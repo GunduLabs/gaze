@@ -6,3 +6,7 @@ target
 *.pdb
 
 **/mutants.out*/
+
+images
+reference.bin
+models
