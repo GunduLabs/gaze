@@ -75,9 +75,69 @@ jobs:
           name: gaze-rpm-${{ matrix.arch }}
           path: dist/*.rpm
 
+  package-arch:
+    name: Package .pkg.tar.zst (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          pacman -Sy --noconfirm base-devel opencv pam dbus gtk4 libadwaita clang pkg-config v4l-utils curl git
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --workspace --release
+      - name: Package
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          ARCH=${{ matrix.arch }}
+
+          mkdir -p pkg/src
+          chmod +x target/release/gazed target/release/gaze target/release/gaze-gui
+
+          cat > pkg/PKGBUILD << EOF
+          pkgname=gaze
+          pkgver=${VERSION}
+          pkgrel=1
+          pkgdesc="Facial authentication daemon with PAM support"
+          arch=('${ARCH}')
+          url="https://gaze.gundulabs.com"
+          license=('MIT')
+          depends=('opencv' 'pam' 'dbus' 'gtk4' 'libadwaita')
+
+          package() {
+            install -Dm755 "\$srcdir/../../target/release/gazed"    "\$pkgdir/usr/bin/gazed"
+            install -Dm755 "\$srcdir/../../target/release/gaze"     "\$pkgdir/usr/bin/gaze"
+            install -Dm755 "\$srcdir/../../target/release/gaze-gui" "\$pkgdir/usr/bin/gaze-gui"
+            install -Dm644 "\$srcdir/../../target/release/libpam_gaze.so" "\$pkgdir/usr/lib/security/pam_gaze.so"
+            install -Dm644 "\$srcdir/../../dist/config.toml"          "\$pkgdir/etc/gaze/config.toml"
+            install -Dm644 "\$srcdir/../../dist/org.gaze.Auth.conf"   "\$pkgdir/etc/dbus-1/system.d/org.gaze.Auth.conf"
+            install -Dm644 "\$srcdir/../../dist/gazed.service"        "\$pkgdir/usr/lib/systemd/system/gazed.service"
+            install -dm755 "\$pkgdir/var/lib/gaze/users"
+            install -dm755 "\$pkgdir/opt/gaze/models"
+          }
+          EOF
+
+          cd pkg
+          useradd -m builder 2>/dev/null || true
+          chown -R builder:builder .
+          su builder -c "makepkg -f --nodeps --skipinteg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gaze-arch-${{ matrix.arch }}
+          path: pkg/*.pkg.tar.zst
+
   release:
     name: Release
-    needs: [package-deb, package-rpm]
+    needs: [package-deb, package-rpm, package-arch]
     runs-on: ubuntu-latest
     permissions:
       contents: write
