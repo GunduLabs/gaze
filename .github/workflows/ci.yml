@@ -10,24 +10,44 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  dependencies:
+    name: Prepare Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libopencv-dev clang libclang-dev pkg-config libv4l-dev libpam0g-dev \
+            libgtk-4-dev libadwaita-1-dev
+      - name: Fetch dependencies
+        run: cargo fetch
+
   fmt:
     name: Format
+    needs: dependencies
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+      - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
 
   clippy:
     name: Clippy
+    needs: dependencies
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - uses: Swatinem/rust-cache@v2
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -38,10 +58,12 @@ jobs:
 
   test:
     name: Test
+    needs: dependencies
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Install system dependencies
         run: |
           sudo apt-get update

@@ -44,6 +44,9 @@ contents:
   - src: "target/release/libpam_gaze.so"
     dst: "/usr/lib64/security/pam_gaze.so"
     packager: rpm
+  - src: "target/release/libpam_gaze.so"
+    dst: "/usr/lib/security/pam_gaze.so"
+    packager: archlinux
 
 overrides:
   deb:
@@ -57,6 +60,14 @@ overrides:
   rpm:
     scripts:
       postinstall: "packaging/rpm/postinst.sh"
+    depends:
+      - opencv
+      - pam
+      - gtk4
+      - libadwaita
+  archlinux:
+    scripts:
+      postinstall: "packaging/arch/postinst.sh"
     depends:
       - opencv
       - pam

@@ -75,9 +75,35 @@ jobs:
           name: gaze-rpm-${{ matrix.arch }}
           path: dist/*.rpm
 
+  package-arch:
+    name: Package .tar.zst (Arch)
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel opencv clang pkg-config libv4l pam gtk4 libadwaita curl git
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --workspace --release
+      - name: Install nfpm
+        run: |
+          pacman -S --noconfirm nfpm
+      - name: Package
+        run: VERSION=${GITHUB_REF#refs/tags/v} ARCH=x86_64 nfpm pkg --packager archlinux --target dist/
+      - name: Upload .tar.zst
+        uses: actions/upload-artifact@v4
+        with:
+          name: gaze-arch-x86_64
+          path: dist/*.tar.zst
+
   release:
     name: Release
-    needs: [package-deb, package-rpm]
+    needs: [package-deb, package-rpm, package-arch]
     runs-on: ubuntu-latest
     permissions:
       contents: write
