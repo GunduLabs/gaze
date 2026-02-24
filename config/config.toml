@@ -1,0 +1,25 @@
+# Security level determines which InsightFace models and threshold to use.
+#
+# Preset levels:
+#   low      — MobileFaceNet + SCRFD-500M, threshold 0.3  (fastest, least secure)
+#   medium   — MobileFaceNet + SCRFD-500M, threshold 0.4  (default)
+#   high     — ResNet50 + SCRFD-10G, threshold 0.5        (more accurate)
+#   maximum  — ResNet50 + SCRFD-10G, threshold 0.6        (strictest)
+#
+# Models are automatically downloaded from the official InsightFace GitHub
+# releases if not already present in the models directory.
+
+level = "medium"
+
+# Custom level example:
+# level = "custom"
+# detector = "/opt/gaze/models/det_10g.onnx"
+# recognizer = "/opt/gaze/models/w600k_r50.onnx"
+# threshold = 0.45
+
+[cameras]
+rgb = "/dev/video0"
+
+[storage]
+users_dir = "/var/lib/gaze/users"
+models_dir = "/opt/gaze/models"

@@ -3,26 +3,26 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const BASE_DIR: &str = "/var/lib/gaze/users";
-
 type FaceMap = HashMap<String, HashMap<String, Array1<f32>>>;
 
 pub struct UserDatabase {
+    base_dir: PathBuf,
     pub users: HashMap<String, FaceMap>,
 }
 
 impl UserDatabase {
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new(base_dir: &str) -> anyhow::Result<Self> {
         let mut db = Self {
+            base_dir: PathBuf::from(base_dir),
             users: HashMap::new(),
         };
         db.load_all()?;
         Ok(db)
     }
 
-    fn init_dirs() -> anyhow::Result<()> {
-        if !Path::new(BASE_DIR).exists() {
-            fs::create_dir_all(BASE_DIR)?;
+    fn init_dirs(&self) -> anyhow::Result<()> {
+        if !self.base_dir.exists() {
+            fs::create_dir_all(&self.base_dir)?;
         }
         Ok(())
     }
@@ -54,10 +54,10 @@ impl UserDatabase {
     }
 
     pub fn load_all(&mut self) -> anyhow::Result<()> {
-        Self::init_dirs()?;
+        self.init_dirs()?;
         self.users.clear();
 
-        for user_entry in fs::read_dir(BASE_DIR)? {
+        for user_entry in fs::read_dir(&self.base_dir)? {
             let user_entry = user_entry?;
             let user_path = user_entry.path();
             if !user_path.is_dir() {
@@ -106,8 +106,8 @@ impl UserDatabase {
         face_name: &str,
         embed: &Array1<f32>,
     ) -> anyhow::Result<String> {
-        Self::init_dirs()?;
-        let face_dir = PathBuf::from(BASE_DIR).join(username).join(face_name);
+        self.init_dirs()?;
+        let face_dir = self.base_dir.join(username).join(face_name);
         if !face_dir.exists() {
             fs::create_dir_all(&face_dir)?;
         }
@@ -127,7 +127,7 @@ impl UserDatabase {
     }
 
     pub fn remove_face(&mut self, username: &str, face_name: &str) -> anyhow::Result<bool> {
-        let face_dir = PathBuf::from(BASE_DIR).join(username).join(face_name);
+        let face_dir = self.base_dir.join(username).join(face_name);
         let mut cleared = false;
 
         if face_dir.exists() {
@@ -143,7 +143,7 @@ impl UserDatabase {
     }
 
     pub fn clear_user(&mut self, username: &str) -> anyhow::Result<bool> {
-        let user_dir = PathBuf::from(BASE_DIR).join(username);
+        let user_dir = self.base_dir.join(username);
         let mut cleared = false;
 
         if user_dir.exists() {

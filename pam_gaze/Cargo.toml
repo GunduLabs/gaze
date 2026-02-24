@@ -7,6 +7,8 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
+gaze_core = { path = "../gaze_core" }
 libc = "0.2"
+opencv = "0.98.1"
 zbus = "4.4.0"
 tokio = { version = "1.40", features = ["rt-multi-thread"] }

@@ -7,10 +7,10 @@ pub struct Camera {
 }
 
 impl Camera {
-    pub fn new(device_idx: i32) -> anyhow::Result<Self> {
-        let cap = VideoCapture::new(device_idx, CAP_ANY)?;
+    pub fn open(device_path: &str) -> anyhow::Result<Self> {
+        let cap = VideoCapture::from_file(device_path, CAP_ANY)?;
         if !cap.is_opened()? {
-            anyhow::bail!("Failed to open camera device {}", device_idx);
+            anyhow::bail!("Failed to open camera at {}", device_path);
         }
         Ok(Self { cap })
     }

@@ -1,6 +1,9 @@
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
 
+use gaze_core::camera::Camera;
+use gaze_core::config::Config;
+use opencv::prelude::*;
 use zbus::blocking::Connection;
 use zbus::proxy;
 
@@ -20,7 +23,25 @@ unsafe extern "C" {
     default_path = "/org/gaze/Auth"
 )]
 trait Auth {
-    fn authenticate(&self, username: &str) -> zbus::Result<bool>;
+    fn authenticate(
+        &self,
+        username: &str,
+        image_data: &[u8],
+        width: u32,
+        height: u32,
+    ) -> zbus::Result<bool>;
+}
+
+fn capture_frame_bytes(config: &Config) -> Option<(Vec<u8>, u32, u32)> {
+    let mut cam = Camera::open(&config.cameras.rgb).ok()?;
+    let frame = cam.capture_frame().ok()?;
+    let sz = frame.size().ok()?;
+    let total_bytes = (sz.width * sz.height * 3) as usize;
+    let mut bytes = vec![0u8; total_bytes];
+    unsafe {
+        std::ptr::copy_nonoverlapping(frame.data(), bytes.as_mut_ptr(), total_bytes);
+    }
+    Some((bytes, sz.width as u32, sz.height as u32))
 }
 
 fn do_authenticate(pamh: PamHandle) -> c_int {
@@ -36,31 +57,31 @@ fn do_authenticate(pamh: PamHandle) -> c_int {
         }
     };
 
-    let rt = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(rt) => rt,
+    let config = match Config::load() {
+        Ok(c) => c,
         Err(_) => return PAM_SERVICE_ERR,
     };
 
-    rt.block_on(async {
-        let conn = match Connection::system() {
-            Ok(c) => c,
-            Err(_) => return PAM_SERVICE_ERR,
-        };
+    let (bytes, width, height) = match capture_frame_bytes(&config) {
+        Some(f) => f,
+        None => return PAM_SERVICE_ERR,
+    };
 
-        let proxy = match AuthProxyBlocking::new(&conn) {
-            Ok(p) => p,
-            Err(_) => return PAM_SERVICE_ERR,
-        };
+    let conn = match Connection::system() {
+        Ok(c) => c,
+        Err(_) => return PAM_SERVICE_ERR,
+    };
 
-        match proxy.authenticate(&username) {
-            Ok(true) => PAM_SUCCESS,
-            Ok(false) => PAM_AUTH_ERR,
-            Err(_) => PAM_SERVICE_ERR,
-        }
-    })
+    let proxy = match AuthProxyBlocking::new(&conn) {
+        Ok(p) => p,
+        Err(_) => return PAM_SERVICE_ERR,
+    };
+
+    match proxy.authenticate(&username, &bytes, width, height) {
+        Ok(true) => PAM_SUCCESS,
+        Ok(false) => PAM_AUTH_ERR,
+        Err(_) => PAM_SERVICE_ERR,
+    }
 }
 
 #[unsafe(no_mangle)]

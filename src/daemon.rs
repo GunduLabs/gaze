@@ -1,28 +1,50 @@
+use ndarray::Array1;
+use opencv::core::{CV_8UC3, Mat};
 use opencv::prelude::*;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use zbus::{fdo, interface};
 
-use crate::THRESHOLD;
-use crate::align::align_face;
-use crate::camera::Camera;
-use crate::detect::FaceDetector;
-use crate::recognize::FaceRecognizer;
-use crate::users::UserDatabase;
+use gaze_core::align::align_face;
+use gaze_core::detect::FaceDetector;
+use gaze_core::recognize::FaceRecognizer;
+use gaze_core::users::UserDatabase;
 
 pub struct AuthDaemon {
     pub detector: Arc<Mutex<FaceDetector>>,
     pub recognizer: Arc<Mutex<FaceRecognizer>>,
     pub db: Arc<Mutex<UserDatabase>>,
-    pub camera: Arc<Mutex<Camera>>,
+    pub threshold: f32,
 }
 
 impl AuthDaemon {
+    fn bytes_to_mat(data: &[u8], width: u32, height: u32) -> Result<Mat, fdo::Error> {
+        let expected = (width * height * 3) as usize;
+        if data.len() != expected {
+            return Err(fdo::Error::Failed(format!(
+                "Expected {} bytes ({}x{}x3), got {}",
+                expected,
+                width,
+                height,
+                data.len()
+            )));
+        }
+        unsafe {
+            Mat::new_rows_cols_with_data_unsafe_def(
+                height as i32,
+                width as i32,
+                CV_8UC3,
+                data.as_ptr() as *mut std::ffi::c_void,
+            )
+        }
+        .map_err(|e| fdo::Error::Failed(format!("Failed to reconstruct frame: {}", e)))
+    }
+
     fn process_frame(
         detector: &mut FaceDetector,
         recognizer: &mut FaceRecognizer,
-        frame: &opencv::core::Mat,
-    ) -> Result<ndarray::Array1<f32>, fdo::Error> {
+        frame: &Mat,
+    ) -> Result<Array1<f32>, fdo::Error> {
         let (_bboxes, kpss, mat_rgb) = detector
             .detect(frame)
             .map_err(|e| fdo::Error::Failed(format!("Detection failed: {}", e)))?;
@@ -39,12 +61,14 @@ impl AuthDaemon {
 
 #[interface(name = "org.gaze.Auth")]
 impl AuthDaemon {
-    async fn authenticate(&self, username: String) -> fdo::Result<bool> {
-        let frame = {
-            let mut cam = self.camera.lock().await;
-            cam.capture_frame()
-                .map_err(|e| fdo::Error::Failed(format!("Camera capture failed: {}", e)))?
-        };
+    async fn authenticate(
+        &self,
+        username: String,
+        image_data: Vec<u8>,
+        width: u32,
+        height: u32,
+    ) -> fdo::Result<bool> {
+        let frame = Self::bytes_to_mat(&image_data, width, height)?;
 
         let embed = {
             let mut det = self.detector.lock().await;
@@ -55,7 +79,7 @@ impl AuthDaemon {
         let db = self.db.lock().await;
         if let Some(user_embeds) = db.get_user_embeddings(&username) {
             for ref_embed in user_embeds {
-                if embed.dot(ref_embed) > THRESHOLD {
+                if embed.dot(ref_embed) > self.threshold {
                     return Ok(true);
                 }
             }
@@ -64,12 +88,15 @@ impl AuthDaemon {
         Ok(false)
     }
 
-    async fn add_face(&self, username: String, face_name: String) -> fdo::Result<String> {
-        let frame = {
-            let mut cam = self.camera.lock().await;
-            cam.capture_frame()
-                .map_err(|e| fdo::Error::Failed(format!("Camera capture failed: {}", e)))?
-        };
+    async fn add_face(
+        &self,
+        username: String,
+        face_name: String,
+        image_data: Vec<u8>,
+        width: u32,
+        height: u32,
+    ) -> fdo::Result<String> {
+        let frame = Self::bytes_to_mat(&image_data, width, height)?;
 
         let embed = {
             let mut det = self.detector.lock().await;
@@ -78,11 +105,8 @@ impl AuthDaemon {
         };
 
         let mut db = self.db.lock().await;
-        let uuid = db
-            .add_face(&username, &face_name, &embed)
-            .map_err(|e| fdo::Error::Failed(format!("Failed to save face: {}", e)))?;
-
-        Ok(uuid)
+        db.add_face(&username, &face_name, &embed)
+            .map_err(|e| fdo::Error::Failed(format!("Failed to save face: {}", e)))
     }
 
     async fn remove_face(&self, username: String, face_name: String) -> fdo::Result<bool> {
