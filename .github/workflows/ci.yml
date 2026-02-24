@@ -35,6 +35,10 @@ jobs:
           sudo apt-get install -y \
             libopencv-dev clang libclang-dev pkg-config libv4l-dev libpam0g-dev \
             libgtk-4-dev libadwaita-1-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "runner-ubuntu"
+          shared-key: "check"
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
@@ -49,6 +53,10 @@ jobs:
           sudo apt-get install -y \
             libopencv-dev clang libclang-dev pkg-config libv4l-dev libpam0g-dev \
             libgtk-4-dev libadwaita-1-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "runner-ubuntu"
+          shared-key: "check"
       - run: cargo test --workspace --locked
 
   package-deb:
@@ -69,18 +77,36 @@ jobs:
       image: ubuntu:24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Cache apt archives
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-ubuntu24-${{ matrix.arch }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-ubuntu24-${{ matrix.arch }}-
       - name: Install system dependencies
         run: |
           apt-get update
           apt-get install -y pkg-config build-essential libssl-dev libopencv-dev clang libclang-dev \
-            libv4l-dev libpam0g-dev libgtk-4-dev libadwaita-1-dev curl
+            libv4l-dev libpam0g-dev libgtk-4-dev libadwaita-1-dev curl git
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "ubuntu24-${{ matrix.arch }}"
       - name: Build
         run: cargo build --workspace --release
+      - name: Cache nfpm
+        id: cache-nfpm
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/bin/nfpm
+          key: nfpm-${{ matrix.arch }}-${{ hashFiles('.github/workflows/ci.yml') }}
       - name: Install nfpm
+        if: steps.cache-nfpm.outputs.cache-hit != 'true'
         run: |
-          echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | tee /etc/apt/sources.list.d/goreleaser.list
-          apt-get update && apt-get install -y nfpm
+          ARCH=$(uname -m | sed 's/aarch64/arm64/')
+          VERSION=$(curl -sSf "https://api.github.com/repos/goreleaser/nfpm/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"v\(.*\)".*/\1/')
+          curl -sSfL "https://github.com/goreleaser/nfpm/releases/download/v${VERSION}/nfpm_${VERSION}_Linux_${ARCH}.tar.gz" | tar -xz nfpm
+          install -m755 nfpm /usr/local/bin/
       - name: Set version
         run: |
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
@@ -112,14 +138,32 @@ jobs:
       image: fedora:latest
     steps:
       - uses: actions/checkout@v4
+      - name: Cache dnf packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/cache/dnf
+            /var/cache/libdnf5
+          key: dnf-fedora-${{ matrix.arch }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: dnf-fedora-${{ matrix.arch }}-
       - name: Install system dependencies
         run: |
-          dnf install -y openssl-devel opencv-devel clang-devel pkgconfig libv4l-devel \
-            pam-devel gtk4-devel libadwaita-devel curl git tar gzip nodejs
+          dnf install -y --setopt=keepcache=True openssl-devel opencv-devel clang-devel pkgconfig \
+            libv4l-devel pam-devel gtk4-devel libadwaita-devel curl git tar gzip nodejs
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "fedora-${{ matrix.arch }}"
       - name: Build
         run: cargo build --workspace --release
+      - name: Cache nfpm
+        id: cache-nfpm
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/bin/nfpm
+          key: nfpm-${{ matrix.arch }}-${{ hashFiles('.github/workflows/ci.yml') }}
       - name: Install nfpm
+        if: steps.cache-nfpm.outputs.cache-hit != 'true'
         run: |
           ARCH=$(uname -m | sed 's/aarch64/arm64/')
           VERSION=$(curl -sSf "https://api.github.com/repos/goreleaser/nfpm/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"v\(.*\)".*/\1/')
@@ -158,12 +202,21 @@ jobs:
       image: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@v4
+      - name: Cache pacman packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/pacman/pkg
+          key: pacman-${{ matrix.arch }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: pacman-${{ matrix.arch }}-
       - name: Install system dependencies
         run: |
           echo "DisableSandbox" >> /etc/pacman.conf
           pacman -Syu --noconfirm
           pacman -S --noconfirm --ask=4 base-devel opencv pam dbus gtk4 libadwaita clang pkg-config v4l-utils curl git
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "arch-${{ matrix.arch }}"
       - name: Build
         run: cargo build --workspace --release
       - name: Package
