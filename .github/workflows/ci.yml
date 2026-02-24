@@ -11,6 +11,15 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      registry_owner: ${{ steps.lower.outputs.value }}
+    steps:
+      - id: lower
+        run: echo "value=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
   fmt:
     name: Format
     runs-on: ubuntu-latest
@@ -61,7 +70,7 @@ jobs:
 
   package-deb:
     name: Package .deb (${{ matrix.arch }})
-    needs: [fmt, clippy, test]
+    needs: [prepare, fmt, clippy, test]
     permissions:
       packages: read
     strategy:
@@ -76,7 +85,7 @@ jobs:
             multiarch: aarch64-linux-gnu
     runs-on: ${{ matrix.runner }}
     container:
-      image: ghcr.io/${{ github.repository_owner }}/gaze-build-ubuntu-${{ matrix.arch }}:latest
+      image: ghcr.io/${{ needs.prepare.outputs.registry_owner }}/gaze-build-ubuntu-${{ matrix.arch }}:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -115,7 +124,7 @@ jobs:
 
   package-rpm:
     name: Package .rpm (${{ matrix.arch }})
-    needs: [fmt, clippy, test]
+    needs: [prepare, fmt, clippy, test]
     permissions:
       packages: read
     strategy:
@@ -130,7 +139,7 @@ jobs:
             img_arch: arm64
     runs-on: ${{ matrix.runner }}
     container:
-      image: ghcr.io/${{ github.repository_owner }}/gaze-build-fedora-${{ matrix.img_arch }}:latest
+      image: ghcr.io/${{ needs.prepare.outputs.registry_owner }}/gaze-build-fedora-${{ matrix.img_arch }}:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -169,7 +178,7 @@ jobs:
 
   package-arch:
     name: Package .pkg.tar.zst (${{ matrix.arch }})
-    needs: [fmt, clippy, test]
+    needs: [prepare, fmt, clippy, test]
     permissions:
       packages: read
     strategy:
@@ -184,7 +193,7 @@ jobs:
             img_arch: arm64
     runs-on: ${{ matrix.runner }}
     container:
-      image: ghcr.io/${{ github.repository_owner }}/gaze-build-arch-${{ matrix.img_arch }}:latest
+      image: ghcr.io/${{ needs.prepare.outputs.registry_owner }}/gaze-build-arch-${{ matrix.img_arch }}:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
