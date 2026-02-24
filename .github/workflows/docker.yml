@@ -1,0 +1,66 @@
+name: Build Docker Images
+
+on:
+  push:
+    branches: ["main"]
+    paths: ["docker/**"]
+  schedule:
+    - cron: "0 0 * * 0" # Weekly Sunday midnight
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-amd64
+            dockerfile: docker/ubuntu.Dockerfile
+            runner: ubuntu-latest
+            tag: gaze-build-ubuntu-amd64
+
+          - name: ubuntu-arm64
+            dockerfile: docker/ubuntu.Dockerfile
+            runner: ubuntu-24.04-arm
+            tag: gaze-build-ubuntu-arm64
+
+          - name: fedora-amd64
+            dockerfile: docker/fedora.Dockerfile
+            runner: ubuntu-latest
+            tag: gaze-build-fedora-amd64
+
+          - name: fedora-arm64
+            dockerfile: docker/fedora.Dockerfile
+            runner: ubuntu-24.04-arm
+            tag: gaze-build-fedora-arm64
+
+          - name: arch-amd64
+            dockerfile: docker/arch.Dockerfile
+            runner: ubuntu-latest
+            tag: gaze-build-arch-amd64
+            build_args: ""
+
+          - name: arch-arm64
+            dockerfile: docker/arch.Dockerfile
+            runner: ubuntu-24.04-arm
+            tag: gaze-build-arch-arm64
+            build_args: "BASE=menci/archlinuxarm:base"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.tag }}:latest
+          build-args: ${{ matrix.build_args }}
