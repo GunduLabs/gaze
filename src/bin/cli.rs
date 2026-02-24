@@ -9,8 +9,13 @@ use zbus::proxy;
 )]
 trait Auth {
     async fn authenticate(&self, username: &str, image_path: &str) -> zbus::Result<bool>;
-    async fn add_face(&self, username: &str, image_path: &str) -> zbus::Result<String>;
-    async fn remove_face(&self, username: &str, uuid: &str) -> zbus::Result<bool>;
+    async fn add_face(
+        &self,
+        username: &str,
+        face_name: &str,
+        image_path: &str,
+    ) -> zbus::Result<String>;
+    async fn remove_face(&self, username: &str, face_name: &str) -> zbus::Result<bool>;
     async fn clear_user(&self, username: &str) -> zbus::Result<bool>;
 }
 
@@ -23,24 +28,30 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Authenticate a user against their stored face embeddings
     Auth {
         #[arg(short, long)]
         user: String,
         #[arg(short, long)]
         image: String,
     },
+    /// Add a new face embedding under a named face for a user
     AddFace {
         #[arg(short, long)]
         user: String,
         #[arg(short, long)]
+        face: String,
+        #[arg(short, long)]
         image: String,
     },
+    /// Remove a specific embedding from a named face
     RemoveFace {
         #[arg(short, long)]
         user: String,
-        #[arg(long)]
-        uuid: String,
+        #[arg(short, long)]
+        face: String,
     },
+    /// Clear all faces and embeddings for a user
     ClearUser {
         #[arg(short, long)]
         user: String,
@@ -62,16 +73,16 @@ async fn main() -> anyhow::Result<()> {
                 println!("Access Denied.");
             }
         }
-        Commands::AddFace { user, image } => {
-            let uuid = proxy.add_face(&user, &image).await?;
-            println!("Face added for '{}' (uuid: {})", user, uuid);
+        Commands::AddFace { user, face, image } => {
+            let uuid = proxy.add_face(&user, &face, &image).await?;
+            println!("Embedding added to '{}/{}' (uuid: {})", user, face, uuid);
         }
-        Commands::RemoveFace { user, uuid } => {
-            let removed = proxy.remove_face(&user, &uuid).await?;
+        Commands::RemoveFace { user, face } => {
+            let removed = proxy.remove_face(&user, &face).await?;
             if removed {
-                println!("Face '{}' removed for '{}'", uuid, user);
+                println!("Face '{}' removed for '{}'", face, user);
             } else {
-                println!("Face '{}' not found for '{}'", uuid, user);
+                println!("Face '{}' not found for '{}'", face, user);
             }
         }
         Commands::ClearUser { user } => {

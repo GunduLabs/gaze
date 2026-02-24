@@ -57,7 +57,12 @@ impl AuthDaemon {
         Ok(false)
     }
 
-    async fn add_face(&self, username: String, image_path: String) -> fdo::Result<String> {
+    async fn add_face(
+        &self,
+        username: String,
+        face_name: String,
+        image_path: String,
+    ) -> fdo::Result<String> {
         let img_mat_bgr = imread(&image_path, IMREAD_COLOR)
             .map_err(|e| fdo::Error::Failed(format!("Failed to read image: {}", e)))?;
 
@@ -83,16 +88,16 @@ impl AuthDaemon {
 
         let mut db = self.db.lock().await;
         let uuid = db
-            .add_face(&username, &embed)
+            .add_face(&username, &face_name, &embed)
             .map_err(|e| fdo::Error::Failed(format!("Failed to save face: {}", e)))?;
 
         Ok(uuid)
     }
 
-    async fn remove_face(&self, username: String, uuid: String) -> fdo::Result<bool> {
+    async fn remove_face(&self, username: String, face_name: String) -> fdo::Result<bool> {
         let mut db = self.db.lock().await;
         let removed = db
-            .remove_face(&username, &uuid)
+            .remove_face(&username, &face_name)
             .map_err(|e| fdo::Error::Failed(format!("Failed to remove face: {}", e)))?;
         Ok(removed)
     }

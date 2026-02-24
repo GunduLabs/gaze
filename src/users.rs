@@ -5,8 +5,10 @@ use std::path::{Path, PathBuf};
 
 const BASE_DIR: &str = "/var/lib/gaze/users";
 
+type FaceMap = HashMap<String, HashMap<String, Array1<f32>>>;
+
 pub struct UserDatabase {
-    pub users: HashMap<String, HashMap<String, Array1<f32>>>,
+    pub users: HashMap<String, FaceMap>,
 }
 
 impl UserDatabase {
@@ -25,57 +27,21 @@ impl UserDatabase {
         Ok(())
     }
 
-    pub fn load_all(&mut self) -> anyhow::Result<()> {
-        Self::init_dirs()?;
-        self.users.clear();
-
-        for entry in fs::read_dir(BASE_DIR)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                let username = path.file_name().unwrap().to_string_lossy().into_owned();
-                let mut embeddings = HashMap::new();
-
-                for file_entry in fs::read_dir(&path)? {
-                    let file_entry = file_entry?;
-                    let file_path = file_entry.path();
-                    if file_path.extension().and_then(|e| e.to_str()) == Some("bin") {
-                        if let Ok(bytes) = fs::read(&file_path) {
-                            let float_count = bytes.len() / std::mem::size_of::<f32>();
-                            let mut embed_vec = vec![0.0f32; float_count];
-                            unsafe {
-                                std::ptr::copy_nonoverlapping(
-                                    bytes.as_ptr(),
-                                    embed_vec.as_mut_ptr() as *mut u8,
-                                    bytes.len(),
-                                );
-                            }
-                            let embed = Array1::from_vec(embed_vec);
-                            let uuid = file_path
-                                .file_stem()
-                                .unwrap()
-                                .to_string_lossy()
-                                .into_owned();
-                            embeddings.insert(uuid, embed);
-                        }
-                    }
-                }
-                self.users.insert(username, embeddings);
-            }
+    fn read_embedding(path: &Path) -> anyhow::Result<Array1<f32>> {
+        let bytes = fs::read(path)?;
+        let float_count = bytes.len() / std::mem::size_of::<f32>();
+        let mut embed_vec = vec![0.0f32; float_count];
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                embed_vec.as_mut_ptr() as *mut u8,
+                bytes.len(),
+            );
         }
-        Ok(())
+        Ok(Array1::from_vec(embed_vec))
     }
 
-    pub fn add_face(&mut self, username: &str, embed: &Array1<f32>) -> anyhow::Result<String> {
-        Self::init_dirs()?;
-        let user_dir = PathBuf::from(BASE_DIR).join(username);
-        if !user_dir.exists() {
-            fs::create_dir_all(&user_dir)?;
-        }
-
-        let uuid = uuid::Uuid::new_v4().to_string();
-        let file_path = user_dir.join(format!("{}.bin", uuid));
-
+    fn write_embedding(path: &Path, embed: &Array1<f32>) -> anyhow::Result<()> {
         let embed_slice = embed.as_slice().expect("Failed to get embedding slice");
         let bytes: &[u8] = unsafe {
             std::slice::from_raw_parts(
@@ -83,32 +49,97 @@ impl UserDatabase {
                 embed_slice.len() * std::mem::size_of::<f32>(),
             )
         };
-        fs::write(&file_path, bytes)?;
+        fs::write(path, bytes)?;
+        Ok(())
+    }
+
+    pub fn load_all(&mut self) -> anyhow::Result<()> {
+        Self::init_dirs()?;
+        self.users.clear();
+
+        for user_entry in fs::read_dir(BASE_DIR)? {
+            let user_entry = user_entry?;
+            let user_path = user_entry.path();
+            if !user_path.is_dir() {
+                continue;
+            }
+            let username = user_path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            let mut faces: FaceMap = HashMap::new();
+
+            for face_entry in fs::read_dir(&user_path)? {
+                let face_entry = face_entry?;
+                let face_path = face_entry.path();
+                if !face_path.is_dir() {
+                    continue;
+                }
+                let face_name = face_path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                let mut embeddings = HashMap::new();
+
+                for bin_entry in fs::read_dir(&face_path)? {
+                    let bin_entry = bin_entry?;
+                    let bin_path = bin_entry.path();
+                    if bin_path.extension().and_then(|e| e.to_str()) == Some("bin") {
+                        if let Ok(embed) = Self::read_embedding(&bin_path) {
+                            let uuid = bin_path.file_stem().unwrap().to_string_lossy().into_owned();
+                            embeddings.insert(uuid, embed);
+                        }
+                    }
+                }
+                faces.insert(face_name, embeddings);
+            }
+            self.users.insert(username, faces);
+        }
+        Ok(())
+    }
+
+    pub fn add_face(
+        &mut self,
+        username: &str,
+        face_name: &str,
+        embed: &Array1<f32>,
+    ) -> anyhow::Result<String> {
+        Self::init_dirs()?;
+        let face_dir = PathBuf::from(BASE_DIR).join(username).join(face_name);
+        if !face_dir.exists() {
+            fs::create_dir_all(&face_dir)?;
+        }
+
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let file_path = face_dir.join(format!("{}.bin", uuid));
+        Self::write_embedding(&file_path, embed)?;
 
         self.users
             .entry(username.to_string())
+            .or_default()
+            .entry(face_name.to_string())
             .or_default()
             .insert(uuid.clone(), embed.clone());
 
         Ok(uuid)
     }
 
-    pub fn remove_face(&mut self, username: &str, uuid: &str) -> anyhow::Result<bool> {
-        let file_path = PathBuf::from(BASE_DIR)
-            .join(username)
-            .join(format!("{}.bin", uuid));
+    pub fn remove_face(&mut self, username: &str, face_name: &str) -> anyhow::Result<bool> {
+        let face_dir = PathBuf::from(BASE_DIR).join(username).join(face_name);
+        let mut cleared = false;
 
-        let mut removed = false;
-        if file_path.exists() {
-            fs::remove_file(&file_path)?;
-            removed = true;
+        if face_dir.exists() {
+            fs::remove_dir_all(&face_dir)?;
+            cleared = true;
         }
 
-        if let Some(user_embeds) = self.users.get_mut(username) {
-            removed |= user_embeds.remove(uuid).is_some();
+        if let Some(faces) = self.users.get_mut(username) {
+            cleared |= faces.remove(face_name).is_some();
         }
 
-        Ok(removed)
+        Ok(cleared)
     }
 
     pub fn clear_user(&mut self, username: &str) -> anyhow::Result<bool> {
@@ -125,6 +156,8 @@ impl UserDatabase {
     }
 
     pub fn get_user_embeddings(&self, username: &str) -> Option<Vec<&Array1<f32>>> {
-        self.users.get(username).map(|m| m.values().collect())
+        self.users
+            .get(username)
+            .map(|faces| faces.values().flat_map(|embeds| embeds.values()).collect())
     }
 }

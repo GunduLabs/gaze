@@ -61,10 +61,21 @@ impl FaceDetector {
         .expect("Failed color conversion");
 
         let mut center_cache = std::collections::HashMap::new();
+
+        // rusty_scrfd unconditionally prints raw tensor data to stdout
+        use std::os::unix::io::AsRawFd;
+        let devnull = std::fs::File::open("/dev/null").unwrap();
+        let stdout_fd = std::io::stdout().as_raw_fd();
+        let saved_fd = unsafe { libc::dup(stdout_fd) };
+        unsafe { libc::dup2(devnull.as_raw_fd(), stdout_fd) };
+
         let (bboxes, kpss) = self
             .detector
             .detect(&mat_rgb, 1, "max", &mut center_cache)
             .expect("Detect failed");
+
+        unsafe { libc::dup2(saved_fd, stdout_fd) };
+        unsafe { libc::close(saved_fd) };
 
         Ok((bboxes, kpss, mat_rgb))
     }
