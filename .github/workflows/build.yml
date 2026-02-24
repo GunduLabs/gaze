@@ -26,7 +26,8 @@ jobs:
           sudo apt-get update
           mkdir -p ~/apt-cache/partial
           sudo apt-get install -y -o Dir::Cache::archives="$HOME/apt-cache" \
-            libopencv-dev clang libclang-dev pkg-config libv4l-dev libpam0g-dev
+            libopencv-dev clang libclang-dev pkg-config libv4l-dev libpam0g-dev \
+            libgtk-4-dev libadwaita-1-dev
 
       - name: Cache cargo registry & build
         uses: actions/cache@v4
@@ -39,10 +40,10 @@ jobs:
           restore-keys: cargo-${{ runner.os }}-
 
       - name: Build
-        run: cargo build --release
+        run: cargo build --workspace --release
 
       - name: Run tests
-        run: cargo test --release
+        run: cargo test --workspace --release
 
       - name: Stage artifacts
         run: |

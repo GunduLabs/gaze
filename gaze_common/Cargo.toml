@@ -1,5 +1,5 @@
 [package]
-name = "gaze_core"
+name = "gaze_common"
 version = "0.1.0"
 edition = "2024"
 
@@ -12,6 +12,7 @@ ndarray = "0.17.2"
 opencv = "0.98.1"
 ort = "2.0.0-rc.11"
 rusty_scrfd = "1.3.1"
+zbus = "4.4.0"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 ureq = "3.0"

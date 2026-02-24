@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "gaze_core", "pam_gaze"]
+members = [".", "gaze_common", "pam_gaze", "gaze_gui"]
 resolver = "3"
 
 [package]
@@ -10,11 +10,17 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.102"
 clap = { version = "4.5.60", features = ["derive"] }
-gaze_core = { path = "gaze_core" }
+gaze_common = { path = "gaze_common" }
+image = "0.25.9"
+nalgebra = "0.34.1"
 ndarray = "0.17.2"
 opencv = "0.98.1"
+ort = "2.0.0-rc.11"
 tokio = { version = "1.40", features = ["full", "rt-multi-thread"] }
+ureq = "3.0"
+uuid = { version = "1.10", features = ["v4"] }
 zbus = "4.4.0"
+zip = "2.4"
 
 [[bin]]
 name = "gazed"

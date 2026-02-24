@@ -5,10 +5,10 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use zbus::{fdo, interface};
 
-use gaze_core::align::align_face;
-use gaze_core::detect::FaceDetector;
-use gaze_core::recognize::FaceRecognizer;
-use gaze_core::users::UserDatabase;
+use crate::align::align_face;
+use crate::recognize::FaceRecognizer;
+use crate::users::UserDatabase;
+use gaze_common::detect::FaceDetector;
 
 pub struct AuthDaemon {
     pub detector: Arc<Mutex<FaceDetector>>,
@@ -68,7 +68,7 @@ impl AuthDaemon {
         image_data: Vec<u8>,
         width: u32,
         height: u32,
-    ) -> fdo::Result<bool> {
+    ) -> fdo::Result<String> {
         let frame = Self::bytes_to_mat(&image_data, width, height)?;
 
         let embed = {
@@ -78,15 +78,9 @@ impl AuthDaemon {
         };
 
         let db = self.db.lock().await;
-        if let Some(user_embeds) = db.get_user_embeddings(&username) {
-            for ref_embed in user_embeds {
-                if embed.dot(ref_embed) > self.threshold {
-                    return Ok(true);
-                }
-            }
-        }
-
-        Ok(false)
+        Ok(db
+            .find_match(&username, &embed, self.threshold)
+            .unwrap_or_default())
     }
 
     async fn add_face(
@@ -114,6 +108,21 @@ impl AuthDaemon {
         let mut db = self.db.lock().await;
         db.remove_face(&username, &face_name)
             .map_err(|e| fdo::Error::Failed(format!("Failed to remove face: {}", e)))
+    }
+
+    async fn list_faces(&self, username: String) -> fdo::Result<Vec<(String, u32)>> {
+        let db = self.db.lock().await;
+        let faces = db
+            .users
+            .get(&username)
+            .map(|face_map| {
+                face_map
+                    .iter()
+                    .map(|(name, embeds)| (name.clone(), embeds.len() as u32))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(faces)
     }
 
     async fn clear_user(&self, username: String) -> fdo::Result<bool> {

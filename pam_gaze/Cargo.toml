@@ -7,7 +7,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-gaze_core = { path = "../gaze_core" }
+gaze_common = { path = "../gaze_common" }
 libc = "0.2"
 opencv = "0.98.1"
 zbus = "4.4.0"

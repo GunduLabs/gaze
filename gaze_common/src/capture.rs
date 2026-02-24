@@ -44,19 +44,31 @@ pub fn try_capture(cam: &mut Camera, checker: &mut FaceChecker) -> anyhow::Resul
     Ok(CaptureStatus::Ready(frame_to_bytes(&frame)?))
 }
 
-pub fn wait_for_centered_capture(
+pub fn wait_for_capture(
     cam: &mut Camera,
     checker: &mut FaceChecker,
+    require_centering: bool,
     mut on_status: impl FnMut(&CaptureStatus),
 ) -> anyhow::Result<CaptureResult> {
     loop {
-        let status = try_capture(cam, checker)?;
-        match status {
-            CaptureStatus::Ready(result) => return Ok(result),
-            ref s => {
-                on_status(s);
-                thread::sleep(Duration::from_millis(100));
-            }
+        let frame = cam.capture_frame()?;
+        let status = checker.check(&frame)?;
+
+        if !status.detected {
+            on_status(&CaptureStatus::NoFace);
+        } else if require_centering && !status.centered {
+            on_status(&CaptureStatus::NotCentered);
+        } else {
+            return Ok(frame_to_bytes(&frame)?);
         }
+        thread::sleep(Duration::from_millis(100));
     }
+}
+
+pub fn wait_for_centered_capture(
+    cam: &mut Camera,
+    checker: &mut FaceChecker,
+    on_status: impl FnMut(&CaptureStatus),
+) -> anyhow::Result<CaptureResult> {
+    wait_for_capture(cam, checker, true, on_status)
 }

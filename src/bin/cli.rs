@@ -1,40 +1,14 @@
 use clap::{Parser, Subcommand};
-use gaze_core::camera::Camera;
-use gaze_core::capture::{CaptureStatus, frame_to_bytes, wait_for_centered_capture};
-use gaze_core::centering::FaceChecker;
-use gaze_core::config::Config;
+use gaze_common::camera::Camera;
+use gaze_common::capture::{CaptureStatus, frame_to_bytes, wait_for_centered_capture};
+use gaze_common::centering::FaceChecker;
+use gaze_common::config::Config;
 use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
 use zbus::Connection;
-use zbus::proxy;
 
-#[proxy(
-    interface = "org.gaze.Auth",
-    default_service = "org.gaze.Auth",
-    default_path = "/org/gaze/Auth"
-)]
-trait Auth {
-    async fn authenticate(
-        &self,
-        username: &str,
-        image_data: &[u8],
-        width: u32,
-        height: u32,
-    ) -> zbus::Result<bool>;
-
-    async fn add_face(
-        &self,
-        username: &str,
-        face_name: &str,
-        image_data: &[u8],
-        width: u32,
-        height: u32,
-    ) -> zbus::Result<String>;
-
-    async fn remove_face(&self, username: &str, face_name: &str) -> zbus::Result<bool>;
-    async fn clear_user(&self, username: &str) -> zbus::Result<bool>;
-}
+use gaze_common::dbus::AuthProxy;
 
 fn print_status(status: &CaptureStatus) {
     match status {
@@ -149,11 +123,11 @@ async fn main() -> anyhow::Result<()> {
             let mut cam = Camera::open(&config.cameras.rgb)?;
             let frame = cam.capture_frame()?;
             let result = frame_to_bytes(&frame)?;
-            let authed = proxy
+            let auth_res = proxy
                 .authenticate(&user, &result.bytes, result.width, result.height)
                 .await?;
-            if authed {
-                println!("Authenticated!");
+            if !auth_res.is_empty() {
+                println!("Authenticated as: {}", auth_res);
             } else {
                 println!("Access Denied.");
             }

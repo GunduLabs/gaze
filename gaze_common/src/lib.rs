@@ -1,9 +1,6 @@
-pub mod align;
 pub mod camera;
 pub mod capture;
 pub mod centering;
 pub mod config;
+pub mod dbus;
 pub mod detect;
-pub mod models;
-pub mod recognize;
-pub mod users;

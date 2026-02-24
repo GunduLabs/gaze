@@ -1,11 +1,11 @@
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
 
-use gaze_core::camera::Camera;
-use gaze_core::config::Config;
+use gaze_common::camera::Camera;
+use gaze_common::config::Config;
+use gaze_common::dbus::AuthProxyBlocking;
 use opencv::prelude::*;
 use zbus::blocking::Connection;
-use zbus::proxy;
 
 const PAM_SUCCESS: c_int = 0;
 const PAM_AUTH_ERR: c_int = 7;
@@ -15,21 +15,6 @@ type PamHandle = *mut libc::c_void;
 
 unsafe extern "C" {
     fn pam_get_user(pamh: PamHandle, user: *mut *const c_char, prompt: *const c_char) -> c_int;
-}
-
-#[proxy(
-    interface = "org.gaze.Auth",
-    default_service = "org.gaze.Auth",
-    default_path = "/org/gaze/Auth"
-)]
-trait Auth {
-    fn authenticate(
-        &self,
-        username: &str,
-        image_data: &[u8],
-        width: u32,
-        height: u32,
-    ) -> zbus::Result<bool>;
 }
 
 fn capture_frame_bytes(config: &Config) -> Option<(Vec<u8>, u32, u32)> {
@@ -78,8 +63,8 @@ fn do_authenticate(pamh: PamHandle) -> c_int {
     };
 
     match proxy.authenticate(&username, &bytes, width, height) {
-        Ok(true) => PAM_SUCCESS,
-        Ok(false) => PAM_AUTH_ERR,
+        Ok(face) if !face.is_empty() => PAM_SUCCESS,
+        Ok(_) => PAM_AUTH_ERR,
         Err(_) => PAM_SERVICE_ERR,
     }
 }

@@ -195,6 +195,23 @@ impl UserDatabase {
         Ok(cleared)
     }
 
+    pub fn find_match(
+        &self,
+        username: &str,
+        embed: &ndarray::Array1<f32>,
+        threshold: f32,
+    ) -> Option<String> {
+        let faces = self.users.get(username)?;
+        for (face_name, uuid_map) in faces {
+            for ref_embed in uuid_map.values() {
+                if embed.dot(ref_embed) > threshold {
+                    return Some(face_name.clone());
+                }
+            }
+        }
+        None
+    }
+
     pub fn get_user_embeddings(&self, username: &str) -> Option<Vec<&Array1<f32>>> {
         self.users
             .get(username)
