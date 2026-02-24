@@ -23,3 +23,6 @@ rgb = "/dev/video0"
 [storage]
 users_dir = "/var/lib/gaze/users"
 models_dir = "/opt/gaze/models"
+
+[enrollment]
+max_captures_per_face = 8

@@ -64,6 +64,8 @@ pub struct Config {
     pub cameras: CameraConfig,
     #[serde(default)]
     pub storage: StorageConfig,
+    #[serde(default)]
+    pub enrollment: EnrollmentConfig,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -89,6 +91,23 @@ fn default_users_dir() -> String {
 fn default_models_dir() -> String {
     "/opt/gaze/models".to_string()
 }
+fn default_max_captures() -> usize {
+    8
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct EnrollmentConfig {
+    #[serde(default = "default_max_captures")]
+    pub max_captures_per_face: usize,
+}
+
+impl Default for EnrollmentConfig {
+    fn default() -> Self {
+        Self {
+            max_captures_per_face: default_max_captures(),
+        }
+    }
+}
 
 impl Default for CameraConfig {
     fn default() -> Self {
@@ -113,6 +132,7 @@ impl Default for Config {
             security: SecurityLevel::default(),
             cameras: CameraConfig::default(),
             storage: StorageConfig::default(),
+            enrollment: EnrollmentConfig::default(),
         }
     }
 }

@@ -15,6 +15,7 @@ pub struct AuthDaemon {
     pub recognizer: Arc<Mutex<FaceRecognizer>>,
     pub db: Arc<Mutex<UserDatabase>>,
     pub threshold: f32,
+    pub max_captures: usize,
 }
 
 impl AuthDaemon {
@@ -105,7 +106,7 @@ impl AuthDaemon {
         };
 
         let mut db = self.db.lock().await;
-        db.add_face(&username, &face_name, &embed)
+        db.add_face(&username, &face_name, &embed, self.max_captures)
             .map_err(|e| fdo::Error::Failed(format!("Failed to save face: {}", e)))
     }
 

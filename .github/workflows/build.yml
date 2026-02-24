@@ -15,22 +15,46 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-cache
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/build.yml') }}
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libopencv-dev clang libclang-dev pkg-config libv4l-dev libpam0g-dev
+          sudo apt-get install -y -o Dir::Cache::archives="$HOME/apt-cache" \
+            libopencv-dev clang libclang-dev pkg-config libv4l-dev libpam0g-dev
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
       - name: Build
         run: cargo build --release
+
       - name: Run tests
         run: cargo test --release
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p staging
+          cp target/release/gazed staging/
+          cp target/release/gaze staging/
+          cp target/release/libpam_gaze.so staging/
+
       - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
           name: gaze-binaries
-          path: |
-            target/release/gazed
-            target/release/gaze
-            target/release/libpam_gaze.so
+          path: staging/
 
   package-deb:
     needs: build

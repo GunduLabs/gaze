@@ -105,6 +105,7 @@ impl UserDatabase {
         username: &str,
         face_name: &str,
         embed: &Array1<f32>,
+        max_captures: usize,
     ) -> anyhow::Result<String> {
         self.init_dirs()?;
         let face_dir = self.base_dir.join(username).join(face_name);
@@ -112,18 +113,57 @@ impl UserDatabase {
             fs::create_dir_all(&face_dir)?;
         }
 
-        let uuid = uuid::Uuid::new_v4().to_string();
-        let file_path = face_dir.join(format!("{}.bin", uuid));
-        Self::write_embedding(&file_path, embed)?;
-
-        self.users
+        let face_map = self
+            .users
             .entry(username.to_string())
             .or_default()
             .entry(face_name.to_string())
-            .or_default()
-            .insert(uuid.clone(), embed.clone());
+            .or_default();
+
+        while face_map.len() >= max_captures {
+            if let Some(oldest_uuid) = Self::find_oldest_file(&face_dir)? {
+                let path = face_dir.join(format!("{}.bin", oldest_uuid));
+                if path.exists() {
+                    fs::remove_file(&path)?;
+                }
+                face_map.remove(&oldest_uuid);
+            } else {
+                break;
+            }
+        }
+
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let file_path = face_dir.join(format!("{}.bin", uuid));
+        Self::write_embedding(&file_path, embed)?;
+        face_map.insert(uuid.clone(), embed.clone());
 
         Ok(uuid)
+    }
+
+    fn find_oldest_file(dir: &std::path::Path) -> anyhow::Result<Option<String>> {
+        let mut oldest: Option<(String, std::time::SystemTime)> = None;
+
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("bin") {
+                continue;
+            }
+            let modified = entry.metadata()?.modified()?;
+            let uuid = path.file_stem().unwrap().to_string_lossy().into_owned();
+
+            match &oldest {
+                Some((_, old_time)) if modified < *old_time => {
+                    oldest = Some((uuid, modified));
+                }
+                None => {
+                    oldest = Some((uuid, modified));
+                }
+                _ => {}
+            }
+        }
+
+        Ok(oldest.map(|(uuid, _)| uuid))
     }
 
     pub fn remove_face(&mut self, username: &str, face_name: &str) -> anyhow::Result<bool> {

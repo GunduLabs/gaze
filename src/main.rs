@@ -44,6 +44,7 @@ async fn main() -> anyhow::Result<()> {
         recognizer: Arc::new(Mutex::new(recognizer)),
         db: Arc::new(Mutex::new(db)),
         threshold: security.threshold(),
+        max_captures: config.enrollment.max_captures_per_face,
     };
 
     println!("Models & User DB loaded in: {:?}", t_load.elapsed());
