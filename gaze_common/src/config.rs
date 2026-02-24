@@ -3,12 +3,13 @@ use std::path::Path;
 
 const DEFAULT_CONFIG_PATH: &str = "/etc/gaze/config.toml";
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, Default)]
 #[serde(tag = "level")]
 pub enum SecurityLevel {
     #[serde(rename = "low")]
     Low,
     #[serde(rename = "medium")]
+    #[default]
     Medium,
     #[serde(rename = "high")]
     High,
@@ -20,12 +21,6 @@ pub enum SecurityLevel {
         recognizer: String,
         threshold: f32,
     },
-}
-
-impl Default for SecurityLevel {
-    fn default() -> Self {
-        SecurityLevel::Medium
-    }
 }
 
 impl SecurityLevel {
@@ -56,7 +51,7 @@ impl SecurityLevel {
     }
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, Default)]
 pub struct Config {
     #[serde(default)]
     pub security: SecurityLevel,
@@ -122,17 +117,6 @@ impl Default for StorageConfig {
         Self {
             users_dir: default_users_dir(),
             models_dir: default_models_dir(),
-        }
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            security: SecurityLevel::default(),
-            cameras: CameraConfig::default(),
-            storage: StorageConfig::default(),
-            enrollment: EnrollmentConfig::default(),
         }
     }
 }

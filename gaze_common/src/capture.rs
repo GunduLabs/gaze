@@ -59,7 +59,7 @@ pub fn wait_for_capture(
         } else if require_centering && !status.centered {
             on_status(&CaptureStatus::NotCentered);
         } else {
-            return Ok(frame_to_bytes(&frame)?);
+            return frame_to_bytes(&frame);
         }
         thread::sleep(Duration::from_millis(100));
     }
