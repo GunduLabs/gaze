@@ -3,7 +3,9 @@ name: Build Docker Images
 on:
   push:
     branches: ["main"]
-    paths: ["docker/**"]
+    paths:
+      - "docker/**"
+      - ".github/workflows/docker.yml"
   schedule:
     - cron: "0 0 * * 0" # Weekly Sunday midnight
   workflow_dispatch:
