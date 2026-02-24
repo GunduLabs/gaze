@@ -1,0 +1,61 @@
+name: "gaze"
+arch: "amd64"
+platform: "linux"
+version: "${VERSION}"
+section: "admin"
+priority: "optional"
+maintainer: "gaze <contact@gaze.io>"
+description: "Facial authentication daemon with PAM support and GUI manager"
+vendor: "gaze"
+homepage: "https://github.com/gaze/gaze"
+license: "MIT"
+
+contents:
+  - src: "target/release/gazed"
+    dst: "/usr/bin/gazed"
+    type: "file"
+    file_info:
+      mode: 0755
+  - src: "target/release/gaze"
+    dst: "/usr/bin/gaze"
+    type: "file"
+    file_info:
+      mode: 0755
+  - src: "target/release/gaze-gui"
+    dst: "/usr/bin/gaze-gui"
+    type: "file"
+    file_info:
+      mode: 0755
+  - src: "target/release/libpam_gaze.so"
+    dst: "/usr/lib/security/pam_gaze.so"
+    type: "file"
+  - src: "dist/config.toml"
+    dst: "/etc/gaze/config.toml"
+    type: "config"
+  - src: "dist/org.gaze.Auth.conf"
+    dst: "/etc/dbus-1/system.d/org.gaze.Auth.conf"
+    type: "file"
+  - src: "dist/gazed.service"
+    dst: "/usr/lib/systemd/system/gazed.service"
+    type: "file"
+  - src: "dist/gaze.desktop"
+    dst: "/usr/share/applications/gaze.desktop"
+    type: "file"
+
+overrides:
+  deb:
+    scripts:
+      postinstall: "packaging/deb/postinst.sh"
+    depends:
+      - libopencv-dev
+      - libpam0g
+      - libgtk-4-1
+      - libadwaita-1-0
+  rpm:
+    scripts:
+      postinstall: "packaging/rpm/postinst.sh"
+    depends:
+      - opencv
+      - pam
+      - gtk4
+      - libadwaita
