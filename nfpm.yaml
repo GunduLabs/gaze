@@ -38,12 +38,15 @@ contents:
   - src: "dist/gazed.service"
     dst: "/usr/lib/systemd/system/gazed.service"
     type: "file"
+  - src: "target/release/libpam_gaze.so"
+    dst: "/lib/${MULTIARCH}/security/pam_gaze.so"
+    packager: deb
+  - src: "target/release/libpam_gaze.so"
+    dst: "/usr/lib64/security/pam_gaze.so"
+    packager: rpm
 
 overrides:
   deb:
-    contents:
-      - src: "target/release/libpam_gaze.so"
-        dst: "/lib/${MULTIARCH}/security/pam_gaze.so"
     scripts:
       postinstall: "packaging/deb/postinst.sh"
     depends:
@@ -52,9 +55,6 @@ overrides:
       - libgtk-4-1
       - libadwaita-1-0
   rpm:
-    contents:
-      - src: "target/release/libpam_gaze.so"
-        dst: "/usr/lib64/security/pam_gaze.so"
     scripts:
       postinstall: "packaging/rpm/postinst.sh"
     depends:

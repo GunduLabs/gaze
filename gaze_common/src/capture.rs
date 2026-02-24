@@ -1,47 +1,17 @@
 use crate::camera::Camera;
-use crate::centering::FaceChecker;
-use opencv::prelude::*;
+use crate::face::FaceChecker;
 use std::thread;
 use std::time::Duration;
 
-pub struct CaptureResult {
-    pub bytes: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
-}
+pub use crate::face::{CaptureResult, CaptureStatus, ValidatedFace, frame_to_bytes};
 
-pub fn frame_to_bytes(frame: &opencv::core::Mat) -> anyhow::Result<CaptureResult> {
-    let sz = frame.size()?;
-    let total = (sz.width * sz.height * 3) as usize;
-    let mut bytes = vec![0u8; total];
-    unsafe {
-        std::ptr::copy_nonoverlapping(frame.data(), bytes.as_mut_ptr(), total);
-    }
-    Ok(CaptureResult {
-        bytes,
-        width: sz.width as u32,
-        height: sz.height as u32,
-    })
-}
-
-pub enum CaptureStatus {
-    NoFace,
-    NotCentered,
-    Ready(CaptureResult),
-}
-
-pub fn try_capture(cam: &mut Camera, checker: &mut FaceChecker) -> anyhow::Result<CaptureStatus> {
+pub fn try_capture(
+    cam: &mut Camera,
+    checker: &mut FaceChecker,
+    require_centering: bool,
+) -> anyhow::Result<CaptureStatus> {
     let frame = cam.capture_frame()?;
-    let status = checker.check(&frame)?;
-
-    if !status.detected {
-        return Ok(CaptureStatus::NoFace);
-    }
-    if !status.centered {
-        return Ok(CaptureStatus::NotCentered);
-    }
-
-    Ok(CaptureStatus::Ready(frame_to_bytes(&frame)?))
+    checker.check(&frame, require_centering)
 }
 
 pub fn wait_for_capture(
@@ -52,14 +22,11 @@ pub fn wait_for_capture(
 ) -> anyhow::Result<CaptureResult> {
     loop {
         let frame = cam.capture_frame()?;
-        let status = checker.check(&frame)?;
+        let status = checker.check(&frame, require_centering)?;
 
-        if !status.detected {
-            on_status(&CaptureStatus::NoFace);
-        } else if require_centering && !status.centered {
-            on_status(&CaptureStatus::NotCentered);
-        } else {
-            return frame_to_bytes(&frame);
+        match status {
+            CaptureStatus::Ready(result) => return Ok(result),
+            other => on_status(&other),
         }
         thread::sleep(Duration::from_millis(100));
     }

@@ -3,8 +3,7 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 
 use gaze_common::camera::Camera;
-use gaze_common::capture;
-use gaze_common::centering::FaceChecker;
+use gaze_common::capture::frame_to_bytes;
 use gaze_common::config::Config;
 use gaze_common::dbus::AuthProxyBlocking;
 use zbus::blocking::Connection;
@@ -14,6 +13,8 @@ const PAM_AUTH_ERR: c_int = 7;
 const PAM_SERVICE_ERR: c_int = 3;
 const PAM_CONV: c_int = 5;
 const PAM_TEXT_INFO: c_int = 4;
+
+const MAX_ATTEMPTS: usize = 10;
 
 type PamHandle = *mut c_void;
 
@@ -75,6 +76,10 @@ fn say(pamh: PamHandle, text: &str) {
     }
 }
 
+fn is_retryable(err: &zbus::Error) -> bool {
+    err.to_string().contains("RETRYABLE:")
+}
+
 fn do_authenticate(pamh: PamHandle) -> c_int {
     let username = unsafe {
         let mut user_ptr: *const c_char = ptr::null();
@@ -98,33 +103,42 @@ fn do_authenticate(pamh: PamHandle) -> c_int {
         Err(_) => return PAM_SERVICE_ERR,
     };
 
-    let mut checker = match FaceChecker::new() {
-        Ok(c) => c,
-        Err(_) => return PAM_SERVICE_ERR,
-    };
-
-    say(pamh, "Please look at the camera");
-
-    let capture = match capture::wait_for_capture(&mut cam, &mut checker, false, |_status| {}) {
-        Ok(c) => c,
-        Err(_) => return PAM_SERVICE_ERR,
-    };
-
     let conn = match Connection::system() {
         Ok(c) => c,
         Err(_) => return PAM_SERVICE_ERR,
     };
-
     let proxy = match AuthProxyBlocking::new(&conn) {
         Ok(p) => p,
         Err(_) => return PAM_SERVICE_ERR,
     };
 
-    match proxy.authenticate(&username, &capture.bytes, capture.width, capture.height) {
-        Ok(face) if !face.is_empty() => PAM_SUCCESS,
-        Ok(_) => PAM_AUTH_ERR,
-        Err(_) => PAM_SERVICE_ERR,
+    say(pamh, "Please look at the camera");
+
+    for _ in 0..MAX_ATTEMPTS {
+        let frame = match cam.capture_frame() {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        let capture = match frame_to_bytes(&frame) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        match proxy.authenticate(&username, &capture.bytes, capture.width, capture.height) {
+            Ok(face) if !face.is_empty() => {
+                return PAM_SUCCESS;
+            }
+            Ok(_) => {
+                return PAM_AUTH_ERR;
+            }
+            Err(ref err) if is_retryable(err) => continue,
+            Err(_) => {
+                return PAM_SERVICE_ERR;
+            }
+        }
     }
+
+    PAM_AUTH_ERR
 }
 
 /// # Safety

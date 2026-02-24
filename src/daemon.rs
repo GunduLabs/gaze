@@ -8,10 +8,10 @@ use zbus::{fdo, interface};
 use crate::align::align_face;
 use crate::recognize::FaceRecognizer;
 use crate::users::UserDatabase;
-use gaze_common::detect::FaceDetector;
+use gaze_common::face::{CaptureStatus, FaceChecker};
 
 pub struct AuthDaemon {
-    pub detector: Arc<Mutex<FaceDetector>>,
+    pub checker: Arc<Mutex<FaceChecker>>,
     pub recognizer: Arc<Mutex<FaceRecognizer>>,
     pub db: Arc<Mutex<UserDatabase>>,
     pub threshold: f32,
@@ -38,25 +38,35 @@ impl AuthDaemon {
                 data.as_ptr() as *mut std::ffi::c_void,
             )
         }
-        .map_err(|e| fdo::Error::Failed(format!("Failed to reconstruct frame: {}", e)))
+        .map_err(|e| fdo::Error::Failed(format!("Failed to reconstruct frame: {e}")))
     }
 
     fn process_frame(
-        detector: &mut FaceDetector,
+        checker: &mut FaceChecker,
         recognizer: &mut FaceRecognizer,
         frame: &Mat,
     ) -> Result<Array1<f32>, fdo::Error> {
-        let (_bboxes, kpss, mat_rgb) = detector
-            .detect(frame)
-            .map_err(|e| fdo::Error::Failed(format!("Detection failed: {}", e)))?;
+        let validated = checker
+            .validate(frame)
+            .map_err(|e| fdo::Error::Failed(format!("Detection failed: {e}")))?;
 
-        let kps = kpss.ok_or_else(|| fdo::Error::Failed("No face found".to_string()))?;
-        let aligned = align_face(&mat_rgb, &kps)
-            .map_err(|e| fdo::Error::Failed(format!("Alignment failed: {}", e)))?;
+        let face = match validated {
+            Ok(face) => face,
+            Err(CaptureStatus::NoFace) => {
+                return Err(fdo::Error::Failed("RETRYABLE: no faces detected".into()));
+            }
+            Err(CaptureStatus::Clipped) => {
+                return Err(fdo::Error::Failed("RETRYABLE: face clipped".into()));
+            }
+            Err(_) => return Err(fdo::Error::Failed("RETRYABLE: face not ready".into())),
+        };
+
+        let aligned = align_face(&face.mat_rgb, &face.kpss)
+            .map_err(|e| fdo::Error::Failed(format!("Alignment failed: {e}")))?;
 
         recognizer
             .get_embedding(&aligned)
-            .map_err(|e| fdo::Error::Failed(format!("Recognition failed: {}", e)))
+            .map_err(|e| fdo::Error::Failed(format!("Recognition failed: {e}")))
     }
 }
 
@@ -72,9 +82,9 @@ impl AuthDaemon {
         let frame = Self::bytes_to_mat(&image_data, width, height)?;
 
         let embed = {
-            let mut det = self.detector.lock().await;
+            let mut chk = self.checker.lock().await;
             let mut rec = self.recognizer.lock().await;
-            Self::process_frame(&mut det, &mut rec, &frame)?
+            Self::process_frame(&mut chk, &mut rec, &frame)?
         };
 
         let db = self.db.lock().await;
@@ -94,20 +104,20 @@ impl AuthDaemon {
         let frame = Self::bytes_to_mat(&image_data, width, height)?;
 
         let embed = {
-            let mut det = self.detector.lock().await;
+            let mut chk = self.checker.lock().await;
             let mut rec = self.recognizer.lock().await;
-            Self::process_frame(&mut det, &mut rec, &frame)?
+            Self::process_frame(&mut chk, &mut rec, &frame)?
         };
 
         let mut db = self.db.lock().await;
         db.add_face(&username, &face_name, &embed, self.max_captures)
-            .map_err(|e| fdo::Error::Failed(format!("Failed to save face: {}", e)))
+            .map_err(|e| fdo::Error::Failed(format!("Failed to save face: {e}")))
     }
 
     async fn remove_face(&self, username: String, face_name: String) -> fdo::Result<bool> {
         let mut db = self.db.lock().await;
         db.remove_face(&username, &face_name)
-            .map_err(|e| fdo::Error::Failed(format!("Failed to remove face: {}", e)))
+            .map_err(|e| fdo::Error::Failed(format!("Failed to remove face: {e}")))
     }
 
     async fn list_faces(&self, username: String) -> fdo::Result<Vec<(String, u32)>> {
@@ -128,6 +138,6 @@ impl AuthDaemon {
     async fn clear_user(&self, username: String) -> fdo::Result<bool> {
         let mut db = self.db.lock().await;
         db.clear_user(&username)
-            .map_err(|e| fdo::Error::Failed(format!("Failed to clear user: {}", e)))
+            .map_err(|e| fdo::Error::Failed(format!("Failed to clear user: {e}")))
     }
 }

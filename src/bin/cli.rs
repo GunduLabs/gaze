@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 use gaze_common::camera::Camera;
 use gaze_common::capture::{CaptureStatus, frame_to_bytes, wait_for_centered_capture};
-use gaze_common::centering::FaceChecker;
 use gaze_common::config::Config;
+use gaze_common::face::FaceChecker;
 use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
@@ -121,14 +121,30 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Auth { user } => {
             let mut cam = Camera::open(&config.cameras.rgb)?;
-            let frame = cam.capture_frame()?;
-            let result = frame_to_bytes(&frame)?;
-            let auth_res = proxy
-                .authenticate(&user, &result.bytes, result.width, result.height)
-                .await?;
-            if !auth_res.is_empty() {
-                println!("Authenticated as: {}", auth_res);
-            } else {
+            let mut authenticated = false;
+
+            for _ in 0..10 {
+                let frame = cam.capture_frame()?;
+                let result = frame_to_bytes(&frame)?;
+                match proxy
+                    .authenticate(&user, &result.bytes, result.width, result.height)
+                    .await
+                {
+                    Ok(face) if !face.is_empty() => {
+                        println!("Authenticated as: {}", face);
+                        authenticated = true;
+                        break;
+                    }
+                    Ok(_) => {
+                        println!("Access Denied.");
+                        break;
+                    }
+                    Err(ref err) if err.to_string().contains("RETRYABLE:") => continue,
+                    Err(err) => return Err(err.into()),
+                }
+            }
+
+            if !authenticated {
                 println!("Access Denied.");
             }
         }

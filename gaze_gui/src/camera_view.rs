@@ -1,6 +1,6 @@
 use gaze_common::camera::Camera;
 use gaze_common::capture::{CaptureResult, CaptureStatus, frame_to_bytes, try_capture};
-use gaze_common::centering::FaceChecker;
+use gaze_common::face::FaceChecker;
 use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -24,6 +24,7 @@ struct FrameData {
 pub enum CaptureStatusInfo {
     NoFace,
     NotCentered,
+    Clipped,
     Centered,
 }
 
@@ -60,7 +61,7 @@ impl CameraFeed {
             };
 
             while !stop_clone.load(Ordering::Relaxed) {
-                let capture_status = match try_capture(&mut cam, &mut checker) {
+                let capture_status = match try_capture(&mut cam, &mut checker, true) {
                     Ok(s) => s,
                     Err(_) => {
                         thread::sleep(std::time::Duration::from_millis(33));
@@ -92,6 +93,7 @@ impl CameraFeed {
                 let (status, capture) = match capture_status {
                     CaptureStatus::Ready(result) => (CaptureStatusInfo::Centered, Some(result)),
                     CaptureStatus::NotCentered => (CaptureStatusInfo::NotCentered, None),
+                    CaptureStatus::Clipped => (CaptureStatusInfo::Clipped, None),
                     CaptureStatus::NoFace => (CaptureStatusInfo::NoFace, None),
                 };
 
@@ -191,7 +193,7 @@ fn draw_face_guide(cr: &gtk4::cairo::Context, width: i32, height: i32, status: &
 
     let (red, green, blue, alpha) = match status {
         CaptureStatusInfo::NoFace => (0.6, 0.6, 0.6, 0.5),
-        CaptureStatusInfo::NotCentered => (1.0, 0.8, 0.2, 0.7),
+        CaptureStatusInfo::NotCentered | CaptureStatusInfo::Clipped => (1.0, 0.8, 0.2, 0.7),
         CaptureStatusInfo::Centered => (0.2, 0.9, 0.4, 0.85),
     };
 
@@ -234,6 +236,7 @@ fn draw_face_guide(cr: &gtk4::cairo::Context, width: i32, height: i32, status: &
     let label = match status {
         CaptureStatusInfo::NoFace => "No face detected",
         CaptureStatusInfo::NotCentered => "Center your face",
+        CaptureStatusInfo::Clipped => "Move closer",
         CaptureStatusInfo::Centered => "Hold still...",
     };
     cr.set_font_size(min_dim * 0.035);

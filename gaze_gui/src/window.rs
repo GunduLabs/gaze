@@ -1,8 +1,8 @@
 use crate::enroll_dialog;
 use gaze_common::camera::Camera;
-use gaze_common::centering::FaceChecker;
 use gaze_common::config::Config;
 use gaze_common::dbus::AuthProxy;
+use gaze_common::face::FaceChecker;
 use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
