@@ -22,7 +22,12 @@ jobs:
 
   fmt:
     name: Format
+    needs: [prepare]
     runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    container:
+      image: ghcr.io/${{ needs.prepare.outputs.registry_owner }}/gaze-build-ubuntu-amd64:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -32,39 +37,37 @@ jobs:
 
   clippy:
     name: Clippy
+    needs: [prepare]
     runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    container:
+      image: ghcr.io/${{ needs.prepare.outputs.registry_owner }}/gaze-build-ubuntu-amd64:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libopencv-dev clang libclang-dev pkg-config libv4l-dev libpam0g-dev \
-            libgtk-4-dev libadwaita-1-dev
       - uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: "runner-ubuntu"
+          prefix-key: "ubuntu24-amd64"
           shared-key: "check"
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     name: Test
+    needs: [prepare]
     runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    container:
+      image: ghcr.io/${{ needs.prepare.outputs.registry_owner }}/gaze-build-ubuntu-amd64:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libopencv-dev clang libclang-dev pkg-config libv4l-dev libpam0g-dev \
-            libgtk-4-dev libadwaita-1-dev
       - uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: "runner-ubuntu"
+          prefix-key: "ubuntu24-amd64"
           shared-key: "check"
       - run: cargo test --workspace --locked
 
