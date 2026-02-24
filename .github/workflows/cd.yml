@@ -12,8 +12,10 @@ jobs:
         include:
           - arch: amd64
             runner: ubuntu-latest
+            multiarch: x86_64-linux-gnu
           - arch: arm64
             runner: ubuntu-24.04-arm
+            multiarch: aarch64-linux-gnu
     runs-on: ${{ matrix.runner }}
     container:
       image: ubuntu:24.04
@@ -32,7 +34,7 @@ jobs:
           echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | tee /etc/apt/sources.list.d/goreleaser.list
           apt-get update && apt-get install -y nfpm
       - name: Package
-        run: VERSION=${GITHUB_REF#refs/tags/v} ARCH=${{ matrix.arch }} nfpm pkg --packager deb --target dist/
+        run: VERSION=${GITHUB_REF#refs/tags/v} ARCH=${{ matrix.arch }} MULTIARCH=${{ matrix.multiarch }} nfpm pkg --packager deb --target dist/
       - name: Upload .deb
         uses: actions/upload-artifact@v4
         with:

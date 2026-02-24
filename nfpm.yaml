@@ -26,8 +26,8 @@ contents:
     type: "file"
     file_info:
       mode: 0755
-  - src: "target/release/libpam_gaze.so"
-    dst: "/usr/lib/security/pam_gaze.so"
+  - src: "dist/gaze.desktop"
+    dst: "/usr/share/applications/gaze.desktop"
     type: "file"
   - src: "dist/config.toml"
     dst: "/etc/gaze/config.toml"
@@ -38,12 +38,12 @@ contents:
   - src: "dist/gazed.service"
     dst: "/usr/lib/systemd/system/gazed.service"
     type: "file"
-  - src: "dist/gaze.desktop"
-    dst: "/usr/share/applications/gaze.desktop"
-    type: "file"
 
 overrides:
   deb:
+    contents:
+      - src: "target/release/libpam_gaze.so"
+        dst: "/lib/${MULTIARCH}/security/pam_gaze.so"
     scripts:
       postinstall: "packaging/deb/postinst.sh"
     depends:
@@ -52,6 +52,9 @@ overrides:
       - libgtk-4-1
       - libadwaita-1-0
   rpm:
+    contents:
+      - src: "target/release/libpam_gaze.so"
+        dst: "/usr/lib64/security/pam_gaze.so"
     scripts:
       postinstall: "packaging/rpm/postinst.sh"
     depends:

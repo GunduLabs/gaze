@@ -1,6 +1,6 @@
 use opencv::core::Mat;
 use opencv::prelude::*;
-use opencv::videoio::{CAP_ANY, VideoCapture};
+use opencv::videoio::{CAP_V4L2, VideoCapture};
 
 pub struct Camera {
     cap: VideoCapture,
@@ -8,7 +8,7 @@ pub struct Camera {
 
 impl Camera {
     pub fn open(device_path: &str) -> anyhow::Result<Self> {
-        let cap = VideoCapture::from_file(device_path, CAP_ANY)?;
+        let cap = VideoCapture::from_file(device_path, CAP_V4L2)?;
         if !cap.is_opened()? {
             anyhow::bail!("Failed to open camera at {}", device_path);
         }
