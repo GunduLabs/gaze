@@ -140,17 +140,9 @@ jobs:
           path: dist/*.rpm
 
   package-arch:
-    name: Package .pkg.tar.zst (${{ matrix.arch }})
+    name: Package .pkg.tar.zst (x86_64)
     needs: [fmt, clippy, test]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            runner: ubuntu-latest
-          - arch: aarch64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
     container:
       image: archlinux:latest
     steps:
@@ -168,7 +160,6 @@ jobs:
           else
             VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
           fi
-          ARCH=${{ matrix.arch }}
 
           mkdir -p pkg/src
           chmod +x target/release/gazed target/release/gaze target/release/gaze-gui
@@ -178,7 +169,7 @@ jobs:
           pkgver=${VERSION}
           pkgrel=1
           pkgdesc="Facial authentication daemon with PAM support"
-          arch=('${ARCH}')
+          arch=('x86_64')
           url="https://gaze.gundulabs.com"
           license=('MIT')
           depends=('opencv' 'pam' 'dbus' 'gtk4' 'libadwaita')
@@ -205,7 +196,7 @@ jobs:
           su builder -c "makepkg -f --nodeps --skipinteg"
       - uses: actions/upload-artifact@v4
         with:
-          name: gaze-arch-${{ matrix.arch }}
+          name: gaze-arch-x86_64
           path: pkg/*.pkg.tar.zst
 
   release:
