@@ -13,6 +13,7 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     permissions:
+      contents: read
       packages: write
     strategy:
       fail-fast: false
