@@ -11,6 +11,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use zbus::Connection;
 
+type RefreshCb = Rc<dyn Fn()>;
+
 pub fn build_window(app: &libadwaita::Application, username_str: &str) {
     let username = Rc::new(username_str.to_string());
     let window = libadwaita::ApplicationWindow::builder()
@@ -71,7 +73,7 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
     scroll.set_child(Some(&clamp));
     main_box.append(&scroll);
 
-    let refresh: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let refresh: Rc<RefCell<Option<RefreshCb>>> = Rc::new(RefCell::new(None));
 
     {
         let fl = face_list.clone();
@@ -159,12 +161,12 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
                                 let fn_ = fn_.clone();
                                 let refresh_ptr = refresh_ptr.clone();
                                 glib::MainContext::default().spawn_local(async move {
-                                    if let Ok(conn) = Connection::system().await {
-                                        if let Ok(proxy) = AuthProxy::new(&conn).await {
-                                            let _ = proxy.remove_face(&un, &fn_).await;
-                                            if let Some(f) = refresh_ptr.borrow().as_ref() {
-                                                f();
-                                            }
+                                    if let Ok(conn) = Connection::system().await
+                                        && let Ok(proxy) = AuthProxy::new(&conn).await
+                                    {
+                                        let _ = proxy.remove_face(&un, &fn_).await;
+                                        if let Some(f) = refresh_ptr.borrow().as_ref() {
+                                            f();
                                         }
                                     }
                                 });

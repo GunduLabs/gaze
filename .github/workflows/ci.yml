@@ -11,6 +11,7 @@ env:
 
 jobs:
   check-test:
+    name: Check & Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,17 +21,11 @@ jobs:
           sudo apt-get install -y \
             libopencv-dev clang libclang-dev pkg-config libv4l-dev libpam0g-dev \
             libgtk-4-dev libadwaita-1-dev
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-
-      - name: Install rustup components
-        run: rustup component add clippy rustfmt
+          toolchain: stable
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy

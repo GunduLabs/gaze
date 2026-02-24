@@ -1,5 +1,5 @@
 name: "gaze"
-arch: "amd64"
+arch: "${ARCH}"
 platform: "linux"
 version: "${VERSION}"
 section: "admin"

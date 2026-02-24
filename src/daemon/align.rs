@@ -59,8 +59,8 @@ pub fn umeyama(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> Option<Matrix3<f32>>
     let r = u * d_mat * v_t;
 
     let mut var_src = 0.0;
-    for i in 0..5 {
-        var_src += src_demean[i][0] * src_demean[i][0] + src_demean[i][1] * src_demean[i][1];
+    for pts in &src_demean {
+        var_src += pts[0] * pts[0] + pts[1] * pts[1];
     }
     var_src /= num_pts;
 

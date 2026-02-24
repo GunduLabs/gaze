@@ -46,7 +46,7 @@ impl UserDatabase {
         let bytes: &[u8] = unsafe {
             std::slice::from_raw_parts(
                 embed_slice.as_ptr() as *const u8,
-                embed_slice.len() * std::mem::size_of::<f32>(),
+                std::mem::size_of_val(embed_slice),
             )
         };
         fs::write(path, bytes)?;
@@ -86,11 +86,11 @@ impl UserDatabase {
                 for bin_entry in fs::read_dir(&face_path)? {
                     let bin_entry = bin_entry?;
                     let bin_path = bin_entry.path();
-                    if bin_path.extension().and_then(|e| e.to_str()) == Some("bin") {
-                        if let Ok(embed) = Self::read_embedding(&bin_path) {
-                            let uuid = bin_path.file_stem().unwrap().to_string_lossy().into_owned();
-                            embeddings.insert(uuid, embed);
-                        }
+                    if bin_path.extension().and_then(|e| e.to_str()) == Some("bin")
+                        && let Ok(embed) = Self::read_embedding(&bin_path)
+                    {
+                        let uuid = bin_path.file_stem().unwrap().to_string_lossy().into_owned();
+                        embeddings.insert(uuid, embed);
                     }
                 }
                 faces.insert(face_name, embeddings);

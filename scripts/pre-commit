@@ -1,0 +1,19 @@
+#!/bin/sh
+# Gaze Pre-commit Hook
+
+echo "Checking formatting..."
+cargo fmt --all -- --check
+if [ $? -ne 0 ]; then
+    echo "Error: Formatting check failed. Run 'cargo fmt --all' to fix."
+    exit 1
+fi
+
+echo "Running clippy..."
+cargo clippy --workspace -- -D warnings
+if [ $? -ne 0 ]; then
+    echo "Error: Clippy check failed."
+    exit 1
+fi
+
+echo "Pre-commit checks passed!"
+exit 0

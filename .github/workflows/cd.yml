@@ -6,43 +6,58 @@ on:
 
 jobs:
   package-deb:
-    runs-on: ubuntu-latest
+    name: Package .deb
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ubuntu:24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
+      - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libopencv-dev clang libclang-dev pkg-config libv4l-dev libpam0g-dev \
-            libgtk-4-dev libadwaita-1-dev
+          apt-get update
+          apt-get install -y pkg-config build-essential libopencv-dev clang libclang-dev libv4l-dev libpam0g-dev libgtk-4-dev libadwaita-1-dev curl
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --workspace --release
       - name: Install nfpm
         run: |
-          echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | sudo tee /etc/apt/sources.list.d/goreleaser.list
-          sudo apt-get update
-          sudo apt-get install nfpm
+          echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | tee /etc/apt/sources.list.d/goreleaser.list
+          apt-get update && apt-get install -y nfpm
       - name: Package
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          VERSION=$VERSION nfpm pkg --packager deb --target dist/
+        run: VERSION=${GITHUB_REF#refs/tags/v} ARCH=${{ matrix.arch }} nfpm pkg --packager deb --target dist/
       - name: Upload .deb
         uses: actions/upload-artifact@v4
         with:
-          name: gaze-deb
+          name: gaze-deb-${{ matrix.arch }}
           path: dist/*.deb
 
   package-rpm:
-    runs-on: ubuntu-latest
+    name: Package .rpm
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     container:
       image: fedora:latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
+      - name: Install system dependencies
         run: |
-          dnf install -y \
-            opencv-devel clang-devel pkgconfig v4l-utils-devel pam-devel \
-            gtk4-devel libadwaita-devel rust-core cargo
+          dnf install -y openssl-devel opencv-devel clang-devel pkgconfig libv4l-devel pam-devel gtk4-devel libadwaita-devel curl git tar gzip nodejs
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --workspace --release
       - name: Install nfpm
@@ -51,16 +66,15 @@ jobs:
           dnf config-manager addrepo --from-repofrompath=goreleaser,https://repo.goreleaser.com/yum/
           dnf install -y --nogpgcheck nfpm
       - name: Package
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          VERSION=$VERSION nfpm pkg --packager rpm --target dist/
+        run: VERSION=${GITHUB_REF#refs/tags/v} ARCH=${{ matrix.arch }} nfpm pkg --packager rpm --target dist/
       - name: Upload .rpm
         uses: actions/upload-artifact@v4
         with:
-          name: gaze-rpm
+          name: gaze-rpm-${{ matrix.arch }}
           path: dist/*.rpm
 
   release:
+    name: Release
     needs: [package-deb, package-rpm]
     runs-on: ubuntu-latest
     permissions:
