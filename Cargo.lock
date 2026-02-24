@@ -1053,6 +1053,7 @@ dependencies = [
  "ndarray",
  "opencv",
  "ort",
+ "rayon",
  "tokio",
  "ureq",
  "uuid",

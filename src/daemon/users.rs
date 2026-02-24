@@ -1,4 +1,5 @@
 use ndarray::Array1;
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -202,14 +203,21 @@ impl UserDatabase {
         threshold: f32,
     ) -> Option<String> {
         let faces = self.users.get(username)?;
-        for (face_name, uuid_map) in faces {
-            for ref_embed in uuid_map.values() {
+
+        let candidates: Vec<(&String, &Array1<f32>)> = faces
+            .iter()
+            .flat_map(|(name, uuid_map)| uuid_map.values().map(move |e| (name, e)))
+            .collect();
+
+        candidates
+            .into_par_iter()
+            .find_map_any(|(name, ref_embed)| {
                 if embed.dot(ref_embed) > threshold {
-                    return Some(face_name.clone());
+                    Some(name.clone())
+                } else {
+                    None
                 }
-            }
-        }
-        None
+            })
     }
 
     pub fn get_user_embeddings(&self, username: &str) -> Option<Vec<&Array1<f32>>> {
