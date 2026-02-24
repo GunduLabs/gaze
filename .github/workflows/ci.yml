@@ -180,6 +180,7 @@ jobs:
             install -Dm755 "\$srcdir/../../target/release/gaze"     "\$pkgdir/usr/bin/gaze"
             install -Dm755 "\$srcdir/../../target/release/gaze-gui" "\$pkgdir/usr/bin/gaze-gui"
             install -Dm644 "\$srcdir/../../target/release/libpam_gaze.so" "\$pkgdir/usr/lib/security/pam_gaze.so"
+            install -Dm755 "\$srcdir/../../packaging/arch/postinst.sh" "\$pkgdir/usr/lib/gaze/postinst.sh"
             install -Dm644 "\$srcdir/../../dist/config.toml"          "\$pkgdir/etc/gaze/config.toml"
             install -Dm644 "\$srcdir/../../dist/org.gaze.Auth.conf"   "\$pkgdir/etc/dbus-1/system.d/org.gaze.Auth.conf"
             install -Dm644 "\$srcdir/../../dist/gazed.service"        "\$pkgdir/usr/lib/systemd/system/gazed.service"

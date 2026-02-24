@@ -1,0 +1,7 @@
+post_install() {
+    /usr/lib/gaze/postinst.sh
+}
+
+post_upgrade() {
+    /usr/lib/gaze/postinst.sh
+}
