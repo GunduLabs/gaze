@@ -1,0 +1,13 @@
+[Unit]
+Description=Gaze Facial Authentication Daemon
+After=dbus.service
+Requires=dbus.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/gazed
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

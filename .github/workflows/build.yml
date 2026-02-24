@@ -1,10 +1,11 @@
-name: Rust
+name: Build & Package
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
+    tags: ["v*"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,13 +14,204 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libopencv-dev clang libclang-dev pkg-config libv4l-dev
-    - name: Build
-      run: cargo build --release
-    - name: Run tests
-      run: cargo test --release
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopencv-dev clang libclang-dev pkg-config libv4l-dev libpam0g-dev
+      - name: Build
+        run: cargo build --release
+      - name: Run tests
+        run: cargo test --release
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: gaze-binaries
+          path: |
+            target/release/gazed
+            target/release/gaze
+            target/release/libpam_gaze.so
 
+  package-deb:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gaze-binaries
+          path: artifacts
+      - name: Build .deb
+        run: |
+          PKG=gaze_0.1.0_amd64
+          mkdir -p $PKG/DEBIAN
+          mkdir -p $PKG/usr/bin
+          mkdir -p $PKG/usr/lib/security
+          mkdir -p $PKG/etc/gaze
+          mkdir -p $PKG/etc/dbus-1/system.d
+          mkdir -p $PKG/usr/lib/systemd/system
+
+          cp artifacts/gazed $PKG/usr/bin/
+          cp artifacts/gaze $PKG/usr/bin/
+          cp artifacts/libpam_gaze.so $PKG/usr/lib/security/pam_gaze.so
+          cp dist/config.toml $PKG/etc/gaze/config.toml
+          cp dist/org.gaze.Auth.conf $PKG/etc/dbus-1/system.d/
+          cp dist/gazed.service $PKG/usr/lib/systemd/system/
+
+          chmod +x $PKG/usr/bin/gazed $PKG/usr/bin/gaze
+
+          cat > $PKG/DEBIAN/control << 'EOF'
+          Package: gaze
+          Version: 0.1.0
+          Architecture: amd64
+          Maintainer: gaze
+          Description: Facial authentication daemon with PAM support
+          Depends: libopencv-dev, libpam0g
+          Section: admin
+          Priority: optional
+          EOF
+          sed -i 's/^          //' $PKG/DEBIAN/control
+
+          cat > $PKG/DEBIAN/postinst << 'SCRIPT'
+          #!/bin/sh
+          set -e
+          mkdir -p /var/lib/gaze/users
+          mkdir -p /opt/gaze/models
+          systemctl daemon-reload
+          dbus-send --system --type=method_call --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig 2>/dev/null || true
+          SCRIPT
+          chmod 755 $PKG/DEBIAN/postinst
+
+          dpkg-deb --build $PKG
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gaze-deb
+          path: "*.deb"
+
+  package-rpm:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gaze-binaries
+          path: artifacts
+      - name: Install rpm tools
+        run: sudo apt-get update && sudo apt-get install -y rpm
+      - name: Build .rpm
+        run: |
+          mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS,BUILDROOT}
+
+          cat > rpmbuild/SPECS/gaze.spec << 'EOF'
+          Name:    gaze
+          Version: 0.1.0
+          Release: 1
+          Summary: Facial authentication daemon with PAM support
+          License: MIT
+          URL:     https://github.com/gaze
+
+          %description
+          Facial authentication daemon with DBus interface and PAM module.
+
+          %install
+          mkdir -p %{buildroot}/usr/bin
+          mkdir -p %{buildroot}/usr/lib/security
+          mkdir -p %{buildroot}/etc/gaze
+          mkdir -p %{buildroot}/etc/dbus-1/system.d
+          mkdir -p %{buildroot}/usr/lib/systemd/system
+
+          cp %{_topdir}/../artifacts/gazed %{buildroot}/usr/bin/
+          cp %{_topdir}/../artifacts/gaze %{buildroot}/usr/bin/
+          cp %{_topdir}/../artifacts/libpam_gaze.so %{buildroot}/usr/lib/security/pam_gaze.so
+          cp %{_topdir}/../dist/config.toml %{buildroot}/etc/gaze/config.toml
+          cp %{_topdir}/../dist/org.gaze.Auth.conf %{buildroot}/etc/dbus-1/system.d/
+          cp %{_topdir}/../dist/gazed.service %{buildroot}/usr/lib/systemd/system/
+
+          %files
+          %attr(755, root, root) /usr/bin/gazed
+          %attr(755, root, root) /usr/bin/gaze
+          /usr/lib/security/pam_gaze.so
+          %config(noreplace) /etc/gaze/config.toml
+          /etc/dbus-1/system.d/org.gaze.Auth.conf
+          /usr/lib/systemd/system/gazed.service
+
+          %post
+          mkdir -p /var/lib/gaze/users
+          mkdir -p /opt/gaze/models
+          systemctl daemon-reload
+          EOF
+
+          rpmbuild --define "_topdir $(pwd)/rpmbuild" -bb rpmbuild/SPECS/gaze.spec
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gaze-rpm
+          path: rpmbuild/RPMS/**/*.rpm
+
+  package-arch:
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gaze-binaries
+          path: artifacts
+      - name: Install tools
+        run: |
+          pacman -Sy --noconfirm base-devel fakeroot
+      - name: Build .pkg.tar.zst
+        run: |
+          mkdir -p pkg/src
+          chmod +x artifacts/gazed artifacts/gaze
+
+          cat > pkg/PKGBUILD << 'EOF'
+          pkgname=gaze
+          pkgver=0.1.0
+          pkgrel=1
+          pkgdesc="Facial authentication daemon with PAM support"
+          arch=('x86_64')
+          license=('MIT')
+          depends=('opencv' 'pam' 'dbus')
+
+          package() {
+            install -Dm755 "$srcdir/../../artifacts/gazed" "$pkgdir/usr/bin/gazed"
+            install -Dm755 "$srcdir/../../artifacts/gaze" "$pkgdir/usr/bin/gaze"
+            install -Dm644 "$srcdir/../../artifacts/libpam_gaze.so" "$pkgdir/usr/lib/security/pam_gaze.so"
+            install -Dm644 "$srcdir/../../dist/config.toml" "$pkgdir/etc/gaze/config.toml"
+            install -Dm644 "$srcdir/../../dist/org.gaze.Auth.conf" "$pkgdir/etc/dbus-1/system.d/org.gaze.Auth.conf"
+            install -Dm644 "$srcdir/../../dist/gazed.service" "$pkgdir/usr/lib/systemd/system/gazed.service"
+            install -dm755 "$pkgdir/var/lib/gaze/users"
+            install -dm755 "$pkgdir/opt/gaze/models"
+          }
+          EOF
+
+          cd pkg
+          useradd -m builder 2>/dev/null || true
+          chown -R builder:builder .
+          su builder -c "makepkg -f --nodeps --skipinteg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gaze-arch
+          path: pkg/*.pkg.tar.zst
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [package-deb, package-rpm, package-arch]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            packages/**/*.deb
+            packages/**/*.rpm
+            packages/**/*.pkg.tar.zst

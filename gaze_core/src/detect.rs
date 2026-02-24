@@ -51,14 +51,8 @@ impl FaceDetector {
     ) -> anyhow::Result<(ndarray::Array2<f32>, Option<ndarray::Array3<f32>>, Mat)> {
         let mat_square = Self::pad_to_square(img);
         let mut mat_rgb = Mat::default();
-        opencv::imgproc::cvt_color(
-            &mat_square,
-            &mut mat_rgb,
-            opencv::imgproc::COLOR_BGR2RGB,
-            0,
-            opencv::core::AlgorithmHint::ALGO_HINT_DEFAULT,
-        )
-        .expect("Failed color conversion");
+        opencv::imgproc::cvt_color_def(&mat_square, &mut mat_rgb, opencv::imgproc::COLOR_BGR2RGB)
+            .expect("Failed color conversion");
 
         let mut center_cache = std::collections::HashMap::new();
 
