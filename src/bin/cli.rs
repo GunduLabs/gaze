@@ -8,13 +8,8 @@ use zbus::proxy;
     default_path = "/org/gaze/Auth"
 )]
 trait Auth {
-    async fn authenticate(&self, username: &str, image_path: &str) -> zbus::Result<bool>;
-    async fn add_face(
-        &self,
-        username: &str,
-        face_name: &str,
-        image_path: &str,
-    ) -> zbus::Result<String>;
+    async fn authenticate(&self, username: &str) -> zbus::Result<bool>;
+    async fn add_face(&self, username: &str, face_name: &str) -> zbus::Result<String>;
     async fn remove_face(&self, username: &str, face_name: &str) -> zbus::Result<bool>;
     async fn clear_user(&self, username: &str) -> zbus::Result<bool>;
 }
@@ -28,23 +23,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Authenticate a user against their stored face embeddings
+    /// Authenticate a user via webcam capture
     Auth {
         #[arg(short, long)]
         user: String,
-        #[arg(short, long)]
-        image: String,
     },
-    /// Add a new face embedding under a named face for a user
+    /// Capture a face from webcam and add it under a named face for a user
     AddFace {
         #[arg(short, long)]
         user: String,
         #[arg(short, long)]
         face: String,
-        #[arg(short, long)]
-        image: String,
     },
-    /// Remove a specific embedding from a named face
+    /// Remove all embeddings for a named face
     RemoveFace {
         #[arg(short, long)]
         user: String,
@@ -65,16 +56,16 @@ async fn main() -> anyhow::Result<()> {
     let proxy = AuthProxy::new(&conn).await?;
 
     match cli.command {
-        Commands::Auth { user, image } => {
-            let result = proxy.authenticate(&user, &image).await?;
+        Commands::Auth { user } => {
+            let result = proxy.authenticate(&user).await?;
             if result {
                 println!("Authenticated!");
             } else {
                 println!("Access Denied.");
             }
         }
-        Commands::AddFace { user, face, image } => {
-            let uuid = proxy.add_face(&user, &face, &image).await?;
+        Commands::AddFace { user, face } => {
+            let uuid = proxy.add_face(&user, &face).await?;
             println!("Embedding added to '{}/{}' (uuid: {})", user, face, uuid);
         }
         Commands::RemoveFace { user, face } => {

@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "pam_gaze"]
+resolver = "3"
+
 [package]
 name = "gaze"
 version = "0.1.0"

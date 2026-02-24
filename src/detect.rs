@@ -18,7 +18,7 @@ impl FaceDetector {
         Ok(Self { detector })
     }
 
-    // Fixes stupid bug in rusty_scrfd
+    // fixes memory corruption bug in rusty_scrfd
     pub fn pad_to_square(img: &Mat) -> Mat {
         use opencv::core;
         let width = img.cols();
