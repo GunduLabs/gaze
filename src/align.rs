@@ -97,3 +97,38 @@ pub fn warp_affine(img: &RgbImage, transform: &Matrix3<f32>, width: u32, height:
     }
     out
 }
+
+pub fn mat_to_rgb(mat: &opencv::core::Mat) -> anyhow::Result<image::RgbImage> {
+    use opencv::prelude::*;
+    let mut img_bytes = Vec::new();
+    let sz = mat.size()?;
+    let total_bytes = (sz.width * sz.height * 3) as usize;
+    img_bytes.resize(total_bytes, 0);
+    unsafe {
+        std::ptr::copy_nonoverlapping(mat.data(), img_bytes.as_mut_ptr(), total_bytes);
+    }
+    let img = image::RgbImage::from_raw(sz.width as u32, sz.height as u32, img_bytes)
+        .ok_or_else(|| anyhow::anyhow!("Failed to create RgbImage from Mat raw bytes"))?;
+    Ok(img)
+}
+
+pub fn align_face(
+    mat_rgb: &opencv::core::Mat,
+    kpss: &ndarray::Array3<f32>,
+) -> anyhow::Result<image::RgbImage> {
+    let k: [[f32; 2]; 5] = [
+        [kpss[[0, 0, 0]], kpss[[0, 0, 1]]],
+        [kpss[[0, 1, 0]], kpss[[0, 1, 1]]],
+        [kpss[[0, 2, 0]], kpss[[0, 2, 1]]],
+        [kpss[[0, 3, 0]], kpss[[0, 3, 1]]],
+        [kpss[[0, 4, 0]], kpss[[0, 4, 1]]],
+    ];
+    let transform = umeyama(&k, &ARCFACE_SRC_PTS)
+        .ok_or_else(|| anyhow::anyhow!("Failed to estimate transform"))?;
+
+    let img_rgb = mat_to_rgb(mat_rgb)?;
+    let img_dyn = image::DynamicImage::ImageRgb8(img_rgb);
+
+    let aligned = warp_affine(&img_dyn.to_rgb8(), &transform, 112, 112);
+    Ok(aligned)
+}
