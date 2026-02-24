@@ -2,7 +2,7 @@
 Name=Gaze
 Comment=Facial Authentication Manager
 Exec=gaze-gui
-Icon=gaze
+Icon=com.gundulabs.Gaze
 Terminal=false
 Type=Application
 Categories=Settings;Security;
