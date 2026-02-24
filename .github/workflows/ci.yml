@@ -121,9 +121,10 @@ jobs:
         run: cargo build --workspace --release
       - name: Install nfpm
         run: |
-          dnf install -y 'dnf-command(config-manager)'
-          dnf config-manager addrepo --from-repofrompath=goreleaser,https://repo.goreleaser.com/yum/
-          dnf install -y --nogpgcheck nfpm
+          ARCH=$(uname -m | sed 's/aarch64/arm64/')
+          VERSION=$(curl -sSf "https://api.github.com/repos/goreleaser/nfpm/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"v\(.*\)".*/\1/')
+          curl -sSfL "https://github.com/goreleaser/nfpm/releases/download/v${VERSION}/nfpm_${VERSION}_Linux_${ARCH}.tar.gz" | tar -xz nfpm
+          install -m755 nfpm /usr/local/bin/
       - name: Set version
         run: |
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
