@@ -160,8 +160,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install system dependencies
         run: |
+          echo "DisableSandbox" >> /etc/pacman.conf
           pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel opencv pam dbus gtk4 libadwaita clang pkg-config v4l-utils curl git
+          pacman -S --noconfirm --ask=4 base-devel opencv pam dbus gtk4 libadwaita clang pkg-config v4l-utils curl git
       - uses: dtolnay/rust-toolchain@stable
       - name: Build
         run: cargo build --workspace --release
