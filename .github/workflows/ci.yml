@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: ["main"]
+    tags: ["v*"]
   pull_request:
     branches: ["main"]
 
@@ -49,3 +50,176 @@ jobs:
             libopencv-dev clang libclang-dev pkg-config libv4l-dev libpam0g-dev \
             libgtk-4-dev libadwaita-1-dev
       - run: cargo test --workspace --locked
+
+  package-deb:
+    name: Package .deb (${{ matrix.arch }})
+    needs: [fmt, clippy, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            multiarch: x86_64-linux-gnu
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            multiarch: aarch64-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y pkg-config build-essential libopencv-dev clang libclang-dev \
+            libv4l-dev libpam0g-dev libgtk-4-dev libadwaita-1-dev curl
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --workspace --release
+      - name: Install nfpm
+        run: |
+          echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | tee /etc/apt/sources.list.d/goreleaser.list
+          apt-get update && apt-get install -y nfpm
+      - name: Set version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+            echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          fi
+      - name: Package
+        run: VERSION=$VERSION ARCH=${{ matrix.arch }} MULTIARCH=${{ matrix.multiarch }} nfpm pkg --packager deb --target dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gaze-deb-${{ matrix.arch }}
+          path: dist/*.deb
+
+  package-rpm:
+    name: Package .rpm (${{ matrix.arch }})
+    needs: [fmt, clippy, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: fedora:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          dnf install -y openssl-devel opencv-devel clang-devel pkgconfig libv4l-devel \
+            pam-devel gtk4-devel libadwaita-devel curl git tar gzip nodejs
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --workspace --release
+      - name: Install nfpm
+        run: |
+          dnf install -y 'dnf-command(config-manager)'
+          dnf config-manager addrepo --from-repofrompath=goreleaser,https://repo.goreleaser.com/yum/
+          dnf install -y --nogpgcheck nfpm
+      - name: Set version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+            echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          fi
+      - name: Package
+        run: VERSION=$VERSION ARCH=${{ matrix.arch }} nfpm pkg --packager rpm --target dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gaze-rpm-${{ matrix.arch }}
+          path: dist/*.rpm
+
+  package-arch:
+    name: Package .pkg.tar.zst (${{ matrix.arch }})
+    needs: [fmt, clippy, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          pacman -Sy --noconfirm base-devel opencv pam dbus gtk4 libadwaita clang pkg-config v4l-utils curl git
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --workspace --release
+      - name: Package
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          fi
+          ARCH=${{ matrix.arch }}
+
+          mkdir -p pkg/src
+          chmod +x target/release/gazed target/release/gaze target/release/gaze-gui
+
+          cat > pkg/PKGBUILD << EOF
+          pkgname=gaze
+          pkgver=${VERSION}
+          pkgrel=1
+          pkgdesc="Facial authentication daemon with PAM support"
+          arch=('${ARCH}')
+          url="https://gaze.gundulabs.com"
+          license=('MIT')
+          depends=('opencv' 'pam' 'dbus' 'gtk4' 'libadwaita')
+          install=gaze.install
+
+          package() {
+            install -Dm755 "\$srcdir/../../target/release/gazed"    "\$pkgdir/usr/bin/gazed"
+            install -Dm755 "\$srcdir/../../target/release/gaze"     "\$pkgdir/usr/bin/gaze"
+            install -Dm755 "\$srcdir/../../target/release/gaze-gui" "\$pkgdir/usr/bin/gaze-gui"
+            install -Dm644 "\$srcdir/../../target/release/libpam_gaze.so" "\$pkgdir/usr/lib/security/pam_gaze.so"
+            install -Dm644 "\$srcdir/../../dist/config.toml"          "\$pkgdir/etc/gaze/config.toml"
+            install -Dm644 "\$srcdir/../../dist/org.gaze.Auth.conf"   "\$pkgdir/etc/dbus-1/system.d/org.gaze.Auth.conf"
+            install -Dm644 "\$srcdir/../../dist/gazed.service"        "\$pkgdir/usr/lib/systemd/system/gazed.service"
+            install -dm755 "\$pkgdir/var/lib/gaze/users"
+            install -dm755 "\$pkgdir/opt/gaze/models"
+          }
+          EOF
+
+          cp packaging/arch/gaze.install pkg/
+
+          cd pkg
+          useradd -m builder 2>/dev/null || true
+          chown -R builder:builder .
+          su builder -c "makepkg -f --nodeps --skipinteg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gaze-arch-${{ matrix.arch }}
+          path: pkg/*.pkg.tar.zst
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [package-deb, package-rpm, package-arch]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
