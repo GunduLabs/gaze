@@ -24,6 +24,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
+          mkdir -p ~/apt-cache/partial
           sudo apt-get install -y -o Dir::Cache::archives="$HOME/apt-cache" \
             libopencv-dev clang libclang-dev pkg-config libv4l-dev libpam0g-dev
 
