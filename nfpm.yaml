@@ -4,10 +4,10 @@ platform: "linux"
 version: "${VERSION}"
 section: "admin"
 priority: "optional"
-maintainer: "gaze <contact@gaze.io>"
+maintainer: "Gundu Labs <contact@gundulabs.com>"
 description: "Facial authentication daemon with PAM support and GUI manager"
-vendor: "gaze"
-homepage: "https://github.com/gaze/gaze"
+vendor: "Gundu Labs"
+homepage: "https://gaze.gundulabs.com"
 license: "MIT"
 
 contents:

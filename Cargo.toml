@@ -2,10 +2,22 @@
 members = [".", "gaze_common", "pam_gaze", "gaze_gui"]
 resolver = "3"
 
-[package]
-name = "gaze"
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+homepage = "https://gaze.gundulabs.com"
+repository = "https://github.com/gundulabs/gaze"
+authors = ["Gundu Labs <contact@gundulabs.com>"]
+license = "MIT"
+
+[package]
+name = "gaze"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
 anyhow = "1.0.102"
