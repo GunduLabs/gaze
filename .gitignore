@@ -1,5 +1,6 @@
 debug
 target
+.cargo/
 
 **/*.rs.bk
 
