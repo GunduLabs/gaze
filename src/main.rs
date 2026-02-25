@@ -1,17 +1,13 @@
 #![allow(dead_code, unused_imports)]
 
-#[path = "daemon/align.rs"]
 mod align;
 mod daemon;
-#[path = "daemon/models.rs"]
 pub mod models;
-#[path = "daemon/recognize.rs"]
 mod recognize;
-#[path = "daemon/users.rs"]
 pub mod users;
 
 use daemon::AuthDaemon;
-use gaze_common::config::Config;
+use gaze_core::config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use zbus::ConnectionBuilder;
@@ -38,9 +34,9 @@ async fn main() -> anyhow::Result<()> {
         security.recognizer(),
     )?;
 
-    let detector = gaze_common::detect::FaceDetector::new(det_path.to_str().unwrap())
+    let detector = gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap())
         .expect("Failed to load detection model");
-    let checker = gaze_common::face::FaceChecker::from_detector(detector);
+    let checker = gaze_core::face::FaceChecker::from_detector(detector);
 
     let recognizer = recognize::FaceRecognizer::new(rec_path.to_str().unwrap())
         .expect("Failed to load recognition model");

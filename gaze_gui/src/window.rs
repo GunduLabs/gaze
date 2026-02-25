@@ -1,8 +1,8 @@
 use crate::enroll_dialog;
-use gaze_common::camera::Camera;
-use gaze_common::config::Config;
-use gaze_common::dbus::AuthProxy;
-use gaze_common::face::FaceChecker;
+use gaze_core::camera::Camera;
+use gaze_core::config::Config;
+use gaze_core::dbus::AuthProxy;
+use gaze_core::face::FaceChecker;
 use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
@@ -197,7 +197,7 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
                 let result = std::thread::spawn(move || {
                     let mut cam = Camera::open(&config.cameras.rgb)?;
                     let mut checker = FaceChecker::new()?;
-                    gaze_common::capture::wait_for_capture(&mut cam, &mut checker, false, |_| {})
+                    gaze_core::capture::wait_for_capture(&mut cam, &mut checker, false, |_| {})
                 })
                 .join();
 

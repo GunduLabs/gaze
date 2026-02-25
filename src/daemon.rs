@@ -8,7 +8,7 @@ use zbus::{fdo, interface};
 use crate::align::align_face;
 use crate::recognize::FaceRecognizer;
 use crate::users::UserDatabase;
-use gaze_common::face::{CaptureStatus, FaceChecker};
+use gaze_core::face::{CaptureStatus, FaceChecker};
 
 pub struct AuthDaemon {
     pub checker: Arc<Mutex<FaceChecker>>,

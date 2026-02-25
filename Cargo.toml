@@ -1,5 +1,13 @@
 [workspace]
-members = [".", "gaze_common", "pam_gaze", "gaze_gui"]
+members = [
+    ".",
+    "gaze_core",
+    "pam_gaze_core",
+    "pam_gaze",
+    "pam_gaze_grosshack",
+    "gaze_gui",
+]
+default-members = [".", "pam_gaze", "pam_gaze_grosshack", "gaze_gui"]
 resolver = "3"
 
 [package]
@@ -10,7 +18,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.102"
 clap = { version = "4.5.60", features = ["derive"] }
-gaze_common = { path = "gaze_common" }
+gaze_core = { path = "gaze_core" }
 image = "0.25.9"
 nalgebra = "0.34.1"
 ndarray = "0.17.2"

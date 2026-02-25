@@ -1,5 +1,5 @@
 [package]
-name = "pam_gaze"
+name = "pam_gaze_grosshack"
 version = "0.1.0"
 edition = "2024"
 
@@ -11,3 +11,4 @@ pam_gaze_core = { path = "../pam_gaze_core" }
 gaze_core = { path = "../gaze_core" }
 libc = "0.2"
 zbus = "4.4.0"
+parking_lot = "0.12"

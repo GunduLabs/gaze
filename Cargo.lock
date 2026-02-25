@@ -1047,7 +1047,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "gaze_common",
+ "gaze_core",
  "image",
  "nalgebra",
  "ndarray",
@@ -1062,7 +1062,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "gaze_common"
+name = "gaze_core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1086,7 +1086,7 @@ name = "gaze_gui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "gaze_common",
+ "gaze_core",
  "gtk4",
  "libadwaita",
  "opencv",
@@ -2211,10 +2211,32 @@ dependencies = [
 name = "pam_gaze"
 version = "0.1.0"
 dependencies = [
- "gaze_common",
+ "gaze_core",
+ "libc",
+ "pam_gaze_core",
+ "zbus",
+]
+
+[[package]]
+name = "pam_gaze_core"
+version = "0.1.0"
+dependencies = [
+ "gaze_core",
  "libc",
  "opencv",
+ "parking_lot",
  "tokio",
+ "zbus",
+]
+
+[[package]]
+name = "pam_gaze_grosshack"
+version = "0.1.0"
+dependencies = [
+ "gaze_core",
+ "libc",
+ "pam_gaze_core",
+ "parking_lot",
  "zbus",
 ]
 

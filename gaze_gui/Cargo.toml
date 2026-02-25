@@ -8,7 +8,7 @@ name = "gaze-gui"
 path = "src/main.rs"
 
 [dependencies]
-gaze_common = { path = "../gaze_common" }
+gaze_core = { path = "../gaze_core" }
 gtk4 = { version = "0.9.7", features = ["gnome_46"] }
 libadwaita = { version = "0.7.2", features = ["v1_4"] }
 zbus = "4.4.0"

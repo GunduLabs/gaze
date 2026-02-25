@@ -1,14 +1,14 @@
 use clap::{Parser, Subcommand};
-use gaze_common::camera::Camera;
-use gaze_common::capture::{CaptureStatus, frame_to_bytes, wait_for_centered_capture};
-use gaze_common::config::Config;
-use gaze_common::face::FaceChecker;
+use gaze_core::camera::Camera;
+use gaze_core::capture::{CaptureStatus, frame_to_bytes, wait_for_centered_capture};
+use gaze_core::config::Config;
+use gaze_core::face::FaceChecker;
 use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
 use zbus::Connection;
 
-use gaze_common::dbus::AuthProxy;
+use gaze_core::dbus::AuthProxy;
 
 fn print_status(status: &CaptureStatus) {
     match status {

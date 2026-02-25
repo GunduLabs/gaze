@@ -1,6 +1,6 @@
 use crate::camera_view::{CameraFeed, CaptureStatusInfo, build_camera_widget};
-use gaze_common::config::Config;
-use gaze_common::dbus::AuthProxy;
+use gaze_core::config::Config;
+use gaze_core::dbus::AuthProxy;
 use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
