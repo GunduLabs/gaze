@@ -1,0 +1,21 @@
+Gaze facial authentication profile
+
+This profile configures PAM to use Gaze (pam_gaze.so) for facial
+authentication. Users who have enrolled their face can authenticate
+without entering a password; others fall through to standard password
+authentication automatically.
+
+REQUIREMENTS
+- gazed.service must be running (systemctl enable --now gazed)
+- pam_gaze.so must be installed at /usr/lib/security/pam_gaze.so
+- Users must enroll their face: gaze add-face <username> <face-name>
+
+USAGE
+  authselect select custom/gaze [features...]
+  authselect select custom/gaze with-faillock
+  authselect select custom/gaze with-fingerprint with-faillock
+
+OPTIONAL FEATURES
+  with-faillock     Track failed authentication attempts with pam_faillock
+  with-fingerprint  Enable fingerprint authentication as an additional fallback
+  with-mkhomedir    Automatically create home directories on first login
