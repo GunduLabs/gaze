@@ -126,17 +126,18 @@ async fn main() -> anyhow::Result<()> {
             for _ in 0..10 {
                 let frame = cam.capture_frame()?;
                 let result = frame_to_bytes(&frame)?;
+                let t0 = std::time::Instant::now();
                 match proxy
                     .authenticate(&user, &result.bytes, result.width, result.height)
                     .await
                 {
                     Ok(face) if !face.is_empty() => {
-                        println!("Authenticated as: {}", face);
+                        println!("Authenticated as: {} ({}ms)", face, t0.elapsed().as_millis());
                         authenticated = true;
                         break;
                     }
                     Ok(_) => {
-                        println!("Access Denied.");
+                        println!("Access Denied. ({}ms)", t0.elapsed().as_millis());
                         break;
                     }
                     Err(ref err) if err.to_string().contains("RETRYABLE:") => continue,

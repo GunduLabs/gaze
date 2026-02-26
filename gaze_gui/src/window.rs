@@ -194,6 +194,7 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
             let ww = ww.clone();
             glib::MainContext::default().spawn_local(async move {
                 let config = Config::load().unwrap_or_default();
+                let t0 = std::time::Instant::now();
                 let result = std::thread::spawn(move || {
                     let mut cam = Camera::open(&config.cameras.rgb)?;
                     let mut checker = FaceChecker::new()?;
@@ -210,9 +211,9 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
                                     .await
                                 {
                                     Ok(face) if !face.is_empty() => {
-                                        format!("✓ Authenticated as: {}", face)
+                                        format!("✓ Authenticated as: {} ({}ms)", face, t0.elapsed().as_millis())
                                     }
-                                    Ok(_) => "✗ Authentication failed".to_string(),
+                                    Ok(_) => format!("✗ Authentication failed ({}ms)", t0.elapsed().as_millis()),
                                     Err(e) => format!("✗ DBus error: {}", e),
                                 }
                             }
