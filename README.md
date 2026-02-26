@@ -42,10 +42,12 @@ cargo build -p pam_gaze --release        # PAM module (libpam_gaze.so)
 
 ## Installation
 
-1. Install the daemon binary and enable the systemd service:
+1. Install the binaries and enable the systemd service:
 
 ```bash
 sudo cp target/release/gazed /usr/bin/gazed
+sudo cp target/release/gaze /usr/bin/gaze
+sudo cp target/release/gaze-gui /usr/bin/gaze-gui
 sudo cp dist/gazed.service /etc/systemd/system/
 sudo systemctl enable --now gazed
 ```
@@ -66,7 +68,11 @@ sudo cp dist/config.toml /etc/gaze/config.toml
 4. Install the PAM module:
 
 ```bash
-sudo cp target/release/libpam_gaze.so /lib/security/
+# Fedora / RHEL (x86_64)
+sudo cp target/release/libpam_gaze.so /lib64/security/pam_gaze.so
+
+# Debian / Ubuntu
+sudo cp target/release/libpam_gaze.so /lib/x86_64-linux-gnu/security/pam_gaze.so
 ```
 
 5. Add to your PAM config (e.g. `/etc/pam.d/gdm-password`):
