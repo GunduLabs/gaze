@@ -1,0 +1,9 @@
+auth        required      pam_gaze.so
+auth        include       postlogin
+
+account     required      pam_nologin.so
+account     include       system-auth
+
+session     required      pam_loginuid.so
+session     include       system-auth
+session     include       postlogin

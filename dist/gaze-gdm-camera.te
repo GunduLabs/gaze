@@ -1,0 +1,9 @@
+module gaze-gdm-camera 1.0;
+
+require {
+    type xdm_t;
+    type v4l_device_t;
+    class chr_file { open read write map ioctl getattr };
+}
+
+allow xdm_t v4l_device_t:chr_file { open read write map ioctl getattr };

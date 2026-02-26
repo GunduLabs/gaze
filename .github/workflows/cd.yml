@@ -34,7 +34,11 @@ jobs:
           echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | tee /etc/apt/sources.list.d/goreleaser.list
           apt-get update && apt-get install -y nfpm
       - name: Package
-        run: VERSION=${GITHUB_REF#refs/tags/v} ARCH=${{ matrix.arch }} MULTIARCH=${{ matrix.multiarch }} nfpm pkg --packager deb --target dist/
+        run: |
+          export VERSION=${GITHUB_REF#refs/tags/v} ARCH=${{ matrix.arch }} MULTIARCH=${{ matrix.multiarch }}
+          nfpm pkg -f packaging/nfpm.yaml --packager deb --target dist/
+          nfpm pkg -f packaging/nfpm_gui.yaml --packager deb --target dist/
+          nfpm pkg -f packaging/nfpm_gnome_extension.yaml --packager deb --target dist/
       - name: Upload .deb
         uses: actions/upload-artifact@v4
         with:
@@ -68,7 +72,11 @@ jobs:
           dnf config-manager addrepo --from-repofrompath=goreleaser,https://repo.goreleaser.com/yum/
           dnf install -y --nogpgcheck nfpm
       - name: Package
-        run: VERSION=${GITHUB_REF#refs/tags/v} ARCH=${{ matrix.arch }} nfpm pkg --packager rpm --target dist/
+        run: |
+          export VERSION=${GITHUB_REF#refs/tags/v} ARCH=${{ matrix.arch }}
+          nfpm pkg -f packaging/nfpm.yaml --packager rpm --target dist/
+          nfpm pkg -f packaging/nfpm_gui.yaml --packager rpm --target dist/
+          nfpm pkg -f packaging/nfpm_gnome_extension.yaml --packager rpm --target dist/
       - name: Upload .rpm
         uses: actions/upload-artifact@v4
         with:
@@ -94,7 +102,11 @@ jobs:
         run: |
           pacman -S --noconfirm nfpm
       - name: Package
-        run: VERSION=${GITHUB_REF#refs/tags/v} ARCH=x86_64 nfpm pkg --packager archlinux --target dist/
+        run: |
+          export VERSION=${GITHUB_REF#refs/tags/v} ARCH=x86_64
+          nfpm pkg -f packaging/nfpm.yaml --packager archlinux --target dist/
+          nfpm pkg -f packaging/nfpm_gui.yaml --packager archlinux --target dist/
+          nfpm pkg -f packaging/nfpm_gnome_extension.yaml --packager archlinux --target dist/
       - name: Upload .tar.zst
         uses: actions/upload-artifact@v4
         with:

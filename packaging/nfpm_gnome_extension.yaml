@@ -1,0 +1,41 @@
+name: "gaze-gnome-extension"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+section: "admin"
+priority: "optional"
+maintainer: "GunduLabs <contact@gundulabs.com>"
+description: "GNOME Shell extension for Gaze on login and lock screen"
+vendor: "GunduLabs"
+homepage: "https://github.com/gaze/gaze"
+license: "MIT"
+
+contents:
+  - src: "gnome-shell-extension/metadata.json"
+    dst: "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/metadata.json"
+    type: "file"
+  - src: "gnome-shell-extension/extension.js"
+    dst: "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/extension.js"
+    type: "file"
+  - src: "dist/org.gnome.login-screen.gaze.gschema.xml"
+    dst: "/usr/share/glib-2.0/schemas/org.gnome.login-screen.gaze.gschema.xml"
+    type: "file"
+  - src: "dist/gdm-face"
+    dst: "/etc/pam.d/gdm-face"
+    type: "config"
+  - src: "dist/gaze-gdm-camera.te"
+    dst: "/usr/share/gaze/gaze-gdm-camera.te"
+    type: "file"
+
+scripts:
+  postinstall: "packaging/postinst_gnome_extension.sh"
+
+depends:
+  - gaze
+  - gnome-shell
+
+overrides:
+  rpm:
+    recommends:
+      - checkpolicy
+      - policycoreutils
