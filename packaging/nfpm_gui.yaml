@@ -16,8 +16,8 @@ contents:
     type: "file"
     file_info:
       mode: 0755
-  - src: "dist/gaze.desktop"
-    dst: "/usr/share/applications/gaze.desktop"
+  - src: "dist/com.gundulabs.Gaze.desktop"
+    dst: "/usr/share/applications/com.gundulabs.Gaze.desktop"
     type: "file"
   - src: "dist/com.gundulabs.Gaze.svg"
     dst: "/usr/share/icons/hicolor/scalable/apps/com.gundulabs.Gaze.svg"

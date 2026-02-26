@@ -17,7 +17,7 @@
     </clipPath>
   </defs>
 
-  <rect x="12" y="20" width="104" height="104" rx="8" fill="url(#chin-shine)" />
+  <rect x="12" y="16" width="104" height="104" rx="8" fill="url(#chin-shine)" />
   
   <rect x="12" y="12" width="104" height="104" rx="8" fill="#3d3846" />
 
