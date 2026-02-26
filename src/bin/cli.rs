@@ -132,7 +132,11 @@ async fn main() -> anyhow::Result<()> {
                     .await
                 {
                     Ok(face) if !face.is_empty() => {
-                        println!("Authenticated as: {} ({}ms)", face, t0.elapsed().as_millis());
+                        println!(
+                            "Authenticated as: {} ({}ms)",
+                            face,
+                            t0.elapsed().as_millis()
+                        );
                         authenticated = true;
                         break;
                     }

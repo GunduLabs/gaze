@@ -18,10 +18,10 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         None => return PAM_AUTH_ERR,
     };
 
-    let (_, mut cam, proxy) = match setup_auth_env() {
-        Ok(e) => e,
-        Err(e) => return e,
-    };
+    let env = setup_auth_env();
+    if env.is_ok() {
+        unsafe { say(pamh, "Please look at the camera or enter password") };
+    }
 
     let state = Arc::new(Mutex::new(AuthState {
         password: None,
@@ -40,48 +40,48 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         }
     });
 
-    unsafe { say(pamh, "Please look at the camera or enter password") };
-
-    for _ in 0..MAX_ATTEMPTS {
-        {
-            let s = state.lock();
-            if s.finished {
-                if let Some(ref pw) = s.password {
-                    let pw_cstr = CString::new(pw.as_str()).unwrap();
-                    unsafe {
-                        pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);
+    if let Ok((_, mut cam, proxy)) = env {
+        for _ in 0..MAX_ATTEMPTS {
+            {
+                let s = state.lock();
+                if s.finished {
+                    if let Some(ref pw) = s.password {
+                        let pw_cstr = CString::new(pw.as_str()).unwrap();
+                        unsafe {
+                            pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);
+                        }
+                        return PAM_AUTHINFO_UNAVAIL;
                     }
-                    return PAM_AUTHINFO_UNAVAIL;
+                    return PAM_AUTH_ERR;
                 }
-                return PAM_AUTH_ERR;
             }
-        }
 
-        let frame = match cam.capture_frame() {
-            Ok(f) => f,
-            Err(_) => {
-                thread::sleep(std::time::Duration::from_millis(100));
-                continue;
-            }
-        };
-        let capture = match frame_to_bytes(&frame) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
+            let frame = match cam.capture_frame() {
+                Ok(f) => f,
+                Err(_) => {
+                    thread::sleep(std::time::Duration::from_millis(100));
+                    continue;
+                }
+            };
+            let capture = match frame_to_bytes(&frame) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
 
-        match proxy.authenticate(&username, &capture.bytes, capture.width, capture.height) {
-            Ok(face) if !face.is_empty() => {
-                drop(cam);
-                unblock_terminal();
-                return PAM_SUCCESS;
+            match proxy.authenticate(&username, &capture.bytes, capture.width, capture.height) {
+                Ok(face) if !face.is_empty() => {
+                    drop(cam);
+                    unblock_terminal();
+                    return PAM_SUCCESS;
+                }
+                Ok(_) => {}
+                Err(ref err) if is_retryable(err) => continue,
+                Err(_) => break,
             }
-            Ok(_) => {}
-            Err(ref err) if is_retryable(err) => continue,
-            Err(_) => break,
+            thread::sleep(std::time::Duration::from_millis(50));
         }
-        thread::sleep(std::time::Duration::from_millis(50));
+        drop(cam);
     }
-    drop(cam);
 
     loop {
         {

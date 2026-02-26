@@ -211,9 +211,16 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
                                     .await
                                 {
                                     Ok(face) if !face.is_empty() => {
-                                        format!("✓ Authenticated as: {} ({}ms)", face, t0.elapsed().as_millis())
+                                        format!(
+                                            "✓ Authenticated as: {} ({}ms)",
+                                            face,
+                                            t0.elapsed().as_millis()
+                                        )
                                     }
-                                    Ok(_) => format!("✗ Authentication failed ({}ms)", t0.elapsed().as_millis()),
+                                    Ok(_) => format!(
+                                        "✗ Authentication failed ({}ms)",
+                                        t0.elapsed().as_millis()
+                                    ),
                                     Err(e) => format!("✗ DBus error: {}", e),
                                 }
                             }

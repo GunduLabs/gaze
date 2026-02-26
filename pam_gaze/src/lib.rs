@@ -11,7 +11,10 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
     let (_, mut cam, proxy) = match setup_auth_env() {
         Ok(e) => e,
-        Err(e) => return e,
+        Err(_) => {
+            unsafe { say(pamh, "Face authentication unavailable") };
+            return PAM_AUTHINFO_UNAVAIL;
+        }
     };
 
     unsafe { say(pamh, "Please look at the camera") };
