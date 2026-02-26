@@ -82,6 +82,8 @@ enum Commands {
     Auth {
         #[arg(short, long)]
         user: String,
+        #[arg(long, help = "Print detailed step-by-step performance metrics")]
+        perf: bool,
     },
     /// Enroll a new face with guided multi-angle capture
     AddFace {
@@ -119,32 +121,57 @@ async fn main() -> anyhow::Result<()> {
     let proxy = AuthProxy::new(&conn).await?;
 
     match cli.command {
-        Commands::Auth { user } => {
+        Commands::Auth { user, perf } => {
+            let mut last = std::time::Instant::now();
+            let start = last;
+            let log = |label: &str, last: &mut std::time::Instant| {
+                if !perf {
+                    return;
+                }
+                let now = std::time::Instant::now();
+                let delta = now.duration_since(*last);
+                let total = now.duration_since(start);
+                *last = now;
+                eprintln!(
+                    "[gaze perf] {:>40} | step: {:>8.3}ms | total: {:>8.3}ms",
+                    label,
+                    delta.as_secs_f64() * 1000.0,
+                    total.as_secs_f64() * 1000.0,
+                );
+            };
+
             let mut cam = Camera::open(&config.cameras.rgb)?;
+            log("camera opened", &mut last);
             let mut authenticated = false;
 
-            for _ in 0..10 {
+            for attempt in 0..10 {
                 let frame = cam.capture_frame()?;
+                log(&format!("attempt {attempt}: frame captured"), &mut last);
                 let result = frame_to_bytes(&frame)?;
-                let t0 = std::time::Instant::now();
+                log(&format!("attempt {attempt}: frame_to_bytes"), &mut last);
                 match proxy
                     .authenticate(&user, &result.bytes, result.width, result.height)
                     .await
                 {
                     Ok(face) if !face.is_empty() => {
+                        log(&format!("attempt {attempt}: auth SUCCESS"), &mut last);
                         println!(
                             "Authenticated as: {} ({}ms)",
                             face,
-                            t0.elapsed().as_millis()
+                            start.elapsed().as_millis()
                         );
                         authenticated = true;
                         break;
                     }
                     Ok(_) => {
-                        println!("Access Denied. ({}ms)", t0.elapsed().as_millis());
+                        log(&format!("attempt {attempt}: no face matched"), &mut last);
+                        println!("Access Denied. ({}ms)", start.elapsed().as_millis());
                         break;
                     }
-                    Err(ref err) if err.to_string().contains("RETRYABLE:") => continue,
+                    Err(ref err) if err.to_string().contains("RETRYABLE:") => {
+                        log(&format!("attempt {attempt}: retryable error"), &mut last);
+                        continue;
+                    }
                     Err(err) => return Err(err.into()),
                 }
             }

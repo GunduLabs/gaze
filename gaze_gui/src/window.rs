@@ -2,7 +2,6 @@ use crate::enroll_dialog;
 use gaze_core::camera::Camera;
 use gaze_core::config::Config;
 use gaze_core::dbus::AuthProxy;
-use gaze_core::face::FaceChecker;
 use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
@@ -195,21 +194,19 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
             glib::MainContext::default().spawn_local(async move {
                 let config = Config::load().unwrap_or_default();
                 let t0 = std::time::Instant::now();
-                let result = std::thread::spawn(move || {
+                let result = std::thread::spawn(move || -> anyhow::Result<(Vec<u8>, u32, u32)> {
                     let mut cam = Camera::open(&config.cameras.rgb)?;
-                    let mut checker = FaceChecker::new()?;
-                    gaze_core::capture::wait_for_capture(&mut cam, &mut checker, false, |_| {})
+                    let frame = cam.capture_frame()?;
+                    let cap = gaze_core::capture::frame_to_bytes(&frame)?;
+                    Ok((cap.bytes, cap.width, cap.height))
                 })
                 .join();
 
                 let toast_text = match result {
-                    Ok(Ok(cap)) => match Connection::system().await {
+                    Ok(Ok((bytes, width, height))) => match Connection::system().await {
                         Ok(conn) => match AuthProxy::new(&conn).await {
                             Ok(proxy) => {
-                                match proxy
-                                    .authenticate(&un, &cap.bytes, cap.width, cap.height)
-                                    .await
-                                {
+                                match proxy.authenticate(&un, &bytes, width, height).await {
                                     Ok(face) if !face.is_empty() => {
                                         format!(
                                             "✓ Authenticated as: {} ({}ms)",
