@@ -72,7 +72,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         match proxy.authenticate(&username, &capture.bytes, capture.width, capture.height) {
             Ok(face) if !face.is_empty() => {
                 drop(cam);
-                unsafe { say(pamh, "") };
+                unblock_terminal();
                 return PAM_SUCCESS;
             }
             Ok(_) => {}
@@ -98,6 +98,13 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
             }
         }
         thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+fn unblock_terminal() {
+    unsafe {
+        let nl = b'\n' as libc::c_char;
+        libc::ioctl(0, libc::TIOCSTI, &nl as *const libc::c_char);
     }
 }
 
