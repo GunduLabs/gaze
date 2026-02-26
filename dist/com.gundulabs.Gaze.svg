@@ -1,14 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
   <defs>
     <linearGradient id="chin-shine" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#1a1621" />
-      <stop offset="4%" stop-color="#5e5c64" /> <stop offset="12%" stop-color="#1a1621" />
-      <stop offset="88%" stop-color="#1a1621" />
-      <stop offset="96%" stop-color="#5e5c64" /> <stop offset="100%" stop-color="#1a1621" />
+      <stop offset="0%" stop-color="#241f31" />
+      <stop offset="5%" stop-color="#3d3846" /> <stop offset="12%" stop-color="#241f31" />
+      <stop offset="88%" stop-color="#241f31" />
+      <stop offset="95%" stop-color="#3d3846" /> <stop offset="100%" stop-color="#241f31" />
     </linearGradient>
 
     <linearGradient id="scan-glow" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#33d17a" stop-opacity="0.6" />
+      <stop offset="0%" stop-color="#33d17a" stop-opacity="0.4" />
       <stop offset="100%" stop-color="#33d17a" stop-opacity="0" />
     </linearGradient>
     
@@ -39,4 +39,3 @@
       <polygon points="38,50 90,50 86,76 42,76" fill="url(#scan-glow)" />
   </g>
 </svg>
-
