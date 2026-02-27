@@ -5,3 +5,4 @@ mkdir -p /opt/gaze/models
 systemctl daemon-reload
 dbus-send --system --type=method_call --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig 2>/dev/null || true
 systemctl enable --now gazed
+pam-auth-update --package
