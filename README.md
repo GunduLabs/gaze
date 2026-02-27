@@ -38,7 +38,7 @@ go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
 export PATH="$PATH:$(go env GOPATH)/bin"
 ```
 
-Rebuild, repackage, and reinstall all three RPMs in one shot (resets the config so the package version is laid down fresh):
+Rebuild, repackage, reinstall, and configure everything in one shot (resets the config so the package version is laid down fresh):
 
 ```bash
 sudo rm -f /etc/gaze/config.toml && \
@@ -46,7 +46,10 @@ cargo build --workspace --release && \
 VERSION=0.0.1 ARCH=x86_64 nfpm pkg -f packaging/nfpm.yaml --packager rpm --target /tmp/ && \
 VERSION=0.0.1 ARCH=x86_64 nfpm pkg -f packaging/nfpm_gui.yaml --packager rpm --target /tmp/ && \
 VERSION=0.0.1 ARCH=x86_64 nfpm pkg -f packaging/nfpm_gnome_extension.yaml --packager rpm --target /tmp/ && \
-sudo rpm -Uvh --force /tmp/gaze-0.0.1-1.x86_64.rpm /tmp/gaze-gui-0.0.1-1.x86_64.rpm /tmp/gaze-gnome-extension-0.0.1-1.x86_64.rpm
+sudo rpm -Uvh --force /tmp/gaze-0.0.1-1.x86_64.rpm /tmp/gaze-gui-0.0.1-1.x86_64.rpm /tmp/gaze-gnome-extension-0.0.1-1.x86_64.rpm && \
+sudo systemctl enable --now gazed && \
+sudo authselect select custom/gaze --force && \
+gnome-extensions enable gaze@gundulabs.com
 ```
 
 ## Workspace
