@@ -143,6 +143,7 @@ async fn main() -> anyhow::Result<()> {
             let mut cam = Camera::open(&config.cameras.rgb)?;
             log("camera opened", &mut last);
             let mut authenticated = false;
+            let mut denied = false;
 
             for attempt in 0..10 {
                 let frame = cam.capture_frame()?;
@@ -156,7 +157,7 @@ async fn main() -> anyhow::Result<()> {
                     Ok(face) if !face.is_empty() => {
                         log(&format!("attempt {attempt}: auth SUCCESS"), &mut last);
                         println!(
-                            "Authenticated as: {} ({}ms)",
+                            "\x1b[32mAuthenticated as: {} ({}ms)\x1b[0m",
                             face,
                             start.elapsed().as_millis()
                         );
@@ -165,7 +166,8 @@ async fn main() -> anyhow::Result<()> {
                     }
                     Ok(_) => {
                         log(&format!("attempt {attempt}: no face matched"), &mut last);
-                        println!("Access Denied. ({}ms)", start.elapsed().as_millis());
+                        println!("\x1b[31mAccess Denied. ({}ms)\x1b[0m", start.elapsed().as_millis());
+                        denied = true;
                         break;
                     }
                     Err(ref err) if err.to_string().contains("RETRYABLE:") => {
@@ -176,8 +178,8 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
 
-            if !authenticated {
-                println!("Access Denied.");
+            if !authenticated && !denied {
+                println!("\x1b[33mAccess Denied. Could not detect a face.\x1b[0m");
             }
         }
         Commands::AddFace { user, face } => {

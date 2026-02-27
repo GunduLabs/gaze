@@ -68,6 +68,12 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
     status_page.set_visible(false);
     content.append(&status_page);
 
+    let auth_label = gtk4::Label::new(None);
+    auth_label.set_visible(false);
+    auth_label.set_halign(gtk4::Align::Center);
+    auth_label.set_margin_top(8);
+    content.append(&auth_label);
+
     clamp.set_child(Some(&content));
     scroll.set_child(Some(&clamp));
     main_box.append(&scroll);
@@ -186,11 +192,13 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
     {
         let un = username.clone();
         let ww = glib::SendWeakRef::from(window.downgrade());
+        let al = auth_label.clone();
         test_btn.connect_clicked(move |btn| {
             btn.set_sensitive(false);
             let un = un.clone();
             let b = btn.clone();
             let ww = ww.clone();
+            let al = al.clone();
             glib::MainContext::default().spawn_local(async move {
                 let config = Config::load().unwrap_or_default();
                 let t0 = std::time::Instant::now();
@@ -202,34 +210,45 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
                 })
                 .join();
 
-                let toast_text = match result {
+                let (text, css) = match result {
                     Ok(Ok((bytes, width, height))) => match Connection::system().await {
                         Ok(conn) => match AuthProxy::new(&conn).await {
                             Ok(proxy) => {
                                 match proxy.authenticate(&un, &bytes, width, height).await {
-                                    Ok(face) if !face.is_empty() => {
+                                    Ok(face) if !face.is_empty() => (
                                         format!(
                                             "✓ Authenticated as: {} ({}ms)",
                                             face,
                                             t0.elapsed().as_millis()
-                                        )
-                                    }
-                                    Ok(_) => format!(
-                                        "✗ Authentication failed ({}ms)",
-                                        t0.elapsed().as_millis()
+                                        ),
+                                        "success",
                                     ),
-                                    Err(e) => format!("✗ DBus error: {}", e),
+                                    Ok(_) => (
+                                        format!(
+                                            "✗ Authentication failed ({}ms)",
+                                            t0.elapsed().as_millis()
+                                        ),
+                                        "error",
+                                    ),
+                                    Err(e) => (format!("✗ DBus error: {}", e), "error"),
                                 }
                             }
-                            _ => "Proxy error".to_string(),
+                            _ => ("✗ Proxy error".to_string(), "error"),
                         },
-                        _ => "DBus error".to_string(),
+                        _ => ("✗ DBus error".to_string(), "error"),
                     },
-                    _ => "Capture failed".to_string(),
+                    _ => ("✗ Capture failed".to_string(), "warning"),
                 };
 
+                for class in ["success", "error", "warning"] {
+                    al.remove_css_class(class);
+                }
+                al.add_css_class(css);
+                al.set_text(&text);
+                al.set_visible(true);
+
                 if let Some(win) = ww.upgrade() {
-                    let toast = libadwaita::Toast::new(&toast_text);
+                    let toast = libadwaita::Toast::new(&text);
                     if let Some(overlay) = win
                         .content()
                         .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())

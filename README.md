@@ -158,11 +158,16 @@ gaze remove-face <name>          # Remove a specific face
 gaze clear-user                  # Remove all faces for current user
 ```
 
+Auth results are color-coded:
+- **Green** — authenticated successfully
+- **Red** — access denied (face detected but not recognized)
+- **Yellow** — could not detect a face
+
 The CLI communicates with the running daemon over DBus.
 
 ### GUI
 
-Launch `gaze-gui` for a graphical enrollment and authentication interface.
+Launch `gaze-gui` for a graphical enrollment and authentication interface. The test authentication button shows a color-coded result label (green/red/yellow) using the same scheme as the CLI.
 
 ## How It Works
 
