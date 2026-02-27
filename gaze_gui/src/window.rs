@@ -193,12 +193,14 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
         let un = username.clone();
         let ww = glib::SendWeakRef::from(window.downgrade());
         let al = auth_label.clone();
+        let fl = face_list.clone();
         test_btn.connect_clicked(move |btn| {
             btn.set_sensitive(false);
             let un = un.clone();
             let b = btn.clone();
             let ww = ww.clone();
             let al = al.clone();
+            let fl = fl.clone();
             glib::MainContext::default().spawn_local(async move {
                 let config = Config::load().unwrap_or_default();
                 let t0 = std::time::Instant::now();
@@ -210,35 +212,85 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
                 })
                 .join();
 
-                let (text, css) = match result {
+                let (text, css, face_scores) = match result {
                     Ok(Ok((bytes, width, height))) => match Connection::system().await {
                         Ok(conn) => match AuthProxy::new(&conn).await {
                             Ok(proxy) => {
-                                match proxy.authenticate(&un, &bytes, width, height).await {
-                                    Ok(face) if !face.is_empty() => (
-                                        format!(
-                                            "✓ Authenticated as: {} ({}ms)",
-                                            face,
-                                            t0.elapsed().as_millis()
-                                        ),
-                                        "success",
-                                    ),
-                                    Ok(_) => (
-                                        format!(
-                                            "✗ Authentication failed ({}ms)",
-                                            t0.elapsed().as_millis()
-                                        ),
-                                        "error",
-                                    ),
-                                    Err(e) => (format!("✗ DBus error: {}", e), "error"),
+                                match proxy.match_faces(&un, &bytes, width, height).await {
+                                    Ok(faces) => {
+                                        let scores: Vec<(String, f64)> = faces
+                                            .iter()
+                                            .map(|(name, _, pct, _, _)| (name.clone(), *pct))
+                                            .collect();
+                                        if faces.iter().any(|(_, _, _, passed, _)| *passed) {
+                                            (
+                                                format!(
+                                                    "✓ Authenticated ({}ms)",
+                                                    t0.elapsed().as_millis()
+                                                ),
+                                                "success",
+                                                scores,
+                                            )
+                                        } else {
+                                            (
+                                                format!(
+                                                    "✗ Authentication failed ({}ms)",
+                                                    t0.elapsed().as_millis()
+                                                ),
+                                                "error",
+                                                scores,
+                                            )
+                                        }
+                                    }
+                                    Err(e) => (format!("✗ DBus error: {}", e), "error", Vec::new()),
                                 }
                             }
-                            _ => ("✗ Proxy error".to_string(), "error"),
+                            _ => ("✗ Proxy error".to_string(), "error", Vec::new()),
                         },
-                        _ => ("✗ DBus error".to_string(), "error"),
+                        _ => ("✗ DBus error".to_string(), "error", Vec::new()),
                     },
-                    _ => ("✗ Capture failed".to_string(), "warning"),
+                    _ => ("✗ Capture failed".to_string(), "warning", Vec::new()),
                 };
+
+                if !face_scores.is_empty() {
+                    let mut badges: Vec<gtk4::Label> = Vec::new();
+                    let mut child = fl.first_child();
+                    while let Some(widget) = child {
+                        if let Some(row) = widget.downcast_ref::<libadwaita::ActionRow>() {
+                            let name = row.title().to_string();
+
+                            let mut prefix_child = row.first_child();
+                            while let Some(pc) = prefix_child {
+                                prefix_child = pc.next_sibling();
+                                if pc.widget_name() == "match-badge" {
+                                    pc.unparent();
+                                }
+                            }
+
+                            if let Some((_, pct)) = face_scores.iter().find(|(n, _)| n == &name) {
+                                let badge = gtk4::Label::new(Some(&format!("{:.1}%", pct)));
+                                badge.set_widget_name("match-badge");
+                                badge.add_css_class("heading");
+                                if *pct >= 50.0 {
+                                    badge.add_css_class("success");
+                                } else {
+                                    badge.add_css_class("error");
+                                }
+                                badge.set_margin_end(8);
+                                badge.set_valign(gtk4::Align::Center);
+                                row.add_prefix(&badge);
+                                badges.push(badge);
+                            }
+                        }
+                        child = widget.next_sibling();
+                    }
+
+                    glib::timeout_add_seconds_local_once(3, move || {
+                        for badge in badges {
+                            badge.unparent();
+                        }
+                    });
+                }
 
                 for class in ["success", "error", "warning"] {
                     al.remove_css_class(class);

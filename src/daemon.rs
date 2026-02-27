@@ -72,13 +72,13 @@ impl AuthDaemon {
 
 #[interface(name = "org.gaze.Auth")]
 impl AuthDaemon {
-    async fn authenticate(
+    async fn verify(
         &self,
         username: String,
         image_data: Vec<u8>,
         width: u32,
         height: u32,
-    ) -> fdo::Result<String> {
+    ) -> fdo::Result<bool> {
         let frame = Self::bytes_to_mat(&image_data, width, height)?;
 
         let embed = {
@@ -88,9 +88,33 @@ impl AuthDaemon {
         };
 
         let db = self.db.lock().await;
-        Ok(db
-            .find_match(&username, &embed, self.threshold)
-            .unwrap_or_default())
+        Ok(db.verify(&username, &embed, self.threshold))
+    }
+
+    async fn match_faces(
+        &self,
+        username: String,
+        image_data: Vec<u8>,
+        width: u32,
+        height: u32,
+    ) -> fdo::Result<Vec<(String, f64, f64, bool, u32)>> {
+        let frame = Self::bytes_to_mat(&image_data, width, height)?;
+
+        let embed = {
+            let mut chk = self.checker.lock().await;
+            let mut rec = self.recognizer.lock().await;
+            Self::process_frame(&mut chk, &mut rec, &frame)?
+        };
+
+        let db = self.db.lock().await;
+        let results = db
+            .score_all(&username, &embed, self.threshold)
+            .into_iter()
+            .map(|(name, score, pct, passed, count)| {
+                (name, score as f64, pct as f64, passed, count)
+            })
+            .collect();
+        Ok(results)
     }
 
     async fn add_face(

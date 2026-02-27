@@ -196,28 +196,52 @@ impl UserDatabase {
         Ok(cleared)
     }
 
-    pub fn find_match(
-        &self,
-        username: &str,
-        embed: &ndarray::Array1<f32>,
-        threshold: f32,
-    ) -> Option<String> {
-        let faces = self.users.get(username)?;
+    pub fn verify(&self, username: &str, embed: &ndarray::Array1<f32>, threshold: f32) -> bool {
+        let Some(faces) = self.users.get(username) else {
+            return false;
+        };
 
-        let candidates: Vec<(&String, &Array1<f32>)> = faces
-            .iter()
-            .flat_map(|(name, uuid_map)| uuid_map.values().map(move |e| (name, e)))
+        let candidates: Vec<&Array1<f32>> = faces
+            .values()
+            .flat_map(|uuid_map| uuid_map.values())
             .collect();
 
         candidates
             .into_par_iter()
-            .find_map_any(|(name, ref_embed)| {
-                if embed.dot(ref_embed) > threshold {
-                    Some(name.clone())
-                } else {
-                    None
-                }
+            .any(|ref_embed| embed.dot(ref_embed) > threshold)
+    }
+
+    pub fn score_all(
+        &self,
+        username: &str,
+        embed: &ndarray::Array1<f32>,
+        threshold: f32,
+    ) -> Vec<(String, f32, f32, bool, u32)> {
+        let Some(faces) = self.users.get(username) else {
+            return Vec::new();
+        };
+
+        let mut results: Vec<(String, f32, f32, bool, u32)> = faces
+            .iter()
+            .map(|(name, uuid_map)| {
+                let best = uuid_map
+                    .values()
+                    .map(|ref_embed| embed.dot(ref_embed))
+                    .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .unwrap_or(0.0);
+                let pct = 100.0 / (1.0 + (-15.0_f32 * (best - 0.4)).exp());
+                (
+                    name.clone(),
+                    best,
+                    pct,
+                    best > threshold,
+                    uuid_map.len() as u32,
+                )
             })
+            .collect();
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results
     }
 
     pub fn get_user_embeddings(&self, username: &str) -> Option<Vec<&Array1<f32>>> {

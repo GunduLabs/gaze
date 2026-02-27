@@ -29,9 +29,9 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
             Err(_) => continue,
         };
 
-        match proxy.authenticate(&username, &capture.bytes, capture.width, capture.height) {
-            Ok(face) if !face.is_empty() => return PAM_SUCCESS,
-            Ok(_) => {}
+        match proxy.verify(&username, &capture.bytes, capture.width, capture.height) {
+            Ok(true) => return PAM_SUCCESS,
+            Ok(false) => {}
             Err(ref err) if is_retryable(err) => continue,
             Err(_) => return PAM_SERVICE_ERR,
         }

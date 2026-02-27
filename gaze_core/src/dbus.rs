@@ -6,13 +6,22 @@ use zbus::proxy;
     default_path = "/org/gaze/Auth"
 )]
 pub trait Auth {
-    async fn authenticate(
+    async fn verify(
         &self,
         username: &str,
         image_data: &[u8],
         width: u32,
         height: u32,
-    ) -> zbus::Result<String>;
+    ) -> zbus::Result<bool>;
+
+    #[allow(clippy::type_complexity)]
+    async fn match_faces(
+        &self,
+        username: &str,
+        image_data: &[u8],
+        width: u32,
+        height: u32,
+    ) -> zbus::Result<Vec<(String, f64, f64, bool, u32)>>;
 
     async fn add_face(
         &self,

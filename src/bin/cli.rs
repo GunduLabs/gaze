@@ -84,6 +84,8 @@ enum Commands {
         user: String,
         #[arg(long, help = "Print detailed step-by-step performance metrics")]
         perf: bool,
+        #[arg(short, long, help = "Show detailed authentication metrics")]
+        verbose: bool,
     },
     /// Enroll a new face with guided multi-angle capture
     AddFace {
@@ -121,7 +123,11 @@ async fn main() -> anyhow::Result<()> {
     let proxy = AuthProxy::new(&conn).await?;
 
     match cli.command {
-        Commands::Auth { user, perf } => {
+        Commands::Auth {
+            user,
+            perf,
+            verbose,
+        } => {
             let mut last = std::time::Instant::now();
             let start = last;
             let log = |label: &str, last: &mut std::time::Instant| {
@@ -132,7 +138,7 @@ async fn main() -> anyhow::Result<()> {
                 let delta = now.duration_since(*last);
                 let total = now.duration_since(start);
                 *last = now;
-                eprintln!(
+                println!(
                     "[gaze perf] {:>40} | step: {:>8.3}ms | total: {:>8.3}ms",
                     label,
                     delta.as_secs_f64() * 1000.0,
@@ -151,27 +157,55 @@ async fn main() -> anyhow::Result<()> {
                 let result = frame_to_bytes(&frame)?;
                 log(&format!("attempt {attempt}: frame_to_bytes"), &mut last);
                 match proxy
-                    .authenticate(&user, &result.bytes, result.width, result.height)
+                    .match_faces(&user, &result.bytes, result.width, result.height)
                     .await
                 {
-                    Ok(face) if !face.is_empty() => {
-                        log(&format!("attempt {attempt}: auth SUCCESS"), &mut last);
-                        println!(
-                            "\x1b[32mAuthenticated as: {} ({}ms)\x1b[0m",
-                            face,
-                            start.elapsed().as_millis()
-                        );
-                        authenticated = true;
-                        break;
-                    }
-                    Ok(_) => {
-                        log(&format!("attempt {attempt}: no face matched"), &mut last);
-                        println!("\x1b[31mAccess Denied. ({}ms)\x1b[0m", start.elapsed().as_millis());
-                        denied = true;
+                    Ok(faces) => {
+                        log(&format!("attempt {attempt}: match complete"), &mut last);
+                        let matched = faces.iter().find(|(_, _, _, passed, _)| *passed);
+
+                        if verbose {
+                            println!();
+                            println!(
+                                "{:<20} {:>10} {:>8} {:>8} {:>6}",
+                                "Face", "Similarity", "Match %", "Passed", "Count"
+                            );
+                            println!("{}", "-".repeat(56));
+                            for (name, score, pct, passed, count) in &faces {
+                                println!(
+                                    "{:<20} {:>10.4} {:>7.1}% {:>8} {:>6}",
+                                    name,
+                                    score,
+                                    pct,
+                                    if *passed { "✓" } else { "✗" },
+                                    count,
+                                );
+                            }
+                            println!();
+                        }
+
+                        if let Some((face, _, pct, _, _)) = matched {
+                            println!(
+                                "\x1b[32mAuthenticated as: {} ({:.1}%, {}ms)\x1b[0m",
+                                face,
+                                pct,
+                                start.elapsed().as_millis()
+                            );
+                            authenticated = true;
+                        } else {
+                            println!(
+                                "\x1b[31mAccess Denied. ({}ms)\x1b[0m",
+                                start.elapsed().as_millis()
+                            );
+                            denied = true;
+                        }
                         break;
                     }
                     Err(ref err) if err.to_string().contains("RETRYABLE:") => {
                         log(&format!("attempt {attempt}: retryable error"), &mut last);
+                        if verbose {
+                            println!("  attempt {}: {}", attempt, err);
+                        }
                         continue;
                     }
                     Err(err) => return Err(err.into()),
