@@ -14,3 +14,5 @@ libadwaita = { version = "0.7.2", features = ["v1_4"] }
 zbus = "4.4.0"
 anyhow = "1.0.102"
 opencv = "0.98.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

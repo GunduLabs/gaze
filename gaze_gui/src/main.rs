@@ -3,8 +3,15 @@ mod enroll_dialog;
 mod window;
 
 use gtk4::prelude::*;
+use tracing_subscriber::EnvFilter;
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
+        )
+        .init();
+
     let username = std::env::var("USER").unwrap_or_else(|_| "unknown".to_string());
 
     let app = libadwaita::Application::builder()

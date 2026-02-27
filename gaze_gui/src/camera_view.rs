@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread;
+use tracing::error;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -48,14 +49,14 @@ impl CameraFeed {
             let mut cam = match Camera::open(&device) {
                 Ok(c) => c,
                 Err(err) => {
-                    eprintln!("Camera open failed: {}", err);
+                    error!(%err, "Camera open failed");
                     return;
                 }
             };
             let mut checker = match FaceChecker::new() {
                 Ok(c) => c,
                 Err(err) => {
-                    eprintln!("FaceChecker init failed: {}", err);
+                    error!(%err, "FaceChecker init failed");
                     return;
                 }
             };

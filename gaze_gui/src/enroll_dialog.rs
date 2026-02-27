@@ -6,6 +6,7 @@ use gtk4::prelude::*;
 use libadwaita::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
+use tracing::error;
 use zbus::Connection;
 
 const ENROLL_PROMPTS: &[&str] = &[
@@ -28,7 +29,7 @@ pub fn show_enroll_dialog(
             f
         }
         Err(err) => {
-            eprintln!("Camera init failed: {}", err);
+            error!(%err, "Camera init failed");
             return;
         }
     };

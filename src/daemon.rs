@@ -3,6 +3,7 @@ use opencv::core::{CV_8UC3, Mat};
 use opencv::prelude::*;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::{debug, info, warn};
 use zbus::{fdo, interface};
 
 use crate::align::align_face;
@@ -79,6 +80,7 @@ impl AuthDaemon {
         width: u32,
         height: u32,
     ) -> fdo::Result<bool> {
+        debug!(username = %username, width, height, "Verify request");
         let frame = Self::bytes_to_mat(&image_data, width, height)?;
 
         let embed = {
@@ -88,7 +90,9 @@ impl AuthDaemon {
         };
 
         let db = self.db.lock().await;
-        Ok(db.verify(&username, &embed, self.threshold))
+        let result = db.verify(&username, &embed, self.threshold);
+        info!(username = %username, passed = result, "Verify result");
+        Ok(result)
     }
 
     async fn match_faces(
@@ -125,6 +129,7 @@ impl AuthDaemon {
         width: u32,
         height: u32,
     ) -> fdo::Result<String> {
+        debug!(username = %username, face_name = %face_name, "Add face request");
         let frame = Self::bytes_to_mat(&image_data, width, height)?;
 
         let embed = {
@@ -134,11 +139,15 @@ impl AuthDaemon {
         };
 
         let mut db = self.db.lock().await;
-        db.add_face(&username, &face_name, &embed, self.max_captures)
-            .map_err(|e| fdo::Error::Failed(format!("Failed to save face: {e}")))
+        let result = db
+            .add_face(&username, &face_name, &embed, self.max_captures)
+            .map_err(|e| fdo::Error::Failed(format!("Failed to save face: {e}")))?;
+        info!(username = %username, face_name = %face_name, "Face added");
+        Ok(result)
     }
 
     async fn remove_face(&self, username: String, face_name: String) -> fdo::Result<bool> {
+        info!(username = %username, face_name = %face_name, "Remove face request");
         let mut db = self.db.lock().await;
         db.remove_face(&username, &face_name)
             .map_err(|e| fdo::Error::Failed(format!("Failed to remove face: {e}")))
@@ -160,6 +169,7 @@ impl AuthDaemon {
     }
 
     async fn clear_user(&self, username: String) -> fdo::Result<bool> {
+        warn!(username = %username, "Clear user request");
         let mut db = self.db.lock().await;
         db.clear_user(&username)
             .map_err(|e| fdo::Error::Failed(format!("Failed to clear user: {e}")))

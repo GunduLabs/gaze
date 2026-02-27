@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use tracing::{debug, info};
 
 const RELEASE_BASE: &str = "https://github.com/deepinsight/insightface/releases/download/v0.7";
 
@@ -24,7 +25,7 @@ fn zip_url(pack_name: &str) -> String {
 }
 
 fn download_file(url: &str, dest: &Path) -> anyhow::Result<()> {
-    eprintln!("Downloading {}...", url);
+    info!(url, "Downloading model pack");
     let resp = ureq::get(url).call()?;
     let mut reader = resp.into_body().into_reader();
     let mut file = fs::File::create(dest)?;
@@ -51,7 +52,7 @@ fn extract_onnx_from_zip(zip_path: &Path, dest_dir: &Path) -> anyhow::Result<Vec
             let mut out_file = fs::File::create(&out_path)?;
             std::io::copy(&mut entry, &mut out_file)?;
             extracted.push(out_path);
-            eprintln!("  Extracted: {}", basename);
+            debug!(file = %basename, "Extracted model");
         }
     }
 

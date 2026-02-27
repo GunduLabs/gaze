@@ -28,6 +28,8 @@ rayon = "1.10"
 tokio = { version = "1.40", features = ["full", "rt-multi-thread"] }
 ureq = "3.0"
 uuid = { version = "1.10", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zbus = "4.4.0"
 zip = "2.4"
 

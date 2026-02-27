@@ -10,22 +10,30 @@ use daemon::AuthDaemon;
 use gaze_core::config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::{debug, info, warn};
+use tracing_subscriber::EnvFilter;
 use zbus::ConnectionBuilder;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    println!("Initializing Gaze Daemon...");
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .init();
+
+    info!("Initializing Gaze Daemon...");
     let t_load = std::time::Instant::now();
 
     let config = Config::load()?;
     let security = &config.security;
 
-    println!(
-        "Security: {:?} | Detector: {} | Recognizer: {} | Threshold: {}",
-        security,
-        security.detector(),
-        security.recognizer(),
-        security.threshold()
+    info!(
+        level = ?security,
+        detector = security.detector(),
+        recognizer = security.recognizer(),
+        threshold = security.threshold(),
+        "Loaded security config"
     );
 
     let (det_path, rec_path) = models::ensure_models(
@@ -51,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
         max_captures: config.enrollment.max_captures_per_face,
     };
 
-    println!("Models & User DB loaded in: {:?}", t_load.elapsed());
+    info!(elapsed = ?t_load.elapsed(), "Models & user DB loaded");
 
     let _conn = ConnectionBuilder::system()?
         .name("org.gaze.Auth")?
@@ -59,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .await?;
 
-    println!("Gaze Daemon listening on System Bus...");
+    info!("Gaze Daemon listening on System Bus");
     std::future::pending::<()>().await;
 
     Ok(())
