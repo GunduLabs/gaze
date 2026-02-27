@@ -53,25 +53,25 @@ contents:
     dst: "/usr/share/pam-configs/gaze"
     packager: deb
   - src: "dist/authselect/custom/gaze/README"
-    dst: "/usr/share/authselect/custom/gaze/README"
+    dst: "/etc/authselect/custom/gaze/README"
     packager: rpm
   - src: "dist/authselect/custom/gaze/REQUIREMENTS"
-    dst: "/usr/share/authselect/custom/gaze/REQUIREMENTS"
+    dst: "/etc/authselect/custom/gaze/REQUIREMENTS"
     packager: rpm
   - src: "dist/authselect/custom/gaze/system-auth"
-    dst: "/usr/share/authselect/custom/gaze/system-auth"
+    dst: "/etc/authselect/custom/gaze/system-auth"
     packager: rpm
   - src: "dist/authselect/custom/gaze/password-auth"
-    dst: "/usr/share/authselect/custom/gaze/password-auth"
+    dst: "/etc/authselect/custom/gaze/password-auth"
     packager: rpm
   - src: "dist/authselect/custom/gaze/fingerprint-auth"
-    dst: "/usr/share/authselect/custom/gaze/fingerprint-auth"
+    dst: "/etc/authselect/custom/gaze/fingerprint-auth"
     packager: rpm
   - src: "dist/authselect/custom/gaze/smartcard-auth"
-    dst: "/usr/share/authselect/custom/gaze/smartcard-auth"
+    dst: "/etc/authselect/custom/gaze/smartcard-auth"
     packager: rpm
   - src: "dist/authselect/custom/gaze/postlogin"
-    dst: "/usr/share/authselect/custom/gaze/postlogin"
+    dst: "/etc/authselect/custom/gaze/postlogin"
     packager: rpm
 
 overrides:
