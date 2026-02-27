@@ -101,6 +101,22 @@ sudo cp target/release/libpam_gaze.so /lib/x86_64-linux-gnu/security/pam_gaze.so
 auth sufficient pam_gaze.so
 ```
 
+6. Enable face authentication via authselect (Fedora/RHEL):
+
+```bash
+sudo authselect select custom/gaze
+```
+
+This configures `system-auth` and `password-auth` to include `pam_gaze.so`, covering both login and lock screen unlock via GDM.
+
+7. Enable the GNOME Shell extension (for lock screen support):
+
+```bash
+gnome-extensions enable gaze@gundulabs.com
+```
+
+The extension hooks into GDM to trigger face auth on the lock screen using `/etc/pam.d/gdm-face`. It also installs a SELinux policy that allows GDM to access the camera.
+
 ## Configuration
 
 `/etc/gaze/config.toml`:
