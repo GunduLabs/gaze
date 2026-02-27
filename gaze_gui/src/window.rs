@@ -68,12 +68,6 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
     status_page.set_visible(false);
     content.append(&status_page);
 
-    let auth_label = gtk4::Label::new(None);
-    auth_label.set_visible(false);
-    auth_label.set_halign(gtk4::Align::Center);
-    auth_label.set_margin_top(8);
-    content.append(&auth_label);
-
     clamp.set_child(Some(&content));
     scroll.set_child(Some(&clamp));
     main_box.append(&scroll);
@@ -192,14 +186,12 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
     {
         let un = username.clone();
         let ww = glib::SendWeakRef::from(window.downgrade());
-        let al = auth_label.clone();
         let fl = face_list.clone();
         test_btn.connect_clicked(move |btn| {
             btn.set_sensitive(false);
             let un = un.clone();
             let b = btn.clone();
             let ww = ww.clone();
-            let al = al.clone();
             let fl = fl.clone();
             glib::MainContext::default().spawn_local(async move {
                 let config = Config::load().unwrap_or_default();
@@ -212,7 +204,7 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
                 })
                 .join();
 
-                let (text, css, face_scores) = match result {
+                let (text, face_scores) = match result {
                     Ok(Ok((bytes, width, height))) => match Connection::system().await {
                         Ok(conn) => match AuthProxy::new(&conn).await {
                             Ok(proxy) => {
@@ -228,7 +220,6 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
                                                     "✓ Authenticated ({}ms)",
                                                     t0.elapsed().as_millis()
                                                 ),
-                                                "success",
                                                 scores,
                                             )
                                         } else {
@@ -237,19 +228,18 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
                                                     "✗ Authentication failed ({}ms)",
                                                     t0.elapsed().as_millis()
                                                 ),
-                                                "error",
                                                 scores,
                                             )
                                         }
                                     }
-                                    Err(e) => (format!("✗ DBus error: {}", e), "error", Vec::new()),
+                                    Err(e) => (format!("✗ DBus error: {}", e), Vec::new()),
                                 }
                             }
-                            _ => ("✗ Proxy error".to_string(), "error", Vec::new()),
+                            _ => ("✗ Proxy error".to_string(), Vec::new()),
                         },
-                        _ => ("✗ DBus error".to_string(), "error", Vec::new()),
+                        _ => ("✗ DBus error".to_string(), Vec::new()),
                     },
-                    _ => ("✗ Capture failed".to_string(), "warning", Vec::new()),
+                    _ => ("✗ Capture failed".to_string(), Vec::new()),
                 };
 
                 if !face_scores.is_empty() {
@@ -291,13 +281,6 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
                         }
                     });
                 }
-
-                for class in ["success", "error", "warning"] {
-                    al.remove_css_class(class);
-                }
-                al.add_css_class(css);
-                al.set_text(&text);
-                al.set_visible(true);
 
                 if let Some(win) = ww.upgrade() {
                     let toast = libadwaita::Toast::new(&text);

@@ -187,7 +187,6 @@ fn draw_face_guide(cr: &gtk4::cairo::Context, width: i32, height: i32, status: &
     let cx = width as f64 / 2.0;
     let cy = height as f64 / 2.0;
 
-    // Scale relative to whichever dimension is smaller
     let min_dim = width.min(height) as f64;
     let rx = min_dim * 0.28;
     let ry = min_dim * 0.38;
@@ -198,7 +197,6 @@ fn draw_face_guide(cr: &gtk4::cairo::Context, width: i32, height: i32, status: &
         CaptureStatusInfo::Centered => (0.2, 0.9, 0.4, 0.85),
     };
 
-    // Oval
     cr.save().unwrap();
     cr.translate(cx, cy);
     cr.scale(rx, ry);
@@ -233,7 +231,6 @@ fn draw_face_guide(cr: &gtk4::cairo::Context, width: i32, height: i32, status: &
         let _ = cr.stroke();
     }
 
-    // Status text below the oval
     let label = match status {
         CaptureStatusInfo::NoFace => "No face detected",
         CaptureStatusInfo::NotCentered => "Center your face",

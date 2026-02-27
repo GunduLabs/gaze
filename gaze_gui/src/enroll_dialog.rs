@@ -119,7 +119,6 @@ pub fn show_enroll_dialog(
     let countdown = Rc::new(RefCell::new(0i32));
     let username = username.to_string();
 
-    // Start button logic
     {
         let active = active.clone();
         let prompt_label = prompt_label.clone();
@@ -136,7 +135,6 @@ pub fn show_enroll_dialog(
         });
     }
 
-    // Stop button logic
     {
         let active = active.clone();
         let dialog_weak = glib::SendWeakRef::from(dialog.downgrade());
@@ -148,7 +146,6 @@ pub fn show_enroll_dialog(
         });
     }
 
-    // Main logic loop
     {
         let feed = feed.clone();
         let active = active.clone();
@@ -170,7 +167,7 @@ pub fn show_enroll_dialog(
                     CaptureStatusInfo::NoFace => "⏳ No face detected...",
                     _ => "⏳ Center your face...",
                 });
-                *countdown.borrow_mut() = 30; // Reset countdown (3.0s)
+                *countdown.borrow_mut() = 30;
                 return glib::ControlFlow::Continue;
             }
 
@@ -183,9 +180,7 @@ pub fn show_enroll_dialog(
                 *cd -= 1;
                 return glib::ControlFlow::Continue;
             }
-            *cd = 30; // Reset for next capture
-
-            // Capture time!
+            *cd = 30;
             if let Some(cap) = feed.take_capture() {
                 let username = username.clone();
                 let face_name = resolved_face.borrow().clone();
