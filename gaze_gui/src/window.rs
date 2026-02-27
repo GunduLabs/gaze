@@ -283,7 +283,12 @@ pub fn build_window(app: &libadwaita::Application, username_str: &str) {
                 }
 
                 if let Some(win) = ww.upgrade() {
-                    let toast = libadwaita::Toast::new(&text);
+                    let color_dot = match css {
+                        "success" => "🟢 ",
+                        "error" => "🔴 ",
+                        _ => "🟡 ",
+                    };
+                    let toast = libadwaita::Toast::new(&format!("{}{}", color_dot, text));
                     if let Some(overlay) = win
                         .content()
                         .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
