@@ -48,7 +48,12 @@ VERSION=0.0.1 ARCH=x86_64 nfpm pkg -f packaging/nfpm_gui.yaml --packager rpm --t
 VERSION=0.0.1 ARCH=x86_64 nfpm pkg -f packaging/nfpm_gnome_extension.yaml --packager rpm --target /tmp/ && \
 sudo rpm -Uvh --force /tmp/gaze-0.0.1-1.x86_64.rpm /tmp/gaze-gui-0.0.1-1.x86_64.rpm /tmp/gaze-gnome-extension-0.0.1-1.x86_64.rpm && \
 sudo systemctl enable --now gazed && \
-sudo authselect select custom/gaze --force && \
+sudo authselect select custom/gaze --force
+```
+
+On Wayland, GNOME Shell must be restarted (log out and back in) before it picks up newly installed system extensions. After logging back in, run:
+
+```bash
 gnome-extensions enable gaze@gundulabs.com
 ```
 
