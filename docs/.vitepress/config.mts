@@ -2,6 +2,9 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   ignoreDeadLinks: true,
+  vite: {
+    assetsInclude: ['**/*.mp4'],
+  },
   title: "Gaze",
   description: "Facial authentication daemon for Linux",
   themeConfig: {
