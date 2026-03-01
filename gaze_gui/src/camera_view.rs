@@ -1,5 +1,6 @@
 use gaze_core::camera::Camera;
 use gaze_core::capture::frame_to_bytes;
+use gaze_core::capture_session::CaptureHint;
 use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -20,20 +21,12 @@ struct FrameData {
     mat: opencv::core::Mat,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum CaptureStatusInfo {
-    NoFace,
-    NotCentered,
-    Clipped,
-    Centered,
-}
-
 pub struct CameraFeed {
     pub picture: gtk4::Picture,
     pub overlay_area: gtk4::DrawingArea,
     rx: Rc<RefCell<Option<mpsc::Receiver<FrameData>>>>,
     latest_frame: Rc<RefCell<Option<opencv::core::Mat>>>,
-    status: Rc<RefCell<CaptureStatusInfo>>,
+    status: Rc<RefCell<CaptureHint>>,
     stop_flag: Arc<AtomicBool>,
 }
 
@@ -99,12 +92,12 @@ impl CameraFeed {
             overlay_area,
             rx: Rc::new(RefCell::new(Some(rx))),
             latest_frame: Rc::new(RefCell::new(None)),
-            status: Rc::new(RefCell::new(CaptureStatusInfo::NoFace)),
+            status: Rc::new(RefCell::new(CaptureHint::NoFace)),
             stop_flag,
         })
     }
 
-    pub fn set_status(&self, new_status: CaptureStatusInfo) {
+    pub fn set_status(&self, new_status: CaptureHint) {
         *self.status.borrow_mut() = new_status;
         self.overlay_area.queue_draw();
     }
@@ -159,7 +152,7 @@ impl CameraFeed {
     }
 }
 
-fn draw_face_guide(cr: &gtk4::cairo::Context, width: i32, height: i32, status: &CaptureStatusInfo) {
+fn draw_face_guide(cr: &gtk4::cairo::Context, width: i32, height: i32, status: &CaptureHint) {
     let cx = width as f64 / 2.0;
     let cy = height as f64 / 2.0;
 
@@ -168,9 +161,9 @@ fn draw_face_guide(cr: &gtk4::cairo::Context, width: i32, height: i32, status: &
     let ry = min_dim * 0.38;
 
     let (red, green, blue, alpha) = match status {
-        CaptureStatusInfo::NoFace => (0.6, 0.6, 0.6, 0.5),
-        CaptureStatusInfo::NotCentered | CaptureStatusInfo::Clipped => (1.0, 0.8, 0.2, 0.7),
-        CaptureStatusInfo::Centered => (0.2, 0.9, 0.4, 0.85),
+        CaptureHint::NoFace => (0.6, 0.6, 0.6, 0.5),
+        CaptureHint::NotCentered | CaptureHint::FaceClipped => (1.0, 0.8, 0.2, 0.7),
+        CaptureHint::Ready => (0.2, 0.9, 0.4, 0.85),
     };
 
     cr.save().unwrap();
@@ -207,17 +200,12 @@ fn draw_face_guide(cr: &gtk4::cairo::Context, width: i32, height: i32, status: &
         let _ = cr.stroke();
     }
 
-    let label = match status {
-        CaptureStatusInfo::NoFace => "No face detected",
-        CaptureStatusInfo::NotCentered => "Center your face",
-        CaptureStatusInfo::Clipped => "Move into frame",
-        CaptureStatusInfo::Centered => "Hold still...",
-    };
+    let label = status.to_string();
     cr.set_font_size(min_dim * 0.035);
-    let extents = cr.text_extents(label).unwrap();
+    let extents = cr.text_extents(&label).unwrap();
     cr.move_to(cx - extents.width() / 2.0, bottom + min_dim * 0.06);
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.9);
-    let _ = cr.show_text(label);
+    let _ = cr.show_text(&label);
 }
 
 pub fn build_camera_widget(feed: &CameraFeed) -> gtk4::Overlay {

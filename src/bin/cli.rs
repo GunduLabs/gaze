@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use console::{Term, style};
 use gaze_core::camera::Camera;
 use gaze_core::capture::{init_camera_and_checker, wait_for_capture};
-use gaze_core::capture_session::{CaptureMode, CaptureSession, CaptureState};
+use gaze_core::capture_session::{CaptureHint, CaptureMode, CaptureSession, CaptureState};
 use gaze_core::config::Config;
 use gaze_core::face::{CaptureStatus, FaceChecker};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -105,11 +105,16 @@ async fn run_capture_session(
                         } else {
                             format!("Step {}/{}", step, total_steps)
                         };
+                        let hint_text = style(format!("{}...", hint));
                         pb.set_prefix(prefix);
                         pb.set_message(format!(
                             "{}: {}",
                             style(prompt).white().bold(),
-                            style(hint).yellow()
+                            match hint {
+                                CaptureHint::NoFace => hint_text.red(),
+                                CaptureHint::NotCentered | CaptureHint::FaceClipped => hint_text.yellow(),
+                                CaptureHint::Ready => hint_text.green(),
+                            }
                         ));
                     }
                     CaptureState::Countdown {
@@ -133,7 +138,7 @@ async fn run_capture_session(
                         pb.set_message(format!(
                             "{}: {}",
                             style(prompt).white().bold(),
-                            style("Hold still!").green().bold()
+                            style(format!("{}...", CaptureHint::Ready)).green().bold()
                         ));
                     }
                     CaptureState::Captured { prompt } => {
@@ -280,18 +285,8 @@ async fn main() -> anyhow::Result<()> {
             ));
             let result = wait_for_capture(&mut cam, &mut checker, false, |status| {
                 let hint = match status {
-                    CaptureStatus::NoFace => {
-                        format!(
-                            "{}",
-                            style("No face detected. Please look at the camera...").red()
-                        )
-                    }
-                    CaptureStatus::Clipped(_) => {
-                        format!(
-                            "{}",
-                            style("Face is clipped. Move fully into frame...").yellow()
-                        )
-                    }
+                    CaptureStatus::NoFaces => style(status.to_string()).red().to_string(),
+                    CaptureStatus::Clipped(_) => style(status.to_string()).yellow().to_string(),
                     _ => panic!("Unexpected capture status during authentication"),
                 };
 

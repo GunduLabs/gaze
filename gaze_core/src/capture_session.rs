@@ -38,16 +38,16 @@ pub enum CaptureHint {
     NotCentered,
     FaceClipped,
     NoFace,
-    CenteredReady,
+    Ready,
 }
 
 impl std::fmt::Display for CaptureHint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            CaptureHint::NotCentered => "Center your face...",
-            CaptureHint::FaceClipped => "Face is clipped...",
-            CaptureHint::NoFace => "No face detected...",
-            CaptureHint::CenteredReady => "Centered! Ready to begin.",
+            CaptureHint::NotCentered => "Center your face",
+            CaptureHint::FaceClipped => "Move into frame",
+            CaptureHint::NoFace => "No faces detected",
+            CaptureHint::Ready => "Hold still",
         };
         write!(f, "{}", s)
     }
@@ -147,8 +147,8 @@ impl CaptureSession {
         let hint = match capture_status {
             CaptureStatus::NotCentered(_) => CaptureHint::NotCentered,
             CaptureStatus::Clipped(_) => CaptureHint::FaceClipped,
-            CaptureStatus::NoFace => CaptureHint::NoFace,
-            CaptureStatus::Ready(_) => CaptureHint::CenteredReady,
+            CaptureStatus::NoFaces => CaptureHint::NoFace,
+            CaptureStatus::Ready(_) => CaptureHint::Ready,
         };
 
         if !self.is_active || !matches!(capture_status, CaptureStatus::Ready(_)) {

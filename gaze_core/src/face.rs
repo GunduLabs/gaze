@@ -22,7 +22,7 @@ pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
 }
 
 pub enum CaptureStatus {
-    NoFace,
+    NoFaces,
     NotCentered(CaptureResult),
     Clipped(CaptureResult),
     Ready(CaptureResult),
@@ -31,9 +31,9 @@ pub enum CaptureStatus {
 impl std::fmt::Display for CaptureStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let text = match self {
-            CaptureStatus::NoFace => "No face detected. Look at the camera.",
-            CaptureStatus::NotCentered(_) => "Face detected. Center your face.",
-            CaptureStatus::Clipped(_) => "Face is clipped. Move fully into frame.",
+            CaptureStatus::NoFaces => "No faces detected. Please look at the camera...",
+            CaptureStatus::NotCentered(_) => "Please center your face...",
+            CaptureStatus::Clipped(_) => "Face is clipped. Please move fully into frame...",
             CaptureStatus::Ready(_) => "Face ready.",
         };
         write!(f, "{}", text)
@@ -80,7 +80,7 @@ impl FaceChecker {
     pub fn capture_status(&mut self, frame: &Mat) -> anyhow::Result<CaptureStatus> {
         let (bboxes, kpss, _) = match self.detector.detect(frame) {
             Ok(result) => result,
-            Err(DetectError::NoFacesDetected) => return Ok(CaptureStatus::NoFace),
+            Err(DetectError::NoFacesDetected) => return Ok(CaptureStatus::NoFaces),
             Err(err) => return Err(err.into()),
         };
 
@@ -107,7 +107,7 @@ impl FaceChecker {
         }
 
         if kpss.is_none() {
-            return Ok(CaptureStatus::NoFace);
+            return Ok(CaptureStatus::NoFaces);
         }
 
         let width = x2 - x1;

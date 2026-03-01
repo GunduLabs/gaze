@@ -14,9 +14,9 @@ const GENERIC_ERROR_MAP = new Map([
 ]);
 
 const FACE_STATUS_UPDATES = new Set([
-    'No face detected. Look at the camera.',
-    'Face is clipped. Move fully into frame.',
-    'Face detected. Center your face.',
+    'No faces detected. Please look at the camera...',
+    'Face is clipped. Please move fully into frame...',
+    'Please center your face...',
 ]);
 
 export default class GazeFaceAuthExtension extends Extension {

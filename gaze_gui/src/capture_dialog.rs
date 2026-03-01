@@ -1,5 +1,5 @@
-use crate::camera_view::{CameraFeed, CaptureStatusInfo, build_camera_widget};
-use gaze_core::capture_session::{CaptureMode, CaptureSession, CaptureState};
+use crate::camera_view::{CameraFeed, build_camera_widget};
+use gaze_core::capture_session::{CaptureHint, CaptureMode, CaptureSession, CaptureState};
 use gaze_core::config::Config;
 use gaze_core::dbus::AuthProxy;
 use gaze_core::face::FaceChecker;
@@ -316,22 +316,9 @@ pub fn show_capture_dialog(
 
                                     status_label.set_visible(false);
 
-                                    let (status_info, is_centered) = match hint {
-                                        gaze_core::capture_session::CaptureHint::FaceClipped => {
-                                            (CaptureStatusInfo::Clipped, false)
-                                        }
-                                        gaze_core::capture_session::CaptureHint::NoFace => {
-                                            (CaptureStatusInfo::NoFace, false)
-                                        }
-                                        gaze_core::capture_session::CaptureHint::NotCentered => {
-                                            (CaptureStatusInfo::NotCentered, false)
-                                        }
-                                        gaze_core::capture_session::CaptureHint::CenteredReady => {
-                                            (CaptureStatusInfo::Centered, true)
-                                        }
-                                    };
+                                    let is_centered = matches!(hint, CaptureHint::Ready);
 
-                                    feed.set_status(status_info);
+                                    feed.set_status(hint);
 
                                     if !is_active {
                                         *centered_ready.borrow_mut() = is_centered;
@@ -348,13 +335,13 @@ pub fn show_capture_dialog(
                                         seconds_remaining
                                     ));
                                     status_label.set_visible(true);
-                                    feed.set_status(CaptureStatusInfo::Centered);
+                                    feed.set_status(CaptureHint::Ready);
                                 }
                                 _ => unreachable!(),
                             }
                         }
                         CaptureState::Captured { .. } => {
-                            feed.set_status(CaptureStatusInfo::Centered);
+                            feed.set_status(CaptureHint::Ready);
                             *current_step.borrow_mut() += 1;
                             status_label.set_text("✓ Captured!");
                             on_done();
