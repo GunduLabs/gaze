@@ -1,6 +1,7 @@
 use ndarray::Array1;
 use opencv::core::{CV_8UC3, Mat};
 use opencv::prelude::*;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -55,7 +56,7 @@ impl AuthDaemon {
         detector: &mut FaceDetector,
         recognizer: &mut FaceRecognizer,
         frame: &Mat,
-    ) -> Result<Array1<f32>, fdo::Error> {
+    ) -> Result<Vec<Array1<f32>>, fdo::Error> {
         let (bboxes, kpss, mat_rgb) = match detector.detect(frame) {
             Ok(result) => result,
             Err(DetectError::NoFacesDetected) => {
@@ -64,27 +65,32 @@ impl AuthDaemon {
             Err(err) => return Err(fdo::Error::Failed(format!("Detection failed: {err}"))),
         };
 
-        if bboxes.nrows() == 0 {
-            return Err(fdo::Error::Failed("No faces detected".into()));
-        }
-
         let Some(kpss) = kpss else {
             return Err(fdo::Error::Failed("No keypoints detected".into()));
         };
 
-        let aligned = align_face(&mat_rgb, &kpss)
-            .map_err(|e| fdo::Error::Failed(format!("Alignment failed: {e}")))?;
+        let face_count = bboxes.nrows().min(kpss.shape()[0]);
+        let mut embeddings = Vec::with_capacity(face_count);
 
-        recognizer
-            .get_embedding(&aligned)
-            .map_err(|e| fdo::Error::Failed(format!("Recognition failed: {e}")))
+        for face_index in 0..face_count {
+            let aligned = align_face(&mat_rgb, &kpss, face_index)
+                .map_err(|e| fdo::Error::Failed(format!("Alignment failed: {e}")))?;
+
+            let embedding = recognizer
+                .get_embedding(&aligned)
+                .map_err(|e| fdo::Error::Failed(format!("Recognition failed: {e}")))?;
+            embeddings.push(embedding);
+        }
+
+        Ok(embeddings)
     }
-    async fn get_embedding_from_frame(
+
+    async fn get_embeddings_from_frame(
         &self,
         image_data: &[u8],
         width: u32,
         height: u32,
-    ) -> fdo::Result<Array1<f32>> {
+    ) -> fdo::Result<Vec<Array1<f32>>> {
         let frame = Self::bytes_to_mat(image_data, width, height)?;
         let mut detector = self.detector.lock().await;
         let mut rec = self.recognizer.lock().await;
@@ -102,14 +108,21 @@ impl AuthDaemon {
         height: u32,
     ) -> fdo::Result<bool> {
         info!(username = %username, width, height, "Verify request");
-        let embed = self
-            .get_embedding_from_frame(&image_data, width, height)
+        let embeds = self
+            .get_embeddings_from_frame(&image_data, width, height)
             .await?;
 
         let db = self.db.lock().await;
-        let result = db
-            .verify_user(&username, &embed, self.threshold)
-            .map_err(Self::map_user_db_error)?;
+        let mut result = false;
+        for embed in &embeds {
+            if db
+                .verify_user(&username, embed, self.threshold)
+                .map_err(Self::map_user_db_error)?
+            {
+                result = true;
+                break;
+            }
+        }
         info!(username = %username, passed = result, "Verify result");
         Ok(result)
     }
@@ -122,19 +135,33 @@ impl AuthDaemon {
         height: u32,
     ) -> fdo::Result<Vec<(String, f64, f64, bool, u32)>> {
         info!(username = %username, width, height, "Match faces request");
-        let embed = self
-            .get_embedding_from_frame(&image_data, width, height)
+        let embeds = self
+            .get_embeddings_from_frame(&image_data, width, height)
             .await?;
 
         let db = self.db.lock().await;
-        let results = db
-            .match_faces(&username, &embed, self.threshold)
-            .map_err(Self::map_user_db_error)?
+        let mut combined: HashMap<String, (f32, f32, bool, u32)> = HashMap::new();
+
+        for embed in &embeds {
+            let per_face = db
+                .match_faces(&username, embed, self.threshold)
+                .map_err(Self::map_user_db_error)?;
+
+            for (name, score, pct, passed, count) in per_face {
+                let entry = combined.entry(name).or_insert((score, pct, passed, count));
+                if score > entry.0 {
+                    *entry = (score, pct, passed, count);
+                }
+            }
+        }
+
+        let mut results: Vec<(String, f64, f64, bool, u32)> = combined
             .into_iter()
-            .map(|(name, score, pct, passed, count)| {
+            .map(|(name, (score, pct, passed, count))| {
                 (name, score as f64, pct as f64, passed, count)
             })
             .collect();
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         Ok(results)
     }
 
@@ -150,13 +177,16 @@ impl AuthDaemon {
         if face_name.trim().is_empty() {
             return Err(fdo::Error::InvalidArgs("Face name cannot be empty".into()));
         }
-        let embed = self
-            .get_embedding_from_frame(&image_data, width, height)
+        let embeds = self
+            .get_embeddings_from_frame(&image_data, width, height)
             .await?;
+        let Some(embed) = embeds.first() else {
+            return Err(fdo::Error::Failed("No faces detected".into()));
+        };
 
         let mut db = self.db.lock().await;
         let result = db
-            .add_face(&username, &face_name, &embed, self.max_captures)
+            .add_face(&username, &face_name, embed, self.max_captures)
             .map_err(Self::map_user_db_error)?;
         info!(username = %username, face_name = %face_name, "Face added");
         Ok(result)

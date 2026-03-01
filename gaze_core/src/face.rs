@@ -84,10 +84,6 @@ impl FaceChecker {
             Err(err) => return Err(err.into()),
         };
 
-        if bboxes.nrows() == 0 {
-            return Ok(CaptureStatus::NoFace);
-        }
-
         let face = bboxes.row(0);
         let x1 = face[0];
         let y1 = face[1];

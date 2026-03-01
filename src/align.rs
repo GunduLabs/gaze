@@ -116,8 +116,10 @@ pub fn mat_to_rgb(mat: &opencv::core::Mat) -> anyhow::Result<image::RgbImage> {
 pub fn align_face(
     mat_rgb: &opencv::core::Mat,
     kpss: &ndarray::Array3<f32>,
+    face_index: usize,
 ) -> anyhow::Result<image::RgbImage> {
-    let k: [[f32; 2]; 5] = std::array::from_fn(|i| [kpss[[0, i, 0]], kpss[[0, i, 1]]]);
+    let k: [[f32; 2]; 5] =
+        std::array::from_fn(|i| [kpss[[face_index, i, 0]], kpss[[face_index, i, 1]]]);
     let transform = umeyama(&k, &ARCFACE_SRC_PTS)
         .ok_or_else(|| anyhow::anyhow!("Failed to estimate transform"))?;
 

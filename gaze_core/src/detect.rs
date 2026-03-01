@@ -119,6 +119,11 @@ impl FaceDetector {
         unsafe { libc::close(saved_fd) };
 
         let (bboxes, kpss) = result?;
+
+        if bboxes.nrows() == 0 {
+            return Err(DetectError::NoFacesDetected);
+        }
+
         Ok((bboxes, kpss, mat_rgb))
     }
 }

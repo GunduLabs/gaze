@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 type FaceMap = HashMap<String, HashMap<String, Array1<f32>>>;
+pub type FaceScore = (String, f32, f32, bool, u32);
 
 #[derive(Debug)]
 pub enum UserDbError {
@@ -149,9 +150,9 @@ impl UserDatabase {
             .or_default();
 
         while face_map.len() >= max_captures {
-            if let Some(oldest_uuid) = Self::find_oldest_file(&face_dir).map_err(|err| {
-                UserDbError::Io(std::io::Error::other(err.to_string()))
-            })? {
+            if let Some(oldest_uuid) = Self::find_oldest_file(&face_dir)
+                .map_err(|err| UserDbError::Io(std::io::Error::other(err.to_string())))?
+            {
                 let path = face_dir.join(format!("{}.bin", oldest_uuid));
                 if path.exists() {
                     fs::remove_file(&path)?;
@@ -310,12 +311,12 @@ impl UserDatabase {
         username: &str,
         embed: &ndarray::Array1<f32>,
         threshold: f32,
-    ) -> Vec<(String, f32, f32, bool, u32)> {
+    ) -> Vec<FaceScore> {
         let Some(faces) = self.users.get(username) else {
             return Vec::new();
         };
 
-        let mut results: Vec<(String, f32, f32, bool, u32)> = faces
+        let mut results: Vec<FaceScore> = faces
             .iter()
             .map(|(name, uuid_map)| {
                 let best = uuid_map
@@ -343,7 +344,7 @@ impl UserDatabase {
         username: &str,
         embed: &ndarray::Array1<f32>,
         threshold: f32,
-    ) -> Result<Vec<(String, f32, f32, bool, u32)>, UserDbError> {
+    ) -> Result<Vec<FaceScore>, UserDbError> {
         if !self.users.contains_key(username) {
             return Err(UserDbError::UserNotFound(username.to_string()));
         }
