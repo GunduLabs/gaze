@@ -4,6 +4,7 @@ export default defineConfig({
   ignoreDeadLinks: true,
   title: "Gaze",
   description: "Facial authentication daemon for Linux",
+  head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }]],
   themeConfig: {
     nav: [
       { text: 'Home', link: '/' },

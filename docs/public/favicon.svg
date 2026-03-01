@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="chin-shine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#241f31" />
+      <stop offset="5%" stop-color="#3d3846" /> <stop offset="12%" stop-color="#241f31" />
+      <stop offset="88%" stop-color="#241f31" />
+      <stop offset="95%" stop-color="#3d3846" /> <stop offset="100%" stop-color="#241f31" />
+    </linearGradient>
+
+    <linearGradient id="scan-glow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#33d17a" stop-opacity="0.4" />
+      <stop offset="100%" stop-color="#33d17a" stop-opacity="0" />
+    </linearGradient>
+    
+    <clipPath id="surface-clip">
+       <rect x="12" y="12" width="104" height="104" rx="8" />
+    </clipPath>
+  </defs>
+
+  <rect x="12" y="16" width="104" height="104" rx="8" fill="url(#chin-shine)" />
+  
+  <rect x="12" y="12" width="104" height="104" rx="8" fill="#3d3846" />
+
+  <g clip-path="url(#surface-clip)">
+      
+      <g fill="#f6f5f4">
+        <circle cx="64" cy="50" r="16" />
+        <path d="M 36 100 C 36 78, 48 70, 64 70 C 80 70, 92 78, 92 100 Z" />
+      </g>
+
+      <g fill="none" stroke="#3584e4" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M 52 28 L 42 28 L 42 38" />
+        <path d="M 76 28 L 86 28 L 86 38" />
+        <path d="M 42 62 L 42 72 L 52 72" />
+        <path d="M 86 62 L 86 72 L 76 72" />
+      </g>
+
+      <line x1="38" y1="50" x2="90" y2="50" stroke="#33d17a" stroke-width="4" stroke-linecap="round" />
+      <polygon points="38,50 90,50 86,76 42,76" fill="url(#scan-glow)" />
+  </g>
+</svg>
