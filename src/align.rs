@@ -15,31 +15,32 @@ pub fn umeyama(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> Option<Matrix3<f32>>
     let mut src_mean = [0.0; 2];
     let mut dst_mean = [0.0; 2];
     for i in 0..5 {
-        src_mean[0] += src[i][0];
-        src_mean[1] += src[i][1];
-        dst_mean[0] += dst[i][0];
-        dst_mean[1] += dst[i][1];
+        for j in 0..2 {
+            src_mean[j] += src[i][j];
+            dst_mean[j] += dst[i][j];
+        }
     }
-    src_mean[0] /= num_pts;
-    src_mean[1] /= num_pts;
-    dst_mean[0] /= num_pts;
-    dst_mean[1] /= num_pts;
+    for j in 0..2 {
+        src_mean[j] /= num_pts;
+        dst_mean[j] /= num_pts;
+    }
 
     let mut src_demean = [[0.0; 2]; 5];
     let mut dst_demean = [[0.0; 2]; 5];
     for i in 0..5 {
-        src_demean[i][0] = src[i][0] - src_mean[0];
-        src_demean[i][1] = src[i][1] - src_mean[1];
-        dst_demean[i][0] = dst[i][0] - dst_mean[0];
-        dst_demean[i][1] = dst[i][1] - dst_mean[1];
+        for j in 0..2 {
+            src_demean[i][j] = src[i][j] - src_mean[j];
+            dst_demean[i][j] = dst[i][j] - dst_mean[j];
+        }
     }
 
     let mut a = nalgebra::Matrix2::<f32>::zeros();
     for i in 0..5 {
-        a[(0, 0)] += dst_demean[i][0] * src_demean[i][0];
-        a[(0, 1)] += dst_demean[i][0] * src_demean[i][1];
-        a[(1, 0)] += dst_demean[i][1] * src_demean[i][0];
-        a[(1, 1)] += dst_demean[i][1] * src_demean[i][1];
+        for r in 0..2 {
+            for c in 0..2 {
+                a[(r, c)] += dst_demean[i][r] * src_demean[i][c];
+            }
+        }
     }
     a /= num_pts;
 
@@ -66,12 +67,12 @@ pub fn umeyama(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> Option<Matrix3<f32>>
 
     let scale = 1.0 / var_src * (s[0] * d_mat[(0, 0)] + s[1] * d_mat[(1, 1)]);
 
-    t[(0, 0)] = scale * r[(0, 0)];
-    t[(0, 1)] = scale * r[(0, 1)];
-    t[(1, 0)] = scale * r[(1, 0)];
-    t[(1, 1)] = scale * r[(1, 1)];
-    t[(0, 2)] = dst_mean[0] - scale * (r[(0, 0)] * src_mean[0] + r[(0, 1)] * src_mean[1]);
-    t[(1, 2)] = dst_mean[1] - scale * (r[(1, 0)] * src_mean[0] + r[(1, 1)] * src_mean[1]);
+    for i in 0..2 {
+        for j in 0..2 {
+            t[(i, j)] = scale * r[(i, j)];
+        }
+        t[(i, 2)] = dst_mean[i] - scale * (r[(i, 0)] * src_mean[0] + r[(i, 1)] * src_mean[1]);
+    }
 
     Some(t)
 }
@@ -116,13 +117,7 @@ pub fn align_face(
     mat_rgb: &opencv::core::Mat,
     kpss: &ndarray::Array3<f32>,
 ) -> anyhow::Result<image::RgbImage> {
-    let k: [[f32; 2]; 5] = [
-        [kpss[[0, 0, 0]], kpss[[0, 0, 1]]],
-        [kpss[[0, 1, 0]], kpss[[0, 1, 1]]],
-        [kpss[[0, 2, 0]], kpss[[0, 2, 1]]],
-        [kpss[[0, 3, 0]], kpss[[0, 3, 1]]],
-        [kpss[[0, 4, 0]], kpss[[0, 4, 1]]],
-    ];
+    let k: [[f32; 2]; 5] = std::array::from_fn(|i| [kpss[[0, i, 0]], kpss[[0, i, 1]]]);
     let transform = umeyama(&k, &ARCFACE_SRC_PTS)
         .ok_or_else(|| anyhow::anyhow!("Failed to estimate transform"))?;
 

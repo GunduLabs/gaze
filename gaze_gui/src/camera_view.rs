@@ -1,6 +1,5 @@
 use gaze_core::camera::Camera;
-use gaze_core::capture::{CaptureResult, CaptureStatus, frame_to_bytes, try_capture};
-use gaze_core::face::FaceChecker;
+use gaze_core::capture::frame_to_bytes;
 use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -17,8 +16,7 @@ struct FrameData {
     rgb_bytes: Vec<u8>,
     width: i32,
     height: i32,
-    status: CaptureStatusInfo,
-    capture: Option<CaptureResult>,
+    mat: opencv::core::Mat,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -33,8 +31,8 @@ pub struct CameraFeed {
     pub picture: gtk4::Picture,
     pub overlay_area: gtk4::DrawingArea,
     rx: Rc<RefCell<Option<mpsc::Receiver<FrameData>>>>,
+    latest_frame: Rc<RefCell<Option<opencv::core::Mat>>>,
     status: Rc<RefCell<CaptureStatusInfo>>,
-    last_capture: Rc<RefCell<Option<CaptureResult>>>,
     stop_flag: Arc<AtomicBool>,
 }
 
@@ -53,58 +51,28 @@ impl CameraFeed {
                     return;
                 }
             };
-            let mut checker = match FaceChecker::new() {
-                Ok(c) => c,
-                Err(err) => {
-                    error!(%err, "FaceChecker init failed");
-                    return;
-                }
-            };
 
             while !stop_clone.load(Ordering::Relaxed) {
-                let capture_status = match try_capture(&mut cam, &mut checker, true) {
-                    Ok(s) => s,
-                    Err(_) => {
-                        thread::sleep(std::time::Duration::from_millis(33));
-                        continue;
-                    }
+                let Ok(frame) = cam.capture_frame() else {
+                    thread::sleep(std::time::Duration::from_millis(33));
+                    continue;
                 };
 
-                let frame = match cam.capture_frame() {
-                    Ok(f) => f,
-                    Err(_) => {
-                        thread::sleep(std::time::Duration::from_millis(33));
-                        continue;
-                    }
-                };
-                let fb = match frame_to_bytes(&frame) {
-                    Ok(r) => r,
-                    Err(_) => continue,
+                let Ok(fb) = frame_to_bytes(&frame) else {
+                    continue;
                 };
 
-                let mut rgb = vec![0u8; fb.bytes.len()];
-                for idx in (0..fb.bytes.len()).step_by(3) {
-                    if idx + 2 < fb.bytes.len() {
-                        rgb[idx] = fb.bytes[idx + 2];
-                        rgb[idx + 1] = fb.bytes[idx + 1];
-                        rgb[idx + 2] = fb.bytes[idx];
-                    }
+                let mut rgb = fb.bytes.clone();
+                for chunk in rgb.chunks_exact_mut(3) {
+                    chunk.swap(0, 2);
                 }
-
-                let (status, capture) = match capture_status {
-                    CaptureStatus::Ready(result) => (CaptureStatusInfo::Centered, Some(result)),
-                    CaptureStatus::NotCentered => (CaptureStatusInfo::NotCentered, None),
-                    CaptureStatus::Clipped => (CaptureStatusInfo::Clipped, None),
-                    CaptureStatus::NoFace => (CaptureStatusInfo::NoFace, None),
-                };
 
                 if tx
                     .send(FrameData {
                         rgb_bytes: rgb,
                         width: fb.width as i32,
                         height: fb.height as i32,
-                        status,
-                        capture,
+                        mat: frame,
                     })
                     .is_err()
                 {
@@ -125,18 +93,19 @@ impl CameraFeed {
             picture,
             overlay_area,
             rx: Rc::new(RefCell::new(Some(rx))),
+            latest_frame: Rc::new(RefCell::new(None)),
             status: Rc::new(RefCell::new(CaptureStatusInfo::NoFace)),
-            last_capture: Rc::new(RefCell::new(None)),
             stop_flag,
         })
     }
 
-    pub fn status(&self) -> CaptureStatusInfo {
-        self.status.borrow().clone()
+    pub fn set_status(&self, new_status: CaptureStatusInfo) {
+        *self.status.borrow_mut() = new_status;
+        self.overlay_area.queue_draw();
     }
 
-    pub fn take_capture(&self) -> Option<CaptureResult> {
-        self.last_capture.borrow_mut().take()
+    pub fn take_frame(&self) -> Option<opencv::core::Mat> {
+        self.latest_frame.borrow_mut().take()
     }
 
     pub fn stop(&self) {
@@ -144,42 +113,44 @@ impl CameraFeed {
     }
 
     pub fn start(&self) {
-        let picture = self.picture.clone();
-        let overlay = self.overlay_area.clone();
-        let status = self.status.clone();
-        let last_capture = self.last_capture.clone();
         let rx = self
             .rx
             .borrow_mut()
             .take()
             .expect("CameraFeed already started");
 
-        let status_for_draw = status.clone();
-        overlay.set_draw_func(move |_area, cr, width, height| {
-            draw_face_guide(cr, width, height, &status_for_draw.borrow());
-        });
-
-        glib::timeout_add_local(std::time::Duration::from_millis(33), move || {
-            while let Ok(frame) = rx.try_recv() {
-                *status.borrow_mut() = frame.status.clone();
-
-                if let Some(cap) = frame.capture {
-                    *last_capture.borrow_mut() = Some(cap);
-                }
-
-                let bytes = glib::Bytes::from(&frame.rgb_bytes);
-                let texture = gdk::MemoryTexture::new(
-                    frame.width,
-                    frame.height,
-                    gdk::MemoryFormat::R8g8b8,
-                    &bytes,
-                    (frame.width * 3) as usize,
-                );
-                picture.set_paintable(Some(&texture));
-                overlay.queue_draw();
+        self.overlay_area.set_draw_func(glib::clone!(
+            #[strong(rename_to = status)]
+            self.status,
+            move |_area, cr, width, height| {
+                draw_face_guide(cr, width, height, &status.borrow());
             }
-            glib::ControlFlow::Continue
-        });
+        ));
+
+        glib::timeout_add_local(
+            std::time::Duration::from_millis(33),
+            glib::clone!(
+                #[strong(rename_to = picture)]
+                self.picture,
+                #[strong(rename_to = latest_frame)]
+                self.latest_frame,
+                move || {
+                    while let Ok(frame) = rx.try_recv() {
+                        let bytes = glib::Bytes::from(&frame.rgb_bytes);
+                        let texture = gdk::MemoryTexture::new(
+                            frame.width,
+                            frame.height,
+                            gdk::MemoryFormat::R8g8b8,
+                            &bytes,
+                            (frame.width * 3) as usize,
+                        );
+                        picture.set_paintable(Some(&texture));
+                        *latest_frame.borrow_mut() = Some(frame.mat);
+                    }
+                    glib::ControlFlow::Continue
+                }
+            ),
+        );
     }
 }
 

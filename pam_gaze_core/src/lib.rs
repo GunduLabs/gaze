@@ -52,67 +52,48 @@ unsafe extern "C" {
     pub fn pam_set_item(pamh: PamHandle, item_type: c_int, item: *const c_void) -> c_int;
 }
 
-pub unsafe fn say(pamh: PamHandle, text: &str) {
-    let mut item: *const c_void = ptr::null();
-    if unsafe { pam_get_item(pamh, PAM_CONV, &mut item) } != PAM_SUCCESS || item.is_null() {
-        return;
-    }
-    let conv = unsafe { &*(item as *const PamConv) };
-    let Some(conv_fn) = conv.conv else { return };
+unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<String> {
+    unsafe {
+        let mut item: *const c_void = ptr::null();
+        if pam_get_item(pamh, PAM_CONV, &mut item) != PAM_SUCCESS || item.is_null() {
+            return None;
+        }
+        let conv = &*(item as *const PamConv);
+        let conv_fn = conv.conv?;
 
-    let msg_str = CString::new(text).unwrap();
-    let msg = PamMessage {
-        msg_style: PAM_TEXT_INFO,
-        msg: msg_str.as_ptr(),
-    };
-    let mut msg_ptr = &msg as *const PamMessage;
-    let mut resp_ptr: *mut PamResponse = ptr::null_mut();
+        let msg_str = CString::new(text).unwrap();
+        let msg = PamMessage {
+            msg_style,
+            msg: msg_str.as_ptr(),
+        };
+        let mut msg_ptr = &msg as *const PamMessage;
+        let mut resp_ptr: *mut PamResponse = ptr::null_mut();
 
-    unsafe { (conv_fn)(1, &mut msg_ptr, &mut resp_ptr, conv.appdata_ptr) };
+        if (conv_fn)(1, &mut msg_ptr, &mut resp_ptr, conv.appdata_ptr) != PAM_SUCCESS {
+            return None;
+        }
 
-    if !resp_ptr.is_null() {
-        unsafe {
-            if !(*resp_ptr).resp.is_null() {
-                let _ = CString::from_raw((*resp_ptr).resp);
+        let mut result = None;
+        if !resp_ptr.is_null() {
+            let resp = (*resp_ptr).resp;
+            if !resp.is_null() {
+                result = Some(CStr::from_ptr(resp).to_string_lossy().into_owned());
+                let _ = CString::from_raw(resp);
             }
             libc::free(resp_ptr as *mut c_void);
         }
+        result
+    }
+}
+
+pub unsafe fn say(pamh: PamHandle, text: &str) {
+    unsafe {
+        let _ = converse(pamh, PAM_TEXT_INFO, text);
     }
 }
 
 pub unsafe fn prompt_password(pamh: PamHandle) -> Option<String> {
-    let mut item: *const c_void = ptr::null();
-    if unsafe { pam_get_item(pamh, PAM_CONV, &mut item) } != PAM_SUCCESS || item.is_null() {
-        return None;
-    }
-    let conv = unsafe { &*(item as *const PamConv) };
-    let conv_fn = conv.conv?;
-
-    let prompt_str = CString::new("Password: ").unwrap();
-    let msg = PamMessage {
-        msg_style: PAM_PROMPT_ECHO_OFF,
-        msg: prompt_str.as_ptr(),
-    };
-    let mut msg_ptr = &msg as *const PamMessage;
-    let mut resp_ptr: *mut PamResponse = ptr::null_mut();
-
-    if unsafe { (conv_fn)(1, &mut msg_ptr, &mut resp_ptr, conv.appdata_ptr) } != PAM_SUCCESS {
-        return None;
-    }
-
-    if !resp_ptr.is_null() {
-        unsafe {
-            let resp = (*resp_ptr).resp;
-            if !resp.is_null() {
-                let s = CStr::from_ptr(resp).to_string_lossy().into_owned();
-                let _ = CString::from_raw(resp);
-                libc::free(resp_ptr as *mut c_void);
-                return Some(s);
-            }
-            libc::free(resp_ptr as *mut c_void);
-        }
-    }
-    None
+    unsafe { converse(pamh, PAM_PROMPT_ECHO_OFF, "Password: ") }
 }
 
 pub unsafe fn get_username(pamh: PamHandle) -> Option<String> {

@@ -1,7 +1,8 @@
 use clap::{Parser, Subcommand};
 use gaze_core::camera::Camera;
-use gaze_core::capture::{CaptureStatus, frame_to_bytes, wait_for_centered_capture};
+use gaze_core::capture::frame_to_bytes;
 use gaze_core::config::Config;
+use gaze_core::capture_session::{CaptureMode, CaptureState, CaptureSession};
 use gaze_core::face::FaceChecker;
 use std::io::{self, Write};
 use std::thread;
@@ -10,62 +11,101 @@ use zbus::Connection;
 
 use gaze_core::dbus::AuthProxy;
 
-fn print_status(status: &CaptureStatus) {
-    match status {
-        CaptureStatus::NoFace => eprint!("\r  ⏳ No face detected...          "),
-        CaptureStatus::NotCentered => eprint!("\r  ⏳ Center your face...           "),
-        _ => {}
-    }
-    io::stderr().flush().unwrap();
-}
-
-const ENROLLMENT_PROMPTS: &[&str] = &[
-    "Look straight at the camera",
-    "Turn your head slightly to the LEFT",
-    "Turn your head slightly to the RIGHT",
-    "Tilt your head slightly UP",
-];
-
-async fn guided_enrollment(
+async fn run_capture_session(
     proxy: &AuthProxy<'_>,
     cam: &mut Camera,
-    checker: &mut FaceChecker,
+    checker: FaceChecker,
     user: &str,
     face: &str,
+    mode: CaptureMode,
 ) -> anyhow::Result<()> {
-    println!("\n  Face enrollment for '{}/{}'\n", user, face);
+    let mut session = CaptureSession::new(checker).with_mode(mode);
+    session.start();
+
+    if mode == CaptureMode::Guided {
+        println!("\n  Face capture session for '{}/{}'\n", user, face);
+    } else {
+        println!("\n  Refining face '{}/{}'\n", user, face);
+    }
     println!("  Position your face as prompted. Capture is automatic when centered.\n");
 
-    for (idx, prompt) in ENROLLMENT_PROMPTS.iter().enumerate() {
-        println!("  [{}/{}] {}", idx + 1, ENROLLMENT_PROMPTS.len(), prompt);
+    let mut last_hint = String::new();
+    let mut last_prompt = String::new();
 
-        loop {
-            let result = wait_for_centered_capture(cam, checker, print_status)?;
-            eprint!("\r                                      \r");
+    loop {
+        if session.is_complete() {
+            let captures = session.take_captures();
+            for capture in captures {
+                proxy
+                    .add_face(user, face, &capture.bytes, capture.width, capture.height)
+                    .await?;
+            }
+            println!(
+                "\n  ✓ Mode complete! Captures saved for '{}/{}'.\n",
+                user, face
+            );
+            break;
+        }
 
-            match proxy
-                .add_face(user, face, &result.bytes, result.width, result.height)
-                .await
-            {
-                Ok(_) => {
-                    println!("  ✓ Captured!\n");
-                    thread::sleep(Duration::from_secs(1));
-                    break;
-                }
-                Err(err) => {
-                    eprintln!("  ✗ {}, retrying...", err);
-                    thread::sleep(Duration::from_millis(500));
+        let frame = cam.capture_frame()?;
+        let state = match session.process_frame(&frame) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("  ✗ Error processing frame: {}", e);
+                thread::sleep(Duration::from_millis(500));
+                continue;
+            }
+        };
+
+        match state {
+            CaptureState::Prompting {
+                prompt,
+                step,
+                total_steps,
+                ..
+            }
+            | CaptureState::Countdown {
+                prompt,
+                step,
+                total_steps,
+                ..
+            } => {
+                let prompt_text = prompt.to_string();
+
+                let hint = match &state {
+                    CaptureState::Prompting { hint, .. } => hint.to_string(),
+                    CaptureState::Countdown {
+                        seconds_remaining, ..
+                    } => {
+                        format!("✓ Centered! Hold still for {:.1}s...", seconds_remaining)
+                    }
+                    _ => unreachable!(),
+                };
+
+                let msg = if step == 0 {
+                    format!("  {}: {}", prompt_text, hint)
+                } else {
+                    format!("  [{}/{}] {}: {}", step, total_steps, prompt_text, hint)
+                };
+
+                last_prompt = prompt_text.to_string();
+                if msg != last_hint {
+                    eprint!("\r{}\x1b[K", msg);
+                    io::stderr().flush().unwrap();
+                    last_hint = msg;
                 }
             }
+            CaptureState::Captured { prompt: _ } => {
+                eprint!("\r                                      \r");
+                println!("  ✓ Captured {}!\n", last_prompt);
+                thread::sleep(Duration::from_secs(1));
+                last_hint.clear();
+            }
+            CaptureState::Complete => break,
         }
+        thread::sleep(Duration::from_millis(30));
     }
 
-    println!(
-        "  ✓ Enrollment complete! {} angles captured for '{}/{}'.\n",
-        ENROLLMENT_PROMPTS.len(),
-        user,
-        face
-    );
     Ok(())
 }
 
@@ -87,7 +127,7 @@ enum Commands {
         #[arg(short, long, help = "Show detailed authentication metrics")]
         verbose: bool,
     },
-    /// Enroll a new face with guided multi-angle capture
+    /// Capture a new face with guided multi-angle session
     AddFace {
         #[arg(short, long)]
         user: String,
@@ -216,41 +256,15 @@ async fn main() -> anyhow::Result<()> {
                 println!("\x1b[33mAccess Denied. Could not detect a face.\x1b[0m");
             }
         }
-        Commands::AddFace { user, face } => {
+        Commands::AddFace { ref user, ref face } | Commands::RefineFace { ref user, ref face } => {
+            let mode = if matches!(cli.command, Commands::AddFace { .. }) {
+                CaptureMode::Guided
+            } else {
+                CaptureMode::Refine
+            };
             let mut cam = Camera::open(&config.cameras.rgb)?;
-            let mut checker = FaceChecker::new()?;
-            guided_enrollment(&proxy, &mut cam, &mut checker, &user, &face).await?;
-        }
-        Commands::RefineFace { user, face } => {
-            let mut cam = Camera::open(&config.cameras.rgb)?;
-            let mut checker = FaceChecker::new()?;
-
-            println!(
-                "\n  Refining face '{}/{}'. Auto-capturing when face is centered.",
-                user, face
-            );
-            println!("  Older captures are replaced when the limit is reached.");
-            println!("  Press Ctrl+C to stop.\n");
-
-            let mut count = 0;
-            loop {
-                println!("  Waiting for centered face...");
-                let result = wait_for_centered_capture(&mut cam, &mut checker, print_status)?;
-                eprint!("\r                                      \r");
-
-                match proxy
-                    .add_face(&user, &face, &result.bytes, result.width, result.height)
-                    .await
-                {
-                    Ok(_) => {
-                        count += 1;
-                        println!("  ✓ Capture #{} added!\n", count);
-                    }
-                    Err(err) => eprintln!("  ✗ {}\n", err),
-                }
-
-                thread::sleep(Duration::from_secs(2));
-            }
+            let checker = FaceChecker::new()?;
+            run_capture_session(&proxy, &mut cam, checker, user, face, mode).await?;
         }
         Commands::RemoveFace { user, face } => {
             let removed = proxy.remove_face(&user, &face).await?;

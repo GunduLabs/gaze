@@ -167,31 +167,24 @@ impl UserDatabase {
         Ok(oldest.map(|(uuid, _)| uuid))
     }
 
-    pub fn remove_face(&mut self, username: &str, face_name: &str) -> anyhow::Result<bool> {
-        let face_dir = self.base_dir.join(username).join(face_name);
-        let mut cleared = false;
-
-        if face_dir.exists() {
-            fs::remove_dir_all(&face_dir)?;
-            cleared = true;
+    fn clear_dir(path: std::path::PathBuf) -> anyhow::Result<bool> {
+        let exists = path.exists();
+        if exists {
+            fs::remove_dir_all(&path)?;
         }
+        Ok(exists)
+    }
 
+    pub fn remove_face(&mut self, username: &str, face_name: &str) -> anyhow::Result<bool> {
+        let mut cleared = Self::clear_dir(self.base_dir.join(username).join(face_name))?;
         if let Some(faces) = self.users.get_mut(username) {
             cleared |= faces.remove(face_name).is_some();
         }
-
         Ok(cleared)
     }
 
     pub fn clear_user(&mut self, username: &str) -> anyhow::Result<bool> {
-        let user_dir = self.base_dir.join(username);
-        let mut cleared = false;
-
-        if user_dir.exists() {
-            fs::remove_dir_all(&user_dir)?;
-            cleared = true;
-        }
-
+        let mut cleared = Self::clear_dir(self.base_dir.join(username))?;
         cleared |= self.users.remove(username).is_some();
         Ok(cleared)
     }

@@ -32,9 +32,9 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     let pamh_worker = pamh as usize;
     let _ = thread::spawn(move || {
         if let Some(pw) = unsafe { prompt_password(pamh_worker as PamHandle) } {
-            let mut s = thread_state.lock();
-            s.password = Some(pw);
-            s.finished = true;
+            let mut shared_state = thread_state.lock();
+            shared_state.password = Some(pw);
+            shared_state.finished = true;
         } else {
             thread_state.lock().finished = true;
         }
@@ -43,9 +43,9 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     if let Ok((_, mut cam, proxy)) = env {
         for _ in 0..MAX_ATTEMPTS {
             {
-                let s = state.lock();
-                if s.finished {
-                    if let Some(ref pw) = s.password {
+                let shared_state = state.lock();
+                if shared_state.finished {
+                    if let Some(ref pw) = shared_state.password {
                         let pw_cstr = CString::new(pw.as_str()).unwrap();
                         unsafe {
                             pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);
@@ -85,9 +85,9 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
     loop {
         {
-            let s = state.lock();
-            if s.finished {
-                if let Some(ref pw) = s.password {
+            let shared_state = state.lock();
+            if shared_state.finished {
+                if let Some(ref pw) = shared_state.password {
                     let pw_cstr = CString::new(pw.as_str()).unwrap();
                     unsafe {
                         pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);

@@ -69,6 +69,17 @@ impl AuthDaemon {
             .get_embedding(&aligned)
             .map_err(|e| fdo::Error::Failed(format!("Recognition failed: {e}")))
     }
+    async fn get_embedding_from_frame(
+        &self,
+        image_data: &[u8],
+        width: u32,
+        height: u32,
+    ) -> fdo::Result<Array1<f32>> {
+        let frame = Self::bytes_to_mat(image_data, width, height)?;
+        let mut chk = self.checker.lock().await;
+        let mut rec = self.recognizer.lock().await;
+        Self::process_frame(&mut chk, &mut rec, &frame)
+    }
 }
 
 #[interface(name = "org.gaze.Auth")]
@@ -81,13 +92,9 @@ impl AuthDaemon {
         height: u32,
     ) -> fdo::Result<bool> {
         debug!(username = %username, width, height, "Verify request");
-        let frame = Self::bytes_to_mat(&image_data, width, height)?;
-
-        let embed = {
-            let mut chk = self.checker.lock().await;
-            let mut rec = self.recognizer.lock().await;
-            Self::process_frame(&mut chk, &mut rec, &frame)?
-        };
+        let embed = self
+            .get_embedding_from_frame(&image_data, width, height)
+            .await?;
 
         let db = self.db.lock().await;
         let result = db.verify(&username, &embed, self.threshold);
@@ -102,13 +109,9 @@ impl AuthDaemon {
         width: u32,
         height: u32,
     ) -> fdo::Result<Vec<(String, f64, f64, bool, u32)>> {
-        let frame = Self::bytes_to_mat(&image_data, width, height)?;
-
-        let embed = {
-            let mut chk = self.checker.lock().await;
-            let mut rec = self.recognizer.lock().await;
-            Self::process_frame(&mut chk, &mut rec, &frame)?
-        };
+        let embed = self
+            .get_embedding_from_frame(&image_data, width, height)
+            .await?;
 
         let db = self.db.lock().await;
         let results = db
@@ -130,13 +133,9 @@ impl AuthDaemon {
         height: u32,
     ) -> fdo::Result<String> {
         debug!(username = %username, face_name = %face_name, "Add face request");
-        let frame = Self::bytes_to_mat(&image_data, width, height)?;
-
-        let embed = {
-            let mut chk = self.checker.lock().await;
-            let mut rec = self.recognizer.lock().await;
-            Self::process_frame(&mut chk, &mut rec, &frame)?
-        };
+        let embed = self
+            .get_embedding_from_frame(&image_data, width, height)
+            .await?;
 
         let mut db = self.db.lock().await;
         let result = db

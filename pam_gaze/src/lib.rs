@@ -4,29 +4,23 @@ use pam_gaze_core::*;
 use std::os::raw::{c_char, c_int};
 
 unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
-    let username = match unsafe { get_username(pamh) } {
-        Some(u) => u,
-        None => return PAM_AUTH_ERR,
+    let Some(username) = (unsafe { get_username(pamh) }) else {
+        return PAM_AUTH_ERR;
     };
 
-    let (_, mut cam, proxy) = match setup_auth_env() {
-        Ok(e) => e,
-        Err(_) => {
-            unsafe { say(pamh, "Face authentication unavailable") };
-            return PAM_AUTHINFO_UNAVAIL;
-        }
+    let Ok((_, mut cam, proxy)) = setup_auth_env() else {
+        unsafe { say(pamh, "Face authentication unavailable") };
+        return PAM_AUTHINFO_UNAVAIL;
     };
 
     unsafe { say(pamh, "Please look at the camera") };
 
     for _ in 0..MAX_ATTEMPTS {
-        let frame = match cam.capture_frame() {
-            Ok(f) => f,
-            Err(_) => continue,
+        let Ok(frame) = cam.capture_frame() else {
+            continue;
         };
-        let capture = match frame_to_bytes(&frame) {
-            Ok(c) => c,
-            Err(_) => continue,
+        let Ok(capture) = frame_to_bytes(&frame) else {
+            continue;
         };
 
         match proxy.verify(&username, &capture.bytes, capture.width, capture.height) {

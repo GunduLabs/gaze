@@ -1,5 +1,5 @@
 mod camera_view;
-mod enroll_dialog;
+mod capture_dialog;
 mod window;
 
 use gtk4::prelude::*;
