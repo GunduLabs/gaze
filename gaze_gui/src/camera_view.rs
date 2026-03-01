@@ -205,7 +205,7 @@ fn draw_face_guide(cr: &gtk4::cairo::Context, width: i32, height: i32, status: &
     let label = match status {
         CaptureStatusInfo::NoFace => "No face detected",
         CaptureStatusInfo::NotCentered => "Center your face",
-        CaptureStatusInfo::Clipped => "Move closer",
+        CaptureStatusInfo::Clipped => "Move into frame",
         CaptureStatusInfo::Centered => "Hold still...",
     };
     cr.set_font_size(min_dim * 0.035);

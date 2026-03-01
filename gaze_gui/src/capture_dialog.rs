@@ -260,15 +260,7 @@ pub fn show_capture_dialog(
                                 CaptureState::Prompting { hint, .. } => {
                                     let is_active = session.borrow().is_active();
                                     
-                                    let hint_text = hint.to_string();
-
-                                    if !is_active {
-                                        status_label.set_text("");
-                                        status_label.set_visible(false);
-                                    } else {
-                                        status_label.set_text(&hint_text);
-                                        status_label.set_visible(!hint_text.is_empty());
-                                    }
+                                    status_label.set_visible(false);
 
                                     let (status_info, is_centered) = match hint {
                                         gaze_core::capture_session::CaptureHint::FaceClipped => (CaptureStatusInfo::Clipped, false),

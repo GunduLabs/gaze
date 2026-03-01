@@ -1,10 +1,11 @@
 use clap::{Parser, Subcommand};
+use console::{style, Term};
 use gaze_core::camera::Camera;
 use gaze_core::capture::frame_to_bytes;
 use gaze_core::config::Config;
 use gaze_core::capture_session::{CaptureMode, CaptureState, CaptureSession};
 use gaze_core::face::FaceChecker;
-use std::io::{self, Write};
+use indicatif::{ProgressBar, ProgressStyle};
 use std::thread;
 use std::time::Duration;
 use zbus::Connection;
@@ -22,91 +23,120 @@ async fn run_capture_session(
     let mut session = CaptureSession::new(checker).with_mode(mode);
     session.start();
 
-    if mode == CaptureMode::Guided {
-        println!("\n  Face capture session for '{}/{}'\n", user, face);
-    } else {
-        println!("\n  Refining face '{}/{}'\n", user, face);
-    }
-    println!("  Position your face as prompted. Capture is automatic when centered.\n");
+    let term = Term::stdout();
+    term.clear_screen()?;
 
-    let mut last_hint = String::new();
-    let mut last_prompt = String::new();
+    if mode == CaptureMode::Guided {
+        term.write_line(&format!(
+            "\n  {} {}\n",
+            style("Face capture session for").cyan().bold(),
+            style(format!("{}/{}", user, face)).cyan().underlined()
+        ))?;
+    } else {
+        term.write_line(&format!(
+            "\n  {} {}\n",
+            style("Refining face").cyan().bold(),
+            style(format!("{}/{}", user, face)).cyan().underlined()
+        ))?;
+    }
+    term.write_line("  Position your face as prompted. Capture is automatic when centered.\n")?;
+
+    let pb = ProgressBar::new(100);
+    let style_prompting = ProgressStyle::default_spinner()
+        .template("{spinner:.yellow} {prefix:.bold.blue} {msg}")
+        .unwrap()
+        .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
+    
+    let style_countdown = ProgressStyle::default_bar()
+        .template("{spinner:.green} {prefix:.bold.blue} {msg} {bar:20.green/blue} {percent}%")
+        .unwrap()
+        .progress_chars("█▇▆▅▄▃▂   ");
+        
+    let style_captured = ProgressStyle::default_spinner()
+        .template("{spinner:.green} {prefix:.bold.green} {msg}")
+        .unwrap()
+        .tick_chars("✓   ");
+
+    pb.set_style(style_prompting.clone());
+    pb.enable_steady_tick(Duration::from_millis(80));
 
     loop {
         if session.is_complete() {
             let captures = session.take_captures();
+            pb.set_style(style_captured.clone());
+            pb.finish_with_message(format!("Saving {} captures...", captures.len()));
+            
             for capture in captures {
                 proxy
                     .add_face(user, face, &capture.bytes, capture.width, capture.height)
                     .await?;
             }
-            println!(
-                "\n  ✓ Mode complete! Captures saved for '{}/{}'.\n",
-                user, face
-            );
+            term.write_line(&format!(
+                "\n  {} Captures perfectly saved for {}/{}!\n",
+                style("✓").green().bold(),
+                style(user).green(),
+                style(face).green()
+            ))?;
             break;
         }
 
-        let frame = cam.capture_frame()?;
-        let state = match session.process_frame(&frame) {
-            Ok(s) => s,
+        let frame = match cam.capture_frame() {
+            Ok(f) => f,
             Err(e) => {
-                eprintln!("  ✗ Error processing frame: {}", e);
-                thread::sleep(Duration::from_millis(500));
+                pb.set_message(format!("{}", style(format!("Camera error: {}", e)).red()));
+                thread::sleep(Duration::from_millis(50));
                 continue;
             }
         };
 
-        match state {
-            CaptureState::Prompting {
-                prompt,
-                step,
-                total_steps,
-                ..
-            }
-            | CaptureState::Countdown {
-                prompt,
-                step,
-                total_steps,
-                ..
-            } => {
-                let prompt_text = prompt.to_string();
-
-                let hint = match &state {
-                    CaptureState::Prompting { hint, .. } => hint.to_string(),
-                    CaptureState::Countdown {
-                        seconds_remaining, ..
-                    } => {
-                        format!("✓ Centered! Hold still for {:.1}s...", seconds_remaining)
+        match session.process_frame(&frame) {
+            Ok(state) => {
+                match state {
+                    CaptureState::Prompting { prompt, step, total_steps, hint, .. } => {
+                        pb.set_style(style_prompting.clone());
+                        let prefix = if step == 0 {
+                            "Step 1".to_string()
+                        } else {
+                            format!("Step {}/{}", step, total_steps)
+                        };
+                        pb.set_prefix(prefix);
+                        pb.set_message(format!("{}: {}", style(prompt).white().bold(), style(hint).yellow()));
                     }
-                    _ => unreachable!(),
-                };
-
-                let msg = if step == 0 {
-                    format!("  {}: {}", prompt_text, hint)
-                } else {
-                    format!("  [{}/{}] {}: {}", step, total_steps, prompt_text, hint)
-                };
-
-                last_prompt = prompt_text.to_string();
-                if msg != last_hint {
-                    eprint!("\r{}\x1b[K", msg);
-                    io::stderr().flush().unwrap();
-                    last_hint = msg;
+                    CaptureState::Countdown { prompt, step, total_steps, seconds_remaining, .. } => {
+                        pb.set_style(style_countdown.clone());
+                        let prefix = if step == 0 {
+                            "Step 1".to_string()
+                        } else {
+                            format!("Step {}/{}", step, total_steps)
+                        };
+                        pb.set_prefix(prefix);
+                        
+                        let progress = ((1.5 - seconds_remaining) / 1.5 * 100.0).clamp(0.0, 100.0) as u64;
+                        pb.set_position(progress);
+                        pb.set_message(format!("{}: {}", style(prompt).white().bold(), style("Hold still!").green().bold()));
+                    }
+                    CaptureState::Captured { prompt } => {
+                        pb.set_style(style_captured.clone());
+                        pb.set_message(format!("{}", style(format!("Captured {}!", prompt)).green().bold()));
+                        thread::sleep(Duration::from_millis(800));
+                    }
+                    CaptureState::Complete => {
+                        // Handled above in is_complete
+                    }
                 }
             }
-            CaptureState::Captured { prompt: _ } => {
-                eprint!("\r                                      \r");
-                println!("  ✓ Captured {}!\n", last_prompt);
-                thread::sleep(Duration::from_secs(1));
-                last_hint.clear();
+            Err(e) => {
+                pb.set_message(format!("{}", style(format!("Processing error: {}", e)).red()));
             }
-            CaptureState::Complete => break,
         }
         thread::sleep(Duration::from_millis(30));
     }
 
     Ok(())
+}
+
+fn get_current_user() -> String {
+    std::env::var("USER").unwrap_or_else(|_| "root".into())
 }
 
 #[derive(Parser)]
@@ -121,7 +151,7 @@ enum Commands {
     /// Authenticate a user via webcam
     Auth {
         #[arg(short, long)]
-        user: String,
+        user: Option<String>,
         #[arg(long, help = "Print detailed step-by-step performance metrics")]
         perf: bool,
         #[arg(short, long, help = "Show detailed authentication metrics")]
@@ -130,28 +160,33 @@ enum Commands {
     /// Capture a new face with guided multi-angle session
     AddFace {
         #[arg(short, long)]
-        user: String,
-        #[arg(short, long)]
+        user: Option<String>,
+        #[arg(help = "The name of the face to enroll")]
         face: String,
     },
     /// Add additional captures to improve recognition of an existing face
     RefineFace {
         #[arg(short, long)]
-        user: String,
-        #[arg(short, long)]
+        user: Option<String>,
+        #[arg(help = "The name of the face to refine")]
         face: String,
+    },
+    /// List all faces enrolled for a user
+    ListFaces {
+        #[arg(short, long)]
+        user: Option<String>,
     },
     /// Remove a named face for a user
     RemoveFace {
         #[arg(short, long)]
-        user: String,
-        #[arg(short, long)]
+        user: Option<String>,
+        #[arg(help = "The name of the face to remove")]
         face: String,
     },
     /// Remove all data for a user
     ClearUser {
         #[arg(short, long)]
-        user: String,
+        user: Option<String>,
     },
 }
 
@@ -162,12 +197,15 @@ async fn main() -> anyhow::Result<()> {
     let conn = Connection::system().await?;
     let proxy = AuthProxy::new(&conn).await?;
 
+    let term = Term::stdout();
+
     match cli.command {
         Commands::Auth {
             user,
             perf,
             verbose,
         } => {
+            let user = user.unwrap_or_else(get_current_user);
             let mut last = std::time::Instant::now();
             let start = last;
             let log = |label: &str, last: &mut std::time::Instant| {
@@ -179,19 +217,36 @@ async fn main() -> anyhow::Result<()> {
                 let total = now.duration_since(start);
                 *last = now;
                 println!(
-                    "[gaze perf] {:>40} | step: {:>8.3}ms | total: {:>8.3}ms",
+                    "{} {:>40} | step: {:>8.3}ms | total: {:>8.3}ms",
+                    style("[gaze perf]").cyan(),
                     label,
                     delta.as_secs_f64() * 1000.0,
                     total.as_secs_f64() * 1000.0,
                 );
             };
 
+            let pb = ProgressBar::new_spinner();
+            let pb_style = ProgressStyle::default_spinner()
+                .template("{spinner:.cyan} {prefix:.bold.blue} {msg}")
+                .unwrap()
+                .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
+            pb.set_style(pb_style);
+            pb.enable_steady_tick(Duration::from_millis(80));
+            pb.set_prefix("Authenticating");
+            pb.set_message("Opening camera...");
+
             let mut cam = Camera::open(&config.cameras.rgb)?;
             log("camera opened", &mut last);
+            
+            pb.set_message(format!("Scanning face for {}...", style(&user).cyan().bold()));
+            
             let mut authenticated = false;
             let mut denied = false;
 
             for attempt in 0..10 {
+                if attempt > 0 {
+                    pb.set_message(format!("Scanning face for {}... (attempt {})", style(&user).cyan().bold(), attempt + 1));
+                }
                 let frame = cam.capture_frame()?;
                 log(&format!("attempt {attempt}: frame captured"), &mut last);
                 let result = frame_to_bytes(&frame)?;
@@ -205,38 +260,48 @@ async fn main() -> anyhow::Result<()> {
                         let matched = faces.iter().find(|(_, _, _, passed, _)| *passed);
 
                         if verbose {
-                            println!();
-                            println!(
-                                "{:<20} {:>10} {:>8} {:>8} {:>6}",
-                                "Face", "Similarity", "Match %", "Passed", "Count"
-                            );
-                            println!("{}", "-".repeat(56));
-                            for (name, score, pct, passed, count) in &faces {
+                            pb.suspend(|| {
+                                println!();
                                 println!(
-                                    "{:<20} {:>10.4} {:>7.1}% {:>8} {:>6}",
-                                    name,
-                                    score,
-                                    pct,
-                                    if *passed { "✓" } else { "✗" },
-                                    count,
+                                    "{}",
+                                    style(format!(
+                                        "{:<20} {:>10} {:>8} {:>8} {:>6}",
+                                        "Face", "Similarity", "Match %", "Passed", "Count"
+                                    )).bold()
                                 );
-                            }
-                            println!();
+                                println!("{}", style("-".repeat(56)).dim());
+                                for (name, score, pct, passed, count) in &faces {
+                                    let check = if *passed { style("✓").green() } else { style("✗").red() };
+                                    println!(
+                                        "{:<20} {:>10.4} {:>7.1}% {:>8} {:>6}",
+                                        style(name).cyan(),
+                                        score,
+                                        pct,
+                                        check,
+                                        count,
+                                    );
+                                }
+                                println!();
+                            });
                         }
 
                         if let Some((face, _, pct, _, _)) = matched {
-                            println!(
-                                "\x1b[32mAuthenticated as: {} ({:.1}%, {}ms)\x1b[0m",
-                                face,
+                            pb.finish_and_clear();
+                            term.write_line(&format!(
+                                "{} Authenticated as: {} ({:.1}%, {}ms)",
+                                style("✓").green().bold(),
+                                style(face).green().bold(),
                                 pct,
                                 start.elapsed().as_millis()
-                            );
+                            ))?;
                             authenticated = true;
                         } else {
-                            println!(
-                                "\x1b[31mAccess Denied. ({}ms)\x1b[0m",
+                            pb.finish_and_clear();
+                            term.write_line(&format!(
+                                "{} Access Denied. ({}ms)",
+                                style("✗").red().bold(),
                                 start.elapsed().as_millis()
-                            );
+                            ))?;
                             denied = true;
                         }
                         break;
@@ -244,45 +309,110 @@ async fn main() -> anyhow::Result<()> {
                     Err(ref err) if err.to_string().contains("RETRYABLE:") => {
                         log(&format!("attempt {attempt}: retryable error"), &mut last);
                         if verbose {
-                            println!("  attempt {}: {}", attempt, err);
+                            pb.suspend(|| {
+                                term.write_line(&format!("  {} {}", style(format!("attempt {}", attempt)).yellow(), err)).ok();
+                            });
                         }
                         continue;
                     }
-                    Err(err) => return Err(err.into()),
+                    Err(err) => {
+                        pb.finish_and_clear();
+                        return Err(err.into());
+                    }
                 }
             }
 
             if !authenticated && !denied {
-                println!("\x1b[33mAccess Denied. Could not detect a face.\x1b[0m");
+                pb.finish_and_clear();
+                term.write_line(&format!("{} Access Denied. Could not detect a face.", style("!").yellow().bold()))?;
             }
         }
-        Commands::AddFace { ref user, ref face } | Commands::RefineFace { ref user, ref face } => {
-            let mode = if matches!(cli.command, Commands::AddFace { .. }) {
-                CaptureMode::Guided
-            } else {
-                CaptureMode::Refine
-            };
+        Commands::AddFace { user, face } => {
+            let user = user.unwrap_or_else(get_current_user);
             let mut cam = Camera::open(&config.cameras.rgb)?;
             let checker = FaceChecker::new()?;
-            run_capture_session(&proxy, &mut cam, checker, user, face, mode).await?;
+            run_capture_session(&proxy, &mut cam, checker, &user, &face, CaptureMode::Guided).await?;
+        }
+        Commands::RefineFace { user, face } => {
+            let user = user.unwrap_or_else(get_current_user);
+            let mut cam = Camera::open(&config.cameras.rgb)?;
+            let checker = FaceChecker::new()?;
+            run_capture_session(&proxy, &mut cam, checker, &user, &face, CaptureMode::Refine).await?;
+        }
+        Commands::ListFaces { user } => {
+            let user = user.unwrap_or_else(get_current_user);
+            let pb = ProgressBar::new_spinner();
+            let pb_style = ProgressStyle::default_spinner()
+                .template("{spinner:.cyan} {prefix:.bold.blue} {msg}")
+                .unwrap()
+                .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
+            pb.set_style(pb_style);
+            pb.enable_steady_tick(Duration::from_millis(80));
+            pb.set_prefix("Database");
+            pb.set_message(format!("Fetching faces for {}...", style(&user).cyan().bold()));
+            
+            match proxy.list_faces(&user).await {
+                Ok(faces) => {
+                    pb.finish_and_clear();
+                    if faces.is_empty() {
+                        term.write_line(&format!("{} No faces found for {}", style("i").cyan().bold(), style(&user).bold()))?;
+                    } else {
+                        term.write_line(&format!("\n{} faces for {}:\n", style(faces.len()).green().bold(), style(&user).bold()))?;
+                        for (face, count) in faces {
+                            term.write_line(&format!("  {} {} ({} captures)", style("•").cyan(), style(face).bold(), count))?;
+                        }
+                        term.write_line("")?;
+                    }
+                }
+                Err(e) => {
+                    pb.finish_and_clear();
+                    term.write_line(&format!("{} Failed to fetch faces: {}", style("✗").red().bold(), e))?;
+                }
+            }
         }
         Commands::RemoveFace { user, face } => {
+            let user = user.unwrap_or_else(get_current_user);
+            let pb = ProgressBar::new_spinner();
+            let pb_style = ProgressStyle::default_spinner()
+                .template("{spinner:.red} {prefix:.bold.red} {msg}")
+                .unwrap()
+                .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
+            pb.set_style(pb_style);
+            pb.enable_steady_tick(Duration::from_millis(80));
+            pb.set_prefix("Removing");
+            pb.set_message(format!("Deleting face {}...", style(&face).red().bold()));
+
             let removed = proxy.remove_face(&user, &face).await?;
+            pb.finish_and_clear();
             if removed {
-                println!("Face '{}' removed for '{}'", face, user);
+                term.write_line(&format!("{} Face '{}' removed for '{}'", style("✓").green().bold(), face, user))?;
             } else {
-                println!("Face '{}' not found for '{}'", face, user);
+                term.write_line(&format!("{} Face '{}' not found for '{}'", style("!").yellow().bold(), face, user))?;
             }
         }
         Commands::ClearUser { user } => {
+            let user = user.unwrap_or_else(get_current_user);
+            let pb = ProgressBar::new_spinner();
+            let pb_style = ProgressStyle::default_spinner()
+                .template("{spinner:.red} {prefix:.bold.red} {msg}")
+                .unwrap()
+                .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
+            pb.set_style(pb_style);
+            pb.enable_steady_tick(Duration::from_millis(80));
+            pb.set_prefix("Clearing");
+            pb.set_message(format!("Deleting all data for {}...", style(&user).red().bold()));
+
             let cleared = proxy.clear_user(&user).await?;
+            pb.finish_and_clear();
             if cleared {
-                println!("All data cleared for '{}'", user);
+                term.write_line(&format!("{} All data cleared for '{}'", style("✓").green().bold(), user))?;
             } else {
-                println!("No data found for '{}'", user);
+                term.write_line(&format!("{} No data found for '{}'", style("!").yellow().bold(), user))?;
             }
         }
     }
 
     Ok(())
 }
+
+
