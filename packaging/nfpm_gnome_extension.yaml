@@ -4,10 +4,10 @@ platform: "linux"
 version: "${VERSION}"
 section: "admin"
 priority: "optional"
-maintainer: "GunduLabs <contact@gundulabs.com>"
+maintainer: "Gundu Labs <maintainers@gundulabs.com>"
 description: "GNOME Shell extension for Gaze on login and lock screen"
-vendor: "GunduLabs"
-homepage: "https://github.com/gaze/gaze"
+vendor: "Gundu Labs"
+homepage: "https://gaze.gundulabs.com"
 license: "MIT"
 
 contents:

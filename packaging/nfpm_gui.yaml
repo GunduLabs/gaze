@@ -4,10 +4,10 @@ platform: "linux"
 version: "${VERSION}"
 section: "admin"
 priority: "optional"
-maintainer: "gundulabs <contact@gundulabs.com>"
+maintainer: "Gundu Labs <maintainers@gundulabs.com>"
 description: "GTK4/Adwaita GUI for managing Gaze facial authentication"
-vendor: "gundulabs"
-homepage: "https://github.com/gaze/gaze"
+vendor: "Gundu Labs"
+homepage: "https://gaze.gundulabs.com"
 license: "MIT"
 
 contents:
