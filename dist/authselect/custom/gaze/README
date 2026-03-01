@@ -1,21 +1,83 @@
-Gaze facial authentication profile
+Local users only (with Gaze Facial Authentication)
+================
 
-This profile configures PAM to use Gaze (pam_gaze.so) for facial
-authentication. Users who have enrolled their face can authenticate
-without entering a password; others fall through to standard password
-authentication automatically.
+Selecting this profile will enable local files as the source of identity
+and authentication providers. It includes Gaze facial authentication by default.
 
-REQUIREMENTS
-- gazed.service must be running (systemctl enable --now gazed)
-- pam_gaze.so must be installed at /usr/lib/security/pam_gaze.so
-- Users must enroll their face: gaze add-face <username> <face-name>
+AVAILABLE OPTIONAL FEATURES
+---------------------------
 
-USAGE
-  authselect select custom/gaze [features...]
-  authselect select custom/gaze with-faillock
-  authselect select custom/gaze with-fingerprint with-faillock
+with-face-simultaneous::
+    Attempts facial authentication simultaneously with password prompt
 
-OPTIONAL FEATURES
-  with-faillock     Track failed authentication attempts with pam_faillock
-  with-fingerprint  Enable fingerprint authentication as an additional fallback
-  with-mkhomedir    Automatically create home directories on first login
+with-faillock::
+    Enable account locking in case of too many consecutive
+    authentication failures.
+
+with-mkhomedir::
+    Enable automatic creation of home directories for users on their
+    first login.
+
+with-ecryptfs::
+    Enable automatic per-user ecryptfs.
+
+with-fingerprint::
+    Enable authentication with fingerprint reader through *pam_fprintd*.
+
+with-pam-gnome-keyring::
+    Enable pam-gnome-keyring support.
+
+with-pam-u2f::
+    Enable authentication via u2f dongle through *pam_u2f*.
+
+with-pam-u2f-2fa::
+    Enable 2nd factor authentication via u2f dongle through *pam_u2f*.
+
+without-pam-u2f-nouserok::
+    Module argument nouserok is omitted if also with-pam-u2f-2fa is used.
+    *WARNING*: Omitting nouserok argument means that users without pam-u2f
+    authentication configured will not be able to log in *INCLUDING* root.
+    Make sure you are able to log in before losing root privileges.
+
+with-silent-lastlog::
+    Do not produce pam_lastlog message during login.
+
+without-lastlog-showfailed::
+    Do not print number of failed login attempts during login.
+
+with-pamaccess::
+    Check access.conf during account authorization.
+
+with-pwhistory::
+    Enable pam_pwhistory module for local users.
+
+with-altfiles::
+    Use nss_altfiles for passwd and group nsswitch databases.
+
+with-mdns4::
+    Enable multicast DNS over IPv4.
+
+with-mdns6::
+    Enable multicast DNS over IPv6.
+
+with-systemd-homed::
+    If set, pam_systemd_homed is enabled for all pam operations.
+
+with-libvirt::
+    Enable connecting to libvirt VMs using the hostname configured in the
+    guest OS or, as a fallback, their name.
+
+without-nullok::
+    Do not add nullok parameter to pam_unix.
+
+EXAMPLES
+--------
+
+* Enable local profile
+
+  authselect select local
+
+SEE ALSO
+--------
+* man passwd(5)
+* man group(5)

@@ -1,3 +1,8 @@
--session    optional                                     pam_keyinit.so force revoke
-session     required                                     pam_loginuid.so
--session    optional                                     pam_systemd.so
+auth        optional                   pam_ecryptfs.so unwrap                                 {include if "with-ecryptfs"}
+
+password    optional                   pam_ecryptfs.so unwrap                                 {include if "with-ecryptfs"}
+
+session     optional                   pam_umask.so silent
+session     [success=1 default=ignore] pam_succeed_if.so service !~ gdm* service !~ su* quiet
+session     [default=1]                pam_lastlog2.so {if "with-silent-lastlog":silent}
+session     optional                   pam_lastlog2.so silent

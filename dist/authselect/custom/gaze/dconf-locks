@@ -1,0 +1,4 @@
+/org/gnome/login-screen/enable-smartcard-authentication
+/org/gnome/login-screen/enable-fingerprint-authentication
+/org/gnome/login-screen/enable-switchable-authentication
+/org/gnome/login-screen/gaze/enable-face-authentication

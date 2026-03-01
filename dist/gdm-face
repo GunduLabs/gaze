@@ -1,9 +1,15 @@
-auth        required      pam_gaze.so
-auth        include       postlogin
+#%PAM-1.0
+auth        required                                     pam_env.so
+auth        [success=done default=bad]                   pam_gaze.so
+auth        optional                                     pam_gnome_keyring.so only_if=login auto_start
+auth        required                                     pam_deny.so
+auth        include                                      postlogin
 
-account     required      pam_nologin.so
-account     include       system-auth
+account     required                                     pam_nologin.so
+account     include                                      system-auth
 
-session     required      pam_loginuid.so
-session     include       system-auth
-session     include       postlogin
+password    required                                     pam_deny.so
+
+session     required                                     pam_loginuid.so
+session     include                                      system-auth
+session     include                                      postlogin

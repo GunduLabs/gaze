@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
-  <schema id="org.gnome.login-screen.gaze" path="/org/gnome/login-screen/">
+  <schema id="org.gnome.login-screen.gaze" path="/org/gnome/login-screen/gaze/">
     <key name="enable-face-authentication" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Whether or not to allow face recognition for login</summary>
       <description>
         The login screen can optionally allow users who have enrolled

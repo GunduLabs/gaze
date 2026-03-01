@@ -1,8 +1,7 @@
-Name: Gaze facial authentication
-Default: no
-Priority: 384
+Name: Gaze Face Authentication (Sequential)
+Default: yes
+Conflicts: gaze-simultaneous
+Priority: 255
 Auth-Type: Primary
 Auth:
-        [success=end default=ignore]    pam_gaze.so
-Auth-Initial:
         [success=end default=ignore]    pam_gaze.so

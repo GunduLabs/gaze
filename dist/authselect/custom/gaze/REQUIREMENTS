@@ -1,2 +1,23 @@
-| File: /usr/lib/security/pam_gaze.so
-| File: /usr/bin/gazed
+- ensure gazed is active                              {include if "with-face-simultaneous"}
+                                                                                          {include if "with-face-simultaneous"}
+- with-mkhomedir is selected, make sure pam_oddjob_mkhomedir module                       {include if "with-mkhomedir"}
+  is present and oddjobd service is enabled and active                                    {include if "with-mkhomedir"}
+  - systemctl enable --now oddjobd.service                                                {include if "with-mkhomedir"}
+                                                                                          {include if "with-altfiles"}
+- with-altfiles is selected, make sure nss_altfiles module is present                     {include if "with-altfiles"}
+                                                                                          {include if "with-libvirt"}
+- with-libvirt is selected, make sure that the libvirt NSS plugins are installed          {include if "with-libvirt"}
+                                                                                          {include if "with-systemd-homed"}
+- with-systemd-homed is selected, make sure that the system-homed service is enabled      {include if "with-systemd-homed"}
+  - systemctl enable --now systemd-homed.service                                          {include if "with-systemd-homed"}
+                                                                                          {include if "with-pam-gnome-keyring"}
+- with-pam-gnome-keyring is selected, make sure the pam_gnome_keyring module              {include if "with-pam-gnome-keyring"}
+  is present.                                                                             {include if "with-pam-gnome-keyring"}
+                                                                                          {include if "with-fingerprint"}
+- with-fingerprint is selected, make sure fprintd service is configured and enabled       {include if "with-fingerprint"}
+                                                                                          {include if "with-pam-u2f"}
+- with-pam-u2f is selected, make sure that the pam u2f module is installed                {include if "with-pam-u2f"}
+  - users can then configure keys using the pamu2fcfg tool                                {include if "with-pam-u2f"}
+                                                                                          {include if "with-pam-u2f-2fa"}
+- with-pam-u2f-2fa is selected, make sure that the pam u2f module is installed            {include if "with-pam-u2f-2fa"}
+  - users can then configure keys using the pamu2fcfg tool                                {include if "with-pam-u2f-2fa"}

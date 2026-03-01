@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-glib-compile-schemas /usr/share/glib-2.0/schemas
+glib-compile-schemas /usr/share/glib-2.0/schemas &> /dev/null || true
 
 POLICY_DIR="/usr/share/gaze"
 MODULE="gaze-gdm-camera"

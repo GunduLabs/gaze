@@ -30,6 +30,9 @@ contents:
   - src: "dist/gazed.service"
     dst: "/usr/lib/systemd/system/gazed.service"
     type: "file"
+  - src: "dist/gdm-face"
+    dst: "/etc/pam.d/gdm-face"
+    type: "file"
   - src: "target/release/libpam_gaze.so"
     dst: "/lib/${MULTIARCH}/security/pam_gaze.so"
     packager: deb
@@ -49,29 +52,11 @@ contents:
     dst: "/usr/lib/security/pam_gaze_grosshack.so"
     packager: archlinux
 
-  - src: "dist/pam-configs/gaze"
-    dst: "/usr/share/pam-configs/gaze"
+  - src: "dist/pam-configs/gaze/"
+    dst: "/usr/share/pam-configs/"
     packager: deb
-  - src: "dist/authselect/custom/gaze/README"
-    dst: "/etc/authselect/custom/gaze/README"
-    packager: rpm
-  - src: "dist/authselect/custom/gaze/REQUIREMENTS"
-    dst: "/etc/authselect/custom/gaze/REQUIREMENTS"
-    packager: rpm
-  - src: "dist/authselect/custom/gaze/system-auth"
-    dst: "/etc/authselect/custom/gaze/system-auth"
-    packager: rpm
-  - src: "dist/authselect/custom/gaze/password-auth"
-    dst: "/etc/authselect/custom/gaze/password-auth"
-    packager: rpm
-  - src: "dist/authselect/custom/gaze/fingerprint-auth"
-    dst: "/etc/authselect/custom/gaze/fingerprint-auth"
-    packager: rpm
-  - src: "dist/authselect/custom/gaze/smartcard-auth"
-    dst: "/etc/authselect/custom/gaze/smartcard-auth"
-    packager: rpm
-  - src: "dist/authselect/custom/gaze/postlogin"
-    dst: "/etc/authselect/custom/gaze/postlogin"
+  - src: "dist/authselect/custom/gaze/"
+    dst: "/usr/share/authselect/vendor/gaze/"
     packager: rpm
 
 overrides:
