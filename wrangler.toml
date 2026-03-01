@@ -1,5 +1,3 @@
 name = "gaze"
 compatibility_date = "2026-03-01"
-
-[assets]
-directory = "docs/.vitepress/dist"
+pages_build_output_dir = "docs/.vitepress/dist"

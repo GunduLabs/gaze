@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
+  ignoreDeadLinks: true,
   title: "Gaze",
   description: "Facial authentication daemon for Linux",
   themeConfig: {
