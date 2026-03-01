@@ -14,6 +14,7 @@ resolver = "3"
 name = "gaze"
 version = "0.1.0"
 edition = "2024"
+description = "Facial authentication for Linux"
 
 [dependencies]
 anyhow = "1.0.102"

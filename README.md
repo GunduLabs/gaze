@@ -1,6 +1,6 @@
 # Gaze
 
-Facial authentication daemon for Linux. Uses InsightFace ONNX models (SCRFD detection + ArcFace recognition) to provide face-based login via PAM and a DBus interface.
+Facial authentication for Linux.
 
 ## Features
 
