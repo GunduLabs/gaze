@@ -2,13 +2,6 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   ignoreDeadLinks: true,
-  vite: {
-    build: {
-      rollupOptions: {
-        external: [/\.mp4$/],
-      },
-    },
-  },
   title: "Gaze",
   description: "Facial authentication daemon for Linux",
   themeConfig: {

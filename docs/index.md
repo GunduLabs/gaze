@@ -26,9 +26,7 @@ hero:
   </section>
 
   <div class="video-wrapper">
-    <video controls muted playsinline>
-      <source src="/demo.mp4" type="video/mp4" />
-    </video>
+    <video controls muted playsinline :src="'/demo.mp4'"></video>
   </div>
 
   <section class="features-section">
