@@ -16,19 +16,15 @@ hero:
 
 <div class="home-content">
 
-  <section class="install-section">
-    <p class="section-label">Quick install</p>
-    <div class="install-cmd">
-      <code>curl -fsSL https://gaze.gundulabs.com/install.sh | sh</code>
-      <button class="copy-btn" onclick="
-        navigator.clipboard.writeText('curl -fsSL https://gaze.gundulabs.com/install.sh | sh');
-        this.textContent = '✓ Copied';
-        this.classList.add('copied');
-        setTimeout(() => { this.textContent = 'Copy'; this.classList.remove('copied'); }, 2000);
-      ">Copy</button>
-    </div>
-    <p class="install-note">Supports Fedora, RHEL, Debian, Ubuntu, and Arch Linux</p>
-  </section>
+<section class="install-section">
+<p class="section-label">Quick install</p>
+
+```bash
+curl -fsSL https://gaze.gundulabs.com/install.sh | sh
+```
+
+<p class="install-note">Supports Fedora, RHEL, Debian, Ubuntu, and Arch Linux</p>
+</section>
 
   <div class="video-wrapper">
     <video controls muted playsinline :src="'/demo.mp4'"></video>
@@ -80,8 +76,10 @@ hero:
 
 /* Install section */
 .install-section {
-  text-align: center;
-  padding: 56px 0 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 0 64px;
   border-bottom: 1px solid var(--vp-c-divider);
 }
 
@@ -94,51 +92,11 @@ hero:
   margin-bottom: 14px;
 }
 
-.install-cmd {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--vp-c-bg-soft);
-  border: 1px solid var(--vp-c-border);
-  border-radius: 8px;
-  padding: 12px 16px;
-  font-family: var(--vp-font-family-mono);
-  max-width: 560px;
+.install-section div[class*='language-'] {
   width: 100%;
-}
-
-.install-cmd code {
-  flex: 1;
-  font-size: 0.9rem;
-  color: var(--vp-c-text-1);
-  background: none;
-  padding: 0;
-  text-align: left;
-}
-
-.copy-btn {
-  flex-shrink: 0;
-  padding: 4px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--vp-c-border);
-  background: var(--vp-c-bg);
-  color: var(--vp-c-text-2);
-  font-size: 0.78rem;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.copy-btn:hover {
-  background: var(--vp-c-brand-soft);
-  color: var(--vp-c-brand-1);
-  border-color: var(--vp-c-brand-1);
-}
-
-.copy-btn.copied {
-  background: var(--vp-c-green-soft);
-  color: var(--vp-c-green-1);
-  border-color: var(--vp-c-green-1);
-  transition: all 0.15s;
+  max-width: 560px;
+  margin: 0 !important;
+  border-radius: 8px;
 }
 
 .install-note {
