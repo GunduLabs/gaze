@@ -20,7 +20,12 @@ hero:
     <p class="section-label">Quick install</p>
     <div class="install-cmd">
       <code>curl -fsSL https://gaze.gundulabs.com/install.sh | sh</code>
-      <button class="copy-btn" onclick="navigator.clipboard.writeText('curl -fsSL https://gaze.gundulabs.com/install.sh | sh')">Copy</button>
+      <button class="copy-btn" onclick="
+        navigator.clipboard.writeText('curl -fsSL https://gaze.gundulabs.com/install.sh | sh');
+        this.textContent = '✓ Copied';
+        this.classList.add('copied');
+        setTimeout(() => { this.textContent = 'Copy'; this.classList.remove('copied'); }, 2000);
+      ">Copy</button>
     </div>
     <p class="install-note">Supports Fedora, RHEL, Debian, Ubuntu, and Arch Linux</p>
   </section>
@@ -127,6 +132,13 @@ hero:
   background: var(--vp-c-brand-soft);
   color: var(--vp-c-brand-1);
   border-color: var(--vp-c-brand-1);
+}
+
+.copy-btn.copied {
+  background: var(--vp-c-green-soft);
+  color: var(--vp-c-green-1);
+  border-color: var(--vp-c-green-1);
+  transition: all 0.15s;
 }
 
 .install-note {
