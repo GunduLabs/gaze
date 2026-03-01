@@ -10,13 +10,15 @@ Gaze is a Rust-based facial authentication daemon for Linux. It provides a secur
 
 - **`gazed` (Daemon)**: The central service (`org.gaze.Auth`) that handles ML inference (detection, alignment, recognition) and manages the user database.
 - **`gaze` (CLI)**: A command-line tool for management (enrollment, authentication tests, etc.).
-- **`pam_gaze`**: A PAM (Pluggable Authentication Module) implementation that enables Gaze for system-wide login, sudo, and lock screens.
+- **`pam_gaze`**: A PAM (Pluggable Authentication Module) implementation that enables Gaze for system-wide login, sudo, and lock screens. Thin wrapper over `pam_gaze_core`.
+- **`pam_gaze_core`**: Core PAM authentication logic shared by the PAM module.
+- **`pam_gaze_grosshack`**: PAM compatibility shim for environments that require it.
 - **`gaze_gui`**: A GTK4/Adwaita application for user-friendly face enrollment and management.
-- **`gaze_common`**: Shared logic for camera interaction, configuration, and DBus communication.
+- **`gaze_core`**: Shared logic for camera interaction, capture sessions, face checking, configuration, and DBus communication.
 
 ## Architecture & Data Flow
 
-1. **Capture**: Frames are captured via OpenCV (`gaze_common/src/camera.rs`).
+1. **Capture**: Frames are captured via OpenCV (`gaze_core/src/camera.rs`).
 2. **Detection**: SCRFD (Sample and Computation Redistribution for Efficient Face Detection) is used to locate faces.
 3. **Alignment**: Faces are aligned using the Umeyama transform to a standard 112x112 size.
 4. **Embedding**: A ResNet50 or MobileFaceNet model generates a 512-dimensional embedding.

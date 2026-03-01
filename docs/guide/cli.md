@@ -15,13 +15,14 @@ gaze auth [OPTIONS]
 | Option | Description |
 |---|---|
 | `-u, --user <USER>` | Authenticate as a specific user (default: `$USER`) |
-| `--perf` | Print detailed step-by-step performance metrics |
-| `-v, --verbose` | Show per-face similarity scores and match details |
+| `--perf` | Print step-by-step timing metrics (camera init, detection, match) |
+| `-v, --verbose` | Show a table of all enrolled faces with similarity scores |
 
-**Result codes:**
-- **Green ✓** — authenticated successfully
-- **Red ✗** — access denied (face detected but not recognized)
-- **Yellow !** — could not detect a face
+The command opens the camera and waits until a face is detected and centered. While scanning, a spinner shows real-time status (`No face detected`, `Face is clipped`, etc.). Once a frame is captured it is sent to the daemon for matching.
+
+**Results:**
+- **Green ✓** — `✓ Authenticated as: <face> (<pct>%, <ms>ms)`
+- **Red ✗** — `✗ Access Denied. (<ms>ms)`
 
 ---
 

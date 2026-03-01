@@ -23,37 +23,45 @@ sudo mkdir -p /etc/gaze
 sudo cp dist/config.toml /etc/gaze/config.toml
 ```
 
-## 4. Install the PAM module
+## 4. Install the PAM modules
 
 ::: code-group
 
 ```bash [Fedora/RHEL (x86_64)]
-sudo cp target/release/libpam_gaze.so /lib64/security/pam_gaze.so
+sudo cp target/release/libpam_gaze.so /usr/lib64/security/pam_gaze.so
+sudo cp target/release/libpam_gaze_grosshack.so /usr/lib64/security/pam_gaze_grosshack.so
 ```
 
 ```bash [Debian/Ubuntu]
 sudo cp target/release/libpam_gaze.so /lib/x86_64-linux-gnu/security/pam_gaze.so
+sudo cp target/release/libpam_gaze_grosshack.so /lib/x86_64-linux-gnu/security/pam_gaze_grosshack.so
+```
+
+```bash [Arch Linux]
+sudo cp target/release/libpam_gaze.so /usr/lib/security/pam_gaze.so
+sudo cp target/release/libpam_gaze_grosshack.so /usr/lib/security/pam_gaze_grosshack.so
 ```
 
 :::
 
-## 5. Configure PAM
+## 5. Enable face authentication
 
-Add to your PAM config (e.g. `/etc/pam.d/gdm-password`):
+::: code-group
 
+```bash [Fedora/RHEL]
+sudo authselect select vendor/gaze --force
 ```
-auth sufficient pam_gaze.so
+
+```bash [Debian/Ubuntu]
+sudo cp dist/pam-configs/gaze dist/pam-configs/gaze-simultaneous /usr/share/pam-configs/
+sudo pam-auth-update --package
 ```
 
-## 6. Enable via authselect (Fedora/RHEL)
-
-```bash
-sudo authselect select custom/gaze
-```
+:::
 
 This configures `system-auth` and `password-auth` to include `pam_gaze.so`, covering both login and lock screen unlock via GDM.
 
-## 7. Enable the GNOME Shell extension
+## 6. Enable the GNOME Shell extension
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
@@ -84,5 +92,5 @@ VERSION=0.0.1 ARCH=x86_64 nfpm pkg -f packaging/nfpm_gui.yaml --packager rpm --t
 VERSION=0.0.1 ARCH=x86_64 nfpm pkg -f packaging/nfpm_gnome_extension.yaml --packager rpm --target /tmp/ && \
 sudo rpm -Uvh --force /tmp/gaze-0.0.1-1.x86_64.rpm /tmp/gaze-gui-0.0.1-1.x86_64.rpm /tmp/gaze-gnome-extension-0.0.1-1.x86_64.rpm && \
 sudo systemctl enable --now gazed && \
-sudo authselect select custom/gaze --force
+sudo authselect select vendor/gaze --force
 ```

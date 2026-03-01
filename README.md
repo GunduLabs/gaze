@@ -48,7 +48,7 @@ VERSION=0.0.1 ARCH=x86_64 nfpm pkg -f packaging/nfpm_gui.yaml --packager rpm --t
 VERSION=0.0.1 ARCH=x86_64 nfpm pkg -f packaging/nfpm_gnome_extension.yaml --packager rpm --target /tmp/ && \
 sudo rpm -Uvh --force /tmp/gaze-0.0.1-1.x86_64.rpm /tmp/gaze-gui-0.0.1-1.x86_64.rpm /tmp/gaze-gnome-extension-0.0.1-1.x86_64.rpm && \
 sudo systemctl enable --now gazed && \
-sudo authselect select custom/gaze --force
+sudo authselect select vendor/gaze --force
 ```
 
 On Wayland, GNOME Shell must be restarted (log out and back in) before it picks up newly installed system extensions. After logging back in, run:
@@ -93,31 +93,34 @@ sudo mkdir -p /etc/gaze
 sudo cp dist/config.toml /etc/gaze/config.toml
 ```
 
-4. Install the PAM module:
+4. Install the PAM modules:
 
 ```bash
 # Fedora / RHEL (x86_64)
-sudo cp target/release/libpam_gaze.so /lib64/security/pam_gaze.so
+sudo cp target/release/libpam_gaze.so /usr/lib64/security/pam_gaze.so
+sudo cp target/release/libpam_gaze_grosshack.so /usr/lib64/security/pam_gaze_grosshack.so
 
 # Debian / Ubuntu
 sudo cp target/release/libpam_gaze.so /lib/x86_64-linux-gnu/security/pam_gaze.so
+sudo cp target/release/libpam_gaze_grosshack.so /lib/x86_64-linux-gnu/security/pam_gaze_grosshack.so
+
+# Arch Linux
+sudo cp target/release/libpam_gaze.so /usr/lib/security/pam_gaze.so
+sudo cp target/release/libpam_gaze_grosshack.so /usr/lib/security/pam_gaze_grosshack.so
 ```
 
-5. Add to your PAM config (e.g. `/etc/pam.d/gdm-password`):
-
-```
-auth sufficient pam_gaze.so
-```
-
-6. Enable face authentication via authselect (Fedora/RHEL):
+5. Enable face authentication:
 
 ```bash
-sudo authselect select custom/gaze
+# Fedora / RHEL — select the vendor authselect profile:
+sudo authselect select vendor/gaze --force
+
+# Debian / Ubuntu — register with pam-auth-update:
+sudo cp dist/pam-configs/gaze dist/pam-configs/gaze-simultaneous /usr/share/pam-configs/
+sudo pam-auth-update --package
 ```
 
-This configures `system-auth` and `password-auth` to include `pam_gaze.so`, covering both login and lock screen unlock via GDM.
-
-7. Enable the GNOME Shell extension (for lock screen support):
+6. Enable the GNOME Shell extension (for lock screen support):
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
@@ -157,22 +160,26 @@ Models are downloaded automatically to `models_dir` on first run.
 
 ```bash
 gaze auth                        # Authenticate current user
-gaze add-face <name>             # Enroll a new face
-gaze refine-face <name>          # Add more samples to existing face
+gaze auth --verbose              # Show per-face similarity scores
+gaze auth --perf                 # Print step-by-step timing metrics
+gaze add-face <name>             # Enroll a new face (guided multi-angle)
+gaze refine-face <name>          # Add more samples to an existing face
+gaze list-faces                  # List all enrolled faces for current user
 gaze remove-face <name>          # Remove a specific face
 gaze clear-user                  # Remove all faces for current user
 ```
 
-Auth results are color-coded:
-- **Green** — authenticated successfully
-- **Red** — access denied (face detected but not recognized)
-- **Yellow** — could not detect a face
+All commands accept `-u <user>` to target a specific user instead of `$USER`.
 
-The CLI communicates with the running daemon over DBus.
+Auth results:
+- **Green ✓** — authenticated (`✓ Authenticated as: <face> (<pct>%, <ms>ms)`)
+- **Red ✗** — access denied (`✗ Access Denied. (<ms>ms)`)
+
+While scanning, the spinner shows real-time feedback if no face is detected or the face is clipped. The CLI communicates with the running daemon over DBus.
 
 ### GUI
 
-Launch `gaze-gui` for a graphical enrollment and authentication interface. The test authentication button shows a color-coded result label (green/red/yellow) using the same scheme as the CLI.
+Launch `gaze-gui` for a graphical enrollment and authentication interface. The test authentication button shows a color-coded result label (green/red) matching the CLI output.
 
 ## How It Works
 
