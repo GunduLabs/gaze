@@ -3,6 +3,7 @@ use gaze_core::capture::frame_to_bytes;
 use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
+use opencv::prelude::MatTraitConst;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
@@ -58,20 +59,24 @@ impl CameraFeed {
                     continue;
                 };
 
-                let Ok(fb) = frame_to_bytes(&frame) else {
+                let Ok(bytes) = frame_to_bytes(&frame) else {
                     continue;
                 };
 
-                let mut rgb = fb.bytes.clone();
+                let mut rgb = bytes;
                 for chunk in rgb.chunks_exact_mut(3) {
                     chunk.swap(0, 2);
                 }
 
+                let Ok(size) = frame.size() else {
+                    continue;
+                };
+
                 if tx
                     .send(FrameData {
                         rgb_bytes: rgb,
-                        width: fb.width as i32,
-                        height: fb.height as i32,
+                        width: size.width,
+                        height: size.height,
                         mat: frame,
                     })
                     .is_err()

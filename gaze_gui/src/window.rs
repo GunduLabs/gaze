@@ -1,5 +1,5 @@
 use crate::capture_dialog;
-use gaze_core::camera::Camera;
+use gaze_core::capture::{init_camera_and_checker, wait_for_capture};
 use gaze_core::config::Config;
 use gaze_core::dbus::AuthProxy;
 use gtk4::glib;
@@ -275,9 +275,10 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                             let t0 = std::time::Instant::now();
                             let result = std::thread::spawn(
                                 move || -> anyhow::Result<(Vec<u8>, u32, u32)> {
-                                    let mut cam = Camera::open(&config.cameras.rgb)?;
-                                    let frame = cam.capture_frame()?;
-                                    let cap = gaze_core::capture::frame_to_bytes(&frame)?;
+                                    let (mut cam, mut checker) =
+                                        init_camera_and_checker(&config.cameras.rgb)?;
+                                    let cap =
+                                        wait_for_capture(&mut cam, &mut checker, false, |_| {})?;
                                     Ok((cap.bytes, cap.width, cap.height))
                                 },
                             )
@@ -313,6 +314,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         Err(e) => (format!("✗ DBus error: {}", e), Vec::new()),
                                     }
                                 }
+                                Ok(Err(e)) => (format!("✗ {}", e), Vec::new()),
                                 _ => ("✗ Capture failed".to_string(), Vec::new()),
                             };
 

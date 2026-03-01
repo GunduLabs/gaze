@@ -1,7 +1,7 @@
 use crate::camera_view::{CameraFeed, CaptureStatusInfo, build_camera_widget};
+use gaze_core::capture_session::{CaptureMode, CaptureSession, CaptureState};
 use gaze_core::config::Config;
 use gaze_core::dbus::AuthProxy;
-use gaze_core::capture_session::{CaptureMode, CaptureState, CaptureSession};
 use gaze_core::face::FaceChecker;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -259,14 +259,22 @@ pub fn show_capture_dialog(
                             match state {
                                 CaptureState::Prompting { hint, .. } => {
                                     let is_active = session.borrow().is_active();
-                                    
+
                                     status_label.set_visible(false);
 
                                     let (status_info, is_centered) = match hint {
-                                        gaze_core::capture_session::CaptureHint::FaceClipped => (CaptureStatusInfo::Clipped, false),
-                                        gaze_core::capture_session::CaptureHint::NoFace => (CaptureStatusInfo::NoFace, false),
-                                        gaze_core::capture_session::CaptureHint::NotCentered => (CaptureStatusInfo::NotCentered, false),
-                                        gaze_core::capture_session::CaptureHint::CenteredReady => (CaptureStatusInfo::Centered, true),
+                                        gaze_core::capture_session::CaptureHint::FaceClipped => {
+                                            (CaptureStatusInfo::Clipped, false)
+                                        }
+                                        gaze_core::capture_session::CaptureHint::NoFace => {
+                                            (CaptureStatusInfo::NoFace, false)
+                                        }
+                                        gaze_core::capture_session::CaptureHint::NotCentered => {
+                                            (CaptureStatusInfo::NotCentered, false)
+                                        }
+                                        gaze_core::capture_session::CaptureHint::CenteredReady => {
+                                            (CaptureStatusInfo::Centered, true)
+                                        }
                                     };
 
                                     feed.set_status(status_info);

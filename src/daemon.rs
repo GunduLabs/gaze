@@ -9,10 +9,10 @@ use zbus::{fdo, interface};
 use crate::align::align_face;
 use crate::recognize::FaceRecognizer;
 use crate::users::UserDatabase;
-use gaze_core::face::{CaptureStatus, FaceChecker};
+use gaze_core::detect::{DetectError, FaceDetector};
 
 pub struct AuthDaemon {
-    pub checker: Arc<Mutex<FaceChecker>>,
+    pub detector: Arc<Mutex<FaceDetector>>,
     pub recognizer: Arc<Mutex<FaceRecognizer>>,
     pub db: Arc<Mutex<UserDatabase>>,
     pub threshold: f32,
@@ -43,26 +43,27 @@ impl AuthDaemon {
     }
 
     fn process_frame(
-        checker: &mut FaceChecker,
+        detector: &mut FaceDetector,
         recognizer: &mut FaceRecognizer,
         frame: &Mat,
     ) -> Result<Array1<f32>, fdo::Error> {
-        let validated = checker
-            .validate(frame)
-            .map_err(|e| fdo::Error::Failed(format!("Detection failed: {e}")))?;
-
-        let face = match validated {
-            Ok(face) => face,
-            Err(CaptureStatus::NoFace) => {
-                return Err(fdo::Error::Failed("RETRYABLE: no faces detected".into()));
+        let (bboxes, kpss, mat_rgb) = match detector.detect(frame) {
+            Ok(result) => result,
+            Err(DetectError::NoFacesDetected) => {
+                return Err(fdo::Error::Failed("No faces detected".into()));
             }
-            Err(CaptureStatus::Clipped) => {
-                return Err(fdo::Error::Failed("RETRYABLE: face clipped".into()));
-            }
-            Err(_) => return Err(fdo::Error::Failed("RETRYABLE: face not ready".into())),
+            Err(err) => return Err(fdo::Error::Failed(format!("Detection failed: {err}"))),
         };
 
-        let aligned = align_face(&face.mat_rgb, &face.kpss)
+        if bboxes.nrows() == 0 {
+            return Err(fdo::Error::Failed("No faces detected".into()));
+        }
+
+        let Some(kpss) = kpss else {
+            return Err(fdo::Error::Failed("No keypoints detected".into()));
+        };
+
+        let aligned = align_face(&mat_rgb, &kpss)
             .map_err(|e| fdo::Error::Failed(format!("Alignment failed: {e}")))?;
 
         recognizer
@@ -76,9 +77,9 @@ impl AuthDaemon {
         height: u32,
     ) -> fdo::Result<Array1<f32>> {
         let frame = Self::bytes_to_mat(image_data, width, height)?;
-        let mut chk = self.checker.lock().await;
+        let mut detector = self.detector.lock().await;
         let mut rec = self.recognizer.lock().await;
-        Self::process_frame(&mut chk, &mut rec, &frame)
+        Self::process_frame(&mut detector, &mut rec, &frame)
     }
 }
 

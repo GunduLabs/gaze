@@ -82,7 +82,6 @@ pub struct CaptureSession {
     checker: FaceChecker,
     current_step: usize,
     centered_start: Option<Instant>,
-    require_centering: bool,
     countdown_duration: Duration,
     mode: CaptureMode,
     is_active: bool,
@@ -95,7 +94,6 @@ impl CaptureSession {
             checker,
             current_step: 0,
             centered_start: None,
-            require_centering: true,
             countdown_duration: Duration::from_secs(3),
             mode: CaptureMode::Guided,
             is_active: false,
@@ -128,7 +126,7 @@ impl CaptureSession {
     }
 
     pub fn process_frame(&mut self, frame: &Mat) -> anyhow::Result<CaptureState> {
-        let capture_status = self.checker.check(frame, self.require_centering)?;
+        let capture_status = self.checker.capture_status(frame)?;
 
         if self.is_active && self.current_step >= CAPTURE_PROMPTS.len() {
             return Ok(CaptureState::Complete);
@@ -147,8 +145,8 @@ impl CaptureSession {
         };
 
         let hint = match capture_status {
-            CaptureStatus::NotCentered => CaptureHint::NotCentered,
-            CaptureStatus::Clipped => CaptureHint::FaceClipped,
+            CaptureStatus::NotCentered(_) => CaptureHint::NotCentered,
+            CaptureStatus::Clipped(_) => CaptureHint::FaceClipped,
             CaptureStatus::NoFace => CaptureHint::NoFace,
             CaptureStatus::Ready(_) => CaptureHint::CenteredReady,
         };

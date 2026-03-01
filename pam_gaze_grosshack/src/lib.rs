@@ -1,9 +1,10 @@
 #![allow(clippy::missing_safety_doc)]
-use gaze_core::capture::frame_to_bytes;
+use gaze_core::capture::{init_camera_and_checker, wait_for_capture_until};
 use pam_gaze_core::*;
 use parking_lot::Mutex;
 use std::ffi::CString;
-use std::os::raw::{c_char, c_int, c_void};
+use std::os::raw::c_void;
+use std::os::raw::{c_char, c_int};
 use std::sync::Arc;
 use std::thread;
 
@@ -12,16 +13,36 @@ struct AuthState {
     finished: bool,
 }
 
+fn wait_for_password_and_fallback(pamh: PamHandle, state: &Arc<Mutex<AuthState>>) -> c_int {
+    loop {
+        let shared_state = state.lock();
+        if shared_state.finished {
+            if let Some(ref pw) = shared_state.password {
+                let pw_cstr = CString::new(pw.as_str()).unwrap();
+                unsafe {
+                    pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);
+                }
+                return PAM_AUTHINFO_UNAVAIL;
+            }
+            return PAM_AUTH_ERR;
+        }
+        drop(shared_state);
+        thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     let username = match unsafe { get_username(pamh) } {
         Some(u) => u,
         None => return PAM_AUTH_ERR,
     };
 
-    let env = setup_auth_env();
-    if env.is_ok() {
-        unsafe { say(pamh, "Please look at the camera or enter password") };
-    }
+    let Ok((config, _, proxy)) = setup_auth_env() else {
+        return PAM_AUTHINFO_UNAVAIL;
+    };
+    let is_polkit = unsafe { is_polkit_service(pamh) };
+
+    unsafe { say(pamh, "Please look at the camera or enter password") };
 
     let state = Arc::new(Mutex::new(AuthState {
         password: None,
@@ -40,64 +61,34 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         }
     });
 
-    if let Ok((_, mut cam, proxy)) = env {
-        for _ in 0..MAX_ATTEMPTS {
-            {
-                let shared_state = state.lock();
-                if shared_state.finished {
-                    if let Some(ref pw) = shared_state.password {
-                        let pw_cstr = CString::new(pw.as_str()).unwrap();
-                        unsafe {
-                            pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);
-                        }
-                        return PAM_AUTHINFO_UNAVAIL;
-                    }
-                    return PAM_AUTH_ERR;
-                }
-            }
+    let Ok((mut cam, mut checker)) = init_camera_and_checker(&config.cameras.rgb) else {
+        return PAM_SERVICE_ERR;
+    };
 
-            let frame = match cam.capture_frame() {
-                Ok(f) => f,
-                Err(_) => {
-                    thread::sleep(std::time::Duration::from_millis(100));
-                    continue;
-                }
-            };
-            let capture = match frame_to_bytes(&frame) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-
-            match proxy.verify(&username, &capture.bytes, capture.width, capture.height) {
-                Ok(true) => {
-                    drop(cam);
-                    unblock_terminal();
-                    return PAM_SUCCESS;
-                }
-                Ok(false) => {}
-                Err(ref err) if is_retryable(err) => continue,
-                Err(_) => break,
+    let capture = match wait_for_capture_until(
+        &mut cam,
+        &mut checker,
+        false,
+        |status| {
+            if is_polkit {
+                unsafe { say(pamh, &status.to_string()) };
             }
-            thread::sleep(std::time::Duration::from_millis(50));
+        },
+        || state.lock().finished,
+    ) {
+        Ok(Some(capture)) => capture,
+        Ok(None) => return wait_for_password_and_fallback(pamh, &state),
+        Err(_) => return PAM_SERVICE_ERR,
+    };
+
+    match proxy.verify(&username, &capture.bytes, capture.width, capture.height) {
+        Ok(true) => {
+            drop(cam);
+            unblock_terminal();
+            PAM_SUCCESS
         }
-        drop(cam);
-    }
-
-    loop {
-        {
-            let shared_state = state.lock();
-            if shared_state.finished {
-                if let Some(ref pw) = shared_state.password {
-                    let pw_cstr = CString::new(pw.as_str()).unwrap();
-                    unsafe {
-                        pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);
-                    }
-                    return PAM_AUTHINFO_UNAVAIL;
-                }
-                return PAM_AUTH_ERR;
-            }
-        }
-        thread::sleep(std::time::Duration::from_millis(50));
+        Ok(false) => wait_for_password_and_fallback(pamh, &state),
+        Err(_) => wait_for_password_and_fallback(pamh, &state),
     }
 }
 

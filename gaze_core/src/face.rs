@@ -8,33 +8,36 @@ pub struct CaptureResult {
     pub bytes: Vec<u8>,
     pub width: u32,
     pub height: u32,
+    pub bbox: Option<(f32, f32, f32, f32)>,
 }
 
-pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<CaptureResult> {
+pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
     let sz = frame.size()?;
     let total = (sz.width * sz.height * 3) as usize;
     let mut bytes = vec![0u8; total];
     unsafe {
         std::ptr::copy_nonoverlapping(frame.data(), bytes.as_mut_ptr(), total);
     }
-    Ok(CaptureResult {
-        bytes,
-        width: sz.width as u32,
-        height: sz.height as u32,
-    })
+    Ok(bytes)
 }
 
 pub enum CaptureStatus {
     NoFace,
-    NotCentered,
-    Clipped,
+    NotCentered(CaptureResult),
+    Clipped(CaptureResult),
     Ready(CaptureResult),
 }
 
-pub struct ValidatedFace {
-    pub kpss: ndarray::Array3<f32>,
-    pub mat_rgb: Mat,
-    pub bbox: (f32, f32, f32, f32),
+impl std::fmt::Display for CaptureStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
+            CaptureStatus::NoFace => "No face detected. Look at the camera.",
+            CaptureStatus::NotCentered(_) => "Face detected. Center your face.",
+            CaptureStatus::Clipped(_) => "Face is clipped. Move fully into frame.",
+            CaptureStatus::Ready(_) => "Face ready.",
+        };
+        write!(f, "{}", text)
+    }
 }
 
 pub struct FaceChecker {
@@ -61,18 +64,28 @@ impl FaceChecker {
         Self { detector }
     }
 
-    pub fn validate(
-        &mut self,
+    fn build_capture_result(
         frame: &Mat,
-    ) -> anyhow::Result<Result<ValidatedFace, CaptureStatus>> {
-        let (bboxes, kpss, mat_rgb) = match self.detector.detect(frame) {
+        bbox: Option<(f32, f32, f32, f32)>,
+    ) -> anyhow::Result<CaptureResult> {
+        let sz = frame.size()?;
+        Ok(CaptureResult {
+            bytes: frame_to_bytes(frame)?,
+            width: sz.width as u32,
+            height: sz.height as u32,
+            bbox,
+        })
+    }
+
+    pub fn capture_status(&mut self, frame: &Mat) -> anyhow::Result<CaptureStatus> {
+        let (bboxes, kpss, _) = match self.detector.detect(frame) {
             Ok(result) => result,
-            Err(DetectError::NoFacesDetected) => return Ok(Err(CaptureStatus::NoFace)),
+            Err(DetectError::NoFacesDetected) => return Ok(CaptureStatus::NoFace),
             Err(err) => return Err(err.into()),
         };
 
         if bboxes.nrows() == 0 {
-            return Ok(Err(CaptureStatus::NoFace));
+            return Ok(CaptureStatus::NoFace);
         }
 
         let face = bboxes.row(0);
@@ -91,43 +104,34 @@ impl FaceChecker {
             || x2 / max_dim > (1.0 - edge_margin)
             || y2 / max_dim > (1.0 - edge_margin)
         {
-            return Ok(Err(CaptureStatus::Clipped));
+            return Ok(CaptureStatus::Clipped(Self::build_capture_result(
+                frame,
+                Some((x1, y1, x2, y2)),
+            )?));
         }
 
-        let kpss = match kpss {
-            Some(k) => k,
-            None => return Ok(Err(CaptureStatus::NoFace)),
-        };
-
-        Ok(Ok(ValidatedFace {
-            kpss,
-            mat_rgb,
-            bbox: (x1, y1, x2, y2),
-        }))
-    }
-
-    pub fn check(&mut self, frame: &Mat, require_centering: bool) -> anyhow::Result<CaptureStatus> {
-        let validated = match self.validate(frame)? {
-            Err(status) => return Ok(status),
-            Ok(v) => v,
-        };
-
-        if require_centering {
-            let (x1, y1, x2, y2) = validated.bbox;
-            let width = x2 - x1;
-            let height = y2 - y1;
-            let cx = x1 + width / 2.0;
-            let cy = y1 + height / 2.0;
-
-            let max_dim = (frame.cols() as f32).max(frame.rows() as f32);
-            let norm_cx = cx / max_dim;
-            let norm_cy = cy / max_dim;
-
-            if (norm_cx - 0.5).abs() >= 0.2 || (norm_cy - 0.5).abs() >= 0.2 {
-                return Ok(CaptureStatus::NotCentered);
-            }
+        if kpss.is_none() {
+            return Ok(CaptureStatus::NoFace);
         }
 
-        Ok(CaptureStatus::Ready(frame_to_bytes(frame)?))
+        let width = x2 - x1;
+        let height = y2 - y1;
+        let cx = x1 + width / 2.0;
+        let cy = y1 + height / 2.0;
+
+        let norm_cx = cx / max_dim;
+        let norm_cy = cy / max_dim;
+
+        if (norm_cx - 0.5).abs() >= 0.2 || (norm_cy - 0.5).abs() >= 0.2 {
+            return Ok(CaptureStatus::NotCentered(Self::build_capture_result(
+                frame,
+                Some((x1, y1, x2, y2)),
+            )?));
+        }
+
+        Ok(CaptureStatus::Ready(Self::build_capture_result(
+            frame,
+            Some((x1, y1, x2, y2)),
+        )?))
     }
 }

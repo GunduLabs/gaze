@@ -13,6 +13,12 @@ const GENERIC_ERROR_MAP = new Map([
         'You reached the maximum face authentication attempts, please try another method'],
 ]);
 
+const FACE_STATUS_UPDATES = new Set([
+    'No face detected. Look at the camera.',
+    'Face is clipped. Move fully into frame.',
+    'Face detected. Center your face.',
+]);
+
 export default class GazeFaceAuthExtension extends Extension {
     enable() {
         this._injectionManager = new InjectionManager();
@@ -86,6 +92,16 @@ export default class GazeFaceAuthExtension extends Extension {
         this._injectionManager.overrideMethod(proto, '_onInfo',
             original => {
                 return function (client, serviceName, info) {
+                    if (this.serviceIsFace(serviceName)) {
+                        const text = info?.trim();
+                        if (!text || !FACE_STATUS_UPDATES.has(text))
+                            return;
+
+                        this._filterServiceMessages(serviceName, Util.MessageType.HINT);
+                        this._queueMessage(serviceName, text, Util.MessageType.HINT);
+                        return;
+                    }
+
                     if (this.serviceIsBiometric(serviceName)) {
                         return;
                     }

@@ -1,5 +1,5 @@
 #![allow(clippy::missing_safety_doc)]
-use gaze_core::capture::frame_to_bytes;
+use gaze_core::capture::{init_camera_and_checker, wait_for_capture};
 use pam_gaze_core::*;
 use std::os::raw::{c_char, c_int};
 
@@ -8,30 +8,36 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         return PAM_AUTH_ERR;
     };
 
-    let Ok((_, mut cam, proxy)) = setup_auth_env() else {
+    let Ok((config, _, proxy)) = setup_auth_env() else {
         unsafe { say(pamh, "Face authentication unavailable") };
         return PAM_AUTHINFO_UNAVAIL;
+    };
+    let Ok((mut cam, mut checker)) = init_camera_and_checker(&config.cameras.rgb) else {
+        return PAM_SERVICE_ERR;
     };
 
     unsafe { say(pamh, "Please look at the camera") };
 
-    for _ in 0..MAX_ATTEMPTS {
-        let Ok(frame) = cam.capture_frame() else {
-            continue;
-        };
-        let Ok(capture) = frame_to_bytes(&frame) else {
-            continue;
-        };
+    let mut last_hint: Option<String> = None;
 
-        match proxy.verify(&username, &capture.bytes, capture.width, capture.height) {
-            Ok(true) => return PAM_SUCCESS,
-            Ok(false) => {}
-            Err(ref err) if is_retryable(err) => continue,
-            Err(_) => return PAM_SERVICE_ERR,
-        }
+    let capture = {
+        let Ok(capture) = wait_for_capture(&mut cam, &mut checker, false, |status| {
+            let hint = status.to_string();
+            if last_hint.as_deref() != Some(hint.as_str()) {
+                unsafe { say(pamh, &hint) };
+                last_hint = Some(hint);
+            }
+        }) else {
+            return PAM_SERVICE_ERR;
+        };
+        capture
+    };
+
+    match proxy.verify(&username, &capture.bytes, capture.width, capture.height) {
+        Ok(true) => PAM_SUCCESS,
+        Ok(false) => PAM_AUTH_ERR,
+        Err(_) => PAM_SERVICE_ERR,
     }
-
-    PAM_AUTH_ERR
 }
 
 #[unsafe(no_mangle)]

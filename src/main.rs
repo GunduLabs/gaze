@@ -44,7 +44,6 @@ async fn main() -> anyhow::Result<()> {
 
     let detector = gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap())
         .expect("Failed to load detection model");
-    let checker = gaze_core::face::FaceChecker::from_detector(detector);
 
     let recognizer = recognize::FaceRecognizer::new(rec_path.to_str().unwrap())
         .expect("Failed to load recognition model");
@@ -52,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
     let db = users::UserDatabase::new(&config.storage.users_dir)?;
 
     let daemon = AuthDaemon {
-        checker: Arc::new(Mutex::new(checker)),
+        detector: Arc::new(Mutex::new(detector)),
         recognizer: Arc::new(Mutex::new(recognizer)),
         db: Arc::new(Mutex::new(db)),
         threshold: security.threshold(),

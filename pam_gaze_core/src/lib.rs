@@ -12,6 +12,7 @@ pub const PAM_SUCCESS: c_int = 0;
 pub const PAM_AUTH_ERR: c_int = 7;
 pub const PAM_SERVICE_ERR: c_int = 3;
 pub const PAM_CONV: c_int = 5;
+pub const PAM_SERVICE: c_int = 1;
 pub const PAM_AUTHTOK: c_int = 6;
 pub const PAM_TEXT_INFO: c_int = 4;
 pub const PAM_PROMPT_ECHO_OFF: c_int = 1;
@@ -115,4 +116,17 @@ pub fn setup_auth_env() -> Result<(Config, Camera, AuthProxyBlocking<'static>), 
     let conn = Connection::system().map_err(|_| PAM_SERVICE_ERR)?;
     let proxy = AuthProxyBlocking::new(&conn).map_err(|_| PAM_SERVICE_ERR)?;
     Ok((config, cam, proxy))
+}
+
+pub unsafe fn is_polkit_service(pamh: PamHandle) -> bool {
+    let mut item: *const c_void = ptr::null();
+    if unsafe { pam_get_item(pamh, PAM_SERVICE, &mut item) } != PAM_SUCCESS || item.is_null() {
+        return false;
+    }
+
+    let Ok(service_name) = unsafe { CStr::from_ptr(item as *const c_char) }.to_str() else {
+        return false;
+    };
+
+    service_name.to_ascii_lowercase().contains("polkit")
 }
