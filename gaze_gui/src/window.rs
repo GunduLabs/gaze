@@ -1,7 +1,7 @@
 use crate::capture_dialog;
 use gaze_core::capture::{init_camera_and_checker, wait_for_capture};
 use gaze_core::config::Config;
-use gaze_core::dbus::AuthProxy;
+use gaze_core::dbus::{AuthProxy, dbus_error_message, dbus_is_file_not_found};
 use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
@@ -11,6 +11,14 @@ use std::rc::Rc;
 use zbus::Connection;
 
 type RefreshCb = Rc<dyn Fn()>;
+
+fn format_dbus_error(err: &zbus::Error) -> String {
+    dbus_error_message(err)
+}
+
+fn is_file_not_found_error(err: &zbus::Error) -> bool {
+    dbus_is_file_not_found(err)
+}
 
 pub fn build_window(app: &libadwaita::Application, username: &str) {
     let username = Rc::new(username.to_string());
@@ -137,7 +145,26 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         #[strong]
                         proxy,
                         async move {
-                            let faces = proxy.list_faces(&username).await.unwrap_or_default();
+                            let faces = match proxy.list_faces(&username).await {
+                                Ok(faces) => faces,
+                                Err(err) => {
+                                    if is_file_not_found_error(&err) {
+                                        Vec::new()
+                                    } else {
+                                        let toast = libadwaita::Toast::new(&format!(
+                                            "Failed to load faces: {}",
+                                            format_dbus_error(&err)
+                                        ));
+                                        if let Some(overlay) = window
+                                            .content()
+                                            .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+                                        {
+                                            overlay.add_toast(toast);
+                                        }
+                                        Vec::new()
+                                    }
+                                }
+                            };
 
                             while let Some(child) = face_list.first_child() {
                                 face_list.remove(&child);
@@ -152,6 +179,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 status_page.set_visible(false);
                                 face_list.set_visible(true);
 
+                                let existing_face_names: Rc<std::collections::HashSet<String>> =
+                                    Rc::new(faces.iter().map(|(name, _)| name.clone()).collect());
+
                                 for (face_name, count) in faces {
                                     let row = libadwaita::ActionRow::new();
                                     row.set_title(&face_name);
@@ -164,6 +194,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                     let btn_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
                                     btn_box.set_valign(gtk4::Align::Center);
 
+                                    let rename_btn =
+                                        gtk4::Button::from_icon_name("document-edit-symbolic");
+                                    rename_btn.add_css_class("flat");
                                     let refine_btn =
                                         gtk4::Button::from_icon_name("view-refresh-symbolic");
                                     refine_btn.add_css_class("flat");
@@ -171,9 +204,158 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         gtk4::Button::from_icon_name("user-trash-symbolic");
                                     delete_btn.add_css_class("flat");
 
+                                    btn_box.append(&rename_btn);
                                     btn_box.append(&refine_btn);
                                     btn_box.append(&delete_btn);
                                     row.add_suffix(&btn_box);
+
+                                    rename_btn.connect_clicked(glib::clone!(
+                                        #[weak]
+                                        rename_btn,
+                                        #[weak]
+                                        window,
+                                        #[strong]
+                                        username,
+                                        #[strong]
+                                        face_name,
+                                        #[strong]
+                                        refresh,
+                                        #[strong]
+                                        existing_face_names,
+                                        #[strong]
+                                        proxy,
+                                        move |_| {
+                                            let popover = gtk4::Popover::new();
+                                            popover.set_has_arrow(true);
+                                            popover.set_autohide(true);
+                                            popover.set_parent(&rename_btn);
+
+                                            let body = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+                                            body.set_margin_start(10);
+                                            body.set_margin_end(10);
+                                            body.set_margin_top(10);
+                                            body.set_margin_bottom(10);
+
+                                            let entry = gtk4::Entry::new();
+                                            entry.set_placeholder_text(Some("New face name"));
+                                            entry.set_text(&face_name);
+                                            body.append(&entry);
+
+                                            let button_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+                                            button_row.set_halign(gtk4::Align::End);
+
+                                            let cancel_btn = gtk4::Button::with_label("Cancel");
+                                            let rename_confirm_btn = gtk4::Button::with_label("Rename");
+                                            rename_confirm_btn.add_css_class("suggested-action");
+                                            rename_confirm_btn.set_sensitive(false);
+
+                                            button_row.append(&cancel_btn);
+                                            button_row.append(&rename_confirm_btn);
+                                            body.append(&button_row);
+
+                                            popover.set_child(Some(&body));
+
+                                            entry.connect_changed(glib::clone!(
+                                                #[weak]
+                                                rename_confirm_btn,
+                                                #[strong]
+                                                face_name,
+                                                #[strong]
+                                                existing_face_names,
+                                                move |e| {
+                                                    let new_name = e.text().trim().to_string();
+                                                    let valid = !new_name.is_empty()
+                                                        && new_name != face_name
+                                                        && !existing_face_names.contains(&new_name);
+                                                    rename_confirm_btn.set_sensitive(valid);
+                                                }
+                                            ));
+
+                                            cancel_btn.connect_clicked(glib::clone!(
+                                                #[weak]
+                                                popover,
+                                                move |_| {
+                                                    popover.popdown();
+                                                }
+                                            ));
+
+                                            rename_confirm_btn.connect_clicked(glib::clone!(
+                                                #[weak]
+                                                window,
+                                                #[weak]
+                                                popover,
+                                                #[strong]
+                                                username,
+                                                #[strong]
+                                                face_name,
+                                                #[strong]
+                                                refresh,
+                                                #[strong]
+                                                proxy,
+                                                move |_| {
+                                                    let new_name = entry.text().trim().to_string();
+                                                    if new_name.is_empty() || new_name == face_name {
+                                                        popover.popdown();
+                                                        return;
+                                                    }
+
+                                                    glib::MainContext::default().spawn_local(glib::clone!(
+                                                        #[weak]
+                                                        window,
+                                                        #[strong]
+                                                        username,
+                                                        #[strong]
+                                                        face_name,
+                                                        #[strong]
+                                                        new_name,
+                                                        #[strong]
+                                                        refresh,
+                                                        #[strong]
+                                                        proxy,
+                                                        async move {
+                                                            if let Err(err) = proxy.rename_face(
+                                                                &username,
+                                                                &face_name,
+                                                                &new_name,
+                                                            ).await {
+                                                                let toast = libadwaita::Toast::new(&format!(
+                                                                    "Failed to rename face: {}",
+                                                                    format_dbus_error(&err)
+                                                                ));
+                                                                if let Some(overlay) = window
+                                                                    .content()
+                                                                    .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+                                                                {
+                                                                    overlay.add_toast(toast);
+                                                                }
+                                                            } else {
+                                                                if let Some(f) = refresh.borrow().as_ref() {
+                                                                    f();
+                                                                }
+
+                                                                let text = format!(
+                                                                    "Renamed '{}' to '{}'",
+                                                                    face_name,
+                                                                    new_name
+                                                                );
+                                                                let toast = libadwaita::Toast::new(&text);
+                                                                if let Some(overlay) = window
+                                                                    .content()
+                                                                    .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+                                                                {
+                                                                    overlay.add_toast(toast);
+                                                                }
+                                                            }
+                                                        }
+                                                    ));
+
+                                                    popover.popdown();
+                                                }
+                                            ));
+
+                                            popover.popup();
+                                        }
+                                    ));
 
                                     refine_btn.connect_clicked(glib::clone!(
                                         #[weak]
@@ -206,6 +388,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                     ));
 
                                     delete_btn.connect_clicked(glib::clone!(
+                                        #[weak]
+                                        window,
                                         #[strong]
                                         username,
                                         #[strong]
@@ -216,6 +400,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         proxy,
                                         move |_| {
                                             glib::MainContext::default().spawn_local(glib::clone!(
+                                                #[weak]
+                                                window,
                                                 #[strong]
                                                 username,
                                                 #[strong]
@@ -225,9 +411,21 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                 #[strong]
                                                 proxy,
                                                 async move {
-                                                    let _ = proxy
+                                                    if let Err(err) = proxy
                                                         .remove_face(&username, &face_name)
-                                                        .await;
+                                                        .await
+                                                    {
+                                                        let toast = libadwaita::Toast::new(&format!(
+                                                            "Failed to remove face: {}",
+                                                            format_dbus_error(&err)
+                                                        ));
+                                                        if let Some(overlay) = window
+                                                            .content()
+                                                            .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+                                                        {
+                                                            overlay.add_toast(toast);
+                                                        }
+                                                    }
                                                     if let Some(f) = refresh.borrow().as_ref() {
                                                         f();
                                                     }
@@ -311,7 +509,13 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                 )
                                             }
                                         }
-                                        Err(e) => (format!("✗ DBus error: {}", e), Vec::new()),
+                                        Err(e) => (
+                                            format!(
+                                                "✗ DBus error: {}",
+                                                format_dbus_error(&e)
+                                            ),
+                                            Vec::new(),
+                                        ),
                                     }
                                 }
                                 Ok(Err(e)) => (format!("✗ {}", e), Vec::new()),

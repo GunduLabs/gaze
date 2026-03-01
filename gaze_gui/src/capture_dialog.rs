@@ -7,6 +7,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 use tracing::error;
 
@@ -58,6 +59,11 @@ pub fn show_capture_dialog(
     body.set_margin_bottom(16);
 
     let resolved_face = Rc::new(RefCell::new(face_name.unwrap_or("default").to_string()));
+    let existing_face_names = Rc::new(RefCell::new(HashSet::<String>::new()));
+    let centered_ready = Rc::new(RefCell::new(false));
+    let face_name_valid = Rc::new(RefCell::new(is_refine));
+    let mut face_name_entry: Option<libadwaita::EntryRow> = None;
+
     if !is_refine {
         let entry = libadwaita::EntryRow::new();
         entry.set_title("Face Name");
@@ -65,9 +71,12 @@ pub fn show_capture_dialog(
         let group = libadwaita::PreferencesGroup::new();
         group.add(&entry);
         body.append(&group);
+        face_name_entry = Some(entry.clone());
+
         let rf = resolved_face.clone();
         entry.connect_changed(move |e| {
-            *rf.borrow_mut() = e.text().to_string();
+            let name = e.text().trim().to_string();
+            *rf.borrow_mut() = name.clone();
         });
     }
 
@@ -105,6 +114,19 @@ pub fn show_capture_dialog(
     start_btn.set_sensitive(false);
     body.append(&start_btn);
 
+    if let Some(entry) = face_name_entry {
+        let start_btn_for_validation = start_btn.clone();
+        let existing_face_names = existing_face_names.clone();
+        let centered_ready = centered_ready.clone();
+        let face_name_valid = face_name_valid.clone();
+        entry.connect_changed(move |e| {
+            let name = e.text().trim().to_string();
+            let valid = !name.is_empty() && !existing_face_names.borrow().contains(&name);
+            *face_name_valid.borrow_mut() = valid;
+            start_btn_for_validation.set_sensitive(*centered_ready.borrow() && valid);
+        });
+    }
+
     let stop_btn = gtk4::Button::with_label("Cancel");
     stop_btn.add_css_class("destructive-action");
     stop_btn.add_css_class("pill");
@@ -117,6 +139,38 @@ pub fn show_capture_dialog(
 
     let current_step = Rc::new(RefCell::new(0usize));
     let username = username.to_string();
+
+    if !is_refine {
+        glib::MainContext::default().spawn_local(glib::clone!(
+            #[weak]
+            start_btn,
+            #[strong]
+            proxy,
+            #[strong]
+            username,
+            #[strong]
+            resolved_face,
+            #[strong]
+            existing_face_names,
+            #[strong]
+            centered_ready,
+            #[strong]
+            face_name_valid,
+            async move {
+                if let Ok(faces) = proxy.list_faces(&username).await {
+                    let mut names = existing_face_names.borrow_mut();
+                    names.clear();
+                    names.extend(faces.into_iter().map(|(name, _)| name));
+                }
+
+                let current_name = resolved_face.borrow().trim().to_string();
+                let valid = !current_name.is_empty()
+                    && !existing_face_names.borrow().contains(&current_name);
+                *face_name_valid.borrow_mut() = valid;
+                start_btn.set_sensitive(*centered_ready.borrow() && valid);
+            }
+        ));
+    }
 
     let Ok(checker) = FaceChecker::new() else {
         error!("FaceChecker init failed");
@@ -280,7 +334,10 @@ pub fn show_capture_dialog(
                                     feed.set_status(status_info);
 
                                     if !is_active {
-                                        start_btn.set_sensitive(is_centered);
+                                        *centered_ready.borrow_mut() = is_centered;
+                                        start_btn.set_sensitive(
+                                            is_centered && *face_name_valid.borrow(),
+                                        );
                                     }
                                 }
                                 CaptureState::Countdown {

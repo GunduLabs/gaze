@@ -10,7 +10,7 @@ use std::thread;
 use std::time::Duration;
 use zbus::Connection;
 
-use gaze_core::dbus::AuthProxy;
+use gaze_core::dbus::{AuthProxy, dbus_error_message, dbus_is_file_not_found};
 
 async fn run_capture_session(
     proxy: &AuthProxy<'_>,
@@ -210,6 +210,15 @@ enum Commands {
         #[arg(help = "The name of the face to remove")]
         face: String,
     },
+    /// Rename a face for a user
+    RenameFace {
+        #[arg(short, long)]
+        user: Option<String>,
+        #[arg(help = "Current face name")]
+        from: String,
+        #[arg(help = "New face name")]
+        to: String,
+    },
     /// Remove all data for a user
     ClearUser {
         #[arg(short, long)]
@@ -350,7 +359,11 @@ async fn main() -> anyhow::Result<()> {
                 }
                 Err(err) => {
                     pb.finish_and_clear();
-                    return Err(err.into());
+                    term.write_line(&format!(
+                        "{} Authentication error: {}",
+                        style("✗").red().bold(),
+                        dbus_error_message(&err)
+                    ))?;
                 }
             }
         }
@@ -411,11 +424,19 @@ async fn main() -> anyhow::Result<()> {
                 }
                 Err(e) => {
                     pb.finish_and_clear();
-                    term.write_line(&format!(
-                        "{} Failed to fetch faces: {}",
-                        style("✗").red().bold(),
-                        e
-                    ))?;
+                    if dbus_is_file_not_found(&e) {
+                        term.write_line(&format!(
+                            "{} No faces found for {}",
+                            style("i").cyan().bold(),
+                            style(&user).bold()
+                        ))?;
+                    } else {
+                        term.write_line(&format!(
+                            "{} Failed to fetch faces: {}",
+                            style("✗").red().bold(),
+                            dbus_error_message(&e)
+                        ))?;
+                    }
                 }
             }
         }
@@ -431,7 +452,18 @@ async fn main() -> anyhow::Result<()> {
             pb.set_prefix("Removing");
             pb.set_message(format!("Deleting face {}...", style(&face).red().bold()));
 
-            let removed = proxy.remove_face(&user, &face).await?;
+            let removed = match proxy.remove_face(&user, &face).await {
+                Ok(value) => value,
+                Err(err) => {
+                    pb.finish_and_clear();
+                    term.write_line(&format!(
+                        "{} Failed to remove face: {}",
+                        style("✗").red().bold(),
+                        dbus_error_message(&err)
+                    ))?;
+                    return Ok(());
+                }
+            };
             pb.finish_and_clear();
             if removed {
                 term.write_line(&format!(
@@ -445,6 +477,52 @@ async fn main() -> anyhow::Result<()> {
                     "{} Face '{}' not found for '{}'",
                     style("!").yellow().bold(),
                     face,
+                    user
+                ))?;
+            }
+        }
+        Commands::RenameFace { user, from, to } => {
+            let user = user.unwrap_or_else(get_current_user);
+            let pb = ProgressBar::new_spinner();
+            let pb_style = ProgressStyle::default_spinner()
+                .template("{spinner:.cyan} {prefix:.bold.blue} {msg}")
+                .unwrap()
+                .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
+            pb.set_style(pb_style);
+            pb.enable_steady_tick(Duration::from_millis(80));
+            pb.set_prefix("Renaming");
+            pb.set_message(format!(
+                "Renaming face {} -> {}...",
+                style(&from).cyan().bold(),
+                style(&to).cyan().bold()
+            ));
+
+            let renamed = match proxy.rename_face(&user, &from, &to).await {
+                Ok(value) => value,
+                Err(err) => {
+                    pb.finish_and_clear();
+                    term.write_line(&format!(
+                        "{} Failed to rename face: {}",
+                        style("✗").red().bold(),
+                        dbus_error_message(&err)
+                    ))?;
+                    return Ok(());
+                }
+            };
+            pb.finish_and_clear();
+            if renamed {
+                term.write_line(&format!(
+                    "{} Face '{}' renamed to '{}' for '{}'",
+                    style("✓").green().bold(),
+                    from,
+                    to,
+                    user
+                ))?;
+            } else {
+                term.write_line(&format!(
+                    "{} Face '{}' not found for '{}'",
+                    style("!").yellow().bold(),
+                    from,
                     user
                 ))?;
             }
@@ -464,7 +542,18 @@ async fn main() -> anyhow::Result<()> {
                 style(&user).red().bold()
             ));
 
-            let cleared = proxy.clear_user(&user).await?;
+            let cleared = match proxy.clear_user(&user).await {
+                Ok(value) => value,
+                Err(err) => {
+                    pb.finish_and_clear();
+                    term.write_line(&format!(
+                        "{} Failed to clear user: {}",
+                        style("✗").red().bold(),
+                        dbus_error_message(&err)
+                    ))?;
+                    return Ok(());
+                }
+            };
             pb.finish_and_clear();
             if cleared {
                 term.write_line(&format!(

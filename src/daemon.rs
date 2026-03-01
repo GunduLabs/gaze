@@ -3,12 +3,12 @@ use opencv::core::{CV_8UC3, Mat};
 use opencv::prelude::*;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, info, warn};
+use tracing::info;
 use zbus::{fdo, interface};
 
 use crate::align::align_face;
 use crate::recognize::FaceRecognizer;
-use crate::users::UserDatabase;
+use crate::users::{UserDatabase, UserDbError};
 use gaze_core::detect::{DetectError, FaceDetector};
 
 pub struct AuthDaemon {
@@ -20,6 +20,15 @@ pub struct AuthDaemon {
 }
 
 impl AuthDaemon {
+    fn map_user_db_error(err: UserDbError) -> fdo::Error {
+        match err {
+            UserDbError::UserNotFound(msg) => fdo::Error::FileNotFound(msg),
+            UserDbError::FaceNotFound(msg) => fdo::Error::FileNotFound(msg),
+            UserDbError::FaceExists(msg) => fdo::Error::FileExists(msg),
+            UserDbError::Io(io_err) => fdo::Error::Failed(io_err.to_string()),
+        }
+    }
+
     fn bytes_to_mat(data: &[u8], width: u32, height: u32) -> Result<Mat, fdo::Error> {
         let expected = (width * height * 3) as usize;
         if data.len() != expected {
@@ -92,13 +101,15 @@ impl AuthDaemon {
         width: u32,
         height: u32,
     ) -> fdo::Result<bool> {
-        debug!(username = %username, width, height, "Verify request");
+        info!(username = %username, width, height, "Verify request");
         let embed = self
             .get_embedding_from_frame(&image_data, width, height)
             .await?;
 
         let db = self.db.lock().await;
-        let result = db.verify(&username, &embed, self.threshold);
+        let result = db
+            .verify_user(&username, &embed, self.threshold)
+            .map_err(Self::map_user_db_error)?;
         info!(username = %username, passed = result, "Verify result");
         Ok(result)
     }
@@ -110,13 +121,15 @@ impl AuthDaemon {
         width: u32,
         height: u32,
     ) -> fdo::Result<Vec<(String, f64, f64, bool, u32)>> {
+        info!(username = %username, width, height, "Match faces request");
         let embed = self
             .get_embedding_from_frame(&image_data, width, height)
             .await?;
 
         let db = self.db.lock().await;
         let results = db
-            .score_all(&username, &embed, self.threshold)
+            .match_faces(&username, &embed, self.threshold)
+            .map_err(Self::map_user_db_error)?
             .into_iter()
             .map(|(name, score, pct, passed, count)| {
                 (name, score as f64, pct as f64, passed, count)
@@ -133,7 +146,10 @@ impl AuthDaemon {
         width: u32,
         height: u32,
     ) -> fdo::Result<String> {
-        debug!(username = %username, face_name = %face_name, "Add face request");
+        info!(username = %username, face_name = %face_name, "Add face request");
+        if face_name.trim().is_empty() {
+            return Err(fdo::Error::InvalidArgs("Face name cannot be empty".into()));
+        }
         let embed = self
             .get_embedding_from_frame(&image_data, width, height)
             .await?;
@@ -141,7 +157,7 @@ impl AuthDaemon {
         let mut db = self.db.lock().await;
         let result = db
             .add_face(&username, &face_name, &embed, self.max_captures)
-            .map_err(|e| fdo::Error::Failed(format!("Failed to save face: {e}")))?;
+            .map_err(Self::map_user_db_error)?;
         info!(username = %username, face_name = %face_name, "Face added");
         Ok(result)
     }
@@ -150,28 +166,40 @@ impl AuthDaemon {
         info!(username = %username, face_name = %face_name, "Remove face request");
         let mut db = self.db.lock().await;
         db.remove_face(&username, &face_name)
-            .map_err(|e| fdo::Error::Failed(format!("Failed to remove face: {e}")))
+            .map_err(Self::map_user_db_error)?;
+        Ok(true)
+    }
+
+    async fn rename_face(
+        &self,
+        username: String,
+        old_face_name: String,
+        new_face_name: String,
+    ) -> fdo::Result<bool> {
+        info!(
+            username = %username,
+            old_face_name = %old_face_name,
+            new_face_name = %new_face_name,
+            "Rename face request"
+        );
+        let mut db = self.db.lock().await;
+        db.rename_face(&username, &old_face_name, &new_face_name)
+            .map_err(Self::map_user_db_error)?;
+
+        Ok(true)
     }
 
     async fn list_faces(&self, username: String) -> fdo::Result<Vec<(String, u32)>> {
+        info!(username = %username, "List faces request");
         let db = self.db.lock().await;
-        let faces = db
-            .users
-            .get(&username)
-            .map(|face_map| {
-                face_map
-                    .iter()
-                    .map(|(name, embeds)| (name.clone(), embeds.len() as u32))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let faces = db.list_faces(&username).map_err(Self::map_user_db_error)?;
         Ok(faces)
     }
 
     async fn clear_user(&self, username: String) -> fdo::Result<bool> {
-        warn!(username = %username, "Clear user request");
+        info!(username = %username, "Clear user request");
         let mut db = self.db.lock().await;
-        db.clear_user(&username)
-            .map_err(|e| fdo::Error::Failed(format!("Failed to clear user: {e}")))
+        db.clear_user(&username).map_err(Self::map_user_db_error)?;
+        Ok(true)
     }
 }

@@ -6,6 +6,33 @@ use std::path::{Path, PathBuf};
 
 type FaceMap = HashMap<String, HashMap<String, Array1<f32>>>;
 
+#[derive(Debug)]
+pub enum UserDbError {
+    UserNotFound(String),
+    FaceNotFound(String),
+    FaceExists(String),
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for UserDbError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UserDbError::UserNotFound(username) => write!(f, "User '{}' not found", username),
+            UserDbError::FaceNotFound(face_name) => write!(f, "Face '{}' not found", face_name),
+            UserDbError::FaceExists(face_name) => write!(f, "Face '{}' already exists", face_name),
+            UserDbError::Io(err) => write!(f, "{}", err),
+        }
+    }
+}
+
+impl std::error::Error for UserDbError {}
+
+impl From<std::io::Error> for UserDbError {
+    fn from(value: std::io::Error) -> Self {
+        UserDbError::Io(value)
+    }
+}
+
 pub struct UserDatabase {
     base_dir: PathBuf,
     pub users: HashMap<String, FaceMap>,
@@ -21,7 +48,7 @@ impl UserDatabase {
         Ok(db)
     }
 
-    fn init_dirs(&self) -> anyhow::Result<()> {
+    fn init_dirs(&self) -> std::io::Result<()> {
         if !self.base_dir.exists() {
             fs::create_dir_all(&self.base_dir)?;
         }
@@ -107,7 +134,7 @@ impl UserDatabase {
         face_name: &str,
         embed: &Array1<f32>,
         max_captures: usize,
-    ) -> anyhow::Result<String> {
+    ) -> Result<String, UserDbError> {
         self.init_dirs()?;
         let face_dir = self.base_dir.join(username).join(face_name);
         if !face_dir.exists() {
@@ -122,7 +149,9 @@ impl UserDatabase {
             .or_default();
 
         while face_map.len() >= max_captures {
-            if let Some(oldest_uuid) = Self::find_oldest_file(&face_dir)? {
+            if let Some(oldest_uuid) = Self::find_oldest_file(&face_dir).map_err(|err| {
+                UserDbError::Io(std::io::Error::other(err.to_string()))
+            })? {
                 let path = face_dir.join(format!("{}.bin", oldest_uuid));
                 if path.exists() {
                     fs::remove_file(&path)?;
@@ -135,7 +164,8 @@ impl UserDatabase {
 
         let uuid = uuid::Uuid::new_v4().to_string();
         let file_path = face_dir.join(format!("{}.bin", uuid));
-        Self::write_embedding(&file_path, embed)?;
+        Self::write_embedding(&file_path, embed)
+            .map_err(|err| UserDbError::Io(std::io::Error::other(err.to_string())))?;
         face_map.insert(uuid.clone(), embed.clone());
 
         Ok(uuid)
@@ -175,18 +205,77 @@ impl UserDatabase {
         Ok(exists)
     }
 
-    pub fn remove_face(&mut self, username: &str, face_name: &str) -> anyhow::Result<bool> {
-        let mut cleared = Self::clear_dir(self.base_dir.join(username).join(face_name))?;
-        if let Some(faces) = self.users.get_mut(username) {
-            cleared |= faces.remove(face_name).is_some();
+    pub fn remove_face(&mut self, username: &str, face_name: &str) -> Result<(), UserDbError> {
+        let Some(faces) = self.users.get_mut(username) else {
+            return Err(UserDbError::UserNotFound(username.to_string()));
+        };
+
+        if faces.remove(face_name).is_none() {
+            return Err(UserDbError::FaceNotFound(face_name.to_string()));
         }
-        Ok(cleared)
+
+        let face_dir = self.base_dir.join(username).join(face_name);
+        if face_dir.exists() {
+            fs::remove_dir_all(face_dir)?;
+        }
+
+        Ok(())
     }
 
-    pub fn clear_user(&mut self, username: &str) -> anyhow::Result<bool> {
-        let mut cleared = Self::clear_dir(self.base_dir.join(username))?;
-        cleared |= self.users.remove(username).is_some();
-        Ok(cleared)
+    pub fn rename_face(
+        &mut self,
+        username: &str,
+        old_face_name: &str,
+        new_face_name: &str,
+    ) -> Result<(), UserDbError> {
+        if old_face_name == new_face_name {
+            return Ok(());
+        }
+
+        let Some(faces) = self.users.get_mut(username) else {
+            return Err(UserDbError::UserNotFound(username.to_string()));
+        };
+
+        let Some(embeddings) = faces.remove(old_face_name) else {
+            return Err(UserDbError::FaceNotFound(old_face_name.to_string()));
+        };
+
+        if faces.contains_key(new_face_name) {
+            faces.insert(old_face_name.to_string(), embeddings);
+            return Err(UserDbError::FaceExists(new_face_name.to_string()));
+        }
+
+        let old_face_dir = self.base_dir.join(username).join(old_face_name);
+        let new_face_dir = self.base_dir.join(username).join(new_face_name);
+
+        if new_face_dir.exists() {
+            faces.insert(old_face_name.to_string(), embeddings);
+            return Err(UserDbError::FaceExists(new_face_name.to_string()));
+        }
+
+        if !old_face_dir.exists() {
+            faces.insert(old_face_name.to_string(), embeddings);
+            return Err(UserDbError::FaceNotFound(old_face_name.to_string()));
+        }
+
+        fs::rename(&old_face_dir, &new_face_dir)?;
+
+        faces.insert(new_face_name.to_string(), embeddings);
+
+        Ok(())
+    }
+
+    pub fn clear_user(&mut self, username: &str) -> Result<(), UserDbError> {
+        if self.users.remove(username).is_none() && !self.base_dir.join(username).exists() {
+            return Err(UserDbError::UserNotFound(username.to_string()));
+        }
+
+        let user_dir = self.base_dir.join(username);
+        if user_dir.exists() {
+            fs::remove_dir_all(user_dir)?;
+        }
+
+        Ok(())
     }
 
     pub fn verify(&self, username: &str, embed: &ndarray::Array1<f32>, threshold: f32) -> bool {
@@ -202,6 +291,18 @@ impl UserDatabase {
         candidates
             .into_par_iter()
             .any(|ref_embed| embed.dot(ref_embed) > threshold)
+    }
+
+    pub fn verify_user(
+        &self,
+        username: &str,
+        embed: &ndarray::Array1<f32>,
+        threshold: f32,
+    ) -> Result<bool, UserDbError> {
+        if !self.users.contains_key(username) {
+            return Err(UserDbError::UserNotFound(username.to_string()));
+        }
+        Ok(self.verify(username, embed, threshold))
     }
 
     pub fn score_all(
@@ -235,6 +336,30 @@ impl UserDatabase {
 
         results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         results
+    }
+
+    pub fn match_faces(
+        &self,
+        username: &str,
+        embed: &ndarray::Array1<f32>,
+        threshold: f32,
+    ) -> Result<Vec<(String, f32, f32, bool, u32)>, UserDbError> {
+        if !self.users.contains_key(username) {
+            return Err(UserDbError::UserNotFound(username.to_string()));
+        }
+        Ok(self.score_all(username, embed, threshold))
+    }
+
+    pub fn list_faces(&self, username: &str) -> Result<Vec<(String, u32)>, UserDbError> {
+        let Some(face_map) = self.users.get(username) else {
+            return Err(UserDbError::UserNotFound(username.to_string()));
+        };
+
+        let faces = face_map
+            .iter()
+            .map(|(name, embeds)| (name.clone(), embeds.len() as u32))
+            .collect();
+        Ok(faces)
     }
 
     pub fn get_user_embeddings(&self, username: &str) -> Option<Vec<&Array1<f32>>> {
