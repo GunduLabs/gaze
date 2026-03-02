@@ -8,7 +8,6 @@ target
 
 **/mutants.out*/
 
-# Node / VitePress
 node_modules/
 docs/.vitepress/dist
 docs/.vitepress/cache
