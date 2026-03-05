@@ -446,16 +446,21 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 f();
             }
 
+            let last_toast: Rc<RefCell<Option<libadwaita::Toast>>> = Rc::new(RefCell::new(None));
+
             test_btn.connect_clicked(glib::clone!(
                 #[weak]
                 window,
                 #[strong]
                 username,
-                #[weak]
-                face_list,
                 #[strong]
                 proxy,
+                #[strong]
+                last_toast,
                 move |btn| {
+                    if let Some(prev) = last_toast.borrow_mut().take() {
+                        prev.dismiss();
+                    }
                     btn.set_sensitive(false);
                     glib::MainContext::default().spawn_local(glib::clone!(
                         #[weak]
@@ -463,11 +468,11 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         #[strong]
                         username,
                         #[weak]
-                        face_list,
-                        #[weak]
                         btn,
                         #[strong]
                         proxy,
+                        #[strong]
+                        last_toast,
                         async move {
                             let config = Config::load().unwrap_or_default();
                             let t0 = std::time::Instant::now();
@@ -482,98 +487,41 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                             )
                             .join();
 
-                            let (text, face_scores) = match result {
+                            let text = match result {
                                 Ok(Ok((bytes, width, height))) => {
                                     match proxy.match_faces(&username, &bytes, width, height).await
                                     {
                                         Ok(faces) => {
-                                            let scores: Vec<(String, f64)> = faces
-                                                .iter()
-                                                .map(|(name, _, pct, _, _)| (name.clone(), *pct))
-                                                .collect();
                                             if faces.iter().any(|(_, _, _, passed, _)| *passed) {
-                                                (
-                                                    format!(
-                                                        "✓ Authenticated ({}ms)",
-                                                        t0.elapsed().as_millis()
-                                                    ),
-                                                    scores,
+                                                format!(
+                                                    "✓ Authenticated ({}ms)",
+                                                    t0.elapsed().as_millis()
                                                 )
                                             } else {
-                                                (
-                                                    format!(
-                                                        "✗ Authentication failed ({}ms)",
-                                                        t0.elapsed().as_millis()
-                                                    ),
-                                                    scores,
+                                                format!(
+                                                    "✗ Authentication failed ({}ms)",
+                                                    t0.elapsed().as_millis()
                                                 )
                                             }
                                         }
-                                        Err(e) => (
-                                            format!(
-                                                "✗ DBus error: {}",
-                                                format_dbus_error(&e)
-                                            ),
-                                            Vec::new(),
+                                        Err(e) => format!(
+                                            "✗ DBus error: {}",
+                                            format_dbus_error(&e)
                                         ),
                                     }
                                 }
-                                Ok(Err(e)) => (format!("✗ {}", e), Vec::new()),
-                                _ => ("✗ Capture failed".to_string(), Vec::new()),
+                                Ok(Err(e)) => format!("✗ {}", e),
+                                _ => "✗ Capture failed".to_string(),
                             };
-
-                            if !face_scores.is_empty() {
-                                let mut badges: Vec<gtk4::Label> = Vec::new();
-                                let mut child = face_list.first_child();
-                                while let Some(widget) = child {
-                                    if let Some(row) =
-                                        widget.downcast_ref::<libadwaita::ActionRow>()
-                                    {
-                                        let name = row.title().to_string();
-
-                                        let mut prefix_child = row.first_child();
-                                        while let Some(pc) = prefix_child {
-                                            prefix_child = pc.next_sibling();
-                                            if pc.widget_name() == "match-badge" {
-                                                pc.unparent();
-                                            }
-                                        }
-
-                                        if let Some((_, pct)) =
-                                            face_scores.iter().find(|(n, _)| n == &name)
-                                        {
-                                            let badge =
-                                                gtk4::Label::new(Some(&format!("{:.1}%", pct)));
-                                            badge.set_widget_name("match-badge");
-                                            badge.add_css_class("heading");
-                                            if *pct >= 50.0 {
-                                                badge.add_css_class("success");
-                                            } else {
-                                                badge.add_css_class("error");
-                                            }
-                                            badge.set_margin_end(8);
-                                            badge.set_valign(gtk4::Align::Center);
-                                            row.add_prefix(&badge);
-                                            badges.push(badge);
-                                        }
-                                    }
-                                    child = widget.next_sibling();
-                                }
-
-                                glib::timeout_add_seconds_local_once(3, move || {
-                                    for badge in badges {
-                                        badge.unparent();
-                                    }
-                                });
-                            }
 
                             let toast = libadwaita::Toast::new(&text);
                             if let Some(overlay) = window
                                 .content()
                                 .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
                             {
-                                overlay.add_toast(toast);
+                                overlay.add_toast(toast.clone());
                             }
+                            *last_toast.borrow_mut() = Some(toast);
                             btn.set_sensitive(true);
                         }
                     ));
