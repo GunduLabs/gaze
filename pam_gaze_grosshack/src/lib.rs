@@ -1,21 +1,25 @@
 #![allow(clippy::missing_safety_doc)]
 use gaze_core::capture::{init_camera_and_checker, wait_for_capture_until};
 use pam_gaze_core::*;
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use std::ffi::CString;
 use std::os::raw::c_void;
 use std::os::raw::{c_char, c_int};
 use std::sync::Arc;
 use std::thread;
+use std::time::Instant;
 
 struct AuthState {
     password: Option<String>,
     finished: bool,
 }
 
-fn wait_for_password_and_fallback(pamh: PamHandle, state: &Arc<Mutex<AuthState>>) -> c_int {
+type SharedAuthState = Arc<(Mutex<AuthState>, Condvar)>;
+
+fn wait_for_password_and_fallback(pamh: PamHandle, state: &SharedAuthState) -> c_int {
+    let (lock, condvar) = &**state;
+    let mut shared_state = lock.lock();
     loop {
-        let shared_state = state.lock();
         if shared_state.finished {
             if let Some(ref pw) = shared_state.password {
                 let pw_cstr = CString::new(pw.as_str()).unwrap();
@@ -26,8 +30,7 @@ fn wait_for_password_and_fallback(pamh: PamHandle, state: &Arc<Mutex<AuthState>>
             }
             return PAM_AUTH_ERR;
         }
-        drop(shared_state);
-        thread::sleep(std::time::Duration::from_millis(50));
+        condvar.wait(&mut shared_state);
     }
 }
 
@@ -37,33 +40,41 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         None => return PAM_AUTH_ERR,
     };
 
-    let Ok((config, _, proxy)) = setup_auth_env() else {
+    let Ok((config, proxy)) = setup_auth_env() else {
         return PAM_AUTHINFO_UNAVAIL;
     };
     let is_polkit = unsafe { is_polkit_service(pamh) };
 
     unsafe { say(pamh, "Please look at the camera or enter password") };
 
-    let state = Arc::new(Mutex::new(AuthState {
-        password: None,
-        finished: false,
-    }));
+    let state: SharedAuthState = Arc::new((
+        Mutex::new(AuthState {
+            password: None,
+            finished: false,
+        }),
+        Condvar::new(),
+    ));
 
     let thread_state = Arc::clone(&state);
     let pamh_worker = pamh as usize;
     let _ = thread::spawn(move || {
-        if let Some(pw) = unsafe { prompt_password(pamh_worker as PamHandle) } {
-            let mut shared_state = thread_state.lock();
+        let password = unsafe { prompt_password(pamh_worker as PamHandle) };
+        let (lock, condvar) = &*thread_state;
+        let mut shared_state = lock.lock();
+        if let Some(pw) = password {
             shared_state.password = Some(pw);
             shared_state.finished = true;
         } else {
-            thread_state.lock().finished = true;
+            shared_state.finished = true;
         }
+        condvar.notify_all();
     });
 
     let Ok((mut cam, mut checker)) = init_camera_and_checker(&config.cameras.rgb) else {
-        return PAM_SERVICE_ERR;
+        return PAM_AUTHINFO_UNAVAIL;
     };
+
+    let capture_start = Instant::now();
 
     let capture = match wait_for_capture_until(
         &mut cam,
@@ -74,11 +85,20 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
                 unsafe { say(pamh, &status.to_string()) };
             }
         },
-        || state.lock().finished,
+        || {
+            let (lock, _) = &*state;
+            lock.lock().finished || capture_start.elapsed().as_secs() >= CAMERA_AUTH_TIMEOUT_SECS
+        },
     ) {
         Ok(Some(capture)) => capture,
-        Ok(None) => return wait_for_password_and_fallback(pamh, &state),
-        Err(_) => return PAM_SERVICE_ERR,
+        Ok(None) => {
+            drop(cam);
+            return wait_for_password_and_fallback(pamh, &state);
+        }
+        Err(_) => {
+            drop(cam);
+            return PAM_AUTHINFO_UNAVAIL;
+        }
     };
 
     match proxy.verify(&username, &capture.bytes, capture.width, capture.height) {
@@ -87,8 +107,14 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
             unblock_terminal();
             PAM_SUCCESS
         }
-        Ok(false) => wait_for_password_and_fallback(pamh, &state),
-        Err(_) => wait_for_password_and_fallback(pamh, &state),
+        Ok(false) => {
+            drop(cam);
+            wait_for_password_and_fallback(pamh, &state)
+        }
+        Err(_) => {
+            drop(cam);
+            wait_for_password_and_fallback(pamh, &state)
+        }
     }
 }
 

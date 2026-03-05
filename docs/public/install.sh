@@ -1,4 +1,6 @@
 #!/bin/sh
+# Gaze installer — https://gaze.gundulabs.com/install.sh
+# Usage: curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
 set -e
 
 REPO="GunduLabs/gaze"
@@ -19,23 +21,25 @@ need uname
 bold "Gaze installer"
 echo ""
 
-# Detect architecture
+# ── architecture ──────────────────────────────────────────────────────────────
+
 ARCH="$(uname -m)"
 case "$ARCH" in
-    x86_64)  PKG_ARCH="x86_64" ;;
-    aarch64) PKG_ARCH="aarch64" ;;
+    x86_64)  PKG_ARCH="x86_64" ; DEB_ARCH="amd64" ;;
+    aarch64) PKG_ARCH="aarch64"; DEB_ARCH="arm64"  ;;
     *) red "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
-# Detect distro
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    DISTRO_ID="${ID}"
-    DISTRO_LIKE="${ID_LIKE:-}"
-else
+# ── distro detection ──────────────────────────────────────────────────────────
+
+if [ ! -f /etc/os-release ]; then
     red "Cannot detect Linux distribution (missing /etc/os-release)"
     exit 1
 fi
+# shellcheck disable=SC1091
+. /etc/os-release
+DISTRO_ID="${ID}"
+DISTRO_LIKE="${ID_LIKE:-}"
 
 is_rpm() {
     case "$DISTRO_ID $DISTRO_LIKE" in
@@ -52,72 +56,99 @@ is_deb() {
 }
 
 is_arch() {
-    case "$DISTRO_ID" in
-        arch|manjaro|endeavouros) return 0 ;;
+    case "$DISTRO_ID $DISTRO_LIKE" in
+        *arch*|*manjaro*) return 0 ;;
     esac
     return 1
 }
 
-if is_rpm; then
-    PKG_EXT="rpm"
-    PKG_NAME="gaze-latest-1.${PKG_ARCH}.rpm"
-elif is_deb; then
-    PKG_EXT="deb"
-    case "$PKG_ARCH" in
-        x86_64)  DEB_ARCH="amd64" ;;
-        aarch64) DEB_ARCH="arm64" ;;
-    esac
-    PKG_NAME="gaze_latest_${DEB_ARCH}.deb"
-elif is_arch; then
-    PKG_EXT="pkg.tar.zst"
-    PKG_NAME="gaze-latest-1-${PKG_ARCH}.pkg.tar.zst"
-else
+if ! is_rpm && ! is_deb && ! is_arch; then
     red "Unsupported distribution: $DISTRO_ID"
-    echo "Supported: Fedora, RHEL, Debian, Ubuntu, Arch"
+    echo "Supported: Fedora, RHEL/CentOS/AlmaLinux/Rocky, Debian, Ubuntu, Arch Linux, Manjaro"
     exit 1
 fi
 
-# Get latest release version
+# ── latest version ────────────────────────────────────────────────────────────
+
 echo "Fetching latest release..."
-VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | grep -o '"v[^"]*"' | tr -d '"')"
+VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+    | grep '"tag_name"' | grep -o '"v[^"]*"' | tr -d '"')"
 if [ -z "$VERSION" ]; then
     red "Could not fetch latest release from GitHub."
     exit 1
 fi
 echo "Latest version: $VERSION"
+V="${VERSION#v}"
 
-# Build download URL
+# ── already up to date? ───────────────────────────────────────────────────────
+
+if command -v gaze >/dev/null 2>&1; then
+    INSTALLED="v$(gaze --version 2>/dev/null | awk '{print $2}')"
+    if [ "$INSTALLED" = "$VERSION" ]; then
+        green "Gaze is already up to date ($VERSION)"
+        exit 0
+    fi
+    echo "Updating from $INSTALLED to $VERSION..."
+fi
+
+# ── download & install ────────────────────────────────────────────────────────
+
 BASE_URL="${GITHUB}/releases/download/${VERSION}"
-case "$PKG_EXT" in
-    rpm)         URL="${BASE_URL}/gaze-${VERSION#v}-1.${PKG_ARCH}.rpm" ;;
-    deb)         URL="${BASE_URL}/gaze_${VERSION#v}_${DEB_ARCH}.deb" ;;
-    pkg.tar.zst) URL="${BASE_URL}/gaze-${VERSION#v}-1-${PKG_ARCH}.pkg.tar.zst" ;;
-esac
-
-# Download
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-PKG_FILE="${TMP}/gaze.${PKG_EXT}"
 
-echo "Downloading $URL ..."
-curl -fsSL --progress-bar -o "$PKG_FILE" "$URL"
+if is_deb; then
+    echo "Downloading packages..."
+    curl -fsSL --progress-bar -o "${TMP}/gaze.deb"                 "${BASE_URL}/gaze_${V}_${DEB_ARCH}.deb"
+    curl -fsSL --progress-bar -o "${TMP}/gaze-gui.deb"             "${BASE_URL}/gaze-gui_${V}_${DEB_ARCH}.deb"
+    curl -fsSL --progress-bar -o "${TMP}/gaze-gnome-ext.deb"       "${BASE_URL}/gaze-gnome-extension_${V}_${DEB_ARCH}.deb"
+    echo "Installing..."
+    apt-get install -y \
+        "${TMP}/gaze.deb" \
+        "${TMP}/gaze-gui.deb" \
+        "${TMP}/gaze-gnome-ext.deb" || true
 
-# Install
-echo "Installing..."
-if is_rpm; then
-    sudo rpm -Uvh --force "$PKG_FILE"
-    sudo systemctl enable --now gazed
-    sudo authselect select vendor/gaze --force 2>/dev/null || true
-elif is_deb; then
-    sudo dpkg -i "$PKG_FILE" || sudo apt-get install -f -y
+elif is_rpm; then
+    echo "Downloading packages..."
+    curl -fsSL --progress-bar -o "${TMP}/gaze.rpm"                 "${BASE_URL}/gaze-${V}-1.${PKG_ARCH}.rpm"
+    curl -fsSL --progress-bar -o "${TMP}/gaze-gui.rpm"             "${BASE_URL}/gaze-gui-${V}-1.${PKG_ARCH}.rpm"
+    curl -fsSL --progress-bar -o "${TMP}/gaze-gnome-ext.rpm"       "${BASE_URL}/gaze-gnome-extension-${V}-1.${PKG_ARCH}.rpm"
+    echo "Installing..."
+    if command -v dnf >/dev/null 2>&1; then
+        dnf install -y \
+            "${TMP}/gaze.rpm" \
+            "${TMP}/gaze-gui.rpm" \
+            "${TMP}/gaze-gnome-ext.rpm"
+    else
+        rpm -Uvh \
+            "${TMP}/gaze.rpm" \
+            "${TMP}/gaze-gui.rpm" \
+            "${TMP}/gaze-gnome-ext.rpm"
+    fi
+    if command -v authselect >/dev/null 2>&1; then
+        authselect select gaze --force || true
+    fi
+
 elif is_arch; then
-    sudo pacman -U --noconfirm "$PKG_FILE"
+    echo "Downloading packages..."
+    curl -fsSL --progress-bar -o "${TMP}/gaze.pkg.tar.zst"         "${BASE_URL}/gaze-${V}-1-${PKG_ARCH}.pkg.tar.zst"
+    curl -fsSL --progress-bar -o "${TMP}/gaze-gui.pkg.tar.zst"     "${BASE_URL}/gaze-gui-${V}-1-${PKG_ARCH}.pkg.tar.zst"
+    curl -fsSL --progress-bar -o "${TMP}/gaze-gnome-ext.pkg.tar.zst" "${BASE_URL}/gaze-gnome-extension-${V}-1-${PKG_ARCH}.pkg.tar.zst"
+    echo "Installing..."
+    pacman -U --noconfirm \
+        "${TMP}/gaze.pkg.tar.zst" \
+        "${TMP}/gaze-gui.pkg.tar.zst" \
+        "${TMP}/gaze-gnome-ext.pkg.tar.zst"
 fi
+
+systemctl restart gazed 2>/dev/null || true
+
+# ── done ─────────────────────────────────────────────────────────────────────
 
 echo ""
 green "Gaze installed successfully!"
 echo ""
-echo "  Enroll your face:    gaze add-face myface"
+echo "  Enroll your face:    gaze add-face <username>"
 echo "  Test authentication: gaze auth"
 echo "  GUI:                 gaze-gui"
 echo ""

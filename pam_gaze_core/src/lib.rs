@@ -3,7 +3,6 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 
-use gaze_core::camera::Camera;
 use gaze_core::config::Config;
 use gaze_core::dbus::AuthProxyBlocking;
 pub use zbus::blocking::Connection;
@@ -19,6 +18,7 @@ pub const PAM_PROMPT_ECHO_OFF: c_int = 1;
 pub const PAM_AUTHINFO_UNAVAIL: c_int = 9;
 
 pub const MAX_ATTEMPTS: usize = 10;
+pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
 
 pub type PamHandle = *mut c_void;
 
@@ -110,12 +110,11 @@ pub fn is_retryable(err: &zbus::Error) -> bool {
     err.to_string().contains("RETRYABLE:")
 }
 
-pub fn setup_auth_env() -> Result<(Config, Camera, AuthProxyBlocking<'static>), c_int> {
+pub fn setup_auth_env() -> Result<(Config, AuthProxyBlocking<'static>), c_int> {
     let config = Config::load().map_err(|_| PAM_SERVICE_ERR)?;
-    let cam = Camera::open(&config.cameras.rgb).map_err(|_| PAM_SERVICE_ERR)?;
     let conn = Connection::system().map_err(|_| PAM_SERVICE_ERR)?;
     let proxy = AuthProxyBlocking::new(&conn).map_err(|_| PAM_SERVICE_ERR)?;
-    Ok((config, cam, proxy))
+    Ok((config, proxy))
 }
 
 pub unsafe fn is_polkit_service(pamh: PamHandle) -> bool {
