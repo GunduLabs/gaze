@@ -7,7 +7,7 @@ Facial authentication for Linux.
 - Fast, local face recognition — no cloud dependency
 - PAM integration for system login (GDM, lightdm, etc.)
 - DBus interface (`org.gaze.Auth`) for third-party integration
-- GTK4/Adwaita GUI for enrollment
+- GTK4/Adwaita GUI for enrollment and testing
 - Configurable security levels (model + similarity threshold)
 - Models auto-downloaded from InsightFace on first run
 
@@ -15,8 +15,12 @@ Facial authentication for Linux.
 
 **Rust toolchain** (2024 edition) and the following system libraries:
 
-```
-libopencv-dev libclang-dev libv4l-dev libpam0g-dev libgtk-4-dev libadwaita-1-dev
+```bash
+# Debian / Ubuntu
+sudo apt install libopencv-dev libclang-dev libv4l-dev libpam0g-dev libgtk-4-dev libadwaita-1-dev
+
+# Fedora / RHEL
+sudo dnf install opencv-devel clang-devel libv4l-devel pam-devel gtk4-devel libadwaita-devel
 ```
 
 ## Building
@@ -38,15 +42,16 @@ go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
 export PATH="$PATH:$(go env GOPATH)/bin"
 ```
 
-Rebuild, repackage, reinstall, and configure everything in one shot (resets the config so the package version is laid down fresh):
+Rebuild, repackage, reinstall, and re-configure everything in one shot (resets the config so the packaged version is applied fresh):
 
 ```bash
+VER=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2) && \
 sudo rm -f /etc/gaze/config.toml && \
 cargo build --workspace --release && \
-VERSION=0.0.1 ARCH=x86_64 nfpm pkg -f packaging/nfpm.yaml --packager rpm --target /tmp/ && \
-VERSION=0.0.1 ARCH=x86_64 nfpm pkg -f packaging/nfpm_gui.yaml --packager rpm --target /tmp/ && \
-VERSION=0.0.1 ARCH=x86_64 nfpm pkg -f packaging/nfpm_gnome_extension.yaml --packager rpm --target /tmp/ && \
-sudo rpm -Uvh --force /tmp/gaze-0.0.1-1.x86_64.rpm /tmp/gaze-gui-0.0.1-1.x86_64.rpm /tmp/gaze-gnome-extension-0.0.1-1.x86_64.rpm && \
+VERSION=$VER ARCH=x86_64 nfpm pkg -f packaging/nfpm.yaml --packager rpm --target /tmp/ && \
+VERSION=$VER ARCH=x86_64 nfpm pkg -f packaging/nfpm_gui.yaml --packager rpm --target /tmp/ && \
+VERSION=$VER ARCH=x86_64 nfpm pkg -f packaging/nfpm_gnome_extension.yaml --packager rpm --target /tmp/ && \
+sudo rpm -Uvh --force /tmp/gaze-${VER}-1.x86_64.rpm /tmp/gaze-gui-${VER}-1.x86_64.rpm /tmp/gaze-gnome-extension-${VER}-1.x86_64.rpm && \
 sudo systemctl enable --now gazed && \
 sudo authselect select vendor/gaze --force
 ```
@@ -62,11 +67,11 @@ gnome-extensions enable gaze@gundulabs.com
 | Crate | Description |
 |---|---|
 | `gaze` | Daemon (`gazed`) and CLI (`gaze`) |
-| `gaze_core` | Shared camera, detection, config, DBus types |
+| `gaze_core` | Shared camera, detection, config, and DBus types |
 | `gaze_gui` | GTK4/Adwaita enrollment and auth GUI |
 | `pam_gaze` | PAM module (`libpam_gaze.so`) |
-| `pam_gaze_grosshack` | PAM compatibility shim |
 | `pam_gaze_core` | Core PAM logic |
+| `pam_gaze_grosshack` | PAM compatibility shim |
 
 ## Installation
 
@@ -158,18 +163,19 @@ Models are downloaded automatically to `models_dir` on first run.
 
 ### CLI
 
-```bash
-gaze auth                        # Authenticate current user
-gaze auth --verbose              # Show per-face similarity scores
-gaze auth --perf                 # Print step-by-step timing metrics
-gaze add-face <name>             # Enroll a new face (guided multi-angle)
-gaze refine-face <name>          # Add more samples to an existing face
-gaze list-faces                  # List all enrolled faces for current user
-gaze remove-face <name>          # Remove a specific face
-gaze clear-user                  # Remove all faces for current user
-```
+All commands communicate with the running `gazed` daemon over DBus. Each accepts `-u <user>` to target a specific user instead of `$USER`.
 
-All commands accept `-u <user>` to target a specific user instead of `$USER`.
+```bash
+gaze auth                            # Authenticate the current user
+gaze auth --verbose                  # Show a per-face similarity score table
+gaze auth --perf                     # Print step-by-step timing metrics
+gaze add-face <name>                 # Enroll a new face (guided multi-angle capture)
+gaze refine-face <name>              # Add more captures to an existing face
+gaze list-faces                      # List all enrolled faces for the current user
+gaze remove-face <name>              # Delete a specific enrolled face
+gaze rename-face <old-name> <new-name>  # Rename an enrolled face
+gaze clear-user                      # Remove all faces and data for the current user
+```
 
 Auth results:
 - **Green ✓** — authenticated (`✓ Authenticated as: <face> (<pct>%, <ms>ms)`)
@@ -192,6 +198,8 @@ Face embeddings are stored as binary files at:
 ```
 /var/lib/gaze/users/{username}/{face_name}/{uuid}.bin
 ```
+
+Each file is a raw `f32` array (512 floats = 2048 bytes). Multiple captures per face improve robustness — all embeddings for a face are scored individually and the best match wins.
 
 ## License
 

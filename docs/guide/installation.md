@@ -85,12 +85,13 @@ export PATH="$PATH:$(go env GOPATH)/bin"
 Then:
 
 ```bash
+VER=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2) && \
 sudo rm -f /etc/gaze/config.toml && \
 cargo build --workspace --release && \
-VERSION=0.0.1 ARCH=x86_64 nfpm pkg -f packaging/nfpm.yaml --packager rpm --target /tmp/ && \
-VERSION=0.0.1 ARCH=x86_64 nfpm pkg -f packaging/nfpm_gui.yaml --packager rpm --target /tmp/ && \
-VERSION=0.0.1 ARCH=x86_64 nfpm pkg -f packaging/nfpm_gnome_extension.yaml --packager rpm --target /tmp/ && \
-sudo rpm -Uvh --force /tmp/gaze-0.0.1-1.x86_64.rpm /tmp/gaze-gui-0.0.1-1.x86_64.rpm /tmp/gaze-gnome-extension-0.0.1-1.x86_64.rpm && \
+VERSION=$VER ARCH=x86_64 nfpm pkg -f packaging/nfpm.yaml --packager rpm --target /tmp/ && \
+VERSION=$VER ARCH=x86_64 nfpm pkg -f packaging/nfpm_gui.yaml --packager rpm --target /tmp/ && \
+VERSION=$VER ARCH=x86_64 nfpm pkg -f packaging/nfpm_gnome_extension.yaml --packager rpm --target /tmp/ && \
+sudo rpm -Uvh --force /tmp/gaze-${VER}-1.x86_64.rpm /tmp/gaze-gui-${VER}-1.x86_64.rpm /tmp/gaze-gnome-extension-${VER}-1.x86_64.rpm && \
 sudo systemctl enable --now gazed && \
 sudo authselect select vendor/gaze --force
 ```
