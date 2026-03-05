@@ -45,20 +45,7 @@ export PATH="$PATH:$(go env GOPATH)/bin"
 Rebuild, repackage, reinstall, and re-configure everything in one shot (resets the config so the packaged version is applied fresh):
 
 ```bash
-VER=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2) && \
-sudo rm -f /etc/gaze/config.toml && \
-cargo build --workspace --release && \
-VERSION=$VER ARCH=x86_64 nfpm pkg -f packaging/nfpm.yaml --packager rpm --target /tmp/ && \
-VERSION=$VER ARCH=x86_64 nfpm pkg -f packaging/nfpm_gui.yaml --packager rpm --target /tmp/ && \
-VERSION=$VER ARCH=x86_64 nfpm pkg -f packaging/nfpm_gnome_extension.yaml --packager rpm --target /tmp/ && \
-script -qc "sudo rpm -Uvh --force \
-  /tmp/gaze-${VER}-1.x86_64.rpm \
-  /tmp/gaze-gui-${VER}-1.x86_64.rpm \
-  /tmp/gaze-gnome-extension-${VER}-1.x86_64.rpm" /dev/null; \
-sudo systemctl daemon-reload && \
-sudo systemctl enable gazed && \
-sudo systemctl restart gazed && \
-sudo authselect select vendor/gaze --force 2>/dev/null
+./dev-reinstall.sh
 ```
 
 On Wayland, GNOME Shell must be restarted (log out and back in) before it picks up newly installed system extensions. After logging back in, run:
