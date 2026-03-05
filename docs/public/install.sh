@@ -126,7 +126,7 @@ elif is_rpm; then
             "${TMP}/gaze-gnome-ext.rpm"
     fi
     if command -v authselect >/dev/null 2>&1; then
-        authselect select gaze --force || true
+        authselect select vendor/gaze --force || true
     fi
 
 elif is_arch; then
@@ -148,7 +148,7 @@ systemctl restart gazed 2>/dev/null || true
 echo ""
 green "Gaze installed successfully!"
 echo ""
-echo "  Enroll your face:    gaze add-face <username>"
+echo "  Enroll your face:    gaze add-face <name>"
 echo "  Test authentication: gaze auth"
 echo "  GUI:                 gaze-gui"
 echo ""
