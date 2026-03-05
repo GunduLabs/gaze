@@ -126,6 +126,14 @@ elif is_rpm; then
             "${TMP}/gaze-gnome-ext.rpm"
     fi
     if command -v authselect >/dev/null 2>&1; then
+        rm -rf /etc/authselect/custom/gaze 2>/dev/null || true
+        # Fix stale authselect.conf pointing to bare "gaze" instead of "vendor/gaze"
+        if [ -f /etc/authselect/authselect.conf ]; then
+            current=$(head -1 /etc/authselect/authselect.conf)
+            if [ "$current" = "gaze" ]; then
+                echo "vendor/gaze" > /etc/authselect/authselect.conf
+            fi
+        fi
         authselect select vendor/gaze --force || true
     fi
 

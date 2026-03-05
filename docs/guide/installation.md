@@ -91,9 +91,12 @@ cargo build --workspace --release && \
 VERSION=$VER ARCH=x86_64 nfpm pkg -f packaging/nfpm.yaml --packager rpm --target /tmp/ && \
 VERSION=$VER ARCH=x86_64 nfpm pkg -f packaging/nfpm_gui.yaml --packager rpm --target /tmp/ && \
 VERSION=$VER ARCH=x86_64 nfpm pkg -f packaging/nfpm_gnome_extension.yaml --packager rpm --target /tmp/ && \
-sudo rpm -Uvh --force /tmp/gaze-${VER}-1.x86_64.rpm /tmp/gaze-gui-${VER}-1.x86_64.rpm /tmp/gaze-gnome-extension-${VER}-1.x86_64.rpm && \
+script -qc "sudo rpm -Uvh --force \
+  /tmp/gaze-${VER}-1.x86_64.rpm \
+  /tmp/gaze-gui-${VER}-1.x86_64.rpm \
+  /tmp/gaze-gnome-extension-${VER}-1.x86_64.rpm" /dev/null; \
 sudo systemctl daemon-reload && \
 sudo systemctl enable gazed && \
 sudo systemctl restart gazed && \
-sudo authselect select vendor/gaze --force
+sudo authselect select vendor/gaze --force 2>/dev/null
 ```
