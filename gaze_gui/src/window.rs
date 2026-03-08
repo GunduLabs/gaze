@@ -8,6 +8,7 @@ use libadwaita::prelude::*;
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::OnceLock;
 use zbus::Connection;
 
 type RefreshCb = Rc<dyn Fn()>;
@@ -20,7 +21,31 @@ fn is_file_not_found_error(err: &zbus::Error) -> bool {
     dbus_is_file_not_found(err)
 }
 
+fn load_auth_highlight_css() {
+    static AUTH_HIGHLIGHT_CSS: OnceLock<()> = OnceLock::new();
+
+    AUTH_HIGHLIGHT_CSS.get_or_init(|| {
+        let provider = gtk4::CssProvider::new();
+        provider.load_from_string(
+            ".auth-match-highlight {
+                background: alpha(@accent_bg_color, 0.35);
+                transition: background 220ms ease-in-out;
+            }",
+        );
+
+        if let Some(display) = gtk4::gdk::Display::default() {
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &provider,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+        }
+    });
+}
+
 pub fn build_window(app: &libadwaita::Application, username: &str) {
+    load_auth_highlight_css();
+
     let username = Rc::new(username.to_string());
 
     let window = libadwaita::ApplicationWindow::builder()
@@ -453,6 +478,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 window,
                 #[strong]
                 username,
+                #[weak]
+                face_list,
                 #[strong]
                 proxy,
                 #[strong]
@@ -468,40 +495,35 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         #[strong]
                         username,
                         #[weak]
+                        face_list,
+                        #[weak]
                         btn,
                         #[strong]
                         proxy,
                         #[strong]
                         last_toast,
                         async move {
-                            let config = Config::load().unwrap_or_default();
-                            let t0 = std::time::Instant::now();
-                            let result = std::thread::spawn(
-                                move || -> anyhow::Result<(Vec<u8>, u32, u32)> {
-                                    let (mut cam, mut checker) =
-                                        init_camera_and_checker(&config.cameras.rgb)?;
-                                    let cap =
-                                        wait_for_capture(&mut cam, &mut checker, false, |_| {})?;
-                                    Ok((cap.bytes, cap.width, cap.height))
-                                },
-                            )
-                            .join();
+                            let result = (|| -> anyhow::Result<(Vec<u8>, u32, u32)> {
+                                let config = Config::load().unwrap_or_default();
+                                let (mut cam, mut checker) =
+                                    init_camera_and_checker(&config.cameras.rgb)?;
+                                let cap = wait_for_capture(&mut cam, &mut checker, false, |_| {})?;
+                                Ok((cap.bytes, cap.width, cap.height))
+                            })();
 
+                            let mut matched_face_name: Option<String> = None;
                             let text = match result {
-                                Ok(Ok((bytes, width, height))) => {
+                                Ok((bytes, width, height)) => {
                                     match proxy.match_faces(&username, &bytes, width, height).await
                                     {
                                         Ok(faces) => {
-                                            if faces.iter().any(|(_, _, _, passed, _)| *passed) {
-                                                format!(
-                                                    "✓ Authenticated ({}ms)",
-                                                    t0.elapsed().as_millis()
-                                                )
+                                            if let Some((name, _, _, _, _)) =
+                                                faces.iter().find(|(_, _, _, passed, _)| *passed)
+                                            {
+                                                matched_face_name = Some(name.clone());
+                                                "✓ Authentication successful".to_string()
                                             } else {
-                                                format!(
-                                                    "✗ Authentication failed ({}ms)",
-                                                    t0.elapsed().as_millis()
-                                                )
+                                                "✗ Authentication failed".to_string()
                                             }
                                         }
                                         Err(e) => format!(
@@ -510,9 +532,28 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         ),
                                     }
                                 }
-                                Ok(Err(e)) => format!("✗ {}", e),
-                                _ => "✗ Capture failed".to_string(),
+                                Err(e) => format!("✗ {}", e),
                             };
+
+                            if let Some(face_name) = matched_face_name.as_ref() {
+                                let mut child = face_list.first_child();
+                                while let Some(widget) = child {
+                                    if let Ok(row) = widget.clone().downcast::<libadwaita::ActionRow>() {
+                                        row.remove_css_class("auth-match-highlight");
+                                        if row.title().as_str() == face_name {
+                                            row.add_css_class("auth-match-highlight");
+                                            let row_clone = row.clone();
+                                            glib::timeout_add_seconds_local_once(
+                                                2,
+                                                move || {
+                                                    row_clone.remove_css_class("auth-match-highlight");
+                                                },
+                                            );
+                                        }
+                                    }
+                                    child = widget.next_sibling();
+                                }
+                            }
 
                             let toast = libadwaita::Toast::new(&text);
                             if let Some(overlay) = window
