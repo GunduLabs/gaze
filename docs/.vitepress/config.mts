@@ -17,10 +17,12 @@ export default defineConfig({
         items: [
           { text: 'Getting Started', link: '/guide/getting-started' },
           { text: 'Installation', link: '/guide/installation' },
+          { text: 'PAM Setup', link: '/guide/pam' },
+          { text: 'GUI Guide', link: '/guide/gui' },
+          { text: 'CLI Guide', link: '/guide/cli' },
           { text: 'Configuration', link: '/guide/configuration' },
-          { text: 'CLI Reference', link: '/guide/cli' },
-          { text: 'GUI', link: '/guide/gui' },
-          { text: 'How It Works', link: '/guide/how-it-works' },
+          { text: 'Troubleshooting', link: '/guide/troubleshooting' },
+          { text: 'How Gaze Works', link: '/guide/how-it-works' },
         ]
       }
     ],

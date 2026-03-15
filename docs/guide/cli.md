@@ -1,118 +1,90 @@
-# CLI Reference
+# CLI Guide
 
-The `gaze` CLI communicates with the running `gazed` daemon over DBus. All commands accept `-u, --user <USER>` to target a specific user instead of `$USER`.
+Use the `gaze` command for enrollment, testing, and managing face profiles.
 
-## Commands
+All commands talk to the running `gazed` daemon over DBus.
 
-### `gaze auth`
-
-Authenticate the current user via webcam.
+## Most common workflow
 
 ```bash
-gaze auth [OPTIONS]
+gaze add-face default
+gaze auth --verbose
+gaze refine-face default
+gaze list-faces
 ```
 
-| Option | Description |
-|---|---|
-| `-u, --user <USER>` | Authenticate as a specific user (default: `$USER`) |
-| `--perf` | Print step-by-step timing metrics (camera init, detection, match) |
-| `-v, --verbose` | Show a table of all enrolled faces with their similarity scores and whether they passed the threshold |
-
-The command opens the camera and waits until a face is detected and centered. While scanning, a spinner shows real-time status (`No face detected`, `Face is clipped`, etc.). Once a valid frame is captured it is sent to the daemon for matching.
-
-**Results:**
-- **Green ✓** — `✓ Authenticated as: <face> (<pct>%, <ms>ms)`
-- **Red ✗** — `✗ Access Denied. (<ms>ms)`
-
----
-
-### `gaze add-face <NAME>`
-
-Enroll a new face with a guided multi-angle capture session.
+## Authenticate
 
 ```bash
-gaze add-face <NAME> [OPTIONS]
+gaze auth
 ```
 
-| Argument/Option | Description |
-|---|---|
-| `<NAME>` | Name to assign to this face (e.g. `default`, `glasses`) |
-| `-u, --user <USER>` | Enroll for a specific user (default: `$USER`) |
-
-The capture session walks you through multiple angle prompts. Capture is automatic when the face is centered and stable — no button press needed. The more angles captured, the more robust recognition will be.
-
----
-
-### `gaze refine-face <NAME>`
-
-Add additional captures to an existing enrolled face to improve recognition accuracy.
+Useful options:
 
 ```bash
-gaze refine-face <NAME> [OPTIONS]
+gaze auth --verbose   # show score table
+gaze auth --perf      # show timing details
 ```
 
-| Argument/Option | Description |
-|---|---|
-| `<NAME>` | Name of the face to refine |
-| `-u, --user <USER>` | Target a specific user (default: `$USER`) |
+Result meanings:
 
-Use this if recognition is failing under certain lighting conditions or angles — it adds new embeddings to the existing face without replacing what's already there.
+- `Authenticated as: ...`: pass
+- `Access Denied`: no stored face passed current threshold
 
----
-
-### `gaze rename-face <FROM> <TO>`
-
-Rename an enrolled face.
+## Enroll a new face profile
 
 ```bash
-gaze rename-face <FROM> <TO> [OPTIONS]
+gaze add-face <name>
 ```
 
-| Argument/Option | Description |
-|---|---|
-| `<FROM>` | Current name of the face |
-| `<TO>` | New name to assign |
-| `-u, --user <USER>` | Target a specific user (default: `$USER`) |
-
----
-
-### `gaze list-faces`
-
-List all enrolled faces for a user, along with the number of captures stored for each.
+Examples:
 
 ```bash
-gaze list-faces [OPTIONS]
+gaze add-face default
+gaze add-face glasses
 ```
 
-| Option | Description |
-|---|---|
-| `-u, --user <USER>` | List faces for a specific user (default: `$USER`) |
+Use separate profiles when your appearance changes often.
 
----
-
-### `gaze remove-face <NAME>`
-
-Remove a specific enrolled face and all its stored captures.
+## Improve a profile
 
 ```bash
-gaze remove-face <NAME> [OPTIONS]
+gaze refine-face <name>
 ```
 
-| Argument/Option | Description |
-|---|---|
-| `<NAME>` | Name of the face to remove |
-| `-u, --user <USER>` | Target a specific user (default: `$USER`) |
+Use this if recognition is inconsistent in dim light or side angles.
 
----
-
-### `gaze clear-user`
-
-Remove all enrolled faces and data for a user. This is destructive and cannot be undone.
+## List, rename, and remove
 
 ```bash
-gaze clear-user [OPTIONS]
+gaze list-faces
+gaze rename-face <old> <new>
+gaze remove-face <name>
 ```
 
-| Option | Description |
-|---|---|
-| `-u, --user <USER>` | Target a specific user (default: `$USER`) |
+## Delete all faces for current user
+
+```bash
+gaze clear-user
+```
+
+This is destructive.
+
+## Manage another user
+
+Most commands support `-u`:
+
+```bash
+gaze list-faces -u alice
+gaze add-face work -u alice
+```
+
+## Troubleshooting commands
+
+```bash
+systemctl status gazed
+journalctl -u gazed -n 100 --no-pager
+gaze auth --verbose
+```
+
+If you need help diagnosing failures, see the [troubleshooting guide](/guide/troubleshooting).

@@ -1,41 +1,52 @@
-# How It Works
+# How Gaze Works
 
-## Pipeline
+You do not need this page to use Gaze, but it explains why it behaves the way it does.
 
-```
-Camera frame → SCRFD face detection → Umeyama alignment (112×112)
-→ ResNet50 / MobileFaceNet embedding → cosine similarity → auth result
-```
+## Privacy model
 
-1. **Camera frame** — a raw frame is captured from the configured V4L2 device
-2. **SCRFD face detection** — a lightweight ONNX model locates faces and their 5-point landmarks in the frame
-3. **Umeyama alignment** — the detected face is warped to ArcFace-standard 112×112 alignment using the landmarks
-4. **Embedding** — either MobileFaceNet or ResNet50 (depending on security level) produces a 512-dim face embedding
-5. **Cosine similarity** — the embedding is compared against all stored embeddings for the user; the best match is returned
+- Face processing runs locally on your machine.
+- No cloud account is required.
+- Face embeddings are stored on disk under your local Gaze data path.
 
-## Embedding storage
+## Authentication pipeline
 
-Face embeddings are stored as binary files:
-
-```
-/var/lib/gaze/users/{username}/{face_name}/{uuid}.bin
+```text
+Camera frame -> Face detection -> Face alignment -> Embedding -> Similarity match
 ```
 
-Each file is a raw `f32` array (512 floats = 2048 bytes). Multiple captures per face improve robustness — all embeddings for a face are scored individually and the best match wins.
+High level:
 
-## Workspace
+1. Camera frame is captured from your configured `/dev/video*` device.
+2. Detector finds a face and facial landmarks.
+3. Face is aligned into a standard input shape.
+4. Recognition model creates an embedding vector.
+5. Embedding is compared against your enrolled profiles.
 
-| Crate | Description |
-|---|---|
-| `gaze` | Daemon (`gazed`) and CLI (`gaze`) |
-| `gaze_core` | Shared camera, detection, config, DBus types |
-| `gaze_gui` | GTK4/Adwaita enrollment and auth GUI |
-| `pam_gaze` | PAM module (`libpam_gaze.so`) |
-| `pam_gaze_core` | Core PAM logic |
-| `pam_gaze_grosshack` | PAM compatibility shim |
+If best similarity passes threshold, auth succeeds.
 
-## DBus interface
+## Why multiple captures help
 
-The daemon registers as `org.gaze.Auth` at `/org/gaze/Auth` on the system bus. This interface is used by the CLI, GUI, PAM module, and GNOME Shell extension.
+Each enrollment stores multiple samples across slightly different angles.
 
-The interface is defined in `gaze_core/src/dbus.rs` and exposed by the daemon via `zbus`.
+That makes authentication more robust for:
+
+- Small head rotation
+- Minor lighting changes
+- Appearance shifts (for example, glasses)
+
+## Where data is stored
+
+Default locations:
+
+- User embeddings: `/var/lib/gaze/users`
+- Model files: `/opt/gaze/models`
+- Config file: `/etc/gaze/config.toml`
+
+## Components
+
+- `gazed`: daemon that performs detection and recognition
+- `gaze`: CLI client
+- `gaze-gui`: GTK app
+- PAM integration and GNOME extension for login/lock screen flow
+
+The CLI and GUI communicate with daemon over DBus (`org.gaze.Auth`).

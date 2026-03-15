@@ -3,11 +3,11 @@ layout: home
 
 hero:
   name: "Gaze"
-  text: "Facial authentication for Linux"
-  tagline: Fast, local face recognition via PAM and DBus — no cloud dependency.
+  text: "Face login for Linux"
+  tagline: Install in minutes. Works with PAM, CLI, and GUI.
   actions:
     - theme: brand
-      text: Get Started
+      text: Install Gaze
       link: /guide/getting-started
     - theme: alt
       text: GitHub
@@ -20,10 +20,30 @@ hero:
 <p class="section-label">Quick install</p>
 
 ```bash
-curl -fsSL https://gaze.gundulabs.com/install.sh | sh
+curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
 ```
 
-<p class="install-note">Supports Fedora, RHEL, Debian, Ubuntu, and Arch Linux</p>
+<p class="install-note">Supports Fedora, RHEL, Debian, Ubuntu, Arch, and Manjaro</p>
+</section>
+
+<section class="steps-section">
+  <div class="steps-grid">
+    <div class="step-card">
+      <div class="step-number">1</div>
+      <h3>Install</h3>
+      <p>Run the one-line installer or use distro packages.</p>
+    </div>
+    <div class="step-card">
+      <div class="step-number">2</div>
+      <h3>Enroll</h3>
+      <p>Capture your first face profile with <code>gaze add-face default</code>.</p>
+    </div>
+    <div class="step-card">
+      <div class="step-number">3</div>
+      <h3>Test</h3>
+      <p>Verify with <code>gaze auth</code> and then enable lock screen flow.</p>
+    </div>
+  </div>
 </section>
 
   <div class="video-wrapper">
@@ -34,8 +54,8 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh
     <div class="features-grid">
       <div class="feature-card">
         <div class="feature-icon">🔒</div>
-        <h3>Privacy-first</h3>
-        <p>All inference runs locally using ONNX models. No data ever leaves your machine.</p>
+        <h3>Private by default</h3>
+        <p>Authentication runs on your machine with no account or external service required.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">🔌</div>
@@ -106,6 +126,46 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh
   margin-bottom: 0;
 }
 
+.steps-section {
+  padding: 40px 0 12px;
+}
+
+.steps-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.step-card {
+  border: 1px solid var(--vp-c-border);
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft);
+  padding: 18px;
+}
+
+.step-number {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  margin-bottom: 8px;
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+}
+
+.step-card h3 {
+  margin: 0 0 6px;
+}
+
+.step-card p {
+  margin: 0;
+  color: var(--vp-c-text-2);
+  font-size: 0.93rem;
+}
+
 .video-wrapper {
   max-width: 800px;
   margin: 40px auto;
@@ -134,6 +194,10 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 }
 
 @media (max-width: 768px) {
+  .steps-grid {
+    grid-template-columns: 1fr;
+  }
+
   .features-grid {
     grid-template-columns: repeat(2, 1fr);
   }

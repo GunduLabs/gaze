@@ -1,95 +1,80 @@
 # Gaze
 
-Facial authentication for Linux.
+Gaze adds face authentication to Linux login and unlock.
 
-## Features
+## Why users install Gaze
 
-- Fast, local face recognition — no cloud dependency
-- PAM integration for system login (GDM, lightdm, etc.)
-- DBus interface (`org.gaze.Auth`) for third-party integration
-- GTK4/Adwaita GUI for enrollment and testing
-- Configurable security levels (model + similarity threshold)
-- Models auto-downloaded from InsightFace on first run
+- Unlock and log in with your face on Linux
+- Keep authentication on-device
+- Use either a simple GUI (`gaze-gui`) or CLI (`gaze`)
+- Tune security from fast to strict
 
-## Requirements
+## 5-minute quickstart
 
-**Rust toolchain** (2024 edition) and the following system libraries:
+1. Install:
 
 ```bash
-# Debian / Ubuntu
-sudo apt install libopencv-dev libclang-dev libv4l-dev libpam0g-dev libgtk-4-dev libadwaita-1-dev
-
-# Fedora / RHEL
-sudo dnf install opencv-devel clang-devel libv4l-devel pam-devel gtk4-devel libadwaita-devel
+curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
 ```
 
-## Building
+2. Enroll your first face:
 
 ```bash
-cargo build --workspace --release        # Build everything
-cargo build --bin gazed --release        # Daemon only
-cargo build --bin gaze --release         # CLI only
-cargo build -p gaze_gui --release        # GTK4 GUI
-cargo build -p pam_gaze --release        # PAM module (libpam_gaze.so)
+gaze add-face default
 ```
 
-## Development
-
-Install `cargo-nfpm` (required for packaging):
+3. Test authentication:
 
 ```bash
-cargo install cargo-nfpm --locked
+gaze auth
 ```
 
-Build Flatpak package for the GUI:
+4. Open the GUI (optional):
 
 ```bash
-chmod +x scripts/build-flatpak.sh
-scripts/build-flatpak.sh
+gaze-gui
 ```
 
-Rebuild, repackage, reinstall, and re-configure everything in one shot (resets the config so the packaged version is applied fresh):
+If installation succeeded but auth fails, see: https://gaze.gundulabs.com/guide/troubleshooting
+
+## What gets installed
+
+- `gazed`: system daemon (DBus service)
+- `gaze`: CLI client
+- `gaze-gui`: GTK4 app
+- PAM integration for login/lockscreen auth
+- GNOME extension package (`gaze-gnome-extension`) for lock screen flow
+
+## Install options
+
+### Option A (recommended): one-line installer
 
 ```bash
-./dev-reinstall.sh
+curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
 ```
 
-On Wayland, GNOME Shell must be restarted (log out and back in) before it picks up newly installed system extensions. After logging back in, run:
+Supports Fedora/RHEL, Fedora Atomic desktops such as Silverblue, Debian/Ubuntu, and Arch/Manjaro.
+
+### Option B: manually install from Gundu Labs repositories
+
+Debian / Ubuntu:
 
 ```bash
-gnome-extensions enable gaze@gundulabs.com
-```
-
-## Workspace
-
-| Crate | Description |
-|---|---|
-| `gaze` | Daemon (`gazed`) and CLI (`gaze`) |
-| `gaze_core` | Shared camera, detection, config, and DBus types |
-| `gaze_gui` | GTK4/Adwaita enrollment and auth GUI |
-| `pam_gaze` | PAM module (`libpam_gaze.so`) |
-| `pam_gaze_core` | Core PAM logic |
-| `pam_gaze_grosshack` | PAM compatibility shim |
-
-## Installation
-
-### Install from Gundu Labs package repositories
-
-This guide assumes a shared package endpoint at `https://packages.gundulabs.com` (backed by Cloudflare R2).
-
-```bash
-# Debian/Ubuntu
 curl -fsSL https://packages.gundulabs.com/PACKAGE-SIGNING-KEY.asc \
-	| gpg --dearmor \
-	| sudo tee /usr/share/keyrings/gundulabs-packages.gpg >/dev/null
-echo "deb [signed-by=/usr/share/keyrings/gundulabs-packages.gpg] https://packages.gundulabs.com/deb stable main" | sudo tee /etc/apt/sources.list.d/gaze.list
+  | gpg --dearmor \
+  | sudo tee /usr/share/keyrings/gundulabs-packages.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/gundulabs-packages.gpg] https://packages.gundulabs.com/deb stable main" \
+  | sudo tee /etc/apt/sources.list.d/gaze.list >/dev/null
 sudo apt update
 sudo apt install gaze gaze-gui gaze-gnome-extension
+```
 
-# Fedora/RHEL
+Fedora / RHEL:
+
+```bash
 sudo tee /etc/yum.repos.d/gaze.repo >/dev/null <<'EOF'
 [gaze]
-name=Gaze Packages
+name=Gundu Labs Packages
 baseurl=https://packages.gundulabs.com/rpm/x86_64
 enabled=1
 gpgcheck=1
@@ -98,8 +83,11 @@ gpgkey=https://packages.gundulabs.com/PACKAGE-SIGNING-KEY.asc
 EOF
 sudo rpm --import https://packages.gundulabs.com/PACKAGE-SIGNING-KEY.asc
 sudo dnf install gaze gaze-gui gaze-gnome-extension
+```
 
-# Arch Linux
+Arch / Manjaro:
+
+```bash
 sudo tee /etc/pacman.d/gaze-mirrorlist >/dev/null <<'EOF'
 Server = https://packages.gundulabs.com/arch/x86_64
 EOF
@@ -115,141 +103,84 @@ EOF
 sudo pacman -Sy gaze gaze-gui gaze-gnome-extension
 ```
 
-### Manual install from local build artifacts
-
-### Flatpak GUI install
+### Option C: GUI via Flatpak
 
 ```bash
 flatpak remote-add --if-not-exists --no-gpg-verify gundulabs https://packages.gundulabs.com/flatpak
 flatpak install gundulabs com.gundulabs.Gaze
 ```
 
-1. Install the binaries and enable the systemd service:
+Note: Flatpak installs the GUI app. System login PAM integration is provided by distro packages.
+
+For Fedora Silverblue, Kinoite, and similar atomic desktops, this is usually the best way to install the GUI. Use Flatpak, Distrobox, or whatever normal app workflow you already use instead of layering extra GUI packages unless you specifically want to.
+
+## First-time setup checklist
+
+Run these after install:
 
 ```bash
-sudo cp target/release/gazed /usr/bin/gazed
-sudo cp target/release/gaze /usr/bin/gaze
-sudo cp target/release/gaze-gui /usr/bin/gaze-gui
-sudo cp dist/gazed.service /etc/systemd/system/
-sudo systemctl enable --now gazed
+systemctl status gazed
+gaze add-face default
+gaze auth --verbose
 ```
 
-2. Install the DBus policy:
+Expected result from `gaze auth`: `Authenticated as: <face>`.
 
-```bash
-sudo cp dist/org.gaze.Auth.conf /etc/dbus-1/system.d/
-```
+## Configuration (optional)
 
-3. Install the config:
+Main config file:
 
-```bash
-sudo mkdir -p /etc/gaze
-sudo cp dist/config.toml /etc/gaze/config.toml
-```
+`/etc/gaze/config.toml`
 
-4. Install the PAM modules:
-
-```bash
-# Fedora / RHEL (x86_64)
-sudo cp target/release/libpam_gaze.so /usr/lib64/security/pam_gaze.so
-sudo cp target/release/libpam_gaze_grosshack.so /usr/lib64/security/pam_gaze_grosshack.so
-
-# Debian / Ubuntu
-sudo cp target/release/libpam_gaze.so /lib/x86_64-linux-gnu/security/pam_gaze.so
-sudo cp target/release/libpam_gaze_grosshack.so /lib/x86_64-linux-gnu/security/pam_gaze_grosshack.so
-
-# Arch Linux
-sudo cp target/release/libpam_gaze.so /usr/lib/security/pam_gaze.so
-sudo cp target/release/libpam_gaze_grosshack.so /usr/lib/security/pam_gaze_grosshack.so
-```
-
-5. Enable face authentication:
-
-```bash
-# Fedora / RHEL — select the vendor authselect profile:
-sudo authselect select vendor/gaze --force
-
-# Debian / Ubuntu — register with pam-auth-update:
-sudo cp dist/pam-configs/gaze dist/pam-configs/gaze-simultaneous /usr/share/pam-configs/
-sudo pam-auth-update --package
-```
-
-6. Enable the GNOME Shell extension (for lock screen support):
-
-```bash
-gnome-extensions enable gaze@gundulabs.com
-```
-
-The extension hooks into GDM to trigger face auth on the lock screen using `/etc/pam.d/gdm-face`. It also installs a SELinux policy that allows GDM to access the camera.
-
-## Configuration
-
-`/etc/gaze/config.toml`:
+Safe default:
 
 ```toml
-# Preset security levels:
-#   low      — MobileFaceNet + SCRFD-500M, threshold 0.3  (fastest)
-#   medium   — MobileFaceNet + SCRFD-500M, threshold 0.4  (default)
-#   high     — ResNet50 + SCRFD-10G, threshold 0.5
-#   maximum  — ResNet50 + SCRFD-10G, threshold 0.6
-
 level = "medium"
 
 [cameras]
 rgb = "/dev/video0"
 
-[storage]
-users_dir = "/var/lib/gaze/users"
-models_dir = "/opt/gaze/models"
-
 [enrollment]
 max_captures_per_face = 8
 ```
 
-Models are downloaded automatically to `models_dir` on first run.
+Details: https://gaze.gundulabs.com/guide/configuration
 
-## Usage
-
-### CLI
-
-All commands communicate with the running `gazed` daemon over DBus. Each accepts `-u <user>` to target a specific user instead of `$USER`.
+## Command cheat sheet
 
 ```bash
-gaze auth                            # Authenticate the current user
-gaze auth --verbose                  # Show a per-face similarity score table
-gaze auth --perf                     # Print step-by-step timing metrics
-gaze add-face <name>                 # Enroll a new face (guided multi-angle capture)
-gaze refine-face <name>              # Add more captures to an existing face
-gaze list-faces                      # List all enrolled faces for the current user
-gaze remove-face <name>              # Delete a specific enrolled face
-gaze rename-face <old-name> <new-name>  # Rename an enrolled face
-gaze clear-user                      # Remove all faces and data for the current user
+gaze add-face <name>                 # Enroll
+gaze auth                            # Authenticate
+gaze auth --verbose                  # Show similarity scores
+gaze refine-face <name>              # Add more samples
+gaze list-faces                      # List enrolled faces
+gaze remove-face <name>              # Remove one face
+gaze clear-user                      # Remove all face data for current user
+gaze-gui                             # Open graphical app
 ```
 
-Auth results:
-- **Green ✓** — authenticated (`✓ Authenticated as: <face> (<pct>%, <ms>ms)`)
-- **Red ✗** — access denied (`✗ Access Denied. (<ms>ms)`)
+## Documentation
 
-While scanning, the spinner shows real-time feedback if no face is detected or the face is clipped. The CLI communicates with the running daemon over DBus.
+Full documentation: https://gaze.gundulabs.com
 
-### GUI
+## Building from source (for developers)
 
-Launch `gaze-gui` for a graphical enrollment and authentication interface. The test authentication button shows a color-coded result label (green/red) matching the CLI output.
+Install system dependencies first:
 
-## How It Works
+```bash
+# Debian / Ubuntu
+sudo apt install libopencv-dev libclang-dev libv4l-dev libpam0g-dev libgtk-4-dev libadwaita-1-dev
 
-```
-Camera frame → SCRFD face detection → Umeyama alignment (112×112)
-→ ResNet50 / MobileFaceNet embedding → cosine similarity → auth result
-```
-
-Face embeddings are stored as binary files at:
-```
-/var/lib/gaze/users/{username}/{face_name}/{uuid}.bin
+# Fedora / RHEL
+sudo dnf install opencv-devel clang-devel libv4l-devel pam-devel gtk4-devel libadwaita-devel
 ```
 
-Each file is a raw `f32` array (512 floats = 2048 bytes). Multiple captures per face improve robustness — all embeddings for a face are scored individually and the best match wins.
+Build workspace:
+
+```bash
+cargo build --workspace --release
+```
 
 ## License
 
-See [LICENSE](LICENSE).
+See `LICENSE`.

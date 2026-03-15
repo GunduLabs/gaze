@@ -1,8 +1,10 @@
 # Configuration
 
-Gaze is configured via `/etc/gaze/config.toml`.
+Gaze is configured with `/etc/gaze/config.toml`.
 
-## Full example
+Most users only need to change camera device or security level.
+
+## Default config
 
 ```toml
 level = "medium"
@@ -18,9 +20,9 @@ models_dir = "/opt/gaze/models"
 max_captures_per_face = 8
 ```
 
-## Security levels
+## Change security level
 
-The `level` field selects the detector + recognizer model pair and similarity threshold:
+`level` controls model choice and match strictness.
 
 | Level | Detector | Recognizer | Threshold | Notes |
 |---|---|---|---|---|
@@ -29,6 +31,12 @@ The `level` field selects the detector + recognizer model pair and similarity th
 | `high` | SCRFD-10G | ResNet50 | 0.50 | More accurate |
 | `maximum` | SCRFD-10G | ResNet50 | 0.60 | Most strict |
 | `custom` | — | — | — | See below |
+
+Practical guidance:
+
+- `medium`: best starting point for most laptops
+- `high`: use when false positives are unacceptable
+- `low`: use on weaker hardware when speed is critical
 
 ### Custom level
 
@@ -39,26 +47,57 @@ recognizer = "w600k_r50.onnx"
 threshold = 0.55
 ```
 
-## Camera
+## Select camera device
+
+List camera devices:
+
+```bash
+ls /dev/video*
+```
+
+Then set:
 
 ```toml
 [cameras]
-rgb = "/dev/video0"   # Path to your RGB webcam device
+rgb = "/dev/video0"
 ```
 
-## Storage
+If you use an external USB webcam, it may appear as `/dev/video1` or higher.
+
+After changing config:
+
+```bash
+sudo systemctl restart gazed
+```
+
+## Storage paths
 
 ```toml
 [storage]
-users_dir = "/var/lib/gaze/users"   # Where face embeddings are stored
-models_dir = "/opt/gaze/models"     # Where ONNX models are cached
+users_dir = "/var/lib/gaze/users"
+models_dir = "/opt/gaze/models"
 ```
 
-Models are downloaded automatically from InsightFace on first run if not present.
+What these do:
 
-## Enrollment
+- `users_dir`: enrolled face embeddings per user
+- `models_dir`: downloaded ONNX models used by detector/recognizer
+
+Models are auto-downloaded on first run if missing.
+
+## Enrollment behavior
 
 ```toml
 [enrollment]
-max_captures_per_face = 8   # Number of angles captured per face during enrollment
+max_captures_per_face = 8
 ```
+
+Increase this if auth is unreliable in varied lighting.
+
+## Recommended tuning workflow
+
+1. Start with `level = "medium"`
+2. Enroll one profile: `gaze add-face default`
+3. Test 5 to 10 times using `gaze auth --verbose`
+4. If false accepts are too high, switch to `high`
+5. If false rejects are too high, run `gaze refine-face default`
