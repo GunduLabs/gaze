@@ -1,5 +1,67 @@
 # Installation
 
+## Install from Gundu Labs repositories
+
+This guide assumes a shared package endpoint at `https://packages.gundulabs.com` (backed by Cloudflare R2).
+
+::: code-group
+
+```bash [Debian/Ubuntu]
+curl -fsSL https://packages.gundulabs.com/PACKAGE-SIGNING-KEY.asc \
+	| gpg --dearmor \
+	| sudo tee /usr/share/keyrings/gundulabs-packages.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/gundulabs-packages.gpg] https://packages.gundulabs.com/deb stable main" | sudo tee /etc/apt/sources.list.d/gaze.list
+sudo apt update
+sudo apt install gaze gaze-gui gaze-gnome-extension
+```
+
+```bash [Fedora/RHEL]
+sudo tee /etc/yum.repos.d/gaze.repo >/dev/null <<'EOF'
+[gaze]
+name=Gaze Packages
+baseurl=https://packages.gundulabs.com/rpm/x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.gundulabs.com/PACKAGE-SIGNING-KEY.asc
+EOF
+sudo rpm --import https://packages.gundulabs.com/PACKAGE-SIGNING-KEY.asc
+sudo dnf install gaze gaze-gui gaze-gnome-extension
+```
+
+```bash [Arch Linux]
+sudo tee /etc/pacman.d/gaze-mirrorlist >/dev/null <<'EOF'
+Server = https://packages.gundulabs.com/arch/x86_64
+EOF
+curl -fsSL https://packages.gundulabs.com/PACKAGE-SIGNING-KEY.asc -o /tmp/gundulabs-packages.asc
+sudo pacman-key --add /tmp/gundulabs-packages.asc
+sudo pacman-key --lsign-key "$(gpg --show-keys --with-colons /tmp/gundulabs-packages.asc | awk -F: '/^fpr:/ {print $10; exit}')"
+rm -f /tmp/gundulabs-packages.asc
+sudo tee -a /etc/pacman.conf >/dev/null <<'EOF'
+[gaze]
+SigLevel = Required DatabaseOptional
+Include = /etc/pacman.d/gaze-mirrorlist
+EOF
+sudo pacman -Sy gaze gaze-gui gaze-gnome-extension
+```
+
+:::
+
+After installation from packages, enable and start the daemon:
+
+```bash
+sudo systemctl enable --now gazed
+```
+
+## Manual install from local build artifacts
+
+## Flatpak GUI install
+
+```bash
+flatpak remote-add --if-not-exists --no-gpg-verify gundulabs https://packages.gundulabs.com/flatpak
+flatpak install gundulabs com.gundulabs.Gaze
+```
+
 ## 1. Install binaries and enable the daemon
 
 ```bash
@@ -75,11 +137,10 @@ On Wayland, GNOME Shell must be restarted (log out and back in) before it picks 
 
 ## One-shot rebuild & reinstall (development)
 
-Requires [`nfpm`](https://nfpm.goreleaser.com/install/):
+Requires [`cargo-nfpm`](https://crates.io/crates/cargo-nfpm):
 
 ```bash
-go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
-export PATH="$PATH:$(go env GOPATH)/bin"
+cargo install cargo-nfpm --locked
 ```
 
 Then:

@@ -30,7 +30,7 @@ Six crates in a Cargo workspace (Rust 2024 edition, resolver v3):
 - **`pam_gaze_core`** — Core PAM authentication logic shared by the PAM module.
 - **`pam_gaze_grosshack`** — PAM compatibility shim for environments that require it.
 
-The `gnome-shell-extension/` directory contains the GNOME Shell extension (`gaze@gundulabs.com`) packaged separately.
+The `gnome_shell_extension/` directory contains the GNOME Shell extension (`gaze@gundulabs.com`) packaged separately.
 
 ## Architecture
 
@@ -56,4 +56,4 @@ The `gnome-shell-extension/` directory contains the GNOME Shell extension (`gaze
 
 ## Distribution Files
 
-`dist/` contains system integration files: systemd service (`gazed.service`), DBus policy (`org.gaze.Auth.conf`), default config. CI packages these into deb/rpm/arch packages via `.github/workflows/build.yml`.
+`dist/` contains system integration files: systemd service (`gazed.service`), DBus policy (`org.gaze.Auth.conf`), default config. CD packages these into deb/rpm/arch packages via `.github/workflows/cd.yml`.

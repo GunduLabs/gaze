@@ -1085,6 +1085,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "gaze-gnome-extension"
+version = "0.1.0"
+
+[[package]]
 name = "gaze_core"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,38 @@
+app-id: com.gundulabs.Gaze
+runtime: org.gnome.Platform
+runtime-version: "47"
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: gaze-gui
+finish-args:
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=all
+  - --system-talk-name=org.gaze.Auth
+  - --filesystem=xdg-run/gvfsd
+  - --filesystem=xdg-run/gvfs:ro
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/pkgconfig
+  - /share/man
+  - /share/doc
+modules:
+  - name: gaze-gui
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/gaze-gui/cargo
+        CARGO_TARGET_DIR: /run/build/gaze-gui/target
+    build-commands:
+      - cargo build --release --locked -p gaze_gui
+      - install -Dm755 target/release/gaze-gui /app/bin/gaze-gui
+      - install -Dm644 dist/com.gundulabs.Gaze.desktop /app/share/applications/com.gundulabs.Gaze.desktop
+      - install -Dm644 dist/com.gundulabs.Gaze.svg /app/share/icons/hicolor/scalable/apps/com.gundulabs.Gaze.svg
+      - install -Dm644 dist/com.gundulabs.Gaze.metainfo.xml /app/share/metainfo/com.gundulabs.Gaze.metainfo.xml
+    sources:
+      - type: dir
+        path: ../../

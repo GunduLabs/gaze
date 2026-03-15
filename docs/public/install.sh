@@ -3,6 +3,7 @@
 # Usage: curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
 set -e
 
+PKG_BASE_URL="https://packages.gundulabs.com"
 REPO="GunduLabs/gaze"
 GITHUB="https://github.com/${REPO}"
 
@@ -17,6 +18,7 @@ need() {
 need curl
 need grep
 need uname
+need awk
 
 bold "Gaze installer"
 echo ""
@@ -25,8 +27,8 @@ echo ""
 
 ARCH="$(uname -m)"
 case "$ARCH" in
-    x86_64)  PKG_ARCH="x86_64" ; DEB_ARCH="amd64" ;;
-    aarch64) PKG_ARCH="aarch64"; DEB_ARCH="arm64"  ;;
+    x86_64)  PKG_ARCH="x86_64" ;;
+    aarch64) PKG_ARCH="aarch64" ;;
     *) red "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
@@ -68,7 +70,7 @@ if ! is_rpm && ! is_deb && ! is_arch; then
     exit 1
 fi
 
-# ── latest version ────────────────────────────────────────────────────────────
+# ── latest version ───────────────────────────────────────────────────────────
 
 echo "Fetching latest release..."
 VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
@@ -80,51 +82,33 @@ fi
 echo "Latest version: $VERSION"
 V="${VERSION#v}"
 
-# ── already up to date? ───────────────────────────────────────────────────────
-
-if command -v gaze >/dev/null 2>&1; then
-    INSTALLED="v$(gaze --version 2>/dev/null | awk '{print $2}')"
-    if [ "$INSTALLED" = "$VERSION" ]; then
-        green "Gaze is already up to date ($VERSION)"
-        exit 0
-    fi
-    echo "Updating from $INSTALLED to $VERSION..."
-fi
-
-# ── download & install ────────────────────────────────────────────────────────
+# ── download + install standalone packages ───────────────────────────────────
 
 BASE_URL="${GITHUB}/releases/download/${VERSION}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 if is_deb; then
-    echo "Downloading packages..."
-    curl -fsSL --progress-bar -o "${TMP}/gaze.deb"                 "${BASE_URL}/gaze_${V}_${DEB_ARCH}.deb"
-    curl -fsSL --progress-bar -o "${TMP}/gaze-gui.deb"             "${BASE_URL}/gaze-gui_${V}_${DEB_ARCH}.deb"
-    curl -fsSL --progress-bar -o "${TMP}/gaze-gnome-ext.deb"       "${BASE_URL}/gaze-gnome-extension_${V}_${DEB_ARCH}.deb"
-    echo "Installing..."
-    apt-get install -y \
-        "${TMP}/gaze.deb" \
-        "${TMP}/gaze-gui.deb" \
-        "${TMP}/gaze-gnome-ext.deb" || true
+    DEB_ARCH="amd64"
+    [ "$PKG_ARCH" = "aarch64" ] && DEB_ARCH="arm64"
+    echo "Downloading standalone packages..."
+    curl -fsSL --progress-bar -o "${TMP}/gaze.deb" "${BASE_URL}/gaze_${V}_${DEB_ARCH}.deb"
+    curl -fsSL --progress-bar -o "${TMP}/gaze-gui.deb" "${BASE_URL}/gaze-gui_${V}_${DEB_ARCH}.deb"
+    curl -fsSL --progress-bar -o "${TMP}/gaze-gnome-extension.deb" "${BASE_URL}/gaze-gnome-extension_${V}_${DEB_ARCH}.deb"
+    apt-get install -y "${TMP}/gaze.deb" "${TMP}/gaze-gui.deb" "${TMP}/gaze-gnome-extension.deb"
 
 elif is_rpm; then
-    echo "Downloading packages..."
-    curl -fsSL --progress-bar -o "${TMP}/gaze.rpm"                 "${BASE_URL}/gaze-${V}-1.${PKG_ARCH}.rpm"
-    curl -fsSL --progress-bar -o "${TMP}/gaze-gui.rpm"             "${BASE_URL}/gaze-gui-${V}-1.${PKG_ARCH}.rpm"
-    curl -fsSL --progress-bar -o "${TMP}/gaze-gnome-ext.rpm"       "${BASE_URL}/gaze-gnome-extension-${V}-1.${PKG_ARCH}.rpm"
-    echo "Installing..."
+    echo "Downloading standalone packages..."
+    curl -fsSL --progress-bar -o "${TMP}/gaze.rpm" "${BASE_URL}/gaze-${V}-1.${PKG_ARCH}.rpm"
+    curl -fsSL --progress-bar -o "${TMP}/gaze-gui.rpm" "${BASE_URL}/gaze-gui-${V}-1.${PKG_ARCH}.rpm"
+    curl -fsSL --progress-bar -o "${TMP}/gaze-gnome-extension.rpm" "${BASE_URL}/gaze-gnome-extension-${V}-1.${PKG_ARCH}.rpm"
+
     if command -v dnf >/dev/null 2>&1; then
-        dnf install -y \
-            "${TMP}/gaze.rpm" \
-            "${TMP}/gaze-gui.rpm" \
-            "${TMP}/gaze-gnome-ext.rpm"
+        dnf install -y "${TMP}/gaze.rpm" "${TMP}/gaze-gui.rpm" "${TMP}/gaze-gnome-extension.rpm"
     else
-        rpm -Uvh \
-            "${TMP}/gaze.rpm" \
-            "${TMP}/gaze-gui.rpm" \
-            "${TMP}/gaze-gnome-ext.rpm"
+        rpm -Uvh "${TMP}/gaze.rpm" "${TMP}/gaze-gui.rpm" "${TMP}/gaze-gnome-extension.rpm"
     fi
+
     if command -v authselect >/dev/null 2>&1; then
         rm -rf /etc/authselect/custom/gaze 2>/dev/null || true
         # Fix stale authselect.conf pointing to bare "gaze" instead of "vendor/gaze"
@@ -138,15 +122,11 @@ elif is_rpm; then
     fi
 
 elif is_arch; then
-    echo "Downloading packages..."
-    curl -fsSL --progress-bar -o "${TMP}/gaze.pkg.tar.zst"         "${BASE_URL}/gaze-${V}-1-${PKG_ARCH}.pkg.tar.zst"
-    curl -fsSL --progress-bar -o "${TMP}/gaze-gui.pkg.tar.zst"     "${BASE_URL}/gaze-gui-${V}-1-${PKG_ARCH}.pkg.tar.zst"
-    curl -fsSL --progress-bar -o "${TMP}/gaze-gnome-ext.pkg.tar.zst" "${BASE_URL}/gaze-gnome-extension-${V}-1-${PKG_ARCH}.pkg.tar.zst"
-    echo "Installing..."
-    pacman -U --noconfirm \
-        "${TMP}/gaze.pkg.tar.zst" \
-        "${TMP}/gaze-gui.pkg.tar.zst" \
-        "${TMP}/gaze-gnome-ext.pkg.tar.zst"
+    echo "Downloading standalone packages..."
+    curl -fsSL --progress-bar -o "${TMP}/gaze.pkg.tar.zst" "${BASE_URL}/gaze-${V}-1-${PKG_ARCH}.pkg.tar.zst"
+    curl -fsSL --progress-bar -o "${TMP}/gaze-gui.pkg.tar.zst" "${BASE_URL}/gaze-gui-${V}-1-${PKG_ARCH}.pkg.tar.zst"
+    curl -fsSL --progress-bar -o "${TMP}/gaze-gnome-extension.pkg.tar.zst" "${BASE_URL}/gaze-gnome-extension-${V}-1-${PKG_ARCH}.pkg.tar.zst"
+    pacman -U --noconfirm "${TMP}/gaze.pkg.tar.zst" "${TMP}/gaze-gui.pkg.tar.zst" "${TMP}/gaze-gnome-extension.pkg.tar.zst"
 fi
 
 systemctl restart gazed 2>/dev/null || true

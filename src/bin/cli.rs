@@ -112,7 +112,8 @@ async fn run_capture_session(
                             style(prompt).white().bold(),
                             match hint {
                                 CaptureHint::NoFace => hint_text.red(),
-                                CaptureHint::NotCentered | CaptureHint::FaceClipped => hint_text.yellow(),
+                                CaptureHint::NotCentered | CaptureHint::FaceClipped =>
+                                    hint_text.yellow(),
                                 CaptureHint::Ready => hint_text.green(),
                             }
                         ));

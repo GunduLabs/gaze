@@ -2,6 +2,7 @@
 members = [
     ".",
     "gaze_core",
+    "gnome_shell_extension",
     "pam_gaze_core",
     "pam_gaze",
     "pam_gaze_grosshack",
@@ -15,6 +16,10 @@ name = "gaze"
 version = "0.1.0"
 edition = "2024"
 description = "Facial authentication for Linux"
+license = "MIT"
+homepage = "https://gaze.gundulabs.com"
+repository = "https://github.com/Gundu-Labs/gaze"
+authors = ["Gundu Labs <maintainers@gundulabs.com>"]
 
 [dependencies]
 anyhow = "1.0.102"
@@ -43,3 +48,89 @@ path = "src/main.rs"
 [[bin]]
 name = "gaze"
 path = "src/bin/cli.rs"
+
+[package.metadata.nfpm]
+section = "admin"
+priority = "optional"
+
+[[package.metadata.nfpm.contents]]
+src = "dist/config.toml"
+dst = "/etc/gaze/config.toml"
+type = "config"
+
+[[package.metadata.nfpm.contents]]
+src = "dist/org.gaze.Auth.conf"
+dst = "/etc/dbus-1/system.d/org.gaze.Auth.conf"
+type = "file"
+
+[[package.metadata.nfpm.contents]]
+src = "dist/gazed.service"
+dst = "/usr/lib/systemd/system/gazed.service"
+type = "file"
+
+[[package.metadata.nfpm.contents]]
+src = "dist/gdm-face"
+dst = "/etc/pam.d/gdm-face"
+type = "file"
+
+[[package.metadata.nfpm.contents]]
+src = "target/release/libpam_gaze.so"
+dst = "/lib/x86_64-linux-gnu/security/pam_gaze.so"
+packager = "deb"
+
+[[package.metadata.nfpm.contents]]
+src = "target/release/libpam_gaze_grosshack.so"
+dst = "/lib/x86_64-linux-gnu/security/pam_gaze_grosshack.so"
+packager = "deb"
+
+[[package.metadata.nfpm.contents]]
+src = "target/release/libpam_gaze.so"
+dst = "/usr/lib64/security/pam_gaze.so"
+packager = "rpm"
+
+[[package.metadata.nfpm.contents]]
+src = "target/release/libpam_gaze_grosshack.so"
+dst = "/usr/lib64/security/pam_gaze_grosshack.so"
+packager = "rpm"
+
+[[package.metadata.nfpm.contents]]
+src = "target/release/libpam_gaze.so"
+dst = "/usr/lib/security/pam_gaze.so"
+packager = "archlinux"
+
+[[package.metadata.nfpm.contents]]
+src = "target/release/libpam_gaze_grosshack.so"
+dst = "/usr/lib/security/pam_gaze_grosshack.so"
+packager = "archlinux"
+
+[[package.metadata.nfpm.contents]]
+src = "dist/pam-configs/gaze/"
+dst = "/usr/share/pam-configs/"
+packager = "deb"
+
+[[package.metadata.nfpm.contents]]
+src = "dist/authselect/custom/gaze/"
+dst = "/usr/share/authselect/vendor/gaze/"
+packager = "rpm"
+
+[package.metadata.nfpm.deb]
+arch = "amd64"
+depends = ["libopencv-dev", "libpam0g"]
+
+[package.metadata.nfpm.deb.scripts]
+postinstall = "packaging/postinst_deb.sh"
+preremove = "packaging/prerm_deb.sh"
+
+[package.metadata.nfpm.rpm]
+arch = "x86_64"
+depends = ["opencv", "pam"]
+
+[package.metadata.nfpm.rpm.scripts]
+postinstall = "packaging/postinst_rpm.sh"
+
+[package.metadata.nfpm.archlinux]
+arch = "x86_64"
+depends = ["opencv", "pam"]
+
+[package.metadata.nfpm.archlinux.scripts]
+postinstall = "packaging/postinst_arch.sh"
