@@ -1,6 +1,3 @@
 name = "gaze"
 compatibility_date = "2026-03-01"
 pages_build_output_dir = "docs/.vitepress/dist"
-
-[build]
-command = "bun install && bun run docs:build"
