@@ -1,5 +1,5 @@
 #!/bin/sh
-# Gaze installer — https://gaze.gundulabs.com/install.sh
+# Gaze installer - https://gaze.gundulabs.com/install.sh
 # Usage: curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
 set -e
 

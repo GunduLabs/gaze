@@ -23,12 +23,12 @@ System dependencies (Ubuntu): `libopencv-dev libclang-dev libv4l-dev libpam0g-de
 
 Six crates in a Cargo workspace (Rust 2024 edition, resolver v3):
 
-- **`gaze`** — Daemon (`gazed`) and CLI (`gaze`) binaries. Contains the core ML pipeline: face detection → alignment → recognition → embedding comparison.
-- **`gaze-core`** — Shared library used by all other crates. Camera capture, face detection wrapper, capture session logic, configuration parsing, DBus proxy definitions.
-- **`gaze-gui`** — GTK4/Adwaita GUI application for enrollment and authentication.
-- **`pam-gaze`** — PAM module (`cdylib`). Thin wrapper that calls into `pam-gaze-core`.
-- **`pam-gaze-core`** — Core PAM authentication logic shared by the PAM module.
-- **`pam-gaze-grosshack`** — PAM compatibility shim for environments that require it.
+- **`gaze`** - Daemon (`gazed`) and CLI (`gaze`) binaries. Contains the core ML pipeline: face detection → alignment → recognition → embedding comparison.
+- **`gaze-core`** - Shared library used by all other crates. Camera capture, face detection wrapper, capture session logic, configuration parsing, DBus proxy definitions.
+- **`gaze-gui`** - GTK4/Adwaita GUI application for enrollment and authentication.
+- **`pam-gaze`** - PAM module (`cdylib`). Thin wrapper that calls into `pam-gaze-core`.
+- **`pam-gaze-core`** - Core PAM authentication logic shared by the PAM module.
+- **`pam-gaze-grosshack`** - PAM compatibility shim for environments that require it.
 
 The `gnome-shell-extension/` directory contains the GNOME Shell extension (`gaze@gundulabs.com`) packaged separately.
 
@@ -37,10 +37,10 @@ The `gnome-shell-extension/` directory contains the GNOME Shell extension (`gaze
 **Data flow**: Camera frame (OpenCV) → DBus → Daemon: SCRFD detection → Umeyama alignment (112×112) → ResNet50/MobileFaceNet embedding → cosine similarity against stored embeddings → auth result.
 
 **Daemon (`gaze/src/main.rs`, `gaze/src/daemon.rs`)**: Async Tokio service registered on DBus as `org.gaze.Auth` at `/org/gaze/Auth`. The `AuthDaemon` struct holds the detector, recognizer, and user database. Key daemon modules in `gaze/src/`:
-- `align.rs` — Umeyama transform for ArcFace-standard face alignment
-- `recognize.rs` — ONNX inference for face embeddings
-- `models.rs` — Downloads InsightFace models from GitHub releases on demand
-- `users.rs` — File-based embedding database at `/var/lib/gaze/users/{username}/{face_name}/{uuid}.bin`
+- `align.rs` - Umeyama transform for ArcFace-standard face alignment
+- `recognize.rs` - ONNX inference for face embeddings
+- `models.rs` - Downloads InsightFace models from GitHub releases on demand
+- `users.rs` - File-based embedding database at `/var/lib/gaze/users/{username}/{face_name}/{uuid}.bin`
 
 **CLI (`gaze/src/bin/cli.rs`)**: Clap-based tool with subcommands: `auth`, `add-face`, `refine-face`, `list-faces`, `remove-face`, `clear-user`. Communicates with daemon via DBus proxy from `gaze-core`.
 
@@ -52,7 +52,7 @@ The `gnome-shell-extension/` directory contains the GNOME Shell extension (`gaze
 - Async/await with Tokio for all IPC and I/O
 - DBus interface defined via `zbus` derive macros in `gaze-core/src/dbus.rs`
 - ML models auto-downloaded to `/opt/gaze/models/` on first run
-- PAM module uses unsafe C FFI — changes require careful review
+- PAM module uses unsafe C FFI - changes require careful review
 
 ## Distribution Files
 

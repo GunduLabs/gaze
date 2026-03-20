@@ -7,7 +7,7 @@ mod recognize;
 pub mod users;
 
 use daemon::AuthDaemon;
-use gaze_core::config::Config;
+use gaze_core::config::{Config, MODELS_DIR, USERS_DIR};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
@@ -36,11 +36,8 @@ async fn main() -> anyhow::Result<()> {
         "Loaded security config"
     );
 
-    let (det_path, rec_path) = models::ensure_models(
-        &config.storage.models_dir,
-        security.detector(),
-        security.recognizer(),
-    )?;
+    let (det_path, rec_path) =
+        models::ensure_models(MODELS_DIR, security.detector(), security.recognizer())?;
 
     let detector = gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap())
         .expect("Failed to load detection model");
@@ -48,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
     let recognizer = recognize::FaceRecognizer::new(rec_path.to_str().unwrap())
         .expect("Failed to load recognition model");
 
-    let db = users::UserDatabase::new(&config.storage.users_dir)?;
+    let db = users::UserDatabase::new(USERS_DIR)?;
 
     let daemon = AuthDaemon {
         detector: Arc::new(Mutex::new(detector)),

@@ -74,6 +74,10 @@ gnome-extensions enable gaze@gundulabs.com
 
 On Wayland, log out and back in after installing extension updates.
 
+Note: lock screen and GDM login integration are GNOME-only and require this extension.
+GDM login face auth is disabled by default due to GNOME keyring behavior.
+See [GNOME Extension](/guide/gnome) for details and optional login enablement.
+
 ## If something fails
 
 Go to the [troubleshooting guide](/guide/troubleshooting) for camera, daemon, PAM, and low-match issues.
@@ -83,4 +87,5 @@ Go to the [troubleshooting guide](/guide/troubleshooting) for camera, daemon, PA
 - Tune behavior in the [configuration guide](/guide/configuration)
 - Learn commands in the [CLI guide](/guide/cli)
 - Use the desktop app via the [GUI guide](/guide/gui)
-- Review login setup in the [PAM guide](/guide/pam)
+- Review PAM setup in [PAM](/guide/pam)
+- Review lock/login behavior in [GNOME Extension](/guide/gnome)

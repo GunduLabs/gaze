@@ -12,10 +12,6 @@ level = "medium"
 [cameras]
 rgb = "/dev/video0"
 
-[storage]
-users_dir = "/var/lib/gaze/users"
-models_dir = "/opt/gaze/models"
-
 [enrollment]
 max_captures_per_face = 8
 ```
@@ -30,7 +26,7 @@ max_captures_per_face = 8
 | `medium` | SCRFD-500M | MobileFaceNet | 0.40 | Default |
 | `high` | SCRFD-10G | ResNet50 | 0.50 | More accurate |
 | `maximum` | SCRFD-10G | ResNet50 | 0.60 | Most strict |
-| `custom` | — | — | — | See below |
+| `custom` | n/a | n/a | n/a | See below |
 
 Practical guidance:
 
@@ -72,16 +68,10 @@ sudo systemctl restart gazed
 
 ## Storage paths
 
-```toml
-[storage]
-users_dir = "/var/lib/gaze/users"
-models_dir = "/opt/gaze/models"
-```
+Storage locations are managed by the service setup and are not intended to be changed in config:
 
-What these do:
-
-- `users_dir`: enrolled face embeddings per user
-- `models_dir`: downloaded ONNX models used by detector/recognizer
+- User embeddings: `/var/lib/gaze/users`
+- Downloaded models: `/var/cache/gaze`
 
 Models are auto-downloaded on first run if missing.
 

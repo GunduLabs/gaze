@@ -8,26 +8,26 @@ Use one of these paths.
 curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
 ```
 
-This downloads release packages and installs:
+This installs:
 
 - `gaze` (daemon + CLI)
 - `gaze-gui`
 - `gaze-gnome-extension`
 
-It also sets up your distro package repository and signing key so future updates work with your system package manager.
+It also configures your package repository for future updates.
 
 ## Path B: install from Gundu Labs repositories
 
-Use this if you want to manually configure package repositories.
+Use this if you prefer manual repository setup.
 
 ::: code-group
 
 ```bash [Debian/Ubuntu]
 curl -fsSL https://packages.gundulabs.com/PACKAGE-SIGNING-KEY.asc \
-	| gpg --dearmor \
-	| sudo tee /usr/share/keyrings/gundulabs-packages.gpg >/dev/null
+  | gpg --dearmor \
+  | sudo tee /usr/share/keyrings/gundulabs-packages.gpg >/dev/null
 echo "deb [signed-by=/usr/share/keyrings/gundulabs-packages.gpg] https://packages.gundulabs.com/deb stable main" \
-	| sudo tee /etc/apt/sources.list.d/gaze.list >/dev/null
+  | sudo tee /etc/apt/sources.list.d/gaze.list >/dev/null
 sudo apt update
 sudo apt install gaze gaze-gui gaze-gnome-extension
 ```
@@ -71,25 +71,15 @@ flatpak remote-add --if-not-exists --no-gpg-verify gundulabs https://packages.gu
 flatpak install gundulabs com.gundulabs.Gaze
 ```
 
-Use this if you only want the GUI app. For full PAM login integration, use Path A or Path B.
-
-This is also the recommended GUI path for Fedora Silverblue, Kinoite, and other atomic-style desktops. In those environments, it is usually better to install the GUI through Flatpak, Distrobox, or your normal app workflow instead of layering extra desktop packages unless you have a specific reason to.
+Use this if you only want the GUI app.
 
 ## Verify installation
-
-Run these commands after install:
 
 ```bash
 systemctl status gazed
 gaze --version
 gaze-gui --help
 ```
-
-What you should see:
-
-- `systemctl status gazed`: the service should show as running or active
-- `gaze --version`: prints the installed CLI version
-- `gaze-gui --help`: confirms the GUI binary is installed correctly
 
 If daemon is inactive:
 
@@ -104,47 +94,6 @@ gaze add-face default
 gaze auth --verbose
 ```
 
-## PAM configuration and login manager details
+## Development and source builds
 
-See the [PAM guide](/guide/pam) for distro-specific PAM behavior, authselect setup, and manual steps.
-
-## Enable GNOME lock screen extension
-
-```bash
-gnome-extensions enable gaze@gundulabs.com
-```
-
-On Wayland, log out and back in after extension installation or update.
-
-## If auth still fails
-
-Use the [troubleshooting guide](/guide/troubleshooting).
-
-## Build from source (advanced)
-
-Install dependencies:
-
-::: code-group
-
-```bash [Debian/Ubuntu]
-sudo apt install libopencv-dev libclang-dev libv4l-dev libpam0g-dev libgtk-4-dev libadwaita-1-dev
-```
-
-```bash [Fedora/RHEL]
-sudo dnf install opencv-devel clang-devel libv4l-devel pam-devel gtk4-devel libadwaita-devel
-```
-
-:::
-
-Build:
-
-```bash
-cargo build --workspace --release
-```
-
-For packaging workflows:
-
-```bash
-go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
-export PATH="$PATH:$(go env GOPATH)/bin"
-```
+See the [Development guide](/guide/development) for source builds, tests, packaging, and Flatpak development workflows.

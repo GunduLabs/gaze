@@ -47,7 +47,7 @@ That makes authentication more robust for:
 Default locations:
 
 - User embeddings: `/var/lib/gaze/users`
-- Model files: `/opt/gaze/models`
+- Model files: `/var/cache/gaze`
 - Config file: `/etc/gaze/config.toml`
 
 ## Components

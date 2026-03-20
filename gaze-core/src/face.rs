@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{Config, MODELS_DIR};
 use crate::detect::{DetectError, FaceDetector};
 use opencv::core::Mat;
 use opencv::prelude::*;
@@ -47,7 +47,7 @@ pub struct FaceChecker {
 impl FaceChecker {
     pub fn new() -> anyhow::Result<Self> {
         let config = Config::load().unwrap_or_default();
-        let model_path = Path::new(&config.storage.models_dir).join(config.security.detector());
+        let model_path = Path::new(MODELS_DIR).join(config.security.detector());
 
         if !model_path.exists() {
             anyhow::bail!(

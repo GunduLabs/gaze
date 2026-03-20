@@ -17,7 +17,14 @@ export default defineConfig({
         items: [
           { text: 'Getting Started', link: '/guide/getting-started' },
           { text: 'Installation', link: '/guide/installation' },
-          { text: 'PAM Setup', link: '/guide/pam' },
+          { text: 'Development', link: '/guide/development' },
+          {
+            text: 'Authentication',
+            items: [
+              { text: 'PAM', link: '/guide/pam' },
+              { text: 'GNOME Extension', link: '/guide/gnome' },
+            ]
+          },
           { text: 'GUI Guide', link: '/guide/gui' },
           { text: 'CLI Guide', link: '/guide/cli' },
           { text: 'Configuration', link: '/guide/configuration' },

@@ -2,6 +2,8 @@ use serde::Deserialize;
 use std::path::Path;
 
 const DEFAULT_CONFIG_PATH: &str = "/etc/gaze/config.toml";
+pub const USERS_DIR: &str = "/var/lib/gaze/users";
+pub const MODELS_DIR: &str = "/var/cache/gaze";
 
 #[derive(Deserialize, Clone, Debug, Default)]
 #[serde(tag = "level")]
@@ -58,8 +60,6 @@ pub struct Config {
     #[serde(default)]
     pub cameras: CameraConfig,
     #[serde(default)]
-    pub storage: StorageConfig,
-    #[serde(default)]
     pub enrollment: EnrollmentConfig,
 }
 
@@ -69,22 +69,8 @@ pub struct CameraConfig {
     pub rgb: String,
 }
 
-#[derive(Deserialize, Clone, Debug)]
-pub struct StorageConfig {
-    #[serde(default = "default_users_dir")]
-    pub users_dir: String,
-    #[serde(default = "default_models_dir")]
-    pub models_dir: String,
-}
-
 fn default_rgb_device() -> String {
     "/dev/video0".to_string()
-}
-fn default_users_dir() -> String {
-    "/var/lib/gaze/users".to_string()
-}
-fn default_models_dir() -> String {
-    "/var/cache/gaze".to_string()
 }
 fn default_max_captures() -> usize {
     8
@@ -108,15 +94,6 @@ impl Default for CameraConfig {
     fn default() -> Self {
         Self {
             rgb: default_rgb_device(),
-        }
-    }
-}
-
-impl Default for StorageConfig {
-    fn default() -> Self {
-        Self {
-            users_dir: default_users_dir(),
-            models_dir: default_models_dir(),
         }
     }
 }

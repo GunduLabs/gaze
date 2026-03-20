@@ -1,4 +1,4 @@
-# Justfile for Gaze — https://gaze.gundulabs.com
+# Justfile for Gaze - https://gaze.gundulabs.com
 # Run `just` to see available targets.
 
 # Host architecture from just; can be overridden: just arch=aarch64 package deb
@@ -13,12 +13,6 @@ deb_arch := if arch == "x86_64" { "amd64" } else if arch == "aarch64" { "arm64" 
 export ARCH      := arch
 export VERSION   := version
 export MULTIARCH := multiarch
-
-# ── defaults ─────────────────────────────────────────────────────────────────
-
-[private]
-default:
-    @just --list
 
 # ── build ─────────────────────────────────────────────────────────────────────
 

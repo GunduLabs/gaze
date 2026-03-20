@@ -170,22 +170,22 @@ gaze-gui                             # Open graphical app
 Full documentation: https://gaze.gundulabs.com
 
 ## Building from source (for developers)
-
-Install system dependencies first:
-
-```bash
-# Debian / Ubuntu
-sudo apt install libopencv-dev libclang-dev libv4l-dev libpam0g-dev libgtk-4-dev libadwaita-1-dev
-
-# Fedora / RHEL
-sudo dnf install opencv-devel clang-devel libv4l-devel pam-devel gtk4-devel libadwaita-devel
-```
-
-Build workspace:
+For development, you'll need:
+- Rust 1.70+ (or install via `rustup`)
+- `just` (https://github.com/casey/just) for task automation
+- `npfm` (https://nfpm.goreleaser.com) for packaging
+- System dependencies: `build-essential libopencv-dev libclang-dev libv4l-dev libpam0g-dev libgtk-4-dev libadwaita-1-dev`
 
 ```bash
-cargo build --workspace --release
+# Clone and enter the repo
+git clone https://github.com/gundulabs/gaze
+cd gaze
+
+# Create a package for your distribution
+just package <rpm | deb | archlinux>
 ```
+
+For more information, see the [development guide](/guide/development).
 
 ## License
 

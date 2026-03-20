@@ -71,7 +71,7 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
       <div class="feature-card">
         <div class="feature-icon">🔌</div>
         <h3>PAM integration</h3>
-        <p>Drop-in PAM module for GDM, lightdm, and any PAM-aware login manager.</p>
+        <p>PAM modules for system auth flows (such as sudo and polkit), plus GNOME lock/GDM integration through the GNOME extension.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">🚌</div>
@@ -86,7 +86,7 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
       <div class="feature-card">
         <div class="feature-icon">⚙️</div>
         <h3>Configurable security</h3>
-        <p>Four preset security levels — from fast MobileFaceNet to accurate ResNet50.</p>
+        <p>Four preset security levels - from fast MobileFaceNet to accurate ResNet50.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">⬇️</div>
