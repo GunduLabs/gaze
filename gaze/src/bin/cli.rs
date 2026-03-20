@@ -142,12 +142,9 @@ async fn run_capture_session(
                             style(format!("{}...", CaptureHint::Ready)).green().bold()
                         ));
                     }
-                    CaptureState::Captured { prompt } => {
+                    CaptureState::Captured { prompt: _ } => {
                         pb.set_style(style_captured.clone());
-                        pb.set_message(format!(
-                            "{}",
-                            style(format!("Captured {}!", prompt)).green().bold()
-                        ));
+                        pb.set_message(format!("{}", style("Captured.").green().bold()));
                         thread::sleep(Duration::from_millis(800));
                     }
                     CaptureState::Complete => {
