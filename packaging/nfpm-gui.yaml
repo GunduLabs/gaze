@@ -1,0 +1,50 @@
+name: "gaze-gui"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+section: "admin"
+priority: "optional"
+maintainer: "Gundu Labs <maintainers@gundulabs.com>"
+description: "GTK4/Adwaita GUI for managing Gaze facial authentication"
+vendor: "Gundu Labs"
+homepage: "https://gaze.gundulabs.com"
+license: "MIT"
+
+contents:
+  - src: "target/release/gaze-gui"
+    dst: "/usr/bin/gaze-gui"
+    file_info:
+      mode: 0755
+  - src: "packaging/gui/com.gundulabs.Gaze.desktop"
+    dst: "/usr/share/applications/com.gundulabs.Gaze.desktop"
+  - src: "packaging/gui/com.gundulabs.Gaze.svg"
+    dst: "/usr/share/icons/hicolor/scalable/apps/com.gundulabs.Gaze.svg"
+  - src: "packaging/gui/com.gundulabs.Gaze.metainfo.xml"
+    dst: "/usr/share/metainfo/com.gundulabs.Gaze.metainfo.xml"
+
+deb:
+  signature:
+    method: debsign
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+rpm:
+  signature:
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+overrides:
+  deb:
+    depends:
+      - libgtk-4-1
+      - libadwaita-1-0
+    recommends:
+      - gaze
+  rpm:
+    depends:
+      - gtk4
+      - libadwaita
+    recommends:
+      - gaze
+  archlinux:
+    depends:
+      - gtk4
+      - libadwaita

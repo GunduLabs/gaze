@@ -20,6 +20,9 @@ jobs:
     name: Build ${{ matrix.name }} packages
     runs-on: ubuntu-latest
     container: ${{ matrix.container }}
+    env:
+      GPG_PRIVATE_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_PASSPHRASE }}
     strategy:
       fail-fast: false
       matrix:
@@ -33,6 +36,7 @@ jobs:
               DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
                 ca-certificates \
                 curl \
+                golang \
                 clang \
                 libclang-dev \
                 libcairo2-dev \
@@ -43,8 +47,11 @@ jobs:
                 libopencv-dev \
                 libv4l-dev \
                 libpam0g-dev \
+                checkpolicy \
                 libgtk-4-dev \
                 libadwaita-1-dev \
+                gnupg \
+                devscripts \
                 pkg-config
           - id: rpm
             name: rpm (Fedora)
@@ -54,14 +61,18 @@ jobs:
               dnf install -y \
                 ca-certificates \
                 curl \
+                golang \
                 clang \
                 clang-devel \
                 opencv-devel \
                 libv4l-devel \
                 pam-devel \
+                checkpolicy \
                 gtk4-devel \
                 libadwaita-devel \
                 openssl-devel \
+                gnupg2 \
+                rpm-sign \
                 pkg-config \
                 gcc
           - id: arch
@@ -73,14 +84,17 @@ jobs:
               pacman -S --noconfirm \
                 ca-certificates \
                 curl \
+                go \
                 clang \
                 llvm \
                 opencv \
                 v4l-utils \
                 pam \
+                checkpolicy \
                 gtk4 \
                 libadwaita \
                 openssl \
+                gnupg \
                 pkgconf \
                 gcc
 
@@ -94,38 +108,52 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install just
+        uses: taiki-e/install-action@just
+
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: cd-${{ matrix.id }}-v1
           cache-on-failure: true
 
-      - name: Install cargo-nfpm
-        uses: taiki-e/install-action@cargo-nfpm
+      - name: Install nfpm
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      - name: Build workspace
+      - name: Prepare nfpm signing key
+        run: |
+          if [ -n "$GPG_PRIVATE_KEY" ] && [ -n "$GPG_PASSPHRASE" ]; then
+            printf '%s' "$GPG_PRIVATE_KEY" > /tmp/nfpm-signing-key.asc
+            chmod 600 /tmp/nfpm-signing-key.asc
+            echo "NFPM_SIGNING_KEY_FILE=/tmp/nfpm-signing-key.asc" >> "$GITHUB_ENV"
+            echo "NFPM_PASSPHRASE=$GPG_PASSPHRASE" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build native packages
         env:
           CARGO_BUILD_JOBS: 2
           RUSTFLAGS: -Cdebuginfo=0
-        run: cargo build --workspace --release --locked
-
-      - name: Build native packages
         run: |
-          mkdir -p dist/packages
-          for pkg in gaze gaze_gui gaze-gnome-extension; do
-            cargo nfpm package -p "$pkg" -f "${{ matrix.format }}" -o dist/packages/ --no-build
-          done
+          VERSION="${GITHUB_REF_NAME#v}" just package "${{ matrix.format }}"
           ls -lh dist/packages/
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4
         with:
           name: packages-${{ matrix.id }}
-          path: dist/packages/*
+          path: |
+            dist/packages/*.deb
+            dist/packages/*.rpm
+            dist/packages/*.pkg.tar.*
 
   build-flatpak:
     name: Build flatpak
     runs-on: ubuntu-latest
+    env:
+      GPG_PRIVATE_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_PASSPHRASE }}
 
     steps:
       - name: Checkout source
@@ -136,16 +164,35 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
 
+      - name: Install just
+        uses: taiki-e/install-action@just
+
       - name: Add flathub remote
-        run: flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+        run: flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
       - name: Install Flatpak Rust SDK extension
         run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.rust-stable//24.08
 
-      - name: Build flatpak repo and bundle
+      - name: Install Flatpak LLVM SDK extension
+        run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.llvm18//24.08
+
+      - name: Import GPG key for flatpak signing
+        if: ${{ env.GPG_PRIVATE_KEY != '' }}
+        id: import_gpg
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ env.GPG_PRIVATE_KEY }}
+          passphrase: ${{ env.GPG_PASSPHRASE }}
+
+      - name: Resolve flatpak signing key id
         run: |
-          chmod +x scripts/build-flatpak.sh
-          scripts/build-flatpak.sh
+          KEY_ID="${{ steps.import_gpg.outputs.keyid }}"
+          if [ -n "$KEY_ID" ]; then
+            echo "FLATPAK_GPG_SIGN=$KEY_ID" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build flatpak repo and bundle
+        run: just build-flatpak
 
       - name: Upload flatpak package artifact
         uses: actions/upload-artifact@v4
@@ -153,21 +200,10 @@ jobs:
           name: packages-flatpak
           path: dist/packages/*.flatpak
 
-      - name: Upload flatpak repo artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: own-repos-flatpak
-          path: dist/repos/flatpak
-
-  sign-packages:
-    name: Sign packages
+  release:
+    name: Upload release assets
     runs-on: ubuntu-latest
     needs: [build-packages, build-flatpak]
-
-    env:
-      GPG_PRIVATE_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
-      GPG_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_PASSPHRASE }}
-      GPG_KEY_ID: ${{ secrets.PACKAGE_SIGNING_KEY_ID }}
 
     steps:
       - name: Download package artifacts
@@ -177,230 +213,7 @@ jobs:
           path: dist/packages
           merge-multiple: true
 
-      - name: Install signing tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gnupg
-
-      - name: Import GPG key
-        id: import_gpg
-        uses: crazy-max/ghaction-import-gpg@v6
-        with:
-          gpg_private_key: ${{ env.GPG_PRIVATE_KEY }}
-          passphrase: ${{ env.GPG_PASSPHRASE }}
-
-      - name: Resolve key id
-        run: |
-          KEY_ID="${GPG_KEY_ID:-${{ steps.import_gpg.outputs.keyid }}}"
-          test -n "$KEY_ID"
-          echo "SIGNING_KEY_ID=$KEY_ID" >> "$GITHUB_ENV"
-
-      - name: Sign package files
-        run: |
-          cd dist/packages
-          shopt -s nullglob
-          artifacts=(*.deb *.rpm *.flatpak)
-          for pkg in *.pkg.tar.*; do
-            [[ "$pkg" == *.sig ]] && continue
-            artifacts+=("$pkg")
-          done
-          shopt -u nullglob
-
-          for artifact in "${artifacts[@]}"; do
-            gpg --batch --yes --pinentry-mode loopback \
-              --passphrase "$GPG_PASSPHRASE" \
-              --local-user "$SIGNING_KEY_ID" \
-              --detach-sign \
-              --output "$artifact.sig" \
-              "$artifact"
-          done
-
-      - name: Generate signed checksums and public key
-        run: |
-          cd dist/packages
-          shopt -s nullglob
-          files=(*.deb *.rpm *.flatpak)
-          for pkg in *.pkg.tar.*; do
-            [[ "$pkg" == *.sig ]] && continue
-            files+=("$pkg")
-          done
-          shopt -u nullglob
-
-          sha256sum "${files[@]}" > SHA256SUMS
-          gpg --batch --yes --pinentry-mode loopback \
-            --passphrase "$GPG_PASSPHRASE" \
-            --local-user "$SIGNING_KEY_ID" \
-            --detach-sign \
-            --output SHA256SUMS.sig \
-            SHA256SUMS
-
-          gpg --batch --yes --armor --export "$SIGNING_KEY_ID" > PACKAGE-SIGNING-KEY.asc
-
-      - name: Upload signed package artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: packages-signed
-          path: dist/packages/*
-
-  release:
-    name: Upload release assets
-    runs-on: ubuntu-latest
-    needs: [sign-packages]
-
-    steps:
-      - name: Download signed package artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: packages-signed
-          path: dist/packages
-
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/packages/*
-
-  build-own-repos-deb-rpm:
-    name: Build signed deb/rpm repos
-    runs-on: ubuntu-latest
-    needs: [sign-packages]
-
-    env:
-      GPG_PRIVATE_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
-      GPG_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_PASSPHRASE }}
-      GPG_KEY_ID: ${{ secrets.PACKAGE_SIGNING_KEY_ID }}
-
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Download signed packages
-        uses: actions/download-artifact@v4
-        with:
-          name: packages-signed
-          path: dist/packages
-
-      - name: Install repo tooling
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends dpkg-dev apt-utils createrepo-c gnupg
-
-      - name: Import GPG key
-        id: import_gpg
-        uses: crazy-max/ghaction-import-gpg@v6
-        with:
-          gpg_private_key: ${{ env.GPG_PRIVATE_KEY }}
-          passphrase: ${{ env.GPG_PASSPHRASE }}
-
-      - name: Build repository metadata
-        env:
-          GPG_SIGN_KEY_ID: ${{ env.GPG_KEY_ID || steps.import_gpg.outputs.keyid }}
-          GPG_PASSPHRASE: ${{ env.GPG_PASSPHRASE }}
-        run: |
-          chmod +x scripts/build-repos.sh
-          scripts/build-repos.sh deb-rpm dist/packages dist/repos
-
-      - name: Upload repo artifact (deb/rpm)
-        uses: actions/upload-artifact@v4
-        with:
-          name: own-repos-deb-rpm
-          path: dist/repos
-
-  build-own-repos-arch:
-    name: Build signed arch repo
-    runs-on: ubuntu-latest
-    container: archlinux:latest
-    needs: [sign-packages]
-
-    env:
-      GPG_PRIVATE_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
-      GPG_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_PASSPHRASE }}
-      GPG_KEY_ID: ${{ secrets.PACKAGE_SIGNING_KEY_ID }}
-
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Download signed packages
-        uses: actions/download-artifact@v4
-        with:
-          name: packages-signed
-          path: dist/packages
-
-      - name: Install repo tooling
-        run: |
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm pacman-contrib gnupg
-
-      - name: Import GPG key
-        id: import_gpg
-        uses: crazy-max/ghaction-import-gpg@v6
-        with:
-          gpg_private_key: ${{ env.GPG_PRIVATE_KEY }}
-          passphrase: ${{ env.GPG_PASSPHRASE }}
-
-      - name: Build repository metadata
-        env:
-          GPG_SIGN_KEY_ID: ${{ env.GPG_KEY_ID || steps.import_gpg.outputs.keyid }}
-          GPG_PASSPHRASE: ${{ env.GPG_PASSPHRASE }}
-        run: |
-          chmod +x scripts/build-repos.sh
-          scripts/build-repos.sh arch dist/packages dist/repos
-
-      - name: Upload repo artifact (arch)
-        uses: actions/upload-artifact@v4
-        with:
-          name: own-repos-arch
-          path: dist/repos
-
-  publish-own-repos:
-    name: Publish repos to Cloudflare R2
-    runs-on: ubuntu-latest
-    needs: [build-own-repos-deb-rpm, build-own-repos-arch, build-flatpak]
-
-    env:
-      R2_BUCKET: ${{ secrets.R2_BUCKET }}
-      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-
-    steps:
-      - name: Download deb/rpm repo artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: own-repos-deb-rpm
-          path: dist/repos
-
-      - name: Download arch repo artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: own-repos-arch
-          path: dist/repos
-
-      - name: Download flatpak repo artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: own-repos-flatpak
-          path: dist/repos/flatpak
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          aws-region: auto
-
-      - name: Install AWS CLI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends awscli
-
-      - name: Sync repositories to R2
-        run: |
-          test -n "$R2_BUCKET"
-          test -n "$R2_ENDPOINT"
-          aws s3 sync dist/repos "s3://${R2_BUCKET}" \
-            --endpoint-url "$R2_ENDPOINT" \
-            --delete \
-            --no-progress
-
-      - name: Print repository locations
-        run: |
-          echo "Repositories uploaded to R2 bucket: ${R2_BUCKET}"

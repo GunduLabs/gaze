@@ -1,12 +1,12 @@
 [package]
-name = "pam_gaze_core"
+name = "pam-gaze-core"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
 
 [dependencies]
-gaze_core = { path = "../gaze_core" }
+gaze-core = { path = "../gaze-core" }
 libc = "0.2"
 opencv = "0.98.1"
 zbus = "4.4.0"

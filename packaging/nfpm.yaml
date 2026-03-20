@@ -1,0 +1,84 @@
+name: "gaze"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+section: "admin"
+priority: "optional"
+maintainer: "Gundu Labs <maintainers@gundulabs.com>"
+description: "Facial authentication daemon with PAM support"
+vendor: "Gundu Labs"
+homepage: "https://gaze.gundulabs.com"
+license: "MIT"
+
+contents:
+  - src: "target/release/gazed"
+    dst: "/usr/bin/gazed"
+    file_info:
+      mode: 0755
+  - src: "target/release/gaze"
+    dst: "/usr/bin/gaze"
+    file_info:
+      mode: 0755
+  - src: "packaging/config/config.toml"
+    dst: "/etc/gaze/config.toml"
+    type: "config"
+  - src: "packaging/config/org.gaze.Auth.conf"
+    dst: "/etc/dbus-1/system.d/org.gaze.Auth.conf"
+  - src: "packaging/config/gazed.service"
+    dst: "/usr/lib/systemd/system/gazed.service"
+  - src: "packaging/pam/gdm-face"
+    dst: "/etc/pam.d/gdm-face"
+  - src: "target/release/libpam_gaze.so"
+    dst: "/lib/${MULTIARCH}/security/pam_gaze.so"
+    packager: deb
+  - src: "target/release/libpam_gaze_grosshack.so"
+    dst: "/lib/${MULTIARCH}/security/pam_gaze_grosshack.so"
+    packager: deb
+  - src: "target/release/libpam_gaze.so"
+    dst: "/usr/lib64/security/pam_gaze.so"
+    packager: rpm
+  - src: "target/release/libpam_gaze_grosshack.so"
+    dst: "/usr/lib64/security/pam_gaze_grosshack.so"
+    packager: rpm
+  - src: "target/release/libpam_gaze.so"
+    dst: "/usr/lib/security/pam_gaze.so"
+    packager: archlinux
+  - src: "target/release/libpam_gaze_grosshack.so"
+    dst: "/usr/lib/security/pam_gaze_grosshack.so"
+    packager: archlinux
+  - src: "packaging/pam/gaze"
+    dst: "/usr/share/pam-configs/"
+    packager: deb
+  - src: "packaging/authselect/custom/gaze/"
+    dst: "/usr/share/authselect/vendor/gaze/"
+    packager: rpm
+
+deb:
+  signature:
+    method: debsign
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+rpm:
+  signature:
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+overrides:
+  deb:
+    scripts:
+      postinstall: "packaging/postinst-deb.sh"
+      preremove: "packaging/prerm-deb.sh"
+    depends:
+      - libopencv-dev
+      - libpam0g
+  rpm:
+    scripts:
+      postinstall: "packaging/postinst-rpm.sh"
+    depends:
+      - opencv
+      - pam
+  archlinux:
+    scripts:
+      postinstall: "packaging/postinst-arch.sh"
+    depends:
+      - opencv
+      - pam

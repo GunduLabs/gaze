@@ -2,6 +2,14 @@
 
 You do not need this page to use Gaze, but it explains why it behaves the way it does.
 
+## Security warning
+
+Gaze is currently **not suitable for security-critical authentication**.
+
+It can be spoofed with a simple photo of the enrolled user, including a photo displayed on a screen.
+
+Liveness detection, IR camera support, and other anti-spoofing protections are planned for upcoming releases.
+
 ## Privacy model
 
 - Face processing runs locally on your machine.

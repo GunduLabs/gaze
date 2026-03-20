@@ -2,7 +2,13 @@
 
 Gaze adds face authentication to Linux login and unlock.
 
-## Why users install Gaze
+> [!WARNING]
+> Gaze is currently **not suitable for security-critical authentication**.
+> The current pipeline can be spoofed with a simple photo of your face, including one shown on another screen.
+> Use Gaze for convenience scenarios right now, not as a high-assurance identity factor.
+> Liveness detection, IR camera support, and related anti-spoofing protections are planned for upcoming releases.
+
+## Features
 
 - Unlock and log in with your face on Linux
 - Keep authentication on-device

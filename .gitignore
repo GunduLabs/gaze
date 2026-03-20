@@ -1,6 +1,7 @@
 debug
 target
 .cargo/
+vendor/
 
 **/*.rs.bk
 
@@ -11,3 +12,8 @@ target
 node_modules/
 docs/.vitepress/dist
 docs/.vitepress/cache
+
+.flatpak-builder/
+flatpak-build/
+dist/
+.flatpak-cache/

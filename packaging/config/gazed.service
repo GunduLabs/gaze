@@ -8,6 +8,10 @@ Type=simple
 ExecStart=/usr/bin/gazed
 Restart=on-failure
 RestartSec=5
+StateDirectory=gaze
+CacheDirectory=gaze
+User=root
+Group=root
 
 [Install]
 WantedBy=multi-user.target

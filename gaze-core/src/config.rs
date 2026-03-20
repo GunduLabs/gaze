@@ -84,7 +84,7 @@ fn default_users_dir() -> String {
     "/var/lib/gaze/users".to_string()
 }
 fn default_models_dir() -> String {
-    "/opt/gaze/models".to_string()
+    "/var/cache/gaze".to_string()
 }
 fn default_max_captures() -> usize {
     8

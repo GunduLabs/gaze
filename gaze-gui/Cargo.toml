@@ -1,0 +1,23 @@
+[package]
+name = "gaze-gui"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+homepage = "https://gaze.gundulabs.com"
+repository = "https://github.com/Gundu-Labs/gaze"
+authors = ["Gundu Labs <maintainers@gundulabs.com>"]
+
+[[bin]]
+name = "gaze-gui"
+path = "src/main.rs"
+
+[dependencies]
+gaze-core = { path = "../gaze-core" }
+gtk4 = { version = "0.9.7", features = ["gnome_46"] }
+libadwaita = { version = "0.7.2", features = ["v1_4"] }
+zbus = "4.4.0"
+anyhow = "1.0.102"
+opencv = "0.98.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+

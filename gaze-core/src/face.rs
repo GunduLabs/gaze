@@ -51,7 +51,7 @@ impl FaceChecker {
 
         if !model_path.exists() {
             anyhow::bail!(
-                "Model not found at {}. Please install the gaze daemon first.",
+                "Model not found at {}. Run 'gazed' once to download models, or install the gaze package.",
                 model_path.display()
             );
         }

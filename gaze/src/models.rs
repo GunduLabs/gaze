@@ -5,21 +5,6 @@ use tracing::{debug, info};
 
 const RELEASE_BASE: &str = "https://github.com/deepinsight/insightface/releases/download/v0.7";
 
-pub struct ModelPack {
-    pub detector: &'static str,
-    pub recognizer: &'static str,
-}
-
-pub const BUFFALO_L: ModelPack = ModelPack {
-    detector: "det_10g.onnx",
-    recognizer: "w600k_r50.onnx",
-};
-
-pub const BUFFALO_SC: ModelPack = ModelPack {
-    detector: "det_500m.onnx",
-    recognizer: "w600k_mbf.onnx",
-};
-
 fn zip_url(pack_name: &str) -> String {
     format!("{}/{}.zip", RELEASE_BASE, pack_name)
 }

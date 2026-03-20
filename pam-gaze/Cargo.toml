@@ -1,5 +1,5 @@
 [package]
-name = "pam_gaze"
+name = "pam-gaze"
 version = "0.1.0"
 edition = "2024"
 
@@ -7,7 +7,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-pam_gaze_core = { path = "../pam_gaze_core" }
-gaze_core = { path = "../gaze_core" }
+pam-gaze-core = { path = "../pam-gaze-core" }
+gaze-core = { path = "../gaze-core" }
 libc = "0.2"
 zbus = "4.4.0"

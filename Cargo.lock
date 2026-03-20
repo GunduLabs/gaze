@@ -1067,7 +1067,7 @@ dependencies = [
  "anyhow",
  "clap",
  "console",
- "gaze_core",
+ "gaze-core",
  "image",
  "indicatif",
  "nalgebra",
@@ -1085,11 +1085,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "gaze-gnome-extension"
-version = "0.1.0"
-
-[[package]]
-name = "gaze_core"
+name = "gaze-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1110,11 +1106,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "gaze_gui"
+name = "gaze-gui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "gaze_core",
+ "gaze-core",
  "gtk4",
  "libadwaita",
  "opencv",
@@ -2275,20 +2271,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "pam_gaze"
+name = "pam-gaze"
 version = "0.1.0"
 dependencies = [
- "gaze_core",
+ "gaze-core",
  "libc",
- "pam_gaze_core",
+ "pam-gaze-core",
  "zbus",
 ]
 
 [[package]]
-name = "pam_gaze_core"
+name = "pam-gaze-core"
 version = "0.1.0"
 dependencies = [
- "gaze_core",
+ "gaze-core",
  "libc",
  "opencv",
  "parking_lot",
@@ -2297,12 +2293,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "pam_gaze_grosshack"
+name = "pam-gaze-grosshack"
 version = "0.1.0"
 dependencies = [
- "gaze_core",
+ "gaze-core",
  "libc",
- "pam_gaze_core",
+ "pam-gaze-core",
  "parking_lot",
  "zbus",
 ]

@@ -50,6 +50,9 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install just
+        uses: taiki-e/install-action@just
+
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
@@ -57,16 +60,16 @@ jobs:
           cache-on-failure: true
 
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: just fmt-check
 
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: just lint
 
       - name: Run tests
-        run: cargo test --workspace --locked
+        run: just test
 
       - name: Build workspace
         env:
           CARGO_BUILD_JOBS: 2
           RUSTFLAGS: -Cdebuginfo=0
-        run: cargo build --workspace --release --locked
+        run: just build-rust

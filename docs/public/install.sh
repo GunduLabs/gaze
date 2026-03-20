@@ -101,18 +101,6 @@ is_arch() {
     return 1
 }
 
-is_atomic_fedora() {
-    case "$DISTRO_ID $VARIANT_ID" in
-        fedora*silverblue*|fedora*kinoite*|fedora*sericea*|fedora*onyx*) return 0 ;;
-    esac
-
-    if [ -f /run/ostree-booted ] && is_rpm; then
-        return 0
-    fi
-
-    return 1
-}
-
 if ! is_rpm && ! is_deb && ! is_arch; then
     red "Unsupported distribution: $DISTRO_ID"
     echo "Supported: Fedora, RHEL/CentOS/AlmaLinux/Rocky, Debian, Ubuntu, Arch Linux, Manjaro"
@@ -136,26 +124,18 @@ bold "This installer will:"
 echo "1. Detect your Linux distribution and architecture"
 echo "2. Download Gaze ${VERSION} packages from the latest GitHub release"
 echo "3. Install the packages needed for face authentication on your system"
-echo "4. Configure update setup through the package postinstall scripts when supported"
+echo "4. Configure your distro repository for future updates"
 echo "5. Finish with the next steps for your distro"
 echo ""
 
-if is_atomic_fedora; then
-    echo "Detected platform: Fedora Atomic desktop (${PKG_ARCH})"
-    echo "Package manager: rpm-ostree"
-    echo ""
-    bold "Planned steps for this system:"
-    echo "- Download gaze and gaze-gnome-extension RPMs"
-    echo "- Underlay those system packages with rpm-ostree (using --apply-live)"
-    echo "- Set up the PAM modules through authselect if available"
-    echo "- Ask you to reboot into the new deployment when finished"
-elif is_deb; then
+if is_deb; then
     echo "Detected platform: Debian/Ubuntu (${PKG_ARCH})"
     echo "Package manager: apt"
     echo ""
     bold "Planned steps for this system:"
     echo "- Download gaze, gaze-gui, and gaze-gnome-extension DEBs"
     echo "- Install them with apt"
+    echo "- Configure the apt repository for future updates"
     echo "- Set up the PAM modules through pam-auth-update if available"
     echo "- Enable the Gaze daemon"
 elif is_rpm; then
@@ -169,6 +149,7 @@ elif is_rpm; then
     bold "Planned steps for this system:"
     echo "- Download gaze, gaze-gui, and gaze-gnome-extension RPMs"
     echo "- Install them with your RPM package manager"
+    echo "- Configure the dnf repository for future updates"
     echo "- Set up the PAM modules through authselect if available"
     echo "- Enable the Gaze daemon"
 elif is_arch; then
@@ -178,6 +159,7 @@ elif is_arch; then
     bold "Planned steps for this system:"
     echo "- Download gaze, gaze-gui, and gaze-gnome-extension packages"
     echo "- Install them with pacman"
+    echo "- Configure the pacman repository for future updates"
     echo "- Enable the Gaze daemon"
 fi
 
@@ -189,58 +171,32 @@ BASE_URL="${GITHUB}/releases/download/${VERSION}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-if is_atomic_fedora; then
-    echo ""
-    bold "Step 1/3: Downloading system packages"
-    curl -fsSL --progress-bar -o "${TMP}/gaze.rpm" "${BASE_URL}/gaze-${V}-1.${PKG_ARCH}.rpm"
-    curl -fsSL --progress-bar -o "${TMP}/gaze-gnome-extension.rpm" "${BASE_URL}/gaze-gnome-extension-${V}-1.${PKG_ARCH}.rpm"
-    bold "Step 2/3: Layering system packages"
-    if ! command -v rpm-ostree >/dev/null 2>&1; then
-        red "rpm-ostree is required on Fedora Atomic systems."
-        exit 1
-    fi
-    rpm-ostree install "${TMP}/gaze.rpm" "${TMP}/gaze-gnome-extension.rpm" --apply-live
-    
-    if command -v authselect >/dev/null 2>&1; then
-        authselect select vendor/gaze --force || true
-    fi
-    systemctl enable --now gazed 2>/dev/null || true
-
-    bold "Step 3/3: Finish"
-    echo ""
-    green "Core Gaze packages have been added to the system."
-    echo ""
-    echo "Next steps:"
-    echo "  1. Reboot to start the gazed service and avoid partially applied updates"
-    echo "  2. Install the GUI the way you normally install apps, for example Flatpak"
-    echo "  3. After reboot, enroll your face with: gaze add-face default"
-    echo ""
-    echo "Suggested GUI install:"
-    echo "  flatpak remote-add --if-not-exists --no-gpg-verify gundulabs https://packages.gundulabs.com/flatpak"
-    echo "  flatpak install gundulabs com.gundulabs.Gaze"
-    echo ""
-    echo "Docs: https://gaze.gundulabs.com"
-    exit 0
-
-elif is_deb; then
+if is_deb; then
     DEB_ARCH="amd64"
     [ "$PKG_ARCH" = "aarch64" ] && DEB_ARCH="arm64"
     echo ""
-    bold "Step 1/3: Downloading packages"
+    bold "Step 1/4: Downloading packages"
     curl -fsSL --progress-bar -o "${TMP}/gaze.deb" "${BASE_URL}/gaze_${V}_${DEB_ARCH}.deb"
     curl -fsSL --progress-bar -o "${TMP}/gaze-gui.deb" "${BASE_URL}/gaze-gui_${V}_${DEB_ARCH}.deb"
     curl -fsSL --progress-bar -o "${TMP}/gaze-gnome-extension.deb" "${BASE_URL}/gaze-gnome-extension_${V}_${DEB_ARCH}.deb"
-    bold "Step 2/3: Installing packages"
+    bold "Step 2/4: Installing packages"
     apt-get install -y "${TMP}/gaze.deb" "${TMP}/gaze-gui.deb" "${TMP}/gaze-gnome-extension.deb"
+    bold "Step 3/4: Configuring apt repository for future updates"
+    curl -fsSL "${PKG_BASE_URL}/PACKAGE-SIGNING-KEY.asc" \
+        | gpg --dearmor \
+        | tee /usr/share/keyrings/gundulabs-packages.gpg >/dev/null 2>&1 || true
+    echo "deb [signed-by=/usr/share/keyrings/gundulabs-packages.gpg] ${PKG_BASE_URL}/deb stable main" \
+        | tee /etc/apt/sources.list.d/gaze.list >/dev/null 2>&1 || true
+    apt-get update -qq >/dev/null 2>&1 || true
 
 elif is_rpm; then
     echo ""
-    bold "Step 1/3: Downloading packages"
+    bold "Step 1/4: Downloading packages"
     curl -fsSL --progress-bar -o "${TMP}/gaze.rpm" "${BASE_URL}/gaze-${V}-1.${PKG_ARCH}.rpm"
     curl -fsSL --progress-bar -o "${TMP}/gaze-gui.rpm" "${BASE_URL}/gaze-gui-${V}-1.${PKG_ARCH}.rpm"
     curl -fsSL --progress-bar -o "${TMP}/gaze-gnome-extension.rpm" "${BASE_URL}/gaze-gnome-extension-${V}-1.${PKG_ARCH}.rpm"
 
-    bold "Step 2/3: Installing packages"
+    bold "Step 2/4: Installing packages"
     if command -v dnf >/dev/null 2>&1; then
         dnf install -y "${TMP}/gaze.rpm" "${TMP}/gaze-gui.rpm" "${TMP}/gaze-gnome-extension.rpm"
     else
@@ -251,17 +207,46 @@ elif is_rpm; then
         authselect select vendor/gaze --force || true
     fi
 
+    bold "Step 3/4: Configuring dnf repository for future updates"
+    rpm --import "${PKG_BASE_URL}/PACKAGE-SIGNING-KEY.asc" >/dev/null 2>&1 || true
+    tee /etc/yum.repos.d/gaze.repo >/dev/null 2>&1 <<EOF || true
+[gaze]
+name=Gundu Labs Packages
+baseurl=${PKG_BASE_URL}/rpm/${PKG_ARCH}
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=${PKG_BASE_URL}/PACKAGE-SIGNING-KEY.asc
+EOF
+
 elif is_arch; then
     echo ""
-    bold "Step 1/3: Downloading packages"
+    bold "Step 1/4: Downloading packages"
     curl -fsSL --progress-bar -o "${TMP}/gaze.pkg.tar.zst" "${BASE_URL}/gaze-${V}-1-${PKG_ARCH}.pkg.tar.zst"
     curl -fsSL --progress-bar -o "${TMP}/gaze-gui.pkg.tar.zst" "${BASE_URL}/gaze-gui-${V}-1-${PKG_ARCH}.pkg.tar.zst"
     curl -fsSL --progress-bar -o "${TMP}/gaze-gnome-extension.pkg.tar.zst" "${BASE_URL}/gaze-gnome-extension-${V}-1-${PKG_ARCH}.pkg.tar.zst"
-    bold "Step 2/3: Installing packages"
+    bold "Step 2/4: Installing packages"
     pacman -U --noconfirm "${TMP}/gaze.pkg.tar.zst" "${TMP}/gaze-gui.pkg.tar.zst" "${TMP}/gaze-gnome-extension.pkg.tar.zst"
+    bold "Step 3/4: Configuring pacman repository for future updates"
+    curl -fsSL "${PKG_BASE_URL}/PACKAGE-SIGNING-KEY.asc" -o "${TMP}/gundulabs-packages.asc" 2>/dev/null || true
+    if [ -f "${TMP}/gundulabs-packages.asc" ]; then
+        pacman-key --add "${TMP}/gundulabs-packages.asc" >/dev/null 2>&1 || true
+        KEY_FP="$(gpg --show-keys --with-colons "${TMP}/gundulabs-packages.asc" 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')"
+        [ -n "$KEY_FP" ] && pacman-key --lsign-key "$KEY_FP" >/dev/null 2>&1 || true
+    fi
+    tee /etc/pacman.d/gaze-mirrorlist >/dev/null 2>&1 <<EOF || true
+Server = ${PKG_BASE_URL}/arch/${PKG_ARCH}
+EOF
+    if ! grep -q '\[gaze\]' /etc/pacman.conf 2>/dev/null; then
+        tee -a /etc/pacman.conf >/dev/null 2>&1 <<'EOF' || true
+[gaze]
+SigLevel = Required DatabaseOptional
+Include = /etc/pacman.d/gaze-mirrorlist
+EOF
+    fi
 fi
 
-bold "Step 3/3: Enabling Gaze daemon"
+bold "Step 4/4: Enabling Gaze daemon"
 systemctl enable --now gazed 2>/dev/null || true
 
 # ── done ─────────────────────────────────────────────────────────────────────

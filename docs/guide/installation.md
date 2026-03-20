@@ -14,7 +14,7 @@ This downloads release packages and installs:
 - `gaze-gui`
 - `gaze-gnome-extension`
 
-It also sets up your distro repo/key through package postinstall scripts for future updates.
+It also sets up your distro package repository and signing key so future updates work with your system package manager.
 
 ## Path B: install from Gundu Labs repositories
 
@@ -145,5 +145,6 @@ cargo build --workspace --release
 For packaging workflows:
 
 ```bash
-cargo install cargo-nfpm --locked
+go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+export PATH="$PATH:$(go env GOPATH)/bin"
 ```

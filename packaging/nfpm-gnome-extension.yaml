@@ -1,0 +1,48 @@
+name: "gaze-gnome-extension"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+section: "admin"
+priority: "optional"
+maintainer: "Gundu Labs <maintainers@gundulabs.com>"
+description: "GNOME Shell extension for Gaze lock and login integration"
+vendor: "Gundu Labs"
+homepage: "https://gaze.gundulabs.com"
+license: "MIT"
+
+contents:
+  - src: "gnome-shell-extension/metadata.json"
+    dst: "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/metadata.json"
+  - src: "gnome-shell-extension/extension.js"
+    dst: "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/extension.js"
+  - src: "packaging/config/org.gnome.login-screen.gaze.gschema.xml"
+    dst: "/usr/share/glib-2.0/schemas/org.gnome.login-screen.gaze.gschema.xml"
+  - src: "packaging/pam/gdm-face"
+    dst: "/etc/pam.d/gdm-face"
+    type: "config"
+  - src: "dist/selinux/gaze-gdm-camera.pp"
+    dst: "/usr/share/gaze/gaze-gdm-camera.pp"
+
+deb:
+  signature:
+    method: debsign
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+rpm:
+  signature:
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+scripts:
+  postinstall: "packaging/postinst-gnome-extension.sh"
+
+depends:
+  - gnome-shell
+
+overrides:
+  deb:
+    recommends:
+      - gaze
+  rpm:
+    recommends:
+      - gaze
+      - policycoreutils

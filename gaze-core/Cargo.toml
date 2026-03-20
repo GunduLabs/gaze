@@ -1,5 +1,5 @@
 [package]
-name = "gaze_core"
+name = "gaze-core"
 version = "0.1.0"
 edition = "2024"
 

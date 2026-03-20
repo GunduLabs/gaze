@@ -9,8 +9,8 @@ Build, test, and lint commands
 - Build single binaries / packages (release):
   - Daemon: cargo build --bin gazed --release
   - CLI:    cargo build --bin gaze --release
-  - GUI:    cargo build -p gaze_gui --release
-  - PAM:    cargo build -p pam_gaze --release
+  - GUI:    cargo build -p gaze-gui --release
+  - PAM:    cargo build -p pam-gaze --release
 - Run full test suite (release):
   - cargo test --workspace --release
 - Run a single test (examples):
@@ -25,14 +25,14 @@ Build, test, and lint commands
 High-level architecture (big picture)
 - Purpose: Rust-based facial-authentication daemon for Linux using InsightFace ONNX models; integrates with PAM and exposes a DBus API (org.gaze.Auth).
 - Workspace crates (root Cargo.toml):
-  - gaze (root) — contains daemon binary (gazed) and CLI (gaze). Core ML pipeline and main orchestration live here (src/ and src/daemon/).
-  - gaze_common — shared library with camera capture wrappers, DBus proxies, config parsing, and centering logic.
-  - gaze_gui — GTK4/Adwaita GUI for enrollment/auth flows.
-  - pam_gaze — PAM module (cdylib) exposing C FFI entry points for system auth.
+  - gaze — contains daemon binary (gazed) and CLI (gaze). Core ML pipeline and main orchestration live here (gaze/src/).
+  - gaze-core — shared library with camera capture wrappers, DBus proxies, config parsing, and centering logic.
+  - gaze-gui — GTK4/Adwaita GUI for enrollment/auth flows.
+  - pam-gaze — PAM module (cdylib) exposing C FFI entry points for system auth.
 - Data flow (concise): Camera frame (OpenCV) → DBus → Daemon: SCRFD detection → Umeyama alignment (112×112) → ResNet50/MobileFaceNet embedding → cosine similarity vs stored embeddings → authentication result.
 - Runtime & IPC:
-  - Daemon runs as an async Tokio service and registers on DBus as `org.gaze.Auth` at `/org/gaze/Auth` (see src/main.rs and src/daemon.rs).
-  - CLI (src/bin/cli.rs) uses gaze_common DBus proxy to communicate with the daemon and provides subcommands: auth, add-face, refine-face, remove-face, clear-user.
+  - Daemon runs as an async Tokio service and registers on DBus as `org.gaze.Auth` at `/org/gaze/Auth` (see gaze/src/main.rs and gaze/src/daemon.rs).
+  - CLI (gaze/src/bin/cli.rs) uses gaze-core DBus proxy to communicate with the daemon and provides subcommands: auth, add-face, refine-face, remove-face, clear-user.
 - Important paths and artifacts:
   - Default config template: dist/config.toml → system config at /etc/gaze/config.toml
   - Models auto-downloaded to /opt/gaze/models/
@@ -42,9 +42,9 @@ High-level architecture (big picture)
 Key conventions and repo-specific patterns
 - Error handling: use anyhow::Result widely across crates.
 - Async & IPC: tokio runtime for async I/O and zbus derive macros for DBus interfaces (gaze_common/src/dbus.rs).
-- ML pipeline modularization: detector → aligner → recognizer modules (see src/daemon/{recognize.rs,align.rs,models.rs,users.rs}). Alignments use an Umeyama transform to produce ArcFace-style 112×112 inputs.
+- ML pipeline modularization: detector → aligner → recognizer modules (see gaze/src/{recognize.rs,align.rs,models.rs,users.rs}). Alignments use an Umeyama transform to produce ArcFace-style 112×112 inputs.
 - Models: models.rs contains logic to download InsightFace ONNX artifacts from GitHub releases on demand — be mindful of network calls in CI or tests.
-- PAM module: pam_gaze is a cdylib with unsafe C FFI exported functions; changes here require careful review and testing on target systems.
+- PAM module: pam-gaze is a cdylib with unsafe C FFI exported functions; changes here require careful review and testing on target systems.
 - Testing note: the repository's README/CLAUDE.md lists tests run in release mode; when debugging locally, prefer debug builds but be aware behavioral differences.
 - When changing DBus interfaces, update gaze_common proxy/interface definitions and corresponding zbus derives.
 
