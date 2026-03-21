@@ -8,8 +8,10 @@ pub struct FaceRecognizer {
 
 impl FaceRecognizer {
     pub fn new(model_path: &str) -> anyhow::Result<Self> {
-        let session = Session::builder()?
-            .with_optimization_level(GraphOptimizationLevel::Level3)?
+        let session = Session::builder()
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .with_optimization_level(GraphOptimizationLevel::Level3)
+            .map_err(|e| anyhow::anyhow!("{e}"))?
             .commit_from_file(model_path)?;
         Ok(Self { session })
     }
