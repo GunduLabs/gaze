@@ -83,7 +83,7 @@ impl CameraFeed {
         });
 
         let picture = gtk4::Picture::new();
-        picture.set_content_fit(gtk4::ContentFit::Contain);
+        picture.set_content_fit(gtk4::ContentFit::Fill);
 
         let overlay_area = gtk4::DrawingArea::new();
 
@@ -211,6 +211,9 @@ fn draw_face_guide(cr: &gtk4::cairo::Context, width: i32, height: i32, status: &
 pub fn build_camera_widget(feed: &CameraFeed) -> gtk4::Overlay {
     let overlay = gtk4::Overlay::new();
     overlay.set_child(Some(&feed.picture));
+
+    feed.picture.set_hexpand(true);
+    feed.picture.set_vexpand(true);
 
     feed.overlay_area.set_hexpand(true);
     feed.overlay_area.set_vexpand(true);
