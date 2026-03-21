@@ -54,8 +54,10 @@ pub struct FaceDetector {
 
 impl FaceDetector {
     pub fn new(model_path: &str) -> Result<Self, DetectError> {
-        let det_session = Session::builder()?
-            .with_optimization_level(GraphOptimizationLevel::Level3)?
+        let det_session = Session::builder()
+            .map_err(|e| DetectError::InitFailed(e.to_string()))?
+            .with_optimization_level(GraphOptimizationLevel::Level3)
+            .map_err(|e| DetectError::InitFailed(e.to_string()))?
             .commit_from_file(model_path)?;
 
         let detector = rusty_scrfd::SCRFD::new(det_session, (320, 320), 0.1, 0.4, false)
