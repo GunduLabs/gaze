@@ -50,6 +50,7 @@ jobs:
                 checkpolicy \
                 libgtk-4-dev \
                 libadwaita-1-dev \
+                libssl-dev \
                 gnupg \
                 devscripts \
                 pkg-config
