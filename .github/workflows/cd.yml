@@ -90,7 +90,6 @@ jobs:
                 opencv \
                 v4l-utils \
                 pam \
-                checkpolicy \
                 gtk4 \
                 libadwaita \
                 openssl \
@@ -169,6 +168,9 @@ jobs:
 
       - name: Add flathub remote
         run: flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Install Flatpak GNOME SDK
+        run: flatpak install --user -y flathub org.gnome.Sdk//47 org.gnome.Platform//47
 
       - name: Install Flatpak Rust SDK extension
         run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.rust-stable//24.08
