@@ -2,7 +2,7 @@
 
 # Gaze
 
-**Facial authentication for Linux everywhere.**
+**Facial authentication for Linux.**
 
 [![CI](https://github.com/gundulabs/gaze/actions/workflows/ci.yml/badge.svg)](https://github.com/gundulabs/gaze/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
