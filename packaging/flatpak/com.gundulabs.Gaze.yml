@@ -70,9 +70,10 @@ modules:
       - cargo build --release --locked --offline -p gaze-gui
       - install -Dm755 target/release/gaze-gui /app/bin/gaze-gui
       - install -Dm644 packaging/gui/com.gundulabs.Gaze.desktop /app/share/applications/com.gundulabs.Gaze.desktop
-      - install -Dm644 packaging/gui/com.gundulabs.Gaze.svg /app/share/icons/hicolor/scalable/apps/com.gundulabs.Gaze.svg
-      - rsvg-convert --width=128 --height=128 packaging/gui/com.gundulabs.Gaze.svg -o com.gundulabs.Gaze.png
-      - install -Dm644 com.gundulabs.Gaze.png /app/share/icons/hicolor/128x128/apps/com.gundulabs.Gaze.png
+      - rsvg-convert --width=64 --height=64 packaging/gui/com.gundulabs.Gaze.svg -o com.gundulabs.Gaze-64.png
+      - rsvg-convert --width=128 --height=128 packaging/gui/com.gundulabs.Gaze.svg -o com.gundulabs.Gaze-128.png
+      - install -Dm644 com.gundulabs.Gaze-64.png /app/share/icons/hicolor/64x64/apps/com.gundulabs.Gaze.png
+      - install -Dm644 com.gundulabs.Gaze-128.png /app/share/icons/hicolor/128x128/apps/com.gundulabs.Gaze.png
       - install -Dm644 packaging/gui/com.gundulabs.Gaze.metainfo.xml /app/share/metainfo/com.gundulabs.Gaze.metainfo.xml
     sources:
       - type: dir
