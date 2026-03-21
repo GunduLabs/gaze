@@ -45,7 +45,7 @@ modules:
       - -DWITH_OPENMP=ON
       - -DWITH_GTK=ON
       - -DWITH_QT=OFF
-      - -DBUILD_LIST=core,imgproc,videoio
+      - -DBUILD_LIST=core,dnn,imgproc,videoio
     sources:
       - type: archive
         url: https://github.com/opencv/opencv/archive/refs/tags/4.10.0.tar.gz

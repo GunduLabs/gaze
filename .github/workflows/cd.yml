@@ -134,6 +134,17 @@ jobs:
             echo "NFPM_PASSPHRASE=$GPG_PASSPHRASE" >> "$GITHUB_ENV"
           fi
 
+      - name: Configure Arch LLVM/Clang environment
+        if: ${{ matrix.id == 'arch' }}
+        run: |
+          echo "/usr/lib/llvm19/bin" >> "$GITHUB_PATH"
+          echo "LLVM_CONFIG_PATH=/usr/lib/llvm19/bin/llvm-config" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=/usr/lib/llvm19/lib" >> "$GITHUB_ENV"
+          echo "LIBRARY_PATH=/usr/lib/llvm19/lib" >> "$GITHUB_ENV"
+          echo "CLANG_PATH=/usr/lib/llvm19/bin/clang" >> "$GITHUB_ENV"
+          echo "CC=/usr/lib/llvm19/bin/clang" >> "$GITHUB_ENV"
+          echo "CXX=/usr/lib/llvm19/bin/clang++" >> "$GITHUB_ENV"
+
       - name: Build native packages
         env:
           CARGO_BUILD_JOBS: 2
