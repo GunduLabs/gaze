@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: "Gaze"
-  text: "Facial authentication for Linux everywhere"
+  text: "Facial authentication for Linux"
   tagline: On-device face recognition for login, lock screen, sudo, and more.
   actions:
     - theme: brand
