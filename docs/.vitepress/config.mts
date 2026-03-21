@@ -6,6 +6,7 @@ export default defineConfig({
   description: "Facial authentication for Linux",
   head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }]],
   themeConfig: {
+    logo: '/favicon.svg',
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Guide', link: '/guide/getting-started' },
