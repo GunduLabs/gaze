@@ -23,10 +23,14 @@ build-rust:
 # Compile the SELinux policy module
 build-selinux:
     mkdir -p dist/selinux
-    checkmodule -M -m -o dist/selinux/gaze-gdm-camera.mod packaging/selinux/gaze-gdm-camera.te
-    semodule_package -o dist/selinux/gaze-gdm-camera.pp -m dist/selinux/gaze-gdm-camera.mod
-    rm -f dist/selinux/gaze-gdm-camera.mod
-    @echo "Built dist/selinux/gaze-gdm-camera.pp"
+    if command -v checkmodule >/dev/null 2>&1 && command -v semodule_package >/dev/null 2>&1; then \
+        checkmodule -M -m -o dist/selinux/gaze-gdm-camera.mod packaging/selinux/gaze-gdm-camera.te; \
+        semodule_package -o dist/selinux/gaze-gdm-camera.pp -m dist/selinux/gaze-gdm-camera.mod; \
+        rm -f dist/selinux/gaze-gdm-camera.mod; \
+        echo "Built dist/selinux/gaze-gdm-camera.pp"; \
+    else \
+        echo "WARNING: SELinux tools not found. Skipping SELinux policy build." >&2; \
+    fi
 
 [private]
 prepare-flatpak-vendor:

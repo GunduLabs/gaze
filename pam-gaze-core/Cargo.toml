@@ -8,7 +8,7 @@ edition = "2024"
 [dependencies]
 gaze-core = { path = "../gaze-core" }
 libc = "0.2"
-opencv = "0.98.1"
+opencv = { version = "0.98.1", default-features = false, features = ["imgproc", "videoio"] }
 zbus = "4.4.0"
 tokio = { version = "1.40", features = ["rt-multi-thread"] }
 parking_lot = "0.12"

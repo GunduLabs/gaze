@@ -24,6 +24,8 @@ modules:
   - name: opencv
     buildsystem: cmake-ninja
     builddir: true
+    build-options:
+      no-debuginfo: true
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
       - -DCMAKE_INSTALL_PREFIX=/app
@@ -43,7 +45,7 @@ modules:
       - -DWITH_OPENMP=ON
       - -DWITH_GTK=ON
       - -DWITH_QT=OFF
-      - -DBUILD_LIST=core,dnn,imgproc,imgcodecs,videoio,objdetect,highgui
+      - -DBUILD_LIST=core,imgproc,videoio
     sources:
       - type: archive
         url: https://github.com/opencv/opencv/archive/refs/tags/4.10.0.tar.gz

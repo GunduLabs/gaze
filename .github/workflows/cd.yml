@@ -34,6 +34,7 @@ jobs:
             install_cmd: |
               apt-get update
               DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                git \
                 ca-certificates \
                 curl \
                 golang \
@@ -47,7 +48,6 @@ jobs:
                 libopencv-dev \
                 libv4l-dev \
                 libpam0g-dev \
-                checkpolicy \
                 libgtk-4-dev \
                 libadwaita-1-dev \
                 libssl-dev \
@@ -60,6 +60,7 @@ jobs:
             format: rpm
             install_cmd: |
               dnf install -y \
+                git \
                 ca-certificates \
                 curl \
                 golang \
@@ -69,6 +70,7 @@ jobs:
                 libv4l-devel \
                 pam-devel \
                 checkpolicy \
+                policycoreutils \
                 gtk4-devel \
                 libadwaita-devel \
                 openssl-devel \
@@ -83,11 +85,12 @@ jobs:
             install_cmd: |
               pacman -Syu --noconfirm
               pacman -S --noconfirm \
+                git \
                 ca-certificates \
                 curl \
                 go \
-                clang \
-                llvm \
+                clang19 \
+                llvm19   \
                 opencv \
                 v4l-utils \
                 pam \

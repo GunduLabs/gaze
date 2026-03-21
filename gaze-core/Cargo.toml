@@ -9,7 +9,7 @@ image = "0.25.9"
 libc = "0.2"
 nalgebra = "0.34.1"
 ndarray = "0.17.2"
-opencv = "0.98.1"
+opencv = { version = "0.98.1", default-features = false, features = ["imgproc", "videoio"] }
 ort = "2.0.0-rc.11"
 rusty_scrfd = "1.3.1"
 zbus = "4.4.0"

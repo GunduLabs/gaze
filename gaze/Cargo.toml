@@ -15,7 +15,7 @@ gaze-core = { path = "../gaze-core" }
 image = "0.25.9"
 nalgebra = "0.34.1"
 ndarray = "0.17.2"
-opencv = "0.98.1"
+opencv = { version = "0.98.1", default-features = false, features = ["imgproc", "videoio"] }
 ort = "2.0.0-rc.11"
 rayon = "1.10"
 tokio = { version = "1.40", features = ["full", "rt-multi-thread"] }
