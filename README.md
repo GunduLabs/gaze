@@ -171,10 +171,6 @@ gnome-shell-extension/  GNOME Shell extension
 dist/                   Systemd service, DBus policy, default config
 ```
 
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
 ## License
 
 [MIT](LICENSE)
