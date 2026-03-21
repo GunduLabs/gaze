@@ -1,20 +1,37 @@
 <template>
-  <div class="security-warning" role="alert">
-    <div class="security-warning-title">Security warning</div>
-    <p>
-      Gaze is currently <strong>not suitable for security-critical authentication</strong>.
-      It can be spoofed with a simple photo, including one shown on another screen.
-    </p>
-    <p>
-      Liveness detection, IR camera support, and related anti-spoofing protections are planned for upcoming releases.
-    </p>
+  <div class="container">
+      <div class="security-warning" role="alert">
+        <div class="security-warning-title">Security warning</div>
+        <p>
+          Gaze can currently be spoofed with a photo. Do not use it as your only authentication
+          factor. Liveness detection and IR camera support are planned.
+        </p>
+      </div>
   </div>
 </template>
 
 <style scoped>
+.container {
+  position: relative;
+  padding: 0 24px 24px;
+}
+
+@media (min-width: 640px) {
+  .container {
+    padding: 0 48px 24px;
+  }
+}
+
+@media (min-width: 960px) {
+  .container {
+    padding: 0 64px 24px;
+  }
+}
+
 .security-warning {
-  margin: 16px auto 24px;
   max-width: 1152px;
+  margin: 0 auto;
+  box-sizing: border-box;
   border: 1px solid #f59e0b;
   border-radius: 12px;
   padding: 18px;

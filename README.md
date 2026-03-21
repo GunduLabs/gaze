@@ -159,18 +159,6 @@ just package <deb | rpm | archlinux>
 
 See the [development guide](https://gaze.gundulabs.com/guide/development) for more.
 
-## Project structure
-
-```
-gaze/                   Daemon and CLI binaries
-gaze-core/              Shared library (camera, DBus, config)
-gaze-gui/               GTK4/Adwaita GUI application
-pam-gaze/               PAM module (cdylib)
-pam-gaze-core/          Shared PAM authentication logic
-gnome-shell-extension/  GNOME Shell extension
-dist/                   Systemd service, DBus policy, default config
-```
-
 ## License
 
 [MIT](LICENSE)
