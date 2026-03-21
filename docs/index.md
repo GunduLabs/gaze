@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: "Gaze"
-  text: "Face login for Linux"
-  tagline: Install in minutes. Works with PAM, CLI, and GUI.
+  text: "Facial authentication for Linux everywhere"
+  tagline: On-device face recognition for login, lock screen, sudo, and more.
   actions:
     - theme: brand
       text: Install Gaze

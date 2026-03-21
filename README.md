@@ -1,69 +1,33 @@
+<div align="center">
+
 # Gaze
 
-Gaze adds face authentication to Linux login and unlock.
+**Facial authentication for Linux everywhere.**
+
+[![CI](https://github.com/gundulabs/gaze/actions/workflows/ci.yml/badge.svg)](https://github.com/gundulabs/gaze/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+[Documentation](https://gaze.gundulabs.com) · [Install](https://gaze.gundulabs.com/guide/install) · [Contributing](CONTRIBUTING.md)
+
+</div>
+
+---
 
 > [!WARNING]
-> Gaze is currently **not suitable for security-critical authentication**.
-> The current pipeline can be spoofed with a simple photo of your face, including one shown on another screen.
-> Use Gaze for convenience scenarios right now, not as a high-assurance identity factor.
-> Liveness detection, IR camera support, and related anti-spoofing protections are planned for upcoming releases.
+> Gaze can currently be spoofed with a photo. Do not use it as your only authentication factor. Liveness detection and IR camera support are planned.
 
-## Features
+Gaze is a face authentication system for Linux. It runs entirely on-device with no cloud dependency, integrates with PAM for login and lock screen, and works with any standard webcam.
 
-- Unlock and log in with your face on Linux
-- Keep authentication on-device
-- Use either a simple GUI (`gaze-gui`) or CLI (`gaze`)
-- Tune security from fast to strict
-
-## 5-minute quickstart
-
-1. Install:
+## Install
 
 ```bash
 curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
 ```
 
-2. Enroll your first face:
+<details>
+<summary>Manual install (Debian/Ubuntu, Fedora/RHEL, Arch)</summary>
 
-```bash
-gaze add-face default
-```
-
-3. Test authentication:
-
-```bash
-gaze auth
-```
-
-4. Open the GUI (optional):
-
-```bash
-gaze-gui
-```
-
-If installation succeeded but auth fails, see: https://gaze.gundulabs.com/guide/troubleshooting
-
-## What gets installed
-
-- `gazed`: system daemon (DBus service)
-- `gaze`: CLI client
-- `gaze-gui`: GTK4 app
-- PAM integration for login/lockscreen auth
-- GNOME extension package (`gaze-gnome-extension`) for lock screen flow
-
-## Install options
-
-### Option A (recommended): one-line installer
-
-```bash
-curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
-```
-
-Supports Fedora/RHEL, Fedora Atomic desktops such as Silverblue, Debian/Ubuntu, and Arch/Manjaro.
-
-### Option B: manually install from Gundu Labs repositories
-
-Debian / Ubuntu:
+**Debian / Ubuntu**
 
 ```bash
 curl -fsSL https://packages.gundulabs.com/PACKAGE-SIGNING-KEY.asc \
@@ -75,7 +39,7 @@ sudo apt update
 sudo apt install gaze gaze-gui gaze-gnome-extension
 ```
 
-Fedora / RHEL:
+**Fedora / RHEL**
 
 ```bash
 sudo tee /etc/yum.repos.d/gaze.repo >/dev/null <<'EOF'
@@ -91,7 +55,7 @@ sudo rpm --import https://packages.gundulabs.com/PACKAGE-SIGNING-KEY.asc
 sudo dnf install gaze gaze-gui gaze-gnome-extension
 ```
 
-Arch / Manjaro:
+**Arch / Manjaro**
 
 ```bash
 sudo tee /etc/pacman.d/gaze-mirrorlist >/dev/null <<'EOF'
@@ -109,39 +73,53 @@ EOF
 sudo pacman -Sy gaze gaze-gui gaze-gnome-extension
 ```
 
-### Option C: GUI via Flatpak
+**Flatpak (GUI only)**
 
 ```bash
 flatpak remote-add --if-not-exists --no-gpg-verify gundulabs https://packages.gundulabs.com/flatpak
 flatpak install gundulabs com.gundulabs.Gaze
 ```
 
-Note: Flatpak installs the GUI app. System login PAM integration is provided by distro packages.
+</details>
 
-For Fedora Silverblue, Kinoite, and similar atomic desktops, this is usually the best way to install the GUI. Use Flatpak, Distrobox, or whatever normal app workflow you already use instead of layering extra GUI packages unless you specifically want to.
-
-## First-time setup checklist
-
-Run these after install:
+## Quick start
 
 ```bash
-systemctl status gazed
+# Enroll your face
 gaze add-face default
-gaze auth --verbose
+
+# Test authentication
+gaze auth
+
+# Or use the GUI
+gaze-gui
 ```
 
-Expected result from `gaze auth`: `Authenticated as: <face>`.
+## How it works
 
-## Configuration (optional)
+Gaze runs a daemon (`gazed`) that communicates over DBus. When authentication is requested — by PAM at login, the GNOME extension on the lock screen, or the CLI — the daemon captures a frame from your webcam, detects and aligns the face, computes an embedding using an ONNX model, and compares it against stored enrollments.
 
-Main config file:
+All processing happens locally. Face embeddings are stored on disk, not transmitted anywhere.
 
-`/etc/gaze/config.toml`
+```
+Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Match
+```
 
-Safe default:
+## Components
+
+| Component | Description |
+|-----------|-------------|
+| `gazed` | System daemon exposing `org.gaze.Auth` on DBus |
+| `gaze` | CLI for enrollment and authentication |
+| `gaze-gui` | GTK4/Adwaita graphical application |
+| `pam-gaze` | PAM module for login/lock screen integration |
+| `gaze-gnome-extension` | GNOME Shell extension for lock screen auth |
+
+## Configuration
 
 ```toml
-level = "medium"
+# /etc/gaze/config.toml
+level = "medium"    # low | medium | high | maximum | custom
 
 [cameras]
 rgb = "/dev/video0"
@@ -150,43 +128,53 @@ rgb = "/dev/video0"
 max_captures_per_face = 8
 ```
 
-Details: https://gaze.gundulabs.com/guide/configuration
+See the [configuration guide](https://gaze.gundulabs.com/guide/configuration) for all options.
 
-## Command cheat sheet
+## CLI usage
 
-```bash
-gaze add-face <name>                 # Enroll
-gaze auth                            # Authenticate
-gaze auth --verbose                  # Show similarity scores
-gaze refine-face <name>              # Add more samples
-gaze list-faces                      # List enrolled faces
-gaze remove-face <name>              # Remove one face
-gaze clear-user                      # Remove all face data for current user
-gaze-gui                             # Open graphical app
+```
+gaze add-face <name>         Enroll a new face
+gaze refine-face <name>      Add samples to an existing enrollment
+gaze auth                    Authenticate
+gaze auth --verbose          Authenticate with similarity scores
+gaze list-faces              List enrolled faces
+gaze remove-face <name>      Remove a face
+gaze clear-user              Remove all face data for current user
 ```
 
-## Documentation
+## Building from source
 
-Full documentation: https://gaze.gundulabs.com
-
-## Building from source (for developers)
-For development, you'll need:
-- Rust 1.70+ (or install via `rustup`)
-- `just` (https://github.com/casey/just) for task automation
-- `npfm` (https://nfpm.goreleaser.com) for packaging
-- System dependencies: `build-essential libopencv-dev libclang-dev libv4l-dev libpam0g-dev libgtk-4-dev libadwaita-1-dev`
+**Dependencies:** Rust 1.70+, [`just`](https://github.com/casey/just), [`nfpm`](https://nfpm.goreleaser.com)
 
 ```bash
-# Clone and enter the repo
-git clone https://github.com/gundulabs/gaze
-cd gaze
+# Ubuntu/Debian
+sudo apt install build-essential libopencv-dev libclang-dev libv4l-dev libpam0g-dev libgtk-4-dev libadwaita-1-dev
 
-# Create a package for your distribution
-just package <rpm | deb | archlinux>
+# Build
+cargo build --workspace --release
+
+# Package
+just package <deb | rpm | archlinux>
 ```
 
-For more information, see the [development guide](/guide/development).
+See the [development guide](https://gaze.gundulabs.com/guide/development) for more.
+
+## Project structure
+
+```
+gaze/                   Daemon and CLI binaries
+gaze-core/              Shared library (camera, DBus, config)
+gaze-gui/               GTK4/Adwaita GUI application
+pam-gaze/               PAM module (cdylib)
+pam-gaze-core/          Shared PAM authentication logic
+gnome-shell-extension/  GNOME Shell extension
+dist/                   Systemd service, DBus policy, default config
+```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-See `LICENSE`.
+[MIT](LICENSE)

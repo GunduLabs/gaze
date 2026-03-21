@@ -3,7 +3,7 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   ignoreDeadLinks: true,
   title: "Gaze",
-  description: "Facial authentication for Linux",
+  description: "Facial authentication for Linux everywhere",
   head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }]],
   themeConfig: {
     nav: [

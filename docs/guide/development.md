@@ -6,7 +6,7 @@ This page covers source builds, tests, packaging, and Flatpak workflows for cont
 
 - Rust 1.70+ (or install via `rustup`)
 - `just` (https://github.com/casey/just) for task automation
-- `npfm` (https://nfpm.goreleaser.com) for packaging
+- `nfpm` (https://nfpm.goreleaser.com) for packaging
 - `flatpak-builder` (https://github.com/flatpak/flatpak-builder) for flatpak
 
 ::: code-group

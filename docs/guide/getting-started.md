@@ -1,8 +1,6 @@
 # Getting Started
 
-This page is for first-time users who want Gaze working quickly.
-
-Goal: install, enroll your face, and verify face authentication in under 10 minutes.
+Get Gaze running in under 10 minutes: install, enroll your face, and verify authentication.
 
 ## Before you begin
 

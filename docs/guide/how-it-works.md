@@ -1,6 +1,6 @@
 # How Gaze Works
 
-You do not need this page to use Gaze, but it explains why it behaves the way it does.
+This page explains the internals of Gaze's facial authentication pipeline. You don't need it to use Gaze, but it helps understand why it behaves the way it does.
 
 ## Security warning
 
