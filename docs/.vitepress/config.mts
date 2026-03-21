@@ -1,6 +1,28 @@
 import { defineConfig } from 'vitepress'
+import { createHighlighter } from 'shiki'
+
+const INSTALL_CMD = 'curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh'
+
+const highlightedInstall = await createHighlighter({
+  themes: ['github-light', 'github-dark'],
+  langs: ['bash'],
+}).then(hl => hl.codeToHtml(INSTALL_CMD, {
+  lang: 'bash',
+  themes: { light: 'github-light', dark: 'github-dark' },
+  defaultColor: false,
+}))
 
 export default defineConfig({
+  vite: {
+    plugins: [{
+      name: 'install-highlight',
+      resolveId(id) { if (id === 'virtual:install-highlight') return id },
+      load(id) {
+        if (id === 'virtual:install-highlight')
+          return `export const html = ${JSON.stringify(highlightedInstall)}; export const command = ${JSON.stringify(INSTALL_CMD)};`
+      },
+    }],
+  },
   ignoreDeadLinks: true,
   title: "Gaze",
   description: "Facial authentication for Linux",
