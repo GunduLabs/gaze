@@ -24,8 +24,6 @@ modules:
   - name: opencv
     buildsystem: cmake-ninja
     builddir: true
-    build-options:
-      no-debuginfo: true
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
       - -DCMAKE_INSTALL_PREFIX=/app
