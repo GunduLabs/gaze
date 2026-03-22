@@ -30,11 +30,11 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
 **Debian / Ubuntu**
 
 ```bash
-curl -fsSL https://packages.gundulabs.com/PACKAGE-SIGNING-KEY.asc \
-  | gpg --dearmor \
-  | sudo tee /usr/share/keyrings/gundulabs-packages.gpg >/dev/null
-echo "deb [signed-by=/usr/share/keyrings/gundulabs-packages.gpg] https://packages.gundulabs.com/deb stable main" \
-  | sudo tee /etc/apt/sources.list.d/gaze.list >/dev/null
+sudo mkdir -p --mode=0755 /usr/share/keyrings
+curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.gpg \
+  | sudo tee /usr/share/keyrings/gundulabs-archive-keyring.gpg >/dev/null
+curl -fsSL https://packages.gundulabs.com/setup/deb/gundulabs.list \
+  | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 sudo apt update
 sudo apt install gaze gaze-gui gaze-gnome-extension
 ```
@@ -42,16 +42,10 @@ sudo apt install gaze gaze-gui gaze-gnome-extension
 **Fedora / RHEL**
 
 ```bash
-sudo tee /etc/yum.repos.d/gaze.repo >/dev/null <<'EOF'
-[gaze]
-name=Gundu Labs Packages
-baseurl=https://packages.gundulabs.com/rpm/x86_64
-enabled=1
-gpgcheck=1
-repo_gpgcheck=1
-gpgkey=https://packages.gundulabs.com/PACKAGE-SIGNING-KEY.asc
-EOF
-sudo rpm --import https://packages.gundulabs.com/PACKAGE-SIGNING-KEY.asc
+sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
+sudo curl -fsSL https://packages.gundulabs.com/setup/rpm/gundulabs.repo \
+  -o /etc/yum.repos.d/gundulabs.repo
+sudo dnf makecache
 sudo dnf install gaze gaze-gui gaze-gnome-extension
 ```
 
@@ -61,7 +55,7 @@ sudo dnf install gaze gaze-gui gaze-gnome-extension
 sudo tee /etc/pacman.d/gaze-mirrorlist >/dev/null <<'EOF'
 Server = https://packages.gundulabs.com/arch/x86_64
 EOF
-curl -fsSL https://packages.gundulabs.com/PACKAGE-SIGNING-KEY.asc -o /tmp/gundulabs-packages.asc
+curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.asc -o /tmp/gundulabs-packages.asc
 sudo pacman-key --add /tmp/gundulabs-packages.asc
 sudo pacman-key --lsign-key "$(gpg --show-keys --with-colons /tmp/gundulabs-packages.asc | awk -F: '/^fpr:/ {print $10; exit}')"
 rm -f /tmp/gundulabs-packages.asc
