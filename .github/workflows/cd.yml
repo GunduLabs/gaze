@@ -22,7 +22,6 @@ jobs:
     container: ${{ matrix.container }}
     env:
       GPG_PRIVATE_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
-      GPG_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_PASSPHRASE }}
     strategy:
       fail-fast: false
       matrix:
@@ -127,11 +126,10 @@ jobs:
 
       - name: Prepare nfpm signing key
         run: |
-          if [ -n "$GPG_PRIVATE_KEY" ] && [ -n "$GPG_PASSPHRASE" ]; then
+          if [ -n "$GPG_PRIVATE_KEY" ]; then
             printf '%s' "$GPG_PRIVATE_KEY" > /tmp/nfpm-signing-key.asc
             chmod 600 /tmp/nfpm-signing-key.asc
             echo "NFPM_SIGNING_KEY_FILE=/tmp/nfpm-signing-key.asc" >> "$GITHUB_ENV"
-            echo "NFPM_PASSPHRASE=$GPG_PASSPHRASE" >> "$GITHUB_ENV"
           fi
 
       - name: Configure Arch LLVM/Clang environment
@@ -165,9 +163,6 @@ jobs:
   build-flatpak:
     name: Build flatpak
     runs-on: ubuntu-latest
-    env:
-      GPG_PRIVATE_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
-      GPG_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_PASSPHRASE }}
 
     steps:
       - name: Checkout source
@@ -194,28 +189,23 @@ jobs:
         run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.llvm18//24.08
 
       - name: Import GPG key for flatpak signing
-        if: ${{ env.GPG_PRIVATE_KEY != '' }}
         id: import_gpg
         uses: crazy-max/ghaction-import-gpg@v6
         with:
-          gpg_private_key: ${{ env.GPG_PRIVATE_KEY }}
-          passphrase: ${{ env.GPG_PASSPHRASE }}
-
-      - name: Resolve flatpak signing key id
-        run: |
-          KEY_ID="${{ steps.import_gpg.outputs.keyid }}"
-          if [ -n "$KEY_ID" ]; then
-            echo "FLATPAK_GPG_SIGN=$KEY_ID" >> "$GITHUB_ENV"
-          fi
+          gpg_private_key: ${{ secrets.PACKAGE_SIGNING_KEY }}
 
       - name: Build flatpak repo and bundle
+        env:
+          FLATPAK_GPG_SIGN: ${{ steps.import_gpg.outputs.fingerprint }}
         run: just build-flatpak
 
       - name: Upload flatpak package artifact
         uses: actions/upload-artifact@v4
         with:
           name: packages-flatpak
-          path: dist/packages/*.flatpak
+          path: |
+            dist/packages/*.flatpak
+            packaging/flatpak/*.flatpakref
 
   release:
     name: Upload release assets
@@ -228,9 +218,20 @@ jobs:
         with:
           pattern: packages-*
           path: dist/packages
-          merge-multiple: true
+
+      - name: Dispatch package artifact URLs
+        uses: peter-evans/repository-dispatch@v4
+        with:
+          token: ${{ secrets.PACKAGES_REPO_PAT }}
+          repository: GunduLabs/packages
+          event-type: package-artifacts
+          client-payload: '{"repo":"${{ github.repository }}","run_id":"${{ github.run_id }}"}'
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/packages/*
+          files: |
+            dist/packages/*/*.deb
+            dist/packages/*/*.rpm
+            dist/packages/*/*.pkg.tar.*
+            dist/packages/*/*.flatpakref
