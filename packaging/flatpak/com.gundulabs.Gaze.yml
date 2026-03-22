@@ -62,7 +62,7 @@ modules:
         ORT_LIB_LOCATION: /app/lib
         ORT_PREFER_DYNAMIC_LINK: "1"
     build-commands:
-      - install -Dm644 .cargo/config.toml /run/build/gaze-gui/gaze/.cargo/config.toml
+      - install -Dm644 .flatpak-cache/cargo/config.toml /run/build/gaze-gui/gaze/.cargo/config.toml
       - mkdir -p /run/build/gaze-gui/ort
       - tar -xzf .flatpak-cache/ort/onnxruntime.tgz -C /run/build/gaze-gui/ort --strip-components=1
       - mkdir -p /app/lib
