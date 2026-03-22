@@ -34,7 +34,6 @@ build-selinux:
 
 [private]
 prepare-flatpak-vendor:
-    rm -f .cargo/config.toml
     mkdir -p .flatpak-cache/cargo
     cargo vendor --locked --versioned-dirs > .flatpak-cache/cargo/config.toml
 
@@ -94,7 +93,6 @@ clean:
     rm -rf flatpak-build .flatpak-builder
     rm -rf .flatpak-cache
     rm -rf vendor
-    rm -f .cargo/config.toml
 
 # ── dev helpers ───────────────────────────────────────────────────────────────
 
