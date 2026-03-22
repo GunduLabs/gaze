@@ -105,14 +105,6 @@ if ! is_rpm && ! is_deb && ! is_arch; then
     exit 1
 fi
 
-echo ""
-bold "This installer will:"
-echo "1. Detect your Linux distribution and architecture"
-echo "2. Configure the Gundu Labs package repository"
-echo "3. Install the packages needed for face authentication on your system"
-echo "4. Finish with the next steps for your distro"
-echo ""
-
 if is_deb; then
     echo "Detected platform: Debian/Ubuntu (${PKG_ARCH})"
     echo "Package manager: apt"
@@ -137,11 +129,10 @@ elif is_rpm; then
     echo "- Enable the Gaze daemon"
 elif is_arch; then
     echo "Detected platform: Arch/Manjaro (${PKG_ARCH})"
-    echo "Package manager: pacman"
+    echo "Package manager: AUR helper (yay/paru)"
     echo ""
     bold "Planned steps for this system:"
-    echo "- Configure the pacman repository"
-    echo "- Install gaze, gaze-gui, and gaze-gnome-extension"
+    echo "- Install gaze-bin, gaze-gui-bin, and gaze-gnome-extension-bin from the AUR"
     echo "- Enable the Gaze daemon"
 fi
 
@@ -165,6 +156,9 @@ if is_deb; then
 
     bold "Step 3/4: Installing packages"
     apt-get install -y gaze gaze-gui gaze-gnome-extension
+
+    bold "Step 4/4: Enabling Gaze daemon"
+    systemctl enable --now gazed 2>/dev/null || true
 
 elif is_rpm; then
     echo ""
@@ -190,35 +184,54 @@ elif is_rpm; then
         authselect select vendor/gaze --force || true
     fi
 
+    bold "Step 4/4: Enabling Gaze daemon"
+    systemctl enable --now gazed 2>/dev/null || true
+
 elif is_arch; then
     echo ""
-    bold "Step 1/4: Configuring pacman repository"
-    curl -fsSL "${PKG_BASE_URL}/keys/gundulabs-repo.asc" -o "${TMP}/gundulabs-packages.asc" 2>/dev/null || true
-    if [ -f "${TMP}/gundulabs-packages.asc" ]; then
-        pacman-key --add "${TMP}/gundulabs-packages.asc" >/dev/null 2>&1 || true
-        KEY_FP="$(gpg --show-keys --with-colons "${TMP}/gundulabs-packages.asc" 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')"
-        [ -n "$KEY_FP" ] && pacman-key --lsign-key "$KEY_FP" >/dev/null 2>&1 || true
-    fi
-    tee /etc/pacman.d/gaze-mirrorlist >/dev/null 2>&1 <<EOF || true
-Server = ${PKG_BASE_URL}/arch/${PKG_ARCH}
-EOF
-    if ! grep -q '\[gaze\]' /etc/pacman.conf 2>/dev/null; then
-        tee -a /etc/pacman.conf >/dev/null 2>&1 <<'EOF' || true
-[gaze]
-SigLevel = Required DatabaseOptional
-Include = /etc/pacman.d/gaze-mirrorlist
-EOF
+    bold "Step 1/3: Checking for AUR helper"
+    AUR_USER="${SUDO_USER:-}"
+    AUR_HELPER=""
+    for helper in yay paru; do
+        if command -v "$helper" >/dev/null 2>&1; then
+            AUR_HELPER="$helper"
+            break
+        fi
+        if [ -n "$AUR_USER" ] && su -c "command -v $helper" "$AUR_USER" >/dev/null 2>&1; then
+            AUR_HELPER="$helper"
+            break
+        fi
+    done
+
+    if [ -z "$AUR_HELPER" ]; then
+        red "No AUR helper found (tried: yay, paru)."
+        echo ""
+        echo "Gaze is distributed via the AUR and requires an AUR helper to install."
+        echo "We recommend yay. To install it:"
+        echo ""
+        echo "  pacman -S --needed base-devel git"
+        echo "  git clone https://aur.archlinux.org/yay.git"
+        echo "  cd yay && makepkg -si"
+        echo ""
+        echo "Then re-run this installer."
+        exit 1
     fi
 
-    bold "Step 2/4: Refreshing package index"
-    pacman -Sy --noconfirm
+    echo "Found AUR helper: $AUR_HELPER"
 
-    bold "Step 3/4: Installing packages"
-    pacman -S --noconfirm gaze gaze-gui gaze-gnome-extension
+    bold "Step 2/3: Installing packages from AUR"
+    if [ -n "$AUR_USER" ]; then
+        su -c "$AUR_HELPER -S --noconfirm gaze-bin gaze-gui-bin gaze-gnome-extension-bin" "$AUR_USER"
+    else
+        red "Cannot determine the non-root user to run $AUR_HELPER."
+        echo "AUR helpers must not run as root. Please install manually:"
+        echo "  $AUR_HELPER -S gaze-bin gaze-gui-bin gaze-gnome-extension-bin"
+        exit 1
+    fi
+
+    bold "Step 3/3: Enabling Gaze daemon"
+    systemctl enable --now gazed 2>/dev/null || true
 fi
-
-bold "Step 4/4: Enabling Gaze daemon"
-systemctl enable --now gazed 2>/dev/null || true
 
 # ── done ─────────────────────────────────────────────────────────────────────
 
