@@ -99,14 +99,6 @@ if ! is_rpm && ! is_deb && ! is_arch; then
     exit 1
 fi
 
-echo ""
-bold "This installer will:"
-echo "1. Detect your Linux distribution and architecture"
-echo "2. Configure the Gundu Labs package repository"
-echo "3. Install the packages needed for face authentication on your system"
-echo "4. Finish with the next steps for your distro"
-echo ""
-
 if is_deb; then
     echo "Detected platform: Debian/Ubuntu (${PKG_ARCH})"
     echo "Package manager: apt"
