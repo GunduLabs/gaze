@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitepress'
 import { createHighlighter } from 'shiki'
 
-const INSTALL_CMD = 'curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh'
+const INSTALL_CMD = 'curl -fsSL https://gaze.gundulabs.com/install.sh | sh'
 
 const highlightedInstall = await createHighlighter({
   themes: ['github-light', 'github-dark'],

@@ -1,11 +1,10 @@
 #!/bin/sh
 # Gaze installer - https://gaze.gundulabs.com/install.sh
-# Usage: curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
+# Usage: curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 set -e
 
 PKG_BASE_URL="https://packages.gundulabs.com"
 AUTO_YES=0
-ATOMIC_FEDORA=0
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -51,11 +50,6 @@ need id
 
 bold "Gaze installer"
 echo ""
-
-if [ "$(id -u)" -ne 0 ]; then
-    red "Please run this installer as root, for example: curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh"
-    exit 1
-fi
 
 # ── architecture ──────────────────────────────────────────────────────────────
 
@@ -105,6 +99,14 @@ if ! is_rpm && ! is_deb && ! is_arch; then
     exit 1
 fi
 
+echo ""
+bold "This installer will:"
+echo "1. Detect your Linux distribution and architecture"
+echo "2. Configure the Gundu Labs package repository"
+echo "3. Install the packages needed for face authentication on your system"
+echo "4. Finish with the next steps for your distro"
+echo ""
+
 if is_deb; then
     echo "Detected platform: Debian/Ubuntu (${PKG_ARCH})"
     echo "Package manager: apt"
@@ -113,6 +115,7 @@ if is_deb; then
     echo "- Configure the apt repository"
     echo "- Install gaze, gaze-gui, and gaze-gnome-extension"
     echo "- Set up the PAM modules through pam-auth-update if available"
+    echo "- Enable the GNOME extension"
     echo "- Enable the Gaze daemon"
 elif is_rpm; then
     echo "Detected platform: Fedora/RHEL family (${PKG_ARCH})"
@@ -126,6 +129,7 @@ elif is_rpm; then
     echo "- Configure the dnf repository"
     echo "- Install gaze, gaze-gui, and gaze-gnome-extension"
     echo "- Set up the PAM modules through authselect if available"
+    echo "- Enable the GNOME extension"
     echo "- Enable the Gaze daemon"
 elif is_arch; then
     echo "Detected platform: Arch/Manjaro (${PKG_ARCH})"
@@ -133,6 +137,7 @@ elif is_arch; then
     echo ""
     bold "Planned steps for this system:"
     echo "- Install gaze-bin, gaze-gui-bin, and gaze-gnome-extension-bin from the AUR"
+    echo "- Enable the GNOME extension"
     echo "- Enable the Gaze daemon"
 fi
 
@@ -144,60 +149,62 @@ trap 'rm -rf "$TMP"' EXIT
 
 if is_deb; then
     echo ""
-    bold "Step 1/4: Configuring apt repository"
-    mkdir -p -m 0755 /usr/share/keyrings
+    bold "Step 1/5: Configuring apt repository"
+    sudo mkdir -p -m 0755 /usr/share/keyrings
     curl -fsSL "${PKG_BASE_URL}/keys/gundulabs-repo.gpg" \
-        -o /usr/share/keyrings/gundulabs-archive-keyring.gpg
+        | sudo tee /usr/share/keyrings/gundulabs-archive-keyring.gpg >/dev/null
     curl -fsSL "${PKG_BASE_URL}/setup/deb/gundulabs.list" \
-        -o /etc/apt/sources.list.d/gundulabs.list
+        | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 
-    bold "Step 2/4: Updating package index"
-    apt-get update
+    bold "Step 2/5: Updating package index"
+    sudo apt-get update
 
-    bold "Step 3/4: Installing packages"
-    apt-get install -y gaze gaze-gui gaze-gnome-extension
+    bold "Step 3/5: Installing packages"
+    sudo apt-get install -y gaze gaze-gui gaze-gnome-extension
 
-    bold "Step 4/4: Enabling Gaze daemon"
-    systemctl enable --now gazed 2>/dev/null || true
+    bold "Step 4/5: Enabling GNOME extension"
+    gnome-extensions enable gaze@gundulabs.com 2>/dev/null || true
+
+    bold "Step 5/5: Enabling Gaze daemon"
+    sudo systemctl enable --now gazed 2>/dev/null || true
 
 elif is_rpm; then
     echo ""
-    bold "Step 1/4: Configuring dnf repository"
-    rpm --import "${PKG_BASE_URL}/keys/gundulabs-repo.asc"
-    curl -fsSL "${PKG_BASE_URL}/setup/rpm/gundulabs.repo" -o /etc/yum.repos.d/gundulabs.repo
+    bold "Step 1/5: Configuring dnf repository"
+    sudo rpm --import "${PKG_BASE_URL}/keys/gundulabs-repo.asc"
+    curl -fsSL "${PKG_BASE_URL}/setup/rpm/gundulabs.repo" \
+        | sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null
 
-    bold "Step 2/4: Refreshing repository metadata"
+    bold "Step 2/5: Refreshing repository metadata"
     if command -v dnf >/dev/null 2>&1; then
-        dnf makecache
+        sudo dnf makecache
     else
-        yum makecache
+        sudo yum makecache
     fi
 
-    bold "Step 3/4: Installing packages"
+    bold "Step 3/5: Installing packages"
     if command -v dnf >/dev/null 2>&1; then
-        dnf install -y gaze gaze-gui gaze-gnome-extension
+        sudo dnf install -y gaze gaze-gui gaze-gnome-extension
     else
-        yum install -y gaze gaze-gui gaze-gnome-extension
+        sudo yum install -y gaze gaze-gui gaze-gnome-extension
     fi
 
     if command -v authselect >/dev/null 2>&1; then
-        authselect select gaze --force || true
+        sudo authselect select gaze --force || true
     fi
 
-    bold "Step 4/4: Enabling Gaze daemon"
-    systemctl enable --now gazed 2>/dev/null || true
+    bold "Step 4/5: Enabling GNOME extension"
+    gnome-extensions enable gaze@gundulabs.com 2>/dev/null || true
+
+    bold "Step 5/5: Enabling Gaze daemon"
+    sudo systemctl enable --now gazed 2>/dev/null || true
 
 elif is_arch; then
     echo ""
-    bold "Step 1/3: Checking for AUR helper"
-    AUR_USER="${SUDO_USER:-}"
+    bold "Step 1/4: Checking for AUR helper"
     AUR_HELPER=""
     for helper in yay paru; do
         if command -v "$helper" >/dev/null 2>&1; then
-            AUR_HELPER="$helper"
-            break
-        fi
-        if [ -n "$AUR_USER" ] && su -c "command -v $helper" "$AUR_USER" >/dev/null 2>&1; then
             AUR_HELPER="$helper"
             break
         fi
@@ -209,7 +216,7 @@ elif is_arch; then
         echo "Gaze is distributed via the AUR and requires an AUR helper to install."
         echo "We recommend yay. To install it:"
         echo ""
-        echo "  pacman -S --needed base-devel git"
+        echo "  sudo pacman -S --needed base-devel git"
         echo "  git clone https://aur.archlinux.org/yay.git"
         echo "  cd yay && makepkg -si"
         echo ""
@@ -219,18 +226,14 @@ elif is_arch; then
 
     echo "Found AUR helper: $AUR_HELPER"
 
-    bold "Step 2/3: Installing packages from AUR"
-    if [ -n "$AUR_USER" ]; then
-        su -c "$AUR_HELPER -S --noconfirm gaze-bin gaze-gui-bin gaze-gnome-extension-bin" "$AUR_USER"
-    else
-        red "Cannot determine the non-root user to run $AUR_HELPER."
-        echo "AUR helpers must not run as root. Please install manually:"
-        echo "  $AUR_HELPER -S gaze-bin gaze-gui-bin gaze-gnome-extension-bin"
-        exit 1
-    fi
+    bold "Step 2/4: Installing packages from AUR"
+    "$AUR_HELPER" -S --noconfirm gaze-bin gaze-gui-bin gaze-gnome-extension-bin
 
-    bold "Step 3/3: Enabling Gaze daemon"
-    systemctl enable --now gazed 2>/dev/null || true
+    bold "Step 3/4: Enabling GNOME extension"
+    gnome-extensions enable gaze@gundulabs.com 2>/dev/null || true
+
+    bold "Step 4/4: Enabling Gaze daemon"
+    sudo systemctl enable --now gazed 2>/dev/null || true
 fi
 
 # ── done ─────────────────────────────────────────────────────────────────────

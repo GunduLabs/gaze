@@ -13,7 +13,7 @@ Get Gaze running in under 10 minutes: install, enroll your face, and verify auth
 Recommended one-line installer:
 
 ```bash
-curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
+curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 ```
 
 If you prefer manual repo setup, use the [installation guide](/guide/installation).

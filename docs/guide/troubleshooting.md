@@ -85,7 +85,7 @@ On Wayland, log out and back in after extension install or update.
 Reinstall packages (recommended):
 
 ```bash
-curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
+curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 ```
 
 This reapplies package-managed PAM integration.

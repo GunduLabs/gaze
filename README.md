@@ -21,7 +21,7 @@ Gaze is a face authentication system for Linux. It runs entirely on-device with 
 ## Install
 
 ```bash
-curl -fsSL https://gaze.gundulabs.com/install.sh | sudo sh
+curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 ```
 
 <details>
