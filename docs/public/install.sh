@@ -181,7 +181,7 @@ elif is_rpm; then
     fi
 
     if command -v authselect >/dev/null 2>&1; then
-        authselect select vendor/gaze --force || true
+        authselect select gaze --force || true
     fi
 
     bold "Step 4/4: Enabling Gaze daemon"
