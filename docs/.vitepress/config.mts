@@ -51,6 +51,7 @@ export default defineConfig({
           { text: 'GUI Guide', link: '/guide/gui' },
           { text: 'CLI Guide', link: '/guide/cli' },
           { text: 'Configuration', link: '/guide/configuration' },
+          { text: 'Uninstallation', link: '/guide/uninstallation' },
           { text: 'Troubleshooting', link: '/guide/troubleshooting' },
           { text: 'How Gaze Works', link: '/guide/how-it-works' },
         ]
