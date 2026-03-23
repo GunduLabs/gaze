@@ -199,13 +199,18 @@ jobs:
           FLATPAK_GPG_SIGN: ${{ steps.import_gpg.outputs.fingerprint }}
         run: just build-flatpak
 
+      - name: Stage flatpakref for artifacts
+        run: |
+          mkdir -p dist/packages
+          cp packaging/flatpak/com.gundulabs.Gaze.flatpakref dist/packages/com.gundulabs.Gaze.flatpakref
+
       - name: Upload flatpak package artifact
         uses: actions/upload-artifact@v4
         with:
           name: packages-flatpak
           path: |
             dist/packages/*.flatpak
-            packaging/flatpak/*.flatpakref
+            dist/packages/*.flatpakref
 
   release:
     name: Upload release assets
@@ -231,7 +236,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/packages/*/*.deb
-            dist/packages/*/*.rpm
-            dist/packages/*/*.pkg.tar.*
-            dist/packages/*/*.flatpakref
+            dist/packages/**/*.deb
+            dist/packages/**/*.rpm
+            dist/packages/**/*.pkg.tar.*
+            dist/packages/**/*.flatpakref
