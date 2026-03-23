@@ -25,7 +25,7 @@ When that happens, apps that read saved secrets (browser credentials, git creden
 If you still want this, enable it with:
 
 ```bash
-sudo -u gdm dbus-run-session gsettings set org.gnome.login-screen.gaze enable-face-authentication true
+sudo -u gdm dbus-run-session gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
 Then restart GDM (or reboot):
@@ -37,7 +37,7 @@ sudo systemctl restart gdm
 ## Disable face at GDM login
 
 ```bash
-sudo -u gdm dbus-run-session gsettings set org.gnome.login-screen.gaze enable-face-authentication false
+sudo -u gdm dbus-run-session gsettings set org.gnome.shell.extensions.gaze enable-face-authentication false
 ```
 
 ## Verify GNOME flow

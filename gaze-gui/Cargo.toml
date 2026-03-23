@@ -20,4 +20,5 @@ anyhow = "1.0.102"
 opencv = { version = "0.98.1", default-features = false, features = ["imgproc", "videoio"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+toml = "0.8"
 

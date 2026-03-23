@@ -1,3 +1,4 @@
+use crate::config::Config;
 use zbus::proxy;
 
 pub fn dbus_error_message(err: &zbus::Error) -> String {
@@ -10,6 +11,18 @@ pub fn dbus_error_message(err: &zbus::Error) -> String {
 
 pub fn dbus_is_file_not_found(err: &zbus::Error) -> bool {
     err.to_string().contains("FileNotFound")
+}
+
+pub async fn load_config_from_daemon(proxy: &AuthProxy<'_>) -> anyhow::Result<Config> {
+    let config_toml = proxy.get_config_toml().await?;
+    let config: Config = toml::from_str(&config_toml)?;
+    Ok(config)
+}
+
+pub async fn apply_config_to_daemon(proxy: &AuthProxy<'_>, config: &Config) -> anyhow::Result<()> {
+    let encoded = toml::to_string_pretty(config)?;
+    proxy.set_config_toml(&encoded).await?;
+    Ok(())
 }
 
 #[proxy(
@@ -53,4 +66,7 @@ pub trait Auth {
         new_face_name: &str,
     ) -> zbus::Result<bool>;
     async fn clear_user(&self, username: &str) -> zbus::Result<bool>;
+
+    async fn get_config_toml(&self) -> zbus::Result<String>;
+    async fn set_config_toml(&self, config_toml: &str) -> zbus::Result<bool>;
 }

@@ -15,7 +15,7 @@ gnome-extensions disable gaze@gundulabs.com
 ### Disable face auth at GDM login (if enabled)
 
 ```bash
-sudo -u gdm dbus-run-session gsettings set org.gnome.login-screen.gaze enable-face-authentication false
+sudo -u gdm dbus-run-session gsettings set org.gnome.shell.extensions.gaze enable-face-authentication false
 ```
 
 ### Revert PAM configuration

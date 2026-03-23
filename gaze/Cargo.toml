@@ -27,6 +27,8 @@ indicatif = "0.18.4"
 console = "0.16.2"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+dialoguer = "0.12"
+toml = "0.8"
 
 [[bin]]
 name = "gazed"

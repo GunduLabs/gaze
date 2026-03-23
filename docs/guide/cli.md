@@ -70,6 +70,20 @@ gaze clear-user
 
 This is destructive.
 
+## Interactive configuration (modern TUI)
+
+Use the interactive wizard to configure `/etc/gaze/config.toml` and optionally
+
+```bash
+gaze config
+```
+
+Show-only mode:
+
+```bash
+gaze config --show
+```
+
 ## Manage another user
 
 Most commands support `-u`:

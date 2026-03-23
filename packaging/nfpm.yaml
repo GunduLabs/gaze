@@ -24,6 +24,8 @@ contents:
     type: "config"
   - src: "packaging/config/org.gaze.Auth.conf"
     dst: "/etc/dbus-1/system.d/org.gaze.Auth.conf"
+  - src: "packaging/config/com.gundulabs.gaze.policy"
+    dst: "/usr/share/polkit-1/actions/com.gundulabs.gaze.policy"
   - src: "packaging/config/gazed.service"
     dst: "/usr/lib/systemd/system/gazed.service"
   - src: "target/release/libpam_gaze.so"

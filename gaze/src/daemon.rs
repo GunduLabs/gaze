@@ -4,20 +4,27 @@ use opencv::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::time::{Duration, sleep};
 use tracing::info;
-use zbus::{fdo, interface};
+use zbus::zvariant::Value;
+use zbus::{fdo, interface, message::Header};
 
 use crate::align::align_face;
 use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
+use gaze_core::config::Config;
 use gaze_core::detect::{DetectError, FaceDetector};
+
+const CONFIG_PATH: &str = "/etc/gaze/config.toml";
+const POLKIT_ACTION_MANAGE_FACES: &str = "com.gundulabs.gaze.manage-faces";
+const POLKIT_ACTION_MANAGE_CONFIG: &str = "com.gundulabs.gaze.manage-config";
 
 pub struct AuthDaemon {
     pub detector: Arc<Mutex<FaceDetector>>,
     pub recognizer: Arc<Mutex<FaceRecognizer>>,
     pub db: Arc<Mutex<UserDatabase>>,
-    pub threshold: f32,
-    pub max_captures: usize,
+    pub threshold: Arc<Mutex<f32>>,
+    pub max_captures: Arc<Mutex<usize>>,
 }
 
 impl AuthDaemon {
@@ -96,6 +103,52 @@ impl AuthDaemon {
         let mut rec = self.recognizer.lock().await;
         Self::process_frame(&mut detector, &mut rec, &frame)
     }
+
+    async fn ensure_authorized(header: &Header<'_>, action_id: &str) -> fdo::Result<()> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| fdo::Error::AccessDenied("Missing DBus sender".into()))?;
+
+        let conn = zbus::Connection::system()
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("Failed to connect to system bus: {e}")))?;
+        let authority = zbus::Proxy::new(
+            &conn,
+            "org.freedesktop.PolicyKit1",
+            "/org/freedesktop/PolicyKit1/Authority",
+            "org.freedesktop.PolicyKit1.Authority",
+        )
+        .await
+        .map_err(|e| fdo::Error::Failed(format!("Failed to create polkit proxy: {e}")))?;
+
+        let mut subject_details: HashMap<&str, Value<'_>> = HashMap::new();
+        subject_details.insert("name", sender.as_str().into());
+
+        let subject = ("system-bus-name", subject_details);
+        let details: HashMap<&str, &str> = HashMap::new();
+        let flags = 1u32; // AllowUserInteraction
+        let cancellation_id = "";
+
+        let (is_authorized, _is_challenge, _ret_details): (bool, bool, HashMap<String, String>) =
+            authority
+                .call(
+                    "CheckAuthorization",
+                    &(subject, action_id, details, flags, cancellation_id),
+                )
+                .await
+                .map_err(|e| {
+                    fdo::Error::Failed(format!("PolicyKit CheckAuthorization failed: {e}"))
+                })?;
+
+        if !is_authorized {
+            return Err(fdo::Error::AccessDenied(format!(
+                "Authorization denied for action '{action_id}'"
+            )));
+        }
+
+        Ok(())
+    }
 }
 
 #[interface(name = "org.gaze.Auth")]
@@ -112,11 +165,12 @@ impl AuthDaemon {
             .get_embeddings_from_frame(&image_data, width, height)
             .await?;
 
+        let threshold = *self.threshold.lock().await;
         let db = self.db.lock().await;
         let mut result = false;
         for embed in &embeds {
             if db
-                .verify_user(&username, embed, self.threshold)
+                .verify_user(&username, embed, threshold)
                 .map_err(Self::map_user_db_error)?
             {
                 result = true;
@@ -139,12 +193,13 @@ impl AuthDaemon {
             .get_embeddings_from_frame(&image_data, width, height)
             .await?;
 
+        let threshold = *self.threshold.lock().await;
         let db = self.db.lock().await;
         let mut combined: HashMap<String, (f32, f32, bool, u32)> = HashMap::new();
 
         for embed in &embeds {
             let per_face = db
-                .match_faces(&username, embed, self.threshold)
+                .match_faces(&username, embed, threshold)
                 .map_err(Self::map_user_db_error)?;
 
             for (name, score, pct, passed, count) in per_face {
@@ -167,12 +222,14 @@ impl AuthDaemon {
 
     async fn add_face(
         &self,
+        #[zbus(header)] header: Header<'_>,
         username: String,
         face_name: String,
         image_data: Vec<u8>,
         width: u32,
         height: u32,
     ) -> fdo::Result<String> {
+        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_FACES).await?;
         info!(username = %username, face_name = %face_name, "Add face request");
         if face_name.trim().is_empty() {
             return Err(fdo::Error::InvalidArgs("Face name cannot be empty".into()));
@@ -185,14 +242,21 @@ impl AuthDaemon {
         };
 
         let mut db = self.db.lock().await;
+        let max_captures = *self.max_captures.lock().await;
         let result = db
-            .add_face(&username, &face_name, embed, self.max_captures)
+            .add_face(&username, &face_name, embed, max_captures)
             .map_err(Self::map_user_db_error)?;
         info!(username = %username, face_name = %face_name, "Face added");
         Ok(result)
     }
 
-    async fn remove_face(&self, username: String, face_name: String) -> fdo::Result<bool> {
+    async fn remove_face(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        username: String,
+        face_name: String,
+    ) -> fdo::Result<bool> {
+        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_FACES).await?;
         info!(username = %username, face_name = %face_name, "Remove face request");
         let mut db = self.db.lock().await;
         db.remove_face(&username, &face_name)
@@ -202,10 +266,12 @@ impl AuthDaemon {
 
     async fn rename_face(
         &self,
+        #[zbus(header)] header: Header<'_>,
         username: String,
         old_face_name: String,
         new_face_name: String,
     ) -> fdo::Result<bool> {
+        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_FACES).await?;
         info!(
             username = %username,
             old_face_name = %old_face_name,
@@ -226,10 +292,47 @@ impl AuthDaemon {
         Ok(faces)
     }
 
-    async fn clear_user(&self, username: String) -> fdo::Result<bool> {
+    async fn clear_user(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        username: String,
+    ) -> fdo::Result<bool> {
+        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_FACES).await?;
         info!(username = %username, "Clear user request");
         let mut db = self.db.lock().await;
         db.clear_user(&username).map_err(Self::map_user_db_error)?;
+        Ok(true)
+    }
+
+    async fn get_config_toml(&self) -> fdo::Result<String> {
+        let config = Config::load_from(CONFIG_PATH).map_err(|e| {
+            fdo::Error::Failed(format!("Failed to load config from {}: {}", CONFIG_PATH, e))
+        })?;
+
+        toml::to_string_pretty(&config)
+            .map_err(|e| fdo::Error::Failed(format!("Failed to serialize config: {e}")))
+    }
+
+    async fn set_config_toml(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        config_toml: String,
+    ) -> fdo::Result<bool> {
+        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
+
+        let parsed: Config = toml::from_str(&config_toml)
+            .map_err(|e| fdo::Error::InvalidArgs(format!("Invalid TOML config: {}", e)))?;
+
+        parsed
+            .save_to(CONFIG_PATH)
+            .map_err(|e| fdo::Error::Failed(format!("Failed to write config file: {}", e)))?;
+
+        info!("Config updated; scheduling daemon restart");
+        tokio::spawn(async {
+            sleep(Duration::from_millis(150)).await;
+            std::process::exit(42);
+        });
+
         Ok(true)
     }
 }

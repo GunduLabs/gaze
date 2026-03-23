@@ -51,8 +51,8 @@ async fn main() -> anyhow::Result<()> {
         detector: Arc::new(Mutex::new(detector)),
         recognizer: Arc::new(Mutex::new(recognizer)),
         db: Arc::new(Mutex::new(db)),
-        threshold: security.threshold(),
-        max_captures: config.enrollment.max_captures_per_face,
+        threshold: Arc::new(Mutex::new(security.threshold())),
+        max_captures: Arc::new(Mutex::new(config.enrollment.max_captures_per_face)),
     };
 
     info!(elapsed = ?t_load.elapsed(), "Models & user DB loaded");

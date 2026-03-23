@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.gaze" path="/org/gnome/shell/extensions/gaze/">
+    <key name="enable-face-authentication" type="b">
+      <default>true</default>
+      <summary>Enable face authentication</summary>
+      <description>
+        Controls whether face authentication is attempted by the Gaze GNOME
+        extension for the current dconf profile.
+      </description>
+    </key>
+
+    <key name="max-face-tries" type="i">
+      <default>3</default>
+      <summary>Maximum face authentication attempts</summary>
+      <description>
+        Number of failed face attempts before face auth is stopped for the
+        current authentication cycle.
+      </description>
+    </key>
+  </schema>
+</schemalist>

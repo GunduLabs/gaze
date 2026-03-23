@@ -13,6 +13,18 @@ gaze-gui
 - Enroll a new face profile
 - Test authentication with immediate pass/fail feedback
 - View and remove enrolled profiles
+- Configure daemon settings from the header-bar config button
+- Toggle GDM face auth 
+
+## Configuration dialog
+
+Open the config dialog from the header-bar settings button.
+
+From there you can edit:
+
+- Security level (`low`, `medium`, `high`, `maximum`)
+- RGB camera device path
+- Maximum captures per face
 
 ## Common tasks
 

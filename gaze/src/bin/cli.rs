@@ -1,16 +1,19 @@
 use clap::{Parser, Subcommand};
 use console::{Term, style};
+use dialoguer::{Input, Select, theme::ColorfulTheme};
 use gaze_core::camera::Camera;
 use gaze_core::capture::{init_camera_and_checker, wait_for_capture};
 use gaze_core::capture_session::{CaptureHint, CaptureMode, CaptureSession, CaptureState};
-use gaze_core::config::Config;
+use gaze_core::config::{Config, SecurityLevel};
+use gaze_core::dbus::{
+    AuthProxy, apply_config_to_daemon, dbus_error_message, dbus_is_file_not_found,
+    load_config_from_daemon,
+};
 use gaze_core::face::{CaptureStatus, FaceChecker};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::thread;
 use std::time::Duration;
 use zbus::Connection;
-
-use gaze_core::dbus::{AuthProxy, dbus_error_message, dbus_is_file_not_found};
 
 async fn run_capture_session(
     proxy: &AuthProxy<'_>,
@@ -227,12 +230,104 @@ enum Commands {
         #[arg(short, long)]
         user: Option<String>,
     },
+    /// Interactive configuration editor for daemon and GDM options
+    Config {
+        #[arg(long, help = "Print current values and exit")]
+        show: bool,
+    },
+}
+
+async fn run_config_wizard(
+    term: &Term,
+    proxy: &AuthProxy<'_>,
+    mut config: Config,
+) -> anyhow::Result<()> {
+    let theme = ColorfulTheme::default();
+
+    term.write_line(&format!(
+        "\n{}\n",
+        style("Gaze Config Wizard").cyan().bold()
+    ))?;
+
+    let level_options = ["low", "medium", "high", "maximum", "custom"];
+    let default_level_idx = match config.security {
+        SecurityLevel::Low => 0,
+        SecurityLevel::Medium => 1,
+        SecurityLevel::High => 2,
+        SecurityLevel::Maximum => 3,
+        SecurityLevel::Custom { .. } => 4,
+    };
+
+    let selected = Select::with_theme(&theme)
+        .with_prompt("Security level")
+        .items(level_options)
+        .default(default_level_idx)
+        .interact()?;
+
+    config.security = match selected {
+        0 => SecurityLevel::Low,
+        1 => SecurityLevel::Medium,
+        2 => SecurityLevel::High,
+        3 => SecurityLevel::Maximum,
+        _ => {
+            let (default_detector, default_recognizer, default_threshold) = match &config.security {
+                SecurityLevel::Custom {
+                    detector,
+                    recognizer,
+                    threshold,
+                } => (detector.clone(), recognizer.clone(), *threshold),
+                _ => (
+                    config.security.detector().to_string(),
+                    config.security.recognizer().to_string(),
+                    config.security.threshold(),
+                ),
+            };
+
+            let detector = Input::with_theme(&theme)
+                .with_prompt("Custom detector model")
+                .default(default_detector)
+                .interact_text()?;
+
+            let recognizer = Input::with_theme(&theme)
+                .with_prompt("Custom recognizer model")
+                .default(default_recognizer)
+                .interact_text()?;
+
+            let threshold = Input::with_theme(&theme)
+                .with_prompt("Custom threshold (0.0 - 1.0)")
+                .default(default_threshold)
+                .interact_text()?;
+
+            SecurityLevel::Custom {
+                detector,
+                recognizer,
+                threshold,
+            }
+        }
+    };
+
+    config.cameras.rgb = Input::with_theme(&theme)
+        .with_prompt("RGB camera device")
+        .default(config.cameras.rgb.clone())
+        .interact_text()?;
+
+    config.enrollment.max_captures_per_face = Input::with_theme(&theme)
+        .with_prompt("Max captures per face")
+        .default(config.enrollment.max_captures_per_face)
+        .interact_text()?;
+
+    apply_config_to_daemon(proxy, &config).await?;
+    term.write_line(&format!(
+        "{} Configuration saved. Daemon will restart to apply changes.",
+        style("✓").green().bold()
+    ))?;
+
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let config = Config::load()?;
     let conn = Connection::system().await?;
     let proxy = AuthProxy::new(&conn).await?;
 
@@ -245,6 +340,7 @@ async fn main() -> anyhow::Result<()> {
             verbose,
         } => {
             let user = user.unwrap_or_else(get_current_user);
+            let config = load_config_from_daemon(&proxy).await?;
             let mut last = std::time::Instant::now();
             let start = last;
             let log = |label: &str, last: &mut std::time::Instant| {
@@ -362,6 +458,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::AddFace { user, face } => {
             let user = user.unwrap_or_else(get_current_user);
+            let config = load_config_from_daemon(&proxy).await?;
             let mut cam = Camera::open(&config.cameras.rgb)?;
             let checker = FaceChecker::new()?;
             run_capture_session(&proxy, &mut cam, checker, &user, &face, CaptureMode::Guided)
@@ -369,6 +466,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::RefineFace { user, face } => {
             let user = user.unwrap_or_else(get_current_user);
+            let config = load_config_from_daemon(&proxy).await?;
             let mut cam = Camera::open(&config.cameras.rgb)?;
             let checker = FaceChecker::new()?;
             run_capture_session(&proxy, &mut cam, checker, &user, &face, CaptureMode::Refine)
@@ -561,6 +659,30 @@ async fn main() -> anyhow::Result<()> {
                     user
                 ))?;
             }
+        }
+        Commands::Config { show } => {
+            let config = load_config_from_daemon(&proxy).await?;
+
+            if show {
+                term.write_line(&format!(
+                    "{} {}",
+                    style("security.level:").bold(),
+                    config.security.as_name()
+                ))?;
+                term.write_line(&format!(
+                    "{} {}",
+                    style("cameras.rgb:").bold(),
+                    config.cameras.rgb
+                ))?;
+                term.write_line(&format!(
+                    "{} {}",
+                    style("enrollment.max_captures_per_face:").bold(),
+                    config.enrollment.max_captures_per_face
+                ))?;
+                return Ok(());
+            }
+
+            run_config_wizard(&term, &proxy, config).await?;
         }
     }
 

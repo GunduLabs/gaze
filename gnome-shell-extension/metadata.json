@@ -14,5 +14,6 @@
         "unlock-dialog",
         "gdm"
     ],
+    "settings-schema": "org.gnome.shell.extensions.gaze",
     "url": "https://gaze.gundulabs.com"
 }

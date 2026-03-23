@@ -1,7 +1,10 @@
 use crate::capture_dialog;
 use gaze_core::capture::{init_camera_and_checker, wait_for_capture};
-use gaze_core::config::Config;
-use gaze_core::dbus::{AuthProxy, dbus_error_message, dbus_is_file_not_found};
+use gaze_core::config::{Config, SecurityLevel};
+use gaze_core::dbus::{
+    AuthProxy, apply_config_to_daemon, dbus_error_message, dbus_is_file_not_found,
+    load_config_from_daemon,
+};
 use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
@@ -12,14 +15,6 @@ use std::sync::OnceLock;
 use zbus::Connection;
 
 type RefreshCb = Rc<dyn Fn()>;
-
-fn format_dbus_error(err: &zbus::Error) -> String {
-    dbus_error_message(err)
-}
-
-fn is_file_not_found_error(err: &zbus::Error) -> bool {
-    dbus_is_file_not_found(err)
-}
 
 fn load_auth_highlight_css() {
     static AUTH_HIGHLIGHT_CSS: OnceLock<()> = OnceLock::new();
@@ -41,6 +36,268 @@ fn load_auth_highlight_css() {
             );
         }
     });
+}
+
+#[allow(deprecated)]
+fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwaita::ToastOverlay) {
+    let config = Rc::new(RefCell::new(Config::default()));
+
+    let dialog = gtk4::Dialog::builder()
+        .transient_for(parent)
+        .modal(true)
+        .title("Configuration")
+        .default_width(560)
+        .default_height(420)
+        .build();
+    dialog.add_button("Cancel", gtk4::ResponseType::Cancel);
+    dialog.add_button("Save", gtk4::ResponseType::Accept);
+
+    let content = dialog.content_area();
+    content.set_spacing(12);
+    content.set_margin_start(16);
+    content.set_margin_end(16);
+    content.set_margin_top(16);
+    content.set_margin_bottom(16);
+
+    let grid = gtk4::Grid::builder()
+        .column_spacing(12)
+        .row_spacing(12)
+        .hexpand(true)
+        .build();
+
+    let security_label = gtk4::Label::new(Some("Security level"));
+    security_label.set_halign(gtk4::Align::Start);
+    let security_combo = gtk4::ComboBoxText::new();
+    security_combo.append(Some("low"), "low");
+    security_combo.append(Some("medium"), "medium");
+    security_combo.append(Some("high"), "high");
+    security_combo.append(Some("maximum"), "maximum");
+    security_combo.append(Some("custom"), "custom");
+    security_combo.set_active_id(Some(config.borrow().security.as_name()));
+
+    let custom_detector_label = gtk4::Label::new(Some("Custom detector model"));
+    custom_detector_label.set_halign(gtk4::Align::Start);
+    let custom_detector_entry = gtk4::Entry::new();
+    custom_detector_entry.set_hexpand(true);
+
+    let custom_recognizer_label = gtk4::Label::new(Some("Custom recognizer model"));
+    custom_recognizer_label.set_halign(gtk4::Align::Start);
+    let custom_recognizer_entry = gtk4::Entry::new();
+    custom_recognizer_entry.set_hexpand(true);
+
+    let custom_threshold_label = gtk4::Label::new(Some("Custom threshold"));
+    custom_threshold_label.set_halign(gtk4::Align::Start);
+    let custom_threshold_spin = gtk4::SpinButton::with_range(0.0, 1.0, 0.01);
+    custom_threshold_spin.set_digits(3);
+
+    let custom_grid = gtk4::Grid::builder()
+        .column_spacing(12)
+        .row_spacing(10)
+        .hexpand(true)
+        .build();
+    custom_grid.attach(&custom_detector_label, 0, 0, 1, 1);
+    custom_grid.attach(&custom_detector_entry, 1, 0, 1, 1);
+    custom_grid.attach(&custom_recognizer_label, 0, 1, 1, 1);
+    custom_grid.attach(&custom_recognizer_entry, 1, 1, 1, 1);
+    custom_grid.attach(&custom_threshold_label, 0, 2, 1, 1);
+    custom_grid.attach(&custom_threshold_spin, 1, 2, 1, 1);
+
+    let custom_frame = gtk4::Frame::new(Some("Custom level settings"));
+    custom_frame.set_child(Some(&custom_grid));
+
+    {
+        let cfg = config.borrow();
+        let (detector, recognizer, threshold) = match &cfg.security {
+            SecurityLevel::Custom {
+                detector,
+                recognizer,
+                threshold,
+            } => (detector.clone(), recognizer.clone(), *threshold),
+            _ => (
+                cfg.security.detector().to_string(),
+                cfg.security.recognizer().to_string(),
+                cfg.security.threshold(),
+            ),
+        };
+        custom_detector_entry.set_text(&detector);
+        custom_recognizer_entry.set_text(&recognizer);
+        custom_threshold_spin.set_value(threshold as f64);
+    }
+
+    let camera_label = gtk4::Label::new(Some("RGB camera"));
+    camera_label.set_halign(gtk4::Align::Start);
+    let camera_entry = gtk4::Entry::new();
+    camera_entry.set_hexpand(true);
+    camera_entry.set_text(&config.borrow().cameras.rgb);
+
+    let captures_label = gtk4::Label::new(Some("Max captures per face"));
+    captures_label.set_halign(gtk4::Align::Start);
+    let captures_spin = gtk4::SpinButton::with_range(1.0, 64.0, 1.0);
+    captures_spin.set_value(config.borrow().enrollment.max_captures_per_face as f64);
+
+    grid.attach(&security_label, 0, 0, 1, 1);
+    grid.attach(&security_combo, 1, 0, 1, 1);
+    grid.attach(&camera_label, 0, 1, 1, 1);
+    grid.attach(&camera_entry, 1, 1, 1, 1);
+    grid.attach(&captures_label, 0, 2, 1, 1);
+    grid.attach(&captures_spin, 1, 2, 1, 1);
+    grid.attach(&custom_frame, 0, 3, 2, 1);
+
+    let update_custom_visibility: Rc<dyn Fn()> = Rc::new(glib::clone!(
+        #[weak]
+        security_combo,
+        #[weak]
+        custom_frame,
+        move || {
+            let is_custom = security_combo.active_id().as_deref() == Some("custom");
+            custom_frame.set_visible(is_custom);
+        }
+    ));
+    security_combo.connect_changed(glib::clone!(
+        #[strong]
+        update_custom_visibility,
+        move |_| {
+            update_custom_visibility();
+        }
+    ));
+    update_custom_visibility();
+
+    content.append(&grid);
+
+    glib::MainContext::default().spawn_local(glib::clone!(
+        #[weak]
+        security_combo,
+        #[weak]
+        camera_entry,
+        #[weak]
+        captures_spin,
+        #[weak]
+        custom_detector_entry,
+        #[weak]
+        custom_recognizer_entry,
+        #[weak]
+        custom_threshold_spin,
+        #[strong]
+        update_custom_visibility,
+        #[weak]
+        overlay,
+        #[strong]
+        config,
+        async move {
+            let load_result = async {
+                let conn = Connection::system().await?;
+                let proxy = AuthProxy::new(&conn).await?;
+                load_config_from_daemon(&proxy).await
+            }
+            .await;
+
+            match load_result {
+                Ok(cfg) => {
+                    security_combo.set_active_id(Some(cfg.security.as_name()));
+                    camera_entry.set_text(&cfg.cameras.rgb);
+                    captures_spin.set_value(cfg.enrollment.max_captures_per_face as f64);
+                    let (detector, recognizer, threshold) = match &cfg.security {
+                        SecurityLevel::Custom {
+                            detector,
+                            recognizer,
+                            threshold,
+                        } => (detector.clone(), recognizer.clone(), *threshold),
+                        _ => (
+                            cfg.security.detector().to_string(),
+                            cfg.security.recognizer().to_string(),
+                            cfg.security.threshold(),
+                        ),
+                    };
+                    custom_detector_entry.set_text(&detector);
+                    custom_recognizer_entry.set_text(&recognizer);
+                    custom_threshold_spin.set_value(threshold as f64);
+                    *config.borrow_mut() = cfg;
+                    update_custom_visibility();
+                }
+                Err(err) => {
+                    overlay.add_toast(libadwaita::Toast::new(&format!(
+                        "Failed to load daemon config: {}",
+                        err
+                    )));
+                }
+            }
+        }
+    ));
+
+    dialog.connect_response(glib::clone!(
+        #[weak]
+        dialog,
+        #[weak]
+        overlay,
+        #[weak]
+        security_combo,
+        #[weak]
+        camera_entry,
+        #[weak]
+        captures_spin,
+        #[weak]
+        custom_detector_entry,
+        #[weak]
+        custom_recognizer_entry,
+        #[weak]
+        custom_threshold_spin,
+        #[strong]
+        config,
+        move |_, response| {
+            if response != gtk4::ResponseType::Accept {
+                dialog.close();
+                return;
+            }
+
+            let mut cfg = config.borrow_mut();
+            cfg.security = match security_combo.active_id().as_deref() {
+                Some("low") => SecurityLevel::Low,
+                Some("medium") => SecurityLevel::Medium,
+                Some("high") => SecurityLevel::High,
+                Some("maximum") => SecurityLevel::Maximum,
+                Some("custom") => SecurityLevel::Custom {
+                    detector: custom_detector_entry.text().to_string(),
+                    recognizer: custom_recognizer_entry.text().to_string(),
+                    threshold: custom_threshold_spin.value() as f32,
+                },
+                _ => SecurityLevel::Medium,
+            };
+            cfg.cameras.rgb = camera_entry.text().to_string();
+            cfg.enrollment.max_captures_per_face = captures_spin.value() as usize;
+
+            let cfg_to_apply = cfg.clone();
+            drop(cfg);
+
+            glib::MainContext::default().spawn_local(glib::clone!(
+                #[weak]
+                overlay,
+                #[strong]
+                cfg_to_apply,
+                async move {
+                    let apply_result = async {
+                        let conn = Connection::system().await?;
+                        let proxy = AuthProxy::new(&conn).await?;
+                        apply_config_to_daemon(&proxy, &cfg_to_apply).await
+                    }
+                    .await;
+
+                    match apply_result {
+                        Ok(_) => overlay.add_toast(libadwaita::Toast::new(
+                            "Configuration saved. Daemon will restart to apply changes.",
+                        )),
+                        Err(err) => overlay.add_toast(libadwaita::Toast::new(&format!(
+                            "Failed to apply daemon config: {}",
+                            err
+                        ))),
+                    }
+                }
+            ));
+
+            dialog.close();
+        }
+    ));
+
+    dialog.present();
 }
 
 pub fn build_window(app: &libadwaita::Application, username: &str) {
@@ -67,8 +324,12 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     let test_btn = gtk4::Button::from_icon_name("media-playback-start-symbolic");
     test_btn.set_tooltip_text(Some("Test Authentication"));
 
+    let config_btn = gtk4::Button::from_icon_name("emblem-system-symbolic");
+    config_btn.set_tooltip_text(Some("Configure Gaze"));
+
     header.pack_end(&add_btn);
     header.pack_end(&test_btn);
+    header.pack_end(&config_btn);
 
     main_box.append(&header);
 
@@ -173,12 +434,12 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                             let faces = match proxy.list_faces(&username).await {
                                 Ok(faces) => faces,
                                 Err(err) => {
-                                    if is_file_not_found_error(&err) {
+                                    if dbus_is_file_not_found(&err) {
                                         Vec::new()
                                     } else {
                                         let toast = libadwaita::Toast::new(&format!(
                                             "Failed to load faces: {}",
-                                            format_dbus_error(&err)
+                                            dbus_error_message(&err)
                                         ));
                                         if let Some(overlay) = window
                                             .content()
@@ -345,7 +606,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                             ).await {
                                                                 let toast = libadwaita::Toast::new(&format!(
                                                                     "Failed to rename face: {}",
-                                                                    format_dbus_error(&err)
+                                                                    dbus_error_message(&err)
                                                                 ));
                                                                 if let Some(overlay) = window
                                                                     .content()
@@ -442,7 +703,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                     {
                                                         let toast = libadwaita::Toast::new(&format!(
                                                             "Failed to remove face: {}",
-                                                            format_dbus_error(&err)
+                                                            dbus_error_message(&err)
                                                         ));
                                                         if let Some(overlay) = window
                                                             .content()
@@ -504,7 +765,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         last_toast,
                         async move {
                             let result = (|| -> anyhow::Result<(Vec<u8>, u32, u32)> {
-                                let config = Config::load().unwrap_or_default();
+                                let config = glib::MainContext::default()
+                                    .block_on(load_config_from_daemon(&proxy))?;
                                 let (mut cam, mut checker) =
                                     init_camera_and_checker(&config.cameras.rgb)?;
                                 let cap = wait_for_capture(&mut cam, &mut checker, false, |_| {})?;
@@ -528,7 +790,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         }
                                         Err(e) => format!(
                                             "✗ DBus error: {}",
-                                            format_dbus_error(&e)
+                                            dbus_error_message(&e)
                                         ),
                                     }
                                 }
@@ -594,6 +856,19 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                             }
                         ),
                     );
+                }
+            ));
+
+            config_btn.connect_clicked(glib::clone!(
+                #[weak]
+                window,
+                move |_| {
+                    if let Some(overlay) = window
+                        .content()
+                        .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+                    {
+                        show_config_dialog(&window, &overlay)
+                    }
                 }
             ));
         }

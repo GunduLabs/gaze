@@ -1,11 +1,12 @@
-use serde::Deserialize;
+use anyhow::Context;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 const DEFAULT_CONFIG_PATH: &str = "/etc/gaze/config.toml";
 pub const USERS_DIR: &str = "/var/lib/gaze/users";
 pub const MODELS_DIR: &str = "/var/cache/gaze";
 
-#[derive(Deserialize, Clone, Debug, Default)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
 #[serde(tag = "level")]
 pub enum SecurityLevel {
     #[serde(rename = "low")]
@@ -26,6 +27,16 @@ pub enum SecurityLevel {
 }
 
 impl SecurityLevel {
+    pub fn as_name(&self) -> &'static str {
+        match self {
+            SecurityLevel::Low => "low",
+            SecurityLevel::Medium => "medium",
+            SecurityLevel::High => "high",
+            SecurityLevel::Maximum => "maximum",
+            SecurityLevel::Custom { .. } => "custom",
+        }
+    }
+
     pub fn detector(&self) -> &str {
         match self {
             SecurityLevel::Low | SecurityLevel::Medium => "det_500m.onnx",
@@ -53,9 +64,9 @@ impl SecurityLevel {
     }
 }
 
-#[derive(Deserialize, Clone, Debug, Default)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct Config {
-    #[serde(default)]
+    #[serde(default, flatten)]
     pub security: SecurityLevel,
     #[serde(default)]
     pub cameras: CameraConfig,
@@ -63,7 +74,7 @@ pub struct Config {
     pub enrollment: EnrollmentConfig,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct CameraConfig {
     #[serde(default = "default_rgb_device")]
     pub rgb: String,
@@ -76,7 +87,7 @@ fn default_max_captures() -> usize {
     8
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct EnrollmentConfig {
     #[serde(default = "default_max_captures")]
     pub max_captures_per_face: usize,
@@ -111,5 +122,16 @@ impl Config {
         } else {
             Ok(Config::default())
         }
+    }
+
+    pub fn save(&self) -> anyhow::Result<()> {
+        self.save_to(DEFAULT_CONFIG_PATH)
+    }
+
+    pub fn save_to(&self, path: &str) -> anyhow::Result<()> {
+        let encoded = toml::to_string_pretty(self).context("failed to serialize config")?;
+        std::fs::write(path, encoded)
+            .with_context(|| format!("failed to write config file: {}", path))?;
+        Ok(())
     }
 }
