@@ -5,6 +5,9 @@ hero:
   name: "Gaze"
   text: "Facial authentication for Linux"
   tagline: On-device face recognition for login, lock screen, sudo, and more.
+  image:
+    src: /favicon.svg
+    alt: Gaze icon
   actions:
     - theme: brand
       text: Install Gaze
