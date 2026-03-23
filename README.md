@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="packaging/gui/com.gundulabs.Gaze.svg" alt="Gaze icon" width="120" />
+
 # Gaze
 
 **Facial authentication for Linux.**
