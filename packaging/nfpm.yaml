@@ -26,8 +26,6 @@ contents:
     dst: "/etc/dbus-1/system.d/org.gaze.Auth.conf"
   - src: "packaging/config/gazed.service"
     dst: "/usr/lib/systemd/system/gazed.service"
-  - src: "packaging/pam/gdm-face"
-    dst: "/etc/pam.d/gdm-face"
   - src: "target/release/libpam_gaze.so"
     dst: "/lib/${MULTIARCH}/security/pam_gaze.so"
     packager: deb
