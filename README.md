@@ -78,6 +78,12 @@ flatpak install gundulabs com.gundulabs.Gaze
 
 </details>
 
+After installation (any method), reboot once to ensure all system-level changes are fully applied.
+
+```bash
+sudo reboot
+```
+
 ## Quick start
 
 ```bash

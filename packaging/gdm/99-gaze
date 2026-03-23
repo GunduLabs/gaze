@@ -1,0 +1,5 @@
+[org/gnome/shell]
+enabled-extensions=['gaze@gundulabs.com']
+
+[org/gnome/login-screen/gaze]
+enable-face-authentication=false

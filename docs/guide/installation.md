@@ -67,6 +67,14 @@ flatpak install gundulabs com.gundulabs.Gaze
 
 Use this if you only want the GUI app.
 
+## Restart after install
+
+After installation (any method), reboot once to ensure all system-level changes are fully applied.
+
+```bash
+sudo reboot
+```
+
 ## Verify installation
 
 ```bash
