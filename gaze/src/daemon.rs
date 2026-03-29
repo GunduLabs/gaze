@@ -26,7 +26,13 @@ pub struct ClaimState {
     pub sender: String,
 }
 
-type FaceData = (Array1<f32>, [f32; 4]);
+pub struct FaceData {
+    pub embedding: Array1<f32>,
+    pub bbox: [f32; 4],
+    pub kpss: ndarray::Array3<f32>,
+    pub yaw: f32,
+    pub pitch: f32,
+}
 
 pub struct AuthDaemon {
     pub checker: Arc<Mutex<FaceChecker>>,
@@ -73,7 +79,16 @@ impl AuthDaemon {
             let embedding = recognizer.get_embedding(&aligned)?;
 
             let (x1, y1, x2, y2) = res.bbox.unwrap_or((0.0, 0.0, 0.0, 0.0));
-            Ok((status, Some((embedding, [x1, y1, x2, y2]))))
+            Ok((
+                status,
+                Some(FaceData {
+                    embedding,
+                    bbox: [x1, y1, x2, y2],
+                    kpss: kpss.clone(),
+                    yaw: res.yaw,
+                    pitch: res.pitch,
+                }),
+            ))
         } else {
             Ok((status, None))
         }
@@ -311,7 +326,8 @@ impl AuthDaemon {
                     Err(_) => continue,
                 };
 
-                if let Some((embed, _)) = embed_opt {
+                if let Some(data) = embed_opt {
+                    let embed = data.embedding;
                     let db = db_arc.lock().await;
 
                     match db.match_faces(&username, &embed, threshold) {
@@ -407,8 +423,8 @@ impl AuthDaemon {
             let mut last_enroll_prompt: Option<EnrollPrompt> = None;
             let mut last_capture_status: Option<CaptureStatus> = None;
             let mut captured_embeddings: Vec<Array1<f32>> = Vec::new();
-            let mut countdown_start: Option<std::time::Instant> = None;
-            let countdown_duration = std::time::Duration::from_millis(1500);
+            let mut last_kpss: Option<ndarray::Array3<f32>> = None;
+            let mut stable_frames = 0;
             let max_steps = 5u32;
 
             loop {
@@ -429,17 +445,63 @@ impl AuthDaemon {
                     Err(_) => continue,
                 };
 
-                let (status, embed_opt) = match Self::process_and_emit_status(&ctxt, &checker_arc, &recognizer_arc, &frame, &mut last_capture_status).await {
+                let (status, result_opt) = match Self::process_and_emit_status(&ctxt, &checker_arc, &recognizer_arc, &frame, &mut last_capture_status).await {
                     Ok(res) => res,
                     Err(_) => {
-                        countdown_start = None;
+                        stable_frames = 0;
                         continue;
                     }
                 };
 
-                let Some((embed, _bbox)) = embed_opt else {
-                    countdown_start = None;
+                let Some(data) = result_opt else {
+                    stable_frames = 0;
                     continue;
+                };
+                let embed = data.embedding;
+
+                let is_stable = if let Some(ref _res) = last_capture_status
+                    && status == CaptureStatus::Ready
+                {
+                    if let Some(prev_kps) = last_kpss.as_ref() {
+                        let cur_kps = &data.kpss;
+                        let delta: f32 = cur_kps.iter().zip(prev_kps.iter()).map(|(c, p)| (c - p).abs()).sum();
+                        let [x1, _, x2, _] = data.bbox;
+                        let face_w = x2 - x1;
+                        let norm_delta = delta / face_w;
+                        if norm_delta < 0.05 {
+                            stable_frames += 1;
+                        } else {
+                            stable_frames = 0;
+                        }
+
+                        last_kpss = Some(cur_kps.clone());
+                        stable_frames >= 3
+                    } else {
+                        last_kpss = Some(data.kpss.clone());
+                        false
+                    }
+                } else {
+                    stable_frames = 0;
+                    false
+                };
+
+                // Pose matching
+                let pose_matches = if let Some(ref _res) = last_capture_status
+                    && status == CaptureStatus::Ready
+                {
+                    let yaw = data.yaw;
+                    let pitch = data.pitch;
+
+                    match prompt {
+                        EnrollPrompt::LookStraight => yaw.abs() < 0.1 && (pitch - 0.45).abs() < 0.12,
+                        EnrollPrompt::LookUp => pitch < 0.35,
+                        EnrollPrompt::LookDown => pitch > 0.55,
+                        EnrollPrompt::LookLeft => yaw < -0.15,
+                        EnrollPrompt::LookRight => yaw > 0.15,
+                        _ => false,
+                    }
+                } else {
+                    false
                 };
 
                 macro_rules! send_enroll_status {
@@ -451,23 +513,13 @@ impl AuthDaemon {
                     }
                 }
 
-                match status {
-                    CaptureStatus::Ready => {
-                        if countdown_start.is_none() {
-                            countdown_start = Some(std::time::Instant::now());
-                        }
-
-                        let elapsed = countdown_start.unwrap().elapsed();
-                        if elapsed < countdown_duration {
-                            let remaining = (countdown_duration - elapsed).as_secs_f64();
-                            send_enroll_status!(prompt, remaining);
-                            continue;
-                        }
-
+                if status == CaptureStatus::Ready {
+                    if is_stable && pose_matches {
                         captured_embeddings.push(embed);
                         let new_count = captured_embeddings.len() as u32;
-                        countdown_start = None;
+                        stable_frames = 0;
                         last_enroll_prompt = None;
+                        last_kpss = None;
 
                         if new_count == max_steps {
                             info!("All angles captured! Saving template...");
@@ -489,11 +541,12 @@ impl AuthDaemon {
                             let _ = Self::enroll_status(&ctxt, &face_name, new_count, max_steps, false, EnrollPrompt::Captured, 0.0).await;
                             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                         }
-                    }
-                    _ => {
-                        countdown_start = None;
+                    } else {
                         send_enroll_status!(prompt, 0.0);
                     }
+                } else {
+                    stable_frames = 0;
+                    send_enroll_status!(prompt, 0.0);
                 }
             }
         });

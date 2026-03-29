@@ -21,8 +21,7 @@ fn create_spinner(prefix: &str, msg: String, color: &str) -> ProgressBar {
     pb.set_style(
         ProgressStyle::default_spinner()
             .template(&template)
-            .unwrap()
-            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ "),
+            .unwrap(),
     );
     pb.enable_steady_tick(Duration::from_millis(80));
     pb.set_prefix(prefix.to_string());
@@ -235,6 +234,7 @@ async fn handle_enroll(
         .progress_chars("█▇▆▅▄▃▂   ");
 
     pb.set_style(style_progress);
+    pb.enable_steady_tick(Duration::from_millis(80));
     pb.set_prefix("Capturing");
     pb.set_message("Waiting for face...");
 
@@ -253,6 +253,7 @@ async fn handle_enroll(
             _ = tokio::signal::ctrl_c() => {
                 pb.suspend(|| {
                     let theme = ColorfulTheme::default();
+                    println!();
                     if Select::with_theme(&theme)
                         .with_prompt("Cancel enrollment and discard captures?")
                         .items(["No, resume", "Yes, discard"])
@@ -265,7 +266,7 @@ async fn handle_enroll(
                 });
                 if is_cancelled {
                     pb.finish_and_clear();
-                    term.write_line(&format!("{} Enrollment cancelled", style("✗").red().bold())).unwrap();
+                    term.write_line(&format!("\n{} Enrollment cancelled", style("✗").red().bold())).unwrap();
                     break;
                 }
             }
@@ -286,7 +287,7 @@ async fn handle_enroll(
                     if is_done {
                         pb.finish_and_clear();
                         term.write_line(&format!(
-                            "\n  {} Captures perfectly saved for {}/{}!\n",
+                            "  {} Captures saved for {}/{}!\n",
                             style("✓").green().bold(),
                             style(user).green(),
                             style(face).green()

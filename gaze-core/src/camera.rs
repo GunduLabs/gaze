@@ -34,7 +34,9 @@ impl Camera {
         if frame.empty() {
             anyhow::bail!("Captured an empty frame from camera");
         }
-        Ok(frame)
+        let mut mirrored = Mat::default();
+        opencv::core::flip(&frame, &mut mirrored, 1)?;
+        Ok(mirrored)
     }
 }
 
