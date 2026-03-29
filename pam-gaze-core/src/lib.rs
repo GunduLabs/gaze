@@ -4,8 +4,6 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 
 use gaze_core::config::Config;
-use gaze_core::dbus::AuthProxyBlocking;
-pub use zbus::blocking::Connection;
 
 pub const PAM_SUCCESS: c_int = 0;
 pub const PAM_AUTH_ERR: c_int = 7;
@@ -110,22 +108,45 @@ pub fn is_retryable(err: &zbus::Error) -> bool {
     err.to_string().contains("RETRYABLE:")
 }
 
-pub fn setup_auth_env() -> Result<(Config, AuthProxyBlocking<'static>), c_int> {
+use gaze_core::dbus::GazeProxy;
+pub use zbus::Connection;
+
+pub async fn setup_auth_env() -> Result<(Config, GazeProxy<'static>), c_int> {
     let config = Config::load().map_err(|_| PAM_SERVICE_ERR)?;
-    let conn = Connection::system().map_err(|_| PAM_SERVICE_ERR)?;
-    let proxy = AuthProxyBlocking::new(&conn).map_err(|_| PAM_SERVICE_ERR)?;
+    let conn = Connection::system().await.map_err(|_| PAM_SERVICE_ERR)?;
+    let proxy = GazeProxy::new(&conn).await.map_err(|_| PAM_SERVICE_ERR)?;
     Ok((config, proxy))
 }
 
-pub unsafe fn is_polkit_service(pamh: PamHandle) -> bool {
-    let mut item: *const c_void = ptr::null();
-    if unsafe { pam_get_item(pamh, PAM_SERVICE, &mut item) } != PAM_SUCCESS || item.is_null() {
-        return false;
+pub async fn authenticate_biometric(username: &str) -> anyhow::Result<bool> {
+    let (_config, proxy) = setup_auth_env()
+        .await
+        .map_err(|e| anyhow::anyhow!("PAM error: {}", e))?;
+    proxy
+        .claim(username)
+        .await
+        .map_err(|e| anyhow::anyhow!("Claim failed: {:?}", e))?;
+
+    let mut status_stream = proxy
+        .receive_verify_status()
+        .await
+        .map_err(|e| anyhow::anyhow!("Stream failed: {}", e))?;
+    proxy
+        .verify_start("any")
+        .await
+        .map_err(|e| anyhow::anyhow!("Verify start failed: {}", e))?;
+
+    let mut matched = false;
+    use futures::StreamExt;
+    while let Some(signal) = status_stream.next().await {
+        if let Ok(args) = signal.args()
+            && *args.result() == gaze_core::dbus::VerifyResult::VerifyMatch
+        {
+            matched = true;
+            break;
+        }
     }
 
-    let Ok(service_name) = unsafe { CStr::from_ptr(item as *const c_char) }.to_str() else {
-        return false;
-    };
-
-    service_name.to_ascii_lowercase().contains("polkit")
+    let _ = proxy.release().await;
+    Ok(matched)
 }

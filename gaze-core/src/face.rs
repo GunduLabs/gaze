@@ -1,4 +1,5 @@
 use crate::config::{Config, MODELS_DIR};
+use crate::dbus::CaptureStatus;
 use crate::detect::{DetectError, FaceDetector};
 use opencv::core::Mat;
 use opencv::prelude::*;
@@ -9,6 +10,8 @@ pub struct CaptureResult {
     pub width: u32,
     pub height: u32,
     pub bbox: Option<(f32, f32, f32, f32)>,
+    pub kpss: Option<ndarray::Array3<f32>>,
+    pub mat_rgb: Option<opencv::core::Mat>,
 }
 
 pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
@@ -19,25 +22,6 @@ pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
         std::ptr::copy_nonoverlapping(frame.data(), bytes.as_mut_ptr(), total);
     }
     Ok(bytes)
-}
-
-pub enum CaptureStatus {
-    NoFaces,
-    NotCentered(CaptureResult),
-    Clipped(CaptureResult),
-    Ready(CaptureResult),
-}
-
-impl std::fmt::Display for CaptureStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let text = match self {
-            CaptureStatus::NoFaces => "No faces detected. Please look at the camera...",
-            CaptureStatus::NotCentered(_) => "Please center your face...",
-            CaptureStatus::Clipped(_) => "Face is clipped. Please move fully into frame...",
-            CaptureStatus::Ready(_) => "Face ready.",
-        };
-        write!(f, "{}", text)
-    }
 }
 
 pub struct FaceChecker {
@@ -67,6 +51,8 @@ impl FaceChecker {
     fn build_capture_result(
         frame: &Mat,
         bbox: Option<(f32, f32, f32, f32)>,
+        kpss: Option<ndarray::Array3<f32>>,
+        mat_rgb: Option<opencv::core::Mat>,
     ) -> anyhow::Result<CaptureResult> {
         let sz = frame.size()?;
         Ok(CaptureResult {
@@ -74,13 +60,18 @@ impl FaceChecker {
             width: sz.width as u32,
             height: sz.height as u32,
             bbox,
+            kpss,
+            mat_rgb,
         })
     }
 
-    pub fn capture_status(&mut self, frame: &Mat) -> anyhow::Result<CaptureStatus> {
-        let (bboxes, kpss, _) = match self.detector.detect(frame) {
+    pub fn capture_status(
+        &mut self,
+        frame: &Mat,
+    ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
+        let (bboxes, kps, mat_rgb) = match self.detector.detect(frame) {
             Ok(result) => result,
-            Err(DetectError::NoFacesDetected) => return Ok(CaptureStatus::NoFaces),
+            Err(DetectError::NoFacesDetected) => return Ok((CaptureStatus::NoFace, None)),
             Err(err) => return Err(err.into()),
         };
 
@@ -90,44 +81,34 @@ impl FaceChecker {
         let x2 = face[2];
         let y2 = face[3];
 
-        let frame_w = frame.cols() as f32;
-        let frame_h = frame.rows() as f32;
-        let max_dim = frame_w.max(frame_h);
+        let max_dim = (frame.cols() as f32).max(frame.rows() as f32);
         let edge_margin = 0.05;
+        let (width, height) = (x2 - x1, y2 - y1);
+        let (cx, cy) = (x1 + width / 2.0, y1 + height / 2.0);
+        let (norm_cx, norm_cy) = (cx / max_dim, cy / max_dim);
 
-        if x1 / max_dim < edge_margin
+        let status = if x1 / max_dim < edge_margin
             || y1 / max_dim < edge_margin
             || x2 / max_dim > (1.0 - edge_margin)
             || y2 / max_dim > (1.0 - edge_margin)
         {
-            return Ok(CaptureStatus::Clipped(Self::build_capture_result(
+            CaptureStatus::Clipped
+        } else if (norm_cx - 0.5).abs() >= 0.2 || (norm_cy - 0.5).abs() >= 0.2 {
+            CaptureStatus::NotCentered
+        } else if kps.is_none() {
+            return Ok((CaptureStatus::NoFace, None));
+        } else {
+            CaptureStatus::Ready
+        };
+
+        Ok((
+            status,
+            Some(Self::build_capture_result(
                 frame,
                 Some((x1, y1, x2, y2)),
-            )?));
-        }
-
-        if kpss.is_none() {
-            return Ok(CaptureStatus::NoFaces);
-        }
-
-        let width = x2 - x1;
-        let height = y2 - y1;
-        let cx = x1 + width / 2.0;
-        let cy = y1 + height / 2.0;
-
-        let norm_cx = cx / max_dim;
-        let norm_cy = cy / max_dim;
-
-        if (norm_cx - 0.5).abs() >= 0.2 || (norm_cy - 0.5).abs() >= 0.2 {
-            return Ok(CaptureStatus::NotCentered(Self::build_capture_result(
-                frame,
-                Some((x1, y1, x2, y2)),
-            )?));
-        }
-
-        Ok(CaptureStatus::Ready(Self::build_capture_result(
-            frame,
-            Some((x1, y1, x2, y2)),
-        )?))
+                kps,
+                Some(mat_rgb),
+            )?),
+        ))
     }
 }

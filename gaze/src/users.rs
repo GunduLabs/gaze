@@ -1,5 +1,5 @@
 use ndarray::Array1;
-use rayon::prelude::*;
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,13 +36,15 @@ impl From<std::io::Error> for UserDbError {
 
 pub struct UserDatabase {
     base_dir: PathBuf,
-    pub users: HashMap<String, FaceMap>,
+    max_templates: usize,
+    users: HashMap<String, FaceMap>,
 }
 
 impl UserDatabase {
-    pub fn new(base_dir: &str) -> anyhow::Result<Self> {
+    pub fn new(base_dir: &str, max_templates: usize) -> anyhow::Result<Self> {
         let mut db = Self {
             base_dir: PathBuf::from(base_dir),
+            max_templates,
             users: HashMap::new(),
         };
         db.load_all()?;
@@ -54,6 +56,14 @@ impl UserDatabase {
             fs::create_dir_all(&self.base_dir)?;
         }
         Ok(())
+    }
+
+    fn user_dir(&self, username: &str) -> PathBuf {
+        self.base_dir.join(username)
+    }
+
+    fn face_dir(&self, username: &str, face_name: &str) -> PathBuf {
+        self.user_dir(username).join(face_name)
     }
 
     fn read_embedding(path: &Path) -> anyhow::Result<Array1<f32>> {
@@ -112,14 +122,19 @@ impl UserDatabase {
                     .into_owned();
                 let mut embeddings = HashMap::new();
 
-                for bin_entry in fs::read_dir(&face_path)? {
-                    let bin_entry = bin_entry?;
-                    let bin_path = bin_entry.path();
-                    if bin_path.extension().and_then(|e| e.to_str()) == Some("bin")
-                        && let Ok(embed) = Self::read_embedding(&bin_path)
-                    {
-                        let uuid = bin_path.file_stem().unwrap().to_string_lossy().into_owned();
-                        embeddings.insert(uuid, embed);
+                let mut walk_stack = vec![face_path.clone()];
+                while let Some(current_path) = walk_stack.pop() {
+                    for entry in fs::read_dir(current_path)? {
+                        let entry = entry?;
+                        let path = entry.path();
+                        if path.is_dir() {
+                            walk_stack.push(path);
+                        } else if path.extension().and_then(|e| e.to_str()) == Some("bin")
+                            && let Ok(embed) = Self::read_embedding(&path)
+                        {
+                            let uuid = path.file_stem().unwrap().to_string_lossy().into_owned();
+                            embeddings.insert(uuid, embed);
+                        }
                     }
                 }
                 faces.insert(face_name, embeddings);
@@ -129,81 +144,81 @@ impl UserDatabase {
         Ok(())
     }
 
-    pub fn add_face(
+    pub fn add_template(
         &mut self,
         username: &str,
         face_name: &str,
-        embed: &Array1<f32>,
-        max_captures: usize,
-    ) -> Result<String, UserDbError> {
+        template_id: &str,
+        embeddings: Vec<Array1<f32>>,
+    ) -> Result<(), UserDbError> {
         self.init_dirs()?;
-        let face_dir = self.base_dir.join(username).join(face_name);
-        if !face_dir.exists() {
-            fs::create_dir_all(&face_dir)?;
-        }
+        let template_dir = self.face_dir(username, face_name).join(template_id);
 
-        let face_map = self
-            .users
-            .entry(username.to_string())
-            .or_default()
-            .entry(face_name.to_string())
-            .or_default();
-
-        while face_map.len() >= max_captures {
-            if let Some(oldest_uuid) = Self::find_oldest_file(&face_dir)
-                .map_err(|err| UserDbError::Io(std::io::Error::other(err.to_string())))?
-            {
-                let path = face_dir.join(format!("{}.bin", oldest_uuid));
-                if path.exists() {
-                    fs::remove_file(&path)?;
-                }
-                face_map.remove(&oldest_uuid);
-            } else {
-                break;
+        if !template_dir.exists() {
+            let mut templates = self.list_template_ids(username, face_name)?;
+            while templates.len() >= self.max_templates && self.max_templates > 0 {
+                let oldest_id = templates.remove(0);
+                self.remove_face_template(username, face_name, &oldest_id)
+                    .map_err(|e| UserDbError::Io(std::io::Error::other(e.to_string())))?;
             }
+            fs::create_dir_all(&template_dir)?;
         }
 
-        let uuid = uuid::Uuid::new_v4().to_string();
-        let file_path = face_dir.join(format!("{}.bin", uuid));
-        Self::write_embedding(&file_path, embed)
-            .map_err(|err| UserDbError::Io(std::io::Error::other(err.to_string())))?;
-        face_map.insert(uuid.clone(), embed.clone());
+        for embed in embeddings {
+            let uuid = uuid::Uuid::new_v4().to_string();
+            let file_path = template_dir.join(format!("{}.bin", uuid));
+            Self::write_embedding(&file_path, &embed)
+                .map_err(|err| UserDbError::Io(std::io::Error::other(err.to_string())))?;
+        }
 
-        Ok(uuid)
+        self.load_all()
+            .map_err(|e| UserDbError::Io(std::io::Error::other(e.to_string())))?;
+
+        Ok(())
     }
 
-    fn find_oldest_file(dir: &std::path::Path) -> anyhow::Result<Option<String>> {
-        let mut oldest: Option<(String, std::time::SystemTime)> = None;
+    pub fn list_template_ids(
+        &self,
+        username: &str,
+        face_name: &str,
+    ) -> Result<Vec<String>, UserDbError> {
+        let face_dir = self.face_dir(username, face_name);
+        if !face_dir.exists() {
+            return Ok(vec![]);
+        }
 
-        for entry in fs::read_dir(dir)? {
+        let mut templates = vec![];
+        for entry in fs::read_dir(face_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("bin") {
-                continue;
-            }
-            let modified = entry.metadata()?.modified()?;
-            let uuid = path.file_stem().unwrap().to_string_lossy().into_owned();
-
-            match &oldest {
-                Some((_, old_time)) if modified < *old_time => {
-                    oldest = Some((uuid, modified));
-                }
-                None => {
-                    oldest = Some((uuid, modified));
-                }
-                _ => {}
+            if path.is_dir()
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+            {
+                templates.push(name.to_string());
             }
         }
 
-        Ok(oldest.map(|(uuid, _)| uuid))
+        templates.sort_by(|a, b| {
+            let a_val = a.parse::<u64>().unwrap_or(0);
+            let b_val = b.parse::<u64>().unwrap_or(0);
+            a_val.cmp(&b_val)
+        });
+
+        Ok(templates)
     }
 
-    fn clear_dir(path: std::path::PathBuf) -> anyhow::Result<bool> {
-        let exists = path.exists();
-        if exists {
-            fs::remove_dir_all(&path)?;
+    pub fn remove_face_template(
+        &mut self,
+        username: &str,
+        face_name: &str,
+        template_id: &str,
+    ) -> anyhow::Result<()> {
+        let template_dir = self.face_dir(username, face_name).join(template_id);
+        if template_dir.exists() {
+            fs::remove_dir_all(&template_dir)?;
+            self.load_all()?;
         }
-        Ok(exists)
+        Ok(())
     }
 
     pub fn remove_face(&mut self, username: &str, face_name: &str) -> Result<(), UserDbError> {
@@ -233,6 +248,9 @@ impl UserDatabase {
             return Ok(());
         }
 
+        let old_face_dir = self.face_dir(username, old_face_name);
+        let new_face_dir = self.face_dir(username, new_face_name);
+
         let Some(faces) = self.users.get_mut(username) else {
             return Err(UserDbError::UserNotFound(username.to_string()));
         };
@@ -245,9 +263,6 @@ impl UserDatabase {
             faces.insert(old_face_name.to_string(), embeddings);
             return Err(UserDbError::FaceExists(new_face_name.to_string()));
         }
-
-        let old_face_dir = self.base_dir.join(username).join(old_face_name);
-        let new_face_dir = self.base_dir.join(username).join(new_face_name);
 
         if new_face_dir.exists() {
             faces.insert(old_face_name.to_string(), embeddings);
@@ -267,54 +282,24 @@ impl UserDatabase {
     }
 
     pub fn clear_user(&mut self, username: &str) -> Result<(), UserDbError> {
-        if self.users.remove(username).is_none() && !self.base_dir.join(username).exists() {
-            return Err(UserDbError::UserNotFound(username.to_string()));
-        }
-
-        let user_dir = self.base_dir.join(username);
+        self.users.remove(username);
+        let user_dir = self.user_dir(username);
         if user_dir.exists() {
             fs::remove_dir_all(user_dir)?;
         }
-
         Ok(())
     }
 
-    pub fn verify(&self, username: &str, embed: &ndarray::Array1<f32>, threshold: f32) -> bool {
-        let Some(faces) = self.users.get(username) else {
-            return false;
-        };
-
-        let candidates: Vec<&Array1<f32>> = faces
-            .values()
-            .flat_map(|uuid_map| uuid_map.values())
-            .collect();
-
-        candidates
-            .into_par_iter()
-            .any(|ref_embed| embed.dot(ref_embed) > threshold)
-    }
-
-    pub fn verify_user(
+    pub fn match_faces(
         &self,
         username: &str,
         embed: &ndarray::Array1<f32>,
         threshold: f32,
-    ) -> Result<bool, UserDbError> {
-        if !self.users.contains_key(username) {
-            return Err(UserDbError::UserNotFound(username.to_string()));
-        }
-        Ok(self.verify(username, embed, threshold))
-    }
-
-    pub fn score_all(
-        &self,
-        username: &str,
-        embed: &ndarray::Array1<f32>,
-        threshold: f32,
-    ) -> Vec<FaceScore> {
-        let Some(faces) = self.users.get(username) else {
-            return Vec::new();
-        };
+    ) -> Result<Vec<FaceScore>, UserDbError> {
+        let faces = self
+            .users
+            .get(username)
+            .ok_or_else(|| UserDbError::UserNotFound(username.to_string()))?;
 
         let mut results: Vec<FaceScore> = faces
             .iter()
@@ -336,19 +321,7 @@ impl UserDatabase {
             .collect();
 
         results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        results
-    }
-
-    pub fn match_faces(
-        &self,
-        username: &str,
-        embed: &ndarray::Array1<f32>,
-        threshold: f32,
-    ) -> Result<Vec<FaceScore>, UserDbError> {
-        if !self.users.contains_key(username) {
-            return Err(UserDbError::UserNotFound(username.to_string()));
-        }
-        Ok(self.score_all(username, embed, threshold))
+        Ok(results)
     }
 
     pub fn list_faces(&self, username: &str) -> Result<Vec<(String, u32)>, UserDbError> {

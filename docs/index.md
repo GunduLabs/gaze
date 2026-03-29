@@ -21,7 +21,7 @@ features:
   - title: PAM integration
     details: Works with PAM auth flows and GNOME lock/GDM integration via the extension.
   - title: DBus API
-    details: org.gaze.Auth exposes authentication and enrollment for third-party apps.
+    details: com.gundulabs.Gaze exposes authentication and enrollment for third-party apps.
   - title: Local-first
     details: Runs on your machine with configurable security levels and automatic model download.
 ---

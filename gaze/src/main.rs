@@ -1,16 +1,15 @@
-#![allow(dead_code, unused_imports)]
-
 mod align;
 mod daemon;
 pub mod models;
 mod recognize;
 pub mod users;
 
+use crate::users::UserDatabase;
 use daemon::AuthDaemon;
 use gaze_core::config::{Config, MODELS_DIR, USERS_DIR};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, info, warn};
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 use zbus::ConnectionBuilder;
 
@@ -45,21 +44,32 @@ async fn main() -> anyhow::Result<()> {
     let recognizer = recognize::FaceRecognizer::new(rec_path.to_str().unwrap())
         .expect("Failed to load recognition model");
 
-    let db = users::UserDatabase::new(USERS_DIR)?;
+    let db = UserDatabase::new(USERS_DIR, config.enrollment.max_templates as usize)?;
+
+    let checker = gaze_core::face::FaceChecker::from_detector(detector);
 
     let daemon = AuthDaemon {
-        detector: Arc::new(Mutex::new(detector)),
+        checker: Arc::new(Mutex::new(checker)),
         recognizer: Arc::new(Mutex::new(recognizer)),
         db: Arc::new(Mutex::new(db)),
         threshold: Arc::new(Mutex::new(security.threshold())),
-        max_captures: Arc::new(Mutex::new(config.enrollment.max_captures_per_face)),
+        camera_config: Arc::new(Mutex::new(config.cameras.rgb.clone())),
+        claim_state: Arc::new(Mutex::new(None)),
+        active_cancel: Arc::new(Mutex::new(None)),
+        rt_handle: tokio::runtime::Handle::current(),
     };
 
     info!(elapsed = ?t_load.elapsed(), "Models & user DB loaded");
 
+    if let Ok(uid) = daemon::get_active_session_uid().await {
+        unsafe {
+            std::env::set_var("XDG_RUNTIME_DIR", format!("/run/user/{}", uid));
+        }
+    }
+
     let _conn = ConnectionBuilder::system()?
-        .name("org.gaze.Auth")?
-        .serve_at("/org/gaze/Auth", daemon)?
+        .name("com.gundulabs.Gaze")?
+        .serve_at("/com/gundulabs/Gaze", daemon)?
         .build()
         .await?;
 

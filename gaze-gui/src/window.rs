@@ -1,8 +1,7 @@
 use crate::capture_dialog;
-use gaze_core::capture::{init_camera_and_checker, wait_for_capture};
 use gaze_core::config::{Config, SecurityLevel};
 use gaze_core::dbus::{
-    AuthProxy, apply_config_to_daemon, dbus_error_message, dbus_is_file_not_found,
+    GazeProxy, apply_config_to_daemon, dbus_error_message, dbus_is_file_not_found,
     load_config_from_daemon,
 };
 use gtk4::glib;
@@ -73,7 +72,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     security_combo.append(Some("high"), "high");
     security_combo.append(Some("maximum"), "maximum");
     security_combo.append(Some("custom"), "custom");
-    security_combo.set_active_id(Some(config.borrow().security.as_name()));
+    security_combo.set_active_id(Some(&config.borrow().security.to_string()));
 
     let custom_detector_label = gtk4::Label::new(Some("Custom detector model"));
     custom_detector_label.set_halign(gtk4::Align::Start);
@@ -107,40 +106,37 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
     {
         let cfg = config.borrow();
-        let (detector, recognizer, threshold) = match &cfg.security {
-            SecurityLevel::Custom {
-                detector,
-                recognizer,
-                threshold,
-            } => (detector.clone(), recognizer.clone(), *threshold),
-            _ => (
-                cfg.security.detector().to_string(),
-                cfg.security.recognizer().to_string(),
-                cfg.security.threshold(),
-            ),
-        };
+        let detector = cfg.security.detector().to_string();
+        let recognizer = cfg.security.recognizer().to_string();
+        let threshold = cfg.security.threshold();
         custom_detector_entry.set_text(&detector);
         custom_recognizer_entry.set_text(&recognizer);
         custom_threshold_spin.set_value(threshold as f64);
     }
 
+    let cameras = gaze_core::camera::enumerate_cameras()
+        .unwrap_or_else(|_| vec![("Default Camera".to_string(), "/dev/video0".to_string())]);
+    let cam_names = cameras.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>();
+    let default_cam_idx = cameras
+        .iter()
+        .position(|(_, t)| t == &config.borrow().cameras.rgb)
+        .unwrap_or(0);
+
     let camera_label = gtk4::Label::new(Some("RGB camera"));
     camera_label.set_halign(gtk4::Align::Start);
-    let camera_entry = gtk4::Entry::new();
-    camera_entry.set_hexpand(true);
-    camera_entry.set_text(&config.borrow().cameras.rgb);
+    let camera_dropdown = gtk4::DropDown::from_strings(&cam_names);
+    camera_dropdown.set_hexpand(true);
+    camera_dropdown.set_selected(default_cam_idx as u32);
 
-    let captures_label = gtk4::Label::new(Some("Max captures per face"));
-    captures_label.set_halign(gtk4::Align::Start);
-    let captures_spin = gtk4::SpinButton::with_range(1.0, 64.0, 1.0);
-    captures_spin.set_value(config.borrow().enrollment.max_captures_per_face as f64);
+    let templates_spin = libadwaita::SpinRow::with_range(1.0, 50.0, 1.0);
+    templates_spin.set_title("Max Templates Per Face");
+    templates_spin.set_value(config.borrow().enrollment.max_templates as f64);
 
     grid.attach(&security_label, 0, 0, 1, 1);
     grid.attach(&security_combo, 1, 0, 1, 1);
     grid.attach(&camera_label, 0, 1, 1, 1);
-    grid.attach(&camera_entry, 1, 1, 1, 1);
-    grid.attach(&captures_label, 0, 2, 1, 1);
-    grid.attach(&captures_spin, 1, 2, 1, 1);
+    grid.attach(&camera_dropdown, 1, 1, 1, 1);
+    grid.attach(&templates_spin, 0, 2, 2, 1);
     grid.attach(&custom_frame, 0, 3, 2, 1);
 
     let update_custom_visibility: Rc<dyn Fn()> = Rc::new(glib::clone!(
@@ -168,9 +164,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         security_combo,
         #[weak]
-        camera_entry,
+        camera_dropdown,
+        #[strong]
+        cameras,
         #[weak]
-        captures_spin,
+        templates_spin,
         #[weak]
         custom_detector_entry,
         #[weak]
@@ -186,28 +184,23 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         async move {
             let load_result = async {
                 let conn = Connection::system().await?;
-                let proxy = AuthProxy::new(&conn).await?;
+                let proxy = GazeProxy::new(&conn).await?;
                 load_config_from_daemon(&proxy).await
             }
             .await;
 
             match load_result {
                 Ok(cfg) => {
-                    security_combo.set_active_id(Some(cfg.security.as_name()));
-                    camera_entry.set_text(&cfg.cameras.rgb);
-                    captures_spin.set_value(cfg.enrollment.max_captures_per_face as f64);
-                    let (detector, recognizer, threshold) = match &cfg.security {
-                        SecurityLevel::Custom {
-                            detector,
-                            recognizer,
-                            threshold,
-                        } => (detector.clone(), recognizer.clone(), *threshold),
-                        _ => (
-                            cfg.security.detector().to_string(),
-                            cfg.security.recognizer().to_string(),
-                            cfg.security.threshold(),
-                        ),
-                    };
+                    security_combo.set_active_id(Some(&cfg.security.to_string()));
+                    let active_idx = cameras
+                        .iter()
+                        .position(|(_, t)| t == &cfg.cameras.rgb)
+                        .unwrap_or(0);
+                    camera_dropdown.set_selected(active_idx as u32);
+                    templates_spin.set_value(cfg.enrollment.max_templates as f64);
+                    let detector = cfg.security.detector().to_string();
+                    let recognizer = cfg.security.recognizer().to_string();
+                    let threshold = cfg.security.threshold();
                     custom_detector_entry.set_text(&detector);
                     custom_recognizer_entry.set_text(&recognizer);
                     custom_threshold_spin.set_value(threshold as f64);
@@ -232,9 +225,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         security_combo,
         #[weak]
-        camera_entry,
+        camera_dropdown,
+        #[strong]
+        cameras,
         #[weak]
-        captures_spin,
+        templates_spin,
         #[weak]
         custom_detector_entry,
         #[weak]
@@ -262,8 +257,12 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 },
                 _ => SecurityLevel::Medium,
             };
-            cfg.cameras.rgb = camera_entry.text().to_string();
-            cfg.enrollment.max_captures_per_face = captures_spin.value() as usize;
+            let sel_idx = camera_dropdown.selected() as usize;
+            cfg.cameras.rgb = cameras
+                .get(sel_idx)
+                .map(|(_, t)| t.clone())
+                .unwrap_or_default();
+            cfg.enrollment.max_templates = templates_spin.value() as u32;
 
             let cfg_to_apply = cfg.clone();
             drop(cfg);
@@ -276,7 +275,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 async move {
                     let apply_result = async {
                         let conn = Connection::system().await?;
-                        let proxy = AuthProxy::new(&conn).await?;
+                        let proxy = GazeProxy::new(&conn).await?;
                         apply_config_to_daemon(&proxy, &cfg_to_apply).await
                     }
                     .await;
@@ -393,9 +392,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 return;
             };
 
-            let Ok(proxy) = AuthProxy::new(&conn).await else {
-                tracing::error!("Failed to create AuthProxy");
-                status_page.set_description(Some("Failed to create AuthProxy"));
+            let Ok(proxy) = GazeProxy::new(&conn).await else {
+                tracing::error!("Failed to create GazeProxy");
+                status_page.set_description(Some("Failed to create GazeProxy"));
                 return;
             };
 
@@ -466,13 +465,13 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 face_list.set_visible(true);
 
                                 let existing_face_names: Rc<std::collections::HashSet<String>> =
-                                    Rc::new(faces.iter().map(|(name, _)| name.clone()).collect());
+                                    Rc::new(faces.iter().map(|(name, _): &(String, u32)| name.clone()).collect());
 
                                 for (face_name, count) in faces {
                                     let row = libadwaita::ActionRow::new();
                                     row.set_title(&face_name);
                                     row.set_subtitle(&format!(
-                                        "{} capture{}",
+                                        "{} template{}",
                                         count,
                                         if count == 1 { "" } else { "s" }
                                     ));
@@ -698,7 +697,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                 proxy,
                                                 async move {
                                                     if let Err(err) = proxy
-                                                        .remove_face(&username, &face_name)
+                                                        .delete_face(&username, &face_name)
                                                         .await
                                                     {
                                                         let toast = libadwaita::Toast::new(&format!(
@@ -738,11 +737,11 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 #[weak]
                 window,
                 #[strong]
-                username,
-                #[weak]
+                proxy,
+                #[weak(rename_to = face_list_weak)]
                 face_list,
                 #[strong]
-                proxy,
+                username,
                 #[strong]
                 last_toast,
                 move |btn| {
@@ -756,64 +755,78 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         #[strong]
                         username,
                         #[weak]
-                        face_list,
-                        #[weak]
                         btn,
                         #[strong]
                         proxy,
                         #[strong]
+                        face_list_weak,
+                        #[strong]
                         last_toast,
                         async move {
-                            let result = (|| -> anyhow::Result<(Vec<u8>, u32, u32)> {
-                                let config = glib::MainContext::default()
-                                    .block_on(load_config_from_daemon(&proxy))?;
-                                let (mut cam, mut checker) =
-                                    init_camera_and_checker(&config.cameras.rgb)?;
-                                let cap = wait_for_capture(&mut cam, &mut checker, false, |_| {})?;
-                                Ok((cap.bytes, cap.width, cap.height))
-                            })();
+                            use futures::StreamExt;
 
-                            let mut matched_face_name: Option<String> = None;
-                            let text = match result {
-                                Ok((bytes, width, height)) => {
-                                    match proxy.match_faces(&username, &bytes, width, height).await
-                                    {
-                                        Ok(faces) => {
-                                            if let Some((name, _, _, _, _)) =
-                                                faces.iter().find(|(_, _, _, passed, _)| *passed)
-                                            {
-                                                matched_face_name = Some(name.clone());
-                                                "✓ Authentication successful".to_string()
-                                            } else {
-                                                "✗ Authentication failed".to_string()
-                                            }
+                            if proxy.claim(&username).await.is_err() {
+                                if let Some(overlay) = window
+                                    .content()
+                                    .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+                                {
+                                    overlay.add_toast(libadwaita::Toast::new("Failed to claim device"));
+                                }
+                                btn.set_sensitive(true);
+                                return;
+                            }
+
+                            if proxy.verify_start("any").await.is_err() {
+                                if let Some(overlay) = window
+                                    .content()
+                                    .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+                                {
+                                    overlay.add_toast(libadwaita::Toast::new("Daemon error starting verification"));
+                                }
+                                let _ = proxy.release().await;
+                                btn.set_sensitive(true);
+                                return;
+                            }
+
+                            let mut text = "✗ Verification failed".to_string();
+                            let mut matched_face: Option<String> = None;
+
+                            if let Ok(mut stream) = proxy.receive_verify_status().await {
+                                while let Some(signal) = stream.next().await {
+                                    if let Ok(args) = signal.args() {
+                                        let res = *args.result();
+                                        if res == gaze_core::dbus::VerifyResult::VerifyMatch {
+                                            text = "✓ Authentication successful".to_string();
+                                            let faces = args.faces();
+                                            matched_face = faces.iter().find(|(_, _, _, p, _)| *p).map(|(n, _, _, _, _)| n.clone());
+                                            break;
+                                        } else {
+                                            text = "✗ Authentication failed".to_string();
+                                            break;
                                         }
-                                        Err(e) => format!(
-                                            "✗ DBus error: {}",
-                                            dbus_error_message(&e)
-                                        ),
                                     }
                                 }
-                                Err(e) => format!("✗ {}", e),
-                            };
+                            }
 
-                            if let Some(face_name) = matched_face_name.as_ref() {
-                                let mut child = face_list.first_child();
-                                while let Some(widget) = child {
-                                    if let Ok(row) = widget.clone().downcast::<libadwaita::ActionRow>() {
-                                        row.remove_css_class("auth-match-highlight");
-                                        if row.title().as_str() == face_name {
+                            let _ = proxy.release().await;
+
+                            if let Some(face_name) = matched_face {
+                                let list = face_list_weak;
+                                let mut child = list.first_child();
+                                while let Some(w) = child {
+                                    if let Ok(row) = w.clone().downcast::<libadwaita::ActionRow>() {
+                                        let title: gtk4::glib::GString = row.title();
+                                        let is_match = title.as_str() == face_name.as_str();
+                                        if is_match {
                                             row.add_css_class("auth-match-highlight");
-                                            let row_clone = row.clone();
-                                            glib::timeout_add_seconds_local_once(
-                                                2,
-                                                move || {
-                                                    row_clone.remove_css_class("auth-match-highlight");
-                                                },
-                                            );
+                                            let r = row;
+                                            glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
+                                                r.remove_css_class("auth-match-highlight");
+                                            });
+                                            break;
                                         }
                                     }
-                                    child = widget.next_sibling();
+                                    child = w.next_sibling();
                                 }
                             }
 

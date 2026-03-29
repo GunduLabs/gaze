@@ -6,19 +6,15 @@ const DEFAULT_CONFIG_PATH: &str = "/etc/gaze/config.toml";
 pub const USERS_DIR: &str = "/var/lib/gaze/users";
 pub const MODELS_DIR: &str = "/var/cache/gaze";
 
-#[derive(Deserialize, Serialize, Clone, Debug, Default)]
-#[serde(tag = "level")]
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "kebab-case", tag = "level")]
+#[derive(Default)]
 pub enum SecurityLevel {
-    #[serde(rename = "low")]
     Low,
-    #[serde(rename = "medium")]
     #[default]
     Medium,
-    #[serde(rename = "high")]
     High,
-    #[serde(rename = "maximum")]
     Maximum,
-    #[serde(rename = "custom")]
     Custom {
         detector: String,
         recognizer: String,
@@ -26,22 +22,37 @@ pub enum SecurityLevel {
     },
 }
 
-impl SecurityLevel {
-    pub fn as_name(&self) -> &'static str {
-        match self {
+impl zbus::zvariant::Type for SecurityLevel {
+    fn signature() -> zbus::zvariant::Signature<'static> {
+        zbus::zvariant::Signature::from_static_str_unchecked("v")
+    }
+}
+
+impl std::fmt::Display for SecurityLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
             SecurityLevel::Low => "low",
             SecurityLevel::Medium => "medium",
             SecurityLevel::High => "high",
             SecurityLevel::Maximum => "maximum",
             SecurityLevel::Custom { .. } => "custom",
-        }
+        };
+        write!(f, "{}", s)
     }
+}
 
+impl SecurityLevel {
     pub fn detector(&self) -> &str {
         match self {
             SecurityLevel::Low | SecurityLevel::Medium => "det_500m.onnx",
             SecurityLevel::High | SecurityLevel::Maximum => "det_10g.onnx",
-            SecurityLevel::Custom { detector, .. } => detector,
+            SecurityLevel::Custom { detector, .. } => {
+                if detector.is_empty() {
+                    "det_10g.onnx"
+                } else {
+                    detector
+                }
+            }
         }
     }
 
@@ -49,7 +60,13 @@ impl SecurityLevel {
         match self {
             SecurityLevel::Low | SecurityLevel::Medium => "w600k_mbf.onnx",
             SecurityLevel::High | SecurityLevel::Maximum => "w600k_r50.onnx",
-            SecurityLevel::Custom { recognizer, .. } => recognizer,
+            SecurityLevel::Custom { recognizer, .. } => {
+                if recognizer.is_empty() {
+                    "w600k_r50.onnx"
+                } else {
+                    recognizer
+                }
+            }
         }
     }
 
@@ -59,14 +76,20 @@ impl SecurityLevel {
             SecurityLevel::Medium => 0.4,
             SecurityLevel::High => 0.5,
             SecurityLevel::Maximum => 0.6,
-            SecurityLevel::Custom { threshold, .. } => *threshold,
+            SecurityLevel::Custom { threshold, .. } => {
+                if *threshold <= 0.0 {
+                    0.5
+                } else {
+                    *threshold
+                }
+            }
         }
     }
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default, zbus::zvariant::Type)]
 pub struct Config {
-    #[serde(default, flatten)]
+    #[serde(default)]
     pub security: SecurityLevel,
     #[serde(default)]
     pub cameras: CameraConfig,
@@ -74,7 +97,7 @@ pub struct Config {
     pub enrollment: EnrollmentConfig,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, zbus::zvariant::Type)]
 pub struct CameraConfig {
     #[serde(default = "default_rgb_device")]
     pub rgb: String,
@@ -83,20 +106,20 @@ pub struct CameraConfig {
 fn default_rgb_device() -> String {
     "/dev/video0".to_string()
 }
-fn default_max_captures() -> usize {
-    8
+#[derive(Deserialize, Serialize, Clone, Debug, zbus::zvariant::Type)]
+pub struct EnrollmentConfig {
+    #[serde(default = "default_max_templates")]
+    pub max_templates: u32,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
-pub struct EnrollmentConfig {
-    #[serde(default = "default_max_captures")]
-    pub max_captures_per_face: usize,
+fn default_max_templates() -> u32 {
+    2
 }
 
 impl Default for EnrollmentConfig {
     fn default() -> Self {
         Self {
-            max_captures_per_face: default_max_captures(),
+            max_templates: default_max_templates(),
         }
     }
 }

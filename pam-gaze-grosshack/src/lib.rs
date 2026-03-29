@@ -1,5 +1,4 @@
 #![allow(clippy::missing_safety_doc)]
-use gaze_core::capture::{init_camera_and_checker, wait_for_capture_until};
 use pam_gaze_core::*;
 use parking_lot::{Condvar, Mutex};
 use std::ffi::CString;
@@ -7,7 +6,7 @@ use std::os::raw::c_void;
 use std::os::raw::{c_char, c_int};
 use std::sync::Arc;
 use std::thread;
-use std::time::Instant;
+use std::time::Duration;
 
 struct AuthState {
     password: Option<String>,
@@ -40,10 +39,10 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         None => return PAM_AUTH_ERR,
     };
 
-    let Ok((config, proxy)) = setup_auth_env() else {
-        return PAM_AUTHINFO_UNAVAIL;
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(_) => return PAM_AUTHINFO_UNAVAIL,
     };
-    let is_polkit = unsafe { is_polkit_service(pamh) };
 
     unsafe { say(pamh, "Please look at the camera or enter password") };
 
@@ -70,52 +69,30 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         condvar.notify_all();
     });
 
-    let Ok((mut cam, mut checker)) = init_camera_and_checker(&config.cameras.rgb) else {
-        return PAM_AUTHINFO_UNAVAIL;
-    };
+    rt.block_on(async {
+        let auth_future = authenticate_biometric(&username);
+        let timeout_duration = Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS);
 
-    let capture_start = Instant::now();
-
-    let capture = match wait_for_capture_until(
-        &mut cam,
-        &mut checker,
-        false,
-        |status| {
-            if is_polkit {
-                unsafe { say(pamh, &status.to_string()) };
+        let result = tokio::select! {
+            res = auth_future => {
+                match res {
+                    Ok(true) => {
+                        unblock_terminal();
+                        Some(PAM_SUCCESS)
+                    }
+                    Ok(false) => Some(PAM_AUTH_ERR),
+                    Err(_) => None,
+                }
             }
-        },
-        || {
-            let (lock, _) = &*state;
-            lock.lock().finished || capture_start.elapsed().as_secs() >= CAMERA_AUTH_TIMEOUT_SECS
-        },
-    ) {
-        Ok(Some(capture)) => capture,
-        Ok(None) => {
-            drop(cam);
-            return wait_for_password_and_fallback(pamh, &state);
-        }
-        Err(_) => {
-            drop(cam);
-            return PAM_AUTHINFO_UNAVAIL;
-        }
-    };
+            _ = tokio::time::sleep(timeout_duration) => None,
+        };
 
-    match proxy.verify(&username, &capture.bytes, capture.width, capture.height) {
-        Ok(true) => {
-            drop(cam);
-            unblock_terminal();
-            PAM_SUCCESS
+        if result == Some(PAM_SUCCESS) {
+            return PAM_SUCCESS;
         }
-        Ok(false) => {
-            drop(cam);
-            wait_for_password_and_fallback(pamh, &state)
-        }
-        Err(_) => {
-            drop(cam);
-            wait_for_password_and_fallback(pamh, &state)
-        }
-    }
+
+        wait_for_password_and_fallback(pamh, &state)
+    })
 }
 
 fn unblock_terminal() {

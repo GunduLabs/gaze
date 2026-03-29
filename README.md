@@ -111,7 +111,7 @@ Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Matc
 
 | Component | Description |
 |-----------|-------------|
-| `gazed` | System daemon exposing `org.gaze.Auth` on DBus |
+| `gazed` | System daemon exposing `com.gundulabs.Gaze` on DBus |
 | `gaze` | CLI for enrollment and authentication |
 | `gaze-gui` | GTK4/Adwaita graphical application |
 | `pam-gaze` | PAM module for login/lock screen integration |

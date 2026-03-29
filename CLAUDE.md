@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Gaze is a Rust-based facial authentication daemon for Linux. It uses InsightFace ONNX models for face detection, alignment, and recognition. The system integrates with PAM for system login and exposes a DBus interface (`org.gaze.Auth`) for IPC. A GNOME Shell extension enables lock-screen face auth via GDM.
+Gaze is a Rust-based facial authentication daemon for Linux. It uses InsightFace ONNX models for face detection, alignment, and recognition. The system integrates with PAM for system login and exposes a DBus interface (`com.gundulabs.Gaze`) for IPC. A GNOME Shell extension enables lock-screen face auth via GDM.
 
 ## Build Commands
 
@@ -36,7 +36,7 @@ The `gnome-shell-extension/` directory contains the GNOME Shell extension (`gaze
 
 **Data flow**: Camera frame (OpenCV) → DBus → Daemon: SCRFD detection → Umeyama alignment (112×112) → ResNet50/MobileFaceNet embedding → cosine similarity against stored embeddings → auth result.
 
-**Daemon (`gaze/src/main.rs`, `gaze/src/daemon.rs`)**: Async Tokio service registered on DBus as `org.gaze.Auth` at `/org/gaze/Auth`. The `AuthDaemon` struct holds the detector, recognizer, and user database. Key daemon modules in `gaze/src/`:
+**Daemon (`gaze/src/main.rs`, `gaze/src/daemon.rs`)**: Async Tokio service registered on DBus as `com.gundulabs.Gaze` at `/com/gundulabs/Gaze`. The `AuthDaemon` struct holds the detector, recognizer, and user database. Key daemon modules in `gaze/src/`:
 - `align.rs` - Umeyama transform for ArcFace-standard face alignment
 - `recognize.rs` - ONNX inference for face embeddings
 - `models.rs` - Downloads InsightFace models from GitHub releases on demand
@@ -56,4 +56,4 @@ The `gnome-shell-extension/` directory contains the GNOME Shell extension (`gaze
 
 ## Distribution Files
 
-`dist/` contains system integration files: systemd service (`gazed.service`), DBus policy (`org.gaze.Auth.conf`), default config. CD packages these into deb/rpm/arch packages via `.github/workflows/cd.yml`.
+`dist/` contains system integration files: systemd service (`gazed.service`), DBus policy (`com.gundulabs.Gaze.conf`), default config. CD packages these into deb/rpm/arch packages via `.github/workflows/cd.yml`.

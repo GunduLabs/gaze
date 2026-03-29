@@ -9,6 +9,7 @@
 # Models are automatically downloaded from the official InsightFace GitHub
 # releases if not already present in the models directory.
 
+[security]
 level = "medium"
 
 # Custom level example:
@@ -21,4 +22,4 @@ level = "medium"
 rgb = "/dev/video0"
 
 [enrollment]
-max_captures_per_face = 8
+max_templates = 3

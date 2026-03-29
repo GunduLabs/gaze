@@ -1,8 +1,7 @@
 use crate::camera_view::{CameraFeed, build_camera_widget};
-use gaze_core::capture_session::{CaptureHint, CaptureMode, CaptureSession, CaptureState};
+use futures::StreamExt;
 use gaze_core::config::Config;
-use gaze_core::dbus::AuthProxy;
-use gaze_core::face::FaceChecker;
+use gaze_core::dbus::{EnrollPrompt, GazeProxy};
 use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
@@ -15,7 +14,7 @@ pub fn show_capture_dialog(
     parent: &impl IsA<gtk4::Widget>,
     username: &str,
     face_name: Option<&str>,
-    proxy: &Rc<AuthProxy<'static>>,
+    proxy: &Rc<GazeProxy<'static>>,
     on_done: impl Fn() + 'static,
 ) {
     let config = Config::load().unwrap_or_default();
@@ -33,13 +32,65 @@ pub fn show_capture_dialog(
     let on_done = Rc::new(on_done);
 
     let is_refine = face_name.is_some();
+
+    let show_cancel_confirmation = Rc::new({
+        let proxy = proxy.clone();
+        let feed = feed.clone();
+        let on_done = on_done.clone();
+        move |parent: gtk4::Window| {
+            let confirm = libadwaita::MessageDialog::builder()
+                .heading(if is_refine {
+                    "Cancel Template Update?"
+                } else {
+                    "Cancel Template Capture?"
+                })
+                .body("This will discard any partial captures.")
+                .transient_for(&parent)
+                .build();
+
+            confirm.add_response("resume", "Resume");
+            confirm.add_response("discard", "Discard");
+            confirm.set_response_appearance("discard", libadwaita::ResponseAppearance::Destructive);
+
+            confirm.connect_response(
+                None,
+                glib::clone!(
+                    #[strong]
+                    proxy,
+                    #[strong]
+                    feed,
+                    #[strong]
+                    on_done,
+                    #[weak]
+                    parent,
+                    move |c, response| {
+                        if response == "discard" {
+                            glib::MainContext::default().spawn_local(glib::clone!(
+                                #[strong]
+                                proxy,
+                                async move {
+                                    let _ = proxy.enroll_stop().await;
+                                    let _ = proxy.release().await;
+                                }
+                            ));
+                            feed.stop();
+                            on_done();
+                            parent.close();
+                        }
+                        c.close();
+                    }
+                ),
+            );
+            confirm.present();
+        }
+    });
     let dialog = libadwaita::Window::new();
     dialog.set_title(Some(if is_refine {
-        "Refining Face"
+        "Updating Face Template"
     } else {
-        "New Face Capture Session"
+        "New Face Template"
     }));
-    dialog.set_default_size(500, if is_refine { 550 } else { 630 });
+    dialog.set_default_size(500, if is_refine { 450 } else { 530 });
     dialog.set_modal(true);
     dialog.set_transient_for(
         parent
@@ -60,7 +111,6 @@ pub fn show_capture_dialog(
 
     let resolved_face = Rc::new(RefCell::new(face_name.unwrap_or("default").to_string()));
     let existing_face_names = Rc::new(RefCell::new(HashSet::<String>::new()));
-    let centered_ready = Rc::new(RefCell::new(false));
     let face_name_valid = Rc::new(RefCell::new(is_refine));
     let mut face_name_entry: Option<libadwaita::EntryRow> = None;
 
@@ -89,41 +139,39 @@ pub fn show_capture_dialog(
 
     let prompt_label = gtk4::Label::new(None);
     prompt_label.add_css_class("title-4");
+    prompt_label.set_visible(false);
     body.append(&prompt_label);
 
-    let progress_label = gtk4::Label::new(Some("Waiting to start"));
+    let progress_label = gtk4::Label::new(None);
     progress_label.add_css_class("dim-label");
     progress_label.set_margin_bottom(2);
+    progress_label.set_visible(false);
     body.append(&progress_label);
 
     let progress = gtk4::ProgressBar::new();
+    progress.set_visible(false);
     body.append(&progress);
 
-    let status_label = gtk4::Label::new(None);
-    status_label.add_css_class("dim-label");
-    body.append(&status_label);
-
     let start_btn = gtk4::Button::with_label(if is_refine {
-        "Start Refining"
+        "Start Update"
     } else {
         "Start Capture"
     });
     start_btn.add_css_class("suggested-action");
     start_btn.add_css_class("pill");
     start_btn.set_halign(gtk4::Align::Center);
-    start_btn.set_sensitive(false);
+    start_btn.set_sensitive(is_refine);
     body.append(&start_btn);
 
     if let Some(entry) = face_name_entry {
         let start_btn_for_validation = start_btn.clone();
         let existing_face_names = existing_face_names.clone();
-        let centered_ready = centered_ready.clone();
         let face_name_valid = face_name_valid.clone();
         entry.connect_changed(move |e| {
             let name = e.text().trim().to_string();
             let valid = !name.is_empty() && !existing_face_names.borrow().contains(&name);
             *face_name_valid.borrow_mut() = valid;
-            start_btn_for_validation.set_sensitive(*centered_ready.borrow() && valid);
+            start_btn_for_validation.set_sensitive(valid);
         });
     }
 
@@ -137,7 +185,6 @@ pub fn show_capture_dialog(
     content.append(&body);
     dialog.set_content(Some(&content));
 
-    let current_step = Rc::new(RefCell::new(0usize));
     let username = username.to_string();
 
     if !is_refine {
@@ -153,8 +200,6 @@ pub fn show_capture_dialog(
             #[strong]
             existing_face_names,
             #[strong]
-            centered_ready,
-            #[strong]
             face_name_valid,
             async move {
                 if let Ok(faces) = proxy.list_faces(&username).await {
@@ -167,189 +212,123 @@ pub fn show_capture_dialog(
                 let valid = !current_name.is_empty()
                     && !existing_face_names.borrow().contains(&current_name);
                 *face_name_valid.borrow_mut() = valid;
-                start_btn.set_sensitive(*centered_ready.borrow() && valid);
+                start_btn.set_sensitive(valid);
             }
         ));
     }
 
-    let Ok(checker) = FaceChecker::new() else {
-        error!("FaceChecker init failed");
-        return;
-    };
-
-    let mode = if is_refine {
-        CaptureMode::Refine
-    } else {
-        CaptureMode::Guided
-    };
-    let session = Rc::new(RefCell::new(CaptureSession::new(checker).with_mode(mode)));
-
     start_btn.connect_clicked(glib::clone!(
-        #[strong]
-        session,
-        #[weak]
-        stop_btn,
-        #[weak]
-        prompt_label,
+        #[weak] stop_btn, #[weak] prompt_label, #[weak] progress,
+        #[weak] progress_label, #[strong] proxy, #[strong] username, #[strong] resolved_face,
+        #[weak] dialog, #[strong] on_done, #[strong] feed,
         move |btn| {
-            session.borrow_mut().start();
             btn.set_visible(false);
             stop_btn.set_visible(true);
-            prompt_label.set_text("Capture Session in progress...");
+            prompt_label.set_visible(true);
+            progress_label.set_visible(true);
+            progress.set_visible(true);
+            feed.set_active(true);
+
+            let uname = username.clone();
+            let face_name = resolved_face.borrow().clone();
+
+            glib::MainContext::default().spawn_local(glib::clone!(
+                #[strong] proxy, #[weak] progress, #[weak] progress_label, #[weak] prompt_label,
+                #[weak] dialog, #[strong] on_done, #[strong] feed,
+                async move {
+                    if proxy.claim(&uname).await.is_err() {
+                        prompt_label.set_text("Failed to claim device.");
+                        return;
+                    }
+
+                    let mut enroll_stream = match proxy.receive_enroll_status().await {
+                        Ok(s) => s,
+                        Err(_) => {
+                            prompt_label.set_text("Failed to connect to enrollment stream.");
+                            let _ = proxy.release().await;
+                            return;
+                        }
+                    };
+
+                    let mut capture_stream = match proxy.receive_face_status().await {
+                        Ok(s) => s,
+                        Err(_) => {
+                            prompt_label.set_text("Failed to connect to capture stream.");
+                            let _ = proxy.release().await;
+                            return;
+                        }
+                    };
+
+                    if proxy.enroll_start(&face_name).await.is_err() {
+                        prompt_label.set_text("Daemon failed to start enrollment.");
+                        let _ = proxy.release().await;
+                        return;
+                    }
+
+                    loop {
+                        tokio::select! {
+                            Some(signal) = enroll_stream.next() => {
+                                if let Ok(args) = signal.args() {
+                                    let prog = *args.progress();
+                                    let max = *args.max();
+                                    let raw_msg = args.msg();
+                                    let time_remaining = *args.time_remaining();
+                                    let is_done = args.is_done();
+
+                                    let display_msg = raw_msg.to_string();
+
+                                    if time_remaining > 0.0 {
+                                        prompt_label.set_text(&format!("{} [{:.1}s]", display_msg, time_remaining));
+                                    } else {
+                                        prompt_label.set_text(&display_msg);
+                                    }
+
+                                    if max > 0 {
+                                        let frac = prog as f64 / max as f64;
+                                        progress.set_fraction(frac);
+                                        progress_label.set_text(&format!("{}/{}", prog, max));
+                                    }
+
+                                    if *is_done {
+                                        prompt_label.set_text("✓ Enrollment Complete!");
+                                        on_done();
+                                        glib::timeout_add_local_once(
+                                            std::time::Duration::from_millis(1500),
+                                            glib::clone!(#[weak] dialog, move || {
+                                                dialog.close();
+                                            })
+                                        );
+                                        break;
+                                    }
+
+                                    if matches!(raw_msg, EnrollPrompt::DbFailed | EnrollPrompt::Cancelled) {
+                                        prompt_label.set_text("Enrollment Failed or Cancelled");
+                                        break;
+                                    }
+                                }
+                            }
+                            Some(signal) = capture_stream.next() => {
+                                if let Ok(args) = signal.args() {
+                                    let status = *args.status();
+                                    feed.set_face_status(status);
+                                }
+                            }
+                        }
+                    }
+
+                    let _ = proxy.release().await;
+                }
+            ));
         }
     ));
 
     stop_btn.connect_clicked(glib::clone!(
         #[weak]
         dialog,
+        #[strong]
+        show_cancel_confirmation,
         move |_| {
-            dialog.close();
-        }
-    ));
-
-    glib::MainContext::default().spawn_local(glib::clone!(
-        #[weak]
-        feed,
-        #[weak]
-        prompt_label,
-        #[weak]
-        progress,
-        #[weak]
-        progress_label,
-        #[weak]
-        status_label,
-        #[weak]
-        dialog,
-        #[weak]
-        start_btn,
-        #[strong]
-        on_done,
-        #[strong]
-        current_step,
-        #[strong]
-        session,
-        #[strong]
-        username,
-        #[strong]
-        resolved_face,
-        #[strong]
-        proxy,
-        async move {
-            loop {
-                glib::timeout_future(std::time::Duration::from_millis(30)).await;
-
-                if session.borrow().is_complete() {
-                    let face_name = resolved_face.borrow().clone();
-                    let captures = session.borrow_mut().take_captures();
-
-                    for capture in captures {
-                        if let Err(e) = proxy
-                            .add_face(
-                                &username,
-                                &face_name,
-                                &capture.bytes,
-                                capture.width,
-                                capture.height,
-                            )
-                            .await
-                        {
-                            error!(%e, "Failed to upload capture");
-                        }
-                    }
-
-                    prompt_label.set_text("✓ Capture Session Complete!");
-                    on_done();
-                    glib::timeout_add_local_once(
-                        std::time::Duration::from_millis(1000),
-                        glib::clone!(
-                            #[weak]
-                            dialog,
-                            move || {
-                                dialog.close();
-                            }
-                        ),
-                    );
-                    break;
-                }
-
-                let mut state = None;
-                if let Some(mat) = feed.take_frame() {
-                    let mut capture_session = session.borrow_mut();
-                    let res = capture_session.process_frame(&mat);
-                    drop(capture_session);
-
-                    match res {
-                        Ok(s) => state = Some(s),
-                        Err(e) => {
-                            error!(%e, "Error processing frame");
-                        }
-                    }
-                }
-
-                if let Some(state) = state {
-                    match state {
-                        CaptureState::Prompting {
-                            prompt,
-                            step,
-                            total_steps,
-                            ..
-                        }
-                        | CaptureState::Countdown {
-                            prompt,
-                            step,
-                            total_steps,
-                            ..
-                        } => {
-                            prompt_label.set_text(&prompt.to_string());
-
-                            if session.borrow().is_active() {
-                                progress.set_fraction(step as f64 / total_steps as f64);
-                                progress_label.set_text(&format!("{}/{}", step, total_steps));
-                            } else {
-                                progress.set_fraction(0.0);
-                                progress_label.set_text("Waiting to start");
-                            }
-
-                            match state {
-                                CaptureState::Prompting { hint, .. } => {
-                                    let is_active = session.borrow().is_active();
-
-                                    status_label.set_visible(false);
-
-                                    let is_centered = matches!(hint, CaptureHint::Ready);
-
-                                    feed.set_status(hint);
-
-                                    if !is_active {
-                                        *centered_ready.borrow_mut() = is_centered;
-                                        start_btn.set_sensitive(
-                                            is_centered && *face_name_valid.borrow(),
-                                        );
-                                    }
-                                }
-                                CaptureState::Countdown {
-                                    seconds_remaining, ..
-                                } => {
-                                    status_label.set_text(&format!(
-                                        "✓ Centered! Hold still for {:.1}s...",
-                                        seconds_remaining
-                                    ));
-                                    status_label.set_visible(true);
-                                    feed.set_status(CaptureHint::Ready);
-                                }
-                                _ => unreachable!(),
-                            }
-                        }
-                        CaptureState::Captured { .. } => {
-                            feed.set_status(CaptureHint::Ready);
-                            *current_step.borrow_mut() += 1;
-                            status_label.set_text("✓ Captured!");
-                            on_done();
-                        }
-                        CaptureState::Complete => {}
-                    }
-                }
-            }
+            show_cancel_confirmation(dialog.upcast());
         }
     ));
 
@@ -359,50 +338,22 @@ pub fn show_capture_dialog(
         #[strong]
         on_done,
         #[strong]
-        session,
+        proxy,
+        #[strong]
+        show_cancel_confirmation,
         move |dialog| {
-            if session.borrow().is_active() && !session.borrow().is_complete() {
-                let heading_text = if is_refine {
-                    "Cancel Refining?"
-                } else {
-                    "Cancel Capture Session?"
-                };
-                let confirm = libadwaita::MessageDialog::builder()
-                    .heading(heading_text)
-                    .body("This will discard any partial captures.")
-                    .transient_for(dialog)
-                    .build();
-
-                confirm.add_response("resume", "Resume");
-                confirm.add_response("discard", "Discard");
-                confirm.set_response_appearance(
-                    "discard",
-                    libadwaita::ResponseAppearance::Destructive,
-                );
-
-                let dialog_clone = dialog.clone();
-                confirm.connect_response(
-                    None,
-                    glib::clone!(
-                        #[strong]
-                        feed,
-                        #[strong]
-                        on_done,
-                        #[strong]
-                        session,
-                        move |_, response| {
-                            if response == "discard" {
-                                feed.stop();
-                                session.borrow_mut().stop();
-                                on_done();
-                                dialog_clone.close();
-                            }
-                        }
-                    ),
-                );
-                confirm.present();
+            if stop_btn.get_visible() && !prompt_label.text().contains("Complete") {
+                show_cancel_confirmation(dialog.clone().upcast());
                 glib::Propagation::Stop
             } else {
+                glib::MainContext::default().spawn_local(glib::clone!(
+                    #[strong]
+                    proxy,
+                    async move {
+                        let _ = proxy.enroll_stop().await;
+                        let _ = proxy.release().await;
+                    }
+                ));
                 feed.stop();
                 on_done();
                 glib::Propagation::Proceed

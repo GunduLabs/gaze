@@ -19,3 +19,8 @@ toml = "0.8"
 ureq = "3.0"
 uuid = { version = "1.10", features = ["v4"] }
 zip = "2.4"
+gstreamer = "0.25.1"
+gstreamer-app = "0.25.0"
+gstreamer-video = "0.25.0"
+strum = "0.26"
+strum_macros = "0.26"

@@ -3,7 +3,8 @@ use crate::face::FaceChecker;
 use std::thread;
 use std::time::Duration;
 
-pub use crate::face::{CaptureResult, CaptureStatus, frame_to_bytes};
+use crate::dbus::CaptureStatus;
+pub use crate::face::{CaptureResult, frame_to_bytes};
 
 pub fn init_camera_and_checker(device: &str) -> anyhow::Result<(Camera, FaceChecker)> {
     let checker_thread = thread::spawn(FaceChecker::new);
@@ -17,7 +18,10 @@ pub fn init_camera_and_checker(device: &str) -> anyhow::Result<(Camera, FaceChec
     Ok((cam, checker))
 }
 
-pub fn try_capture(cam: &mut Camera, checker: &mut FaceChecker) -> anyhow::Result<CaptureStatus> {
+pub fn try_capture(
+    cam: &mut Camera,
+    checker: &mut FaceChecker,
+) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
     let frame = cam.capture_frame()?;
     checker.capture_status(&frame)
 }
@@ -26,7 +30,7 @@ pub fn wait_for_capture(
     cam: &mut Camera,
     checker: &mut FaceChecker,
     centering_required: bool,
-    mut on_status: impl FnMut(&CaptureStatus),
+    mut on_status: impl FnMut(&(CaptureStatus, Option<CaptureResult>)),
 ) -> anyhow::Result<CaptureResult> {
     let result = wait_for_capture_until(
         cam,
@@ -43,7 +47,7 @@ pub fn wait_for_capture_until(
     cam: &mut Camera,
     checker: &mut FaceChecker,
     centering_required: bool,
-    mut on_status: impl FnMut(&CaptureStatus),
+    mut on_status: impl FnMut(&(CaptureStatus, Option<CaptureResult>)),
     mut should_abort: impl FnMut() -> bool,
 ) -> anyhow::Result<Option<CaptureResult>> {
     loop {
@@ -52,12 +56,14 @@ pub fn wait_for_capture_until(
         }
 
         let frame = cam.capture_frame()?;
-        let status = checker.capture_status(&frame)?;
+        let (status, result) = checker.capture_status(&frame)?;
 
-        match status {
-            CaptureStatus::Ready(result) => return Ok(Some(result)),
-            CaptureStatus::NotCentered(result) if !centering_required => return Ok(Some(result)),
-            other => on_status(&other),
+        match (status, result) {
+            (CaptureStatus::Ready, Some(result)) => return Ok(Some(result)),
+            (CaptureStatus::NotCentered, Some(result)) if !centering_required => {
+                return Ok(Some(result));
+            }
+            (s, r) => on_status(&(s, r)),
         }
         thread::sleep(Duration::from_millis(100));
     }

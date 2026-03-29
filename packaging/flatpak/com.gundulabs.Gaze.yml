@@ -11,7 +11,7 @@ finish-args:
   - --socket=fallback-x11
   - --socket=wayland
   - --device=all
-  - --system-talk-name=org.gaze.Auth
+  - --system-talk-name=com.gundulabs.Gaze
   - --filesystem=xdg-run/gvfsd
   - --filesystem=xdg-run/gvfs:ro
 cleanup:

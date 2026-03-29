@@ -57,4 +57,4 @@ Default locations:
 - `gaze-gui`: GTK app
 - PAM integration and GNOME extension for login/lock screen flow
 
-The CLI and GUI communicate with daemon over DBus (`org.gaze.Auth`).
+The CLI and GUI communicate with daemon over DBus (`com.gundulabs.Gaze`).

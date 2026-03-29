@@ -8,7 +8,7 @@ Gaze is a Rust-based facial authentication daemon for Linux. It provides a secur
 
 ### Core Components
 
-- **`gazed` (Daemon)**: The central service (`org.gaze.Auth`) that handles ML inference (detection, alignment, recognition) and manages the user database.
+- **`gazed` (Daemon)**: The central service (`com.gundulabs.Gaze`) that handles ML inference (detection, alignment, recognition) and manages the user database.
 - **`gaze` (CLI)**: A command-line tool for management (enrollment, authentication tests, etc.).
 - **`pam-gaze`**: A PAM (Pluggable Authentication Module) implementation that enables Gaze for system-wide login, sudo, and lock screens. Thin wrapper over `pam-gaze-core`.
 - **`pam-gaze-core`**: Core PAM authentication logic shared by the PAM module.
@@ -59,7 +59,7 @@ The module expects to be located in `/lib/x86_64-linux-gnu/security/pam_gaze.so`
 - **User Templates**: `/var/lib/gaze/users/{username}/`
 - **ML Models**: `/opt/gaze/models/`
 - **Systemd Service**: `gazed.service`
-- **DBus Policy**: `/etc/dbus-1/system.d/org.gaze.Auth.conf`
+- **DBus Policy**: `/etc/dbus-1/system.d/com.gundulabs.Gaze.conf`
 
 ## Coding Conventions
 

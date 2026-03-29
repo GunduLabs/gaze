@@ -59,10 +59,9 @@ pub fn ensure_models(
         return Ok((det_path, rec_path));
     }
 
-    let pack_name = if detector_name.contains("10g") {
-        "buffalo_l"
-    } else {
-        "buffalo_sc"
+    let pack_name = match detector_name {
+        d if d.contains("10g") => "buffalo_l",
+        _ => "buffalo_sc",
     };
 
     let url = zip_url(pack_name);

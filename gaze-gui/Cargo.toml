@@ -21,4 +21,6 @@ opencv = { version = "0.98.1", default-features = false, features = ["imgproc", 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 toml = "0.8"
+futures = "0.3.32"
+tokio = { version = "1.43.0", features = ["macros", "rt", "sync"] }
 

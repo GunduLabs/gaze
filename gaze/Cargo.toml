@@ -29,6 +29,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 dialoguer = "0.12"
 toml = "0.8"
+futures = "0.3.32"
 
 [[bin]]
 name = "gazed"

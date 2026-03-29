@@ -1,32 +1,29 @@
+use gstreamer::prelude::*;
 use opencv::core::Mat;
 use opencv::prelude::*;
-use opencv::videoio::{CAP_V4L2, VideoCapture};
+use opencv::videoio::{CAP_GSTREAMER, VideoCapture};
+use tracing::info;
 
 pub struct Camera {
     cap: VideoCapture,
 }
 
 impl Camera {
-    pub fn open(device_path: &str) -> anyhow::Result<Self> {
-        let saved_stderr = unsafe { libc::dup(2) };
-        let devnull = unsafe { libc::open(c"/dev/null".as_ptr() as _, libc::O_WRONLY) };
-        if saved_stderr >= 0 && devnull >= 0 {
-            unsafe { libc::dup2(devnull, 2) };
-        }
+    pub fn open(device_target: &str) -> anyhow::Result<Self> {
+        let p = if device_target.is_empty() {
+            "pipewiresrc ! videoconvert ! appsink".to_string()
+        } else {
+            format!(
+                "pipewiresrc target-object={} ! videoconvert ! appsink",
+                device_target
+            )
+        };
+        info!("Attempting to open pipewire GStreamer camera: {}", p);
 
-        let cap = VideoCapture::from_file(device_path, CAP_V4L2);
+        let cap = VideoCapture::from_file(&p, CAP_GSTREAMER)?;
 
-        if saved_stderr >= 0 {
-            unsafe { libc::dup2(saved_stderr, 2) };
-            unsafe { libc::close(saved_stderr) };
-        }
-        if devnull >= 0 {
-            unsafe { libc::close(devnull) };
-        }
-
-        let cap = cap?;
         if !cap.is_opened()? {
-            anyhow::bail!("Failed to open camera at {}", device_path);
+            anyhow::bail!("Failed to open camera at {}", device_target);
         }
         Ok(Self { cap })
     }
@@ -39,4 +36,37 @@ impl Camera {
         }
         Ok(frame)
     }
+}
+
+pub fn enumerate_cameras() -> anyhow::Result<Vec<(String, String)>> {
+    gstreamer::init()?;
+    let monitor = gstreamer::DeviceMonitor::new();
+    let caps = gstreamer::Caps::builder("video/x-raw").build();
+    monitor.add_filter(Some("Video/Source"), Some(&caps));
+    monitor.start()?;
+    let devices = monitor.devices();
+    monitor.stop();
+
+    let mut cameras = Vec::new();
+    for device in devices {
+        let display_name = device.display_name().to_string();
+        if let Some(props) = device.properties() {
+            let target = if let Ok(name) = props.get::<String>("node.name") {
+                name
+            } else if let Ok(serial) = props.get::<u64>("object.serial") {
+                serial.to_string()
+            } else if let Ok(api) = props.get::<String>("api.v4l2.path") {
+                api
+            } else if let Ok(api) = props.get::<String>("object.path") {
+                api
+            } else {
+                continue;
+            };
+            if !cameras.iter().any(|(_, t)| t == &target) {
+                cameras.push((display_name, target));
+            }
+        }
+    }
+
+    Ok(cameras)
 }
