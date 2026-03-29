@@ -44,6 +44,10 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         Err(_) => return PAM_AUTHINFO_UNAVAIL,
     };
 
+    if let Ok(false) = rt.block_on(has_enrolled_faces(&username)) {
+        return PAM_IGNORE;
+    }
+
     unsafe { say(pamh, "Please look at the camera or enter password") };
 
     let state: SharedAuthState = Arc::new((
@@ -76,11 +80,12 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         let result = tokio::select! {
             res = auth_future => {
                 match res {
-                    Ok(true) => {
+                    Ok(Some(true)) => {
                         unblock_terminal();
                         Some(PAM_SUCCESS)
                     }
-                    Ok(false) => Some(PAM_AUTH_ERR),
+                    Ok(Some(false)) => Some(PAM_AUTH_ERR),
+                    Ok(None) => Some(PAM_IGNORE),
                     Err(_) => None,
                 }
             }

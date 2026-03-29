@@ -15,6 +15,10 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     };
 
     rt.block_on(async {
+        if let Ok(false) = has_enrolled_faces(&username).await {
+            return PAM_IGNORE;
+        }
+
         unsafe { say(pamh, "Please look at the camera") };
 
         match timeout(
@@ -23,8 +27,9 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         )
         .await
         {
-            Ok(Ok(true)) => PAM_SUCCESS,
-            Ok(Ok(false)) => PAM_AUTH_ERR,
+            Ok(Ok(Some(true))) => PAM_SUCCESS,
+            Ok(Ok(Some(false))) => PAM_AUTH_ERR,
+            Ok(Ok(None)) => PAM_IGNORE,
             _ => PAM_AUTHINFO_UNAVAIL,
         }
     })

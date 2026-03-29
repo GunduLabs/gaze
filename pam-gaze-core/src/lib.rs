@@ -14,6 +14,7 @@ pub const PAM_AUTHTOK: c_int = 6;
 pub const PAM_TEXT_INFO: c_int = 4;
 pub const PAM_PROMPT_ECHO_OFF: c_int = 1;
 pub const PAM_AUTHINFO_UNAVAIL: c_int = 9;
+pub const PAM_IGNORE: c_int = 25;
 
 pub const MAX_ATTEMPTS: usize = 10;
 pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
@@ -118,14 +119,46 @@ pub async fn setup_auth_env() -> Result<(Config, GazeProxy<'static>), c_int> {
     Ok((config, proxy))
 }
 
-pub async fn authenticate_biometric(username: &str) -> anyhow::Result<bool> {
+pub async fn has_enrolled_faces(username: &str) -> anyhow::Result<bool> {
     let (_config, proxy) = setup_auth_env()
         .await
         .map_err(|e| anyhow::anyhow!("PAM error: {}", e))?;
+    let faces = proxy.list_faces(username).await?;
+    Ok(!faces.is_empty())
+}
+
+struct ReleaseGuard {
+    proxy: GazeProxy<'static>,
+    active: bool,
+}
+
+impl Drop for ReleaseGuard {
+    fn drop(&mut self) {
+        if self.active {
+            let proxy = self.proxy.clone();
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = proxy.release().await;
+                });
+            }
+        }
+    }
+}
+
+pub async fn authenticate_biometric(username: &str) -> anyhow::Result<Option<bool>> {
+    let (_config, proxy) = setup_auth_env()
+        .await
+        .map_err(|e| anyhow::anyhow!("PAM error: {}", e))?;
+
     proxy
         .claim(username)
         .await
         .map_err(|e| anyhow::anyhow!("Claim failed: {:?}", e))?;
+
+    let mut guard = ReleaseGuard {
+        proxy: proxy.clone(),
+        active: true,
+    };
 
     let mut status_stream = proxy
         .receive_verify_status()
@@ -147,6 +180,7 @@ pub async fn authenticate_biometric(username: &str) -> anyhow::Result<bool> {
         }
     }
 
+    guard.active = false;
     let _ = proxy.release().await;
-    Ok(matched)
+    Ok(Some(matched))
 }

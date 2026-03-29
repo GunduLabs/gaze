@@ -1,3 +1,4 @@
+use futures::StreamExt;
 use ndarray::Array1;
 use opencv::core::Mat;
 use std::collections::HashMap;
@@ -161,7 +162,12 @@ pub async fn get_active_session_uid() -> anyhow::Result<u32> {
 
 #[interface(name = "com.gundulabs.Gaze")]
 impl AuthDaemon {
-    async fn claim(&self, #[zbus(header)] header: Header<'_>, username: String) -> fdo::Result<()> {
+    async fn claim(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &zbus::Connection,
+        username: String,
+    ) -> fdo::Result<()> {
         let sender = header
             .sender()
             .map(|s| s.to_string())
@@ -178,7 +184,50 @@ impl AuthDaemon {
         }
 
         info!(sender = %sender, username = %username, "Claimed daemon");
-        *state = Some(ClaimState { username, sender });
+        *state = Some(ClaimState {
+            username,
+            sender: sender.clone(),
+        });
+
+        let claim_state = self.claim_state.clone();
+        let active_cancel = self.active_cancel.clone();
+        let conn = conn.clone();
+        let sender_for_watcher = sender.clone();
+
+        self.rt_handle.spawn(async move {
+            let Ok(dbus) = fdo::DBusProxy::new(&conn).await else {
+                return;
+            };
+
+            let Ok(mut stream) = dbus.receive_name_owner_changed().await else {
+                return;
+            };
+
+            while let Some(signal) = stream.next().await {
+                if let Ok(args) = signal.args()
+                    && args.name().as_str() == sender_for_watcher
+                    && args.new_owner().is_none()
+                {
+                    info!(
+                        sender = %sender_for_watcher,
+                        "Sender vanished, auto-releasing claim"
+                    );
+                    let mut state = claim_state.lock().await;
+                    if let Some(claim) = &*state
+                        && claim.sender == sender_for_watcher
+                    {
+                        *state = None;
+                        if let Ok(mut cancel) = active_cancel.try_lock()
+                            && let Some(tx) = cancel.take()
+                        {
+                            let _ = tx.send(());
+                        }
+                    }
+                    break;
+                }
+            }
+        });
+
         Ok(())
     }
 
