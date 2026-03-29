@@ -33,57 +33,6 @@ pub fn show_capture_dialog(
 
     let is_refine = face_name.is_some();
 
-    let show_cancel_confirmation = Rc::new({
-        let proxy = proxy.clone();
-        let feed = feed.clone();
-        let on_done = on_done.clone();
-        move |parent: gtk4::Window| {
-            let confirm = libadwaita::MessageDialog::builder()
-                .heading(if is_refine {
-                    "Cancel Template Update?"
-                } else {
-                    "Cancel Template Capture?"
-                })
-                .body("This will discard any partial captures.")
-                .transient_for(&parent)
-                .build();
-
-            confirm.add_response("resume", "Resume");
-            confirm.add_response("discard", "Discard");
-            confirm.set_response_appearance("discard", libadwaita::ResponseAppearance::Destructive);
-
-            confirm.connect_response(
-                None,
-                glib::clone!(
-                    #[strong]
-                    proxy,
-                    #[strong]
-                    feed,
-                    #[strong]
-                    on_done,
-                    #[weak]
-                    parent,
-                    move |c, response| {
-                        if response == "discard" {
-                            glib::MainContext::default().spawn_local(glib::clone!(
-                                #[strong]
-                                proxy,
-                                async move {
-                                    let _ = proxy.enroll_stop().await;
-                                    let _ = proxy.release().await;
-                                }
-                            ));
-                            feed.stop();
-                            on_done();
-                            parent.close();
-                        }
-                        c.close();
-                    }
-                ),
-            );
-            confirm.present();
-        }
-    });
     let dialog = libadwaita::Window::new();
     dialog.set_title(Some(if is_refine {
         "Updating Face Template"
@@ -181,6 +130,66 @@ pub fn show_capture_dialog(
     stop_btn.set_halign(gtk4::Align::Center);
     stop_btn.set_visible(false);
     body.append(&stop_btn);
+
+    let show_cancel_confirmation = Rc::new(glib::clone!(
+        #[strong]
+        proxy,
+        #[strong]
+        feed,
+        #[strong]
+        on_done,
+        #[weak]
+        stop_btn,
+        move |parent: gtk4::Window| {
+            let confirm = libadwaita::MessageDialog::builder()
+                .heading(if is_refine {
+                    "Cancel Template Update?"
+                } else {
+                    "Cancel Template Capture?"
+                })
+                .body("This will discard any partial captures.")
+                .transient_for(&parent)
+                .build();
+
+            confirm.add_response("resume", "Resume");
+            confirm.add_response("discard", "Discard");
+            confirm.set_response_appearance("discard", libadwaita::ResponseAppearance::Destructive);
+
+            confirm.connect_response(
+                None,
+                glib::clone!(
+                    #[strong]
+                    proxy,
+                    #[strong]
+                    feed,
+                    #[strong]
+                    on_done,
+                    #[weak]
+                    parent,
+                    #[weak]
+                    stop_btn,
+                    move |c, response| {
+                        if response == "discard" {
+                            stop_btn.set_visible(false);
+                            glib::MainContext::default().spawn_local(glib::clone!(
+                                #[strong]
+                                proxy,
+                                async move {
+                                    let _ = proxy.enroll_stop().await;
+                                    let _ = proxy.release().await;
+                                }
+                            ));
+                            feed.stop();
+                            on_done();
+                            parent.close();
+                        }
+                        c.close();
+                    }
+                ),
+            );
+            confirm.present();
+        }
+    ));
 
     content.append(&body);
     dialog.set_content(Some(&content));
