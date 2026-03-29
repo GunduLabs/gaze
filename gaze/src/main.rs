@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
-use zbus::ConnectionBuilder;
+use zbus::connection::Builder;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let _conn = ConnectionBuilder::system()?
+    let _conn = Builder::system()?
         .name("com.gundulabs.Gaze")?
         .serve_at("/com/gundulabs/Gaze", daemon)?
         .build()

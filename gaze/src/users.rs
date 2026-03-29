@@ -341,4 +341,8 @@ impl UserDatabase {
             .get(username)
             .map(|faces| faces.values().flat_map(|embeds| embeds.values()).collect())
     }
+
+    pub fn set_max_templates(&mut self, max: usize) {
+        self.max_templates = max;
+    }
 }

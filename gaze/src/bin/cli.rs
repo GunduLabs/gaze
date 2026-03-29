@@ -120,38 +120,47 @@ async fn run_config_wizard(
         .default(default_level_idx)
         .interact()?;
 
-    config.security = match selected {
-        0 => SecurityLevel::Low,
-        1 => SecurityLevel::Medium,
-        2 => SecurityLevel::High,
-        3 => SecurityLevel::Maximum,
+    match selected {
+        0 => config.security = SecurityLevel::Low,
+        1 => config.security = SecurityLevel::Medium,
+        2 => config.security = SecurityLevel::High,
+        3 => config.security = SecurityLevel::Maximum,
         _ => {
-            let default_detector = config.security.detector().to_string();
-            let default_recognizer = config.security.recognizer().to_string();
-            let default_threshold = config.security.threshold();
+            let (old_detector, old_recognizer, old_threshold) = match &config.security {
+                SecurityLevel::Custom {
+                    detector,
+                    recognizer,
+                    threshold,
+                } => (detector.clone(), recognizer.clone(), *threshold),
+                _ => (
+                    "det_10g.onnx".to_string(),
+                    "w600k_r50.onnx".to_string(),
+                    0.6,
+                ),
+            };
 
             let detector = Input::with_theme(&theme)
                 .with_prompt("Custom detector model")
-                .default(default_detector)
+                .default(old_detector)
                 .interact_text()?;
 
             let recognizer = Input::with_theme(&theme)
                 .with_prompt("Custom recognizer model")
-                .default(default_recognizer)
+                .default(old_recognizer)
                 .interact_text()?;
 
             let threshold = Input::with_theme(&theme)
                 .with_prompt("Custom threshold (0.0 - 1.0)")
-                .default(default_threshold.to_string())
+                .default(old_threshold.to_string())
                 .interact_text()?
                 .parse::<f32>()
-                .unwrap_or(0.5);
+                .unwrap_or(0.6);
 
-            SecurityLevel::Custom {
+            config.security = SecurityLevel::Custom {
                 detector,
                 recognizer,
                 threshold,
-            }
+            };
         }
     };
 
@@ -602,7 +611,29 @@ async fn main() -> anyhow::Result<()> {
         Commands::Config { show } => {
             let config = load_config_from_daemon(&proxy).await?;
             if show {
-                println!("{} {}", style("security.level:").bold(), config.security);
+                let level_name = match config.security {
+                    SecurityLevel::Low => "low",
+                    SecurityLevel::Medium => "medium",
+                    SecurityLevel::High => "high",
+                    SecurityLevel::Maximum => "maximum",
+                    SecurityLevel::Custom { .. } => "custom",
+                };
+                println!("{} {}", style("security.level:").bold(), level_name);
+                println!(
+                    "{} {}",
+                    style("security.detector:").bold(),
+                    config.security.detector()
+                );
+                println!(
+                    "{} {}",
+                    style("security.recognizer:").bold(),
+                    config.security.recognizer()
+                );
+                println!(
+                    "{} {:.2}",
+                    style("security.threshold:").bold(),
+                    config.security.threshold()
+                );
                 println!("{} {}", style("cameras.rgb:").bold(), config.cameras.rgb);
                 println!(
                     "{} {}",

@@ -8,10 +8,14 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
 
+use enumflags2::BitFlag;
+use futures::StreamExt;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::OnceLock;
 use zbus::Connection;
+use zbus_polkit::policykit1::{AuthorityProxy, CheckAuthorizationFlags, Subject};
 
 type RefreshCb = Rc<dyn Fn()>;
 
@@ -41,228 +45,154 @@ fn load_auth_highlight_css() {
 fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwaita::ToastOverlay) {
     let config = Rc::new(RefCell::new(Config::default()));
 
-    let dialog = gtk4::Dialog::builder()
+    let window = libadwaita::Window::builder()
         .transient_for(parent)
         .modal(true)
         .title("Configuration")
-        .default_width(560)
-        .default_height(420)
-        .build();
-    dialog.add_button("Cancel", gtk4::ResponseType::Cancel);
-    dialog.add_button("Save", gtk4::ResponseType::Accept);
-
-    let content = dialog.content_area();
-    content.set_spacing(12);
-    content.set_margin_start(16);
-    content.set_margin_end(16);
-    content.set_margin_top(16);
-    content.set_margin_bottom(16);
-
-    let grid = gtk4::Grid::builder()
-        .column_spacing(12)
-        .row_spacing(12)
-        .hexpand(true)
+        .default_width(500)
+        .default_height(470)
         .build();
 
-    let security_label = gtk4::Label::new(Some("Security level"));
-    security_label.set_halign(gtk4::Align::Start);
-    let security_combo = gtk4::ComboBoxText::new();
-    security_combo.append(Some("low"), "low");
-    security_combo.append(Some("medium"), "medium");
-    security_combo.append(Some("high"), "high");
-    security_combo.append(Some("maximum"), "maximum");
-    security_combo.append(Some("custom"), "custom");
-    security_combo.set_active_id(Some(&config.borrow().security.to_string()));
+    let toolbar_view = libadwaita::ToolbarView::new();
+    let header_bar = libadwaita::HeaderBar::new();
+    toolbar_view.add_top_bar(&header_bar);
 
-    let custom_detector_label = gtk4::Label::new(Some("Custom detector model"));
-    custom_detector_label.set_halign(gtk4::Align::Start);
-    let custom_detector_entry = gtk4::Entry::new();
-    custom_detector_entry.set_hexpand(true);
+    let banner = libadwaita::Banner::new("Settings are locked");
+    banner.set_button_label(Some("Unlock…"));
+    toolbar_view.add_top_bar(&banner);
 
-    let custom_recognizer_label = gtk4::Label::new(Some("Custom recognizer model"));
-    custom_recognizer_label.set_halign(gtk4::Align::Start);
-    let custom_recognizer_entry = gtk4::Entry::new();
-    custom_recognizer_entry.set_hexpand(true);
-
-    let custom_threshold_label = gtk4::Label::new(Some("Custom threshold"));
-    custom_threshold_label.set_halign(gtk4::Align::Start);
-    let custom_threshold_spin = gtk4::SpinButton::with_range(0.0, 1.0, 0.01);
-    custom_threshold_spin.set_digits(3);
-
-    let custom_grid = gtk4::Grid::builder()
-        .column_spacing(12)
-        .row_spacing(10)
-        .hexpand(true)
+    let scrolled = gtk4::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Never)
         .build();
-    custom_grid.attach(&custom_detector_label, 0, 0, 1, 1);
-    custom_grid.attach(&custom_detector_entry, 1, 0, 1, 1);
-    custom_grid.attach(&custom_recognizer_label, 0, 1, 1, 1);
-    custom_grid.attach(&custom_recognizer_entry, 1, 1, 1, 1);
-    custom_grid.attach(&custom_threshold_label, 0, 2, 1, 1);
-    custom_grid.attach(&custom_threshold_spin, 1, 2, 1, 1);
 
-    let custom_frame = gtk4::Frame::new(Some("Custom level settings"));
-    custom_frame.set_child(Some(&custom_grid));
+    let page = libadwaita::PreferencesPage::new();
+    scrolled.set_child(Some(&page));
+    toolbar_view.set_content(Some(&scrolled));
+    window.set_content(Some(&toolbar_view));
 
-    {
-        let cfg = config.borrow();
-        let detector = cfg.security.detector().to_string();
-        let recognizer = cfg.security.recognizer().to_string();
-        let threshold = cfg.security.threshold();
-        custom_detector_entry.set_text(&detector);
-        custom_recognizer_entry.set_text(&recognizer);
-        custom_threshold_spin.set_value(threshold as f64);
-    }
+    scrolled.set_sensitive(false);
+    banner.set_revealed(true);
+
+    let security_group = libadwaita::PreferencesGroup::new();
+    security_group.set_title("Security");
+    page.add(&security_group);
+
+    let level_row = libadwaita::ComboRow::new();
+    level_row.set_title("Security Level");
+    level_row.set_subtitle("Adjust the balance between speed and security");
+    let level_model = gtk4::StringList::new(&["Low", "Medium", "High", "Maximum", "Custom"]);
+    level_row.set_model(Some(&level_model));
+    security_group.add(&level_row);
+
+    let detector_row = libadwaita::EntryRow::new();
+    detector_row.set_title("Detector Model");
+    security_group.add(&detector_row);
+
+    let recognizer_row = libadwaita::EntryRow::new();
+    recognizer_row.set_title("Recognizer Model");
+    security_group.add(&recognizer_row);
+
+    let threshold_row = libadwaita::SpinRow::with_range(0.0, 1.0, 0.01);
+    threshold_row.set_digits(3);
+    threshold_row.set_title("Recognizer Threshold");
+    threshold_row.set_subtitle("Minimum similarity for a match");
+    security_group.add(&threshold_row);
+
+    let hardware_group = libadwaita::PreferencesGroup::new();
+    hardware_group.set_title("Hardware");
+    page.add(&hardware_group);
 
     let cameras = gaze_core::camera::enumerate_cameras()
         .unwrap_or_else(|_| vec![("Default Camera".to_string(), "/dev/video0".to_string())]);
-    let cam_names = cameras.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>();
-    let default_cam_idx = cameras
-        .iter()
-        .position(|(_, t)| t == &config.borrow().cameras.rgb)
-        .unwrap_or(0);
+    let cam_names = cameras.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
 
-    let camera_label = gtk4::Label::new(Some("RGB camera"));
-    camera_label.set_halign(gtk4::Align::Start);
-    let camera_dropdown = gtk4::DropDown::from_strings(&cam_names);
-    camera_dropdown.set_hexpand(true);
-    camera_dropdown.set_selected(default_cam_idx as u32);
+    let camera_row = libadwaita::ComboRow::new();
+    camera_row.set_title("RGB Camera Device");
+    let cam_model =
+        gtk4::StringList::new(&cam_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+    camera_row.set_model(Some(&cam_model));
+    hardware_group.add(&camera_row);
 
-    let templates_spin = libadwaita::SpinRow::with_range(1.0, 50.0, 1.0);
-    templates_spin.set_title("Max Templates Per Face");
-    templates_spin.set_value(config.borrow().enrollment.max_templates as f64);
+    let enrollment_group = libadwaita::PreferencesGroup::new();
+    enrollment_group.set_title("Enrollment");
+    page.add(&enrollment_group);
 
-    grid.attach(&security_label, 0, 0, 1, 1);
-    grid.attach(&security_combo, 1, 0, 1, 1);
-    grid.attach(&camera_label, 0, 1, 1, 1);
-    grid.attach(&camera_dropdown, 1, 1, 1, 1);
-    grid.attach(&templates_spin, 0, 2, 2, 1);
-    grid.attach(&custom_frame, 0, 3, 2, 1);
+    let templates_row = libadwaita::SpinRow::with_range(1.0, 50.0, 1.0);
+    templates_row.set_title("Max Templates");
+    templates_row.set_subtitle("Number of capture sets stored per face");
+    enrollment_group.add(&templates_row);
 
-    let update_custom_visibility: Rc<dyn Fn()> = Rc::new(glib::clone!(
+    let update_custom_visibility =
+        move |row: &libadwaita::ComboRow,
+              det: &libadwaita::EntryRow,
+              rec: &libadwaita::EntryRow,
+              thr: &libadwaita::SpinRow| {
+            let is_custom = row.selected() == 4;
+            det.set_visible(is_custom);
+            rec.set_visible(is_custom);
+            thr.set_visible(is_custom);
+        };
+
+    let is_loading = Rc::new(std::cell::Cell::new(true));
+
+    level_row.connect_selected_notify(glib::clone!(
         #[weak]
-        security_combo,
+        detector_row,
         #[weak]
-        custom_frame,
+        recognizer_row,
+        #[weak]
+        threshold_row,
+        move |row| {
+            update_custom_visibility(row, &detector_row, &recognizer_row, &threshold_row);
+        }
+    ));
+
+    let apply_changes = glib::clone!(
+        #[weak]
+        overlay,
+        #[weak]
+        level_row,
+        #[weak]
+        detector_row,
+        #[weak]
+        recognizer_row,
+        #[weak]
+        threshold_row,
+        #[weak]
+        camera_row,
+        #[weak]
+        templates_row,
+        #[strong]
+        cameras,
+        #[strong]
+        config,
+        #[strong]
+        is_loading,
         move || {
-            let is_custom = security_combo.active_id().as_deref() == Some("custom");
-            custom_frame.set_visible(is_custom);
-        }
-    ));
-    security_combo.connect_changed(glib::clone!(
-        #[strong]
-        update_custom_visibility,
-        move |_| {
-            update_custom_visibility();
-        }
-    ));
-    update_custom_visibility();
-
-    content.append(&grid);
-
-    glib::MainContext::default().spawn_local(glib::clone!(
-        #[weak]
-        security_combo,
-        #[weak]
-        camera_dropdown,
-        #[strong]
-        cameras,
-        #[weak]
-        templates_spin,
-        #[weak]
-        custom_detector_entry,
-        #[weak]
-        custom_recognizer_entry,
-        #[weak]
-        custom_threshold_spin,
-        #[strong]
-        update_custom_visibility,
-        #[weak]
-        overlay,
-        #[strong]
-        config,
-        async move {
-            let load_result = async {
-                let conn = Connection::system().await?;
-                let proxy = GazeProxy::new(&conn).await?;
-                load_config_from_daemon(&proxy).await
-            }
-            .await;
-
-            match load_result {
-                Ok(cfg) => {
-                    security_combo.set_active_id(Some(&cfg.security.to_string()));
-                    let active_idx = cameras
-                        .iter()
-                        .position(|(_, t)| t == &cfg.cameras.rgb)
-                        .unwrap_or(0);
-                    camera_dropdown.set_selected(active_idx as u32);
-                    templates_spin.set_value(cfg.enrollment.max_templates as f64);
-                    let detector = cfg.security.detector().to_string();
-                    let recognizer = cfg.security.recognizer().to_string();
-                    let threshold = cfg.security.threshold();
-                    custom_detector_entry.set_text(&detector);
-                    custom_recognizer_entry.set_text(&recognizer);
-                    custom_threshold_spin.set_value(threshold as f64);
-                    *config.borrow_mut() = cfg;
-                    update_custom_visibility();
-                }
-                Err(err) => {
-                    overlay.add_toast(libadwaita::Toast::new(&format!(
-                        "Failed to load daemon config: {}",
-                        err
-                    )));
-                }
-            }
-        }
-    ));
-
-    dialog.connect_response(glib::clone!(
-        #[weak]
-        dialog,
-        #[weak]
-        overlay,
-        #[weak]
-        security_combo,
-        #[weak]
-        camera_dropdown,
-        #[strong]
-        cameras,
-        #[weak]
-        templates_spin,
-        #[weak]
-        custom_detector_entry,
-        #[weak]
-        custom_recognizer_entry,
-        #[weak]
-        custom_threshold_spin,
-        #[strong]
-        config,
-        move |_, response| {
-            if response != gtk4::ResponseType::Accept {
-                dialog.close();
+            if is_loading.get() {
                 return;
             }
-
             let mut cfg = config.borrow_mut();
-            cfg.security = match security_combo.active_id().as_deref() {
-                Some("low") => SecurityLevel::Low,
-                Some("medium") => SecurityLevel::Medium,
-                Some("high") => SecurityLevel::High,
-                Some("maximum") => SecurityLevel::Maximum,
-                Some("custom") => SecurityLevel::Custom {
-                    detector: custom_detector_entry.text().to_string(),
-                    recognizer: custom_recognizer_entry.text().to_string(),
-                    threshold: custom_threshold_spin.value() as f32,
-                },
-                _ => SecurityLevel::Medium,
-            };
-            let sel_idx = camera_dropdown.selected() as usize;
-            cfg.cameras.rgb = cameras
-                .get(sel_idx)
-                .map(|(_, t)| t.clone())
-                .unwrap_or_default();
-            cfg.enrollment.max_templates = templates_spin.value() as u32;
+            match level_row.selected() {
+                0 => cfg.security = SecurityLevel::Low,
+                1 => cfg.security = SecurityLevel::Medium,
+                2 => cfg.security = SecurityLevel::High,
+                3 => cfg.security = SecurityLevel::Maximum,
+                4 => {
+                    cfg.security = SecurityLevel::Custom {
+                        detector: detector_row.text().to_string(),
+                        recognizer: recognizer_row.text().to_string(),
+                        threshold: threshold_row.value() as f32,
+                    };
+                }
+                _ => {}
+            }
+
+            let cam_idx = camera_row.selected() as usize;
+            if let Some((_, target)) = cameras.get(cam_idx) {
+                cfg.cameras.rgb = target.clone();
+            }
+            cfg.enrollment.max_templates = templates_row.value() as u32;
 
             let cfg_to_apply = cfg.clone();
             drop(cfg);
@@ -273,30 +203,243 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 #[strong]
                 cfg_to_apply,
                 async move {
-                    let apply_result = async {
+                    let result = async {
                         let conn = Connection::system().await?;
                         let proxy = GazeProxy::new(&conn).await?;
                         apply_config_to_daemon(&proxy, &cfg_to_apply).await
                     }
                     .await;
 
-                    match apply_result {
-                        Ok(_) => overlay.add_toast(libadwaita::Toast::new(
-                            "Configuration saved. Daemon will restart to apply changes.",
-                        )),
-                        Err(err) => overlay.add_toast(libadwaita::Toast::new(&format!(
-                            "Failed to apply daemon config: {}",
-                            err
-                        ))),
+                    if let Err(e) = result {
+                        overlay.add_toast(libadwaita::Toast::new(&format!(
+                            "Failed to apply config: {}",
+                            e
+                        )));
                     }
                 }
             ));
+        }
+    );
 
-            dialog.close();
+    level_row.connect_selected_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    camera_row.connect_selected_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    threshold_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    templates_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    detector_row.connect_apply(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    recognizer_row.connect_apply(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+
+    {
+        let cfg = config.borrow();
+        let level_idx = match cfg.security {
+            SecurityLevel::Low => 0,
+            SecurityLevel::Medium => 1,
+            SecurityLevel::High => 2,
+            SecurityLevel::Maximum => 3,
+            SecurityLevel::Custom { .. } => 4,
+        };
+        level_row.set_selected(level_idx);
+        update_custom_visibility(&level_row, &detector_row, &recognizer_row, &threshold_row);
+
+        let (det, rec, thr) = match &cfg.security {
+            SecurityLevel::Custom {
+                detector,
+                recognizer,
+                threshold,
+            } => (detector.clone(), recognizer.clone(), *threshold as f64),
+            _ => (
+                cfg.security.detector().to_string(),
+                cfg.security.recognizer().to_string(),
+                cfg.security.threshold() as f64,
+            ),
+        };
+        detector_row.set_text(&det);
+        recognizer_row.set_text(&rec);
+        threshold_row.set_value(thr);
+
+        let cam_idx = cameras
+            .iter()
+            .position(|(_, t)| t == &cfg.cameras.rgb)
+            .unwrap_or(0);
+        camera_row.set_selected(cam_idx as u32);
+        templates_row.set_value(cfg.enrollment.max_templates as f64);
+    }
+    is_loading.set(false);
+
+    glib::MainContext::default().spawn_local(glib::clone!(
+        #[weak]
+        banner,
+        #[weak]
+        scrolled,
+        async move {
+            let Ok(conn) = Connection::system().await else {
+                return;
+            };
+            let Ok(authority) = AuthorityProxy::new(&conn).await else {
+                return;
+            };
+
+            let check_auth = |auth: AuthorityProxy<'static>, _conn: Connection| async move {
+                let subject = Subject::new_for_owner(std::process::id(), None, None).unwrap();
+
+                auth.check_authorization(
+                    &subject,
+                    "com.gundulabs.gaze.manage-config",
+                    &HashMap::new(),
+                    CheckAuthorizationFlags::empty(),
+                    "",
+                )
+                .await
+            };
+
+            let update_ui = glib::clone!(
+                #[weak]
+                banner,
+                #[weak]
+                scrolled,
+                move |allowed: bool| {
+                    banner.set_revealed(!allowed);
+                    scrolled.set_sensitive(allowed);
+                }
+            );
+
+            if let Ok(res) = check_auth(authority.clone(), conn.clone()).await {
+                update_ui(res.is_authorized);
+            }
+
+            let mut changed_stream = authority.receive_changed().await.unwrap();
+
+            banner.connect_button_clicked(glib::clone!(
+                #[strong]
+                authority,
+                #[strong]
+                update_ui,
+                move |_| {
+                    glib::MainContext::default().spawn_local(glib::clone!(
+                        #[strong]
+                        authority,
+                        #[strong]
+                        update_ui,
+                        async move {
+                            let subject =
+                                Subject::new_for_owner(std::process::id(), None, None).unwrap();
+
+                            if let Ok(res) = authority
+                                .check_authorization(
+                                    &subject,
+                                    "com.gundulabs.gaze.manage-config",
+                                    &HashMap::new(),
+                                    CheckAuthorizationFlags::AllowUserInteraction.into(),
+                                    "",
+                                )
+                                .await
+                            {
+                                update_ui(res.is_authorized);
+                            }
+                        }
+                    ));
+                }
+            ));
+
+            while changed_stream.next().await.is_some() {
+                if let Ok(res) = check_auth(authority.clone(), conn.clone()).await {
+                    update_ui(res.is_authorized);
+                }
+            }
         }
     ));
 
-    dialog.present();
+    glib::MainContext::default().spawn_local(glib::clone!(
+        #[weak]
+        level_row,
+        #[weak]
+        detector_row,
+        #[weak]
+        recognizer_row,
+        #[weak]
+        threshold_row,
+        #[weak]
+        camera_row,
+        #[weak]
+        templates_row,
+        #[strong]
+        cameras,
+        #[strong]
+        config,
+        #[strong]
+        is_loading,
+        async move {
+            let load_result = async {
+                let conn = Connection::system().await?;
+                let proxy = GazeProxy::new(&conn).await?;
+                load_config_from_daemon(&proxy).await
+            }
+            .await;
+
+            if let Ok(cfg) = load_result {
+                is_loading.set(true);
+                let level_idx = match cfg.security {
+                    SecurityLevel::Low => 0,
+                    SecurityLevel::Medium => 1,
+                    SecurityLevel::High => 2,
+                    SecurityLevel::Maximum => 3,
+                    SecurityLevel::Custom { .. } => 4,
+                };
+                level_row.set_selected(level_idx);
+
+                let (det, rec, thr) = match &cfg.security {
+                    SecurityLevel::Custom {
+                        detector,
+                        recognizer,
+                        threshold,
+                    } => (detector.clone(), recognizer.clone(), *threshold as f64),
+                    _ => (
+                        cfg.security.detector().to_string(),
+                        cfg.security.recognizer().to_string(),
+                        cfg.security.threshold() as f64,
+                    ),
+                };
+                detector_row.set_text(&det);
+                recognizer_row.set_text(&rec);
+                threshold_row.set_value(thr);
+
+                let cam_idx = cameras
+                    .iter()
+                    .position(|(_, t)| t == &cfg.cameras.rgb)
+                    .unwrap_or(0);
+                camera_row.set_selected(cam_idx as u32);
+                templates_row.set_value(cfg.enrollment.max_templates as f64);
+
+                *config.borrow_mut() = cfg;
+                is_loading.set(false);
+            }
+        }
+    ));
+
+    window.present();
 }
 
 pub fn build_window(app: &libadwaita::Application, username: &str) {

@@ -21,7 +21,7 @@ rayon = "1.10"
 tokio = { version = "1.40", features = ["full", "rt-multi-thread"] }
 ureq = "3.0"
 uuid = { version = "1.10", features = ["v4"] }
-zbus = "4.4.0"
+zbus = "5.14"
 zip = "2.4"
 indicatif = "0.18.4"
 console = "0.16.2"
@@ -30,6 +30,7 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 dialoguer = "0.12"
 toml = "0.8"
 futures = "0.3.32"
+zbus_polkit = "5.0.0"
 
 [[bin]]
 name = "gazed"

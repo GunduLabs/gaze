@@ -90,6 +90,9 @@ pub enum VerifyResult {
     VerifyNoMatch,
 }
 
+use std::collections::HashMap;
+use zvariant::OwnedValue;
+
 pub fn dbus_error_message(err: &zbus::Error) -> String {
     let text = err.to_string();
     if let Some((_, inner)) = text.split_once(':') {
@@ -103,12 +106,12 @@ pub fn dbus_is_file_not_found(err: &zbus::Error) -> bool {
 }
 
 pub async fn load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Config> {
-    let config = proxy.get_config().await?;
-    Ok(config)
+    let map = proxy.get_config().await?;
+    Config::from_map(map)
 }
 
 pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> anyhow::Result<()> {
-    proxy.set_config(config).await?;
+    proxy.set_config(config.to_map()).await?;
     Ok(())
 }
 
@@ -137,8 +140,13 @@ pub trait Gaze {
     ) -> zbus::Result<bool>;
     async fn delete_faces(&self, username: &str) -> zbus::Result<bool>;
 
-    async fn get_config(&self) -> zbus::Result<Config>;
-    async fn set_config(&self, config: &Config) -> zbus::Result<bool>;
+    #[zbus(allow_interactive_auth)]
+    async fn get_config(&self) -> zbus::Result<HashMap<String, HashMap<String, OwnedValue>>>;
+    #[zbus(allow_interactive_auth)]
+    async fn set_config(
+        &self,
+        config: HashMap<String, HashMap<String, OwnedValue>>,
+    ) -> zbus::Result<bool>;
 
     #[zbus(signal)]
     fn face_status(&self, status: CaptureStatus) -> zbus::Result<()>;

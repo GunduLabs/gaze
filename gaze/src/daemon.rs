@@ -3,10 +3,9 @@ use opencv::core::Mat;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, oneshot};
-use tokio::time::{Duration, sleep};
 use tracing::{error, info};
-use zbus::zvariant::Value;
-use zbus::{fdo, interface, message::Header, object_server::SignalContext};
+use zbus::zvariant::OwnedValue;
+use zbus::{fdo, interface, message::Header, object_server::SignalEmitter};
 
 use crate::align::align_face;
 use crate::recognize::FaceRecognizer;
@@ -80,43 +79,26 @@ impl AuthDaemon {
     }
 
     async fn ensure_authorized(header: &Header<'_>, action_id: &str) -> fdo::Result<()> {
-        let sender = header
-            .sender()
-            .map(|s| s.to_string())
-            .ok_or_else(|| fdo::Error::AccessDenied("Missing DBus sender".into()))?;
-
         let conn = zbus::Connection::system()
             .await
             .map_err(|e| fdo::Error::Failed(format!("Failed to connect to system bus: {e}")))?;
-        let authority = zbus::Proxy::new(
-            &conn,
-            "org.freedesktop.PolicyKit1",
-            "/org/freedesktop/PolicyKit1/Authority",
-            "org.freedesktop.PolicyKit1.Authority",
-        )
-        .await
-        .map_err(|e| fdo::Error::Failed(format!("Failed to create polkit proxy: {e}")))?;
 
-        let mut subject_details: HashMap<&str, Value<'_>> = HashMap::new();
-        subject_details.insert("name", sender.as_str().into());
+        let authority = zbus_polkit::policykit1::AuthorityProxy::new(&conn)
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("Failed to create polkit proxy: {e}")))?;
 
-        let subject = ("system-bus-name", subject_details);
+        let subject = zbus_polkit::policykit1::Subject::new_for_message_header(header)
+            .map_err(|e| fdo::Error::Failed(format!("Failed to create polkit subject: {e}")))?;
+
         let details: HashMap<&str, &str> = HashMap::new();
-        let flags = 1u32; // AllowUserInteraction
-        let cancellation_id = "";
+        let flags = zbus_polkit::policykit1::CheckAuthorizationFlags::AllowUserInteraction.into();
 
-        let (is_authorized, _is_challenge, _ret_details): (bool, bool, HashMap<String, String>) =
-            authority
-                .call(
-                    "CheckAuthorization",
-                    &(subject, action_id, details, flags, cancellation_id),
-                )
-                .await
-                .map_err(|e| {
-                    fdo::Error::Failed(format!("PolicyKit CheckAuthorization failed: {e}"))
-                })?;
+        let result = authority
+            .check_authorization(&subject, action_id, &details, flags, "")
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("PolicyKit CheckAuthorization failed: {e}")))?;
 
-        if !is_authorized {
+        if !result.is_authorized {
             return Err(fdo::Error::AccessDenied(format!(
                 "Authorization denied for action '{action_id}'"
             )));
@@ -223,7 +205,7 @@ impl AuthDaemon {
 
     async fn verify_start(
         &self,
-        #[zbus(signal_context)] ctxt: SignalContext<'_>,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
         #[zbus(header)] header: Header<'_>,
         _face_name: String,
     ) -> fdo::Result<()> {
@@ -243,7 +225,7 @@ impl AuthDaemon {
         let path = ctxt.path().to_owned();
 
         self.rt_handle.spawn(async move {
-            let ctxt = SignalContext::new(&conn, path).unwrap();
+            let ctxt = SignalEmitter::new(&conn, path).unwrap();
 
 
             let mut cam = match Camera::open(&camera_config) {
@@ -324,7 +306,7 @@ impl AuthDaemon {
 
     async fn enroll_start(
         &self,
-        #[zbus(signal_context)] ctxt: SignalContext<'_>,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
         #[zbus(header)] header: Header<'_>,
         face_name: String,
     ) -> fdo::Result<()> {
@@ -347,7 +329,7 @@ impl AuthDaemon {
         let path = ctxt.path().to_owned();
 
         self.rt_handle.spawn(async move {
-            let ctxt = SignalContext::new(&conn, path).unwrap();
+            let ctxt = SignalEmitter::new(&conn, path).unwrap();
 
 
             let mut cam = match Camera::open(&camera_config) {
@@ -519,45 +501,85 @@ impl AuthDaemon {
         Ok(true)
     }
 
-    async fn get_config(&self) -> fdo::Result<Config> {
+    async fn get_config(&self) -> fdo::Result<HashMap<String, HashMap<String, OwnedValue>>> {
         let config = Config::load_from(CONFIG_PATH)
             .map_err(|e| fdo::Error::Failed(format!("Failed to load config: {e}")))?;
-        Ok(config)
+        Ok(config.to_map())
     }
 
     async fn set_config(
         &self,
         #[zbus(header)] header: Header<'_>,
-        config: Config,
+        config: HashMap<String, HashMap<String, OwnedValue>>,
     ) -> fdo::Result<bool> {
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
 
-        config
+        let new_config = Config::from_map(config)
+            .map_err(|e| fdo::Error::Failed(format!("Invalid config: {e}")))?;
+
+        let mut threshold = self.threshold.lock().await;
+        *threshold = new_config.security.threshold();
+
+        let mut camera_config = self.camera_config.lock().await;
+        *camera_config = new_config.cameras.rgb.clone();
+
+        let mut db = self.db.lock().await;
+        db.set_max_templates(new_config.enrollment.max_templates as usize);
+
+        let mut checker = self.checker.lock().await;
+        let mut recognizer = self.recognizer.lock().await;
+
+        let security = &new_config.security;
+        info!(
+            detector = security.detector(),
+            recognizer = security.recognizer(),
+            "Hot-reloading models if needed"
+        );
+
+        let (det_path, rec_path) = match crate::models::ensure_models(
+            gaze_core::config::MODELS_DIR,
+            security.detector(),
+            security.recognizer(),
+        ) {
+            Ok(p) => p,
+            Err(e) => return Err(fdo::Error::Failed(format!("Failed to ensure models: {e}"))),
+        };
+
+        match gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap()) {
+            Ok(det) => *checker = FaceChecker::from_detector(det),
+            Err(e) => return Err(fdo::Error::Failed(format!("Failed to load detector: {e}"))),
+        }
+
+        match crate::recognize::FaceRecognizer::new(rec_path.to_str().unwrap()) {
+            Ok(rec) => *recognizer = rec,
+            Err(e) => {
+                return Err(fdo::Error::Failed(format!(
+                    "Failed to load recognizer: {e}"
+                )));
+            }
+        }
+
+        new_config
             .save_to(CONFIG_PATH)
             .map_err(|e| fdo::Error::Failed(format!("Failed to save config: {e}")))?;
 
-        info!("Config updated; scheduling daemon restart");
-        self.rt_handle.spawn(async {
-            sleep(Duration::from_millis(150)).await;
-            std::process::exit(42);
-        });
-
+        info!("Config reloaded successfully");
         Ok(true)
     }
 
     #[zbus(signal)]
     async fn verify_status(
-        ctxt: &SignalContext<'_>,
+        ctxt: &SignalEmitter<'_>,
         result: VerifyResult,
         faces: Vec<(String, f64, f64, bool, u32)>,
     ) -> zbus::Result<()>;
 
     #[zbus(signal)]
-    async fn face_status(ctxt: &SignalContext<'_>, status: CaptureStatus) -> zbus::Result<()>;
+    async fn face_status(ctxt: &SignalEmitter<'_>, status: CaptureStatus) -> zbus::Result<()>;
 
     #[zbus(signal)]
     async fn enroll_status(
-        ctxt: &SignalContext<'_>,
+        ctxt: &SignalEmitter<'_>,
         face_name: &str,
         progress: u32,
         max: u32,
@@ -569,7 +591,7 @@ impl AuthDaemon {
 
 impl AuthDaemon {
     async fn process_and_emit_status(
-        ctxt: &SignalContext<'_>,
+        ctxt: &SignalEmitter<'_>,
         checker_arc: &Arc<Mutex<FaceChecker>>,
         recognizer_arc: &Arc<Mutex<FaceRecognizer>>,
         frame: &Mat,
