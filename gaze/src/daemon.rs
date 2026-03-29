@@ -514,6 +514,8 @@ impl AuthDaemon {
     ) -> fdo::Result<bool> {
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
 
+        self.cancel_active_tasks();
+
         let new_config = Config::from_map(config)
             .map_err(|e| fdo::Error::Failed(format!("Invalid config: {e}")))?;
 

@@ -172,6 +172,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             if is_loading.get() {
                 return;
             }
+
             let mut cfg = config.borrow_mut();
             match level_row.selected() {
                 0 => cfg.security = SecurityLevel::Low,
@@ -784,7 +785,6 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                             popover.popup();
                                         }
                                     ));
-
                                     refine_btn.connect_clicked(glib::clone!(
                                         #[weak]
                                         window,
@@ -797,21 +797,49 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         #[strong]
                                         proxy,
                                         move |_| {
-                                            capture_dialog::show_capture_dialog(
-                                                &window,
-                                                &username,
-                                                Some(&face_name),
-                                                &proxy,
-                                                glib::clone!(
-                                                    #[strong]
-                                                    refresh,
-                                                    move || {
-                                                        if let Some(f) = refresh.borrow().as_ref() {
-                                                            f();
+                                            glib::MainContext::default().spawn_local(glib::clone!(
+                                                #[weak]
+                                                window,
+                                                #[strong]
+                                                username,
+                                                #[strong]
+                                                face_name,
+                                                #[strong]
+                                                refresh,
+                                                #[strong]
+                                                proxy,
+                                                async move {
+                                                    if let Err(err) = proxy.claim(&username).await {
+                                                        let toast = libadwaita::Toast::new(&format!(
+                                                            "Failed to claim device: {}",
+                                                            dbus_error_message(&err)
+                                                        ));
+                                                        if let Some(overlay) = window
+                                                            .content()
+                                                            .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+                                                        {
+                                                            overlay.add_toast(toast);
                                                         }
+                                                        return;
                                                     }
-                                                ),
-                                            );
+
+                                                    capture_dialog::show_capture_dialog(
+                                                        &window,
+                                                        &username,
+                                                        Some(&face_name),
+                                                        &proxy,
+                                                        glib::clone!(
+                                                            #[strong]
+                                                            refresh,
+                                                            move || {
+                                                                if let Some(f) = refresh.borrow().as_ref() {
+                                                                    f();
+                                                                }
+                                                            }
+                                                        ),
+                                                    );
+                                                }
+                                            ));
                                         }
                                     ));
 
@@ -997,21 +1025,47 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 #[strong]
                 proxy,
                 move |_| {
-                    capture_dialog::show_capture_dialog(
-                        &window,
-                        &username,
-                        None,
-                        &proxy,
-                        glib::clone!(
-                            #[strong]
-                            refresh,
-                            move || {
-                                if let Some(f) = refresh.borrow().as_ref() {
-                                    f();
+                    glib::MainContext::default().spawn_local(glib::clone!(
+                        #[weak]
+                        window,
+                        #[strong]
+                        username,
+                        #[strong]
+                        refresh,
+                        #[strong]
+                        proxy,
+                        async move {
+                            if let Err(err) = proxy.claim(&username).await {
+                                let toast = libadwaita::Toast::new(&format!(
+                                    "Failed to claim device: {}",
+                                    dbus_error_message(&err)
+                                ));
+                                if let Some(overlay) = window
+                                    .content()
+                                    .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+                                {
+                                    overlay.add_toast(toast);
                                 }
+                                return;
                             }
-                        ),
-                    );
+
+                            capture_dialog::show_capture_dialog(
+                                &window,
+                                &username,
+                                None,
+                                &proxy,
+                                glib::clone!(
+                                    #[strong]
+                                    refresh,
+                                    move || {
+                                        if let Some(f) = refresh.borrow().as_ref() {
+                                            f();
+                                        }
+                                    }
+                                ),
+                            );
+                        }
+                    ));
                 }
             ));
 

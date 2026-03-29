@@ -218,9 +218,24 @@ pub fn show_capture_dialog(
     }
 
     start_btn.connect_clicked(glib::clone!(
-        #[weak] stop_btn, #[weak] prompt_label, #[weak] progress,
-        #[weak] progress_label, #[strong] proxy, #[strong] username, #[strong] resolved_face,
-        #[weak] dialog, #[strong] on_done, #[strong] feed,
+        #[weak]
+        stop_btn,
+        #[weak]
+        prompt_label,
+        #[weak]
+        progress,
+        #[weak]
+        progress_label,
+        #[strong]
+        proxy,
+        #[strong]
+        resolved_face,
+        #[weak]
+        dialog,
+        #[strong]
+        on_done,
+        #[strong]
+        feed,
         move |btn| {
             btn.set_visible(false);
             stop_btn.set_visible(true);
@@ -229,18 +244,24 @@ pub fn show_capture_dialog(
             progress.set_visible(true);
             feed.set_active(true);
 
-            let uname = username.clone();
             let face_name = resolved_face.borrow().clone();
 
             glib::MainContext::default().spawn_local(glib::clone!(
-                #[strong] proxy, #[weak] progress, #[weak] progress_label, #[weak] prompt_label,
-                #[weak] dialog, #[strong] on_done, #[strong] feed,
+                #[strong]
+                proxy,
+                #[weak]
+                progress,
+                #[weak]
+                progress_label,
+                #[weak]
+                prompt_label,
+                #[weak]
+                dialog,
+                #[strong]
+                on_done,
+                #[strong]
+                feed,
                 async move {
-                    if proxy.claim(&uname).await.is_err() {
-                        prompt_label.set_text("Failed to claim device.");
-                        return;
-                    }
-
                     let mut enroll_stream = match proxy.receive_enroll_status().await {
                         Ok(s) => s,
                         Err(_) => {
