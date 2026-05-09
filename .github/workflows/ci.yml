@@ -36,6 +36,8 @@ jobs:
             libcairo2-dev \
             libglib2.0-dev \
             libgdk-pixbuf-2.0-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
             libpango1.0-dev \
             libgraphene-1.0-dev \
             libopencv-dev \
