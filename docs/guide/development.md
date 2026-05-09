@@ -1,13 +1,12 @@
 # Development
 
-This page covers source builds, tests, packaging, and Flatpak workflows for contributors.
+This page covers source builds, tests, and packaging workflows for contributors.
 
 ## Prerequisites
 
 - Rust 1.70+ (or install via `rustup`)
 - `just` (https://github.com/casey/just) for task automation
 - `nfpm` (https://nfpm.goreleaser.com) for packaging
-- `flatpak-builder` (https://github.com/flatpak/flatpak-builder) for flatpak
 
 ::: code-group
 
@@ -53,16 +52,6 @@ just package <deb | rpm | archlinux>
 Package output:
 
 - `dist/packages/`
-
-## Flatpak build
-
-```bash
-just build-flatpak
-```
-
-Output bundle:
-
-- `dist/packages/com.gundulabs.Gaze.flatpak`
 
 ## Cleaning build artifacts
 

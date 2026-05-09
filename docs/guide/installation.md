@@ -1,6 +1,6 @@
 # Installation
 
-Use one of these paths.
+Use either of these paths.
 
 ## Path A: one-line installer (recommended)
 
@@ -58,15 +58,6 @@ sudo pacman -Sy gaze gaze-gui gaze-gnome-extension
 
 :::
 
-## Path C: GUI-only via Flatpak
-
-```bash
-flatpak remote-add --if-not-exists --no-gpg-verify gundulabs https://packages.gundulabs.com/flatpak
-flatpak install gundulabs com.gundulabs.Gaze
-```
-
-Use this if you only want the GUI app.
-
 ## Restart after install
 
 After installation (any method), reboot once to ensure all system-level changes are fully applied.
@@ -98,4 +89,4 @@ gaze auth --verbose
 
 ## Development and source builds
 
-See the [Development guide](/guide/development) for source builds, tests, packaging, and Flatpak development workflows.
+See the [Development guide](/guide/development) for source builds, tests, and packaging workflows.

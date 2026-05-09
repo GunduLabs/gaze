@@ -32,45 +32,6 @@ build-selinux:
         echo "WARNING: SELinux tools not found. Skipping SELinux policy build." >&2; \
     fi
 
-[private]
-prepare-flatpak-vendor:
-    mkdir -p .flatpak-cache/cargo
-    cargo vendor --locked --versioned-dirs > .flatpak-cache/cargo/config.toml
-
-[private]
-prepare-flatpak-ort:
-    mkdir -p .flatpak-cache/ort
-    arch="$(flatpak --default-arch)"; \
-    case "$arch" in \
-        x86_64) ort_arch="x64" ;; \
-        aarch64) ort_arch="aarch64" ;; \
-        *) echo "Unsupported Flatpak arch for ORT bootstrap: $arch" >&2; exit 1 ;; \
-    esac; \
-    ort_version="1.23.2"; \
-    ort_file="onnxruntime-linux-${ort_arch}-${ort_version}.tgz"; \
-    ort_url="https://github.com/microsoft/onnxruntime/releases/download/v${ort_version}/${ort_file}"; \
-    if [ ! -s .flatpak-cache/ort/onnxruntime.tgz ]; then \
-        curl -fsSL "$ort_url" -o .flatpak-cache/ort/onnxruntime.tgz; \
-    fi
-
-# Build flatpak repo and bundle
-build-flatpak: prepare-flatpak-vendor prepare-flatpak-ort
-    mkdir -p dist/packages dist/flatpak-repo
-
-    flatpak-builder \
-        --force-clean \
-        --repo=dist/flatpak-repo \
-        --arch="$(flatpak --default-arch)" \
-        --user \
-        $( [ -n "${FLATPAK_GPG_SIGN:-}" ] && printf '%s' "--gpg-sign=${FLATPAK_GPG_SIGN}" ) \
-        flatpak-build \
-        packaging/flatpak/com.gundulabs.Gaze.yml
-
-    flatpak build-bundle \
-        dist/flatpak-repo \
-        dist/packages/com.gundulabs.Gaze.flatpak \
-        com.gundulabs.Gaze
-
 # ── package ───────────────────────────────────────────────────────────────────
 
 [private]
@@ -94,8 +55,6 @@ package-prebuilt format:
 clean:
     cargo clean
     rm -rf dist
-    rm -rf flatpak-build .flatpak-builder
-    rm -rf .flatpak-cache
     rm -rf vendor
 
 # ── dev helpers ───────────────────────────────────────────────────────────────

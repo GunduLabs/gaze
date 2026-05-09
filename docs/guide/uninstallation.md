@@ -62,10 +62,6 @@ sudo dnf remove gaze gaze-gui gaze-gnome-extension
 sudo pacman -Rns gaze gaze-gui gaze-gnome-extension
 ```
 
-```bash [Flatpak (GUI only)]
-flatpak uninstall com.gundulabs.Gaze
-```
-
 :::
 
 ## Step 3: Remove the package repository
@@ -89,10 +85,6 @@ sudo dnf makecache
 sudo sed -i '/^\[gaze\]/,/^$/d' /etc/pacman.conf
 sudo rm -f /etc/pacman.d/gaze-mirrorlist
 sudo pacman -Sy
-```
-
-```bash [Flatpak]
-flatpak remote-delete gundulabs
 ```
 
 :::

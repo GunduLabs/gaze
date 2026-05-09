@@ -69,13 +69,6 @@ EOF
 sudo pacman -Sy gaze gaze-gui gaze-gnome-extension
 ```
 
-**Flatpak (GUI only)**
-
-```bash
-flatpak remote-add --if-not-exists --no-gpg-verify gundulabs https://packages.gundulabs.com/flatpak
-flatpak install gundulabs com.gundulabs.Gaze
-```
-
 </details>
 
 After installation (any method), reboot once to ensure all system-level changes are fully applied.
