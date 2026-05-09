@@ -190,13 +190,13 @@ jobs:
         run: flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
       - name: Install Flatpak GNOME SDK
-        run: flatpak install --user -y flathub org.gnome.Sdk//47 org.gnome.Platform//47
+        run: flatpak install --user -y flathub org.gnome.Sdk//49 org.gnome.Platform//49
 
       - name: Install Flatpak Rust SDK extension
-        run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.rust-stable//24.08
+        run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.rust-stable//25.08
 
       - name: Install Flatpak LLVM SDK extension
-        run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.llvm18//24.08
+        run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.llvm20//25.08
 
       - name: Import GPG key for flatpak signing
         id: import_gpg

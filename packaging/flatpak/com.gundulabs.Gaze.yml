@@ -1,10 +1,10 @@
 app-id: com.gundulabs.Gaze
 runtime: org.gnome.Platform
-runtime-version: "47"
+runtime-version: "49"
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
-  - org.freedesktop.Sdk.Extension.llvm18
+  - org.freedesktop.Sdk.Extension.llvm20
 command: gaze-gui
 finish-args:
   - --share=ipc
@@ -52,12 +52,12 @@ modules:
   - name: gaze-gui
     buildsystem: simple
     build-options:
-      append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/llvm18/bin
+      append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/llvm20/bin
       env:
         CARGO_HOME: /run/build/gaze-gui/cargo
         CARGO_TARGET_DIR: /run/build/gaze-gui/target
-        LLVM_CONFIG_PATH: /usr/lib/sdk/llvm18/bin/llvm-config
-        LIBCLANG_PATH: /usr/lib/sdk/llvm18/lib
+        LLVM_CONFIG_PATH: /usr/lib/sdk/llvm20/bin/llvm-config
+        LIBCLANG_PATH: /usr/lib/sdk/llvm20/lib
         ORT_STRATEGY: system
         ORT_LIB_LOCATION: /app/lib
         ORT_PREFER_DYNAMIC_LINK: "1"
