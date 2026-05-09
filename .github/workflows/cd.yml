@@ -188,7 +188,7 @@ jobs:
           token: ${{ secrets.PACKAGES_REPO_PAT }}
           repository: GunduLabs/packages
           event-type: package-artifacts
-          client-payload: '{"repo":"${{ github.repository }}","run_id":"${{ github.run_id }}"}'
+          client-payload: '{"repo":"${{ github.repository }}","run_id":"${{ github.run_id }}","url":"https://gaze.gundulabs.com"}'
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
