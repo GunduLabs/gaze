@@ -174,7 +174,7 @@ async fn run_config_wizard(
         .unwrap_or(0);
 
     let selected_cam_idx = Select::with_theme(&theme)
-        .with_prompt("RGB camera device")
+        .with_prompt("RGB camera source")
         .items(&cam_names)
         .default(default_cam_idx)
         .interact()?;

@@ -19,7 +19,7 @@ level = "medium"
 # threshold = 0.45
 
 [cameras]
-rgb = "/dev/video0"
+rgb = "primary"
 
 [enrollment]
 max_templates = 3

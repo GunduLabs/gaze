@@ -4,7 +4,7 @@ Get Gaze running in under 10 minutes: install, enroll your face, and verify auth
 
 ## Before you begin
 
-- Linux desktop with a working webcam (`/dev/video*`)
+- Linux desktop with a working PipeWire/GStreamer webcam
 - `sudo` access
 - Internet connection for first-time model download
 

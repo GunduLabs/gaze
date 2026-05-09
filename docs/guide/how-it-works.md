@@ -24,7 +24,7 @@ Camera frame -> Face detection -> Face alignment -> Embedding -> Similarity matc
 
 High level:
 
-1. Camera frame is captured from your configured `/dev/video*` device.
+1. Camera frame is captured from your configured GStreamer camera source.
 2. Detector finds a face and facial landmarks.
 3. Face is aligned into a standard input shape.
 4. Recognition model creates an embedding vector.

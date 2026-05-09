@@ -124,7 +124,7 @@ Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Matc
 level = "medium"    # low | medium | high | maximum | custom
 
 [cameras]
-rgb = "/dev/video0"
+rgb = "primary"
 
 [enrollment]
 max_captures_per_face = 8

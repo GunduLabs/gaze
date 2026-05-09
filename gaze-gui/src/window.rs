@@ -1,5 +1,5 @@
 use crate::capture_dialog;
-use gaze_core::config::{Config, SecurityLevel};
+use gaze_core::config::{Config, DEFAULT_RGB_CAMERA, SecurityLevel};
 use gaze_core::dbus::{
     GazeProxy, apply_config_to_daemon, dbus_error_message, dbus_is_file_not_found,
     load_config_from_daemon,
@@ -103,11 +103,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     page.add(&hardware_group);
 
     let cameras = gaze_core::camera::enumerate_cameras()
-        .unwrap_or_else(|_| vec![("Default Camera".to_string(), "/dev/video0".to_string())]);
+        .unwrap_or_else(|_| vec![("Primary Camera".to_string(), DEFAULT_RGB_CAMERA.to_string())]);
     let cam_names = cameras.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
 
     let camera_row = libadwaita::ComboRow::new();
-    camera_row.set_title("RGB Camera Device");
+    camera_row.set_title("RGB Camera Source");
     let cam_model =
         gtk4::StringList::new(&cam_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
     camera_row.set_model(Some(&cam_model));

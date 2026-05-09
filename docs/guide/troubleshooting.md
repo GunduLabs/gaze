@@ -28,18 +28,21 @@ That command shows the most recent daemon log messages.
 
 ## 2. Camera is not detected
 
-Check camera devices:
-
-```bash
-ls /dev/video*
-```
-
-If your camera is not `/dev/video0`, set it in `/etc/gaze/config.toml`:
+Use the primary GStreamer camera source first:
 
 ```toml
 [cameras]
-rgb = "/dev/video1"
+rgb = "primary"
 ```
+
+If you need a specific camera, run `gaze config` and select one of the detected PipeWire cameras, or set a GStreamer source manually:
+
+```toml
+[cameras]
+rgb = "pipewiresrc target-object=<pipewire-target>"
+```
+
+Direct `/dev/video*` paths are not supported.
 
 Then restart daemon:
 

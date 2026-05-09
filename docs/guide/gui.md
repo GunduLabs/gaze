@@ -23,7 +23,7 @@ Open the config dialog from the header-bar settings button.
 From there you can edit:
 
 - Security level (`low`, `medium`, `high`, `maximum`)
-- RGB camera device path
+- RGB camera source
 - Maximum captures per face
 
 ## Common tasks

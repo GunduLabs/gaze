@@ -2,7 +2,7 @@
 
 Gaze is configured with `/etc/gaze/config.toml`.
 
-Most users only need to change camera device or security level.
+Most users only need to change camera source or security level.
 
 ## Default config
 
@@ -10,7 +10,7 @@ Most users only need to change camera device or security level.
 level = "medium"
 
 [cameras]
-rgb = "/dev/video0"
+rgb = "primary"
 
 [enrollment]
 max_captures_per_face = 8
@@ -43,22 +43,23 @@ recognizer = "w600k_r50.onnx"
 threshold = 0.55
 ```
 
-## Select camera device
+## Select Camera Source
 
-List camera devices:
-
-```bash
-ls /dev/video*
-```
-
-Then set:
+The default camera source is:
 
 ```toml
 [cameras]
-rgb = "/dev/video0"
+rgb = "primary"
 ```
 
-If you use an external USB webcam, it may appear as `/dev/video1` or higher.
+`primary` uses GStreamer `autovideosrc`. To pin Gaze to a specific PipeWire camera, use `gaze config` or set `rgb` to a GStreamer source:
+
+```toml
+[cameras]
+rgb = "pipewiresrc target-object=<pipewire-target>"
+```
+
+Direct `/dev/video*` paths are not supported.
 
 After changing config:
 

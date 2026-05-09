@@ -7,6 +7,7 @@ use zvariant::{OwnedValue, Value};
 const DEFAULT_CONFIG_PATH: &str = "/etc/gaze/config.toml";
 pub const USERS_DIR: &str = "/var/lib/gaze/users";
 pub const MODELS_DIR: &str = "/var/cache/gaze";
+pub const DEFAULT_RGB_CAMERA: &str = "primary";
 
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 #[serde(tag = "level", rename_all = "kebab-case")]
@@ -73,7 +74,7 @@ pub struct CameraConfig {
 }
 
 fn default_rgb_device() -> String {
-    "/dev/video0".to_string()
+    DEFAULT_RGB_CAMERA.to_string()
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -216,7 +217,7 @@ impl Config {
             rgb: cameras_dict
                 .get("rgb")
                 .and_then(|v| v.clone().try_into().ok())
-                .unwrap_or_else(|| "/dev/video0".to_string()),
+                .unwrap_or_else(default_rgb_device),
         };
 
         let enrollment_dict = map
