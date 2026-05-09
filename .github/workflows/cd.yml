@@ -14,14 +14,13 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  NFPM_VERSION: v2.46.3
 
 jobs:
   build-packages:
     name: Build ${{ matrix.name }} packages
     runs-on: ubuntu-latest
     container: ${{ matrix.container }}
-    env:
-      GPG_PRIVATE_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
     strategy:
       fail-fast: false
       matrix:
@@ -55,7 +54,7 @@ jobs:
                 pkg-config
           - id: rpm
             name: rpm (Fedora)
-            container: fedora:latest
+            container: fedora:42
             format: rpm
             install_cmd: |
               dnf install -y \
@@ -121,16 +120,8 @@ jobs:
 
       - name: Install nfpm
         run: |
-          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@${NFPM_VERSION}
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-
-      - name: Prepare nfpm signing key
-        run: |
-          if [ -n "$GPG_PRIVATE_KEY" ]; then
-            printf '%s' "$GPG_PRIVATE_KEY" > /tmp/nfpm-signing-key.asc
-            chmod 600 /tmp/nfpm-signing-key.asc
-            echo "NFPM_SIGNING_KEY_FILE=/tmp/nfpm-signing-key.asc" >> "$GITHUB_ENV"
-          fi
 
       - name: Configure Arch LLVM/Clang environment
         if: ${{ matrix.id == 'arch' }}
@@ -143,12 +134,27 @@ jobs:
           echo "CC=/usr/lib/llvm19/bin/clang" >> "$GITHUB_ENV"
           echo "CXX=/usr/lib/llvm19/bin/clang++" >> "$GITHUB_ENV"
 
-      - name: Build native packages
+      - name: Build native artifacts
         env:
           CARGO_BUILD_JOBS: 2
           RUSTFLAGS: -Cdebuginfo=0
         run: |
-          VERSION="${GITHUB_REF_NAME#v}" just package "${{ matrix.format }}"
+          VERSION="${GITHUB_REF_NAME#v}" just build-rust
+          VERSION="${GITHUB_REF_NAME#v}" just build-selinux
+
+      - name: Prepare nfpm signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+        run: |
+          if [ -n "$GPG_PRIVATE_KEY" ]; then
+            printf '%s' "$GPG_PRIVATE_KEY" > /tmp/nfpm-signing-key.asc
+            chmod 600 /tmp/nfpm-signing-key.asc
+            echo "NFPM_SIGNING_KEY_FILE=/tmp/nfpm-signing-key.asc" >> "$GITHUB_ENV"
+          fi
+
+      - name: Package native artifacts
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}" just package-prebuilt "${{ matrix.format }}"
           ls -lh dist/packages/
 
       - name: Upload package artifacts

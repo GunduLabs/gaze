@@ -2,9 +2,12 @@ use futures::StreamExt;
 use ndarray::Array1;
 use opencv::core::Mat;
 use std::collections::HashMap;
+use std::ffi::CString;
+use std::ptr;
 use std::sync::Arc;
 use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info};
+use zbus::names::BusName;
 use zbus::zvariant::OwnedValue;
 use zbus::{fdo, interface, message::Header, object_server::SignalEmitter};
 
@@ -19,6 +22,7 @@ use gaze_core::face::FaceChecker;
 const CONFIG_PATH: &str = "/etc/gaze/config.toml";
 const POLKIT_ACTION_MANAGE_FACES: &str = "com.gundulabs.gaze.manage-faces";
 const POLKIT_ACTION_MANAGE_CONFIG: &str = "com.gundulabs.gaze.manage-config";
+const CLAIM_TIMEOUT_SECS: u64 = 300;
 
 #[derive(Clone)]
 pub struct ClaimState {
@@ -51,8 +55,82 @@ impl AuthDaemon {
             UserDbError::UserNotFound(msg) => fdo::Error::FileNotFound(msg),
             UserDbError::FaceNotFound(msg) => fdo::Error::FileNotFound(msg),
             UserDbError::FaceExists(msg) => fdo::Error::FileExists(msg),
+            UserDbError::InvalidName(msg) => fdo::Error::InvalidArgs(msg),
             UserDbError::Io(io_err) => fdo::Error::Failed(io_err.to_string()),
         }
+    }
+
+    fn username_uid(username: &str) -> fdo::Result<u32> {
+        UserDatabase::validate_username(username).map_err(Self::map_user_db_error)?;
+
+        let c_username = CString::new(username)
+            .map_err(|_| fdo::Error::InvalidArgs("username contains NUL byte".into()))?;
+        let mut pwd = unsafe { std::mem::zeroed::<libc::passwd>() };
+        let mut result: *mut libc::passwd = ptr::null_mut();
+        let buf_size = unsafe { libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX) };
+        let buf_size = if buf_size > 0 {
+            buf_size as usize
+        } else {
+            16 * 1024
+        };
+        let mut buf = vec![0u8; buf_size];
+
+        let ret = unsafe {
+            libc::getpwnam_r(
+                c_username.as_ptr(),
+                &mut pwd,
+                buf.as_mut_ptr() as *mut libc::c_char,
+                buf.len(),
+                &mut result,
+            )
+        };
+
+        if ret != 0 {
+            return Err(fdo::Error::Failed(format!(
+                "failed to resolve user '{username}'"
+            )));
+        }
+        if result.is_null() {
+            return Err(fdo::Error::AccessDenied(format!(
+                "unknown user '{username}'"
+            )));
+        }
+
+        Ok(pwd.pw_uid)
+    }
+
+    async fn caller_uid(header: &Header<'_>) -> fdo::Result<u32> {
+        let sender = header
+            .sender()
+            .ok_or_else(|| fdo::Error::AccessDenied("Missing DBus sender".into()))?;
+        let conn = zbus::Connection::system()
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("Failed to connect to system bus: {e}")))?;
+        let dbus = fdo::DBusProxy::new(&conn)
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("Failed to create DBus proxy: {e}")))?;
+        dbus.get_connection_unix_user(sender.to_owned().into())
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("Failed to get caller uid: {e}")))
+    }
+
+    async fn ensure_user_access(
+        header: &Header<'_>,
+        username: &str,
+        action_id: &str,
+    ) -> fdo::Result<()> {
+        let caller_uid = Self::caller_uid(header).await?;
+        let target_uid = Self::username_uid(username)?;
+        if caller_uid == 0 || caller_uid == target_uid {
+            return Ok(());
+        }
+
+        Self::ensure_authorized(header, action_id).await
+    }
+
+    fn signal_destination(sender: &str) -> fdo::Result<BusName<'static>> {
+        BusName::try_from(sender.to_string())
+            .map_err(|e| fdo::Error::Failed(format!("Invalid signal destination: {e}")))
     }
 
     fn process_frame(
@@ -123,7 +201,7 @@ impl AuthDaemon {
         Ok(())
     }
 
-    async fn check_claim(&self, header: &Header<'_>) -> fdo::Result<String> {
+    async fn check_claim(&self, header: &Header<'_>) -> fdo::Result<ClaimState> {
         let sender = header
             .sender()
             .map(|s| s.to_string())
@@ -132,7 +210,7 @@ impl AuthDaemon {
         let state = self.claim_state.lock().await;
         if let Some(claim) = &*state {
             if claim.sender == sender {
-                return Ok(claim.username.clone());
+                return Ok(claim.clone());
             } else {
                 return Err(fdo::Error::Failed(
                     "Daemon is claimed by another process".into(),
@@ -188,20 +266,54 @@ impl AuthDaemon {
             .map(|s| s.to_string())
             .ok_or_else(|| fdo::Error::AccessDenied("Missing DBus sender".into()))?;
 
+        let caller_uid = Self::caller_uid(&header).await?;
+        let target_uid = Self::username_uid(&username)?;
+        if caller_uid != 0 && caller_uid != target_uid {
+            Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_FACES).await?;
+        }
+
         let mut state = self.claim_state.lock().await;
         if let Some(existing) = &*state {
             if existing.sender == sender {
                 return Ok(());
             }
-            return Err(fdo::Error::Failed(
-                "Device already claimed by another interface".into(),
-            ));
+            if caller_uid == 0 {
+                self.cancel_active_tasks();
+                info!(
+                    sender = %sender,
+                    previous_sender = %existing.sender,
+                    "Root caller preempting existing daemon claim"
+                );
+            } else {
+                return Err(fdo::Error::Failed(
+                    "Device already claimed by another interface".into(),
+                ));
+            }
         }
 
         info!(sender = %sender, username = %username, "Claimed daemon");
         *state = Some(ClaimState {
             username,
             sender: sender.clone(),
+        });
+        drop(state);
+
+        let claim_state = self.claim_state.clone();
+        let active_cancel = self.active_cancel.clone();
+        let sender_for_timeout = sender.clone();
+
+        self.rt_handle.spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(CLAIM_TIMEOUT_SECS)).await;
+            let mut state = claim_state.lock().await;
+            if let Some(claim) = &*state
+                && claim.sender == sender_for_timeout
+            {
+                *state = None;
+                let mut cancel = active_cancel.lock().await;
+                if let Some(tx) = cancel.take() {
+                    let _ = tx.send(());
+                }
+            }
         });
 
         let claim_state = self.claim_state.clone();
@@ -232,9 +344,8 @@ impl AuthDaemon {
                         && claim.sender == sender_for_watcher
                     {
                         *state = None;
-                        if let Ok(mut cancel) = active_cancel.try_lock()
-                            && let Some(tx) = cancel.take()
-                        {
+                        let mut cancel = active_cancel.lock().await;
+                        if let Some(tx) = cancel.take() {
                             let _ = tx.send(());
                         }
                     }
@@ -273,7 +384,9 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         _face_name: String,
     ) -> fdo::Result<()> {
-        let username = self.check_claim(&header).await?;
+        let claim = self.check_claim(&header).await?;
+        let username = claim.username.clone();
+        let signal_destination = Self::signal_destination(&claim.sender)?;
         self.cancel_active_tasks();
 
         let (tx, mut rx) = oneshot::channel();
@@ -289,7 +402,9 @@ impl AuthDaemon {
         let path = ctxt.path().to_owned();
 
         self.rt_handle.spawn(async move {
-            let ctxt = SignalEmitter::new(&conn, path).unwrap();
+            let ctxt = SignalEmitter::new(&conn, path)
+                .unwrap()
+                .set_destination(signal_destination);
 
 
             let mut cam = match Camera::open(&camera_config) {
@@ -375,12 +490,12 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         face_name: String,
     ) -> fdo::Result<()> {
-        let username = self.check_claim(&header).await?;
+        let claim = self.check_claim(&header).await?;
+        let username = claim.username.clone();
+        let signal_destination = Self::signal_destination(&claim.sender)?;
         self.cancel_active_tasks();
 
-        if face_name.trim().is_empty() {
-            return Err(fdo::Error::InvalidArgs("Face name cannot be empty".into()));
-        }
+        UserDatabase::validate_face_name(&face_name).map_err(Self::map_user_db_error)?;
 
         let (tx, mut rx) = oneshot::channel();
         *self.active_cancel.lock().await = Some(tx);
@@ -394,7 +509,9 @@ impl AuthDaemon {
         let path = ctxt.path().to_owned();
 
         self.rt_handle.spawn(async move {
-            let ctxt = SignalEmitter::new(&conn, path).unwrap();
+            let ctxt = SignalEmitter::new(&conn, path)
+                .unwrap()
+                .set_destination(signal_destination);
 
 
             let mut cam = match Camera::open(&camera_config) {
@@ -560,7 +677,12 @@ impl AuthDaemon {
         Ok(())
     }
 
-    async fn list_faces(&self, username: String) -> fdo::Result<Vec<(String, u32)>> {
+    async fn list_faces(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        username: String,
+    ) -> fdo::Result<Vec<(String, u32)>> {
+        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let db = self.db.lock().await;
         db.list_faces(&username).map_err(Self::map_user_db_error)
     }
@@ -571,7 +693,7 @@ impl AuthDaemon {
         username: String,
         face_name: String,
     ) -> fdo::Result<bool> {
-        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_FACES).await?;
+        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let mut db = self.db.lock().await;
         db.remove_face(&username, &face_name)
             .map_err(Self::map_user_db_error)?;
@@ -585,7 +707,7 @@ impl AuthDaemon {
         old_face_name: String,
         new_face_name: String,
     ) -> fdo::Result<bool> {
-        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_FACES).await?;
+        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let mut db = self.db.lock().await;
         db.rename_face(&username, &old_face_name, &new_face_name)
             .map_err(Self::map_user_db_error)?;
@@ -597,13 +719,17 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         username: String,
     ) -> fdo::Result<bool> {
-        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_FACES).await?;
+        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let mut db = self.db.lock().await;
         db.clear_user(&username).map_err(Self::map_user_db_error)?;
         Ok(true)
     }
 
-    async fn get_config(&self) -> fdo::Result<HashMap<String, HashMap<String, OwnedValue>>> {
+    async fn get_config(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+    ) -> fdo::Result<HashMap<String, HashMap<String, OwnedValue>>> {
+        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
         let config = Config::load_from(CONFIG_PATH)
             .map_err(|e| fdo::Error::Failed(format!("Failed to load config: {e}")))?;
         Ok(config.to_map())

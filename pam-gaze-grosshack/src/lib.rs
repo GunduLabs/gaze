@@ -15,6 +15,14 @@ struct AuthState {
 
 type SharedAuthState = Arc<(Mutex<AuthState>, Condvar)>;
 
+fn wait_for_prompt_finish(state: &SharedAuthState) {
+    let (lock, condvar) = &**state;
+    let mut shared_state = lock.lock();
+    while !shared_state.finished {
+        condvar.wait(&mut shared_state);
+    }
+}
+
 fn wait_for_password_and_fallback(pamh: PamHandle, state: &SharedAuthState) -> c_int {
     let (lock, condvar) = &**state;
     let mut shared_state = lock.lock();
@@ -60,7 +68,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
     let thread_state = Arc::clone(&state);
     let pamh_worker = pamh as usize;
-    let _ = thread::spawn(move || {
+    let prompt_thread = thread::spawn(move || {
         let password = unsafe { prompt_password(pamh_worker as PamHandle) };
         let (lock, condvar) = &*thread_state;
         let mut shared_state = lock.lock();
@@ -73,31 +81,33 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         condvar.notify_all();
     });
 
-    rt.block_on(async {
+    let biometric_result = rt.block_on(async {
         let auth_future = authenticate_biometric(&username);
         let timeout_duration = Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS);
 
-        let result = tokio::select! {
+        tokio::select! {
             res = auth_future => {
                 match res {
-                    Ok(Some(true)) => {
-                        unblock_terminal();
-                        Some(PAM_SUCCESS)
-                    }
+                    Ok(Some(true)) => Some(PAM_SUCCESS),
                     Ok(Some(false)) => Some(PAM_AUTH_ERR),
                     Ok(None) => Some(PAM_IGNORE),
                     Err(_) => None,
                 }
             }
             _ = tokio::time::sleep(timeout_duration) => None,
-        };
-
-        if result == Some(PAM_SUCCESS) {
-            return PAM_SUCCESS;
         }
+    });
 
-        wait_for_password_and_fallback(pamh, &state)
-    })
+    if biometric_result == Some(PAM_SUCCESS) {
+        unblock_terminal();
+        wait_for_prompt_finish(&state);
+        let _ = prompt_thread.join();
+        return PAM_SUCCESS;
+    }
+
+    let fallback = wait_for_password_and_fallback(pamh, &state);
+    let _ = prompt_thread.join();
+    fallback
 }
 
 fn unblock_terminal() {

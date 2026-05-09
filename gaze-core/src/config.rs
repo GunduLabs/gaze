@@ -1,6 +1,8 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use zvariant::{OwnedValue, Value};
 
@@ -257,8 +259,37 @@ impl Config {
 
     pub fn save_to(&self, path: &str) -> anyhow::Result<()> {
         let encoded = toml::to_string_pretty(self).context("failed to serialize config")?;
-        std::fs::write(path, encoded)
-            .with_context(|| format!("failed to write config file: {}", path))?;
+        let path = Path::new(path);
+        let parent = path
+            .parent()
+            .context("config path must have a parent directory")?;
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .context("config path must have a valid file name")?;
+        let tmp_path = parent.join(format!(".{file_name}.{}.tmp", std::process::id()));
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp_path)
+            .with_context(|| {
+                format!(
+                    "failed to create temporary config file: {}",
+                    tmp_path.display()
+                )
+            })?;
+        if let Err(err) = file
+            .write_all(encoded.as_bytes())
+            .and_then(|_| file.flush())
+        {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(err)
+                .with_context(|| format!("failed to write config file: {}", path.display()));
+        }
+        drop(file);
+        std::fs::rename(&tmp_path, path)
+            .with_context(|| format!("failed to replace config file: {}", path.display()))?;
         Ok(())
     }
 }

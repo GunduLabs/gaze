@@ -4,6 +4,7 @@
 set -e
 
 PKG_BASE_URL="https://packages.gundulabs.com"
+REPO_KEY_FPR="505AC1C71AFEDBD5555235F6CB4FA24E5C1C7C98"
 AUTO_YES=0
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
@@ -47,6 +48,20 @@ need grep
 need uname
 need awk
 need id
+need gpg
+
+fetch_repo_key() {
+    key_path="$TMP/gundulabs-repo.asc"
+    curl -fsSL "${PKG_BASE_URL}/keys/gundulabs-repo.asc" -o "$key_path"
+    actual_fpr="$(gpg --show-keys --with-colons "$key_path" | awk -F: '$1 == "fpr" { print $10; exit }')"
+    if [ "$actual_fpr" != "$REPO_KEY_FPR" ]; then
+        red "Repository signing key fingerprint mismatch."
+        red "Expected: $REPO_KEY_FPR"
+        red "Actual:   ${actual_fpr:-unknown}"
+        exit 1
+    fi
+    printf '%s\n' "$key_path"
+}
 
 bold "Gaze installer"
 echo ""
@@ -142,10 +157,12 @@ trap 'rm -rf "$TMP"' EXIT
 if is_deb; then
     echo ""
     bold "Step 1/5: Configuring apt repository"
+    KEY_PATH="$(fetch_repo_key)"
+    gpg --dearmor --yes --output "$TMP/gundulabs-archive-keyring.gpg" "$KEY_PATH"
     sudo mkdir -p -m 0755 /usr/share/keyrings
-    curl -fsSL "${PKG_BASE_URL}/keys/gundulabs-repo.gpg" \
-        | sudo tee /usr/share/keyrings/gundulabs-archive-keyring.gpg >/dev/null
-    curl -fsSL "${PKG_BASE_URL}/setup/deb/gundulabs.list" \
+    sudo cp "$TMP/gundulabs-archive-keyring.gpg" /usr/share/keyrings/gundulabs-archive-keyring.gpg
+    sudo chmod 0644 /usr/share/keyrings/gundulabs-archive-keyring.gpg
+    printf '%s\n' "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] ${PKG_BASE_URL}/deb stable main" \
         | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 
     bold "Step 2/5: Updating package index"
@@ -163,9 +180,20 @@ if is_deb; then
 elif is_rpm; then
     echo ""
     bold "Step 1/5: Configuring dnf repository"
-    sudo rpm --import "${PKG_BASE_URL}/keys/gundulabs-repo.asc"
-    curl -fsSL "${PKG_BASE_URL}/setup/rpm/gundulabs.repo" \
-        | sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null
+    KEY_PATH="$(fetch_repo_key)"
+    sudo mkdir -p -m 0755 /etc/pki/rpm-gpg
+    sudo cp "$KEY_PATH" /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+    sudo chmod 0644 /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+    sudo rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+    sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
+[gundulabs]
+name=Gundu Labs
+baseurl=${PKG_BASE_URL}/rpm/\$basearch
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+EOF
 
     bold "Step 2/5: Refreshing repository metadata"
     if command -v dnf >/dev/null 2>&1; then

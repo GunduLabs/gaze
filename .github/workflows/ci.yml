@@ -53,6 +53,9 @@ jobs:
       - name: Install just
         uses: taiki-e/install-action@just
 
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
@@ -67,6 +70,9 @@ jobs:
 
       - name: Run tests
         run: just test
+
+      - name: Run cargo audit
+        run: just audit
 
       - name: Build workspace
         env:

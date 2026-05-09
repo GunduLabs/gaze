@@ -80,6 +80,10 @@ _nfpm config format:
 
 # Build nfpm packages for a given packager
 package format: build-rust build-selinux
+    just package-prebuilt {{ format }}
+
+# Package already-built artifacts for a given packager
+package-prebuilt format:
     mkdir -p dist/packages
     just _nfpm packaging/nfpm.yaml {{ format }}
     just _nfpm packaging/nfpm-gui.yaml {{ format }}
@@ -99,6 +103,10 @@ clean:
 # Run the full test suite
 test:
     cargo test --workspace --release
+
+# Check dependencies for known security advisories
+audit:
+    cargo audit
 
 # Run clippy lints across the workspace
 lint:

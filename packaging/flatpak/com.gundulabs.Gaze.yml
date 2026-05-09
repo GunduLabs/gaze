@@ -10,7 +10,7 @@ finish-args:
   - --share=ipc
   - --socket=fallback-x11
   - --socket=wayland
-  - --device=all
+  - --device=dri
   - --system-talk-name=com.gundulabs.Gaze
   - --filesystem=xdg-run/gvfsd
   - --filesystem=xdg-run/gvfs:ro

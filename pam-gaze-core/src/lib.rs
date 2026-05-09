@@ -78,7 +78,7 @@ unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<Stri
             let resp = (*resp_ptr).resp;
             if !resp.is_null() {
                 result = Some(CStr::from_ptr(resp).to_string_lossy().into_owned());
-                let _ = CString::from_raw(resp);
+                libc::free(resp as *mut c_void);
             }
             libc::free(resp_ptr as *mut c_void);
         }

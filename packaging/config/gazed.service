@@ -9,9 +9,24 @@ ExecStart=/usr/bin/gazed
 Restart=on-failure
 RestartSec=5
 StateDirectory=gaze
+StateDirectoryMode=0700
 CacheDirectory=gaze
+CacheDirectoryMode=0700
+UMask=0077
 User=root
 Group=root
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+ReadWritePaths=/etc/gaze /var/lib/gaze /var/cache/gaze
 
 [Install]
 WantedBy=multi-user.target
