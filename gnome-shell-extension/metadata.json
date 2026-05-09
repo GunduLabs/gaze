@@ -3,6 +3,7 @@
     "description": "Adds face authentication support to the GDM login and lock screen using the Gaze facial recognition daemon.",
     "uuid": "gaze@gundulabs.com",
     "shell-version": [
+    	"50",
         "49",
         "48",
         "47",
