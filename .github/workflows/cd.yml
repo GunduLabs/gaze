@@ -41,6 +41,8 @@ jobs:
                 libcairo2-dev \
                 libglib2.0-dev \
                 libgdk-pixbuf-2.0-dev \
+                libgstreamer1.0-dev \
+                libgstreamer-plugins-base1.0-dev \
                 libpango1.0-dev \
                 libgraphene-1.0-dev \
                 libopencv-dev \
@@ -71,6 +73,8 @@ jobs:
                 policycoreutils \
                 gtk4-devel \
                 libadwaita-devel \
+                gstreamer1-devel \
+                gstreamer1-plugins-base-devel \
                 openssl-devel \
                 gnupg2 \
                 rpm-sign \
@@ -87,13 +91,15 @@ jobs:
                 ca-certificates \
                 curl \
                 go \
-                clang19 \
-                llvm19   \
+                clang \
+                llvm \
                 opencv \
                 v4l-utils \
                 pam \
                 gtk4 \
                 libadwaita \
+                gstreamer \
+                gst-plugins-base \
                 openssl \
                 gnupg \
                 pkgconf \
@@ -126,13 +132,11 @@ jobs:
       - name: Configure Arch LLVM/Clang environment
         if: ${{ matrix.id == 'arch' }}
         run: |
-          echo "/usr/lib/llvm19/bin" >> "$GITHUB_PATH"
-          echo "LLVM_CONFIG_PATH=/usr/lib/llvm19/bin/llvm-config" >> "$GITHUB_ENV"
-          echo "LIBCLANG_PATH=/usr/lib/llvm19/lib" >> "$GITHUB_ENV"
-          echo "LIBRARY_PATH=/usr/lib/llvm19/lib" >> "$GITHUB_ENV"
-          echo "CLANG_PATH=/usr/lib/llvm19/bin/clang" >> "$GITHUB_ENV"
-          echo "CC=/usr/lib/llvm19/bin/clang" >> "$GITHUB_ENV"
-          echo "CXX=/usr/lib/llvm19/bin/clang++" >> "$GITHUB_ENV"
+          echo "LLVM_CONFIG_PATH=/usr/bin/llvm-config" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=/usr/lib" >> "$GITHUB_ENV"
+          echo "CLANG_PATH=/usr/bin/clang" >> "$GITHUB_ENV"
+          echo "CC=/usr/bin/clang" >> "$GITHUB_ENV"
+          echo "CXX=/usr/bin/clang++" >> "$GITHUB_ENV"
 
       - name: Build native artifacts
         env:
