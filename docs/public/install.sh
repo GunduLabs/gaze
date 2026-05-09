@@ -211,6 +211,7 @@ EOF
 
     if command -v authselect >/dev/null 2>&1; then
         sudo authselect select gaze --force || true
+	sudo authselect enable-feature with-silent-lastlog || true
     fi
 
     bold "Step 4/5: Enabling GNOME extension"
