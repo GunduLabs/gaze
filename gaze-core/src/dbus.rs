@@ -28,6 +28,10 @@ pub enum CaptureStatus {
     Clipped,
     #[strum(serialize = "Please center your face...")]
     NotCentered,
+    #[strum(serialize = "Please come closer...")]
+    TooFar,
+    #[strum(serialize = "Please back up...")]
+    TooClose,
     #[strum(serialize = "Hold still...")]
     Ready,
 }
@@ -49,15 +53,15 @@ pub enum CaptureStatus {
 #[zvariant(signature = "s")]
 #[serde(rename_all = "kebab-case")]
 pub enum EnrollPrompt {
-    #[strum(serialize = "Look straight at the camera")]
+    #[strum(serialize = "Face the camera")]
     LookStraight,
-    #[strum(serialize = "Look slightly up")]
+    #[strum(serialize = "Tilt your face slightly up")]
     LookUp,
-    #[strum(serialize = "Look slightly down")]
+    #[strum(serialize = "Tilt your face slightly down")]
     LookDown,
-    #[strum(serialize = "Look slightly left")]
+    #[strum(serialize = "Turn your face slightly left")]
     LookLeft,
-    #[strum(serialize = "Look slightly right")]
+    #[strum(serialize = "Turn your face slightly right")]
     LookRight,
     #[strum(serialize = "Database error during enrollment")]
     DbFailed,

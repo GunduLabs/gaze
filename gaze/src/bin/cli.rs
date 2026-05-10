@@ -390,7 +390,10 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
                     let status = *args.status();
                     let msg = match status {
                         CaptureStatus::NoFace => style(status.to_string()).red().to_string(),
-                        CaptureStatus::Clipped | CaptureStatus::NotCentered => style(status.to_string()).yellow().to_string(),
+                        CaptureStatus::Clipped
+                        | CaptureStatus::NotCentered
+                        | CaptureStatus::TooFar
+                        | CaptureStatus::TooClose => style(status.to_string()).yellow().to_string(),
                         CaptureStatus::Ready => format!("Scanning face for {}...", style(user).cyan().bold()),
                     };
                     pb.set_message(msg);

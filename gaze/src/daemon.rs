@@ -617,7 +617,7 @@ impl AuthDaemon {
                     let pitch = data.pitch;
 
                     match prompt {
-                        EnrollPrompt::LookStraight => yaw.abs() < 0.1 && (pitch - 0.45).abs() < 0.12,
+                        EnrollPrompt::LookStraight => yaw.abs() < 0.16 && (pitch - 0.48).abs() < 0.18,
                         EnrollPrompt::LookUp => pitch < 0.35,
                         EnrollPrompt::LookDown => pitch > 0.55,
                         EnrollPrompt::LookLeft => yaw < -0.15,

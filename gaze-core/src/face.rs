@@ -5,6 +5,9 @@ use opencv::core::Mat;
 use opencv::prelude::*;
 use std::path::Path;
 
+const MIN_FACE_SIZE_RATIO: f32 = 0.35;
+const MAX_FACE_SIZE_RATIO: f32 = 0.78;
+
 pub struct CaptureResult {
     pub bytes: Vec<u8>,
     pub width: u32,
@@ -88,10 +91,12 @@ impl FaceChecker {
         let y2 = face[3];
 
         let max_dim = (frame.cols() as f32).max(frame.rows() as f32);
+        let min_dim = (frame.cols() as f32).min(frame.rows() as f32);
         let edge_margin = 0.05;
         let (width, height) = (x2 - x1, y2 - y1);
         let (cx, cy) = (x1 + width / 2.0, y1 + height / 2.0);
         let (norm_cx, norm_cy) = (cx / max_dim, cy / max_dim);
+        let face_size_ratio = width.max(height) / min_dim;
 
         let mut yaw = 0.0;
         let mut pitch = 0.0;
@@ -124,6 +129,10 @@ impl FaceChecker {
             CaptureStatus::Clipped
         } else if (norm_cx - 0.5).abs() >= 0.2 || (norm_cy - 0.5).abs() >= 0.2 {
             CaptureStatus::NotCentered
+        } else if face_size_ratio < MIN_FACE_SIZE_RATIO {
+            CaptureStatus::TooFar
+        } else if face_size_ratio > MAX_FACE_SIZE_RATIO {
+            CaptureStatus::TooClose
         } else if kps.is_none() {
             return Ok((CaptureStatus::NoFace, None));
         } else {

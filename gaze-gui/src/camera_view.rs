@@ -105,7 +105,10 @@ impl CameraFeed {
             let (red, green, blue, alpha) = if active {
                 match status {
                     CaptureStatus::NoFace => (0.6, 0.6, 0.6, 0.5),
-                    CaptureStatus::NotCentered | CaptureStatus::Clipped => (1.0, 0.8, 0.2, 0.7),
+                    CaptureStatus::NotCentered
+                    | CaptureStatus::Clipped
+                    | CaptureStatus::TooFar
+                    | CaptureStatus::TooClose => (1.0, 0.8, 0.2, 0.7),
                     CaptureStatus::Ready => (0.2, 0.9, 0.4, 0.85),
                 }
             } else {
@@ -151,6 +154,8 @@ impl CameraFeed {
                     CaptureStatus::NoFace => "No Face",
                     CaptureStatus::NotCentered => "Not Centered",
                     CaptureStatus::Clipped => "Face Clipped",
+                    CaptureStatus::TooFar => "Come Closer",
+                    CaptureStatus::TooClose => "Back Up",
                     CaptureStatus::Ready => "Ready",
                 };
                 cr.set_font_size(min_dim * 0.035);
