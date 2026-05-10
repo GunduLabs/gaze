@@ -62,9 +62,7 @@ async fn main() -> anyhow::Result<()> {
     info!(elapsed = ?t_load.elapsed(), "Models & user DB loaded");
 
     if let Ok(uid) = daemon::get_active_session_uid().await {
-        unsafe {
-            std::env::set_var("XDG_RUNTIME_DIR", format!("/run/user/{}", uid));
-        }
+        daemon::set_pipewire_runtime_for_uid(uid);
     }
 
     let _conn = Builder::system()?

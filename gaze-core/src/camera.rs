@@ -7,6 +7,7 @@ use tracing::info;
 use crate::config::DEFAULT_RGB_CAMERA;
 
 const PRIMARY_CAMERA_DISPLAY_NAME: &str = "Primary Camera";
+const DEVICE_SETTLE_TIMEOUT_MS: u64 = 100;
 
 pub struct Camera {
     cap: VideoCapture,
@@ -18,10 +19,10 @@ impl Camera {
         let p = if source.is_empty() {
             anyhow::bail!("camera source cannot be empty; use \"primary\" or a GStreamer source");
         } else if source == DEFAULT_RGB_CAMERA {
-            "autovideosrc ! videoconvert ! appsink".to_string()
+            "pipewiresrc ! videoconvert ! appsink".to_string()
         } else if source.starts_with("/dev/video") {
             anyhow::bail!(
-                "direct /dev/video* camera paths are no longer supported; use \"primary\" or a GStreamer source"
+                "direct /dev/video* camera paths are not supported; use \"primary\" or a GStreamer source"
             );
         } else {
             format!("{} ! videoconvert ! appsink", source)
@@ -54,6 +55,7 @@ pub fn enumerate_cameras() -> anyhow::Result<Vec<(String, String)>> {
     let caps = gstreamer::Caps::builder("video/x-raw").build();
     monitor.add_filter(Some("Video/Source"), Some(&caps));
     monitor.start()?;
+    wait_for_device_updates(&monitor);
     let devices = monitor.devices();
     monitor.stop();
 
@@ -64,13 +66,10 @@ pub fn enumerate_cameras() -> anyhow::Result<Vec<(String, String)>> {
     for device in devices {
         let display_name = device.display_name().to_string();
         if let Some(props) = device.properties() {
-            let target = if let Ok(name) = props.get::<String>("node.name") {
-                name
-            } else if let Ok(serial) = props.get::<u64>("object.serial") {
-                serial.to_string()
-            } else if let Ok(api) = props.get::<String>("object.path") {
-                api
-            } else {
+            if !props.has_name("pipewire-proplist") || !has_color_caps(&device) {
+                continue;
+            }
+            let Some(target) = pipewire_target(&props) else {
                 continue;
             };
             let target = format!("pipewiresrc target-object={}", target);
@@ -81,4 +80,76 @@ pub fn enumerate_cameras() -> anyhow::Result<Vec<(String, String)>> {
     }
 
     Ok(cameras)
+}
+
+fn wait_for_device_updates(monitor: &gstreamer::DeviceMonitor) {
+    let bus = monitor.bus();
+    while bus
+        .timed_pop_filtered(
+            gstreamer::ClockTime::from_mseconds(DEVICE_SETTLE_TIMEOUT_MS),
+            &[
+                gstreamer::MessageType::DeviceAdded,
+                gstreamer::MessageType::DeviceRemoved,
+            ],
+        )
+        .is_some()
+    {}
+}
+
+fn pipewire_target(props: &gstreamer::StructureRef) -> Option<String> {
+    string_property(props, "node.name")
+        .or_else(|| string_property(props, "object.serial"))
+        .or_else(|| string_property(props, "object.id"))
+        .or_else(|| string_property(props, "object.path"))
+}
+
+fn string_property(props: &gstreamer::StructureRef, name: &str) -> Option<String> {
+    if let Ok(value) = props.get::<String>(name) {
+        Some(value)
+    } else if let Ok(value) = props.get::<u64>(name) {
+        Some(value.to_string())
+    } else if let Ok(value) = props.get::<u32>(name) {
+        Some(value.to_string())
+    } else {
+        None
+    }
+}
+
+fn has_color_caps(device: &gstreamer::Device) -> bool {
+    let Some(caps) = device.caps() else {
+        return true;
+    };
+
+    let mut saw_raw_video = false;
+    for structure in caps.iter() {
+        if structure.name() == "image/jpeg" {
+            return true;
+        }
+        if structure.name() != "video/x-raw" {
+            continue;
+        }
+
+        saw_raw_video = true;
+        let Ok(format) = structure.get::<String>("format") else {
+            return true;
+        };
+        let format = if format == "DMA_DRM" {
+            structure.get::<String>("drm-format").unwrap_or(format)
+        } else {
+            format
+        };
+
+        if !is_mono_format(&format) {
+            return true;
+        }
+    }
+
+    !saw_raw_video
+}
+
+fn is_mono_format(format: &str) -> bool {
+    let format = format.trim().to_ascii_uppercase();
+    format.starts_with("GRAY")
+        || format.starts_with("GREY")
+        || matches!(format.as_str(), "R8" | "R16" | "Y8" | "Y16")
 }

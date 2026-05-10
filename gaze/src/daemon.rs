@@ -253,6 +253,12 @@ pub async fn get_active_session_uid() -> anyhow::Result<u32> {
     Ok(user.0)
 }
 
+pub fn set_pipewire_runtime_for_uid(uid: u32) {
+    unsafe {
+        std::env::set_var("XDG_RUNTIME_DIR", format!("/run/user/{uid}"));
+    }
+}
+
 #[interface(name = "com.gundulabs.Gaze")]
 impl AuthDaemon {
     async fn claim(
@@ -292,6 +298,7 @@ impl AuthDaemon {
         }
 
         info!(sender = %sender, username = %username, "Claimed daemon");
+        set_pipewire_runtime_for_uid(target_uid);
         *state = Some(ClaimState {
             username,
             sender: sender.clone(),

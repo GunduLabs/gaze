@@ -52,7 +52,7 @@ The default camera source is:
 rgb = "primary"
 ```
 
-`primary` uses GStreamer `autovideosrc`. To pin Gaze to a specific PipeWire camera, use `gaze config` or set `rgb` to a GStreamer source:
+`primary` uses GStreamer `pipewiresrc`. To pin Gaze to a specific PipeWire camera, use `gaze config` or set `rgb` to a GStreamer source:
 
 ```toml
 [cameras]
