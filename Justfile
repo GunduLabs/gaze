@@ -5,6 +5,8 @@
 arch := env("ARCH", arch())
 # Package version; defaults to the git tag (strip leading v)
 version := env("VERSION", `git describe --tags --always | sed 's/^v//'`)
+# Package release/revision; distro builds set this to keep artifacts distinct.
+package_release := env("PACKAGE_RELEASE", "1")
 
 # Derived vars
 multiarch := if arch == "aarch64" { "aarch64-linux-gnu" } else { "x86_64-linux-gnu" }
@@ -13,6 +15,7 @@ deb_arch := if arch == "x86_64" { "amd64" } else if arch == "aarch64" { "arm64" 
 export ARCH      := arch
 export VERSION   := version
 export MULTIARCH := multiarch
+export PACKAGE_RELEASE := package_release
 
 # ── build ─────────────────────────────────────────────────────────────────────
 

@@ -26,13 +26,14 @@ Use this if you prefer manual repository setup.
 sudo mkdir -p --mode=0755 /usr/share/keyrings
 curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.gpg \
   | sudo tee /usr/share/keyrings/gundulabs-archive-keyring.gpg >/dev/null
-curl -fsSL https://packages.gundulabs.com/setup/deb/gundulabs.list \
+. /etc/os-release
+printf 'deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb %s main\n' "$VERSION_CODENAME" \
   | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 sudo apt update
 sudo apt install gaze gaze-gui gaze-gnome-extension
 ```
 
-```bash [Fedora/RHEL]
+```bash [Fedora]
 sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
 sudo curl -fsSL https://packages.gundulabs.com/setup/rpm/gundulabs.repo \
   -o /etc/yum.repos.d/gundulabs.repo

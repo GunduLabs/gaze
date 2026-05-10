@@ -85,7 +85,13 @@ fi
 . /etc/os-release
 DISTRO_ID="${ID}"
 DISTRO_LIKE="${ID_LIKE:-}"
+DISTRO_VERSION_ID="${VERSION_ID:-}"
+DISTRO_CODENAME="${VERSION_CODENAME:-${UBUNTU_CODENAME:-}}"
 VARIANT_ID="${VARIANT_ID:-}"
+
+is_fedora() {
+    [ "$DISTRO_ID" = "fedora" ]
+}
 
 is_rpm() {
     case "$DISTRO_ID $DISTRO_LIKE" in
@@ -108,14 +114,46 @@ is_arch() {
     return 1
 }
 
+supported_deb_suite() {
+    case "$DISTRO_CODENAME" in
+        noble|resolute|trixie) return 0 ;;
+    esac
+    return 1
+}
+
+supported_fedora_version() {
+    case "$DISTRO_VERSION_ID" in
+        42|43|44) return 0 ;;
+    esac
+    return 1
+}
+
 if ! is_rpm && ! is_deb && ! is_arch; then
     red "Unsupported distribution: $DISTRO_ID"
-    echo "Supported: Fedora, RHEL/CentOS/AlmaLinux/Rocky, Debian, Ubuntu, Arch Linux, Manjaro"
+    echo "Supported: Ubuntu 24.04/26.04, Debian 13, Fedora 42/43/44, Arch Linux, Manjaro"
+    exit 1
+fi
+
+if is_deb && ! supported_deb_suite; then
+    red "Unsupported Debian/Ubuntu release: ${DISTRO_CODENAME:-unknown}"
+    echo "Supported apt suites: noble, resolute, trixie"
+    exit 1
+fi
+
+if is_rpm && ! is_fedora; then
+    red "Unsupported RPM distribution: $DISTRO_ID"
+    echo "Supported RPM distribution: Fedora"
+    exit 1
+fi
+
+if is_fedora && ! supported_fedora_version; then
+    red "Unsupported Fedora version: ${DISTRO_VERSION_ID:-unknown}"
+    echo "Supported Fedora versions: 42, 43, 44"
     exit 1
 fi
 
 if is_deb; then
-    echo "Detected platform: Debian/Ubuntu (${PKG_ARCH})"
+    echo "Detected platform: Debian/Ubuntu ${DISTRO_CODENAME} (${PKG_ARCH})"
     echo "Package manager: apt"
     echo ""
     bold "Planned steps for this system:"
@@ -125,7 +163,7 @@ if is_deb; then
     echo "- Enable the GNOME extension"
     echo "- Enable the Gaze daemon"
 elif is_rpm; then
-    echo "Detected platform: Fedora/RHEL family (${PKG_ARCH})"
+    echo "Detected platform: Fedora ${DISTRO_VERSION_ID} (${PKG_ARCH})"
     if command -v dnf >/dev/null 2>&1; then
         echo "Package manager: dnf"
     else
@@ -162,7 +200,7 @@ if is_deb; then
     sudo mkdir -p -m 0755 /usr/share/keyrings
     sudo cp "$TMP/gundulabs-archive-keyring.gpg" /usr/share/keyrings/gundulabs-archive-keyring.gpg
     sudo chmod 0644 /usr/share/keyrings/gundulabs-archive-keyring.gpg
-    printf '%s\n' "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] ${PKG_BASE_URL}/deb stable main" \
+    printf '%s\n' "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] ${PKG_BASE_URL}/deb ${DISTRO_CODENAME} main" \
         | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 
     bold "Step 2/5: Updating package index"
@@ -188,7 +226,7 @@ elif is_rpm; then
     sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
 [gundulabs]
 name=Gundu Labs
-baseurl=${PKG_BASE_URL}/rpm/\$basearch
+baseurl=${PKG_BASE_URL}/rpm/fedora/\$releasever/\$basearch
 enabled=1
 gpgcheck=1
 repo_gpgcheck=1

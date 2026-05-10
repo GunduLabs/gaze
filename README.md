@@ -27,7 +27,7 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 ```
 
 <details>
-<summary>Manual install (Debian/Ubuntu, Fedora/RHEL, Arch)</summary>
+<summary>Manual install (Debian/Ubuntu, Fedora, Arch)</summary>
 
 **Debian / Ubuntu**
 
@@ -35,13 +35,14 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 sudo mkdir -p --mode=0755 /usr/share/keyrings
 curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.gpg \
   | sudo tee /usr/share/keyrings/gundulabs-archive-keyring.gpg >/dev/null
-curl -fsSL https://packages.gundulabs.com/setup/deb/gundulabs.list \
+. /etc/os-release
+printf 'deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb %s main\n' "$VERSION_CODENAME" \
   | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 sudo apt update
 sudo apt install gaze gaze-gui gaze-gnome-extension
 ```
 
-**Fedora / RHEL**
+**Fedora**
 
 ```bash
 sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
