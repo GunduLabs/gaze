@@ -99,9 +99,10 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     });
 
     if biometric_result == Some(PAM_SUCCESS) {
-        unblock_terminal();
-        wait_for_prompt_finish(&state);
-        let _ = prompt_thread.join();
+        if unblock_terminal() {
+            wait_for_prompt_finish(&state);
+            let _ = prompt_thread.join();
+        }
         return PAM_SUCCESS;
     }
 
@@ -110,10 +111,14 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     fallback
 }
 
-fn unblock_terminal() {
+fn unblock_terminal() -> bool {
     unsafe {
+        if libc::isatty(0) != 1 {
+            return false;
+        }
+
         let nl = b'\n' as libc::c_char;
-        libc::ioctl(0, libc::TIOCSTI, &nl as *const libc::c_char);
+        libc::ioctl(0, libc::TIOCSTI, &nl as *const libc::c_char) == 0
     }
 }
 
