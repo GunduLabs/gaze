@@ -284,7 +284,13 @@ async fn handle_enroll(
                         current_enroll_msg = format!("{} [{:.1}s]", current_enroll_msg, time_remaining);
                     }
 
-                    if is_done {
+                    if matches!(raw_msg, EnrollPrompt::DbFailed | EnrollPrompt::Cancelled) {
+                         pb.finish_and_clear();
+                         term.write_line(&format!("{} Enrollment failed", style("✗").red().bold()))?;
+                         break;
+                    }
+
+                    if is_done && raw_msg == EnrollPrompt::Completed {
                         pb.finish_and_clear();
                         term.write_line(&format!(
                             "  {} Captures saved for {}/{}!\n",
@@ -295,10 +301,10 @@ async fn handle_enroll(
                         break;
                     }
 
-                    if matches!(raw_msg, EnrollPrompt::DbFailed | EnrollPrompt::Cancelled) {
-                         pb.finish_and_clear();
-                         term.write_line(&format!("{} Enrollment failed", style("✗").red().bold()))?;
-                         break;
+                    if is_done {
+                          pb.finish_and_clear();
+                          term.write_line(&format!("{} Enrollment failed", style("✗").red().bold()))?;
+                          break;
                     }
                 }
             }

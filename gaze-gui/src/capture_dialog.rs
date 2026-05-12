@@ -251,7 +251,9 @@ pub fn show_capture_dialog(
             prompt_label.set_visible(true);
             progress_label.set_visible(true);
             progress.set_visible(true);
+            prompt_label.set_text("Starting enrollment...");
             feed.set_active(true);
+            feed.stop();
 
             let face_name = resolved_face.borrow().clone();
 
@@ -266,6 +268,8 @@ pub fn show_capture_dialog(
                 prompt_label,
                 #[weak]
                 dialog,
+                #[weak]
+                stop_btn,
                 #[strong]
                 on_done,
                 #[strong]
@@ -301,9 +305,9 @@ pub fn show_capture_dialog(
                                 if let Ok(args) = signal.args() {
                                     let prog = *args.progress();
                                     let max = *args.max();
-                                    let raw_msg = args.msg();
+                                    let raw_msg = *args.msg();
                                     let time_remaining = *args.time_remaining();
-                                    let is_done = args.is_done();
+                                    let is_done = *args.is_done();
 
                                     let display_msg = raw_msg.to_string();
 
@@ -319,8 +323,15 @@ pub fn show_capture_dialog(
                                         progress_label.set_text(&format!("{}/{}", prog, max));
                                     }
 
-                                    if *is_done {
+                                    if matches!(raw_msg, EnrollPrompt::DbFailed | EnrollPrompt::Cancelled) {
+                                        prompt_label.set_text(&raw_msg.to_string());
+                                        stop_btn.set_visible(false);
+                                        break;
+                                    }
+
+                                    if is_done && raw_msg == EnrollPrompt::Completed {
                                         prompt_label.set_text("✓ Enrollment Complete!");
+                                        stop_btn.set_visible(false);
                                         on_done();
                                         glib::timeout_add_local_once(
                                             std::time::Duration::from_millis(1500),
@@ -331,8 +342,9 @@ pub fn show_capture_dialog(
                                         break;
                                     }
 
-                                    if matches!(raw_msg, EnrollPrompt::DbFailed | EnrollPrompt::Cancelled) {
-                                        prompt_label.set_text("Enrollment Failed or Cancelled");
+                                    if is_done {
+                                        prompt_label.set_text("Enrollment finished without saving.");
+                                        stop_btn.set_visible(false);
                                         break;
                                     }
                                 }

@@ -26,6 +26,7 @@ pub struct CameraFeed {
     guide: gtk4::DrawingArea,
     rx: Rc<RefCell<Option<mpsc::Receiver<FrameData>>>>,
     latest_frame: Rc<RefCell<Option<opencv::core::Mat>>>,
+    thread_handle: RefCell<Option<thread::JoinHandle<()>>>,
     stop_flag: Arc<AtomicBool>,
     face_status: Rc<RefCell<CaptureStatus>>,
     is_active: Rc<RefCell<bool>>,
@@ -38,7 +39,7 @@ impl CameraFeed {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_clone = stop_flag.clone();
 
-        thread::spawn(move || {
+        let thread_handle = thread::spawn(move || {
             let mut cam = match Camera::open(&device) {
                 Ok(c) => c,
                 Err(err) => {
@@ -174,6 +175,7 @@ impl CameraFeed {
             guide,
             rx: Rc::new(RefCell::new(Some(rx))),
             latest_frame: Rc::new(RefCell::new(None)),
+            thread_handle: RefCell::new(Some(thread_handle)),
             stop_flag,
             face_status,
             is_active,
@@ -192,6 +194,9 @@ impl CameraFeed {
 
     pub fn stop(&self) {
         self.stop_flag.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.thread_handle.borrow_mut().take() {
+            let _ = handle.join();
+        }
     }
 
     pub fn start(&self) {
