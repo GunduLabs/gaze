@@ -90,6 +90,15 @@ enum Commands {
         #[arg(long, help = "Print current values and exit")]
         show: bool,
     },
+    /// Completely uninstall Gaze: packages, PAM integration, config, models, and user data
+    Uninstall {
+        #[arg(short = 'y', long, help = "Skip the confirmation prompt")]
+        yes: bool,
+        #[arg(long, help = "Preserve /var/lib/gaze (enrolled face data)")]
+        keep_data: bool,
+        #[arg(long, help = "Print the planned commands without executing them")]
+        dry_run: bool,
+    },
 }
 
 async fn run_config_wizard(
@@ -590,9 +599,208 @@ async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
     Ok(())
 }
 
+fn which(bin: &str) -> bool {
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("command -v {} >/dev/null 2>&1", bin))
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
+    let mut plan: Vec<(&'static str, String)> = Vec::new();
+
+    if which("gnome-extensions") {
+        plan.push((
+            "Disable GNOME extension (best-effort)",
+            "gnome-extensions disable gaze@gundulabs.com 2>/dev/null || true".into(),
+        ));
+        plan.push((
+            "Disable face auth at GDM (best-effort)",
+            "sudo -u gdm dbus-run-session gsettings set org.gnome.shell.extensions.gaze \
+              enable-face-authentication false 2>/dev/null || true"
+                .into(),
+        ));
+    }
+
+    if which("pam-auth-update") {
+        plan.push((
+            "Remove Debian/Ubuntu PAM profile",
+            "sudo pam-auth-update --package --remove gaze 2>/dev/null || true".into(),
+        ));
+    }
+    if which("authselect") {
+        plan.push((
+            "Revert authselect to sssd",
+            "sudo authselect select sssd --force 2>/dev/null || true".into(),
+        ));
+    }
+
+    plan.push((
+        "Stop and disable daemon",
+        "sudo systemctl disable --now gazed 2>/dev/null || true".into(),
+    ));
+
+    if which("apt-get") {
+        plan.push((
+            "Remove apt packages",
+            "sudo apt-get remove --purge -y gaze gaze-gui gaze-gnome-extension 2>/dev/null || true"
+                .into(),
+        ));
+        plan.push((
+            "Remove apt repo + keyring",
+            "sudo rm -f /etc/apt/sources.list.d/gundulabs.list \
+              /usr/share/keyrings/gundulabs-archive-keyring.gpg && \
+              sudo apt-get update 2>/dev/null || true"
+                .into(),
+        ));
+    } else if which("dnf") {
+        plan.push((
+            "Remove dnf packages",
+            "sudo dnf remove -y gaze gaze-gui gaze-gnome-extension 2>/dev/null || true".into(),
+        ));
+        plan.push((
+            "Remove dnf repo",
+            "sudo rm -f /etc/yum.repos.d/gundulabs.repo".into(),
+        ));
+    } else if which("pacman") {
+        plan.push((
+            "Remove pacman packages",
+            "sudo pacman -Rns --noconfirm gaze gaze-gui gaze-gnome-extension 2>/dev/null || true"
+                .into(),
+        ));
+        plan.push((
+            "Remove pacman repo entry",
+            "sudo sed -i '/^\\[gaze\\]/,/^$/d' /etc/pacman.conf && \
+              sudo rm -f /etc/pacman.d/gaze-mirrorlist"
+                .into(),
+        ));
+    }
+
+    if which("semodule") {
+        plan.push((
+            "Remove SELinux policy",
+            "sudo semodule -r gaze-gdm-camera 2>/dev/null || true".into(),
+        ));
+    }
+
+    plan.push((
+        "Remove model cache",
+        "sudo rm -rf /var/cache/gaze".into(),
+    ));
+    plan.push(("Remove config", "sudo rm -rf /etc/gaze".into()));
+    if !keep_data {
+        plan.push((
+            "Remove enrolled face data",
+            "sudo rm -rf /var/lib/gaze".into(),
+        ));
+    }
+
+    plan.push((
+        "Reload systemd",
+        "sudo systemctl daemon-reload".into(),
+    ));
+
+    plan
+}
+
+fn handle_uninstall(yes: bool, keep_data: bool, dry_run: bool) -> anyhow::Result<()> {
+    let term = Term::stdout();
+    let plan = build_uninstall_plan(keep_data);
+
+    term.write_line(&format!(
+        "\n{}\n",
+        style("Gaze uninstall plan").red().bold()
+    ))?;
+    for (i, (desc, cmd)) in plan.iter().enumerate() {
+        term.write_line(&format!(
+            "  {} {}\n    {}",
+            style(format!("{:>2}.", i + 1)).dim(),
+            style(desc).bold(),
+            style(cmd).dim()
+        ))?;
+    }
+    term.write_line("")?;
+
+    if keep_data {
+        term.write_line(&format!(
+            "  {} /var/lib/gaze (enrolled faces) will be preserved.",
+            style("i").cyan().bold()
+        ))?;
+    } else {
+        term.write_line(&format!(
+            "  {} This removes enrolled face data. Pass --keep-data to preserve it.",
+            style("!").yellow().bold()
+        ))?;
+    }
+    term.write_line("")?;
+
+    if dry_run {
+        term.write_line(&format!(
+            "{} Dry run; no commands were executed.",
+            style("i").cyan().bold()
+        ))?;
+        return Ok(());
+    }
+
+    if !yes {
+        let theme = ColorfulTheme::default();
+        let proceed = Select::with_theme(&theme)
+            .with_prompt("Proceed with uninstall?")
+            .items(["No, cancel", "Yes, uninstall Gaze"])
+            .default(0)
+            .interact()?;
+        if proceed != 1 {
+            term.write_line(&format!("{} Cancelled.", style("✗").red().bold()))?;
+            return Ok(());
+        }
+    }
+
+    for (desc, cmd) in &plan {
+        term.write_line(&format!("\n{} {}", style("▶").cyan().bold(), desc))?;
+        let status = std::process::Command::new("sh").arg("-c").arg(cmd).status();
+        match status {
+            Ok(s) if s.success() => {
+                term.write_line(&format!("  {} done", style("✓").green()))?;
+            }
+            Ok(s) => {
+                term.write_line(&format!(
+                    "  {} step exited with {} (continuing)",
+                    style("!").yellow(),
+                    s.code().unwrap_or(-1)
+                ))?;
+            }
+            Err(e) => {
+                term.write_line(&format!(
+                    "  {} failed to spawn: {} (continuing)",
+                    style("!").yellow(),
+                    e
+                ))?;
+            }
+        }
+    }
+
+    term.write_line(&format!(
+        "\n{} Gaze uninstalled. A reboot is recommended to clear any in-memory state.",
+        style("✓").green().bold()
+    ))?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    if let Commands::Uninstall {
+        yes,
+        keep_data,
+        dry_run,
+    } = cli.command
+    {
+        return handle_uninstall(yes, keep_data, dry_run);
+    }
+
     let conn = Connection::system().await?;
     let proxy = GazeProxy::new(&conn).await?;
 
@@ -654,6 +862,7 @@ async fn main() -> anyhow::Result<()> {
             }
             run_config_wizard(&Term::stdout(), &proxy, config).await?;
         }
+        Commands::Uninstall { .. } => unreachable!("handled before DBus connection"),
     }
 
     Ok(())

@@ -137,6 +137,7 @@ gaze auth --verbose          Authenticate with similarity scores
 gaze list-faces              List enrolled faces
 gaze remove-face <name>      Remove a face
 gaze clear-user              Remove all face data for current user
+gaze uninstall               Cleanly remove Gaze (packages, config, models, data)
 ```
 
 ## Building from source

@@ -70,6 +70,19 @@ gaze clear-user
 
 This is destructive.
 
+## Uninstall Gaze completely
+
+```bash
+gaze uninstall              # interactive
+gaze uninstall --yes        # skip confirmation
+gaze uninstall --keep-data  # preserve enrolled faces in /var/lib/gaze
+gaze uninstall --dry-run    # preview the plan, run nothing
+```
+
+Removes the installed packages, repository config, PAM/authselect integration, SELinux policy, the model cache (`/var/cache/gaze`), the system config (`/etc/gaze`), and — unless `--keep-data` is set — enrolled face data (`/var/lib/gaze`). Each step is best-effort and uses `sudo`, so you'll be prompted for your password.
+
+See the [uninstallation guide](/guide/uninstallation) if you'd rather run the steps manually.
+
 ## Interactive configuration (modern TUI)
 
 Use the interactive wizard to configure `/etc/gaze/config.toml` and optionally

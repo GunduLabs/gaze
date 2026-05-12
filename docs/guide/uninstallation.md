@@ -2,6 +2,20 @@
 
 This guide covers completely removing Gaze and all its components from your system.
 
+## Quickest path: `gaze uninstall`
+
+```bash
+gaze uninstall
+```
+
+This runs the full cleanup sequence (disable extension, revert PAM, stop daemon, remove packages and repo, wipe `/etc/gaze`, `/var/cache/gaze`, and `/var/lib/gaze`). It prints the plan and asks for confirmation first. Useful flags:
+
+- `--keep-data` — preserve `/var/lib/gaze` (enrolled faces)
+- `--dry-run` — print the plan without running anything
+- `--yes` — skip the confirmation prompt
+
+If you'd rather run the steps yourself, follow the manual procedure below.
+
 ## Step 1: Disable integrations
 
 Before removing packages, disable any active integrations to avoid leaving your system in a broken state.
