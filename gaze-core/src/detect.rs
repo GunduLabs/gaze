@@ -98,7 +98,6 @@ impl FaceDetector {
 
         let mut center_cache = std::collections::HashMap::new();
 
-        // rusty_scrfd unconditionally prints raw tensor data to stdout
         use std::os::unix::io::AsRawFd;
         let devnull = std::fs::File::open("/dev/null")?;
         let stdout_fd = std::io::stdout().as_raw_fd();

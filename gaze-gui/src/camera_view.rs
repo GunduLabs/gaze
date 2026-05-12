@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
+use std::sync::mpsc::{self, TrySendError};
 use std::thread;
 use tracing::error;
 
@@ -34,7 +34,7 @@ pub struct CameraFeed {
 
 impl CameraFeed {
     pub fn new(device: &str) -> anyhow::Result<Self> {
-        let (tx, rx) = mpsc::channel::<FrameData>();
+        let (tx, rx) = mpsc::sync_channel::<FrameData>(1);
         let device = device.to_string();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_clone = stop_flag.clone();
@@ -67,16 +67,16 @@ impl CameraFeed {
                     continue;
                 };
 
-                if tx
-                    .send(FrameData {
-                        rgb_bytes: rgb,
-                        width: size.width,
-                        height: size.height,
-                        mat: frame,
-                    })
-                    .is_err()
-                {
-                    break;
+                let frame_data = FrameData {
+                    rgb_bytes: rgb,
+                    width: size.width,
+                    height: size.height,
+                    mat: frame,
+                };
+                match tx.try_send(frame_data) {
+                    Ok(()) => {}
+                    Err(TrySendError::Full(_)) => {}
+                    Err(TrySendError::Disconnected(_)) => break,
                 }
                 thread::sleep(std::time::Duration::from_millis(33));
             }
@@ -214,7 +214,11 @@ impl CameraFeed {
                 #[strong(rename_to = latest_frame)]
                 self.latest_frame,
                 move || {
+                    let mut newest = None;
                     while let Ok(frame) = rx.try_recv() {
+                        newest = Some(frame);
+                    }
+                    if let Some(frame) = newest {
                         let bytes = glib::Bytes::from(&frame.rgb_bytes);
                         let texture = gdk::MemoryTexture::new(
                             frame.width,

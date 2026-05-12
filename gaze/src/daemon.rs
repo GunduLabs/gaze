@@ -609,7 +609,6 @@ impl AuthDaemon {
                     false
                 };
 
-                // Pose matching
                 let pose_matches = if let Some(ref _res) = last_capture_status
                     && status == CaptureStatus::Ready
                 {
