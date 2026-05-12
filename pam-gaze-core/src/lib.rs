@@ -16,7 +16,6 @@ pub const PAM_PROMPT_ECHO_OFF: c_int = 1;
 pub const PAM_AUTHINFO_UNAVAIL: c_int = 9;
 pub const PAM_IGNORE: c_int = 25;
 
-pub const MAX_ATTEMPTS: usize = 10;
 pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
 
 pub type PamHandle = *mut c_void;
@@ -172,11 +171,14 @@ pub async fn authenticate_biometric(username: &str) -> anyhow::Result<Option<boo
     let mut matched = false;
     use futures::StreamExt;
     while let Some(signal) = status_stream.next().await {
-        if let Ok(args) = signal.args()
-            && *args.result() == gaze_core::dbus::VerifyResult::VerifyMatch
-        {
-            matched = true;
-            break;
+        if let Ok(args) = signal.args() {
+            match *args.result() {
+                gaze_core::dbus::VerifyResult::VerifyMatch => {
+                    matched = true;
+                    break;
+                }
+                gaze_core::dbus::VerifyResult::VerifyNoMatch => break,
+            }
         }
     }
 

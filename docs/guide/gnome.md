@@ -32,22 +32,42 @@ When that happens, apps that read saved secrets (browser credentials, git creden
 
 ## Optional: enable face at GDM login
 
-If you still want this, enable it with:
+If you still want this, enable it in GDM's system dconf profile:
 
 ```bash
-sudo -u gdm dbus-run-session gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
+sudo mkdir -p /etc/dconf/profile /etc/dconf/db/gdm.d
+sudo tee /etc/dconf/profile/gdm >/dev/null <<'EOF'
+user-db:user
+system-db:gdm
+file-db:/usr/share/gdm/greeter-dconf-defaults
+EOF
+sudo tee /etc/dconf/db/gdm.d/99-gaze >/dev/null <<'EOF'
+[org/gnome/shell]
+enabled-extensions=['gaze@gundulabs.com']
+
+[org/gnome/shell/extensions/gaze]
+enable-face-authentication=true
+EOF
+sudo dconf update
 ```
 
-Then restart GDM (or reboot):
+Then reboot. Restarting GDM also works, but it immediately logs out active desktop sessions.
 
 ```bash
-sudo systemctl restart gdm
+sudo reboot
 ```
 
 ## Disable face at GDM login
 
 ```bash
-sudo -u gdm dbus-run-session gsettings set org.gnome.shell.extensions.gaze enable-face-authentication false
+sudo tee /etc/dconf/db/gdm.d/99-gaze >/dev/null <<'EOF'
+[org/gnome/shell]
+enabled-extensions=['gaze@gundulabs.com']
+
+[org/gnome/shell/extensions/gaze]
+enable-face-authentication=false
+EOF
+sudo dconf update
 ```
 
 ## Verify GNOME flow
