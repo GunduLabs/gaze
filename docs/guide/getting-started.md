@@ -62,9 +62,9 @@ gaze-gui
 
 Use the GUI to enroll additional face profiles (for example, with glasses and without glasses).
 
-## Step 6: Enable lock screen auth
+## Step 6: Enable GNOME lock screen auth (optional)
 
-GNOME extension package is installed as `gaze-gnome-extension`.
+Only do this on GNOME if you want face unlock from the lock screen. The default installer installs the extension package, but leaves it disabled until you run this command.
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
@@ -72,8 +72,8 @@ gnome-extensions enable gaze@gundulabs.com
 
 On Wayland, log out and back in after installing extension updates.
 
-Note: lock screen and GDM login integration are GNOME-only and require this extension.
-GDM login face auth is disabled by default due to GNOME keyring behavior.
+Lock screen and GDM login integration are GNOME-only and require this extension.
+GDM login face auth is separate and disabled by default due to GNOME keyring behavior.
 See [GNOME Extension](/guide/gnome) for details and optional login enablement.
 
 ## If something fails

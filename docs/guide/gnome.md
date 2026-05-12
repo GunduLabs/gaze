@@ -1,10 +1,20 @@
 # GNOME Extension
 
-Gaze lock screen and GDM integration are GNOME-specific and require the `gaze-gnome-extension` package.
+Gaze lock screen and GDM integration are GNOME-specific and require the `gaze-gnome-extension` package. The default installer installs this package, but does not enable the extension.
 
 This extension starts the `gdm-face` PAM service inside GNOME Shell authentication flows.
 
+You do not need to enable this extension for the CLI, the GUI, or normal PAM prompts such as `sudo`. Leave it disabled on non-GNOME desktops.
+
+## Should I enable it?
+
+Enable it if you use GNOME and want face unlock from the lock screen.
+
+Do not enable it if you only want CLI/GUI enrollment, normal PAM authentication, or you are not using GNOME.
+
 ## Enable the extension
+
+If the package is installed but the extension is not enabled yet:
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com

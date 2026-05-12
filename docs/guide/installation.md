@@ -1,6 +1,6 @@
 # Installation
 
-Use either of these paths.
+Use either of these paths. The GNOME extension package is installed by default, but it is not enabled automatically.
 
 ## Path A: one-line installer (recommended)
 
@@ -14,7 +14,19 @@ This installs:
 - `gaze-gui`
 - `gaze-gnome-extension`
 
-It also configures your package repository for future updates.
+It also configures your package repository for future updates and enables the `gazed` daemon.
+
+The installer does not enable GNOME lock screen auth for you:
+
+- CLI, GUI, and normal PAM prompts work without enabling the GNOME extension.
+- If you use GNOME and want lock screen face unlock, enable the extension after install.
+- GDM login face auth is separate and stays disabled unless you explicitly enable it.
+
+For non-interactive installs:
+
+```bash
+curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
+```
 
 ## Path B: install from Gundu Labs repositories
 
@@ -58,6 +70,16 @@ sudo pacman -Sy gaze gaze-gui gaze-gnome-extension
 ```
 
 :::
+
+### Enable GNOME lock screen auth
+
+Only run this on GNOME desktops where you want face unlock from the lock screen. The package is already installed by the default install commands above.
+
+```bash
+gnome-extensions enable gaze@gundulabs.com
+```
+
+Log out and back in once after installing or updating the extension. GDM login face auth stays disabled unless you explicitly enable it; see the [GNOME Extension guide](/guide/gnome) before doing that.
 
 ## Restart after install
 

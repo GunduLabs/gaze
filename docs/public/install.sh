@@ -1,6 +1,7 @@
 #!/bin/sh
 # Gaze installer - https://gaze.gundulabs.com/install.sh
 # Usage: curl -fsSL https://gaze.gundulabs.com/install.sh | sh
+#        curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
 set -e
 
 PKG_BASE_URL="https://packages.gundulabs.com"
@@ -11,9 +12,27 @@ red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 
+usage() {
+    cat <<'EOF'
+Gaze installer
+
+Usage:
+  sh install.sh [options]
+
+Options:
+  -y, --yes                  Use detected defaults without prompting
+  -h, --help                 Show this help
+
+The GNOME extension package is installed by default, but it is not enabled by
+this installer. Enable it separately if you want GNOME lock screen face unlock.
+GDM login face auth is also not enabled by this installer.
+EOF
+}
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -y|--yes) AUTO_YES=1 ;;
+        -h|--help) usage; exit 0 ;;
         *) red "Unknown option: $1"; exit 1 ;;
     esac
     shift
@@ -41,6 +60,13 @@ prompt_continue() {
         y|Y|yes|YES) return 0 ;;
         *) echo "Aborted."; exit 0 ;;
     esac
+}
+
+print_gnome_extension_next_steps() {
+    echo "Installed gaze-gnome-extension, but did not enable it automatically."
+    echo "For GNOME lock screen face unlock, log out and back in if needed, then run:"
+    echo "  gnome-extensions enable gaze@gundulabs.com"
+    echo "GDM login face auth remains disabled by default. See the GNOME docs before enabling it."
 }
 
 need curl
@@ -159,8 +185,8 @@ if is_deb; then
     bold "Planned steps for this system:"
     echo "- Configure the apt repository"
     echo "- Install gaze, gaze-gui, and gaze-gnome-extension"
+    echo "- Leave the GNOME extension disabled until you enable it"
     echo "- Set up the PAM modules through pam-auth-update if available"
-    echo "- Enable the GNOME extension"
     echo "- Enable the Gaze daemon"
 elif is_rpm; then
     echo "Detected platform: Fedora ${DISTRO_VERSION_ID} (${PKG_ARCH})"
@@ -173,8 +199,8 @@ elif is_rpm; then
     bold "Planned steps for this system:"
     echo "- Configure the dnf repository"
     echo "- Install gaze, gaze-gui, and gaze-gnome-extension"
+    echo "- Leave the GNOME extension disabled until you enable it"
     echo "- Set up the PAM modules through authselect if available"
-    echo "- Enable the GNOME extension"
     echo "- Enable the Gaze daemon"
 elif is_arch; then
     echo "Detected platform: Arch/Manjaro (${PKG_ARCH})"
@@ -182,7 +208,7 @@ elif is_arch; then
     echo ""
     bold "Planned steps for this system:"
     echo "- Install gaze-bin, gaze-gui-bin, and gaze-gnome-extension-bin from the AUR"
-    echo "- Enable the GNOME extension"
+    echo "- Leave the GNOME extension disabled until you enable it"
     echo "- Enable the Gaze daemon"
 fi
 
@@ -209,8 +235,8 @@ if is_deb; then
     bold "Step 3/5: Installing packages"
     sudo apt-get install -y gaze gaze-gui gaze-gnome-extension
 
-    bold "Step 4/5: Enabling GNOME extension"
-    gnome-extensions enable gaze@gundulabs.com 2>/dev/null || true
+    bold "Step 4/5: GNOME extension next step"
+    print_gnome_extension_next_steps
 
     bold "Step 5/5: Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
@@ -248,12 +274,12 @@ EOF
     fi
 
     if command -v authselect >/dev/null 2>&1; then
-        sudo authselect select gaze --force || true
-	sudo authselect enable-feature with-silent-lastlog || true
+        sudo authselect select vendor/gaze --force || true
+        sudo authselect enable-feature with-silent-lastlog || true
     fi
 
-    bold "Step 4/5: Enabling GNOME extension"
-    gnome-extensions enable gaze@gundulabs.com 2>/dev/null || true
+    bold "Step 4/5: GNOME extension next step"
+    print_gnome_extension_next_steps
 
     bold "Step 5/5: Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
@@ -288,8 +314,8 @@ elif is_arch; then
     bold "Step 2/4: Installing packages from AUR"
     "$AUR_HELPER" -S --noconfirm gaze-bin gaze-gui-bin gaze-gnome-extension-bin
 
-    bold "Step 3/4: Enabling GNOME extension"
-    gnome-extensions enable gaze@gundulabs.com 2>/dev/null || true
+    bold "Step 3/4: GNOME extension next step"
+    print_gnome_extension_next_steps
 
     bold "Step 4/4: Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
@@ -303,5 +329,7 @@ echo ""
 echo "  Enroll your face:    gaze add-face <name>"
 echo "  Test authentication: gaze auth"
 echo "  GUI:                 gaze-gui"
+echo "  GNOME lock screen:   gnome-extensions enable gaze@gundulabs.com"
+echo "  GDM login face auth: disabled by default"
 echo ""
 echo "Docs: https://gaze.gundulabs.com"

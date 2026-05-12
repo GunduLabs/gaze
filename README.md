@@ -26,6 +26,12 @@ Gaze is a face authentication system for Linux. It runs entirely on-device with 
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 ```
 
+The installer installs the GNOME Shell extension package, but does not enable it. Enable it separately only if you use GNOME and want lock screen face unlock.
+
+```bash
+gnome-extensions enable gaze@gundulabs.com
+```
+
 <details>
 <summary>Manual install (Debian/Ubuntu, Fedora, Arch)</summary>
 
@@ -69,6 +75,8 @@ Include = /etc/pacman.d/gaze-mirrorlist
 EOF
 sudo pacman -Sy gaze gaze-gui gaze-gnome-extension
 ```
+
+For GNOME lock screen face unlock, run `gnome-extensions enable gaze@gundulabs.com` after install.
 
 </details>
 
