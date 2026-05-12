@@ -145,7 +145,11 @@ gaze clear-user              Remove all face data for current user
 
 ```bash
 # Ubuntu/Debian
-sudo apt install build-essential libopencv-dev libclang-dev libv4l-dev libpam0g-dev libgtk-4-dev libadwaita-1-dev
+sudo apt install build-essential pkg-config clang libclang-dev \
+  libopencv-dev libv4l-dev libpam0g-dev \
+  libgtk-4-dev libadwaita-1-dev \
+  libcairo2-dev libglib2.0-dev libgdk-pixbuf-2.0-dev libpango1.0-dev libgraphene-1.0-dev \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
 # Build
 cargo build --workspace --release

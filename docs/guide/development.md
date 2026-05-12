@@ -11,17 +11,27 @@ This page covers source builds, tests, and packaging workflows for contributors.
 ::: code-group
 
 ```bash [Debian/Ubuntu]
-sudo apt install build-essential libopencv-dev libclang-dev libv4l-dev \
-  libpam0g-dev libgtk-4-dev libadwaita-1-dev
+sudo apt install build-essential pkg-config clang libclang-dev \
+  libopencv-dev libv4l-dev libpam0g-dev \
+  libgtk-4-dev libadwaita-1-dev \
+  libcairo2-dev libglib2.0-dev libgdk-pixbuf-2.0-dev \
+  libpango1.0-dev libgraphene-1.0-dev \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 ```
 
 ```bash [Fedora/RHEL]
-sudo dnf install @development-tools opencv-devel clang-devel libv4l-devel \
-  pam-devel gtk4-devel libadwaita-devel
+sudo dnf install @development-tools pkg-config clang clang-devel \
+  opencv-devel libv4l-devel pam-devel \
+  gtk4-devel libadwaita-devel \
+  gstreamer1-devel gstreamer1-plugins-base-devel \
+  checkpolicy policycoreutils
 ```
 
 ```bash [Arch Linux / Manjaro]
-sudo pacman -S base-devel opencv clang libv4l pam gtk4 libadwaita
+sudo pacman -S base-devel pkgconf clang llvm \
+  opencv v4l-utils pam \
+  gtk4 libadwaita \
+  gstreamer gst-plugins-base
 ```
 
 :::
