@@ -685,10 +685,7 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
         ));
     }
 
-    plan.push((
-        "Remove model cache",
-        "sudo rm -rf /var/cache/gaze".into(),
-    ));
+    plan.push(("Remove model cache", "sudo rm -rf /var/cache/gaze".into()));
     plan.push(("Remove config", "sudo rm -rf /etc/gaze".into()));
     if !keep_data {
         plan.push((
@@ -697,10 +694,7 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
         ));
     }
 
-    plan.push((
-        "Reload systemd",
-        "sudo systemctl daemon-reload".into(),
-    ));
+    plan.push(("Reload systemd", "sudo systemctl daemon-reload".into()));
 
     plan
 }
