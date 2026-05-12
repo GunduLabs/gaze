@@ -10,27 +10,27 @@ authors = ["Gundu Labs <maintainers@gundulabs.com>"]
 
 [dependencies]
 anyhow = "1.0.102"
-clap = { version = "4.5.60", features = ["derive"] }
+clap = { version = "4.6.1", features = ["derive"] }
 gaze-core = { path = "../gaze-core" }
-image = "0.25.9"
+image = "0.25.10"
 libc = "0.2"
-nalgebra = "0.34.1"
+nalgebra = "0.34.2"
 ndarray = "0.17.2"
-opencv = { version = "0.98.1", default-features = false, features = ["imgproc", "videoio"] }
-ort = "2.0.0-rc.11"
-rayon = "1.10"
-sha2 = "0.10"
-tokio = { version = "1.40", features = ["full", "rt-multi-thread"] }
-ureq = "3.0"
-uuid = { version = "1.10", features = ["v4"] }
-zbus = "5.14"
-zip = "2.4"
+opencv = { version = "0.98.2", default-features = false, features = ["imgproc", "videoio"] }
+ort = "2.0.0-rc.12"
+rayon = "1.12"
+sha2 = "0.11"
+tokio = { version = "1.52", features = ["full", "rt-multi-thread"] }
+ureq = "3.3"
+uuid = { version = "1.23", features = ["v4"] }
+zbus = "5.15"
+zip = "8.6"
 indicatif = "0.18.4"
-console = "0.16.2"
+console = "0.16.3"
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 dialoguer = "0.12"
-toml = "0.8"
+toml = "1.1"
 futures = "0.3.32"
 zbus_polkit = "5.0.0"
 

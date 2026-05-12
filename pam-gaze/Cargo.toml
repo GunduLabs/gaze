@@ -10,6 +10,6 @@ crate-type = ["cdylib"]
 pam-gaze-core = { path = "../pam-gaze-core" }
 gaze-core = { path = "../gaze-core" }
 libc = "0.2"
-zbus = "5.14"
-tokio = { version = "1.50.0", features = ["full"] }
+zbus = "5.15"
+tokio = { version = "1.52.3", features = ["full"] }
 futures = "0.3.32"

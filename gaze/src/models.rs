@@ -73,7 +73,12 @@ fn sha256_file(path: &Path) -> anyhow::Result<String> {
         }
         hasher.update(&buf[..n]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    let digest = hasher.finalize();
+    Ok(digest.iter().fold(String::with_capacity(64), |mut acc, b| {
+        use std::fmt::Write;
+        let _ = write!(acc, "{:02x}", b);
+        acc
+    }))
 }
 
 fn verify_sha256(path: &Path, expected: &str) -> anyhow::Result<()> {

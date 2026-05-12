@@ -13,17 +13,17 @@ path = "src/main.rs"
 
 [dependencies]
 gaze-core = { path = "../gaze-core" }
-gtk4 = { version = "0.11.1", features = ["gnome_46"] }
+gtk4 = { version = "0.11.3", features = ["gnome_46"] }
 libadwaita = { version = "0.9.1", features = ["v1_4"] }
-zbus = "5.14.0"
+zbus = "5.15.0"
 zbus_polkit = "5.0.0"
 enumflags2 = "0.7"
 anyhow = "1.0.102"
 opencv = { version = "0.98.2", default-features = false, features = ["imgproc", "videoio"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-toml = "1.1.0"
+toml = "1.1.2"
 futures = "0.3.32"
-tokio = { version = "1.50.0", features = ["macros", "rt", "sync"] }
-gio = { version = "0.22.2", features = ["v2_66"] }
-glib = { version = "0.22.3", features = ["v2_66"] }
+tokio = { version = "1.52.3", features = ["macros", "rt", "sync"] }
+gio = { version = "0.22.6", features = ["v2_66"] }
+glib = { version = "0.22.7", features = ["v2_66"] }
