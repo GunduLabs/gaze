@@ -30,7 +30,7 @@ fn create_spinner(prefix: &str, msg: String, color: &str) -> ProgressBar {
 }
 
 #[derive(Parser)]
-#[command(name = "gaze", about = "Gaze Facial Authentication CLI")]
+#[command(name = "gaze", version, about = "Gaze Facial Authentication CLI")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
