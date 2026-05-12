@@ -24,7 +24,7 @@ From there you can edit:
 
 - Security level (`low`, `medium`, `high`, `maximum`)
 - RGB camera source
-- Maximum captures per face
+- Maximum enrollment templates per face
 
 ## Common tasks
 

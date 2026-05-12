@@ -7,18 +7,19 @@ Most users only need to change camera source or security level.
 ## Default config
 
 ```toml
+[security]
 level = "medium"
 
 [cameras]
 rgb = "primary"
 
 [enrollment]
-max_captures_per_face = 8
+max_templates = 3
 ```
 
 ## Change security level
 
-`level` controls model choice and match strictness.
+`level` (under `[security]`) controls model choice and match strictness.
 
 | Level | Detector | Recognizer | Threshold | Notes |
 |---|---|---|---|---|
@@ -37,6 +38,7 @@ Practical guidance:
 ### Custom level
 
 ```toml
+[security]
 level = "custom"
 detector = "det_10g.onnx"
 recognizer = "w600k_r50.onnx"
@@ -80,14 +82,14 @@ Models are auto-downloaded on first run if missing.
 
 ```toml
 [enrollment]
-max_captures_per_face = 8
+max_templates = 3
 ```
 
 Increase this if auth is unreliable in varied lighting.
 
 ## Recommended tuning workflow
 
-1. Start with `level = "medium"`
+1. Start with `[security] level = "medium"`
 2. Enroll one profile: `gaze add-face default`
 3. Test 5 to 10 times using `gaze auth --verbose`
 4. If false accepts are too high, switch to `high`

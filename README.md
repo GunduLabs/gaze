@@ -9,7 +9,7 @@
 [![CI](https://github.com/gundulabs/gaze/actions/workflows/ci.yml/badge.svg)](https://github.com/gundulabs/gaze/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[Documentation](https://gaze.gundulabs.com) · [Install](https://gaze.gundulabs.com/guide/install) · [Contributing](CONTRIBUTING.md)
+[Documentation](https://gaze.gundulabs.com) · [Install](https://gaze.gundulabs.com/guide/installation) · [Development](https://gaze.gundulabs.com/guide/development)
 
 </div>
 
@@ -115,13 +115,14 @@ Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Matc
 
 ```toml
 # /etc/gaze/config.toml
+[security]
 level = "medium"    # low | medium | high | maximum | custom
 
 [cameras]
 rgb = "primary"
 
 [enrollment]
-max_captures_per_face = 8
+max_templates = 3
 ```
 
 See the [configuration guide](https://gaze.gundulabs.com/guide/configuration) for all options.

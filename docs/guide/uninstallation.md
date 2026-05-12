@@ -99,13 +99,7 @@ Package removal does not delete user data, downloaded models, or configuration f
 sudo rm -rf /var/lib/gaze
 ```
 
-### Downloaded ML models
-
-```bash
-sudo rm -rf /opt/gaze
-```
-
-### Cache
+### Downloaded ML models and cache
 
 ```bash
 sudo rm -rf /var/cache/gaze
