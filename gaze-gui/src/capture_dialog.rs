@@ -253,7 +253,6 @@ pub fn show_capture_dialog(
             progress.set_visible(true);
             prompt_label.set_text("Starting enrollment...");
             feed.set_active(true);
-            feed.stop();
 
             let face_name = resolved_face.borrow().clone();
 
