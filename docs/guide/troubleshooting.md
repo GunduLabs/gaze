@@ -75,7 +75,7 @@ gaze add-face glasses
 
 ## 4. Lock screen does not trigger face auth
 
-Enable extension:
+Enable or re-enable the extension from your GNOME session:
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com

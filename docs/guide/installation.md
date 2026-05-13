@@ -1,6 +1,6 @@
 # Installation
 
-Use either of these paths. The GNOME extension package is installed by default, but it is not enabled automatically.
+Use either of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible. Manual package installs still need one GNOME command afterward.
 
 ## Path A: one-line installer (recommended)
 
@@ -14,12 +14,12 @@ This installs:
 - `gaze-gui`
 - `gaze-gnome-extension`
 
-It also configures your package repository for future updates and enables the `gazed` daemon.
+It also configures your package repository for future updates, enables the `gazed` daemon, and tries to enable lock screen face unlock for the current GNOME user.
 
-The installer does not enable GNOME lock screen auth for you:
+GNOME behavior:
 
-- CLI, GUI, and normal PAM prompts work without enabling the GNOME extension.
-- If you use GNOME and want lock screen face unlock, enable the extension after install.
+- CLI, GUI, and normal PAM prompts work without the GNOME extension.
+- If the installer is not run from a GNOME desktop session, it prints the manual enable command instead.
 - GDM login face auth is separate and stays disabled unless you explicitly enable it.
 
 For non-interactive installs:
@@ -71,15 +71,15 @@ sudo pacman -Sy gaze gaze-gui gaze-gnome-extension
 
 :::
 
-### Enable GNOME lock screen auth
+### Enable GNOME lock screen auth after manual install
 
-Only run this on GNOME desktops where you want face unlock from the lock screen. The package is already installed by the default install commands above.
+Only run this on GNOME desktops where you want face unlock from the lock screen. The package is already installed by the default install commands above, but package managers do not safely change per-user extension settings.
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
 ```
 
-Log out and back in once after installing or updating the extension. GDM login face auth stays disabled unless you explicitly enable it; see the [GNOME Extension guide](/guide/gnome) before doing that.
+Log out and back in once after installing or updating the extension if the lock screen does not pick it up immediately. GDM login face auth stays disabled unless you explicitly enable it; see the [GNOME Extension guide](/guide/gnome) before doing that.
 
 ## Restart after install
 

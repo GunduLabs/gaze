@@ -1,6 +1,6 @@
 # GNOME Extension
 
-Gaze lock screen and GDM integration are GNOME-specific and require the `gaze-gnome-extension` package. The default installer installs this package, but does not enable the extension.
+Gaze lock screen and GDM integration are GNOME-specific and require the `gaze-gnome-extension` package. The one-line installer tries to enable the extension for the current GNOME user. Manual package installs only install the extension files.
 
 This extension starts the `gdm-face` PAM service inside GNOME Shell authentication flows.
 

@@ -23,9 +23,9 @@ Options:
   -y, --yes                  Use detected defaults without prompting
   -h, --help                 Show this help
 
-The GNOME extension package is installed by default, but it is not enabled by
-this installer. Enable it separately if you want GNOME lock screen face unlock.
-GDM login face auth is also not enabled by this installer.
+The GNOME extension package is installed by default. When run from a GNOME
+desktop session as your normal user, this installer also enables lock screen
+face unlock for that user. GDM login face auth is not enabled by this installer.
 EOF
 }
 
@@ -62,10 +62,47 @@ prompt_continue() {
     esac
 }
 
-print_gnome_extension_next_steps() {
-    echo "Installed gaze-gnome-extension, but did not enable it automatically."
-    echo "For GNOME lock screen face unlock, log out and back in if needed, then run:"
-    echo "  gnome-extensions enable gaze@gundulabs.com"
+is_gnome_session() {
+    case "${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}" in
+        *GNOME*|*gnome*) return 0 ;;
+    esac
+    return 1
+}
+
+enable_gnome_extension() {
+    if [ "$(id -u)" -eq 0 ]; then
+        echo "Running as root; not changing per-user GNOME extension settings."
+        echo "For GNOME lock screen face unlock, run as your desktop user:"
+        echo "  gnome-extensions enable gaze@gundulabs.com"
+        echo "GDM login face auth remains disabled by default. See the GNOME docs before enabling it."
+        return 0
+    fi
+
+    if ! is_gnome_session; then
+        echo "GNOME desktop session not detected; leaving the extension disabled for this user."
+        echo "For GNOME lock screen face unlock, run from your GNOME session:"
+        echo "  gnome-extensions enable gaze@gundulabs.com"
+        echo "GDM login face auth remains disabled by default. See the GNOME docs before enabling it."
+        return 0
+    fi
+
+    if ! command -v gnome-extensions >/dev/null 2>&1; then
+        echo "gnome-extensions command not found; cannot enable the extension automatically."
+        echo "After installing GNOME Shell tools, run:"
+        echo "  gnome-extensions enable gaze@gundulabs.com"
+        echo "GDM login face auth remains disabled by default. See the GNOME docs before enabling it."
+        return 0
+    fi
+
+    if gnome-extensions enable gaze@gundulabs.com >/dev/null 2>&1; then
+        echo "Enabled GNOME lock screen face unlock for this user."
+        echo "If the lock screen does not pick it up immediately, log out and back in once."
+    else
+        echo "Could not enable the GNOME extension automatically."
+        echo "After logging into GNOME, run:"
+        echo "  gnome-extensions enable gaze@gundulabs.com"
+    fi
+
     echo "GDM login face auth remains disabled by default. See the GNOME docs before enabling it."
 }
 
@@ -185,7 +222,7 @@ if is_deb; then
     bold "Planned steps for this system:"
     echo "- Configure the apt repository"
     echo "- Install gaze, gaze-gui, and gaze-gnome-extension"
-    echo "- Leave the GNOME extension disabled until you enable it"
+    echo "- Enable GNOME lock screen auth for this user when possible"
     echo "- Set up the PAM modules through pam-auth-update if available"
     echo "- Enable the Gaze daemon"
 elif is_rpm; then
@@ -199,7 +236,7 @@ elif is_rpm; then
     bold "Planned steps for this system:"
     echo "- Configure the dnf repository"
     echo "- Install gaze, gaze-gui, and gaze-gnome-extension"
-    echo "- Leave the GNOME extension disabled until you enable it"
+    echo "- Enable GNOME lock screen auth for this user when possible"
     echo "- Set up the PAM modules through authselect if available"
     echo "- Enable the Gaze daemon"
 elif is_arch; then
@@ -208,7 +245,7 @@ elif is_arch; then
     echo ""
     bold "Planned steps for this system:"
     echo "- Install gaze-bin, gaze-gui-bin, and gaze-gnome-extension-bin from the AUR"
-    echo "- Leave the GNOME extension disabled until you enable it"
+    echo "- Enable GNOME lock screen auth for this user when possible"
     echo "- Enable the Gaze daemon"
 fi
 
@@ -235,8 +272,8 @@ if is_deb; then
     bold "Step 3/5: Installing packages"
     sudo apt-get install -y gaze gaze-gui gaze-gnome-extension
 
-    bold "Step 4/5: GNOME extension next step"
-    print_gnome_extension_next_steps
+    bold "Step 4/5: Enabling GNOME lock screen auth"
+    enable_gnome_extension
 
     bold "Step 5/5: Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
@@ -278,8 +315,8 @@ EOF
         sudo authselect enable-feature with-silent-lastlog || true
     fi
 
-    bold "Step 4/5: GNOME extension next step"
-    print_gnome_extension_next_steps
+    bold "Step 4/5: Enabling GNOME lock screen auth"
+    enable_gnome_extension
 
     bold "Step 5/5: Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
@@ -314,8 +351,8 @@ elif is_arch; then
     bold "Step 2/4: Installing packages from AUR"
     "$AUR_HELPER" -S --noconfirm gaze-bin gaze-gui-bin gaze-gnome-extension-bin
 
-    bold "Step 3/4: GNOME extension next step"
-    print_gnome_extension_next_steps
+    bold "Step 3/4: Enabling GNOME lock screen auth"
+    enable_gnome_extension
 
     bold "Step 4/4: Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
@@ -329,7 +366,7 @@ echo ""
 echo "  Enroll your face:    gaze add-face <name>"
 echo "  Test authentication: gaze auth"
 echo "  GUI:                 gaze-gui"
-echo "  GNOME lock screen:   gnome-extensions enable gaze@gundulabs.com"
+echo "  GNOME lock screen:   enabled for this GNOME user when possible"
 echo "  GDM login face auth: disabled by default"
 echo ""
 echo "Docs: https://gaze.gundulabs.com"
