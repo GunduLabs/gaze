@@ -41,13 +41,13 @@ Packages install an authselect profile at:
 Enable it:
 
 ```bash
-sudo authselect select vendor/gaze --force
+sudo authselect select gaze with-silent-lastlog --force
 ```
 
 Or simultaneous mode:
 
 ```bash
-sudo authselect select vendor/gaze with-face-simultaneous --force
+sudo authselect select gaze with-face-simultaneous with-silent-lastlog --force
 ```
 
 Verify profile + PAM behavior:

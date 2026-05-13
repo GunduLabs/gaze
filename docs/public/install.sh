@@ -106,6 +106,20 @@ enable_gnome_extension() {
     echo "GDM login face auth remains disabled by default. See the GNOME docs before enabling it."
 }
 
+configure_authselect() {
+    if ! command -v authselect >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if sudo authselect select gaze with-silent-lastlog --force >/dev/null 2>&1; then
+        echo "Enabled the Gaze PAM authselect profile."
+    else
+        echo "Could not enable the Gaze PAM authselect profile automatically."
+        echo "After installation, run:"
+        echo "  sudo authselect select gaze with-silent-lastlog --force"
+    fi
+}
+
 print_gdm_login_instructions() {
     cat <<'EOF'
 Optional GDM login face auth is disabled by default because face-only login can
@@ -260,7 +274,7 @@ elif is_rpm; then
     echo "- Configure the dnf repository"
     echo "- Install gaze, gaze-gui, and gaze-gnome-extension"
     echo "- Enable GNOME lock screen auth for this user when possible"
-    echo "- Set up the PAM modules through authselect if available"
+    echo "- Enable the Gaze PAM profile through authselect if available"
     echo "- Enable the Gaze daemon"
 elif is_arch; then
     echo "Detected platform: Arch/Manjaro (${PKG_ARCH})"
@@ -333,10 +347,7 @@ EOF
         sudo yum install -y gaze gaze-gui gaze-gnome-extension
     fi
 
-    if command -v authselect >/dev/null 2>&1; then
-        sudo authselect select vendor/gaze --force || true
-        sudo authselect enable-feature with-silent-lastlog || true
-    fi
+    configure_authselect
 
     bold "Step 4/5: Enabling GNOME lock screen auth"
     enable_gnome_extension

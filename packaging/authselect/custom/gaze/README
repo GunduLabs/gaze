@@ -73,9 +73,9 @@ without-nullok::
 EXAMPLES
 --------
 
-* Enable local profile
+* Enable Gaze profile
 
-  authselect select local
+  authselect select gaze with-silent-lastlog --force
 
 SEE ALSO
 --------
