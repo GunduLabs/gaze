@@ -234,20 +234,21 @@ impl AuthDaemon {
         }
 
         let active_uid = get_active_session_uid().await.ok();
-        if let Some(active_uid) = active_uid {
-            if caller_uid == 0 && Self::has_pipewire_runtime(active_uid) {
-                return active_uid;
-            }
+        if let Some(active_uid) = active_uid
+            && caller_uid == 0
+            && Self::has_pipewire_runtime(active_uid)
+        {
+            return active_uid;
         }
 
         if Self::has_pipewire_runtime(target_uid) {
             return target_uid;
         }
 
-        if let Some(active_uid) = active_uid {
-            if Self::has_pipewire_runtime(active_uid) {
-                return active_uid;
-            }
+        if let Some(active_uid) = active_uid
+            && Self::has_pipewire_runtime(active_uid)
+        {
+            return active_uid;
         }
 
         warn!(
