@@ -120,29 +120,6 @@ configure_authselect() {
     fi
 }
 
-print_gdm_login_instructions() {
-    cat <<'EOF'
-Optional GDM login face auth is disabled by default because face-only login can
-leave GNOME keyring locked. To enable it anyway, run:
-
-sudo mkdir -p /etc/dconf/profile /etc/dconf/db/gdm.d
-sudo tee /etc/dconf/profile/gdm >/dev/null <<'GDM_PROFILE'
-user-db:user
-system-db:gdm
-file-db:/usr/share/gdm/greeter-dconf-defaults
-GDM_PROFILE
-sudo tee /etc/dconf/db/gdm.d/99-gaze >/dev/null <<'GDM_GAZE'
-[org/gnome/shell]
-enabled-extensions=['gaze@gundulabs.com']
-
-[org/gnome/shell/extensions/gaze]
-enable-face-authentication=true
-GDM_GAZE
-sudo dconf update
-sudo reboot
-EOF
-}
-
 need curl
 need grep
 need uname
@@ -401,8 +378,9 @@ echo "  Enroll your face:    gaze add-face <name>"
 echo "  Test authentication: gaze auth"
 echo "  GUI:                 gaze-gui"
 echo "  GNOME lock screen:   enabled for this GNOME user when possible"
-echo "  GDM login face auth: disabled by default; enable commands below"
+echo "  GDM login face auth: disabled by default"
 echo ""
-print_gdm_login_instructions
+bold "Optional GDM login setup docs:"
+green "https://gaze.gundulabs.com/guide/gnome#optional-enable-face-at-gdm-login"
 echo ""
 echo "Docs: https://gaze.gundulabs.com"
