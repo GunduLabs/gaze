@@ -6,7 +6,7 @@ use std::ffi::CString;
 use std::ptr;
 use std::sync::Arc;
 use tokio::sync::{Mutex, oneshot};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use zbus::names::BusName;
 use zbus::zvariant::OwnedValue;
 use zbus::{fdo, interface, message::Header, object_server::SignalEmitter};
@@ -220,6 +220,43 @@ impl AuthDaemon {
         Err(fdo::Error::Failed("Daemon is not claimed".into()))
     }
 
+    fn has_pipewire_runtime(uid: u32) -> bool {
+        std::path::Path::new(&format!("/run/user/{uid}/pipewire-0")).exists()
+    }
+
+    async fn camera_runtime_uid(caller_uid: u32, target_uid: u32) -> u32 {
+        if caller_uid == target_uid && Self::has_pipewire_runtime(target_uid) {
+            return target_uid;
+        }
+
+        if caller_uid != 0 && Self::has_pipewire_runtime(caller_uid) {
+            return caller_uid;
+        }
+
+        let active_uid = get_active_session_uid().await.ok();
+        if let Some(active_uid) = active_uid {
+            if caller_uid == 0 && Self::has_pipewire_runtime(active_uid) {
+                return active_uid;
+            }
+        }
+
+        if Self::has_pipewire_runtime(target_uid) {
+            return target_uid;
+        }
+
+        if let Some(active_uid) = active_uid {
+            if Self::has_pipewire_runtime(active_uid) {
+                return active_uid;
+            }
+        }
+
+        warn!(
+            target_uid,
+            caller_uid, "No PipeWire runtime found for target, caller, or active session"
+        );
+        target_uid
+    }
+
     fn cancel_active_tasks(&self) {
         if let Ok(mut cancel) = self.active_cancel.try_lock()
             && let Some(sender) = cancel.take()
@@ -297,8 +334,16 @@ impl AuthDaemon {
             }
         }
 
-        info!(sender = %sender, username = %username, "Claimed daemon");
-        set_pipewire_runtime_for_uid(target_uid);
+        let camera_uid = Self::camera_runtime_uid(caller_uid, target_uid).await;
+        info!(
+            sender = %sender,
+            username = %username,
+            target_uid,
+            caller_uid,
+            camera_uid,
+            "Claimed daemon"
+        );
+        set_pipewire_runtime_for_uid(camera_uid);
         *state = Some(ClaimState {
             username,
             sender: sender.clone(),

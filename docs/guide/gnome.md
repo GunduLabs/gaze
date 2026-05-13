@@ -57,6 +57,8 @@ Then reboot. Restarting GDM also works, but it immediately logs out active deskt
 sudo reboot
 ```
 
+At the GDM login screen, the selected user's desktop session may not exist yet. Gaze still matches against that user's enrolled faces, but uses the active greeter PipeWire camera session when needed.
+
 ## Disable face at GDM login
 
 ```bash

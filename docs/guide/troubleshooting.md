@@ -83,6 +83,14 @@ gnome-extensions enable gaze@gundulabs.com
 
 On Wayland, log out and back in after extension install or update.
 
+For GDM login, if the face-auth text appears but the camera light never turns on, check the daemon logs for camera/PipeWire errors:
+
+```bash
+journalctl -u gazed -b
+```
+
+Older Gaze builds could try to use the selected user's PipeWire runtime before that user session existed. Update Gaze if you see this behavior.
+
 ## 5. PAM auth flow seems broken
 
 Reinstall packages (recommended):
