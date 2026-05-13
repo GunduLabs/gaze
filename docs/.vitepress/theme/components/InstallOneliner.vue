@@ -16,7 +16,7 @@
       <span class="lang">bash</span>
       <div class="shiki-wrap" v-html="html" />
     </div>
-    <p class="install-note">Supports Fedora, RHEL, Debian, Ubuntu, Arch, and Manjaro</p>
+    <p class="install-note">Supports Debian, Ubuntu, Fedora, Arch, and Manjaro</p>
   </div>
 </template>
 

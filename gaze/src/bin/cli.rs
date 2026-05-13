@@ -667,11 +667,16 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     } else if which("pacman") {
         plan.push((
             "Remove pacman packages",
-            "sudo pacman -Rns --noconfirm gaze gaze-gui gaze-gnome-extension 2>/dev/null || true"
+            "for pkg in gaze gaze-gui gaze-gnome-extension gaze-bin gaze-gui-bin \
+              gaze-gnome-extension-bin; do \
+              if pacman -Q \"$pkg\" >/dev/null 2>&1; then \
+              sudo pacman -Rns --noconfirm \"$pkg\" || true; \
+              fi; \
+              done"
                 .into(),
         ));
         plan.push((
-            "Remove pacman repo entry",
+            "Remove old pacman repo entry",
             "sudo sed -i '/^\\[gaze\\]/,/^$/d' /etc/pacman.conf && \
               sudo rm -f /etc/pacman.d/gaze-mirrorlist"
                 .into(),

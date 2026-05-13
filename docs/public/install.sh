@@ -5,6 +5,7 @@
 set -e
 
 PKG_BASE_URL="https://packages.gundulabs.com"
+GNOME_DOCS_URL="https://gaze.gundulabs.com/guide/gnome"
 REPO_KEY_FPR="505AC1C71AFEDBD5555235F6CB4FA24E5C1C7C98"
 AUTO_YES=0
 
@@ -74,7 +75,7 @@ enable_gnome_extension() {
         echo "Running as root; not changing per-user GNOME extension settings."
         echo "For GNOME lock screen face unlock, run as your desktop user:"
         echo "  gnome-extensions enable gaze@gundulabs.com"
-        echo "GDM login face auth remains disabled by default. See the GNOME docs before enabling it."
+        echo "GDM login face auth remains disabled by default. See ${GNOME_DOCS_URL} before enabling it."
         return 0
     fi
 
@@ -82,7 +83,7 @@ enable_gnome_extension() {
         echo "GNOME desktop session not detected; leaving the extension disabled for this user."
         echo "For GNOME lock screen face unlock, run from your GNOME session:"
         echo "  gnome-extensions enable gaze@gundulabs.com"
-        echo "GDM login face auth remains disabled by default. See the GNOME docs before enabling it."
+        echo "GDM login face auth remains disabled by default. See ${GNOME_DOCS_URL} before enabling it."
         return 0
     fi
 
@@ -90,7 +91,7 @@ enable_gnome_extension() {
         echo "gnome-extensions command not found; cannot enable the extension automatically."
         echo "After installing GNOME Shell tools, run:"
         echo "  gnome-extensions enable gaze@gundulabs.com"
-        echo "GDM login face auth remains disabled by default. See the GNOME docs before enabling it."
+        echo "GDM login face auth remains disabled by default. See ${GNOME_DOCS_URL} before enabling it."
         return 0
     fi
 
@@ -103,7 +104,7 @@ enable_gnome_extension() {
         echo "  gnome-extensions enable gaze@gundulabs.com"
     fi
 
-    echo "GDM login face auth remains disabled by default. See the GNOME docs before enabling it."
+    echo "GDM login face auth remains disabled by default. See ${GNOME_DOCS_URL} before enabling it."
 }
 
 configure_authselect() {

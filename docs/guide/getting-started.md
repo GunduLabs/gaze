@@ -16,7 +16,7 @@ Recommended one-line installer:
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 ```
 
-If you prefer manual repo setup, use the [installation guide](/guide/installation).
+If you prefer manual package setup, use the [installation guide](/guide/installation).
 
 ## Step 2: Check daemon status
 

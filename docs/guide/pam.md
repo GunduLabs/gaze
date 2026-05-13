@@ -32,9 +32,9 @@ sudo -v
 
 If camera opens and face auth runs, PAM wiring is active.
 
-## Fedora / RHEL
+## Fedora / RPM systems
 
-Packages install an authselect profile at:
+RPM packages install an authselect profile at:
 
 `/usr/share/authselect/vendor/gaze`
 

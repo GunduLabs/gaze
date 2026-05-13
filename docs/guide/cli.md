@@ -83,9 +83,9 @@ Removes the installed packages, repository config, PAM/authselect integration, S
 
 See the [uninstallation guide](/guide/uninstallation) if you'd rather run the steps manually.
 
-## Interactive configuration (modern TUI)
+## Interactive configuration
 
-Use the interactive wizard to configure `/etc/gaze/config.toml` and optionally
+Use the interactive wizard to edit daemon config through DBus:
 
 ```bash
 gaze config
@@ -96,6 +96,8 @@ Show-only mode:
 ```bash
 gaze config --show
 ```
+
+This prints the current security level, camera source, and enrollment template settings without editing them.
 
 ## Manage another user
 

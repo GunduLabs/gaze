@@ -33,7 +33,7 @@ gnome-extensions enable gaze@gundulabs.com
 ```
 
 <details>
-<summary>Manual install (Debian/Ubuntu, Fedora, Arch)</summary>
+<summary>Manual install (Debian/Ubuntu, Fedora, Arch/Manjaro)</summary>
 
 **Debian / Ubuntu**
 
@@ -61,19 +61,8 @@ sudo dnf install gaze gaze-gui gaze-gnome-extension
 **Arch / Manjaro**
 
 ```bash
-sudo tee /etc/pacman.d/gaze-mirrorlist >/dev/null <<'EOF'
-Server = https://packages.gundulabs.com/arch/x86_64
-EOF
-curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.asc -o /tmp/gundulabs-packages.asc
-sudo pacman-key --add /tmp/gundulabs-packages.asc
-sudo pacman-key --lsign-key "$(gpg --show-keys --with-colons /tmp/gundulabs-packages.asc | awk -F: '/^fpr:/ {print $10; exit}')"
-rm -f /tmp/gundulabs-packages.asc
-sudo tee -a /etc/pacman.conf >/dev/null <<'EOF'
-[gaze]
-SigLevel = Required DatabaseOptional
-Include = /etc/pacman.d/gaze-mirrorlist
-EOF
-sudo pacman -Sy gaze gaze-gui gaze-gnome-extension
+# Requires an AUR helper such as yay or paru. yay shown here.
+yay -S --needed gaze-bin gaze-gui-bin gaze-gnome-extension-bin
 ```
 
 For GNOME lock screen face unlock after manual package installation, run `gnome-extensions enable gaze@gundulabs.com` from your GNOME session.
@@ -150,7 +139,7 @@ gaze uninstall               Cleanly remove Gaze (packages, config, models, data
 
 ## Building from source
 
-**Dependencies:** Rust 1.70+, [`just`](https://github.com/casey/just), [`nfpm`](https://nfpm.goreleaser.com)
+**Dependencies:** Rust 1.85+, [`just`](https://github.com/casey/just), [`nfpm`](https://nfpm.goreleaser.com)
 
 ```bash
 # Ubuntu/Debian

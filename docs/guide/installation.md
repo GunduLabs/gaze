@@ -2,6 +2,8 @@
 
 Use either of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible. Manual package installs still need one GNOME command afterward.
 
+Supported installer targets: Ubuntu 24.04/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Manjaro.
+
 ## Path A: one-line installer (recommended)
 
 ```bash
@@ -10,11 +12,11 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 
 This installs:
 
-- `gaze` (daemon + CLI)
+- the Gaze daemon and CLI
 - `gaze-gui`
-- `gaze-gnome-extension`
+- the GNOME Shell extension package
 
-It also configures your package repository for future updates, enables the `gazed` daemon, and tries to enable lock screen face unlock for the current GNOME user.
+It also configures package updates where needed, enables the `gazed` daemon, and tries to enable lock screen face unlock for the current GNOME user.
 
 GNOME behavior:
 
@@ -28,9 +30,9 @@ For non-interactive installs:
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
 ```
 
-## Path B: install from Gundu Labs repositories
+## Path B: manual package install
 
-Use this if you prefer manual repository setup.
+Use this if you prefer to configure package sources yourself. Debian/Ubuntu and Fedora use Gundu Labs repositories. Arch Linux and Manjaro use the AUR packages.
 
 ::: code-group
 
@@ -54,19 +56,8 @@ sudo dnf install gaze gaze-gui gaze-gnome-extension
 ```
 
 ```bash [Arch Linux / Manjaro]
-sudo tee /etc/pacman.d/gaze-mirrorlist >/dev/null <<'EOF'
-Server = https://packages.gundulabs.com/arch/x86_64
-EOF
-curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.asc -o /tmp/gundulabs-packages.asc
-sudo pacman-key --add /tmp/gundulabs-packages.asc
-sudo pacman-key --lsign-key "$(gpg --show-keys --with-colons /tmp/gundulabs-packages.asc | awk -F: '/^fpr:/ {print $10; exit}')"
-rm -f /tmp/gundulabs-packages.asc
-sudo tee -a /etc/pacman.conf >/dev/null <<'EOF'
-[gaze]
-SigLevel = Required DatabaseOptional
-Include = /etc/pacman.d/gaze-mirrorlist
-EOF
-sudo pacman -Sy gaze gaze-gui gaze-gnome-extension
+# Requires an AUR helper such as yay or paru. yay shown here.
+yay -S --needed gaze-bin gaze-gui-bin gaze-gnome-extension-bin
 ```
 
 :::

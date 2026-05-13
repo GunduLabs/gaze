@@ -4,7 +4,7 @@ This page covers source builds, tests, and packaging workflows for contributors.
 
 ## Prerequisites
 
-- Rust 1.70+ (or install via `rustup`)
+- Rust 1.85+ (or install current stable via `rustup`)
 - `just` (https://github.com/casey/just) for task automation
 - `nfpm` (https://nfpm.goreleaser.com) for packaging
 
@@ -117,7 +117,8 @@ Before touching PAM files, **keep a second terminal open with an active root she
 Quickest end-to-end test once the `.so` is in place:
 
 ```bash
-sudo -v   # invalidates cached creds, forces a fresh PAM prompt
+sudo -k   # invalidate cached sudo credentials
+sudo -v   # force a fresh PAM prompt
 ```
 
 ## Iterating on the GNOME extension

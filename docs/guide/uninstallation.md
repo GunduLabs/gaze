@@ -29,7 +29,14 @@ gnome-extensions disable gaze@gundulabs.com
 ### Disable face auth at GDM login (if enabled)
 
 ```bash
-sudo -u gdm dbus-run-session gsettings set org.gnome.shell.extensions.gaze enable-face-authentication false
+sudo tee /etc/dconf/db/gdm.d/99-gaze >/dev/null <<'EOF'
+[org/gnome/shell]
+enabled-extensions=['gaze@gundulabs.com']
+
+[org/gnome/shell/extensions/gaze]
+enable-face-authentication=false
+EOF
+sudo dconf update
 ```
 
 ### Revert PAM configuration
@@ -40,7 +47,7 @@ sudo -u gdm dbus-run-session gsettings set org.gnome.shell.extensions.gaze enabl
 sudo pam-auth-update --package --remove gaze
 ```
 
-```bash [Fedora/RHEL]
+```bash [Fedora]
 sudo authselect select sssd --force
 ```
 
@@ -68,12 +75,12 @@ sudo apt remove --purge gaze gaze-gui gaze-gnome-extension
 sudo apt autoremove
 ```
 
-```bash [Fedora/RHEL]
+```bash [Fedora]
 sudo dnf remove gaze gaze-gui gaze-gnome-extension
 ```
 
 ```bash [Arch Linux / Manjaro]
-sudo pacman -Rns gaze gaze-gui gaze-gnome-extension
+sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin
 ```
 
 :::
@@ -88,14 +95,15 @@ sudo rm /usr/share/keyrings/gundulabs-archive-keyring.gpg
 sudo apt update
 ```
 
-```bash [Fedora/RHEL]
+```bash [Fedora]
 sudo rm /etc/yum.repos.d/gundulabs.repo
 sudo rpm -e gpg-pubkey-$(rpm -qa gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n' | grep -i gundulabs | awk '{print $1}' | sed 's/gpg-pubkey-//')
 sudo dnf makecache
 ```
 
 ```bash [Arch Linux / Manjaro]
-# Remove the repository from pacman.conf
+# AUR installs do not add a Gundu Labs pacman repo.
+# Only run this if you previously configured the old pacman repo.
 sudo sed -i '/^\[gaze\]/,/^$/d' /etc/pacman.conf
 sudo rm -f /etc/pacman.d/gaze-mirrorlist
 sudo pacman -Sy
@@ -125,7 +133,7 @@ sudo rm -rf /var/cache/gaze
 sudo rm -rf /etc/gaze
 ```
 
-### SELinux policy (Fedora/RHEL only)
+### SELinux policy (Fedora/RPM systems only)
 
 ```bash
 sudo semodule -r gaze-gdm-camera
