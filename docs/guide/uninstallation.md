@@ -8,7 +8,7 @@ This guide covers completely removing Gaze and all its components from your syst
 gaze uninstall
 ```
 
-This runs the full cleanup sequence (disable extension, revert PAM, stop daemon, remove packages and repo, wipe `/etc/gaze`, `/var/cache/gaze`, and `/var/lib/gaze`). It prints the plan and asks for confirmation first. Useful flags:
+This runs the full cleanup sequence (reset GNOME/GDM lock and login settings, revert PAM, stop daemon, remove packages and repo, wipe `/etc/gaze`, `/var/cache/gaze`, and `/var/lib/gaze`). It prints the plan and asks for confirmation first. Useful flags:
 
 - `--keep-data` — preserve `/var/lib/gaze` (enrolled faces)
 - `--dry-run` — print the plan without running anything
@@ -20,22 +20,19 @@ If you'd rather run the steps yourself, follow the manual procedure below.
 
 Before removing packages, disable any active integrations to avoid leaving your system in a broken state.
 
-### Disable the GNOME extension
+### Reset GNOME lock screen settings
 
 ```bash
-gnome-extensions disable gaze@gundulabs.com
+gnome-extensions disable gaze@gundulabs.com 2>/dev/null || true
+gsettings reset-recursively org.gnome.shell.extensions.gaze
 ```
 
-### Disable face auth at GDM login (if enabled)
+Repeat this for each desktop user who enabled lock screen face unlock.
+
+### Remove GDM login defaults and overrides
 
 ```bash
-sudo tee /etc/dconf/db/gdm.d/99-gaze >/dev/null <<'EOF'
-[org/gnome/shell]
-enabled-extensions=['gaze@gundulabs.com']
-
-[org/gnome/shell/extensions/gaze]
-enable-face-authentication=false
-EOF
+sudo rm -f /etc/dconf/db/gdm.d/00-gaze-defaults /etc/dconf/db/gdm.d/99-gaze
 sudo dconf update
 ```
 
@@ -115,6 +112,13 @@ sudo pacman -Sy
 
 Package removal does not delete user data, downloaded models, or configuration files that were modified. Remove these manually if you want a clean slate.
 
+Refresh compiled GNOME settings after package removal if your package manager did not run the hook:
+
+```bash
+sudo dconf update
+sudo glib-compile-schemas /usr/share/glib-2.0/schemas
+```
+
 ### Face enrollment data
 
 ```bash
@@ -137,14 +141,6 @@ sudo rm -rf /etc/gaze
 
 ```bash
 sudo semodule -r gaze-gdm-camera
-```
-
-### Recompile GSettings schemas
-
-After the GNOME extension package is removed, recompile schemas to clean up:
-
-```bash
-sudo glib-compile-schemas /usr/share/glib-2.0/schemas
 ```
 
 ## Step 5: Reload system services

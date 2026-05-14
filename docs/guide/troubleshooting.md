@@ -79,6 +79,7 @@ Enable or re-enable the extension from your GNOME session:
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
+gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
 On Wayland, log out and back in after extension install or update.

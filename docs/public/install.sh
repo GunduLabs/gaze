@@ -26,7 +26,8 @@ Options:
 
 The GNOME extension package is installed by default. When run from a GNOME
 desktop session as your normal user, this installer also enables lock screen
-face unlock for that user. GDM login face auth is not enabled by this installer.
+face unlock for that user. GDM loads the extension by default, but GDM login
+face auth is not enabled unless you explicitly run the docs command for it.
 EOF
 }
 
@@ -51,7 +52,7 @@ prompt_continue() {
     echo ""
     printf "Continue? [y/N]: "
     if [ -r /dev/tty ]; then
-        read answer </dev/tty
+        read -r answer </dev/tty
     else
         red "No interactive terminal available. Re-run with --yes for non-interactive install."
         exit 1
@@ -83,12 +84,20 @@ _gsettings_add_extension() {
     esac
 }
 
+_gsettings_enable_face_auth() {
+    if ! command -v gsettings >/dev/null 2>&1; then
+        return 1
+    fi
+    gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
+}
+
 enable_gnome_extension() {
     if [ "$(id -u)" -eq 0 ]; then
         echo "Running as root; not changing per-user GNOME extension settings."
         echo "For GNOME lock screen face unlock, run as your desktop user:"
         echo "  gnome-extensions enable gaze@gundulabs.com"
-        echo "GDM login face auth remains disabled by default. See ${GNOME_DOCS_URL} before enabling it."
+        echo "  gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true"
+        echo "GDM loads the extension by default. Login face auth requires the docs command: ${GNOME_DOCS_URL}"
         return 0
     fi
 
@@ -96,7 +105,8 @@ enable_gnome_extension() {
         echo "GNOME desktop session not detected; leaving the extension disabled for this user."
         echo "For GNOME lock screen face unlock, run from your GNOME session:"
         echo "  gnome-extensions enable gaze@gundulabs.com"
-        echo "GDM login face auth remains disabled by default. See ${GNOME_DOCS_URL} before enabling it."
+        echo "  gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true"
+        echo "GDM loads the extension by default. Login face auth requires the docs command: ${GNOME_DOCS_URL}"
         return 0
     fi
 
@@ -106,18 +116,19 @@ enable_gnome_extension() {
     # Newly installed system extensions are not scanned until Shell restarts, so it
     # often fails on first install. Fall back to gsettings which writes directly to
     # dconf and takes effect on the next login without needing Shell to know the ext.
-    if command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions enable "$EXT_ID" >/dev/null 2>&1; then
+    if command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions enable "$EXT_ID" >/dev/null 2>&1 && _gsettings_enable_face_auth; then
         echo "Enabled GNOME lock screen face unlock for this user."
-    elif _gsettings_add_extension "$EXT_ID"; then
+    elif _gsettings_add_extension "$EXT_ID" && _gsettings_enable_face_auth; then
         echo "Registered GNOME lock screen face unlock for this user."
         echo "Log out and back in once to activate the extension."
     else
         echo "Could not enable the GNOME extension automatically."
         echo "After logging into GNOME, run:"
         echo "  gnome-extensions enable gaze@gundulabs.com"
+        echo "  gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true"
     fi
 
-    echo "GDM login face auth remains disabled by default. See ${GNOME_DOCS_URL} before enabling it."
+    echo "GDM loads the extension by default. Login face auth requires the docs command: ${GNOME_DOCS_URL}"
 }
 
 configure_authselect() {
@@ -392,7 +403,8 @@ echo "  Enroll your face:    gaze add-face <name>"
 echo "  Test authentication: gaze auth"
 echo "  GUI:                 gaze-gui"
 echo "  GNOME lock screen:   enabled for this GNOME user when possible"
-echo "  GDM login face auth: disabled by default"
+echo "  GDM extension:       enabled by package defaults"
+echo "  GDM login face auth: disabled until you run the docs command"
 echo ""
 bold "Optional GDM login setup docs:"
 green "https://gaze.gundulabs.com/guide/gnome#optional-enable-face-at-gdm-login"

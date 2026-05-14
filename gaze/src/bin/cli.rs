@@ -608,6 +608,51 @@ fn which(bin: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn reset_gnome_user_settings_cmd() -> String {
+    [
+        "if command -v getent >/dev/null 2>&1 && command -v dbus-run-session >/dev/null 2>&1; then",
+        "getent passwd | while IFS=: read -r user _ uid _ _ home _; do",
+        r#"{ [ "$uid" -ge 1000 ] 2>/dev/null || [ "$user" = gdm ] || [ "$user" = gdm3 ] || [ "$user" = Debian-gdm ]; } || continue;"#,
+        r#"[ -d "$home" ] || continue;"#,
+        r#"sudo -u "$user" env HOME="$home" dbus-run-session sh -c 'EXT_ID="gaze@gundulabs.com";"#,
+        "if command -v gsettings >/dev/null 2>&1; then",
+        "current=$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null || true);",
+        r#"case "$current" in *"$EXT_ID"*)"#,
+        r#"next=$(printf "%s" "$current" | sed "s/\047$EXT_ID\047, //; s/, \047$EXT_ID\047//; s/\047$EXT_ID\047//");"#,
+        r#"gsettings set org.gnome.shell enabled-extensions "$next" 2>/dev/null || true;;"#,
+        "esac;",
+        "gsettings reset-recursively org.gnome.shell.extensions.gaze 2>/dev/null || true;",
+        "fi;",
+        "if command -v dconf >/dev/null 2>&1; then",
+        "dconf reset -f /org/gnome/shell/extensions/gaze/ 2>/dev/null || true;",
+        "fi' || true;",
+        "done; fi",
+    ]
+    .join(" ")
+}
+
+fn remove_gdm_dconf_overrides_cmd() -> String {
+    [
+        "sudo rm -f /etc/dconf/db/gdm.d/00-gaze-defaults /etc/dconf/db/gdm.d/99-gaze &&",
+        "if command -v dconf >/dev/null 2>&1; then",
+        "sudo dconf update >/dev/null 2>&1 || true;",
+        "fi",
+    ]
+    .join(" ")
+}
+
+fn refresh_gnome_system_settings_cmd() -> String {
+    [
+        "if command -v dconf >/dev/null 2>&1; then",
+        "sudo dconf update >/dev/null 2>&1 || true;",
+        "fi;",
+        "if command -v glib-compile-schemas >/dev/null 2>&1; then",
+        "sudo glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true;",
+        "fi",
+    ]
+    .join(" ")
+}
+
 fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     let mut plan: Vec<(&'static str, String)> = Vec::new();
 
@@ -616,13 +661,16 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
             "Disable GNOME extension (best-effort)",
             "gnome-extensions disable gaze@gundulabs.com 2>/dev/null || true".into(),
         ));
-        plan.push((
-            "Disable face auth at GDM (best-effort)",
-            "sudo -u gdm dbus-run-session gsettings set org.gnome.shell.extensions.gaze \
-              enable-face-authentication false 2>/dev/null || true"
-                .into(),
-        ));
     }
+
+    plan.push((
+        "Reset GNOME lock/login settings",
+        reset_gnome_user_settings_cmd(),
+    ));
+    plan.push((
+        "Remove GDM dconf overrides",
+        remove_gdm_dconf_overrides_cmd(),
+    ));
 
     if which("pam-auth-update") {
         plan.push((
@@ -699,6 +747,10 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
         ));
     }
 
+    plan.push((
+        "Refresh GNOME system settings",
+        refresh_gnome_system_settings_cmd(),
+    ));
     plan.push(("Reload systemd", "sudo systemctl daemon-reload".into()));
 
     plan

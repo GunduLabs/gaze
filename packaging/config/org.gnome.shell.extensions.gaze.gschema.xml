@@ -2,7 +2,7 @@
 <schemalist>
   <schema id="org.gnome.shell.extensions.gaze" path="/org/gnome/shell/extensions/gaze/">
     <key name="enable-face-authentication" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Enable face authentication</summary>
       <description>
         Controls whether face authentication is attempted by the Gaze GNOME

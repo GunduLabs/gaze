@@ -44,6 +44,7 @@ rpm:
 
 scripts:
   postinstall: "packaging/postinst-gnome-extension.sh"
+  postremove: "packaging/postrm-gnome-extension.sh"
 
 depends:
   - gnome-shell

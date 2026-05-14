@@ -135,6 +135,7 @@ glib-compile-schemas ~/.local/share/gnome-shell/extensions/gaze@gundulabs.com/sc
 
 # on Xorg: Alt+F2 then `r`. On Wayland: log out and back in.
 gnome-extensions enable gaze@gundulabs.com
+gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
 Watch shell logs while you iterate:

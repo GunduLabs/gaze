@@ -1,6 +1,6 @@
 # Installation
 
-Use either of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible. Manual package installs still need one GNOME command afterward.
+Use either of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible. Manual package installs still need GNOME settings commands afterward.
 
 Supported installer targets: Ubuntu 24.04/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Manjaro.
 
@@ -22,7 +22,7 @@ GNOME behavior:
 
 - CLI, GUI, and normal PAM prompts work without the GNOME extension.
 - If the installer is not run from a GNOME desktop session, it prints the manual enable command instead.
-- GDM login face auth is separate and stays disabled unless you explicitly enable it.
+- GDM loads the extension from package defaults, but GDM login face auth stays disabled unless you explicitly enable it.
 
 For non-interactive installs:
 
@@ -68,6 +68,7 @@ Only run this on GNOME desktops where you want face unlock from the lock screen.
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
+gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
 Log out and back in once after installing or updating the extension if the lock screen does not pick it up immediately. GDM login face auth stays disabled unless you explicitly enable it; see the [GNOME Extension guide](/guide/gnome) before doing that.

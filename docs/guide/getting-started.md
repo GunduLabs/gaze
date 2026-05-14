@@ -68,6 +68,7 @@ Only do this on GNOME if you want face unlock from the lock screen. The one-line
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
+gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
 On Wayland, log out and back in after installing extension updates if the lock screen does not pick it up immediately.

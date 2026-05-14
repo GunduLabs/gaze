@@ -1,6 +1,6 @@
 # GNOME Extension
 
-Gaze lock screen and GDM integration are GNOME-specific and require the `gaze-gnome-extension` package. The one-line installer tries to enable the extension for the current GNOME user. Manual package installs only install the extension files.
+Gaze lock screen and GDM integration are GNOME-specific and require the `gaze-gnome-extension` package. The one-line installer tries to enable lock screen face unlock for the current GNOME user. Manual package installs only install the extension files.
 
 This extension starts the `gdm-face` PAM service inside GNOME Shell authentication flows.
 
@@ -18,13 +18,14 @@ If the package is installed but the extension is not enabled yet:
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
+gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
 Then log out and back in once after install or update.
 
 ## Login warning (GNOME keyring)
 
-Face authentication for the GDM login screen is disabled by default.
+GDM loads the extension from package defaults, but face authentication for the GDM login screen is disabled by default.
 
 This is mostly about GNOME keyring behavior. GNOME keyring is normally unlocked by your login password. If you log in with face only, that password is never entered, so the keyring may stay locked.
 
@@ -62,13 +63,7 @@ At the GDM login screen, the selected user's desktop session may not exist yet. 
 ## Disable face at GDM login
 
 ```bash
-sudo tee /etc/dconf/db/gdm.d/99-gaze >/dev/null <<'EOF'
-[org/gnome/shell]
-enabled-extensions=['gaze@gundulabs.com']
-
-[org/gnome/shell/extensions/gaze]
-enable-face-authentication=false
-EOF
+sudo rm -f /etc/dconf/db/gdm.d/99-gaze
 sudo dconf update
 ```
 
