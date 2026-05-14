@@ -70,6 +70,19 @@ is_gnome_session() {
     return 1
 }
 
+_gsettings_add_extension() {
+    ext_id="$1"
+    if ! command -v gsettings >/dev/null 2>&1; then
+        return 1
+    fi
+    current=$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null) || return 1
+    case "$current" in
+        *"$ext_id"*) return 0 ;;
+        "@as []"|"[]") gsettings set org.gnome.shell enabled-extensions "['$ext_id']" ;;
+        *) gsettings set org.gnome.shell enabled-extensions "$(printf '%s' "$current" | sed "s/]$/, '$ext_id']/")" ;;
+    esac
+}
+
 enable_gnome_extension() {
     if [ "$(id -u)" -eq 0 ]; then
         echo "Running as root; not changing per-user GNOME extension settings."
@@ -87,17 +100,17 @@ enable_gnome_extension() {
         return 0
     fi
 
-    if ! command -v gnome-extensions >/dev/null 2>&1; then
-        echo "gnome-extensions command not found; cannot enable the extension automatically."
-        echo "After installing GNOME Shell tools, run:"
-        echo "  gnome-extensions enable gaze@gundulabs.com"
-        echo "GDM login face auth remains disabled by default. See ${GNOME_DOCS_URL} before enabling it."
-        return 0
-    fi
+    EXT_ID="gaze@gundulabs.com"
 
-    if gnome-extensions enable gaze@gundulabs.com >/dev/null 2>&1; then
+    # gnome-extensions enable works immediately when Shell already knows the extension.
+    # Newly installed system extensions are not scanned until Shell restarts, so it
+    # often fails on first install. Fall back to gsettings which writes directly to
+    # dconf and takes effect on the next login without needing Shell to know the ext.
+    if command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions enable "$EXT_ID" >/dev/null 2>&1; then
         echo "Enabled GNOME lock screen face unlock for this user."
-        echo "If the lock screen does not pick it up immediately, log out and back in once."
+    elif _gsettings_add_extension "$EXT_ID"; then
+        echo "Registered GNOME lock screen face unlock for this user."
+        echo "Log out and back in once to activate the extension."
     else
         echo "Could not enable the GNOME extension automatically."
         echo "After logging into GNOME, run:"
