@@ -25,7 +25,6 @@ ureq = "3.3"
 uuid = { version = "1.23", features = ["v4"] }
 zbus = "5.15"
 zip = "8.6"
-indicatif = "0.18.4"
 console = "0.16.3"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
@@ -33,6 +32,8 @@ dialoguer = "0.12"
 toml = "1.1"
 futures = "0.3.32"
 zbus_polkit = "5.0.0"
+crossterm = "0.28"
+ratatui = "0.29"
 
 [[bin]]
 name = "gazed"

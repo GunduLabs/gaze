@@ -1,3 +1,6 @@
+#[path = "cli/tui.rs"]
+mod tui;
+
 use clap::{Parser, Subcommand};
 use console::{Term, style};
 use dialoguer::{Input, Select, theme::ColorfulTheme};
@@ -7,26 +10,55 @@ use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon,
     dbus_error_message, dbus_is_file_not_found, load_config_from_daemon,
 };
-use indicatif::{ProgressBar, ProgressStyle};
-use std::time::Duration;
+use std::{future::Future, time::Duration};
+use tui::{AuthScreen, BusyScreen, EnrollScreen, Tone, TuiAction, TuiTerminal};
 use zbus::Connection;
 
 fn get_current_user() -> String {
     std::env::var("USER").unwrap_or_else(|_| "root".into())
 }
 
-fn create_spinner(prefix: &str, msg: String, color: &str) -> ProgressBar {
-    let pb = ProgressBar::new_spinner();
-    let template = format!("{{spinner:.{}}} {{prefix:.bold.blue}} {{msg}}", color);
-    pb.set_style(
-        ProgressStyle::default_spinner()
-            .template(&template)
-            .unwrap(),
-    );
-    pb.enable_steady_tick(Duration::from_millis(80));
-    pb.set_prefix(prefix.to_string());
-    pb.set_message(msg);
-    pb
+fn capture_tone(status: CaptureStatus) -> Tone {
+    match status {
+        CaptureStatus::Ready => Tone::Good,
+        CaptureStatus::NoFace => Tone::Error,
+        CaptureStatus::Clipped
+        | CaptureStatus::NotCentered
+        | CaptureStatus::TooFar
+        | CaptureStatus::TooClose => Tone::Warn,
+    }
+}
+
+async fn run_busy<F, T>(title: &str, message: String, tone: Tone, future: F) -> anyhow::Result<T>
+where
+    F: Future<Output = T>,
+{
+    let mut terminal = TuiTerminal::new()?;
+    let mut tick = 0_u64;
+    tokio::pin!(future);
+
+    loop {
+        terminal.draw_busy(&BusyScreen {
+            title,
+            message: &message,
+            tone,
+            tick,
+        })?;
+        if let Some(TuiAction::Cancel) = tui::poll_action()? {
+            drop(terminal);
+            anyhow::bail!("cancelled");
+        }
+
+        tokio::select! {
+            result = &mut future => {
+                drop(terminal);
+                return Ok(result);
+            }
+            _ = tokio::time::sleep(Duration::from_millis(80)) => {
+                tick = tick.wrapping_add(1);
+            }
+        }
+    }
 }
 
 #[derive(Parser)]
@@ -211,7 +243,6 @@ async fn handle_enroll(
     is_refine: bool,
 ) -> anyhow::Result<()> {
     let term = Term::stdout();
-    term.clear_screen()?;
 
     if proxy.claim(user).await.is_err() {
         term.write_line(&format!(
@@ -221,121 +252,129 @@ async fn handle_enroll(
         return Ok(());
     }
 
-    if is_refine {
-        term.write_line(&format!(
-            "\n  {} {}\n",
-            style("Refining face").cyan().bold(),
-            style(format!("{}/{}", user, face)).cyan().underlined()
-        ))?;
-    } else {
-        term.write_line(&format!(
-            "\n  {} {}\n",
-            style("Face capture template for").cyan().bold(),
-            style(format!("{}/{}", user, face)).cyan().underlined()
-        ))?;
-    }
-    term.write_line("  Position your face as prompted. Capture is automatic when centered.\n")?;
-
-    let pb = ProgressBar::new(100);
-    let style_progress = ProgressStyle::default_bar()
-        .template("{spinner:.green} {prefix:.bold.blue} {msg} {bar:20.green/blue} {pos}/{len}")
-        .unwrap()
-        .progress_chars("█▇▆▅▄▃▂   ");
-
-    pb.set_style(style_progress);
-    pb.enable_steady_tick(Duration::from_millis(80));
-    pb.set_prefix("Capturing");
-    pb.set_message("Waiting for face...");
-
     let mut enroll_stream = proxy.receive_enroll_status().await?;
     let mut capture_stream = proxy.receive_face_status().await?;
-    proxy.enroll_start(face).await?;
+    let mut terminal = match TuiTerminal::new() {
+        Ok(terminal) => terminal,
+        Err(err) => {
+            let _ = proxy.release().await;
+            return Err(err);
+        }
+    };
+    if let Err(err) = proxy.enroll_start(face).await {
+        drop(terminal);
+        let _ = proxy.release().await;
+        anyhow::bail!("Failed to start enrollment: {}", dbus_error_message(&err));
+    }
 
-    let mut current_enroll_msg = "Waiting...".to_string();
-    let mut current_capture_msg = "".to_string();
-    let mut current_progress = 0;
-    let mut current_max = 100;
+    let mut current_enroll_msg = "Waiting for capture prompt".to_string();
+    let mut current_capture_msg = "Waiting for face...".to_string();
+    let mut current_capture_tone = Tone::Info;
+    let mut current_progress = 0_u32;
+    let mut current_max = 100_u32;
+    let mut current_time_remaining = None;
+    let mut confirm_cancel = false;
+    let mut tick = 0_u64;
 
     let mut is_cancelled = false;
+    let mut is_completed = false;
+    let mut is_failed = false;
     loop {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                pb.suspend(|| {
-                    let theme = ColorfulTheme::default();
-                    println!();
-                    if Select::with_theme(&theme)
-                        .with_prompt("Cancel enrollment and discard captures?")
-                        .items(["No, resume", "Yes, discard"])
-                        .default(0)
-                        .interact()
-                        .unwrap_or(0) == 1
-                    {
-                        is_cancelled = true;
-                    }
-                });
-                if is_cancelled {
-                    pb.finish_and_clear();
-                    term.write_line(&format!("\n{} Enrollment cancelled", style("✗").red().bold())).unwrap();
-                    break;
-                }
+        terminal.draw_enroll(&EnrollScreen {
+            user,
+            face,
+            is_refine,
+            prompt: &current_enroll_msg,
+            capture: &current_capture_msg,
+            capture_tone: current_capture_tone,
+            progress: current_progress,
+            max: current_max,
+            time_remaining: current_time_remaining,
+            confirm_cancel,
+            tick,
+        })?;
+
+        match tui::poll_action()? {
+            Some(TuiAction::Cancel) if confirm_cancel => confirm_cancel = false,
+            Some(TuiAction::Cancel) => confirm_cancel = true,
+            Some(TuiAction::Confirm) if confirm_cancel => {
+                is_cancelled = true;
+                break;
             }
-            Some(signal) = enroll_stream.next() => {
-                if let Ok(args) = signal.args() {
-                    let raw_msg = *args.msg();
-                    let time_remaining = *args.time_remaining();
-                    let is_done = *args.is_done();
-                    current_progress = *args.progress();
-                    current_max = *args.max();
-
-                    current_enroll_msg = raw_msg.to_string();
-
-                    if time_remaining > 0.0 {
-                        current_enroll_msg = format!("{} [{:.1}s]", current_enroll_msg, time_remaining);
-                    }
-
-                    if matches!(raw_msg, EnrollPrompt::DbFailed | EnrollPrompt::Cancelled) {
-                         pb.finish_and_clear();
-                         term.write_line(&format!("{} Enrollment failed", style("✗").red().bold()))?;
-                         break;
-                    }
-
-                    if is_done && raw_msg == EnrollPrompt::Completed {
-                        pb.finish_and_clear();
-                        term.write_line(&format!(
-                            "  {} Captures saved for {}/{}!\n",
-                            style("✓").green().bold(),
-                            style(user).green(),
-                            style(face).green()
-                        ))?;
-                        break;
-                    }
-
-                    if is_done {
-                          pb.finish_and_clear();
-                          term.write_line(&format!("{} Enrollment failed", style("✗").red().bold()))?;
-                          break;
-                    }
-                }
-            }
-            Some(signal) = capture_stream.next() => {
-                if let Ok(args) = signal.args() {
-                    let status = *args.status();
-                    current_capture_msg = status.to_string();
-                }
-            }
+            Some(TuiAction::Decline) if confirm_cancel => confirm_cancel = false,
+            _ => {}
         }
 
-        pb.set_length(current_max as u64);
-        pb.set_position(current_progress as u64);
-        pb.set_message(format!("{} | {}", current_enroll_msg, current_capture_msg));
+        tokio::select! {
+            signal = enroll_stream.next() => match signal {
+                Some(signal) => {
+                    if let Ok(args) = signal.args() {
+                        let raw_msg = *args.msg();
+                        let time_remaining = *args.time_remaining();
+                        let is_done = *args.is_done();
+                        current_progress = *args.progress();
+                        current_max = *args.max();
+                        current_enroll_msg = raw_msg.to_string();
+                        current_time_remaining = (time_remaining > 0.0).then_some(time_remaining);
+
+                        if matches!(raw_msg, EnrollPrompt::DbFailed | EnrollPrompt::Cancelled) {
+                            is_failed = true;
+                            break;
+                        }
+
+                        if is_done && raw_msg == EnrollPrompt::Completed {
+                            is_completed = true;
+                            break;
+                        }
+
+                        if is_done {
+                            is_failed = true;
+                            break;
+                        }
+                    }
+                }
+                None => {
+                    is_failed = true;
+                    break;
+                }
+            },
+            signal = capture_stream.next() => {
+                if let Some(signal) = signal
+                    && let Ok(args) = signal.args()
+                {
+                    let status = *args.status();
+                    current_capture_msg = status.to_string();
+                    current_capture_tone = capture_tone(status);
+                }
+            }
+            _ = tokio::time::sleep(Duration::from_millis(80)) => {
+                tick = tick.wrapping_add(1);
+            }
+        }
     }
+
+    drop(terminal);
 
     if is_cancelled {
         let _ = proxy.enroll_stop().await;
     }
     let _ = proxy.release().await;
     if is_cancelled {
+        term.write_line(&format!(
+            "\n{} Enrollment cancelled",
+            style("✗").red().bold()
+        ))?;
         std::process::exit(130);
+    }
+    if is_completed {
+        term.write_line(&format!(
+            "  {} Captures saved for {}/{}!\n",
+            style("✓").green().bold(),
+            style(user).green(),
+            style(face).green()
+        ))?;
+    } else if is_failed {
+        term.write_line(&format!("{} Enrollment failed", style("✗").red().bold()))?;
     }
     Ok(())
 }
@@ -344,76 +383,138 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
     let term = Term::stdout();
     let start = std::time::Instant::now();
 
-    let pb = create_spinner(
-        "Authenticating",
-        format!("Scanning face for {}...", style(user).cyan().bold()),
-        "cyan",
-    );
-
     if proxy.claim(user).await.is_err() {
-        pb.finish_and_clear();
         term.write_line(&format!("{} Device busy", style("✗").red().bold()))?;
         return Ok(());
     }
 
     let mut status_stream = proxy.receive_verify_status().await?;
     let mut capture_stream = proxy.receive_face_status().await?;
+    let mut terminal = match TuiTerminal::new() {
+        Ok(terminal) => terminal,
+        Err(err) => {
+            let _ = proxy.release().await;
+            return Err(err);
+        }
+    };
     if let Err(e) = proxy.verify_start("any").await {
-        pb.finish_and_clear();
+        drop(terminal);
         term.write_line(&format!("{} Daemon error: {}", style("✗").red().bold(), e))?;
         let _ = proxy.release().await;
         return Ok(());
     }
 
+    let mut status_msg = format!("Scanning face for {user}...");
+    let mut status_tone = Tone::Info;
+    let mut tick = 0_u64;
+    let mut cancelled = false;
+    let mut verify_result = None;
+
     loop {
+        terminal.draw_auth(&AuthScreen {
+            user,
+            status: &status_msg,
+            status_tone,
+            elapsed: start.elapsed(),
+            tick,
+        })?;
+
+        if let Some(TuiAction::Cancel) = tui::poll_action()? {
+            cancelled = true;
+            break;
+        }
+
         tokio::select! {
-            Some(signal) = status_stream.next() => {
-                if let Ok(args) = signal.args() {
-                    let result = *args.result();
-                    let faces = args.faces().clone();
-
-                    pb.finish_and_clear();
-
-                    if verbose {
-                        println!("\n{:<20} {:>10} {:>8} {:>8} {:>6}",
-                            style("Face").bold(), style("Similarity").bold(), style("Match %").bold(), style("Passed").bold(), style("Count").bold()
-                        );
-                        println!("{}", style("-".repeat(56)).dim());
-                        for (name, score, pct, passed, count) in &faces {
-                            let check = if *passed { style("✓").green() } else { style("✗").red() };
-                            println!("{:<20} {:>10.4} {:>7.1}% {:>8} {:>6}", style(name).cyan(), score, pct, check, count);
-                        }
-                        println!();
-                    }
-
-                    if result == VerifyResult::VerifyMatch {
-                        let matched = faces.iter().find(|(_, _, _, p, _)| *p)
-                            .map(|(n, _, pct, _, _)| (n.clone(), *pct));
-                        if let Some((face, pct)) = matched {
-                            term.write_line(&format!("{} Authenticated as: {} ({:.1}%, {}ms)", style("✓").green().bold(), style(&face).green().bold(), pct, start.elapsed().as_millis()))?;
-                        } else {
-                            term.write_line(&format!("{} Authenticated as: {} ({}ms)", style("✓").green().bold(), style(user).green().bold(), start.elapsed().as_millis()))?;
-                        }
-                    } else {
-                        term.write_line(&format!("{} Authentication failed ({}ms)", style("✗").red().bold(), start.elapsed().as_millis()))?;
-                    }
+            signal = status_stream.next() => {
+                if let Some(signal) = signal
+                    && let Ok(args) = signal.args()
+                {
+                    verify_result = Some((*args.result(), args.faces().clone()));
                     break;
                 }
             }
-            Some(signal) = capture_stream.next() => {
-                if let Ok(args) = signal.args() {
+            signal = capture_stream.next() => {
+                if let Some(signal) = signal
+                    && let Ok(args) = signal.args()
+                {
                     let status = *args.status();
-                    let msg = match status {
-                        CaptureStatus::NoFace => style(status.to_string()).red().to_string(),
-                        CaptureStatus::Clipped
-                        | CaptureStatus::NotCentered
-                        | CaptureStatus::TooFar
-                        | CaptureStatus::TooClose => style(status.to_string()).yellow().to_string(),
-                        CaptureStatus::Ready => format!("Scanning face for {}...", style(user).cyan().bold()),
+                    status_tone = capture_tone(status);
+                    status_msg = match status {
+                        CaptureStatus::Ready => format!("Scanning face for {user}..."),
+                        _ => status.to_string(),
                     };
-                    pb.set_message(msg);
                 }
             }
+            _ = tokio::time::sleep(Duration::from_millis(80)) => {
+                tick = tick.wrapping_add(1);
+            }
+        }
+    }
+
+    drop(terminal);
+
+    if cancelled {
+        let _ = proxy.verify_stop().await;
+        let _ = proxy.release().await;
+        std::process::exit(130);
+    }
+
+    if let Some((result, faces)) = verify_result {
+        if verbose {
+            println!(
+                "\n{:<20} {:>10} {:>8} {:>8} {:>6}",
+                style("Face").bold(),
+                style("Similarity").bold(),
+                style("Match %").bold(),
+                style("Passed").bold(),
+                style("Count").bold()
+            );
+            println!("{}", style("-".repeat(56)).dim());
+            for (name, score, pct, passed, count) in &faces {
+                let check = if *passed {
+                    style("✓").green()
+                } else {
+                    style("✗").red()
+                };
+                println!(
+                    "{:<20} {:>10.4} {:>7.1}% {:>8} {:>6}",
+                    style(name).cyan(),
+                    score,
+                    pct,
+                    check,
+                    count
+                );
+            }
+            println!();
+        }
+
+        if result == VerifyResult::VerifyMatch {
+            let matched = faces
+                .iter()
+                .find(|(_, _, _, p, _)| *p)
+                .map(|(n, _, pct, _, _)| (n.clone(), *pct));
+            if let Some((face, pct)) = matched {
+                term.write_line(&format!(
+                    "{} Authenticated as: {} ({:.1}%, {}ms)",
+                    style("✓").green().bold(),
+                    style(&face).green().bold(),
+                    pct,
+                    start.elapsed().as_millis()
+                ))?;
+            } else {
+                term.write_line(&format!(
+                    "{} Authenticated as: {} ({}ms)",
+                    style("✓").green().bold(),
+                    style(user).green().bold(),
+                    start.elapsed().as_millis()
+                ))?;
+            }
+        } else {
+            term.write_line(&format!(
+                "{} Authentication failed ({}ms)",
+                style("✗").red().bold(),
+                start.elapsed().as_millis()
+            ))?;
         }
     }
     let _ = proxy.release().await;
@@ -422,15 +523,16 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
 
 async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<()> {
     let term = Term::stdout();
-    let pb = create_spinner(
-        "Database",
-        format!("Fetching faces for {}...", style(user).cyan().bold()),
-        "cyan",
-    );
+    let result = run_busy(
+        "Face database",
+        format!("Fetching faces for {user}..."),
+        Tone::Info,
+        proxy.list_faces(user),
+    )
+    .await?;
 
-    match proxy.list_faces(user).await {
+    match result {
         Ok(faces) => {
-            pb.finish_and_clear();
             if faces.is_empty() {
                 term.write_line(&format!(
                     "{} No faces found for {}",
@@ -455,7 +557,6 @@ async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
             }
         }
         Err(e) => {
-            pb.finish_and_clear();
             if dbus_is_file_not_found(&e) {
                 term.write_line(&format!(
                     "{} No faces found for {}",
@@ -476,15 +577,16 @@ async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
 
 async fn handle_remove_face(proxy: &GazeProxy<'_>, user: &str, face: &str) -> anyhow::Result<()> {
     let term = Term::stdout();
-    let pb = create_spinner(
-        "Removing",
-        format!("Deleting face {}...", style(face).red().bold()),
-        "red",
-    );
+    let result = run_busy(
+        "Remove face",
+        format!("Deleting face {face}..."),
+        Tone::Warn,
+        proxy.delete_face(user, face),
+    )
+    .await?;
 
-    match proxy.delete_face(user, face).await {
+    match result {
         Ok(true) => {
-            pb.finish_and_clear();
             term.write_line(&format!(
                 "{} Face '{}' removed for '{}'",
                 style("✓").green().bold(),
@@ -493,7 +595,6 @@ async fn handle_remove_face(proxy: &GazeProxy<'_>, user: &str, face: &str) -> an
             ))?;
         }
         Ok(false) => {
-            pb.finish_and_clear();
             term.write_line(&format!(
                 "{} Face '{}' not found for '{}'",
                 style("!").yellow().bold(),
@@ -502,7 +603,6 @@ async fn handle_remove_face(proxy: &GazeProxy<'_>, user: &str, face: &str) -> an
             ))?;
         }
         Err(err) => {
-            pb.finish_and_clear();
             term.write_line(&format!(
                 "{} Failed to remove face: {}",
                 style("✗").red().bold(),
@@ -520,19 +620,16 @@ async fn handle_rename_face(
     to: &str,
 ) -> anyhow::Result<()> {
     let term = Term::stdout();
-    let pb = create_spinner(
-        "Renaming",
-        format!(
-            "Renaming face {} -> {}...",
-            style(from).cyan().bold(),
-            style(to).cyan().bold()
-        ),
-        "cyan",
-    );
+    let result = run_busy(
+        "Rename face",
+        format!("Renaming face {from} -> {to}..."),
+        Tone::Info,
+        proxy.rename_face(user, from, to),
+    )
+    .await?;
 
-    match proxy.rename_face(user, from, to).await {
+    match result {
         Ok(true) => {
-            pb.finish_and_clear();
             term.write_line(&format!(
                 "{} Face '{}' renamed to '{}' for '{}'",
                 style("✓").green().bold(),
@@ -542,7 +639,6 @@ async fn handle_rename_face(
             ))?;
         }
         Ok(false) => {
-            pb.finish_and_clear();
             term.write_line(&format!(
                 "{} Face '{}' not found for '{}'",
                 style("!").yellow().bold(),
@@ -551,7 +647,6 @@ async fn handle_rename_face(
             ))?;
         }
         Err(err) => {
-            pb.finish_and_clear();
             term.write_line(&format!(
                 "{} Failed to rename face: {}",
                 style("✗").red().bold(),
@@ -564,15 +659,16 @@ async fn handle_rename_face(
 
 async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<()> {
     let term = Term::stdout();
-    let pb = create_spinner(
-        "Clearing",
-        format!("Deleting all data for {}...", style(user).red().bold()),
-        "red",
-    );
+    let result = run_busy(
+        "Clear user",
+        format!("Deleting all data for {user}..."),
+        Tone::Warn,
+        proxy.delete_faces(user),
+    )
+    .await?;
 
-    match proxy.delete_faces(user).await {
+    match result {
         Ok(true) => {
-            pb.finish_and_clear();
             term.write_line(&format!(
                 "{} All data cleared for '{}'",
                 style("✓").green().bold(),
@@ -580,7 +676,6 @@ async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
             ))?;
         }
         Ok(false) => {
-            pb.finish_and_clear();
             term.write_line(&format!(
                 "{} No data found for '{}'",
                 style("!").yellow().bold(),
@@ -588,7 +683,6 @@ async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
             ))?;
         }
         Err(err) => {
-            pb.finish_and_clear();
             term.write_line(&format!(
                 "{} Failed to clear user: {}",
                 style("✗").red().bold(),
