@@ -244,10 +244,11 @@ async fn handle_enroll(
 ) -> anyhow::Result<()> {
     let term = Term::stdout();
 
-    if proxy.claim(user).await.is_err() {
+    if let Err(err) = proxy.claim(user).await {
         term.write_line(&format!(
-            "{} Failed to claim device",
-            style("✗").red().bold()
+            "{} Failed to claim device: {}",
+            style("✗").red().bold(),
+            dbus_error_message(&err)
         ))?;
         return Ok(());
     }
@@ -383,8 +384,12 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
     let term = Term::stdout();
     let start = std::time::Instant::now();
 
-    if proxy.claim(user).await.is_err() {
-        term.write_line(&format!("{} Device busy", style("✗").red().bold()))?;
+    if let Err(err) = proxy.claim(user).await {
+        term.write_line(&format!(
+            "{} Failed to claim device: {}",
+            style("✗").red().bold(),
+            dbus_error_message(&err)
+        ))?;
         return Ok(());
     }
 
