@@ -63,7 +63,7 @@ At the GDM login screen, the selected user's desktop session may not exist yet. 
 ## Disable face at GDM login
 
 ```bash
-sudo rm -f /etc/dconf/db/gdm.d/99-gaze
+sudo rm -f /etc/dconf/db/gdm.d/99-gaze*
 sudo dconf update
 ```
 

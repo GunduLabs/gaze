@@ -32,7 +32,7 @@ Repeat this for each desktop user who enabled lock screen face unlock.
 ### Remove GDM login defaults and overrides
 
 ```bash
-sudo rm -f /etc/dconf/db/gdm.d/00-gaze-defaults /etc/dconf/db/gdm.d/99-gaze
+sudo rm -f /etc/dconf/db/gdm.d/00-gaze-defaults* /etc/dconf/db/gdm.d/99-gaze*
 sudo dconf update
 ```
 
@@ -45,7 +45,13 @@ sudo pam-auth-update --package --remove gaze
 ```
 
 ```bash [Fedora]
-sudo authselect select sssd --force
+if [ -f /etc/gaze/authselect.previous ]; then
+  profile=$(sudo sed -n 's/^Profile ID:[[:space:]]*//p' /etc/gaze/authselect.previous)
+  features=$(sudo sed -n 's/^- //p' /etc/gaze/authselect.previous | tr '\n' ' ')
+  sudo authselect select "$profile" $features --force
+else
+  sudo authselect select sssd --force
+fi
 ```
 
 ```bash [Manual PAM setup]

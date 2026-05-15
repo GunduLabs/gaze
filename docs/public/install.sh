@@ -136,6 +136,21 @@ configure_authselect() {
         return 0
     fi
 
+    if ! sudo test -f /etc/gaze/authselect.previous; then
+        current_authselect="$(sudo authselect current 2>/dev/null || true)"
+        case "$current_authselect" in
+            *"Profile ID: gaze"*) ;;
+            "") ;;
+            *)
+                if printf '%s\n' "$current_authselect" >"$TMP/authselect.previous" && \
+                    sudo mkdir -p /etc/gaze && \
+                    sudo cp "$TMP/authselect.previous" /etc/gaze/authselect.previous; then
+                    :
+                fi
+                ;;
+        esac
+    fi
+
     if sudo authselect select gaze with-silent-lastlog --force >/dev/null 2>&1; then
         echo "Enabled the Gaze PAM authselect profile."
     else

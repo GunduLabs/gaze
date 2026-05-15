@@ -614,7 +614,9 @@ fn reset_gnome_user_settings_cmd() -> String {
         "getent passwd | while IFS=: read -r user _ uid _ _ home _; do",
         r#"{ [ "$uid" -ge 1000 ] 2>/dev/null || [ "$user" = gdm ] || [ "$user" = gdm3 ] || [ "$user" = Debian-gdm ]; } || continue;"#,
         r#"[ -d "$home" ] || continue;"#,
-        r#"sudo -u "$user" env HOME="$home" dbus-run-session sh -c 'EXT_ID="gaze@gundulabs.com";"#,
+        r#"dconf_profile="";"#,
+        r#"case "$user" in gdm|gdm3|Debian-gdm) dconf_profile="DCONF_PROFILE=gdm" ;; esac;"#,
+        r#"sudo -u "$user" env HOME="$home" $dconf_profile dbus-run-session sh -c 'EXT_ID="gaze@gundulabs.com";"#,
         "if command -v gsettings >/dev/null 2>&1; then",
         "current=$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null || true);",
         r#"case "$current" in *"$EXT_ID"*)"#,
@@ -633,9 +635,26 @@ fn reset_gnome_user_settings_cmd() -> String {
 
 fn remove_gdm_dconf_overrides_cmd() -> String {
     [
-        "sudo rm -f /etc/dconf/db/gdm.d/00-gaze-defaults /etc/dconf/db/gdm.d/99-gaze &&",
+        "sudo rm -f /etc/dconf/db/gdm.d/00-gaze-defaults* /etc/dconf/db/gdm.d/99-gaze* &&",
         "if command -v dconf >/dev/null 2>&1; then",
         "sudo dconf update >/dev/null 2>&1 || true;",
+        "fi",
+    ]
+    .join(" ")
+}
+
+fn restore_authselect_cmd() -> String {
+    [
+        "if [ -f /etc/gaze/authselect.previous ]; then",
+        r#"profile=$(sudo sed -n 's/^Profile ID:[[:space:]]*//p' /etc/gaze/authselect.previous);"#,
+        r#"features=$(sudo sed -n 's/^- //p' /etc/gaze/authselect.previous | tr '\n' ' ');"#,
+        r#"if [ -n "$profile" ]; then"#,
+        r#"sudo authselect select "$profile" $features --force 2>/dev/null || true;"#,
+        "else",
+        "sudo authselect select sssd --force 2>/dev/null || true;",
+        "fi;",
+        "else",
+        "sudo authselect select sssd --force 2>/dev/null || true;",
         "fi",
     ]
     .join(" ")
@@ -679,10 +698,7 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
         ));
     }
     if which("authselect") {
-        plan.push((
-            "Revert authselect to sssd",
-            "sudo authselect select sssd --force 2>/dev/null || true".into(),
-        ));
+        plan.push(("Restore authselect profile", restore_authselect_cmd()));
     }
 
     plan.push((
