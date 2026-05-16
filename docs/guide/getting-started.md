@@ -88,3 +88,4 @@ Go to the [troubleshooting guide](/guide/troubleshooting) for camera, daemon, PA
 - Use the desktop app via the [GUI guide](/guide/gui)
 - Review PAM setup in [PAM](/guide/pam)
 - Review lock/login behavior in [GNOME Extension](/guide/gnome)
+- Enable face unlock for [Hyprland (hyprlock)](/guide/hyprland)

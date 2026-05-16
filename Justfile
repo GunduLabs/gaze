@@ -52,6 +52,7 @@ package-prebuilt format:
     just _nfpm packaging/nfpm.yaml {{ format }}
     just _nfpm packaging/nfpm-gui.yaml {{ format }}
     just _nfpm packaging/nfpm-gnome-extension.yaml {{ format }}
+    just _nfpm packaging/nfpm-hyprlock.yaml {{ format }}
     @echo "Packages written to dist/packages/"
 
 # Remove all generated artifacts

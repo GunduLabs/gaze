@@ -46,6 +46,7 @@ export default defineConfig({
             items: [
               { text: 'PAM', link: '/guide/pam' },
               { text: 'GNOME Extension', link: '/guide/gnome' },
+              { text: 'Hyprland (hyprlock)', link: '/guide/hyprland' },
             ]
           },
           { text: 'GUI Guide', link: '/guide/gui' },

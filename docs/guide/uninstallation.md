@@ -29,6 +29,14 @@ gsettings reset-recursively org.gnome.shell.extensions.gaze
 
 Repeat this for each desktop user who enabled lock screen face unlock.
 
+### Revert hyprlock face unlock
+
+If you enabled Gaze for hyprlock, remove the `pam_module = hyprlock-gaze` line from `~/.config/hypr/hyprlock.conf` (or restore `~/.config/hypr/hyprlock.conf.gaze-backup` if the installer created one). Repeat for every user that enabled it.
+
+```bash
+sed -i.bak '/^\s*pam_module\s*=\s*hyprlock-gaze/d' "${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprlock.conf"
+```
+
 ### Remove GDM login defaults and overrides
 
 ```bash
@@ -74,16 +82,16 @@ sudo systemctl disable gazed
 ::: code-group
 
 ```bash [Debian/Ubuntu]
-sudo apt remove --purge gaze gaze-gui gaze-gnome-extension
+sudo apt remove --purge gaze gaze-gui gaze-gnome-extension gaze-hyprlock
 sudo apt autoremove
 ```
 
 ```bash [Fedora]
-sudo dnf remove gaze gaze-gui gaze-gnome-extension
+sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-hyprlock
 ```
 
 ```bash [Arch Linux / Manjaro]
-sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin
+sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin gaze-hyprlock-bin
 ```
 
 :::

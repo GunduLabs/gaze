@@ -73,6 +73,10 @@ gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 
 Log out and back in once after installing or updating the extension if the lock screen does not pick it up immediately. GDM login face auth stays disabled unless you explicitly enable it; see the [GNOME Extension guide](/guide/gnome) before doing that.
 
+### Enable face unlock for hyprlock
+
+On Hyprland, install the `gaze-hyprlock` package (auto-installed by the one-line installer when Hyprland is detected) and point hyprlock at the Gaze PAM service. See the [Hyprland guide](/guide/hyprland).
+
 ## Restart after install
 
 After installation (any method), reboot once to ensure all system-level changes are fully applied.
