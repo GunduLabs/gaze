@@ -46,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
 
     let db = UserDatabase::new(USERS_DIR, config.enrollment.max_templates as usize)?;
 
-    let checker = gaze_core::face::FaceChecker::from_detector(detector);
+    let checker = gaze_core::face::FaceChecker::from_detector_with_config(detector, &config);
 
     let daemon = AuthDaemon {
         checker: Arc::new(Mutex::new(checker)),

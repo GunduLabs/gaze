@@ -31,6 +31,8 @@ pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
 
 pub struct FaceChecker {
     detector: FaceDetector,
+    dark_threshold: f32,
+    dark_pixel_value: u8,
 }
 
 impl FaceChecker {
@@ -46,11 +48,23 @@ impl FaceChecker {
         }
 
         let detector = FaceDetector::new(model_path.to_str().unwrap())?;
-        Ok(Self { detector })
+        Ok(Self::from_detector_with_config(detector, &config))
     }
 
     pub fn from_detector(detector: FaceDetector) -> Self {
-        Self { detector }
+        Self {
+            detector,
+            dark_threshold: 0.6,
+            dark_pixel_value: 10,
+        }
+    }
+
+    pub fn from_detector_with_config(detector: FaceDetector, config: &Config) -> Self {
+        Self {
+            detector,
+            dark_threshold: config.cameras.dark_threshold,
+            dark_pixel_value: config.cameras.dark_pixel_value,
+        }
     }
 
     fn build_capture_result(
@@ -78,6 +92,10 @@ impl FaceChecker {
         &mut self,
         frame: &Mat,
     ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
+        if is_dark_frame(frame, self.dark_threshold, self.dark_pixel_value)? {
+            return Ok((CaptureStatus::TooDark, None));
+        }
+
         let (bboxes, kps, mat_rgb) = match self.detector.detect(frame) {
             Ok(result) => result,
             Err(DetectError::NoFacesDetected) => return Ok((CaptureStatus::NoFace, None)),
@@ -150,5 +168,63 @@ impl FaceChecker {
                 pitch,
             )?),
         ))
+    }
+}
+
+pub fn is_dark_frame(
+    frame: &Mat,
+    dark_threshold: f32,
+    dark_pixel_value: u8,
+) -> anyhow::Result<bool> {
+    let size = frame.size()?;
+    let pixel_count = (size.width.max(0) * size.height.max(0)) as usize;
+    if pixel_count == 0 {
+        return Ok(true);
+    }
+
+    let channels = frame.channels() as usize;
+    if channels == 0 {
+        return Ok(true);
+    }
+
+    let bytes = frame.data_bytes()?;
+    let dark_pixels = bytes
+        .chunks_exact(channels)
+        .take(pixel_count)
+        .filter(|pixel| {
+            let luminance = if channels >= 3 {
+                let b = pixel[0] as u32;
+                let g = pixel[1] as u32;
+                let r = pixel[2] as u32;
+                ((77 * r + 150 * g + 29 * b) >> 8) as u8
+            } else {
+                (pixel.iter().map(|&v| v as u32).sum::<u32>() / channels as u32) as u8
+            };
+            luminance < dark_pixel_value
+        })
+        .count();
+
+    Ok((dark_pixels as f32 / pixel_count as f32) >= dark_threshold)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opencv::core::{self, Scalar};
+
+    #[test]
+    fn dark_frame_detection_rejects_black_frames() {
+        let frame =
+            Mat::new_rows_cols_with_default(12, 12, core::CV_8UC3, Scalar::all(0.0)).unwrap();
+
+        assert!(is_dark_frame(&frame, 0.6, 10).unwrap());
+    }
+
+    #[test]
+    fn dark_frame_detection_accepts_lit_frames() {
+        let frame =
+            Mat::new_rows_cols_with_default(12, 12, core::CV_8UC3, Scalar::all(32.0)).unwrap();
+
+        assert!(!is_dark_frame(&frame, 0.6, 10).unwrap());
     }
 }
