@@ -129,13 +129,13 @@ PAM changes can lock you out of authentication flows.
 To preview docs locally:
 
 ```bash
-npm run docs:dev
+bun run docs:dev
 ```
 
 To verify the docs build:
 
 ```bash
-npm run docs:build
+bun run docs:build
 ```
 
 ## Bug reports
