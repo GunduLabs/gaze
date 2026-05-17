@@ -119,6 +119,10 @@ level = "medium"    # low | medium | high | maximum | custom
 [cameras]
 rgb = "primary"
 
+[auth]
+abort_if_ssh = true
+abort_if_lid_closed = true
+
 [enrollment]
 max_templates = 3
 ```

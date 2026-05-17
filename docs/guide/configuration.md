@@ -13,6 +13,10 @@ level = "medium"
 [cameras]
 rgb = "primary"
 
+[auth]
+abort_if_ssh = true
+abort_if_lid_closed = true
+
 [enrollment]
 max_templates = 3
 ```
@@ -62,6 +66,18 @@ rgb = "pipewiresrc target-object=<pipewire-target>"
 ```
 
 Direct `/dev/video*` paths are not supported.
+
+## Authentication aborts
+
+Gaze skips face authentication in sessions where the camera is unlikely or unsafe to use:
+
+```toml
+[auth]
+abort_if_ssh = true
+abort_if_lid_closed = true
+```
+
+`abort_if_ssh` detects SSH sessions from the DBus caller process environment. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor.
 
 After changing config:
 

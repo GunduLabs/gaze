@@ -54,6 +54,8 @@ async fn main() -> anyhow::Result<()> {
         db: Arc::new(Mutex::new(db)),
         threshold: Arc::new(Mutex::new(security.threshold())),
         camera_config: Arc::new(Mutex::new(config.cameras.rgb.clone())),
+        abort_if_ssh: Arc::new(Mutex::new(config.auth.abort_if_ssh)),
+        abort_if_lid_closed: Arc::new(Mutex::new(config.auth.abort_if_lid_closed)),
         claim_state: Arc::new(Mutex::new(None)),
         active_cancel: Arc::new(Mutex::new(None)),
         rt_handle: tokio::runtime::Handle::current(),

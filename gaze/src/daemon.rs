@@ -44,6 +44,8 @@ pub struct AuthDaemon {
     pub db: Arc<Mutex<UserDatabase>>,
     pub threshold: Arc<Mutex<f32>>,
     pub camera_config: Arc<Mutex<String>>,
+    pub abort_if_ssh: Arc<Mutex<bool>>,
+    pub abort_if_lid_closed: Arc<Mutex<bool>>,
     pub claim_state: Arc<Mutex<Option<ClaimState>>>,
     pub active_cancel: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     pub rt_handle: tokio::runtime::Handle,
@@ -112,6 +114,81 @@ impl AuthDaemon {
         dbus.get_connection_unix_user(sender.to_owned().into())
             .await
             .map_err(|e| fdo::Error::Failed(format!("Failed to get caller uid: {e}")))
+    }
+
+    async fn caller_pid(header: &Header<'_>) -> fdo::Result<u32> {
+        let sender = header
+            .sender()
+            .ok_or_else(|| fdo::Error::AccessDenied("Missing DBus sender".into()))?;
+        let conn = zbus::Connection::system()
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("Failed to connect to system bus: {e}")))?;
+        let dbus = fdo::DBusProxy::new(&conn)
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("Failed to create DBus proxy: {e}")))?;
+        dbus.get_connection_unix_process_id(sender.to_owned().into())
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("Failed to get caller pid: {e}")))
+    }
+
+    fn environ_has_ssh_marker(environ: &[u8]) -> bool {
+        environ.split(|b| *b == 0).any(|entry| {
+            (entry.starts_with(b"SSH_CONNECTION=") && entry.len() > b"SSH_CONNECTION=".len())
+                || (entry.starts_with(b"SSH_TTY=") && entry.len() > b"SSH_TTY=".len())
+        })
+    }
+
+    fn process_is_ssh_session(pid: u32) -> Option<bool> {
+        std::fs::read(format!("/proc/{pid}/environ"))
+            .map(|env| Self::environ_has_ssh_marker(&env))
+            .ok()
+    }
+
+    fn current_env_is_ssh_session() -> bool {
+        std::env::var_os("SSH_CONNECTION").is_some_and(|value| !value.as_os_str().is_empty())
+            || std::env::var_os("SSH_TTY").is_some_and(|value| !value.as_os_str().is_empty())
+    }
+
+    fn lid_state_is_closed(state: &str) -> bool {
+        state.to_ascii_lowercase().contains("closed")
+    }
+
+    fn is_lid_closed_at(base: &std::path::Path) -> bool {
+        let Ok(entries) = std::fs::read_dir(base) else {
+            return false;
+        };
+
+        entries.filter_map(Result::ok).any(|entry| {
+            std::fs::read_to_string(entry.path().join("state"))
+                .map(|state| Self::lid_state_is_closed(&state))
+                .unwrap_or(false)
+        })
+    }
+
+    fn is_lid_closed() -> bool {
+        Self::is_lid_closed_at(std::path::Path::new("/proc/acpi/button/lid"))
+    }
+
+    async fn ensure_auth_not_aborted(&self, header: &Header<'_>) -> fdo::Result<()> {
+        let abort_if_ssh = *self.abort_if_ssh.lock().await;
+        if abort_if_ssh {
+            let caller_pid = Self::caller_pid(header).await.ok();
+            let is_ssh = caller_pid
+                .and_then(Self::process_is_ssh_session)
+                .unwrap_or_else(Self::current_env_is_ssh_session);
+            if is_ssh {
+                warn!(caller_pid, "SSH session detected, aborting face auth");
+                return Err(fdo::Error::Failed("SSH session detected".into()));
+            }
+        }
+
+        let abort_if_lid_closed = *self.abort_if_lid_closed.lock().await;
+        if abort_if_lid_closed && Self::is_lid_closed() {
+            warn!("Laptop lid is closed, aborting face auth");
+            return Err(fdo::Error::Failed("lid closed".into()));
+        }
+
+        Ok(())
     }
 
     async fn ensure_user_access(
@@ -264,6 +341,32 @@ impl AuthDaemon {
         {
             let _ = sender.send(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AuthDaemon;
+
+    #[test]
+    fn ssh_marker_detection_requires_non_empty_values() {
+        assert!(AuthDaemon::environ_has_ssh_marker(
+            b"PATH=/usr/bin\0SSH_CONNECTION=1.2.3.4 1 5.6.7.8 22\0"
+        ));
+        assert!(AuthDaemon::environ_has_ssh_marker(
+            b"SSH_TTY=/dev/pts/3\0USER=alice\0"
+        ));
+        assert!(!AuthDaemon::environ_has_ssh_marker(
+            b"SSH_CONNECTION=\0SSH_TTY=\0"
+        ));
+        assert!(!AuthDaemon::environ_has_ssh_marker(b"USER=alice\0"));
+    }
+
+    #[test]
+    fn lid_state_detection_is_case_insensitive() {
+        assert!(AuthDaemon::lid_state_is_closed("state:      closed\n"));
+        assert!(AuthDaemon::lid_state_is_closed("State: CLOSED\n"));
+        assert!(!AuthDaemon::lid_state_is_closed("state:      open\n"));
     }
 }
 
@@ -438,6 +541,7 @@ impl AuthDaemon {
         _face_name: String,
     ) -> fdo::Result<()> {
         let claim = self.check_claim(&header).await?;
+        self.ensure_auth_not_aborted(&header).await?;
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
         self.cancel_active_tasks();
@@ -804,6 +908,12 @@ impl AuthDaemon {
 
         let mut camera_config = self.camera_config.lock().await;
         *camera_config = new_config.cameras.rgb.clone();
+
+        let mut abort_if_ssh = self.abort_if_ssh.lock().await;
+        *abort_if_ssh = new_config.auth.abort_if_ssh;
+
+        let mut abort_if_lid_closed = self.abort_if_lid_closed.lock().await;
+        *abort_if_lid_closed = new_config.auth.abort_if_lid_closed;
 
         let mut db = self.db.lock().await;
         db.set_max_templates(new_config.enrollment.max_templates as usize);
