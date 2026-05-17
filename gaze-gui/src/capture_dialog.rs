@@ -18,7 +18,14 @@ pub fn show_capture_dialog(
     on_done: impl Fn() + 'static,
 ) {
     let config = Config::load().unwrap_or_default();
-    let feed = match CameraFeed::new(&config.cameras.rgb) {
+    let camera_source = match gaze_core::camera::auth_camera_source(&config) {
+        Ok(source) => source,
+        Err(err) => {
+            error!(%err, "Camera config is invalid");
+            return;
+        }
+    };
+    let feed = match CameraFeed::new(&camera_source) {
         Ok(f) => {
             f.start();
             f

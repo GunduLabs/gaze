@@ -16,7 +16,7 @@
 ---
 
 > [!WARNING]
-> Gaze can currently be spoofed with a photo. Do not use it as your only authentication factor. Liveness detection and IR camera support are planned.
+> Gaze can be spoofed with a photo when using RGB-only auth. Optional IR camera enforcement reduces this risk, but it is heuristic and not a full liveness/PAD system.
 
 Gaze is a face authentication system for Linux. It runs entirely on-device with no cloud dependency, integrates with PAM for login and lock screen, and works with any standard webcam.
 
@@ -115,9 +115,11 @@ Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Matc
 # /etc/gaze/config.toml
 [security]
 level = "medium"    # low | medium | high | maximum | custom
+require_ir = false   # set true to enroll/auth with an IR camera
 
 [cameras]
 rgb = "primary"
+ir = "auto"
 
 [enrollment]
 max_templates = 3

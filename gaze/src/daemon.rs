@@ -459,8 +459,17 @@ impl AuthDaemon {
                 .unwrap()
                 .set_destination(signal_destination);
 
+            let camera_source = match gaze_core::camera::resolve_camera_source(&camera_config) {
+                Ok(source) => source,
+                Err(e) => {
+                    error!("Camera config error: {e}");
+                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new())
+                        .await;
+                    return;
+                }
+            };
 
-            let mut cam = match Camera::open(&camera_config) {
+            let mut cam = match Camera::open(&camera_source) {
                 Ok(c) => c,
                 Err(e) => {
                     error!("Camera error: {e}");
@@ -566,8 +575,25 @@ impl AuthDaemon {
                 .unwrap()
                 .set_destination(signal_destination);
 
+            let camera_source = match gaze_core::camera::resolve_camera_source(&camera_config) {
+                Ok(source) => source,
+                Err(e) => {
+                    error!("Camera config error: {e}");
+                    let _ = Self::enroll_status(
+                        &ctxt,
+                        &face_name,
+                        0,
+                        5,
+                        true,
+                        EnrollPrompt::Cancelled,
+                        -1.0,
+                    )
+                    .await;
+                    return;
+                }
+            };
 
-            let mut cam = match Camera::open(&camera_config) {
+            let mut cam = match Camera::open(&camera_source) {
                 Ok(c) => c,
                 Err(e) => {
                     error!("Camera error: {e}");
@@ -802,8 +828,13 @@ impl AuthDaemon {
         let mut threshold = self.threshold.lock().await;
         *threshold = new_config.security.threshold();
 
+        let auth_camera_source = if new_config.security.require_ir {
+            new_config.cameras.ir.clone()
+        } else {
+            new_config.cameras.rgb.clone()
+        };
         let mut camera_config = self.camera_config.lock().await;
-        *camera_config = new_config.cameras.rgb.clone();
+        *camera_config = auth_camera_source;
 
         let mut db = self.db.lock().await;
         db.set_max_templates(new_config.enrollment.max_templates as usize);
@@ -815,6 +846,7 @@ impl AuthDaemon {
         info!(
             detector = security.detector(),
             recognizer = security.recognizer(),
+            require_ir = security.require_ir,
             "Hot-reloading models if needed"
         );
 

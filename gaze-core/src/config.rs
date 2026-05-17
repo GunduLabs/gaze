@@ -10,6 +10,7 @@ const DEFAULT_CONFIG_PATH: &str = "/etc/gaze/config.toml";
 pub const USERS_DIR: &str = "/var/lib/gaze/users";
 pub const MODELS_DIR: &str = "/var/cache/gaze";
 pub const DEFAULT_RGB_CAMERA: &str = "primary";
+pub const DEFAULT_IR_CAMERA: &str = "auto";
 
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 #[serde(tag = "level", rename_all = "kebab-case")]
@@ -59,10 +60,42 @@ impl SecurityLevel {
     }
 }
 
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct SecurityConfig {
+    #[serde(flatten)]
+    #[serde(default)]
+    pub level: SecurityLevel,
+    #[serde(default)]
+    pub require_ir: bool,
+}
+
+impl SecurityConfig {
+    pub fn detector(&self) -> &str {
+        self.level.detector()
+    }
+
+    pub fn recognizer(&self) -> &str {
+        self.level.recognizer()
+    }
+
+    pub fn threshold(&self) -> f32 {
+        self.level.threshold()
+    }
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            level: SecurityLevel::Medium,
+            require_ir: false,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct Config {
     #[serde(default)]
-    pub security: SecurityLevel,
+    pub security: SecurityConfig,
     #[serde(default)]
     pub cameras: CameraConfig,
     #[serde(default)]
@@ -73,10 +106,16 @@ pub struct Config {
 pub struct CameraConfig {
     #[serde(default = "default_rgb_device")]
     pub rgb: String,
+    #[serde(default = "default_ir_device")]
+    pub ir: String,
 }
 
 fn default_rgb_device() -> String {
     DEFAULT_RGB_CAMERA.to_string()
+}
+
+fn default_ir_device() -> String {
+    DEFAULT_IR_CAMERA.to_string()
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -101,6 +140,7 @@ impl Default for CameraConfig {
     fn default() -> Self {
         Self {
             rgb: default_rgb_device(),
+            ir: default_ir_device(),
         }
     }
 }
@@ -110,7 +150,7 @@ impl Config {
         let mut map = HashMap::new();
 
         let mut security = HashMap::new();
-        match &self.security {
+        match &self.security.level {
             SecurityLevel::Low => {
                 security.insert(
                     "level".into(),
@@ -158,12 +198,20 @@ impl Config {
                 );
             }
         }
+        security.insert(
+            "require-ir".to_string(),
+            OwnedValue::try_from(Value::from(self.security.require_ir)).unwrap(),
+        );
         map.insert("security".to_string(), security);
 
         let mut cameras = HashMap::new();
         cameras.insert(
             "rgb".to_string(),
             OwnedValue::try_from(Value::from(self.cameras.rgb.clone())).unwrap(),
+        );
+        cameras.insert(
+            "ir".to_string(),
+            OwnedValue::try_from(Value::from(self.cameras.ir.clone())).unwrap(),
         );
         map.insert("cameras".to_string(), cameras);
 
@@ -184,7 +232,7 @@ impl Config {
             .and_then(|v| v.clone().try_into().ok())
             .unwrap_or_else(|| "medium".to_string());
 
-        let security = match level_str.as_str() {
+        let level = match level_str.as_str() {
             "low" => SecurityLevel::Low,
             "medium" => SecurityLevel::Medium,
             "high" => SecurityLevel::High,
@@ -213,6 +261,13 @@ impl Config {
             }
             _ => SecurityLevel::Medium,
         };
+        let security = SecurityConfig {
+            level,
+            require_ir: security_dict
+                .get("require-ir")
+                .and_then(|v| v.clone().try_into().ok())
+                .unwrap_or(false),
+        };
 
         let cameras_dict = map.get("cameras").context("missing cameras section")?;
         let cameras = CameraConfig {
@@ -220,6 +275,10 @@ impl Config {
                 .get("rgb")
                 .and_then(|v| v.clone().try_into().ok())
                 .unwrap_or_else(default_rgb_device),
+            ir: cameras_dict
+                .get("ir")
+                .and_then(|v| v.clone().try_into().ok())
+                .unwrap_or_else(default_ir_device),
         };
 
         let enrollment_dict = map
@@ -377,13 +436,17 @@ mod tests {
     #[test]
     fn config_map_round_trips_custom_values() {
         let config = Config {
-            security: SecurityLevel::Custom {
-                detector: "det_custom.onnx".to_string(),
-                recognizer: "rec_custom.onnx".to_string(),
-                threshold: 0.77,
+            security: SecurityConfig {
+                level: SecurityLevel::Custom {
+                    detector: "det_custom.onnx".to_string(),
+                    recognizer: "rec_custom.onnx".to_string(),
+                    threshold: 0.77,
+                },
+                require_ir: true,
             },
             cameras: CameraConfig {
                 rgb: "pipewiresrc target-object=42".to_string(),
+                ir: "pipewiresrc target-object=ir42".to_string(),
             },
             enrollment: EnrollmentConfig { max_templates: 5 },
         };
@@ -402,10 +465,16 @@ mod tests {
             owned_string(&map["cameras"]["rgb"]),
             "pipewiresrc target-object=42"
         );
+        assert_eq!(
+            owned_string(&map["cameras"]["ir"]),
+            "pipewiresrc target-object=ir42"
+        );
+        let require_ir: bool = map["security"]["require-ir"].clone().try_into().unwrap();
+        assert!(require_ir);
         assert_eq!(owned_u32(&map["enrollment"]["max-templates"]), 5);
 
         let decoded = Config::from_map(map).unwrap();
-        match decoded.security {
+        match decoded.security.level {
             SecurityLevel::Custom {
                 detector,
                 recognizer,
@@ -417,7 +486,9 @@ mod tests {
             }
             other => panic!("unexpected security level: {other:?}"),
         }
+        assert!(decoded.security.require_ir);
         assert_eq!(decoded.cameras.rgb, "pipewiresrc target-object=42");
+        assert_eq!(decoded.cameras.ir, "pipewiresrc target-object=ir42");
         assert_eq!(decoded.enrollment.max_templates, 5);
     }
 
@@ -434,7 +505,7 @@ mod tests {
         map.insert("enrollment".to_string(), HashMap::new());
 
         let config = Config::from_map(map).unwrap();
-        match config.security {
+        match config.security.level {
             SecurityLevel::Custom {
                 detector,
                 recognizer,
@@ -446,7 +517,9 @@ mod tests {
             }
             other => panic!("unexpected security level: {other:?}"),
         }
+        assert!(!config.security.require_ir);
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
+        assert_eq!(config.cameras.ir, DEFAULT_IR_CAMERA);
         assert_eq!(config.enrollment.max_templates, 2);
     }
 
@@ -493,7 +566,9 @@ mod tests {
 
         let config = Config::load_from(path.to_str().unwrap()).unwrap();
         assert_eq!(config.security.detector(), SecurityLevel::Medium.detector());
+        assert!(!config.security.require_ir);
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
+        assert_eq!(config.cameras.ir, DEFAULT_IR_CAMERA);
         assert_eq!(config.enrollment.max_templates, 2);
     }
 
@@ -502,9 +577,13 @@ mod tests {
         let temp = TempDir::new("round-trip");
         let path = temp.path().join("config.toml");
         let config = Config {
-            security: SecurityLevel::High,
+            security: SecurityConfig {
+                level: SecurityLevel::High,
+                require_ir: true,
+            },
             cameras: CameraConfig {
                 rgb: "primary".to_string(),
+                ir: "pipewiresrc target-object=ir".to_string(),
             },
             enrollment: EnrollmentConfig { max_templates: 8 },
         };
@@ -517,7 +596,9 @@ mod tests {
             loaded.security.recognizer(),
             SecurityLevel::High.recognizer()
         );
+        assert!(loaded.security.require_ir);
         assert_eq!(loaded.cameras.rgb, "primary");
+        assert_eq!(loaded.cameras.ir, "pipewiresrc target-object=ir");
         assert_eq!(loaded.enrollment.max_templates, 8);
     }
 
@@ -535,7 +616,24 @@ mod tests {
             config.security.detector(),
             SecurityLevel::Maximum.detector()
         );
+        assert!(!config.security.require_ir);
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
+        assert_eq!(config.cameras.ir, DEFAULT_IR_CAMERA);
         assert_eq!(config.enrollment.max_templates, 2);
+    }
+
+    #[test]
+    fn security_require_ir_deserializes_from_security_section() {
+        let config: Config = toml::from_str(
+            r#"
+            [security]
+            level = "high"
+            require_ir = true
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.security.detector(), SecurityLevel::High.detector());
+        assert!(config.security.require_ir);
     }
 }

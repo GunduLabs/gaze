@@ -1,5 +1,5 @@
 use crate::capture_dialog;
-use gaze_core::config::{Config, DEFAULT_RGB_CAMERA, SecurityLevel};
+use gaze_core::config::{Config, DEFAULT_IR_CAMERA, DEFAULT_RGB_CAMERA, SecurityLevel};
 use gaze_core::dbus::{
     GazeProxy, apply_config_to_daemon, dbus_error_message, dbus_is_file_not_found,
     load_config_from_daemon,
@@ -98,6 +98,15 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     threshold_row.set_subtitle("Minimum similarity for a match");
     security_group.add(&threshold_row);
 
+    let require_ir_row = libadwaita::ActionRow::new();
+    require_ir_row.set_title("Require IR Camera");
+    require_ir_row.set_subtitle("Use the configured IR source for enrollment and authentication");
+    let require_ir_switch = gtk4::Switch::new();
+    require_ir_switch.set_valign(gtk4::Align::Center);
+    require_ir_row.add_suffix(&require_ir_switch);
+    require_ir_row.set_activatable_widget(Some(&require_ir_switch));
+    security_group.add(&require_ir_row);
+
     let hardware_group = libadwaita::PreferencesGroup::new();
     hardware_group.set_title("Hardware");
     page.add(&hardware_group);
@@ -112,6 +121,33 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         gtk4::StringList::new(&cam_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
     camera_row.set_model(Some(&cam_model));
     hardware_group.add(&camera_row);
+
+    let mut ir_cameras = vec![(
+        "Auto-detect IR camera".to_string(),
+        DEFAULT_IR_CAMERA.to_string(),
+    )];
+    ir_cameras.extend(gaze_core::camera::enumerate_ir_cameras().unwrap_or_default());
+    let current_ir_source = Config::load()
+        .map(|cfg| cfg.cameras.ir)
+        .unwrap_or_else(|_| DEFAULT_IR_CAMERA.to_string());
+    if current_ir_source != DEFAULT_IR_CAMERA
+        && !ir_cameras
+            .iter()
+            .any(|(_, source)| source == &current_ir_source)
+    {
+        ir_cameras.push(("Configured IR source".to_string(), current_ir_source));
+    }
+    let ir_cam_names = ir_cameras
+        .iter()
+        .map(|(n, _)| n.clone())
+        .collect::<Vec<_>>();
+
+    let ir_camera_row = libadwaita::ComboRow::new();
+    ir_camera_row.set_title("IR Camera Source");
+    let ir_cam_model =
+        gtk4::StringList::new(&ir_cam_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+    ir_camera_row.set_model(Some(&ir_cam_model));
+    hardware_group.add(&ir_camera_row);
 
     let enrollment_group = libadwaita::PreferencesGroup::new();
     enrollment_group.set_title("Enrollment");
@@ -159,11 +195,17 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         threshold_row,
         #[weak]
+        require_ir_switch,
+        #[weak]
         camera_row,
+        #[weak]
+        ir_camera_row,
         #[weak]
         templates_row,
         #[strong]
         cameras,
+        #[strong]
+        ir_cameras,
         #[strong]
         config,
         #[strong]
@@ -175,12 +217,12 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
             let mut cfg = config.borrow_mut();
             match level_row.selected() {
-                0 => cfg.security = SecurityLevel::Low,
-                1 => cfg.security = SecurityLevel::Medium,
-                2 => cfg.security = SecurityLevel::High,
-                3 => cfg.security = SecurityLevel::Maximum,
+                0 => cfg.security.level = SecurityLevel::Low,
+                1 => cfg.security.level = SecurityLevel::Medium,
+                2 => cfg.security.level = SecurityLevel::High,
+                3 => cfg.security.level = SecurityLevel::Maximum,
                 4 => {
-                    cfg.security = SecurityLevel::Custom {
+                    cfg.security.level = SecurityLevel::Custom {
                         detector: detector_row.text().to_string(),
                         recognizer: recognizer_row.text().to_string(),
                         threshold: threshold_row.value() as f32,
@@ -192,6 +234,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             let cam_idx = camera_row.selected() as usize;
             if let Some((_, target)) = cameras.get(cam_idx) {
                 cfg.cameras.rgb = target.clone();
+            }
+            cfg.security.require_ir = require_ir_switch.is_active();
+            let ir_cam_idx = ir_camera_row.selected() as usize;
+            if let Some((_, target)) = ir_cameras.get(ir_cam_idx) {
+                cfg.cameras.ir = target.clone();
             }
             cfg.enrollment.max_templates = templates_row.value() as u32;
 
@@ -232,6 +279,16 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         apply_changes,
         move |_| apply_changes()
     ));
+    ir_camera_row.connect_selected_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    require_ir_switch.connect_active_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
     threshold_row.connect_value_notify(glib::clone!(
         #[strong]
         apply_changes,
@@ -255,7 +312,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
     {
         let cfg = config.borrow();
-        let level_idx = match cfg.security {
+        let level_idx = match cfg.security.level {
             SecurityLevel::Low => 0,
             SecurityLevel::Medium => 1,
             SecurityLevel::High => 2,
@@ -265,7 +322,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         level_row.set_selected(level_idx);
         update_custom_visibility(&level_row, &detector_row, &recognizer_row, &threshold_row);
 
-        let (det, rec, thr) = match &cfg.security {
+        let (det, rec, thr) = match &cfg.security.level {
             SecurityLevel::Custom {
                 detector,
                 recognizer,
@@ -286,6 +343,12 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             .position(|(_, t)| t == &cfg.cameras.rgb)
             .unwrap_or(0);
         camera_row.set_selected(cam_idx as u32);
+        require_ir_switch.set_active(cfg.security.require_ir);
+        let ir_cam_idx = ir_cameras
+            .iter()
+            .position(|(_, t)| t == &cfg.cameras.ir)
+            .unwrap_or(0);
+        ir_camera_row.set_selected(ir_cam_idx as u32);
         templates_row.set_value(cfg.enrollment.max_templates as f64);
     }
     is_loading.set(false);
@@ -383,11 +446,17 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         threshold_row,
         #[weak]
+        require_ir_switch,
+        #[weak]
         camera_row,
+        #[weak]
+        ir_camera_row,
         #[weak]
         templates_row,
         #[strong]
         cameras,
+        #[strong]
+        ir_cameras,
         #[strong]
         config,
         #[strong]
@@ -402,7 +471,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
             if let Ok(cfg) = load_result {
                 is_loading.set(true);
-                let level_idx = match cfg.security {
+                let level_idx = match cfg.security.level {
                     SecurityLevel::Low => 0,
                     SecurityLevel::Medium => 1,
                     SecurityLevel::High => 2,
@@ -411,7 +480,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 };
                 level_row.set_selected(level_idx);
 
-                let (det, rec, thr) = match &cfg.security {
+                let (det, rec, thr) = match &cfg.security.level {
                     SecurityLevel::Custom {
                         detector,
                         recognizer,
@@ -432,6 +501,12 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                     .position(|(_, t)| t == &cfg.cameras.rgb)
                     .unwrap_or(0);
                 camera_row.set_selected(cam_idx as u32);
+                require_ir_switch.set_active(cfg.security.require_ir);
+                let ir_cam_idx = ir_cameras
+                    .iter()
+                    .position(|(_, t)| t == &cfg.cameras.ir)
+                    .unwrap_or(0);
+                ir_camera_row.set_selected(ir_cam_idx as u32);
                 templates_row.set_value(cfg.enrollment.max_templates as f64);
 
                 *config.borrow_mut() = cfg;

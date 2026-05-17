@@ -4,13 +4,20 @@ use opencv::prelude::*;
 use opencv::videoio::{CAP_GSTREAMER, VideoCapture};
 use tracing::info;
 
-use crate::config::DEFAULT_RGB_CAMERA;
+use crate::config::{Config, DEFAULT_IR_CAMERA, DEFAULT_RGB_CAMERA};
 
 const PRIMARY_CAMERA_DISPLAY_NAME: &str = "Primary Camera";
 const DEVICE_SETTLE_TIMEOUT_MS: u64 = 100;
 
 pub struct Camera {
     cap: VideoCapture,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CameraInfo {
+    pub name: String,
+    pub source: String,
+    pub is_ir: bool,
 }
 
 impl Camera {
@@ -50,6 +57,22 @@ impl Camera {
 }
 
 pub fn enumerate_cameras() -> anyhow::Result<Vec<(String, String)>> {
+    Ok(enumerate_camera_infos()?
+        .into_iter()
+        .filter(|camera| !camera.is_ir)
+        .map(|camera| (camera.name, camera.source))
+        .collect())
+}
+
+pub fn enumerate_ir_cameras() -> anyhow::Result<Vec<(String, String)>> {
+    Ok(enumerate_camera_infos()?
+        .into_iter()
+        .filter(|camera| camera.is_ir)
+        .map(|camera| (camera.name, camera.source))
+        .collect())
+}
+
+pub fn enumerate_camera_infos() -> anyhow::Result<Vec<CameraInfo>> {
     gstreamer::init()?;
     let monitor = gstreamer::DeviceMonitor::new();
     let caps = gstreamer::Caps::builder("video/x-raw").build();
@@ -59,27 +82,87 @@ pub fn enumerate_cameras() -> anyhow::Result<Vec<(String, String)>> {
     let devices = monitor.devices();
     monitor.stop();
 
-    let mut cameras = vec![(
-        PRIMARY_CAMERA_DISPLAY_NAME.to_string(),
-        DEFAULT_RGB_CAMERA.to_string(),
-    )];
+    let mut cameras = vec![CameraInfo {
+        name: PRIMARY_CAMERA_DISPLAY_NAME.to_string(),
+        source: DEFAULT_RGB_CAMERA.to_string(),
+        is_ir: false,
+    }];
     for device in devices {
         let display_name = device.display_name().to_string();
         if let Some(props) = device.properties() {
-            if !props.has_name("pipewire-proplist") || !has_color_caps(&device) {
+            if !props.has_name("pipewire-proplist") {
                 continue;
             }
             let Some(target) = pipewire_target(&props) else {
                 continue;
             };
+            let is_ir = is_ir_device(&device, &props);
+            if !is_ir && !has_color_caps(&device) {
+                continue;
+            }
             let target = format!("pipewiresrc target-object={}", target);
-            if !cameras.iter().any(|(_, t)| t == &target) {
-                cameras.push((display_name, target));
+            if !cameras.iter().any(|camera| camera.source == target) {
+                let name = if is_ir {
+                    format!("{display_name} [IR]")
+                } else {
+                    display_name
+                };
+                cameras.push(CameraInfo {
+                    name,
+                    source: target,
+                    is_ir,
+                });
             }
         }
     }
 
     Ok(cameras)
+}
+
+pub fn auth_camera_source(config: &Config) -> anyhow::Result<String> {
+    if config.security.require_ir {
+        resolve_camera_source(&config.cameras.ir)
+    } else {
+        Ok(config.cameras.rgb.clone())
+    }
+}
+
+pub fn resolve_camera_source(source: &str) -> anyhow::Result<String> {
+    let source = source.trim();
+    if source == DEFAULT_IR_CAMERA {
+        resolve_ir_camera_source(source)
+    } else {
+        Ok(source.to_string())
+    }
+}
+
+pub fn resolve_ir_camera_source(source: &str) -> anyhow::Result<String> {
+    let source = source.trim();
+    if source.is_empty() || source == DEFAULT_IR_CAMERA {
+        return auto_detect_ir_camera_source();
+    }
+
+    if source == DEFAULT_RGB_CAMERA {
+        anyhow::bail!("primary is not an IR camera source; set cameras.ir to an IR source");
+    }
+
+    let cameras = enumerate_camera_infos().unwrap_or_default();
+    if let Some(camera) = cameras.iter().find(|camera| camera.source == source) {
+        if camera.is_ir {
+            return Ok(source.to_string());
+        }
+        anyhow::bail!("configured IR camera source is not detected as IR: {source}");
+    }
+
+    Ok(source.to_string())
+}
+
+fn auto_detect_ir_camera_source() -> anyhow::Result<String> {
+    enumerate_camera_infos()?
+        .into_iter()
+        .find(|camera| camera.is_ir)
+        .map(|camera| camera.source)
+        .ok_or_else(|| anyhow::anyhow!("IR camera required but no IR camera was detected"))
 }
 
 fn wait_for_device_updates(monitor: &gstreamer::DeviceMonitor) {
@@ -101,6 +184,36 @@ fn pipewire_target(props: &gstreamer::StructureRef) -> Option<String> {
         .or_else(|| string_property(props, "object.serial"))
         .or_else(|| string_property(props, "object.id"))
         .or_else(|| string_property(props, "object.path"))
+}
+
+fn is_ir_device(device: &gstreamer::Device, props: &gstreamer::StructureRef) -> bool {
+    has_ir_name(device, props) || has_ir_caps(device)
+}
+
+fn has_ir_name(device: &gstreamer::Device, props: &gstreamer::StructureRef) -> bool {
+    let mut names = vec![device.display_name().to_string()];
+    for name in [
+        "api.v4l2.path",
+        "device.description",
+        "device.name",
+        "node.description",
+        "node.name",
+        "object.path",
+    ] {
+        if let Some(value) = string_property(props, name) {
+            names.push(value);
+        }
+    }
+
+    names.into_iter().any(|name| has_ir_text(&name))
+}
+
+fn has_ir_text(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    name.contains("infrared")
+        || name
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .any(|token| token == "ir")
 }
 
 fn string_property(props: &gstreamer::StructureRef, name: &str) -> Option<String> {
@@ -147,6 +260,29 @@ fn has_color_caps(device: &gstreamer::Device) -> bool {
     !saw_raw_video
 }
 
+fn has_ir_caps(device: &gstreamer::Device) -> bool {
+    let Some(caps) = device.caps() else {
+        return false;
+    };
+
+    caps.iter().any(|structure| {
+        if structure.name() != "video/x-raw" {
+            return false;
+        }
+
+        let Ok(format) = structure.get::<String>("format") else {
+            return false;
+        };
+        let format = if format == "DMA_DRM" {
+            structure.get::<String>("drm-format").unwrap_or(format)
+        } else {
+            format
+        };
+
+        is_mono_format(&format)
+    })
+}
+
 fn is_mono_format(format: &str) -> bool {
     let format = format.trim().to_ascii_uppercase();
     format.starts_with("GRAY")
@@ -168,6 +304,27 @@ mod tests {
 
         for format in ["RGB", "BGR", "RGBA", "YUY2", "NV12", "DMA_DRM", ""] {
             assert!(!is_mono_format(format), "{format} should be color/unknown");
+        }
+    }
+
+    #[test]
+    fn ir_name_detection_requires_ir_token_or_infrared() {
+        for name in [
+            "IR Camera",
+            "Integrated IR Camera",
+            "Infrared Camera",
+            "video-ir",
+        ] {
+            assert!(has_ir_text(name), "{name} should be detected as IR");
+        }
+
+        for name in [
+            "Primary Camera",
+            "Virtual Camera",
+            "WireCam",
+            "Front Camera",
+        ] {
+            assert!(!has_ir_text(name), "{name} should not be detected as IR");
         }
     }
 }

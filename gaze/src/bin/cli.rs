@@ -3,9 +3,9 @@ mod tui;
 
 use clap::{Parser, Subcommand};
 use console::{Term, style};
-use dialoguer::{Input, Select, theme::ColorfulTheme};
+use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 use futures::StreamExt;
-use gaze_core::config::{Config, SecurityLevel};
+use gaze_core::config::{Config, DEFAULT_IR_CAMERA, SecurityLevel};
 use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon,
     dbus_error_message, dbus_is_file_not_found, load_config_from_daemon,
@@ -146,7 +146,7 @@ async fn run_config_wizard(
     ))?;
 
     let level_options = ["low", "medium", "high", "maximum", "custom"];
-    let default_level_idx = match config.security {
+    let default_level_idx = match config.security.level {
         SecurityLevel::Low => 0,
         SecurityLevel::Medium => 1,
         SecurityLevel::High => 2,
@@ -161,12 +161,12 @@ async fn run_config_wizard(
         .interact()?;
 
     match selected {
-        0 => config.security = SecurityLevel::Low,
-        1 => config.security = SecurityLevel::Medium,
-        2 => config.security = SecurityLevel::High,
-        3 => config.security = SecurityLevel::Maximum,
+        0 => config.security.level = SecurityLevel::Low,
+        1 => config.security.level = SecurityLevel::Medium,
+        2 => config.security.level = SecurityLevel::High,
+        3 => config.security.level = SecurityLevel::Maximum,
         _ => {
-            let (old_detector, old_recognizer, old_threshold) = match &config.security {
+            let (old_detector, old_recognizer, old_threshold) = match &config.security.level {
                 SecurityLevel::Custom {
                     detector,
                     recognizer,
@@ -196,7 +196,7 @@ async fn run_config_wizard(
                 .parse::<f32>()
                 .unwrap_or(0.6);
 
-            config.security = SecurityLevel::Custom {
+            config.security.level = SecurityLevel::Custom {
                 detector,
                 recognizer,
                 threshold,
@@ -221,6 +221,41 @@ async fn run_config_wizard(
         .interact()?;
 
     config.cameras.rgb = cameras[selected_cam_idx].1.clone();
+
+    config.security.require_ir = Confirm::with_theme(&theme)
+        .with_prompt("Require an IR camera for enrollment and auth")
+        .default(config.security.require_ir)
+        .interact()?;
+
+    if config.security.require_ir {
+        let mut ir_sources = vec![(
+            "Auto-detect IR camera".to_string(),
+            DEFAULT_IR_CAMERA.to_string(),
+        )];
+        ir_sources.extend(gaze_core::camera::enumerate_ir_cameras().unwrap_or_default());
+        if !ir_sources
+            .iter()
+            .any(|(_, source)| source == &config.cameras.ir)
+            && config.cameras.ir != DEFAULT_IR_CAMERA
+        {
+            ir_sources.push((
+                "Current custom IR source".to_string(),
+                config.cameras.ir.clone(),
+            ));
+        }
+
+        let ir_names: Vec<String> = ir_sources.iter().map(|(name, _)| name.clone()).collect();
+        let default_ir_idx = ir_sources
+            .iter()
+            .position(|(_, source)| source == &config.cameras.ir)
+            .unwrap_or(0);
+        let selected_ir_idx = Select::with_theme(&theme)
+            .with_prompt("IR camera source")
+            .items(&ir_names)
+            .default(default_ir_idx)
+            .interact()?;
+        config.cameras.ir = ir_sources[selected_ir_idx].1.clone();
+    }
 
     config.enrollment.max_templates = Input::with_theme(&theme)
         .with_prompt("Max templates (sets of captures)")
@@ -995,7 +1030,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Config { show } => {
             let config = load_config_from_daemon(&proxy).await?;
             if show {
-                let level_name = match config.security {
+                let level_name = match config.security.level {
                     SecurityLevel::Low => "low",
                     SecurityLevel::Medium => "medium",
                     SecurityLevel::High => "high",
@@ -1018,7 +1053,13 @@ async fn main() -> anyhow::Result<()> {
                     style("security.threshold:").bold(),
                     config.security.threshold()
                 );
+                println!(
+                    "{} {}",
+                    style("security.require_ir:").bold(),
+                    config.security.require_ir
+                );
                 println!("{} {}", style("cameras.rgb:").bold(), config.cameras.rgb);
+                println!("{} {}", style("cameras.ir:").bold(), config.cameras.ir);
                 println!(
                     "{} {}",
                     style("enrollment.max_templates:").bold(),

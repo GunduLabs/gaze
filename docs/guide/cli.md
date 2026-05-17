@@ -97,7 +97,7 @@ Show-only mode:
 gaze config --show
 ```
 
-This prints the current security level, camera source, and enrollment template settings without editing them.
+This prints the current security level, RGB/IR camera sources, IR enforcement setting, and enrollment template settings without editing them.
 
 ## Manage another user
 

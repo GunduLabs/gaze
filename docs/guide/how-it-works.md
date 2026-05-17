@@ -6,9 +6,9 @@ This page explains the internals of Gaze's facial authentication pipeline. You d
 
 Gaze is currently **not suitable for security-critical authentication**.
 
-It can be spoofed with a simple photo of the enrolled user, including a photo displayed on a screen.
+RGB-only authentication can be spoofed with a simple photo of the enrolled user, including a photo displayed on a screen.
 
-Liveness detection, IR camera support, and other anti-spoofing protections are planned for upcoming releases.
+IR camera enforcement is available as an optional hardening step. It uses heuristic IR camera detection and is not a full liveness/PAD guarantee.
 
 ## Privacy model
 
@@ -24,7 +24,7 @@ Camera frame -> Face detection -> Face alignment -> Embedding -> Similarity matc
 
 High level:
 
-1. Camera frame is captured from your configured GStreamer camera source.
+1. Camera frame is captured from your configured GStreamer camera source, or from the IR source when `security.require_ir = true`.
 2. Detector finds a face and facial landmarks.
 3. Face is aligned into a standard input shape.
 4. Recognition model creates an embedding vector.

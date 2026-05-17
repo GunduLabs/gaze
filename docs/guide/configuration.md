@@ -9,9 +9,11 @@ Most users only need to change camera source or security level.
 ```toml
 [security]
 level = "medium"
+require_ir = false
 
 [cameras]
 rgb = "primary"
+ir = "auto"
 
 [enrollment]
 max_templates = 3
@@ -62,6 +64,22 @@ rgb = "pipewiresrc target-object=<pipewire-target>"
 ```
 
 Direct `/dev/video*` paths are not supported.
+
+## Require An IR Camera
+
+Gaze can require an IR camera for enrollment and authentication:
+
+```toml
+[security]
+require_ir = true
+
+[cameras]
+ir = "auto"
+```
+
+When enabled, `gazed` uses the IR source instead of `cameras.rgb`. `auto` selects the first PipeWire camera that looks like IR based on device name or grayscale formats, similar to FaceLock's heuristic. You should re-enroll faces after enabling IR because RGB and IR embeddings may not match reliably.
+
+This is an anti-spoofing improvement, not a complete liveness guarantee. If auto-detection chooses the wrong device, run `gaze config` or set `cameras.ir` to a specific GStreamer source.
 
 After changing config:
 

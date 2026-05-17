@@ -32,8 +32,19 @@ async fn main() -> anyhow::Result<()> {
         detector = security.detector(),
         recognizer = security.recognizer(),
         threshold = security.threshold(),
+        require_ir = security.require_ir,
         "Loaded security config"
     );
+
+    if let Ok(uid) = daemon::get_active_session_uid().await {
+        daemon::set_pipewire_runtime_for_uid(uid);
+    }
+
+    let camera_source = if security.require_ir {
+        config.cameras.ir.clone()
+    } else {
+        config.cameras.rgb.clone()
+    };
 
     let (det_path, rec_path) =
         models::ensure_models(MODELS_DIR, security.detector(), security.recognizer())?;
@@ -53,17 +64,13 @@ async fn main() -> anyhow::Result<()> {
         recognizer: Arc::new(Mutex::new(recognizer)),
         db: Arc::new(Mutex::new(db)),
         threshold: Arc::new(Mutex::new(security.threshold())),
-        camera_config: Arc::new(Mutex::new(config.cameras.rgb.clone())),
+        camera_config: Arc::new(Mutex::new(camera_source)),
         claim_state: Arc::new(Mutex::new(None)),
         active_cancel: Arc::new(Mutex::new(None)),
         rt_handle: tokio::runtime::Handle::current(),
     };
 
     info!(elapsed = ?t_load.elapsed(), "Models & user DB loaded");
-
-    if let Ok(uid) = daemon::get_active_session_uid().await {
-        daemon::set_pipewire_runtime_for_uid(uid);
-    }
 
     let _conn = Builder::system()?
         .name("com.gundulabs.Gaze")?
