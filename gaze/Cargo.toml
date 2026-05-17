@@ -32,8 +32,8 @@ dialoguer = "0.12"
 toml = "1.1"
 futures = "0.3.32"
 zbus_polkit = "5.0.0"
-crossterm = "0.28"
-ratatui = "0.29"
+crossterm = "0.29"
+ratatui = "0.30"
 
 [[bin]]
 name = "gazed"
