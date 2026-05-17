@@ -2,6 +2,8 @@
 
 This page covers source builds, tests, and packaging workflows for contributors.
 
+For pull request workflow, testing expectations, and safety notes, see [Contributing](/guide/contributing).
+
 ## Prerequisites
 
 - Rust 1.85+ (or install current stable via `rustup`)

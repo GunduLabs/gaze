@@ -41,6 +41,7 @@ export default defineConfig({
           { text: 'Getting Started', link: '/guide/getting-started' },
           { text: 'Installation', link: '/guide/installation' },
           { text: 'Development', link: '/guide/development' },
+          { text: 'Contributing', link: '/guide/contributing' },
           {
             text: 'Authentication',
             items: [
