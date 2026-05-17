@@ -5,7 +5,7 @@ This page covers source builds, tests, and packaging workflows for contributors.
 ## Prerequisites
 
 - Rust 1.85+ (or install current stable via `rustup`)
-- `just` (https://github.com/casey/just) for task automation
+- `just` 1.51+ (https://github.com/casey/just) for task automation
 - `nfpm` (https://nfpm.goreleaser.com) for packaging
 
 ::: code-group

@@ -15,6 +15,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  JUST_VERSION: 1.51.0
 
 jobs:
   checks:
@@ -53,7 +54,12 @@ jobs:
           components: rustfmt, clippy
 
       - name: Install just
-        uses: taiki-e/install-action@just
+        uses: extractions/setup-just@v3
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+
+      - name: Check Justfile formatting
+        run: just --fmt --check
 
       - name: Install cargo-audit
         uses: taiki-e/install-action@cargo-audit
