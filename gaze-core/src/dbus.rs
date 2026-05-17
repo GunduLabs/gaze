@@ -173,3 +173,65 @@ pub trait Gaze {
         time_remaining: f64,
     ) -> zbus::Result<()>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enum_display_strings_are_user_facing_messages() {
+        assert_eq!(
+            CaptureStatus::NoFace.to_string(),
+            "Please look at the camera..."
+        );
+        assert_eq!(CaptureStatus::Ready.to_string(), "Hold still...");
+        assert_eq!(
+            EnrollPrompt::LookLeft.to_string(),
+            "Turn your face slightly left"
+        );
+        assert_eq!(VerifyResult::VerifyNoMatch.as_ref(), "VerifyNoMatch");
+    }
+
+    #[test]
+    fn serde_plain_uses_kebab_case_wire_values() {
+        assert_eq!(
+            serde_plain::to_string(&CaptureStatus::TooClose).unwrap(),
+            "too-close"
+        );
+        assert_eq!(
+            serde_plain::to_string(&EnrollPrompt::LookStraight).unwrap(),
+            "look-straight"
+        );
+        assert_eq!(
+            serde_plain::to_string(&VerifyResult::VerifyMatch).unwrap(),
+            "verify-match"
+        );
+
+        assert_eq!(
+            serde_plain::from_str::<CaptureStatus>("not-centered").unwrap(),
+            CaptureStatus::NotCentered
+        );
+        assert_eq!(
+            serde_plain::from_str::<EnrollPrompt>("db-failed").unwrap(),
+            EnrollPrompt::DbFailed
+        );
+        assert_eq!(
+            serde_plain::from_str::<VerifyResult>("verify-no-match").unwrap(),
+            VerifyResult::VerifyNoMatch
+        );
+    }
+
+    #[test]
+    fn dbus_error_helpers_parse_display_text() {
+        let err = zbus::Error::Failure("org.example.Error: useful detail".to_string());
+        assert_eq!(dbus_error_message(&err), "useful detail");
+        assert!(!dbus_is_file_not_found(&err));
+
+        let err = zbus::Error::Failure("FileNotFound: missing face".to_string());
+        assert_eq!(dbus_error_message(&err), "missing face");
+        assert!(dbus_is_file_not_found(&err));
+
+        let err = zbus::Error::Failure("plain failure".to_string());
+        assert_eq!(dbus_error_message(&err), "plain failure");
+    }
+}

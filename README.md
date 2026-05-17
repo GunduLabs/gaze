@@ -140,7 +140,7 @@ gaze uninstall               Cleanly remove Gaze (packages, config, models, data
 
 ## Building from source
 
-**Dependencies:** Rust 1.85+, [`just`](https://github.com/casey/just), [`nfpm`](https://nfpm.goreleaser.com)
+**Dependencies:** Rust 1.85+, [`just` 1.51+](https://github.com/casey/just), [`nfpm`](https://nfpm.goreleaser.com)
 
 ```bash
 # Ubuntu/Debian

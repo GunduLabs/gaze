@@ -293,3 +293,249 @@ impl Config {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "gaze-config-test-{}-{}-{name}",
+                std::process::id(),
+                unique
+            ));
+            fs::create_dir(&path).unwrap();
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn owned_string(value: &OwnedValue) -> String {
+        value.clone().try_into().unwrap()
+    }
+
+    fn owned_u32(value: &OwnedValue) -> u32 {
+        value.clone().try_into().unwrap()
+    }
+
+    #[test]
+    fn security_level_mappings_are_stable() {
+        let cases = [
+            (SecurityLevel::Low, "det_500m.onnx", "w600k_mbf.onnx", 0.3),
+            (
+                SecurityLevel::Medium,
+                "det_500m.onnx",
+                "w600k_mbf.onnx",
+                0.4,
+            ),
+            (SecurityLevel::High, "det_10g.onnx", "w600k_r50.onnx", 0.5),
+            (
+                SecurityLevel::Maximum,
+                "det_10g.onnx",
+                "w600k_r50.onnx",
+                0.6,
+            ),
+        ];
+
+        for (level, detector, recognizer, threshold) in cases {
+            assert_eq!(level.detector(), detector);
+            assert_eq!(level.recognizer(), recognizer);
+            assert!((level.threshold() - threshold).abs() < f32::EPSILON);
+        }
+
+        let custom = SecurityLevel::Custom {
+            detector: "custom-det.onnx".to_string(),
+            recognizer: "custom-rec.onnx".to_string(),
+            threshold: 0.73,
+        };
+        assert_eq!(custom.detector(), "custom-det.onnx");
+        assert_eq!(custom.recognizer(), "custom-rec.onnx");
+        assert!((custom.threshold() - 0.73).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn config_map_round_trips_custom_values() {
+        let config = Config {
+            security: SecurityLevel::Custom {
+                detector: "det_custom.onnx".to_string(),
+                recognizer: "rec_custom.onnx".to_string(),
+                threshold: 0.77,
+            },
+            cameras: CameraConfig {
+                rgb: "pipewiresrc target-object=42".to_string(),
+            },
+            enrollment: EnrollmentConfig { max_templates: 5 },
+        };
+
+        let map = config.to_map();
+        assert_eq!(owned_string(&map["security"]["level"]), "custom");
+        assert_eq!(
+            owned_string(&map["security"]["detector"]),
+            "det_custom.onnx"
+        );
+        assert_eq!(
+            owned_string(&map["security"]["recognizer"]),
+            "rec_custom.onnx"
+        );
+        assert_eq!(
+            owned_string(&map["cameras"]["rgb"]),
+            "pipewiresrc target-object=42"
+        );
+        assert_eq!(owned_u32(&map["enrollment"]["max-templates"]), 5);
+
+        let decoded = Config::from_map(map).unwrap();
+        match decoded.security {
+            SecurityLevel::Custom {
+                detector,
+                recognizer,
+                threshold,
+            } => {
+                assert_eq!(detector, "det_custom.onnx");
+                assert_eq!(recognizer, "rec_custom.onnx");
+                assert!((threshold - 0.77).abs() < f32::EPSILON);
+            }
+            other => panic!("unexpected security level: {other:?}"),
+        }
+        assert_eq!(decoded.cameras.rgb, "pipewiresrc target-object=42");
+        assert_eq!(decoded.enrollment.max_templates, 5);
+    }
+
+    #[test]
+    fn from_map_defaults_missing_optional_values() {
+        let mut map = HashMap::new();
+        let mut security = HashMap::new();
+        security.insert(
+            "level".to_string(),
+            OwnedValue::try_from(Value::from("custom")).unwrap(),
+        );
+        map.insert("security".to_string(), security);
+        map.insert("cameras".to_string(), HashMap::new());
+        map.insert("enrollment".to_string(), HashMap::new());
+
+        let config = Config::from_map(map).unwrap();
+        match config.security {
+            SecurityLevel::Custom {
+                detector,
+                recognizer,
+                threshold,
+            } => {
+                assert_eq!(detector, "det_10g.onnx");
+                assert_eq!(recognizer, "w600k_r50.onnx");
+                assert!((threshold - 0.6).abs() < f32::EPSILON);
+            }
+            other => panic!("unexpected security level: {other:?}"),
+        }
+        assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
+        assert_eq!(config.enrollment.max_templates, 2);
+    }
+
+    #[test]
+    fn from_map_requires_all_sections() {
+        let err = Config::from_map(HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("missing security section"));
+
+        let map = Config::default().to_map();
+        for section in ["security", "cameras", "enrollment"] {
+            let mut missing = map.clone();
+            missing.remove(section);
+            let err = Config::from_map(missing).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains(&format!("missing {section} section"))
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_security_level_falls_back_to_medium() {
+        let mut map = Config::default().to_map();
+        map.get_mut("security").unwrap().insert(
+            "level".to_string(),
+            OwnedValue::try_from(Value::from("paranoid")).unwrap(),
+        );
+
+        let config = Config::from_map(map).unwrap();
+        assert_eq!(config.security.detector(), SecurityLevel::Medium.detector());
+        assert_eq!(
+            config.security.recognizer(),
+            SecurityLevel::Medium.recognizer()
+        );
+        assert!(
+            (config.security.threshold() - SecurityLevel::Medium.threshold()).abs() < f32::EPSILON
+        );
+    }
+
+    #[test]
+    fn load_from_missing_file_returns_default() {
+        let temp = TempDir::new("missing");
+        let path = temp.path().join("missing.toml");
+
+        let config = Config::load_from(path.to_str().unwrap()).unwrap();
+        assert_eq!(config.security.detector(), SecurityLevel::Medium.detector());
+        assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
+        assert_eq!(config.enrollment.max_templates, 2);
+    }
+
+    #[test]
+    fn save_to_and_load_from_round_trip() {
+        let temp = TempDir::new("round-trip");
+        let path = temp.path().join("config.toml");
+        let config = Config {
+            security: SecurityLevel::High,
+            cameras: CameraConfig {
+                rgb: "primary".to_string(),
+            },
+            enrollment: EnrollmentConfig { max_templates: 8 },
+        };
+
+        config.save_to(path.to_str().unwrap()).unwrap();
+        let loaded = Config::load_from(path.to_str().unwrap()).unwrap();
+
+        assert_eq!(loaded.security.detector(), SecurityLevel::High.detector());
+        assert_eq!(
+            loaded.security.recognizer(),
+            SecurityLevel::High.recognizer()
+        );
+        assert_eq!(loaded.cameras.rgb, "primary");
+        assert_eq!(loaded.enrollment.max_templates, 8);
+    }
+
+    #[test]
+    fn partial_toml_uses_serde_defaults() {
+        let config: Config = toml::from_str(
+            r#"
+            [security]
+            level = "maximum"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.security.detector(),
+            SecurityLevel::Maximum.detector()
+        );
+        assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
+        assert_eq!(config.enrollment.max_templates, 2);
+    }
+}

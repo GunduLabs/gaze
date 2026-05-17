@@ -14,6 +14,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  JUST_VERSION: 1.51.0
   NFPM_VERSION: v2.46.3
 
 jobs:
@@ -178,7 +179,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install just
-        uses: taiki-e/install-action@just
+        uses: extractions/setup-just@v3
+        with:
+          just-version: ${{ env.JUST_VERSION }}
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2

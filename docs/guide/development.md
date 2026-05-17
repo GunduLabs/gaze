@@ -2,10 +2,12 @@
 
 This page covers source builds, tests, and packaging workflows for contributors.
 
+For pull request workflow, testing expectations, and safety notes, see [Contributing](/guide/contributing).
+
 ## Prerequisites
 
 - Rust 1.85+ (or install current stable via `rustup`)
-- `just` (https://github.com/casey/just) for task automation
+- `just` 1.51+ (https://github.com/casey/just) for task automation
 - `nfpm` (https://nfpm.goreleaser.com) for packaging
 
 ::: code-group
@@ -41,8 +43,11 @@ sudo pacman -S base-devel pkgconf clang llvm \
 ```bash
 git clone https://github.com/gundulabs/gaze
 cd gaze
+just setup-hooks
 just --list
 ```
+
+Git hooks are local to each clone. `just setup-hooks` points Git at the tracked hook scripts so pre-commit checks stay up to date when the repo changes. CI still runs the same required checks for pushes and pull requests.
 
 ## Build and test rust components
 

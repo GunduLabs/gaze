@@ -44,3 +44,26 @@ impl FaceRecognizer {
         Ok(row / norm)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::Rgb;
+
+    #[test]
+    fn pre_process_outputs_nchw_bgr_tensor() {
+        let mut img = RgbImage::new(2, 1);
+        img.put_pixel(0, 0, Rgb([255, 127, 0]));
+        img.put_pixel(1, 0, Rgb([0, 128, 255]));
+
+        let tensor = FaceRecognizer::pre_process(&img);
+
+        assert_eq!(tensor.shape(), &[1, 3, 1, 2]);
+        assert_eq!(tensor[[0, 0, 0, 0]], -1.0);
+        assert!((tensor[[0, 1, 0, 0]] - ((127.0 - 127.5) / 127.5)).abs() < f32::EPSILON);
+        assert_eq!(tensor[[0, 2, 0, 0]], 1.0);
+        assert_eq!(tensor[[0, 0, 0, 1]], 1.0);
+        assert!((tensor[[0, 1, 0, 1]] - ((128.0 - 127.5) / 127.5)).abs() < f32::EPSILON);
+        assert_eq!(tensor[[0, 2, 0, 1]], -1.0);
+    }
+}

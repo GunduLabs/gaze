@@ -129,3 +129,90 @@ pub fn align_face(
     let aligned = warp_affine(&img_dyn.to_rgb8(), &transform, 112, 112);
     Ok(aligned)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::Rgb;
+    use nalgebra::Matrix3;
+
+    fn assert_close(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 1e-3,
+            "expected {actual} to be close to {expected}"
+        );
+    }
+
+    #[test]
+    fn umeyama_identity_when_points_match() {
+        let transform = umeyama(&ARCFACE_SRC_PTS, &ARCFACE_SRC_PTS).unwrap();
+
+        assert_close(transform[(0, 0)], 1.0);
+        assert_close(transform[(1, 1)], 1.0);
+        assert_close(transform[(0, 1)], 0.0);
+        assert_close(transform[(1, 0)], 0.0);
+        assert_close(transform[(0, 2)], 0.0);
+        assert_close(transform[(1, 2)], 0.0);
+        assert_close(transform[(2, 2)], 1.0);
+    }
+
+    #[test]
+    fn umeyama_recovers_scale_and_translation() {
+        let src = [
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [0.0, 10.0],
+            [10.0, 10.0],
+            [5.0, 2.0],
+        ];
+        let dst = std::array::from_fn(|idx| [src[idx][0] * 2.0 + 3.0, src[idx][1] * 2.0 - 4.0]);
+
+        let transform = umeyama(&src, &dst).unwrap();
+
+        assert_close(transform[(0, 0)], 2.0);
+        assert_close(transform[(1, 1)], 2.0);
+        assert_close(transform[(0, 1)], 0.0);
+        assert_close(transform[(1, 0)], 0.0);
+        assert_close(transform[(0, 2)], 3.0);
+        assert_close(transform[(1, 2)], -4.0);
+    }
+
+    #[test]
+    fn warp_affine_identity_preserves_pixels() {
+        let mut img = RgbImage::new(2, 2);
+        img.put_pixel(0, 0, Rgb([10, 20, 30]));
+        img.put_pixel(1, 0, Rgb([40, 50, 60]));
+        img.put_pixel(0, 1, Rgb([70, 80, 90]));
+        img.put_pixel(1, 1, Rgb([100, 110, 120]));
+
+        let out = warp_affine(&img, &Matrix3::identity(), 2, 2);
+
+        assert_eq!(out, img);
+    }
+
+    #[test]
+    fn warp_affine_translation_uses_black_for_out_of_bounds() {
+        let mut img = RgbImage::new(3, 1);
+        img.put_pixel(0, 0, Rgb([1, 0, 0]));
+        img.put_pixel(1, 0, Rgb([2, 0, 0]));
+        img.put_pixel(2, 0, Rgb([3, 0, 0]));
+        let transform = Matrix3::new(1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
+
+        let out = warp_affine(&img, &transform, 3, 1);
+
+        assert_eq!(*out.get_pixel(0, 0), Rgb([0, 0, 0]));
+        assert_eq!(*out.get_pixel(1, 0), Rgb([1, 0, 0]));
+        assert_eq!(*out.get_pixel(2, 0), Rgb([2, 0, 0]));
+    }
+
+    #[test]
+    fn warp_affine_non_invertible_transform_falls_back_to_identity() {
+        let mut img = RgbImage::new(1, 1);
+        img.put_pixel(0, 0, Rgb([7, 8, 9]));
+        let transform = Matrix3::zeros();
+
+        let out = warp_affine(&img, &transform, 1, 1);
+
+        assert_eq!(*out.get_pixel(0, 0), Rgb([7, 8, 9]));
+    }
+}

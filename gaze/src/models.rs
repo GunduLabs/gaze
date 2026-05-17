@@ -216,3 +216,171 @@ pub fn ensure_models(
 
     Ok((det_path, rec_path))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "gaze-models-test-{}-{}-{name}",
+                std::process::id(),
+                unique
+            ));
+            fs::create_dir(&path).unwrap();
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn write_zip(path: &Path, entries: &[(&str, &[u8])]) {
+        let file = fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        for (name, bytes) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn model_name_validation_accepts_safe_onnx_files_only() {
+        validate_model_name("det_500m.onnx").unwrap();
+        validate_model_name("w600k-r50.v2.onnx").unwrap();
+
+        for name in [
+            "",
+            " model.onnx",
+            "model.onnx ",
+            ".",
+            "..",
+            "../model.onnx",
+            "dir/model.onnx",
+            "dir\\model.onnx",
+            "model.bin",
+            "model.onnx\0bad",
+            "model.onnx\n",
+        ] {
+            assert!(
+                validate_model_name(name).is_err(),
+                "{name:?} should be invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn expected_hash_tables_cover_known_models_and_packs() {
+        assert_eq!(
+            expected_pack_sha256("buffalo_sc").unwrap(),
+            BUFFALO_SC_SHA256
+        );
+        assert_eq!(expected_pack_sha256("buffalo_l").unwrap(), BUFFALO_L_SHA256);
+        assert!(expected_pack_sha256("unknown").is_err());
+
+        assert_eq!(
+            expected_model_sha256("det_500m.onnx"),
+            Some(DET_500M_SHA256)
+        );
+        assert_eq!(
+            expected_model_sha256("w600k_mbf.onnx"),
+            Some(W600K_MBF_SHA256)
+        );
+        assert_eq!(expected_model_sha256("det_10g.onnx"), Some(DET_10G_SHA256));
+        assert_eq!(
+            expected_model_sha256("w600k_r50.onnx"),
+            Some(W600K_R50_SHA256)
+        );
+        assert_eq!(expected_model_sha256("custom.onnx"), None);
+    }
+
+    #[test]
+    fn sha256_verification_accepts_matching_digest_and_rejects_mismatch() {
+        let temp = TempDir::new("sha256");
+        let path = temp.path().join("input.bin");
+        fs::write(&path, b"abc").unwrap();
+        let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+        assert_eq!(sha256_file(&path).unwrap(), expected);
+        verify_sha256(&path, expected).unwrap();
+        assert!(verify_sha256(&path, DET_500M_SHA256).is_err());
+    }
+
+    #[test]
+    fn ensure_regular_model_rejects_directories_and_symlinks() {
+        let temp = TempDir::new("regular-model");
+        let file = temp.path().join("model.onnx");
+        let dir = temp.path().join("dir.onnx");
+        let symlink = temp.path().join("link.onnx");
+        fs::write(&file, b"model").unwrap();
+        fs::create_dir(&dir).unwrap();
+        std::os::unix::fs::symlink(&file, &symlink).unwrap();
+
+        ensure_regular_model(&file).unwrap();
+        assert!(ensure_regular_model(&dir).is_err());
+        assert!(ensure_regular_model(&symlink).is_err());
+    }
+
+    #[test]
+    fn extract_onnx_from_zip_strips_paths_and_ignores_non_onnx_entries() {
+        let temp = TempDir::new("zip-extract");
+        let zip_path = temp.path().join("models.zip");
+        let dest = temp.path().join("models");
+        fs::create_dir(&dest).unwrap();
+        write_zip(
+            &zip_path,
+            &[
+                ("nested/det_500m.onnx", b"detector"),
+                ("w600k_mbf.onnx", b"recognizer"),
+                ("README.txt", b"ignore me"),
+            ],
+        );
+
+        let mut extracted = extract_onnx_from_zip(&zip_path, &dest).unwrap();
+        extracted.sort();
+
+        assert_eq!(extracted.len(), 2);
+        assert_eq!(fs::read(dest.join("det_500m.onnx")).unwrap(), b"detector");
+        assert_eq!(
+            fs::read(dest.join("w600k_mbf.onnx")).unwrap(),
+            b"recognizer"
+        );
+        assert!(!dest.join("README.txt").exists());
+    }
+
+    #[test]
+    fn extract_onnx_from_zip_reuses_existing_regular_model() {
+        let temp = TempDir::new("zip-existing");
+        let zip_path = temp.path().join("models.zip");
+        let dest = temp.path().join("models");
+        fs::create_dir(&dest).unwrap();
+        fs::write(dest.join("det_500m.onnx"), b"existing").unwrap();
+        write_zip(&zip_path, &[("det_500m.onnx", b"new")]);
+
+        let extracted = extract_onnx_from_zip(&zip_path, &dest).unwrap();
+
+        assert_eq!(extracted, vec![dest.join("det_500m.onnx")]);
+        assert_eq!(fs::read(dest.join("det_500m.onnx")).unwrap(), b"existing");
+    }
+}
