@@ -22,7 +22,8 @@ fn capture_tone(status: CaptureStatus) -> Tone {
     match status {
         CaptureStatus::Ready => Tone::Good,
         CaptureStatus::NoFace => Tone::Error,
-        CaptureStatus::Clipped
+        CaptureStatus::TooDark
+        | CaptureStatus::Clipped
         | CaptureStatus::NotCentered
         | CaptureStatus::TooFar
         | CaptureStatus::TooClose => Tone::Warn,
@@ -1019,6 +1020,16 @@ async fn main() -> anyhow::Result<()> {
                     config.security.threshold()
                 );
                 println!("{} {}", style("cameras.rgb:").bold(), config.cameras.rgb);
+                println!(
+                    "{} {:.2}",
+                    style("cameras.dark_threshold:").bold(),
+                    config.cameras.dark_threshold
+                );
+                println!(
+                    "{} {}",
+                    style("cameras.dark_pixel_value:").bold(),
+                    config.cameras.dark_pixel_value
+                );
                 println!(
                     "{} {}",
                     style("enrollment.max_templates:").bold(),

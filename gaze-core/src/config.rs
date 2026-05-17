@@ -73,10 +73,22 @@ pub struct Config {
 pub struct CameraConfig {
     #[serde(default = "default_rgb_device")]
     pub rgb: String,
+    #[serde(default = "default_dark_threshold")]
+    pub dark_threshold: f32,
+    #[serde(default = "default_dark_pixel_value")]
+    pub dark_pixel_value: u8,
 }
 
 fn default_rgb_device() -> String {
     DEFAULT_RGB_CAMERA.to_string()
+}
+
+fn default_dark_threshold() -> f32 {
+    0.6
+}
+
+fn default_dark_pixel_value() -> u8 {
+    10
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -101,6 +113,8 @@ impl Default for CameraConfig {
     fn default() -> Self {
         Self {
             rgb: default_rgb_device(),
+            dark_threshold: default_dark_threshold(),
+            dark_pixel_value: default_dark_pixel_value(),
         }
     }
 }
@@ -165,6 +179,14 @@ impl Config {
             "rgb".to_string(),
             OwnedValue::try_from(Value::from(self.cameras.rgb.clone())).unwrap(),
         );
+        cameras.insert(
+            "dark-threshold".to_string(),
+            OwnedValue::try_from(Value::from(self.cameras.dark_threshold as f64)).unwrap(),
+        );
+        cameras.insert(
+            "dark-pixel-value".to_string(),
+            OwnedValue::try_from(Value::from(self.cameras.dark_pixel_value)).unwrap(),
+        );
         map.insert("cameras".to_string(), cameras);
 
         let mut enrollment = HashMap::new();
@@ -220,6 +242,17 @@ impl Config {
                 .get("rgb")
                 .and_then(|v| v.clone().try_into().ok())
                 .unwrap_or_else(default_rgb_device),
+            dark_threshold: cameras_dict
+                .get("dark-threshold")
+                .and_then(|v| {
+                    let f: f64 = v.clone().try_into().ok()?;
+                    Some(f as f32)
+                })
+                .unwrap_or_else(default_dark_threshold),
+            dark_pixel_value: cameras_dict
+                .get("dark-pixel-value")
+                .and_then(|v| v.clone().try_into().ok())
+                .unwrap_or_else(default_dark_pixel_value),
         };
 
         let enrollment_dict = map
@@ -384,6 +417,8 @@ mod tests {
             },
             cameras: CameraConfig {
                 rgb: "pipewiresrc target-object=42".to_string(),
+                dark_threshold: 0.7,
+                dark_pixel_value: 12,
             },
             enrollment: EnrollmentConfig { max_templates: 5 },
         };
@@ -402,6 +437,13 @@ mod tests {
             owned_string(&map["cameras"]["rgb"]),
             "pipewiresrc target-object=42"
         );
+        let dark_threshold: f64 = map["cameras"]["dark-threshold"].clone().try_into().unwrap();
+        let dark_pixel_value: u8 = map["cameras"]["dark-pixel-value"]
+            .clone()
+            .try_into()
+            .unwrap();
+        assert!((dark_threshold - 0.7).abs() < 1e-6);
+        assert_eq!(dark_pixel_value, 12);
         assert_eq!(owned_u32(&map["enrollment"]["max-templates"]), 5);
 
         let decoded = Config::from_map(map).unwrap();
@@ -418,6 +460,8 @@ mod tests {
             other => panic!("unexpected security level: {other:?}"),
         }
         assert_eq!(decoded.cameras.rgb, "pipewiresrc target-object=42");
+        assert!((decoded.cameras.dark_threshold - 0.7).abs() < f32::EPSILON);
+        assert_eq!(decoded.cameras.dark_pixel_value, 12);
         assert_eq!(decoded.enrollment.max_templates, 5);
     }
 
@@ -447,6 +491,8 @@ mod tests {
             other => panic!("unexpected security level: {other:?}"),
         }
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
+        assert!((config.cameras.dark_threshold - 0.6).abs() < f32::EPSILON);
+        assert_eq!(config.cameras.dark_pixel_value, 10);
         assert_eq!(config.enrollment.max_templates, 2);
     }
 
@@ -494,6 +540,8 @@ mod tests {
         let config = Config::load_from(path.to_str().unwrap()).unwrap();
         assert_eq!(config.security.detector(), SecurityLevel::Medium.detector());
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
+        assert!((config.cameras.dark_threshold - 0.6).abs() < f32::EPSILON);
+        assert_eq!(config.cameras.dark_pixel_value, 10);
         assert_eq!(config.enrollment.max_templates, 2);
     }
 
@@ -505,6 +553,8 @@ mod tests {
             security: SecurityLevel::High,
             cameras: CameraConfig {
                 rgb: "primary".to_string(),
+                dark_threshold: 0.75,
+                dark_pixel_value: 8,
             },
             enrollment: EnrollmentConfig { max_templates: 8 },
         };
@@ -518,6 +568,8 @@ mod tests {
             SecurityLevel::High.recognizer()
         );
         assert_eq!(loaded.cameras.rgb, "primary");
+        assert!((loaded.cameras.dark_threshold - 0.75).abs() < f32::EPSILON);
+        assert_eq!(loaded.cameras.dark_pixel_value, 8);
         assert_eq!(loaded.enrollment.max_templates, 8);
     }
 
@@ -536,6 +588,8 @@ mod tests {
             SecurityLevel::Maximum.detector()
         );
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
+        assert!((config.cameras.dark_threshold - 0.6).abs() < f32::EPSILON);
+        assert_eq!(config.cameras.dark_pixel_value, 10);
         assert_eq!(config.enrollment.max_templates, 2);
     }
 }

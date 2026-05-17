@@ -24,6 +24,8 @@ use strum_macros::{AsRefStr, Display, EnumString, VariantNames};
 pub enum CaptureStatus {
     #[strum(serialize = "Please look at the camera...")]
     NoFace,
+    #[strum(serialize = "Need more light...")]
+    TooDark,
     #[strum(serialize = "Face is clipped. Please move back...")]
     Clipped,
     #[strum(serialize = "Please center your face...")]
@@ -184,6 +186,7 @@ mod tests {
             CaptureStatus::NoFace.to_string(),
             "Please look at the camera..."
         );
+        assert_eq!(CaptureStatus::TooDark.to_string(), "Need more light...");
         assert_eq!(CaptureStatus::Ready.to_string(), "Hold still...");
         assert_eq!(
             EnrollPrompt::LookLeft.to_string(),
@@ -197,6 +200,10 @@ mod tests {
         assert_eq!(
             serde_plain::to_string(&CaptureStatus::TooClose).unwrap(),
             "too-close"
+        );
+        assert_eq!(
+            serde_plain::to_string(&CaptureStatus::TooDark).unwrap(),
+            "too-dark"
         );
         assert_eq!(
             serde_plain::to_string(&EnrollPrompt::LookStraight).unwrap(),

@@ -12,6 +12,8 @@ level = "medium"
 
 [cameras]
 rgb = "primary"
+dark_threshold = 0.6
+dark_pixel_value = 10
 
 [enrollment]
 max_templates = 3
@@ -62,6 +64,18 @@ rgb = "pipewiresrc target-object=<pipewire-target>"
 ```
 
 Direct `/dev/video*` paths are not supported.
+
+### Dark-frame rejection
+
+Gaze rejects frames that are too dark before running face detection:
+
+```toml
+[cameras]
+dark_threshold = 0.6
+dark_pixel_value = 10
+```
+
+With the defaults, a frame is skipped when at least 60% of pixels have luminance below 10.
 
 After changing config:
 

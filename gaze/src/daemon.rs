@@ -828,7 +828,7 @@ impl AuthDaemon {
         };
 
         match gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap()) {
-            Ok(det) => *checker = FaceChecker::from_detector(det),
+            Ok(det) => *checker = FaceChecker::from_detector_with_config(det, &new_config),
             Err(e) => return Err(fdo::Error::Failed(format!("Failed to load detector: {e}"))),
         }
 

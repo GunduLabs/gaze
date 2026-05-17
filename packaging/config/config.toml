@@ -20,6 +20,9 @@ level = "medium"
 
 [cameras]
 rgb = "primary"
+# Reject frames where this fraction of pixels are below dark_pixel_value.
+dark_threshold = 0.6
+dark_pixel_value = 10
 
 [enrollment]
 max_templates = 3
