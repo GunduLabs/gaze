@@ -41,8 +41,11 @@ sudo pacman -S base-devel pkgconf clang llvm \
 ```bash
 git clone https://github.com/gundulabs/gaze
 cd gaze
+just setup-hooks
 just --list
 ```
+
+Git hooks are local to each clone. `just setup-hooks` points Git at the tracked hook scripts so pre-commit checks stay up to date when the repo changes. CI still runs the same required checks for pushes and pull requests.
 
 ## Build and test rust components
 

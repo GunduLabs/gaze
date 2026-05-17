@@ -1,11 +1,16 @@
 #!/bin/sh
 # Setup git hooks for Gaze
+set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-GIT_DIR="$(git rev-parse --git-dir)"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+HOOKS_PATH="scripts"
 
-echo "Setting up pre-commit hook..."
-cp "$SCRIPT_DIR/pre-commit" "$GIT_DIR/hooks/pre-commit"
-chmod +x "$GIT_DIR/hooks/pre-commit"
+if [ ! -x "$REPO_ROOT/$HOOKS_PATH/pre-commit" ]; then
+    echo "Error: $HOOKS_PATH/pre-commit is missing or not executable." >&2
+    exit 1
+fi
 
-echo "Done! Pre-commit hooks are now active."
+echo "Setting up git hooks..."
+git config core.hooksPath "$HOOKS_PATH"
+
+echo "Done! Git hooks are now active from $HOOKS_PATH/."

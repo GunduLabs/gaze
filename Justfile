@@ -62,6 +62,10 @@ clean:
 
 # ── dev helpers ───────────────────────────────────────────────────────────────
 
+# Enable Git hooks for this clone
+setup-hooks:
+    scripts/setup-hooks.sh
+
 # Run the full test suite
 test:
     cargo test --workspace --release
