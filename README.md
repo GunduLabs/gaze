@@ -121,6 +121,10 @@ rgb = "primary"
 dark_threshold = 0.6
 dark_pixel_value = 10
 
+[auth]
+abort_if_ssh = true
+abort_if_lid_closed = true
+
 [enrollment]
 max_templates = 3
 ```

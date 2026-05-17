@@ -3,7 +3,7 @@ mod tui;
 
 use clap::{Parser, Subcommand};
 use console::{Term, style};
-use dialoguer::{Input, Select, theme::ColorfulTheme};
+use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 use futures::StreamExt;
 use gaze_core::config::{Config, SecurityLevel};
 use gaze_core::dbus::{
@@ -222,6 +222,16 @@ async fn run_config_wizard(
         .interact()?;
 
     config.cameras.rgb = cameras[selected_cam_idx].1.clone();
+
+    config.auth.abort_if_ssh = Confirm::with_theme(&theme)
+        .with_prompt("Abort face auth for SSH sessions")
+        .default(config.auth.abort_if_ssh)
+        .interact()?;
+
+    config.auth.abort_if_lid_closed = Confirm::with_theme(&theme)
+        .with_prompt("Abort face auth when laptop lid is closed")
+        .default(config.auth.abort_if_lid_closed)
+        .interact()?;
 
     config.enrollment.max_templates = Input::with_theme(&theme)
         .with_prompt("Max templates (sets of captures)")
@@ -1029,6 +1039,16 @@ async fn main() -> anyhow::Result<()> {
                     "{} {}",
                     style("cameras.dark_pixel_value:").bold(),
                     config.cameras.dark_pixel_value
+                );
+                println!(
+                    "{} {}",
+                    style("auth.abort_if_ssh:").bold(),
+                    config.auth.abort_if_ssh
+                );
+                println!(
+                    "{} {}",
+                    style("auth.abort_if_lid_closed:").bold(),
+                    config.auth.abort_if_lid_closed
                 );
                 println!(
                     "{} {}",

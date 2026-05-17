@@ -66,6 +66,8 @@ pub struct Config {
     #[serde(default)]
     pub cameras: CameraConfig,
     #[serde(default)]
+    pub auth: AuthConfig,
+    #[serde(default)]
     pub enrollment: EnrollmentConfig,
 }
 
@@ -92,6 +94,18 @@ fn default_dark_pixel_value() -> u8 {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct AuthConfig {
+    #[serde(default = "default_true")]
+    pub abort_if_ssh: bool,
+    #[serde(default = "default_true")]
+    pub abort_if_lid_closed: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct EnrollmentConfig {
     #[serde(default = "default_max_templates")]
     pub max_templates: u32,
@@ -105,6 +119,15 @@ impl Default for EnrollmentConfig {
     fn default() -> Self {
         Self {
             max_templates: default_max_templates(),
+        }
+    }
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            abort_if_ssh: true,
+            abort_if_lid_closed: true,
         }
     }
 }
@@ -189,6 +212,17 @@ impl Config {
         );
         map.insert("cameras".to_string(), cameras);
 
+        let mut auth = HashMap::new();
+        auth.insert(
+            "abort-if-ssh".to_string(),
+            OwnedValue::try_from(Value::from(self.auth.abort_if_ssh)).unwrap(),
+        );
+        auth.insert(
+            "abort-if-lid-closed".to_string(),
+            OwnedValue::try_from(Value::from(self.auth.abort_if_lid_closed)).unwrap(),
+        );
+        map.insert("auth".to_string(), auth);
+
         let mut enrollment = HashMap::new();
         enrollment.insert(
             "max-templates".to_string(),
@@ -255,6 +289,19 @@ impl Config {
                 .unwrap_or_else(default_dark_pixel_value),
         };
 
+        let auth = map
+            .get("auth")
+            .map_or_else(AuthConfig::default, |auth_dict| AuthConfig {
+                abort_if_ssh: auth_dict
+                    .get("abort-if-ssh")
+                    .and_then(|v| v.clone().try_into().ok())
+                    .unwrap_or(true),
+                abort_if_lid_closed: auth_dict
+                    .get("abort-if-lid-closed")
+                    .and_then(|v| v.clone().try_into().ok())
+                    .unwrap_or(true),
+            });
+
         let enrollment_dict = map
             .get("enrollment")
             .context("missing enrollment section")?;
@@ -268,6 +315,7 @@ impl Config {
         Ok(Self {
             security,
             cameras,
+            auth,
             enrollment,
         })
     }
@@ -420,6 +468,10 @@ mod tests {
                 dark_threshold: 0.7,
                 dark_pixel_value: 12,
             },
+            auth: AuthConfig {
+                abort_if_ssh: false,
+                abort_if_lid_closed: true,
+            },
             enrollment: EnrollmentConfig { max_templates: 5 },
         };
 
@@ -444,6 +496,13 @@ mod tests {
             .unwrap();
         assert!((dark_threshold - 0.7).abs() < 1e-6);
         assert_eq!(dark_pixel_value, 12);
+        let abort_if_ssh: bool = map["auth"]["abort-if-ssh"].clone().try_into().unwrap();
+        let abort_if_lid_closed: bool = map["auth"]["abort-if-lid-closed"]
+            .clone()
+            .try_into()
+            .unwrap();
+        assert!(!abort_if_ssh);
+        assert!(abort_if_lid_closed);
         assert_eq!(owned_u32(&map["enrollment"]["max-templates"]), 5);
 
         let decoded = Config::from_map(map).unwrap();
@@ -462,6 +521,8 @@ mod tests {
         assert_eq!(decoded.cameras.rgb, "pipewiresrc target-object=42");
         assert!((decoded.cameras.dark_threshold - 0.7).abs() < f32::EPSILON);
         assert_eq!(decoded.cameras.dark_pixel_value, 12);
+        assert!(!decoded.auth.abort_if_ssh);
+        assert!(decoded.auth.abort_if_lid_closed);
         assert_eq!(decoded.enrollment.max_templates, 5);
     }
 
@@ -493,6 +554,8 @@ mod tests {
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
         assert!((config.cameras.dark_threshold - 0.6).abs() < f32::EPSILON);
         assert_eq!(config.cameras.dark_pixel_value, 10);
+        assert!(config.auth.abort_if_ssh);
+        assert!(config.auth.abort_if_lid_closed);
         assert_eq!(config.enrollment.max_templates, 2);
     }
 
@@ -542,6 +605,8 @@ mod tests {
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
         assert!((config.cameras.dark_threshold - 0.6).abs() < f32::EPSILON);
         assert_eq!(config.cameras.dark_pixel_value, 10);
+        assert!(config.auth.abort_if_ssh);
+        assert!(config.auth.abort_if_lid_closed);
         assert_eq!(config.enrollment.max_templates, 2);
     }
 
@@ -555,6 +620,10 @@ mod tests {
                 rgb: "primary".to_string(),
                 dark_threshold: 0.75,
                 dark_pixel_value: 8,
+            },
+            auth: AuthConfig {
+                abort_if_ssh: true,
+                abort_if_lid_closed: false,
             },
             enrollment: EnrollmentConfig { max_templates: 8 },
         };
@@ -570,6 +639,8 @@ mod tests {
         assert_eq!(loaded.cameras.rgb, "primary");
         assert!((loaded.cameras.dark_threshold - 0.75).abs() < f32::EPSILON);
         assert_eq!(loaded.cameras.dark_pixel_value, 8);
+        assert!(loaded.auth.abort_if_ssh);
+        assert!(!loaded.auth.abort_if_lid_closed);
         assert_eq!(loaded.enrollment.max_templates, 8);
     }
 
@@ -590,6 +661,8 @@ mod tests {
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
         assert!((config.cameras.dark_threshold - 0.6).abs() < f32::EPSILON);
         assert_eq!(config.cameras.dark_pixel_value, 10);
+        assert!(config.auth.abort_if_ssh);
+        assert!(config.auth.abort_if_lid_closed);
         assert_eq!(config.enrollment.max_templates, 2);
     }
 }
