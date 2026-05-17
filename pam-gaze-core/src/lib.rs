@@ -186,3 +186,20 @@ pub async fn authenticate_biometric(username: &str) -> anyhow::Result<Option<boo
     let _ = proxy.release().await;
     Ok(Some(matched))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retryable_errors_are_detected_from_error_text() {
+        let err = zbus::Error::Failure("RETRYABLE: camera is busy".to_string());
+        assert!(is_retryable(&err));
+    }
+
+    #[test]
+    fn ordinary_errors_are_not_retryable() {
+        let err = zbus::Error::Failure("camera is unavailable".to_string());
+        assert!(!is_retryable(&err));
+    }
+}

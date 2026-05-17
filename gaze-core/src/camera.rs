@@ -153,3 +153,21 @@ fn is_mono_format(format: &str) -> bool {
         || format.starts_with("GREY")
         || matches!(format.as_str(), "R8" | "R16" | "Y8" | "Y16")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mono_format_detection_is_case_and_whitespace_insensitive() {
+        for format in [
+            "GRAY8", " gray16 ", "GREY", "grey12", "R8", "r16", "Y8", " y16 ",
+        ] {
+            assert!(is_mono_format(format), "{format} should be mono");
+        }
+
+        for format in ["RGB", "BGR", "RGBA", "YUY2", "NV12", "DMA_DRM", ""] {
+            assert!(!is_mono_format(format), "{format} should be color/unknown");
+        }
+    }
+}

@@ -460,3 +460,211 @@ impl UserDatabase {
         self.max_templates = max;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "gaze-users-test-{}-{}-{name}",
+                std::process::id(),
+                unique
+            ));
+            fs::create_dir(&path).unwrap();
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn embedding(values: &[f32]) -> Array1<f32> {
+        Array1::from_vec(values.to_vec())
+    }
+
+    fn sorted_faces(db: &UserDatabase, username: &str) -> Vec<(String, u32)> {
+        let mut faces = db.list_faces(username).unwrap();
+        faces.sort_by(|a, b| a.0.cmp(&b.0));
+        faces
+    }
+
+    #[test]
+    fn validate_names_accept_safe_components_and_reject_path_tricks() {
+        for name in ["alice", "Alice Smith", "face-1", "face_2"] {
+            UserDatabase::validate_username(name).unwrap();
+            UserDatabase::validate_face_name(name).unwrap();
+        }
+
+        for name in [
+            "", " alice", "alice ", ".", "..", "a/b", "a\\b", "a\0b", "a\nb",
+        ] {
+            assert!(
+                UserDatabase::validate_username(name).is_err(),
+                "{name:?} should be invalid"
+            );
+            assert!(
+                UserDatabase::validate_face_name(name).is_err(),
+                "{name:?} should be invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn error_display_messages_are_stable() {
+        assert_eq!(
+            UserDbError::UserNotFound("alice".to_string()).to_string(),
+            "User 'alice' not found"
+        );
+        assert_eq!(
+            UserDbError::FaceNotFound("work".to_string()).to_string(),
+            "Face 'work' not found"
+        );
+        assert_eq!(
+            UserDbError::FaceExists("home".to_string()).to_string(),
+            "Face 'home' already exists"
+        );
+        assert_eq!(
+            UserDbError::InvalidName("bad name".to_string()).to_string(),
+            "bad name"
+        );
+    }
+
+    #[test]
+    fn add_template_persists_embeddings_and_reload_reads_them() {
+        let temp = TempDir::new("persist");
+        let base = temp.path().to_str().unwrap();
+        let mut db = UserDatabase::new(base, 4).unwrap();
+        db.add_template(
+            "alice",
+            "work",
+            "1",
+            vec![embedding(&[1.0, 0.0]), embedding(&[0.0, 1.0])],
+        )
+        .unwrap();
+
+        assert_eq!(sorted_faces(&db, "alice"), vec![("work".to_string(), 2)]);
+        assert_eq!(db.get_user_embeddings("alice").unwrap().len(), 2);
+
+        let db = UserDatabase::new(base, 4).unwrap();
+        assert_eq!(sorted_faces(&db, "alice"), vec![("work".to_string(), 2)]);
+        assert_eq!(db.get_user_embeddings("alice").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn max_templates_evicts_oldest_numeric_template_ids() {
+        let temp = TempDir::new("evict");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 2).unwrap();
+        for id in ["1", "2", "3"] {
+            db.add_template(
+                "alice",
+                "work",
+                id,
+                vec![embedding(&[id.parse::<f32>().unwrap()])],
+            )
+            .unwrap();
+        }
+
+        assert_eq!(
+            db.list_template_ids("alice", "work").unwrap(),
+            vec!["2", "3"]
+        );
+        assert_eq!(sorted_faces(&db, "alice"), vec![("work".to_string(), 2)]);
+    }
+
+    #[test]
+    fn rename_remove_and_clear_update_memory_and_disk() {
+        let temp = TempDir::new("rename-remove");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 2).unwrap();
+        db.add_template("alice", "work", "1", vec![embedding(&[1.0])])
+            .unwrap();
+        db.add_template("alice", "home", "1", vec![embedding(&[0.5])])
+            .unwrap();
+
+        assert!(matches!(
+            db.rename_face("alice", "work", "home"),
+            Err(UserDbError::FaceExists(face)) if face == "home"
+        ));
+        db.rename_face("alice", "work", "office").unwrap();
+        assert!(!temp.path().join("alice/work").exists());
+        assert!(temp.path().join("alice/office").exists());
+        assert_eq!(
+            sorted_faces(&db, "alice"),
+            vec![("home".to_string(), 1), ("office".to_string(), 1)]
+        );
+
+        db.remove_face("alice", "home").unwrap();
+        assert!(!temp.path().join("alice/home").exists());
+        assert_eq!(sorted_faces(&db, "alice"), vec![("office".to_string(), 1)]);
+
+        db.clear_user("alice").unwrap();
+        assert!(!temp.path().join("alice").exists());
+        assert!(matches!(
+            db.list_faces("alice"),
+            Err(UserDbError::UserNotFound(user)) if user == "alice"
+        ));
+    }
+
+    #[test]
+    fn match_faces_sorts_scores_and_uses_strict_threshold() {
+        let temp = TempDir::new("match");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 3).unwrap();
+        db.add_template("alice", "strong", "1", vec![embedding(&[1.0, 0.0])])
+            .unwrap();
+        db.add_template("alice", "weak", "1", vec![embedding(&[0.25, 0.0])])
+            .unwrap();
+
+        let results = db
+            .match_faces("alice", &embedding(&[1.0, 0.0]), 0.5)
+            .unwrap();
+        assert_eq!(results[0].0, "strong");
+        assert_eq!(results[0].1, 1.0);
+        assert!(results[0].3);
+        assert_eq!(results[1].0, "weak");
+        assert_eq!(results[1].1, 0.25);
+        assert!(!results[1].3);
+
+        let results = db
+            .match_faces("alice", &embedding(&[1.0, 0.0]), 1.0)
+            .unwrap();
+        assert_eq!(results[0].0, "strong");
+        assert!(!results[0].3, "threshold comparison should be strict");
+    }
+
+    #[test]
+    fn match_faces_ignores_dimension_mismatches() {
+        let temp = TempDir::new("dimension-mismatch");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 3).unwrap();
+        db.add_template("alice", "odd", "1", vec![embedding(&[1.0, 0.0, 0.0])])
+            .unwrap();
+
+        let results = db
+            .match_faces("alice", &embedding(&[1.0, 0.0]), 0.0)
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "odd");
+        assert_eq!(results[0].1, 0.0);
+        assert!(!results[0].3);
+        assert_eq!(results[0].4, 1);
+    }
+}

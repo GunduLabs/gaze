@@ -484,3 +484,30 @@ fn inset(area: Rect, horizontal: u16, vertical: u16) -> Rect {
         height: area.height.saturating_sub(vertical.saturating_mul(2)),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tone_maps_to_expected_terminal_colors() {
+        assert_eq!(Tone::Info.color(), Color::Cyan);
+        assert_eq!(Tone::Good.color(), Color::Green);
+        assert_eq!(Tone::Warn.color(), Color::Yellow);
+        assert_eq!(Tone::Error.color(), Color::Red);
+    }
+
+    #[test]
+    fn centered_rect_centers_and_clamps_to_parent_area() {
+        let area = Rect::new(10, 20, 100, 40);
+        assert_eq!(centered_rect(area, 50, 10), Rect::new(35, 35, 50, 10));
+        assert_eq!(centered_rect(area, 200, 80), area);
+    }
+
+    #[test]
+    fn inset_offsets_origin_and_saturates_size() {
+        let area = Rect::new(5, 7, 20, 10);
+        assert_eq!(inset(area, 3, 2), Rect::new(8, 9, 14, 6));
+        assert_eq!(inset(area, 20, 20), Rect::new(25, 27, 0, 0));
+    }
+}
