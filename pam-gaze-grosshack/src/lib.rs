@@ -70,6 +70,8 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     ));
 
     let thread_state = Arc::clone(&state);
+    // Raw pointers aren't Send, so smuggle the handle across the thread boundary as a usize.
+    // PAM owns the handle for the whole pam_sm_authenticate call, so it stays valid.
     let pamh_worker = pamh as usize;
     let prompt_thread = thread::spawn(move || {
         let password = unsafe { prompt_password(pamh_worker as PamHandle) };
@@ -117,7 +119,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 // When biometric auth wins the race, the prompt thread is still blocked inside the PAM
 // conversation read. TIOCSTI injects a newline into the controlling tty's input queue so the
 // read returns and the thread can join cleanly. Returns false if stdin isn't a tty (e.g. GDM,
-// SSH) -- callers must then fall through to wait_for_prompt_finish.
+// SSH); callers must then fall through to wait_for_prompt_finish.
 fn unblock_terminal() -> bool {
     unsafe {
         if libc::isatty(0) != 1 {

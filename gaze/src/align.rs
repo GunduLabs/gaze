@@ -108,6 +108,8 @@ pub fn mat_to_rgb(mat: &opencv::core::Mat) -> anyhow::Result<image::RgbImage> {
     let sz = mat.size()?;
     let total_bytes = (sz.width * sz.height * 3) as usize;
     img_bytes.resize(total_bytes, 0);
+    // Raw byte copy: the Mat must be contiguous 8-bit 3-channel and already in RGB order. The
+    // detector's cvt_color BGR2RGB output satisfies this; passing anything else reads garbage.
     unsafe {
         std::ptr::copy_nonoverlapping(mat.data(), img_bytes.as_mut_ptr(), total_bytes);
     }

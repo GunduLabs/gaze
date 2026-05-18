@@ -60,6 +60,7 @@ impl FaceDetector {
             .map_err(|e| DetectError::InitFailed(e.to_string()))?
             .commit_from_file(model_path)?;
 
+        // Args: input size 320x320, detection confidence 0.1, NMS IoU 0.4, no keypoint pyramid.
         let detector = rusty_scrfd::SCRFD::new(det_session, (320, 320), 0.1, 0.4, false)
             .map_err(|err| DetectError::InitFailed(err.to_string()))?;
 
