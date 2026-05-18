@@ -98,6 +98,8 @@ impl FaceDetector {
 
         let mut center_cache = std::collections::HashMap::new();
 
+        // rusty_scrfd prints diagnostics to stdout on every call; redirect the fd to /dev/null
+        // for the duration of detect() and restore it afterwards so we don't spam the daemon log.
         use std::os::unix::io::AsRawFd;
         let devnull = std::fs::File::open("/dev/null")?;
         let stdout_fd = std::io::stdout().as_raw_fd();

@@ -419,6 +419,8 @@ impl UserDatabase {
                     .map(|ref_embed| embed.dot(ref_embed))
                     .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                     .unwrap_or(0.0);
+                // Sigmoid maps cosine similarity to a 0-100% display number, centered at 0.4
+                // (medium threshold) with slope 15 so values near the threshold spread out nicely.
                 let pct = 100.0 / (1.0 + (-15.0_f32 * (best - 0.4)).exp());
                 (
                     name.clone(),
