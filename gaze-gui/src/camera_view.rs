@@ -106,7 +106,8 @@ impl CameraFeed {
             let (red, green, blue, alpha) = if active {
                 match status {
                     CaptureStatus::NoFace => (0.6, 0.6, 0.6, 0.5),
-                    CaptureStatus::NotCentered
+                    CaptureStatus::TooDark
+                    | CaptureStatus::NotCentered
                     | CaptureStatus::Clipped
                     | CaptureStatus::TooFar
                     | CaptureStatus::TooClose => (1.0, 0.8, 0.2, 0.7),
@@ -153,6 +154,7 @@ impl CameraFeed {
             if active {
                 let label = match status {
                     CaptureStatus::NoFace => "No Face",
+                    CaptureStatus::TooDark => "Need More Light",
                     CaptureStatus::NotCentered => "Not Centered",
                     CaptureStatus::Clipped => "Face Clipped",
                     CaptureStatus::TooFar => "Come Closer",

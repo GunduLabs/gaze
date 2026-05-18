@@ -66,6 +66,8 @@ pub struct Config {
     #[serde(default)]
     pub cameras: CameraConfig,
     #[serde(default)]
+    pub auth: AuthConfig,
+    #[serde(default)]
     pub enrollment: EnrollmentConfig,
 }
 
@@ -73,10 +75,34 @@ pub struct Config {
 pub struct CameraConfig {
     #[serde(default = "default_rgb_device")]
     pub rgb: String,
+    #[serde(default = "default_dark_threshold")]
+    pub dark_threshold: f32,
+    #[serde(default = "default_dark_pixel_value")]
+    pub dark_pixel_value: u8,
 }
 
 fn default_rgb_device() -> String {
     DEFAULT_RGB_CAMERA.to_string()
+}
+
+fn default_dark_threshold() -> f32 {
+    0.6
+}
+
+fn default_dark_pixel_value() -> u8 {
+    10
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct AuthConfig {
+    #[serde(default = "default_true")]
+    pub abort_if_ssh: bool,
+    #[serde(default = "default_true")]
+    pub abort_if_lid_closed: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -97,10 +123,21 @@ impl Default for EnrollmentConfig {
     }
 }
 
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            abort_if_ssh: true,
+            abort_if_lid_closed: true,
+        }
+    }
+}
+
 impl Default for CameraConfig {
     fn default() -> Self {
         Self {
             rgb: default_rgb_device(),
+            dark_threshold: default_dark_threshold(),
+            dark_pixel_value: default_dark_pixel_value(),
         }
     }
 }
@@ -165,7 +202,26 @@ impl Config {
             "rgb".to_string(),
             OwnedValue::try_from(Value::from(self.cameras.rgb.clone())).unwrap(),
         );
+        cameras.insert(
+            "dark-threshold".to_string(),
+            OwnedValue::try_from(Value::from(self.cameras.dark_threshold as f64)).unwrap(),
+        );
+        cameras.insert(
+            "dark-pixel-value".to_string(),
+            OwnedValue::try_from(Value::from(self.cameras.dark_pixel_value)).unwrap(),
+        );
         map.insert("cameras".to_string(), cameras);
+
+        let mut auth = HashMap::new();
+        auth.insert(
+            "abort-if-ssh".to_string(),
+            OwnedValue::try_from(Value::from(self.auth.abort_if_ssh)).unwrap(),
+        );
+        auth.insert(
+            "abort-if-lid-closed".to_string(),
+            OwnedValue::try_from(Value::from(self.auth.abort_if_lid_closed)).unwrap(),
+        );
+        map.insert("auth".to_string(), auth);
 
         let mut enrollment = HashMap::new();
         enrollment.insert(
@@ -220,7 +276,31 @@ impl Config {
                 .get("rgb")
                 .and_then(|v| v.clone().try_into().ok())
                 .unwrap_or_else(default_rgb_device),
+            dark_threshold: cameras_dict
+                .get("dark-threshold")
+                .and_then(|v| {
+                    let f: f64 = v.clone().try_into().ok()?;
+                    Some(f as f32)
+                })
+                .unwrap_or_else(default_dark_threshold),
+            dark_pixel_value: cameras_dict
+                .get("dark-pixel-value")
+                .and_then(|v| v.clone().try_into().ok())
+                .unwrap_or_else(default_dark_pixel_value),
         };
+
+        let auth = map
+            .get("auth")
+            .map_or_else(AuthConfig::default, |auth_dict| AuthConfig {
+                abort_if_ssh: auth_dict
+                    .get("abort-if-ssh")
+                    .and_then(|v| v.clone().try_into().ok())
+                    .unwrap_or(true),
+                abort_if_lid_closed: auth_dict
+                    .get("abort-if-lid-closed")
+                    .and_then(|v| v.clone().try_into().ok())
+                    .unwrap_or(true),
+            });
 
         let enrollment_dict = map
             .get("enrollment")
@@ -235,6 +315,7 @@ impl Config {
         Ok(Self {
             security,
             cameras,
+            auth,
             enrollment,
         })
     }
@@ -384,6 +465,12 @@ mod tests {
             },
             cameras: CameraConfig {
                 rgb: "pipewiresrc target-object=42".to_string(),
+                dark_threshold: 0.7,
+                dark_pixel_value: 12,
+            },
+            auth: AuthConfig {
+                abort_if_ssh: false,
+                abort_if_lid_closed: true,
             },
             enrollment: EnrollmentConfig { max_templates: 5 },
         };
@@ -402,6 +489,20 @@ mod tests {
             owned_string(&map["cameras"]["rgb"]),
             "pipewiresrc target-object=42"
         );
+        let dark_threshold: f64 = map["cameras"]["dark-threshold"].clone().try_into().unwrap();
+        let dark_pixel_value: u8 = map["cameras"]["dark-pixel-value"]
+            .clone()
+            .try_into()
+            .unwrap();
+        assert!((dark_threshold - 0.7).abs() < 1e-6);
+        assert_eq!(dark_pixel_value, 12);
+        let abort_if_ssh: bool = map["auth"]["abort-if-ssh"].clone().try_into().unwrap();
+        let abort_if_lid_closed: bool = map["auth"]["abort-if-lid-closed"]
+            .clone()
+            .try_into()
+            .unwrap();
+        assert!(!abort_if_ssh);
+        assert!(abort_if_lid_closed);
         assert_eq!(owned_u32(&map["enrollment"]["max-templates"]), 5);
 
         let decoded = Config::from_map(map).unwrap();
@@ -418,6 +519,10 @@ mod tests {
             other => panic!("unexpected security level: {other:?}"),
         }
         assert_eq!(decoded.cameras.rgb, "pipewiresrc target-object=42");
+        assert!((decoded.cameras.dark_threshold - 0.7).abs() < f32::EPSILON);
+        assert_eq!(decoded.cameras.dark_pixel_value, 12);
+        assert!(!decoded.auth.abort_if_ssh);
+        assert!(decoded.auth.abort_if_lid_closed);
         assert_eq!(decoded.enrollment.max_templates, 5);
     }
 
@@ -447,6 +552,10 @@ mod tests {
             other => panic!("unexpected security level: {other:?}"),
         }
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
+        assert!((config.cameras.dark_threshold - 0.6).abs() < f32::EPSILON);
+        assert_eq!(config.cameras.dark_pixel_value, 10);
+        assert!(config.auth.abort_if_ssh);
+        assert!(config.auth.abort_if_lid_closed);
         assert_eq!(config.enrollment.max_templates, 2);
     }
 
@@ -494,6 +603,10 @@ mod tests {
         let config = Config::load_from(path.to_str().unwrap()).unwrap();
         assert_eq!(config.security.detector(), SecurityLevel::Medium.detector());
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
+        assert!((config.cameras.dark_threshold - 0.6).abs() < f32::EPSILON);
+        assert_eq!(config.cameras.dark_pixel_value, 10);
+        assert!(config.auth.abort_if_ssh);
+        assert!(config.auth.abort_if_lid_closed);
         assert_eq!(config.enrollment.max_templates, 2);
     }
 
@@ -505,6 +618,12 @@ mod tests {
             security: SecurityLevel::High,
             cameras: CameraConfig {
                 rgb: "primary".to_string(),
+                dark_threshold: 0.75,
+                dark_pixel_value: 8,
+            },
+            auth: AuthConfig {
+                abort_if_ssh: true,
+                abort_if_lid_closed: false,
             },
             enrollment: EnrollmentConfig { max_templates: 8 },
         };
@@ -518,6 +637,10 @@ mod tests {
             SecurityLevel::High.recognizer()
         );
         assert_eq!(loaded.cameras.rgb, "primary");
+        assert!((loaded.cameras.dark_threshold - 0.75).abs() < f32::EPSILON);
+        assert_eq!(loaded.cameras.dark_pixel_value, 8);
+        assert!(loaded.auth.abort_if_ssh);
+        assert!(!loaded.auth.abort_if_lid_closed);
         assert_eq!(loaded.enrollment.max_templates, 8);
     }
 
@@ -536,6 +659,10 @@ mod tests {
             SecurityLevel::Maximum.detector()
         );
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
+        assert!((config.cameras.dark_threshold - 0.6).abs() < f32::EPSILON);
+        assert_eq!(config.cameras.dark_pixel_value, 10);
+        assert!(config.auth.abort_if_ssh);
+        assert!(config.auth.abort_if_lid_closed);
         assert_eq!(config.enrollment.max_templates, 2);
     }
 }

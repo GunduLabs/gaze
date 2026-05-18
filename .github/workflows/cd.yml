@@ -20,14 +20,15 @@ env:
 jobs:
   build-packages:
     name: Build ${{ matrix.name }} packages
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - id: ubuntu-noble
-            name: deb (Ubuntu 24.04 noble)
+          - id: ubuntu-noble-amd64
+            name: deb (Ubuntu 24.04 noble, amd64)
+            runner: ubuntu-latest
             container: ubuntu:24.04
             format: deb
             distro: ubuntu
@@ -36,8 +37,20 @@ jobs:
             rpm_distro: ""
             rpm_version: ""
             package_release: "1~ubuntu24.04"
-          - id: ubuntu-resolute
-            name: deb (Ubuntu 26.04 resolute)
+          - id: ubuntu-noble-arm64
+            name: deb (Ubuntu 24.04 noble, arm64)
+            runner: ubuntu-24.04-arm
+            container: ubuntu:24.04
+            format: deb
+            distro: ubuntu
+            distro_version: "24.04"
+            deb_suite: noble
+            rpm_distro: ""
+            rpm_version: ""
+            package_release: "1~ubuntu24.04"
+          - id: ubuntu-resolute-amd64
+            name: deb (Ubuntu 26.04 resolute, amd64)
+            runner: ubuntu-latest
             container: ubuntu:26.04
             format: deb
             distro: ubuntu
@@ -46,8 +59,20 @@ jobs:
             rpm_distro: ""
             rpm_version: ""
             package_release: "1~ubuntu26.04"
-          - id: debian-trixie
-            name: deb (Debian 13 trixie)
+          - id: ubuntu-resolute-arm64
+            name: deb (Ubuntu 26.04 resolute, arm64)
+            runner: ubuntu-24.04-arm
+            container: ubuntu:26.04
+            format: deb
+            distro: ubuntu
+            distro_version: "26.04"
+            deb_suite: resolute
+            rpm_distro: ""
+            rpm_version: ""
+            package_release: "1~ubuntu26.04"
+          - id: debian-trixie-amd64
+            name: deb (Debian 13 trixie, amd64)
+            runner: ubuntu-latest
             container: debian:13
             format: deb
             distro: debian
@@ -56,8 +81,20 @@ jobs:
             rpm_distro: ""
             rpm_version: ""
             package_release: "1~debian13"
-          - id: fedora-42
-            name: rpm (Fedora 42)
+          - id: debian-trixie-arm64
+            name: deb (Debian 13 trixie, arm64)
+            runner: ubuntu-24.04-arm
+            container: debian:13
+            format: deb
+            distro: debian
+            distro_version: "13"
+            deb_suite: trixie
+            rpm_distro: ""
+            rpm_version: ""
+            package_release: "1~debian13"
+          - id: fedora-42-amd64
+            name: rpm (Fedora 42, amd64)
+            runner: ubuntu-latest
             container: fedora:42
             format: rpm
             distro: fedora
@@ -66,8 +103,20 @@ jobs:
             rpm_distro: fedora
             rpm_version: "42"
             package_release: "1.fc42"
-          - id: fedora-43
-            name: rpm (Fedora 43)
+          - id: fedora-42-arm64
+            name: rpm (Fedora 42, arm64)
+            runner: ubuntu-24.04-arm
+            container: fedora:42
+            format: rpm
+            distro: fedora
+            distro_version: "42"
+            deb_suite: ""
+            rpm_distro: fedora
+            rpm_version: "42"
+            package_release: "1.fc42"
+          - id: fedora-43-amd64
+            name: rpm (Fedora 43, amd64)
+            runner: ubuntu-latest
             container: fedora:43
             format: rpm
             distro: fedora
@@ -76,8 +125,31 @@ jobs:
             rpm_distro: fedora
             rpm_version: "43"
             package_release: "1.fc43"
-          - id: fedora-44
-            name: rpm (Fedora 44)
+          - id: fedora-43-arm64
+            name: rpm (Fedora 43, arm64)
+            runner: ubuntu-24.04-arm
+            container: fedora:43
+            format: rpm
+            distro: fedora
+            distro_version: "43"
+            deb_suite: ""
+            rpm_distro: fedora
+            rpm_version: "43"
+            package_release: "1.fc43"
+          - id: fedora-44-amd64
+            name: rpm (Fedora 44, amd64)
+            runner: ubuntu-latest
+            container: fedora:44
+            format: rpm
+            distro: fedora
+            distro_version: "44"
+            deb_suite: ""
+            rpm_distro: fedora
+            rpm_version: "44"
+            package_release: "1.fc44"
+          - id: fedora-44-arm64
+            name: rpm (Fedora 44, arm64)
+            runner: ubuntu-24.04-arm
             container: fedora:44
             format: rpm
             distro: fedora
@@ -88,6 +160,7 @@ jobs:
             package_release: "1.fc44"
           - id: arch
             name: archlinux (Arch Linux)
+            runner: ubuntu-latest
             container: archlinux:latest
             format: archlinux
             distro: archlinux

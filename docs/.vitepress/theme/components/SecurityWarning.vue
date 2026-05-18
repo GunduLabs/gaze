@@ -29,14 +29,24 @@
 }
 
 .security-warning {
+  --security-warning-border: #bf8700;
+  --security-warning-bg: #fff8c5;
+  --security-warning-title: #9a6700;
+
   max-width: 1152px;
   margin: 0 auto;
   box-sizing: border-box;
-  border: 1px solid #f59e0b;
+  border: 1px solid var(--security-warning-border);
   border-radius: 12px;
   padding: 18px;
-  background: color-mix(in srgb, #f59e0b 14%, var(--vp-c-bg) 86%);
+  background: var(--security-warning-bg);
   color: var(--vp-c-text-1);
+}
+
+:root.dark .security-warning {
+  --security-warning-border: #9e6a03;
+  --security-warning-bg: rgba(187, 128, 9, 0.15);
+  --security-warning-title: #d29922;
 }
 
 .security-warning-title {
@@ -46,7 +56,7 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #b45309;
+  color: var(--security-warning-title);
 }
 
 .security-warning p {
