@@ -1,5 +1,6 @@
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
@@ -8,6 +9,27 @@ const EXTENSION_SCHEMA_ID = 'org.gnome.shell.extensions.gaze';
 
 const MAX_TRIES_KEY = 'max-face-tries';
 const FACE_AUTH_KEY = 'enable-face-authentication';
+
+const GAZE_BUS = 'com.gundulabs.Gaze';
+const GAZE_PATH = '/com/gundulabs/Gaze';
+const GAZE_IFACE = 'com.gundulabs.Gaze';
+
+function callGaze(method, params) {
+    const conn = Gio.DBus.system;
+    return new Promise((resolve, reject) => {
+        conn.call(
+            GAZE_BUS, GAZE_PATH, GAZE_IFACE, method, params,
+            null, Gio.DBusCallFlags.ALLOW_INTERACTIVE_AUTHORIZATION, -1, null,
+            (_src, res) => {
+                try {
+                    resolve(conn.call_finish(res));
+                } catch (e) {
+                    reject(e);
+                }
+            }
+        );
+    });
+}
 
 export default class GazePreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
@@ -55,6 +77,58 @@ export default class GazePreferences extends ExtensionPreferences {
         behaviorGroup.add(triesRow);
 
         behaviorPage.add(behaviorGroup);
+
+        const loginGroup = new Adw.PreferencesGroup({
+            title: 'GDM login screen',
+            description:
+                'Enable face authentication at the GDM login screen. ' +
+                'Requires administrator authorization. ' +
+                'Note: GNOME keyring is normally unlocked by your password, ' +
+                'so logging in with face only may leave it locked.',
+        });
+
+        const gdmRow = new Adw.SwitchRow({
+            title: 'Enable face auth at GDM login',
+            active: false,
+            sensitive: false,
+        });
+
+        let suppressGdmNotify = false;
+        const setGdmRow = active => {
+            suppressGdmNotify = true;
+            gdmRow.set_active(active);
+            suppressGdmNotify = false;
+        };
+
+        callGaze('GetGdmFaceAuth', null)
+            .then(result => {
+                const [enabled] = result.deepUnpack();
+                setGdmRow(enabled);
+                gdmRow.set_sensitive(true);
+            })
+            .catch(error => {
+                logError(error, '[gaze] Failed to read GDM face auth state');
+                gdmRow.set_subtitle('Gaze daemon unavailable.');
+            });
+
+        gdmRow.connect('notify::active', row => {
+            if (suppressGdmNotify)
+                return;
+            const desired = row.active;
+            row.set_sensitive(false);
+            callGaze('SetGdmFaceAuth', new GLib.Variant('(b)', [desired]))
+                .then(() => {
+                    gdmRow.set_sensitive(true);
+                })
+                .catch(error => {
+                    logError(error, '[gaze] Failed to update GDM face auth');
+                    setGdmRow(!desired);
+                    gdmRow.set_sensitive(true);
+                });
+        });
+        loginGroup.add(gdmRow);
+
+        behaviorPage.add(loginGroup);
 
         window.add(behaviorPage);
     }
