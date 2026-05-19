@@ -4,7 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::dbus::CaptureStatus;
-pub use crate::face::{CaptureResult, frame_to_bytes};
+pub use crate::face::CaptureResult;
 
 pub fn init_camera_and_checker(device: &str) -> anyhow::Result<(Camera, FaceChecker)> {
     let checker_thread = thread::spawn(FaceChecker::new);

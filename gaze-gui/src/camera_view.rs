@@ -1,5 +1,4 @@
-use gaze_core::camera::Camera;
-use gaze_core::capture::frame_to_bytes;
+use gaze_core::camera::{Camera, frame_to_bytes};
 use gaze_core::dbus::CaptureStatus;
 use gtk4::gdk;
 use gtk4::glib;

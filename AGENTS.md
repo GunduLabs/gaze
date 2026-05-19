@@ -2,9 +2,9 @@
 
 ## Repo Shape
 
-- Rust workspace members are `gaze`, `gaze-core`, `pam-gaze-core`, `pam-gaze`, `pam-gaze-grosshack`, and `gaze-gui`; root `default-members` omit the two `*-core` libraries, so use `--workspace` for whole-repo checks.
-- `gaze` owns both binaries: `gazed` at `gaze/src/main.rs` and CLI `gaze` at `gaze/src/bin/cli.rs`; the ML pipeline/user DB code also lives in this crate.
-- `gaze-core` is the shared camera/config/DBus/detection library; DBus proxy/types are generated from `gaze-core/src/dbus.rs` with `zbus` macros.
+- Rust workspace members are `gaze`, `gaze-cli`, `gaze-core`, `pam-gaze-core`, `pam-gaze`, `pam-gaze-grosshack`, and `gaze-gui`; root `default-members` omit the two `*-core` libraries, so use `--workspace` for whole-repo checks.
+- `gaze` owns the `gazed` daemon at `gaze/src/main.rs`; the ML pipeline/user DB code also lives in this crate. The `gaze` CLI lives in its own `gaze-cli` crate so the client binary does not statically link ONNX Runtime (see "Runtime Gotchas").
+- `gaze-core` is the shared camera/config/DBus library; face detection lives behind the `detection` feature (enabled by default) so client crates can opt out with `default-features = false`. DBus proxy/types are generated from `gaze-core/src/dbus.rs` with `zbus` macros.
 - `pam-gaze` and `pam-gaze-grosshack` are `cdylib` PAM modules; shared PAM FFI/auth logic is in `pam-gaze-core`.
 - `gaze-gui` is the GTK4/libadwaita app; `gnome-shell-extension/` is packaged separately as `gaze-gnome-extension`.
 
@@ -13,7 +13,7 @@
 - CI uses `just --fmt --check`, `just fmt-check`, `just lint`, `just test`, `just audit`, then `just build-rust`.
 - `just lint` is `cargo clippy --workspace --all-targets -- -D warnings`; the local pre-commit hook is narrower, so do not treat it as CI-equivalent.
 - `just test` is `cargo test --workspace --release`; focused equivalent: `cargo test -p <crate> --release <test_name>`.
-- `just build-rust` is `cargo build --workspace --release`.
+- `just build-rust` runs two `cargo build --release` invocations (daemon first, then clients) so feature unification on `gaze-core/detection` does not pull ONNX Runtime into the client binaries; never replace it with a single `--workspace` build.
 - Native builds need OpenCV, clang/libclang, v4l, PAM, GTK4/libadwaita, and GStreamer dev packages; use `.github/workflows/ci.yml` for exact distro package names.
 - `just package <deb|rpm|archlinux>` builds Rust, SELinux policy, then all three nfpm packages into `dist/packages/`.
 - `just package-prebuilt <deb|rpm|archlinux>` assumes `target/release/*` already exists; RPM GNOME-extension packaging also needs `dist/selinux/gaze-gdm-camera.pp` from SELinux tools.
@@ -27,6 +27,7 @@
 - CLI, GUI, and PAM clients always talk to whichever daemon owns the system bus name.
 - Models are downloaded from InsightFace releases on first daemon run if absent; tests should not depend on network or committed model files.
 - Camera config is `primary` or a GStreamer/PipeWire source string such as `pipewiresrc target-object=...`; `/dev/video*` paths are rejected in `gaze-core/src/camera.rs`.
+- ONNX Runtime (via `ort`) is statically linked and its global constructors use AVX2. Only `gazed` may link `ort`; the `gaze` CLI, `gaze-gui`, and PAM modules must depend on `gaze-core` with `default-features = false` or they will SIGSEGV on launch on pre-AVX2 CPUs (see issue #14).
 
 ## Testing And Safety
 
