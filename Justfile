@@ -13,7 +13,6 @@ package_release := env("PACKAGE_RELEASE", "1")
 nfpm := require("nfpm")
 
 # Derived vars
-multiarch := if arch == "aarch64" { "aarch64-linux-gnu" } else { "x86_64-linux-gnu" }
 deb_arch := if arch == "x86_64" { "amd64" } else if arch == "aarch64" { "arm64" } else { arch }
 
 # List recipes when `just` is run without arguments.
@@ -45,7 +44,6 @@ build-selinux:
 # ── package ───────────────────────────────────────────────────────────────────
 
 [arg("format", pattern="deb|rpm|archlinux")]
-[env("MULTIARCH", multiarch)]
 [env("PACKAGE_RELEASE", package_release)]
 [env("VERSION", version)]
 [private]
