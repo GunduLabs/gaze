@@ -1026,7 +1026,6 @@ impl AuthDaemon {
         let mut abort_if_lid_closed = self.abort_if_lid_closed.lock().await;
         *abort_if_lid_closed = new_config.auth.abort_if_lid_closed;
 
-
         let mut db = self.db.lock().await;
         db.set_max_templates(new_config.enrollment.max_templates as usize);
 
