@@ -3,7 +3,7 @@ mod tui;
 
 use clap::{Parser, Subcommand};
 use console::{Term, style};
-use dialoguer::{Input, Select, theme::ColorfulTheme};
+use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 use futures::StreamExt;
 use gaze_core::config::{Config, SecurityLevel};
 use gaze_core::dbus::{
@@ -226,6 +226,23 @@ async fn run_config_wizard(
         .with_prompt("Max templates (sets of captures)")
         .default(config.enrollment.max_templates)
         .interact_text()?;
+
+    config.liveness.enabled = Confirm::with_theme(&theme)
+        .with_prompt("Enable liveness anti-spoofing")
+        .default(config.liveness.enabled)
+        .interact()?;
+    if config.liveness.enabled {
+        config.liveness.threshold = Input::with_theme(&theme)
+            .with_prompt("Liveness threshold (0.0 - 1.0)")
+            .default(config.liveness.threshold.to_string())
+            .interact_text()?
+            .parse::<f32>()
+            .unwrap_or(0.8);
+        config.liveness.max_frames = Input::with_theme(&theme)
+            .with_prompt("Liveness max frames")
+            .default(config.liveness.max_frames)
+            .interact_text()?;
+    }
 
     apply_config_to_daemon(proxy, &config).await?;
     term.write_line(&format!(
@@ -1023,6 +1040,21 @@ async fn main() -> anyhow::Result<()> {
                     "{} {}",
                     style("enrollment.max_templates:").bold(),
                     config.enrollment.max_templates
+                );
+                println!(
+                    "{} {}",
+                    style("liveness.enabled:").bold(),
+                    config.liveness.enabled
+                );
+                println!(
+                    "{} {:.2}",
+                    style("liveness.threshold:").bold(),
+                    config.liveness.threshold
+                );
+                println!(
+                    "{} {}",
+                    style("liveness.max_frames:").bold(),
+                    config.liveness.max_frames
                 );
                 return Ok(());
             }
