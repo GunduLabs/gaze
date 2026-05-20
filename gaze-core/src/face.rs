@@ -1,9 +1,11 @@
 use crate::config::{Config, MODELS_DIR};
 use crate::dbus::CaptureStatus;
 use crate::detect::{DetectError, FaceDetector};
+use crate::ir_quality;
 use opencv::core::Mat;
 use opencv::prelude::*;
 use std::path::Path;
+use tracing::{debug, warn};
 
 const MIN_FACE_SIZE_RATIO: f32 = 0.35;
 const MAX_FACE_SIZE_RATIO: f32 = 0.78;
@@ -31,6 +33,7 @@ pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
 
 pub struct FaceChecker {
     detector: FaceDetector,
+    ir_mode: bool,
 }
 
 impl FaceChecker {
@@ -46,11 +49,25 @@ impl FaceChecker {
         }
 
         let detector = FaceDetector::new(model_path.to_str().unwrap())?;
-        Ok(Self { detector })
+        Ok(Self {
+            detector,
+            ir_mode: false,
+        })
     }
 
     pub fn from_detector(detector: FaceDetector) -> Self {
-        Self { detector }
+        Self {
+            detector,
+            ir_mode: false,
+        }
+    }
+
+    pub fn set_ir_mode(&mut self, on: bool) {
+        self.ir_mode = on;
+    }
+
+    pub fn ir_mode(&self) -> bool {
+        self.ir_mode
     }
 
     fn build_capture_result(
@@ -78,6 +95,17 @@ impl FaceChecker {
         &mut self,
         frame: &Mat,
     ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
+        let ir_gray = if self.ir_mode {
+            let gray = ir_quality::to_grayscale(frame)?;
+            if ir_quality::is_dark_frame(&gray)? {
+                debug!("dropping dark IR frame");
+                return Ok((CaptureStatus::NoFace, None));
+            }
+            Some(gray)
+        } else {
+            None
+        };
+
         let (bboxes, kps, mat_rgb) = match self.detector.detect(frame) {
             Ok(result) => result,
             Err(DetectError::NoFacesDetected) => return Ok((CaptureStatus::NoFace, None)),
@@ -135,6 +163,12 @@ impl FaceChecker {
             CaptureStatus::TooClose
         } else if kps.is_none() {
             return Ok((CaptureStatus::NoFace, None));
+        } else if let Some(gray) = ir_gray.as_ref() {
+            if !ir_quality::has_live_texture(gray, (x1, y1, x2, y2))? {
+                warn!(bbox = ?(x1, y1, x2, y2), "IR face patch failed texture check");
+                return Ok((CaptureStatus::NoFace, None));
+            }
+            CaptureStatus::Ready
         } else {
             CaptureStatus::Ready
         };

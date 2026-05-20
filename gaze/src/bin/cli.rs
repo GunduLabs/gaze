@@ -18,6 +18,14 @@ fn get_current_user() -> String {
     std::env::var("USER").unwrap_or_else(|_| "root".into())
 }
 
+async fn camera_mode_label(proxy: &GazeProxy<'_>) -> &'static str {
+    match load_config_from_daemon(proxy).await {
+        Ok(cfg) if cfg.security.require_ir => "IR",
+        Ok(_) => "RGB",
+        Err(_) => "RGB",
+    }
+}
+
 fn capture_tone(status: CaptureStatus) -> Tone {
     match status {
         CaptureStatus::Ready => Tone::Good,
@@ -278,6 +286,7 @@ async fn handle_enroll(
     is_refine: bool,
 ) -> anyhow::Result<()> {
     let term = Term::stdout();
+    let camera_mode = camera_mode_label(proxy).await;
 
     if let Err(err) = proxy.claim(user).await {
         term.write_line(&format!(
@@ -319,6 +328,7 @@ async fn handle_enroll(
         terminal.draw_enroll(&EnrollScreen {
             user,
             face,
+            camera_mode,
             is_refine,
             prompt: &current_enroll_msg,
             capture: &current_capture_msg,
@@ -418,6 +428,7 @@ async fn handle_enroll(
 async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow::Result<()> {
     let term = Term::stdout();
     let start = std::time::Instant::now();
+    let camera_mode = camera_mode_label(proxy).await;
 
     if let Err(err) = proxy.claim(user).await {
         term.write_line(&format!(
@@ -453,6 +464,7 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
     loop {
         terminal.draw_auth(&AuthScreen {
             user,
+            camera_mode,
             status: &status_msg,
             status_tone,
             elapsed: start.elapsed(),

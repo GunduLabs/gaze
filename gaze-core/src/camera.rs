@@ -11,6 +11,7 @@ const DEVICE_SETTLE_TIMEOUT_MS: u64 = 100;
 
 pub struct Camera {
     cap: VideoCapture,
+    is_ir: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,7 +42,13 @@ impl Camera {
         if !cap.is_opened()? {
             anyhow::bail!("Failed to open camera source {}", camera_source);
         }
-        Ok(Self { cap })
+
+        let is_ir = detect_is_ir(source);
+        Ok(Self { cap, is_ir })
+    }
+
+    pub fn is_ir(&self) -> bool {
+        self.is_ir
     }
 
     pub fn capture_frame(&mut self) -> anyhow::Result<Mat> {
@@ -54,6 +61,18 @@ impl Camera {
         opencv::core::flip(&frame, &mut mirrored, 1)?;
         Ok(mirrored)
     }
+}
+
+fn detect_is_ir(source: &str) -> bool {
+    if source == DEFAULT_RGB_CAMERA {
+        return false;
+    }
+    enumerate_camera_infos()
+        .unwrap_or_default()
+        .into_iter()
+        .find(|camera| camera.source == source)
+        .map(|camera| camera.is_ir)
+        .unwrap_or(false)
 }
 
 pub fn enumerate_cameras() -> anyhow::Result<Vec<(String, String)>> {

@@ -59,6 +59,7 @@ pub struct BusyScreen<'a> {
 
 pub struct AuthScreen<'a> {
     pub user: &'a str,
+    pub camera_mode: &'a str,
     pub status: &'a str,
     pub status_tone: Tone,
     pub elapsed: Duration,
@@ -68,6 +69,7 @@ pub struct AuthScreen<'a> {
 pub struct EnrollScreen<'a> {
     pub user: &'a str,
     pub face: &'a str,
+    pub camera_mode: &'a str,
     pub is_refine: bool,
     pub prompt: &'a str,
     pub capture: &'a str,
@@ -255,6 +257,13 @@ fn render_auth(frame: &mut Frame<'_>, screen: &AuthScreen<'_>) {
         ),
         Span::raw("   "),
         Span::styled(
+            screen.camera_mode,
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("   "),
+        Span::styled(
             format!("{}ms", screen.elapsed.as_millis()),
             Style::default().fg(Color::DarkGray),
         ),
@@ -348,6 +357,13 @@ fn render_enroll(frame: &mut Frame<'_>, screen: &EnrollScreen<'_>) {
             screen.face,
             Style::default()
                 .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("   "),
+        Span::styled(
+            screen.camera_mode,
+            Style::default()
+                .fg(Color::Magenta)
                 .add_modifier(Modifier::BOLD),
         ),
     ]))

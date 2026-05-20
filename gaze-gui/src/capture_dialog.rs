@@ -40,12 +40,20 @@ pub fn show_capture_dialog(
 
     let is_refine = face_name.is_some();
 
-    let dialog = libadwaita::Window::new();
-    dialog.set_title(Some(if is_refine {
-        "Updating Face Template"
+    let mode_suffix = if config.security.require_ir {
+        " (IR)"
     } else {
-        "New Face Template"
-    }));
+        " (RGB)"
+    };
+    let dialog = libadwaita::Window::new();
+    dialog.set_title(Some(&format!(
+        "{}{mode_suffix}",
+        if is_refine {
+            "Updating Face Template"
+        } else {
+            "New Face Template"
+        }
+    )));
     dialog.set_default_size(500, if is_refine { 450 } else { 530 });
     dialog.set_modal(true);
     dialog.set_transient_for(
