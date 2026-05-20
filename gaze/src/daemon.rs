@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::ptr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info, warn};
 use zbus::names::BusName;
@@ -23,6 +24,7 @@ const CONFIG_PATH: &str = "/etc/gaze/config.toml";
 const POLKIT_ACTION_MANAGE_FACES: &str = "com.gundulabs.gaze.manage-faces";
 const POLKIT_ACTION_MANAGE_CONFIG: &str = "com.gundulabs.gaze.manage-config";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
+const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
 pub struct ClaimState {
@@ -581,6 +583,7 @@ impl AuthDaemon {
             info!("VerifyStart: sensing faces for user {}", username);
 
             let mut last_capture_status: Option<CaptureStatus> = None;
+            let mut dark_since: Option<Instant> = None;
             loop {
                 tokio::select! {
                     _ = &mut rx => {
@@ -598,10 +601,24 @@ impl AuthDaemon {
 
                 let threshold = *threshold_arc.lock().await;
 
-                let (_status, embed_opt) = match Self::process_and_emit_status(&ctxt, &checker_arc, &recognizer_arc, &frame, &mut last_capture_status).await {
+                let (status, embed_opt) = match Self::process_and_emit_status(&ctxt, &checker_arc, &recognizer_arc, &frame, &mut last_capture_status).await {
                     Ok(res) => res,
                     Err(_) => continue,
                 };
+
+                if status == CaptureStatus::TooDark {
+                    let started = *dark_since.get_or_insert_with(Instant::now);
+                    if started.elapsed() >= VERIFY_TOO_DARK_TIMEOUT {
+                        info!(
+                            "VerifyStart: giving up after {}s of dark frames",
+                            VERIFY_TOO_DARK_TIMEOUT.as_secs()
+                        );
+                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new()).await;
+                        break;
+                    }
+                } else {
+                    dark_since = None;
+                }
 
                 if let Some(data) = embed_opt {
                     let embed = data.embedding;
