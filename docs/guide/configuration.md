@@ -21,6 +21,11 @@ abort_if_lid_closed = true
 
 [enrollment]
 max_templates = 3
+
+[liveness]
+enabled = true
+threshold = 0.8
+max_frames = 40
 ```
 
 ## Change security level
@@ -117,10 +122,24 @@ max_templates = 3
 
 Increase this if auth is unreliable in varied lighting.
 
+## Liveness Anti-Spoofing
+
+```toml
+[liveness]
+enabled = true
+threshold = 0.8
+max_frames = 40
+```
+
+When enabled, Gaze runs a local MiniFASNet-V2 anti-spoofing model on the detected face crop after a recognition match. Authentication succeeds only when the face matches and either one frame reaches `threshold` or the best few frames show sustained near-threshold liveness.
+
+`max_frames` caps how many valid face frames Gaze will try before returning no match.
+
 ## Recommended tuning workflow
 
 1. Start with `[security] level = "medium"`
 2. Enroll one profile: `gaze add-face default`
 3. Test 5 to 10 times using `gaze auth --verbose`
-4. If false accepts are too high, switch to `high`
-5. If false rejects are too high, run `gaze refine-face default`
+4. If photo or screen spoofing is a concern, keep `[liveness] enabled = true`
+5. If false accepts are too high, switch to `high`
+6. If false rejects are too high, run `gaze refine-face default`

@@ -58,6 +58,7 @@ impl CameraFeed {
                     continue;
                 };
 
+                // OpenCV gives us BGR; GTK's R8g8b8 texture format expects RGB, so swap each pixel.
                 let mut rgb = bytes;
                 for chunk in rgb.chunks_exact_mut(3) {
                     chunk.swap(0, 2);

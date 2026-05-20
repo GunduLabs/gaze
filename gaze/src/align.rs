@@ -1,6 +1,8 @@
 use image::RgbImage;
 use nalgebra::Matrix3;
 
+// InsightFace's canonical ArcFace template: 5 landmarks (left eye, right eye, nose, left mouth,
+// right mouth) on a 112x112 image. Faces are warped onto these coords before the recognizer runs.
 pub const ARCFACE_SRC_PTS: [[f32; 2]; 5] = [
     [38.2946, 51.6963],
     [73.5318, 51.5014],
@@ -9,6 +11,7 @@ pub const ARCFACE_SRC_PTS: [[f32; 2]; 5] = [
     [70.7299, 92.2041],
 ];
 
+// Umeyama (1991) closed-form least-squares similarity transform.
 pub fn umeyama(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> Option<Matrix3<f32>> {
     let num_pts = src.len() as f32;
 
@@ -105,6 +108,8 @@ pub fn mat_to_rgb(mat: &opencv::core::Mat) -> anyhow::Result<image::RgbImage> {
     let sz = mat.size()?;
     let total_bytes = (sz.width * sz.height * 3) as usize;
     img_bytes.resize(total_bytes, 0);
+    // Raw byte copy: the Mat must be contiguous 8-bit 3-channel and already in RGB order. The
+    // detector's cvt_color BGR2RGB output satisfies this; passing anything else reads garbage.
     unsafe {
         std::ptr::copy_nonoverlapping(mat.data(), img_bytes.as_mut_ptr(), total_bytes);
     }

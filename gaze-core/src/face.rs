@@ -193,6 +193,8 @@ pub fn is_dark_frame(
         .take(pixel_count)
         .filter(|pixel| {
             let luminance = if channels >= 3 {
+                // OpenCV gives us BGR, not RGB. Weights are BT.601 (0.299/0.587/0.114) scaled
+                // by 256 so the divide becomes a right shift.
                 let b = pixel[0] as u32;
                 let g = pixel[1] as u32;
                 let r = pixel[2] as u32;
