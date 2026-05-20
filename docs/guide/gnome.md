@@ -14,14 +14,14 @@ Do not enable it if you only want CLI/GUI enrollment, normal PAM authentication,
 
 ## Enable the extension
 
-If the package is installed but the extension is not enabled yet, first log out and back in so GNOME Shell scans the newly installed extension. Then, from your GNOME session:
+If the package is installed but the extension is not enabled yet, first reboot so GNOME Shell scans the newly installed extension. Then, from your GNOME session:
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
 gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
-`gnome-extensions enable` will report `Extension "gaze@gundulabs.com" does not exist` if you run it before logging back in. Shell only scans extension directories at session start, so running the command immediately after install (without a session restart) always fails. If you cannot log out yet, the equivalent dconf write works at any time and takes effect on the next login:
+`gnome-extensions enable` will report `Extension "gaze@gundulabs.com" does not exist` if you run it before rebooting. Shell only scans extension directories at session start, so running the command immediately after install (without a session restart) always fails. If you cannot reboot yet, the equivalent dconf write works at any time and takes effect on the next login:
 
 ```bash
 gsettings set org.gnome.shell enabled-extensions \
