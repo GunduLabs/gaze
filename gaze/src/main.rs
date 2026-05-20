@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
 
     let db = UserDatabase::new(USERS_DIR, config.enrollment.max_templates as usize)?;
 
-    let checker = gaze_core::face::FaceChecker::from_detector(detector);
+    let checker = gaze_core::face::FaceChecker::from_detector_with_config(detector, &config);
 
     let daemon = AuthDaemon {
         checker: Arc::new(Mutex::new(checker)),
@@ -64,6 +64,8 @@ async fn main() -> anyhow::Result<()> {
         threshold: Arc::new(Mutex::new(security.threshold())),
         camera_config: Arc::new(Mutex::new(config.cameras.rgb.clone())),
         liveness_config: Arc::new(Mutex::new(config.liveness.clone())),
+        abort_if_ssh: Arc::new(Mutex::new(config.auth.abort_if_ssh)),
+        abort_if_lid_closed: Arc::new(Mutex::new(config.auth.abort_if_lid_closed)),
         claim_state: Arc::new(Mutex::new(None)),
         active_cancel: Arc::new(Mutex::new(None)),
         rt_handle: tokio::runtime::Handle::current(),

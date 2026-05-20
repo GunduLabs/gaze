@@ -58,6 +58,7 @@ impl CameraFeed {
                     continue;
                 };
 
+                // OpenCV gives us BGR; GTK's R8g8b8 texture format expects RGB, so swap each pixel.
                 let mut rgb = bytes;
                 for chunk in rgb.chunks_exact_mut(3) {
                     chunk.swap(0, 2);
@@ -106,7 +107,8 @@ impl CameraFeed {
             let (red, green, blue, alpha) = if active {
                 match status {
                     CaptureStatus::NoFace => (0.6, 0.6, 0.6, 0.5),
-                    CaptureStatus::NotCentered
+                    CaptureStatus::TooDark
+                    | CaptureStatus::NotCentered
                     | CaptureStatus::Clipped
                     | CaptureStatus::TooFar
                     | CaptureStatus::TooClose => (1.0, 0.8, 0.2, 0.7),
@@ -153,6 +155,7 @@ impl CameraFeed {
             if active {
                 let label = match status {
                     CaptureStatus::NoFace => "No Face",
+                    CaptureStatus::TooDark => "Need More Light",
                     CaptureStatus::NotCentered => "Not Centered",
                     CaptureStatus::Clipped => "Face Clipped",
                     CaptureStatus::TooFar => "Come Closer",

@@ -22,7 +22,8 @@ fn capture_tone(status: CaptureStatus) -> Tone {
     match status {
         CaptureStatus::Ready => Tone::Good,
         CaptureStatus::NoFace => Tone::Error,
-        CaptureStatus::Clipped
+        CaptureStatus::TooDark
+        | CaptureStatus::Clipped
         | CaptureStatus::NotCentered
         | CaptureStatus::TooFar
         | CaptureStatus::TooClose => Tone::Warn,
@@ -221,6 +222,16 @@ async fn run_config_wizard(
         .interact()?;
 
     config.cameras.rgb = cameras[selected_cam_idx].1.clone();
+
+    config.auth.abort_if_ssh = Confirm::with_theme(&theme)
+        .with_prompt("Abort face auth for SSH sessions")
+        .default(config.auth.abort_if_ssh)
+        .interact()?;
+
+    config.auth.abort_if_lid_closed = Confirm::with_theme(&theme)
+        .with_prompt("Abort face auth when laptop lid is closed")
+        .default(config.auth.abort_if_lid_closed)
+        .interact()?;
 
     config.enrollment.max_templates = Input::with_theme(&theme)
         .with_prompt("Max templates (sets of captures)")
@@ -1036,6 +1047,26 @@ async fn main() -> anyhow::Result<()> {
                     config.security.threshold()
                 );
                 println!("{} {}", style("cameras.rgb:").bold(), config.cameras.rgb);
+                println!(
+                    "{} {:.2}",
+                    style("cameras.dark_threshold:").bold(),
+                    config.cameras.dark_threshold
+                );
+                println!(
+                    "{} {}",
+                    style("cameras.dark_pixel_value:").bold(),
+                    config.cameras.dark_pixel_value
+                );
+                println!(
+                    "{} {}",
+                    style("auth.abort_if_ssh:").bold(),
+                    config.auth.abort_if_ssh
+                );
+                println!(
+                    "{} {}",
+                    style("auth.abort_if_lid_closed:").bold(),
+                    config.auth.abort_if_lid_closed
+                );
                 println!(
                     "{} {}",
                     style("enrollment.max_templates:").bold(),

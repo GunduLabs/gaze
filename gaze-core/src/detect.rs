@@ -60,6 +60,7 @@ impl FaceDetector {
             .map_err(|e| DetectError::InitFailed(e.to_string()))?
             .commit_from_file(model_path)?;
 
+        // Args: input size 320x320, detection confidence 0.1, NMS IoU 0.4, no keypoint pyramid.
         let detector = rusty_scrfd::SCRFD::new(det_session, (320, 320), 0.1, 0.4, false)
             .map_err(|err| DetectError::InitFailed(err.to_string()))?;
 
@@ -98,6 +99,8 @@ impl FaceDetector {
 
         let mut center_cache = std::collections::HashMap::new();
 
+        // rusty_scrfd prints diagnostics to stdout on every call; redirect the fd to /dev/null
+        // for the duration of detect() and restore it afterwards so we don't spam the daemon log.
         use std::os::unix::io::AsRawFd;
         let devnull = std::fs::File::open("/dev/null")?;
         let stdout_fd = std::io::stdout().as_raw_fd();

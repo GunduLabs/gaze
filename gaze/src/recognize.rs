@@ -25,6 +25,8 @@ impl FaceRecognizer {
             let g = (pixel[1] as f32 - 127.5) / 127.5;
             let b = (pixel[2] as f32 - 127.5) / 127.5;
 
+            // ArcFace was trained on BGR tensors (OpenCV convention), so write channels in BGR
+            // order even though the input image is RGB.
             tensor[[0, 0, y as usize, x as usize]] = b;
             tensor[[0, 1, y as usize, x as usize]] = g;
             tensor[[0, 2, y as usize, x as usize]] = r;

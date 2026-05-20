@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::ptr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info, warn};
 use zbus::names::BusName;
@@ -24,6 +25,7 @@ const CONFIG_PATH: &str = "/etc/gaze/config.toml";
 const POLKIT_ACTION_MANAGE_FACES: &str = "com.gundulabs.gaze.manage-faces";
 const POLKIT_ACTION_MANAGE_CONFIG: &str = "com.gundulabs.gaze.manage-config";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
+const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
 pub struct ClaimState {
@@ -48,6 +50,8 @@ pub struct AuthDaemon {
     pub threshold: Arc<Mutex<f32>>,
     pub camera_config: Arc<Mutex<String>>,
     pub liveness_config: Arc<Mutex<gaze_core::config::LivenessConfig>>,
+    pub abort_if_ssh: Arc<Mutex<bool>>,
+    pub abort_if_lid_closed: Arc<Mutex<bool>>,
     pub claim_state: Arc<Mutex<Option<ClaimState>>>,
     pub active_cancel: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     pub rt_handle: tokio::runtime::Handle,
@@ -116,6 +120,81 @@ impl AuthDaemon {
         dbus.get_connection_unix_user(sender.to_owned().into())
             .await
             .map_err(|e| fdo::Error::Failed(format!("Failed to get caller uid: {e}")))
+    }
+
+    async fn caller_pid(header: &Header<'_>) -> fdo::Result<u32> {
+        let sender = header
+            .sender()
+            .ok_or_else(|| fdo::Error::AccessDenied("Missing DBus sender".into()))?;
+        let conn = zbus::Connection::system()
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("Failed to connect to system bus: {e}")))?;
+        let dbus = fdo::DBusProxy::new(&conn)
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("Failed to create DBus proxy: {e}")))?;
+        dbus.get_connection_unix_process_id(sender.to_owned().into())
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("Failed to get caller pid: {e}")))
+    }
+
+    fn environ_has_ssh_marker(environ: &[u8]) -> bool {
+        environ.split(|b| *b == 0).any(|entry| {
+            (entry.starts_with(b"SSH_CONNECTION=") && entry.len() > b"SSH_CONNECTION=".len())
+                || (entry.starts_with(b"SSH_TTY=") && entry.len() > b"SSH_TTY=".len())
+        })
+    }
+
+    fn process_is_ssh_session(pid: u32) -> Option<bool> {
+        std::fs::read(format!("/proc/{pid}/environ"))
+            .map(|env| Self::environ_has_ssh_marker(&env))
+            .ok()
+    }
+
+    fn current_env_is_ssh_session() -> bool {
+        std::env::var_os("SSH_CONNECTION").is_some_and(|value| !value.as_os_str().is_empty())
+            || std::env::var_os("SSH_TTY").is_some_and(|value| !value.as_os_str().is_empty())
+    }
+
+    fn lid_state_is_closed(state: &str) -> bool {
+        state.to_ascii_lowercase().contains("closed")
+    }
+
+    fn is_lid_closed_at(base: &std::path::Path) -> bool {
+        let Ok(entries) = std::fs::read_dir(base) else {
+            return false;
+        };
+
+        entries.filter_map(Result::ok).any(|entry| {
+            std::fs::read_to_string(entry.path().join("state"))
+                .map(|state| Self::lid_state_is_closed(&state))
+                .unwrap_or(false)
+        })
+    }
+
+    fn is_lid_closed() -> bool {
+        Self::is_lid_closed_at(std::path::Path::new("/proc/acpi/button/lid"))
+    }
+
+    async fn ensure_auth_not_aborted(&self, header: &Header<'_>) -> fdo::Result<()> {
+        let abort_if_ssh = *self.abort_if_ssh.lock().await;
+        if abort_if_ssh {
+            let caller_pid = Self::caller_pid(header).await.ok();
+            let is_ssh = caller_pid
+                .and_then(Self::process_is_ssh_session)
+                .unwrap_or_else(Self::current_env_is_ssh_session);
+            if is_ssh {
+                warn!(caller_pid, "SSH session detected, aborting face auth");
+                return Err(fdo::Error::Failed("SSH session detected".into()));
+            }
+        }
+
+        let abort_if_lid_closed = *self.abort_if_lid_closed.lock().await;
+        if abort_if_lid_closed && Self::is_lid_closed() {
+            warn!("Laptop lid is closed, aborting face auth");
+            return Err(fdo::Error::Failed("lid closed".into()));
+        }
+
+        Ok(())
     }
 
     async fn ensure_user_access(
@@ -232,6 +311,11 @@ impl AuthDaemon {
         std::path::Path::new(&format!("/run/user/{uid}/pipewire-0")).exists()
     }
 
+    // PipeWire lives under /run/user/<uid> and we have to set XDG_RUNTIME_DIR to a uid that
+    // actually has a session running. Priority: (1) caller==target with a runtime, (2) any
+    // non-root caller with a runtime, (3) root calling on behalf of the active seat session,
+    // (4) target's runtime, (5) the active seat session's runtime. Falls back to target if
+    // nothing matches so the caller still gets a meaningful "no camera" error.
     async fn camera_runtime_uid(caller_uid: u32, target_uid: u32) -> u32 {
         if caller_uid == target_uid && Self::has_pipewire_runtime(target_uid) {
             return target_uid;
@@ -272,6 +356,32 @@ impl AuthDaemon {
         {
             let _ = sender.send(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AuthDaemon;
+
+    #[test]
+    fn ssh_marker_detection_requires_non_empty_values() {
+        assert!(AuthDaemon::environ_has_ssh_marker(
+            b"PATH=/usr/bin\0SSH_CONNECTION=1.2.3.4 1 5.6.7.8 22\0"
+        ));
+        assert!(AuthDaemon::environ_has_ssh_marker(
+            b"SSH_TTY=/dev/pts/3\0USER=alice\0"
+        ));
+        assert!(!AuthDaemon::environ_has_ssh_marker(
+            b"SSH_CONNECTION=\0SSH_TTY=\0"
+        ));
+        assert!(!AuthDaemon::environ_has_ssh_marker(b"USER=alice\0"));
+    }
+
+    #[test]
+    fn lid_state_detection_is_case_insensitive() {
+        assert!(AuthDaemon::lid_state_is_closed("state:      closed\n"));
+        assert!(AuthDaemon::lid_state_is_closed("State: CLOSED\n"));
+        assert!(!AuthDaemon::lid_state_is_closed("state:      open\n"));
     }
 }
 
@@ -446,6 +556,7 @@ impl AuthDaemon {
         _face_name: String,
     ) -> fdo::Result<()> {
         let claim = self.check_claim(&header).await?;
+        self.ensure_auth_not_aborted(&header).await?;
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
         self.cancel_active_tasks();
@@ -490,6 +601,7 @@ impl AuthDaemon {
             let mut last_faces: Vec<(String, f64, f64, bool, u32)>;
             let mut live_scores: Vec<f32> = Vec::new();
             let mut frames_seen: u32 = 0;
+            let mut dark_since: Option<Instant> = None;
             loop {
                 tokio::select! {
                     _ = &mut rx => {
@@ -507,10 +619,24 @@ impl AuthDaemon {
 
                 let threshold = *threshold_arc.lock().await;
 
-                let (_status, embed_opt) = match Self::process_and_emit_status(&ctxt, &checker_arc, &recognizer_arc, &frame, &mut last_capture_status).await {
+                let (status, embed_opt) = match Self::process_and_emit_status(&ctxt, &checker_arc, &recognizer_arc, &frame, &mut last_capture_status).await {
                     Ok(res) => res,
                     Err(_) => continue,
                 };
+
+                if status == CaptureStatus::TooDark {
+                    let started = *dark_since.get_or_insert_with(Instant::now);
+                    if started.elapsed() >= VERIFY_TOO_DARK_TIMEOUT {
+                        info!(
+                            "VerifyStart: giving up after {}s of dark frames",
+                            VERIFY_TOO_DARK_TIMEOUT.as_secs()
+                        );
+                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new()).await;
+                        break;
+                    }
+                } else {
+                    dark_since = None;
+                }
 
                 let Some(data) = embed_opt else { continue };
                 let embed = data.embedding;
@@ -703,6 +829,8 @@ impl AuthDaemon {
                         let cur_kps = &data.kpss;
                         let delta: f32 = cur_kps.iter().zip(prev_kps.iter()).map(|(c, p)| (c - p).abs()).sum();
                         let [x1, _, x2, _] = data.bbox;
+                        // Normalize landmark drift by face width so distance to camera doesn't
+                        // change the bar; a small face is allowed less absolute jitter.
                         let face_w = x2 - x1;
                         let norm_delta = delta / face_w;
                         if norm_delta < 0.05 {
@@ -892,6 +1020,13 @@ impl AuthDaemon {
         *liveness_slot = new_liveness_detector;
         drop(liveness_slot);
 
+        let mut abort_if_ssh = self.abort_if_ssh.lock().await;
+        *abort_if_ssh = new_config.auth.abort_if_ssh;
+
+        let mut abort_if_lid_closed = self.abort_if_lid_closed.lock().await;
+        *abort_if_lid_closed = new_config.auth.abort_if_lid_closed;
+
+
         let mut db = self.db.lock().await;
         db.set_max_templates(new_config.enrollment.max_templates as usize);
 
@@ -915,7 +1050,7 @@ impl AuthDaemon {
         };
 
         match gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap()) {
-            Ok(det) => *checker = FaceChecker::from_detector(det),
+            Ok(det) => *checker = FaceChecker::from_detector_with_config(det, &new_config),
             Err(e) => return Err(fdo::Error::Failed(format!("Failed to load detector: {e}"))),
         }
 
