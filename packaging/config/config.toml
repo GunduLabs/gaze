@@ -30,3 +30,10 @@ abort_if_lid_closed = true
 
 [enrollment]
 max_templates = 3
+
+# Liveness anti-spoofing runs a local MiniFASNet-V2 PAD model on the detected face crop.
+# The model is downloaded into /var/cache/gaze on first use if missing.
+[liveness]
+enabled = true
+threshold = 0.8
+max_frames = 40
