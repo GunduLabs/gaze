@@ -69,6 +69,38 @@ pub struct Config {
     pub auth: AuthConfig,
     #[serde(default)]
     pub enrollment: EnrollmentConfig,
+    #[serde(default)]
+    pub liveness: LivenessConfig,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct LivenessConfig {
+    #[serde(default = "default_liveness_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_liveness_threshold")]
+    pub threshold: f32,
+    #[serde(default = "default_max_frames")]
+    pub max_frames: u32,
+}
+
+fn default_liveness_enabled() -> bool {
+    false
+}
+fn default_liveness_threshold() -> f32 {
+    0.8
+}
+fn default_max_frames() -> u32 {
+    40
+}
+
+impl Default for LivenessConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_liveness_enabled(),
+            threshold: default_liveness_threshold(),
+            max_frames: default_max_frames(),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -230,6 +262,21 @@ impl Config {
         );
         map.insert("enrollment".to_string(), enrollment);
 
+        let mut liveness = HashMap::new();
+        liveness.insert(
+            "enabled".to_string(),
+            OwnedValue::try_from(Value::from(self.liveness.enabled)).unwrap(),
+        );
+        liveness.insert(
+            "threshold".to_string(),
+            OwnedValue::try_from(Value::from(self.liveness.threshold as f64)).unwrap(),
+        );
+        liveness.insert(
+            "max-frames".to_string(),
+            OwnedValue::try_from(Value::from(self.liveness.max_frames)).unwrap(),
+        );
+        map.insert("liveness".to_string(), liveness);
+
         map
     }
 
@@ -312,11 +359,33 @@ impl Config {
                 .unwrap_or(2),
         };
 
+        let liveness = match map.get("liveness") {
+            Some(d) => LivenessConfig {
+                enabled: d
+                    .get("enabled")
+                    .and_then(|v| v.clone().try_into().ok())
+                    .unwrap_or_else(default_liveness_enabled),
+                threshold: d
+                    .get("threshold")
+                    .and_then(|v| {
+                        let f: f64 = v.clone().try_into().ok()?;
+                        Some(f as f32)
+                    })
+                    .unwrap_or_else(default_liveness_threshold),
+                max_frames: d
+                    .get("max-frames")
+                    .and_then(|v| v.clone().try_into().ok())
+                    .unwrap_or_else(default_max_frames),
+            },
+            None => LivenessConfig::default(),
+        };
+
         Ok(Self {
             security,
             cameras,
             auth,
             enrollment,
+            liveness,
         })
     }
 
@@ -473,6 +542,11 @@ mod tests {
                 abort_if_lid_closed: true,
             },
             enrollment: EnrollmentConfig { max_templates: 5 },
+            liveness: LivenessConfig {
+                enabled: true,
+                threshold: 0.85,
+                max_frames: 30,
+            },
         };
 
         let map = config.to_map();
@@ -504,6 +578,9 @@ mod tests {
         assert!(!abort_if_ssh);
         assert!(abort_if_lid_closed);
         assert_eq!(owned_u32(&map["enrollment"]["max-templates"]), 5);
+        let liveness_enabled: bool = map["liveness"]["enabled"].clone().try_into().unwrap();
+        assert!(liveness_enabled);
+        assert_eq!(owned_u32(&map["liveness"]["max-frames"]), 30);
 
         let decoded = Config::from_map(map).unwrap();
         match decoded.security {
@@ -518,6 +595,9 @@ mod tests {
             }
             other => panic!("unexpected security level: {other:?}"),
         }
+        assert!(decoded.liveness.enabled);
+        assert!((decoded.liveness.threshold - 0.85).abs() < 1e-5);
+        assert_eq!(decoded.liveness.max_frames, 30);
         assert_eq!(decoded.cameras.rgb, "pipewiresrc target-object=42");
         assert!((decoded.cameras.dark_threshold - 0.7).abs() < f32::EPSILON);
         assert_eq!(decoded.cameras.dark_pixel_value, 12);
@@ -626,6 +706,7 @@ mod tests {
                 abort_if_lid_closed: false,
             },
             enrollment: EnrollmentConfig { max_templates: 8 },
+            liveness: LivenessConfig::default(),
         };
 
         config.save_to(path.to_str().unwrap()).unwrap();

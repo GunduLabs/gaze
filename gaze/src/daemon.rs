@@ -12,7 +12,8 @@ use zbus::names::BusName;
 use zbus::zvariant::OwnedValue;
 use zbus::{fdo, interface, message::Header, object_server::SignalEmitter};
 
-use crate::align::align_face;
+use crate::align::{align_face, mat_to_rgb};
+use crate::liveness::LivenessDetector;
 use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
 use gaze_core::camera::Camera;
@@ -34,6 +35,7 @@ pub struct ClaimState {
 
 pub struct FaceData {
     pub embedding: Array1<f32>,
+    pub liveness_face: image::RgbImage,
     pub bbox: [f32; 4],
     pub kpss: ndarray::Array3<f32>,
     pub yaw: f32,
@@ -43,9 +45,11 @@ pub struct FaceData {
 pub struct AuthDaemon {
     pub checker: Arc<Mutex<FaceChecker>>,
     pub recognizer: Arc<Mutex<FaceRecognizer>>,
+    pub liveness: Arc<Mutex<Option<LivenessDetector>>>,
     pub db: Arc<Mutex<UserDatabase>>,
     pub threshold: Arc<Mutex<f32>>,
     pub camera_config: Arc<Mutex<String>>,
+    pub liveness_config: Arc<Mutex<gaze_core::config::LivenessConfig>>,
     pub abort_if_ssh: Arc<Mutex<bool>>,
     pub abort_if_lid_closed: Arc<Mutex<bool>>,
     pub claim_state: Arc<Mutex<Option<ClaimState>>>,
@@ -232,14 +236,18 @@ impl AuthDaemon {
             };
 
             let aligned = align_face(mat_rgb, kpss, 0)?;
-
             let embedding = recognizer.get_embedding(&aligned)?;
 
-            let (x1, y1, x2, y2) = res.bbox.unwrap_or((0.0, 0.0, 0.0, 0.0));
+            let Some((x1, y1, x2, y2)) = res.bbox else {
+                return Ok((status, None));
+            };
+            let rgb = mat_to_rgb(mat_rgb)?;
+            let liveness_face = crate::liveness::crop_face(&rgb, [x1, y1, x2, y2])?;
             Ok((
                 status,
                 Some(FaceData {
                     embedding,
+                    liveness_face,
                     bbox: [x1, y1, x2, y2],
                     kpss: kpss.clone(),
                     yaw: res.yaw,
@@ -558,9 +566,11 @@ impl AuthDaemon {
 
         let checker_arc = self.checker.clone();
         let recognizer_arc = self.recognizer.clone();
+        let liveness_arc = self.liveness.clone();
         let db_arc = self.db.clone();
         let threshold_arc = self.threshold.clone();
         let camera_config = self.camera_config.lock().await.clone();
+        let liveness_cfg = self.liveness_config.lock().await.clone();
 
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
@@ -580,9 +590,17 @@ impl AuthDaemon {
                 }
             };
 
-            info!("VerifyStart: sensing faces for user {}", username);
+            info!(
+                liveness_enabled = liveness_cfg.enabled,
+                liveness_threshold = liveness_cfg.threshold,
+                "VerifyStart: sensing faces for user {}",
+                username
+            );
 
             let mut last_capture_status: Option<CaptureStatus> = None;
+            let mut last_faces: Vec<(String, f64, f64, bool, u32)>;
+            let mut live_scores: Vec<f32> = Vec::new();
+            let mut frames_seen: u32 = 0;
             let mut dark_since: Option<Instant> = None;
             loop {
                 tokio::select! {
@@ -620,36 +638,85 @@ impl AuthDaemon {
                     dark_since = None;
                 }
 
-                if let Some(data) = embed_opt {
-                    let embed = data.embedding;
-                    let db = db_arc.lock().await;
+                let Some(data) = embed_opt else { continue };
+                let embed = data.embedding;
+                let liveness_face = data.liveness_face;
+                let db = db_arc.lock().await;
 
-                    match db.match_faces(&username, &embed, threshold) {
-                        Ok(scores) => {
-                            let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
-                            let faces: Vec<(String, f64, f64, bool, u32)> = scores
-                                .iter()
-                                .map(|(name, sim, pct, passed, count)| {
-                                    (name.clone(), *sim as f64, *pct as f64, *passed, *count)
-                                })
-                                .collect();
-
-                            let result = if matched {
-                                info!("VerifyStart: MATCHED!");
-                                VerifyResult::VerifyMatch
-                            } else {
-                                info!("VerifyStart: no match");
-                                VerifyResult::VerifyNoMatch
-                            };
-                            let _ = Self::verify_status(&ctxt, result, faces).await;
-                            break;
-                        }
-                        Err(e) => {
-                            error!("DB error during verify: {e}");
-                            let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new()).await;
-                            break;
-                        }
+                let scores = match db.match_faces(&username, &embed, threshold) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        error!("DB error during verify: {e}");
+                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new()).await;
+                        break;
                     }
+                };
+                drop(db);
+
+                let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
+                let faces: Vec<(String, f64, f64, bool, u32)> = scores
+                    .iter()
+                    .map(|(name, sim, pct, passed, count)| {
+                        (name.clone(), *sim as f64, *pct as f64, *passed, *count)
+                    })
+                    .collect();
+                last_faces = faces.clone();
+
+                if !liveness_cfg.enabled {
+                    let result = if matched {
+                        info!("VerifyStart: MATCHED!");
+                        VerifyResult::VerifyMatch
+                    } else {
+                        info!("VerifyStart: no match");
+                        VerifyResult::VerifyNoMatch
+                    };
+                    let _ = Self::verify_status(&ctxt, result, faces).await;
+                    break;
+                }
+
+                if matched {
+                    let mut live_guard = liveness_arc.lock().await;
+                    let Some(detector) = live_guard.as_mut() else {
+                        error!("Liveness is enabled but the detector is unavailable");
+                        drop(live_guard);
+                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, last_faces.clone()).await;
+                        break;
+                    };
+                    let live_score = match detector.live_score(&liveness_face) {
+                        Ok(score) => score,
+                        Err(e) => {
+                            error!("Liveness inference failed: {e}");
+                            drop(live_guard);
+                            let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, last_faces.clone()).await;
+                            break;
+                        }
+                    };
+                    drop(live_guard);
+                    live_scores.push(live_score);
+
+                    if crate::liveness::liveness_passes(&live_scores, liveness_cfg.threshold) {
+                        info!(
+                            live_score,
+                            live_samples = live_scores.len(),
+                            "VerifyStart: MATCHED + liveness confirmed"
+                        );
+                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyMatch, last_faces.clone()).await;
+                        break;
+                    }
+                    info!(
+                        live_score,
+                        "VerifyStart: match rejected by liveness gate"
+                    );
+                }
+
+                frames_seen += 1;
+                if frames_seen >= liveness_cfg.max_frames {
+                    info!(
+                        frames = frames_seen,
+                        "VerifyStart: liveness gate timed out"
+                    );
+                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, last_faces.clone()).await;
+                    break;
                 }
             }
         });
@@ -927,11 +994,31 @@ impl AuthDaemon {
         let new_config = Config::from_map(config)
             .map_err(|e| fdo::Error::Failed(format!("Invalid config: {e}")))?;
 
+        let new_liveness_detector = if new_config.liveness.enabled {
+            let path = crate::models::ensure_liveness_model(gaze_core::config::MODELS_DIR)
+                .map_err(|e| fdo::Error::Failed(format!("Failed to ensure liveness model: {e}")))?;
+            Some(
+                LivenessDetector::new(path.to_str().unwrap()).map_err(|e| {
+                    fdo::Error::Failed(format!("Failed to load liveness model: {e}"))
+                })?,
+            )
+        } else {
+            None
+        };
+
         let mut threshold = self.threshold.lock().await;
         *threshold = new_config.security.threshold();
 
         let mut camera_config = self.camera_config.lock().await;
         *camera_config = new_config.cameras.rgb.clone();
+
+        let mut live_cfg = self.liveness_config.lock().await;
+        *live_cfg = new_config.liveness.clone();
+        drop(live_cfg);
+
+        let mut liveness_slot = self.liveness.lock().await;
+        *liveness_slot = new_liveness_detector;
+        drop(liveness_slot);
 
         let mut abort_if_ssh = self.abort_if_ssh.lock().await;
         *abort_if_ssh = new_config.auth.abort_if_ssh;
