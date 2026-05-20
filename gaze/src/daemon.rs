@@ -301,6 +301,11 @@ impl AuthDaemon {
         std::path::Path::new(&format!("/run/user/{uid}/pipewire-0")).exists()
     }
 
+    // PipeWire lives under /run/user/<uid> and we have to set XDG_RUNTIME_DIR to a uid that
+    // actually has a session running. Priority: (1) caller==target with a runtime, (2) any
+    // non-root caller with a runtime, (3) root calling on behalf of the active seat session,
+    // (4) target's runtime, (5) the active seat session's runtime. Falls back to target if
+    // nothing matches so the caller still gets a meaningful "no camera" error.
     async fn camera_runtime_uid(caller_uid: u32, target_uid: u32) -> u32 {
         if caller_uid == target_uid && Self::has_pipewire_runtime(target_uid) {
             return target_uid;
@@ -740,6 +745,8 @@ impl AuthDaemon {
                         let cur_kps = &data.kpss;
                         let delta: f32 = cur_kps.iter().zip(prev_kps.iter()).map(|(c, p)| (c - p).abs()).sum();
                         let [x1, _, x2, _] = data.bbox;
+                        // Normalize landmark drift by face width so distance to camera doesn't
+                        // change the bar; a small face is allowed less absolute jitter.
                         let face_w = x2 - x1;
                         let norm_delta = delta / face_w;
                         if norm_delta < 0.05 {
