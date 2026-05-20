@@ -82,7 +82,7 @@ gnome-extensions enable gaze@gundulabs.com
 gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
-On Wayland, log out and back in after extension install or update.
+If `gnome-extensions enable` reports `Extension "gaze@gundulabs.com" does not exist`, GNOME Shell has not picked up the newly installed extension yet. Reboot, then re-run the command. On Wayland this is the only way; Shell does not rescan extensions in a running session. The one-line installer works around this by writing the equivalent dconf keys directly, which take effect on the next login without needing `gnome-extensions enable` to succeed.
 
 For GDM login, if the face-auth text appears but the camera light never turns on, check the daemon logs for camera/PipeWire errors:
 

@@ -94,7 +94,7 @@ _gsettings_enable_face_auth() {
 enable_gnome_extension() {
     if [ "$(id -u)" -eq 0 ]; then
         echo "Running as root; not changing per-user GNOME extension settings."
-        echo "For GNOME lock screen face unlock, run as your desktop user:"
+        echo "For GNOME lock screen face unlock, reboot, then run as your desktop user:"
         echo "  gnome-extensions enable gaze@gundulabs.com"
         echo "  gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true"
         echo "GDM loads the extension by default. Login face auth requires the docs command: ${GNOME_DOCS_URL}"
@@ -103,7 +103,7 @@ enable_gnome_extension() {
 
     if ! is_gnome_session; then
         echo "GNOME desktop session not detected; leaving the extension disabled for this user."
-        echo "For GNOME lock screen face unlock, run from your GNOME session:"
+        echo "For GNOME lock screen face unlock, reboot, then from your GNOME session:"
         echo "  gnome-extensions enable gaze@gundulabs.com"
         echo "  gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true"
         echo "GDM loads the extension by default. Login face auth requires the docs command: ${GNOME_DOCS_URL}"
@@ -119,11 +119,11 @@ enable_gnome_extension() {
     if command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions enable "$EXT_ID" >/dev/null 2>&1 && _gsettings_enable_face_auth; then
         echo "Enabled GNOME lock screen face unlock for this user."
     elif _gsettings_add_extension "$EXT_ID" && _gsettings_enable_face_auth; then
-        echo "Registered GNOME lock screen face unlock for this user."
-        echo "Log out and back in once to activate the extension."
+        echo "Registered GNOME lock screen face unlock via dconf. Reboot to activate it."
+        echo "Note: running 'gnome-extensions enable $EXT_ID' before that reboot will report \"Extension does not exist\"; the dconf entry just written makes that step unnecessary."
     else
         echo "Could not enable the GNOME extension automatically."
-        echo "After logging into GNOME, run:"
+        echo "Reboot, then from your GNOME session run:"
         echo "  gnome-extensions enable gaze@gundulabs.com"
         echo "  gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true"
     fi
