@@ -6,9 +6,9 @@ This page explains the internals of Gaze's facial authentication pipeline. You d
 
 Gaze is currently **not suitable for security-critical authentication**.
 
-It can be spoofed with a simple photo of the enrolled user, including a photo displayed on a screen.
+Its liveness model raises the bar for printed-photo and screen-photo attacks, but it should not be your only authentication factor. Video replay, high-quality presentation attacks, and missing or disabled liveness checks remain risks.
 
-Liveness detection, IR camera support, and other anti-spoofing protections are planned for upcoming releases.
+IR camera support and other anti-spoofing protections are planned for upcoming releases.
 
 ## Privacy model
 
@@ -19,7 +19,7 @@ Liveness detection, IR camera support, and other anti-spoofing protections are p
 ## Authentication pipeline
 
 ```text
-Camera frame -> Face detection -> Face alignment -> Embedding -> Similarity match
+Camera frame -> Face detection -> Face alignment -> Embedding -> Similarity match -> Liveness check
 ```
 
 High level:
@@ -29,8 +29,9 @@ High level:
 3. Face is aligned into a standard input shape.
 4. Recognition model creates an embedding vector.
 5. Embedding is compared against your enrolled profiles.
+6. If liveness is enabled, a MiniFASNet-V2 anti-spoofing model checks the detected face crop.
 
-If best similarity passes threshold, auth succeeds.
+If best similarity passes threshold and the liveness score passes threshold, auth succeeds.
 
 ## Why multiple captures help
 

@@ -141,6 +141,8 @@ impl UserDatabase {
 
     fn write_embedding(path: &Path, embed: &Array1<f32>) -> anyhow::Result<()> {
         let embed_slice = embed.as_slice().expect("Failed to get embedding slice");
+        // Stored as raw native-endian f32s and read back the same way; templates are not
+        // portable across architectures with different endianness.
         let bytes: &[u8] = unsafe {
             std::slice::from_raw_parts(
                 embed_slice.as_ptr() as *const u8,
@@ -419,6 +421,8 @@ impl UserDatabase {
                     .map(|ref_embed| embed.dot(ref_embed))
                     .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                     .unwrap_or(0.0);
+                // Sigmoid maps cosine similarity to a 0-100% display number, centered at 0.4
+                // (medium threshold) with slope 15 so values near the threshold spread out nicely.
                 let pct = 100.0 / (1.0 + (-15.0_f32 * (best - 0.4)).exp());
                 (
                     name.clone(),

@@ -29,6 +29,9 @@ fn wait_for_password_and_fallback(pamh: PamHandle, state: &SharedAuthState) -> c
     loop {
         if shared_state.finished {
             if let Some(ref pw) = shared_state.password {
+                // Stash the typed password as PAM_AUTHTOK and return AUTHINFO_UNAVAIL so the
+                // stack falls through to pam_unix (or whatever follows) which will pick it up
+                // instead of re-prompting the user.
                 let pw_cstr = CString::new(pw.as_str()).unwrap();
                 unsafe {
                     pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);
@@ -67,6 +70,8 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     ));
 
     let thread_state = Arc::clone(&state);
+    // Raw pointers aren't Send, so smuggle the handle across the thread boundary as a usize.
+    // PAM owns the handle for the whole pam_sm_authenticate call, so it stays valid.
     let pamh_worker = pamh as usize;
     let prompt_thread = thread::spawn(move || {
         let password = unsafe { prompt_password(pamh_worker as PamHandle) };
@@ -111,6 +116,10 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     fallback
 }
 
+// When biometric auth wins the race, the prompt thread is still blocked inside the PAM
+// conversation read. TIOCSTI injects a newline into the controlling tty's input queue so the
+// read returns and the thread can join cleanly. Returns false if stdin isn't a tty (e.g. GDM,
+// SSH); callers must then fall through to wait_for_prompt_finish.
 fn unblock_terminal() -> bool {
     unsafe {
         if libc::isatty(0) != 1 {
