@@ -1,5 +1,6 @@
 mod align;
 mod daemon;
+mod liveness;
 pub mod models;
 mod recognize;
 pub mod users;
@@ -44,6 +45,13 @@ async fn main() -> anyhow::Result<()> {
     let recognizer = recognize::FaceRecognizer::new(rec_path.to_str().unwrap())
         .expect("Failed to load recognition model");
 
+    let liveness_detector = if config.liveness.enabled {
+        let path = models::ensure_liveness_model(MODELS_DIR)?;
+        Some(liveness::LivenessDetector::new(path.to_str().unwrap())?)
+    } else {
+        None
+    };
+
     let db = UserDatabase::new(USERS_DIR, config.enrollment.max_templates as usize)?;
 
     let checker = gaze_core::face::FaceChecker::from_detector_with_config(detector, &config);
@@ -51,9 +59,11 @@ async fn main() -> anyhow::Result<()> {
     let daemon = AuthDaemon {
         checker: Arc::new(Mutex::new(checker)),
         recognizer: Arc::new(Mutex::new(recognizer)),
+        liveness: Arc::new(Mutex::new(liveness_detector)),
         db: Arc::new(Mutex::new(db)),
         threshold: Arc::new(Mutex::new(security.threshold())),
         camera_config: Arc::new(Mutex::new(config.cameras.rgb.clone())),
+        liveness_config: Arc::new(Mutex::new(config.liveness.clone())),
         abort_if_ssh: Arc::new(Mutex::new(config.auth.abort_if_ssh)),
         abort_if_lid_closed: Arc::new(Mutex::new(config.auth.abort_if_lid_closed)),
         claim_state: Arc::new(Mutex::new(None)),

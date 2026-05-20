@@ -12,6 +12,11 @@ const W600K_MBF_SHA256: &str = "9cc6e4a75f0e2bf0b1aed94578f144d15175f357bdc05e81
 const DET_10G_SHA256: &str = "5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91";
 const W600K_R50_SHA256: &str = "4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43";
 
+pub const LIVENESS_MODEL_NAME: &str = "minifasnet_v2.onnx";
+const LIVENESS_MODEL_SHA256: &str =
+    "d7b3cd9ba8a7ceb13baa8c4720902e27ca3112eff52f926c08804af6b6eecc7b";
+const LIVENESS_MODEL_URL: &str = "https://huggingface.co/garciafido/minifasnet-v2-anti-spoofing-onnx/resolve/main/minifasnet_v2.onnx";
+
 fn zip_url(pack_name: &str) -> String {
     format!("{}/{}.zip", RELEASE_BASE, pack_name)
 }
@@ -30,6 +35,7 @@ fn expected_model_sha256(model_name: &str) -> Option<&'static str> {
         "w600k_mbf.onnx" => Some(W600K_MBF_SHA256),
         "det_10g.onnx" => Some(DET_10G_SHA256),
         "w600k_r50.onnx" => Some(W600K_R50_SHA256),
+        LIVENESS_MODEL_NAME => Some(LIVENESS_MODEL_SHA256),
         _ => None,
     }
 }
@@ -111,13 +117,13 @@ fn verify_known_model(path: &Path, model_name: &str) -> anyhow::Result<()> {
 }
 
 fn download_file(url: &str, dest: &Path, expected_sha256: &str) -> anyhow::Result<()> {
-    info!(url, "Downloading model pack");
+    info!(url, "Downloading model file");
     let resp = ureq::get(url).call()?;
     let mut reader = resp.into_body().into_reader();
     let file_name = dest
         .file_name()
         .and_then(|n| n.to_str())
-        .ok_or_else(|| anyhow::anyhow!("invalid model pack path"))?;
+        .ok_or_else(|| anyhow::anyhow!("invalid model file path"))?;
     let tmp_path = dest.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
     let mut file = fs::OpenOptions::new()
         .write(true)
@@ -217,6 +223,20 @@ pub fn ensure_models(
     Ok((det_path, rec_path))
 }
 
+pub fn ensure_liveness_model(models_dir: &str) -> anyhow::Result<PathBuf> {
+    let dir = Path::new(models_dir);
+    ensure_private_dir(dir)?;
+
+    let path = dir.join(LIVENESS_MODEL_NAME);
+    if path.exists() {
+        verify_known_model(&path, LIVENESS_MODEL_NAME)?;
+        return Ok(path);
+    }
+
+    download_file(LIVENESS_MODEL_URL, &path, LIVENESS_MODEL_SHA256)?;
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,6 +331,10 @@ mod tests {
         assert_eq!(
             expected_model_sha256("w600k_r50.onnx"),
             Some(W600K_R50_SHA256)
+        );
+        assert_eq!(
+            expected_model_sha256(LIVENESS_MODEL_NAME),
+            Some(LIVENESS_MODEL_SHA256)
         );
         assert_eq!(expected_model_sha256("custom.onnx"), None);
     }
