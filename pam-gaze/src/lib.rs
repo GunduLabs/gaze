@@ -33,18 +33,8 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         {
             Ok(Ok(Some(true))) => {
                 if require_confirmation {
-                    if let Some(resp) = unsafe {
-                        converse(
-                            pamh,
-                            PAM_PROMPT_ECHO_OFF,
-                            "Press Enter to confirm, Esc to cancel",
-                        )
-                    } {
-                        if resp.contains('\x1b') {
-                            PAM_AUTH_ERR
-                        } else {
-                            PAM_SUCCESS
-                        }
+                    if unsafe { confirm_authentication(pamh) } {
+                        PAM_SUCCESS
                     } else {
                         PAM_AUTH_ERR
                     }

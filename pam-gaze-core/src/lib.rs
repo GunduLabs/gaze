@@ -1,5 +1,9 @@
 #![allow(clippy::missing_safety_doc)]
 use std::ffi::{CStr, CString};
+use std::fs::OpenOptions;
+use std::io::{Read, Write};
+use std::mem::MaybeUninit;
+use std::os::fd::AsRawFd;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 
@@ -13,10 +17,12 @@ pub const PAM_SERVICE: c_int = 1;
 pub const PAM_AUTHTOK: c_int = 6;
 pub const PAM_TEXT_INFO: c_int = 4;
 pub const PAM_PROMPT_ECHO_OFF: c_int = 1;
+pub const PAM_PROMPT_ECHO_ON: c_int = 2;
 pub const PAM_AUTHINFO_UNAVAIL: c_int = 9;
 pub const PAM_IGNORE: c_int = 25;
 
 pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
+const CONFIRMATION_PROMPT: &str = "Press Enter to confirm, Esc to cancel";
 
 pub type PamHandle = *mut c_void;
 
@@ -51,7 +57,7 @@ unsafe extern "C" {
     pub fn pam_set_item(pamh: PamHandle, item_type: c_int, item: *const c_void) -> c_int;
 }
 
-pub unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<String> {
+unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<String> {
     unsafe {
         let mut item: *const c_void = ptr::null();
         if pam_get_item(pamh, PAM_CONV, &mut item) != PAM_SUCCESS || item.is_null() {
@@ -83,6 +89,63 @@ pub unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<
         }
         result
     }
+}
+
+struct TermiosGuard {
+    fd: c_int,
+    original: libc::termios,
+}
+
+impl Drop for TermiosGuard {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = libc::tcsetattr(self.fd, libc::TCSANOW, &self.original);
+        }
+    }
+}
+
+fn confirm_from_tty() -> Option<bool> {
+    let mut tty = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .ok()?;
+    let fd = tty.as_raw_fd();
+
+    let mut original = MaybeUninit::<libc::termios>::uninit();
+    unsafe {
+        if libc::tcgetattr(fd, original.as_mut_ptr()) != 0 {
+            return None;
+        }
+        let original = original.assume_init();
+        let mut raw = original;
+        raw.c_lflag &= !(libc::ICANON | libc::ECHO);
+        raw.c_cc[libc::VMIN] = 1;
+        raw.c_cc[libc::VTIME] = 0;
+        if libc::tcsetattr(fd, libc::TCSANOW, &raw) != 0 {
+            return None;
+        }
+
+        let _guard = TermiosGuard { fd, original };
+        write!(tty, "{CONFIRMATION_PROMPT}").ok()?;
+        tty.flush().ok()?;
+
+        let mut key = [0_u8; 1];
+        tty.read_exact(&mut key).ok()?;
+        writeln!(tty).ok()?;
+
+        Some(matches!(key[0], b'\n' | b'\r'))
+    }
+}
+
+pub unsafe fn confirm_authentication(pamh: PamHandle) -> bool {
+    if let Some(confirmed) = confirm_from_tty() {
+        return confirmed;
+    }
+
+    unsafe { converse(pamh, PAM_PROMPT_ECHO_ON, CONFIRMATION_PROMPT) }
+        .map(|resp| resp.is_empty())
+        .unwrap_or(false)
 }
 
 pub unsafe fn say(pamh: PamHandle, text: &str) {
