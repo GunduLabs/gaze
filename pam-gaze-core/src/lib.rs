@@ -51,7 +51,7 @@ unsafe extern "C" {
     pub fn pam_set_item(pamh: PamHandle, item_type: c_int, item: *const c_void) -> c_int;
 }
 
-unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<String> {
+pub unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<String> {
     unsafe {
         let mut item: *const c_void = ptr::null();
         if pam_get_item(pamh, PAM_CONV, &mut item) != PAM_SUCCESS || item.is_null() {

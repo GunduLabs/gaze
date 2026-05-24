@@ -131,10 +131,16 @@ pub struct AuthConfig {
     pub abort_if_ssh: bool,
     #[serde(default = "default_true")]
     pub abort_if_lid_closed: bool,
+    #[serde(default = "default_false")]
+    pub require_confirmation: bool,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_false() -> bool {
+    false
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -160,6 +166,7 @@ impl Default for AuthConfig {
         Self {
             abort_if_ssh: true,
             abort_if_lid_closed: true,
+            require_confirmation: false,
         }
     }
 }
@@ -252,6 +259,10 @@ impl Config {
         auth.insert(
             "abort-if-lid-closed".to_string(),
             OwnedValue::try_from(Value::from(self.auth.abort_if_lid_closed)).unwrap(),
+        );
+        auth.insert(
+            "require-confirmation".to_string(),
+            OwnedValue::try_from(Value::from(self.auth.require_confirmation)).unwrap(),
         );
         map.insert("auth".to_string(), auth);
 
@@ -347,6 +358,10 @@ impl Config {
                     .get("abort-if-lid-closed")
                     .and_then(|v| v.clone().try_into().ok())
                     .unwrap_or(true),
+                require_confirmation: auth_dict
+                    .get("require-confirmation")
+                    .and_then(|v| v.clone().try_into().ok())
+                    .unwrap_or(false),
             });
 
         let enrollment_dict = map
@@ -540,6 +555,7 @@ mod tests {
             auth: AuthConfig {
                 abort_if_ssh: false,
                 abort_if_lid_closed: true,
+                require_confirmation: false,
             },
             enrollment: EnrollmentConfig { max_templates: 5 },
             liveness: LivenessConfig {
@@ -704,6 +720,7 @@ mod tests {
             auth: AuthConfig {
                 abort_if_ssh: true,
                 abort_if_lid_closed: false,
+                require_confirmation: false,
             },
             enrollment: EnrollmentConfig { max_templates: 8 },
             liveness: LivenessConfig::default(),

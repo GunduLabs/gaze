@@ -108,6 +108,27 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
             wait_for_prompt_finish(&state);
             let _ = prompt_thread.join();
         }
+
+        let require_confirmation = gaze_core::config::Config::load()
+            .map(|c| c.auth.require_confirmation)
+            .unwrap_or(false);
+
+        if require_confirmation {
+            if let Some(resp) = unsafe {
+                converse(
+                    pamh,
+                    PAM_PROMPT_ECHO_OFF,
+                    "Press Enter to confirm, Esc to cancel",
+                )
+            } {
+                if resp.contains('\x1b') {
+                    return PAM_AUTH_ERR;
+                }
+            } else {
+                return PAM_AUTH_ERR;
+            }
+        }
+
         return PAM_SUCCESS;
     }
 

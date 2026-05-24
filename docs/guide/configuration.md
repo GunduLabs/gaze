@@ -18,6 +18,7 @@ dark_pixel_value = 10
 [auth]
 abort_if_ssh = true
 abort_if_lid_closed = true
+require_confirmation = false
 
 [enrollment]
 max_templates = 3
@@ -86,7 +87,7 @@ dark_pixel_value = 10
 
 With the defaults, a frame is skipped when at least 60% of pixels have luminance below 10.
 
-## Authentication aborts
+## Authentication options
 
 Gaze skips face authentication in sessions where the camera is unlikely or unsafe to use:
 
@@ -94,9 +95,12 @@ Gaze skips face authentication in sessions where the camera is unlikely or unsaf
 [auth]
 abort_if_ssh = true
 abort_if_lid_closed = true
+require_confirmation = false
 ```
 
 `abort_if_ssh` detects SSH sessions from the DBus caller process environment. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor.
+
+Setting `require_confirmation = true` adds an optional confirmation step (e.g., "Press Enter to confirm, Esc to cancel") after a successful face match. This provides a natural intent check before executing privileged commands.
 
 After changing config:
 
