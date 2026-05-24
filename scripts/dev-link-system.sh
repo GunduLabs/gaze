@@ -18,8 +18,12 @@ This links:
   - system and current-user GNOME extension files
   - the installed GNOME settings schema
 
+Privileged runtime files are copied to system-labeled paths first, then the
+installed entry points are linked to those copies. This avoids SELinux blocking
+systemd or PAM from executing files directly under your home directory.
+
 It also installs a systemd drop-in that clears the packaged unit's
-InaccessiblePaths=/home /root rule so symlink targets in this checkout work.
+InaccessiblePaths=/home /root rule for local development.
 
 Use `disable` to restore files backed up during `enable`.
 EOF
@@ -41,6 +45,7 @@ repo_root() {
 REPO=$(repo_root)
 TARGET="$REPO/target/release"
 BACKUP_DIR=/usr/local/share/gaze-dev/originals
+LOCAL_BIN_DIR=/usr/local/bin
 SYSTEMD_DROPIN=/etc/systemd/system/gazed.service.d/zz-gaze-dev-checkout.conf
 LEGACY_SYSTEMD_DROPIN=/etc/systemd/system/gazed.service.d/dev-checkout.conf
 SYSTEM_EXTENSION_DIR=/usr/share/gnome-shell/extensions/gaze@gundulabs.com
@@ -83,17 +88,51 @@ backup_and_link() {
     install -d "$(dirname -- "$dst")" "$BACKUP_DIR"
 
     current=
+    should_backup=1
     if [ -L "$dst" ]; then
         current=$(readlink "$dst" || true)
+        case "$current" in
+            "$REPO"/*|"$LOCAL_BIN_DIR"/*) should_backup=0 ;;
+        esac
     fi
 
-    if [ "$current" != "$src" ] && [ ! -e "$backup" ] && { [ -e "$dst" ] || [ -L "$dst" ]; }; then
+    if [ "$current" != "$src" ] && [ "$should_backup" -eq 1 ] && [ ! -e "$backup" ] && { [ -e "$dst" ] || [ -L "$dst" ]; }; then
         cp -a "$dst" "$backup"
     fi
 
     rm -f "$dst"
     ln -s "$src" "$dst"
     printf 'linked %s -> %s\n' "$dst" "$src"
+}
+
+backup_and_install() {
+    src=$1
+    dst=$2
+    mode=$3
+    name=$(backup_name "$dst")
+    backup="$BACKUP_DIR/$name"
+
+    [ -e "$src" ] || die "Missing source: $src"
+    install -d "$(dirname -- "$dst")" "$BACKUP_DIR"
+
+    should_backup=1
+    if [ -L "$dst" ]; then
+        current=$(readlink "$dst" || true)
+        case "$current" in
+            "$REPO"/*|"$LOCAL_BIN_DIR"/*) should_backup=0 ;;
+        esac
+    fi
+
+    if [ "$should_backup" -eq 1 ] && [ ! -e "$backup" ] && { [ -e "$dst" ] || [ -L "$dst" ]; }; then
+        cp -a "$dst" "$backup"
+    fi
+
+    rm -f "$dst"
+    install -m "$mode" "$src" "$dst"
+    if command -v restorecon >/dev/null 2>&1; then
+        restorecon "$dst" >/dev/null 2>&1 || true
+    fi
+    printf 'installed %s from %s\n' "$dst" "$src"
 }
 
 restore_or_remove() {
@@ -112,22 +151,28 @@ restore_or_remove() {
 }
 
 link_binaries() {
-    backup_and_link "$(artifact gazed)" /usr/bin/gazed
-    backup_and_link "$(artifact gaze)" /usr/bin/gaze
-    backup_and_link "$(artifact gaze-gui)" /usr/bin/gaze-gui
+    backup_and_install "$(artifact gazed)" "$LOCAL_BIN_DIR/gazed" 0755
+    backup_and_install "$(artifact gaze)" "$LOCAL_BIN_DIR/gaze" 0755
+    backup_and_install "$(artifact gaze-gui)" "$LOCAL_BIN_DIR/gaze-gui" 0755
+    backup_and_link "$LOCAL_BIN_DIR/gazed" /usr/bin/gazed
+    backup_and_link "$LOCAL_BIN_DIR/gaze" /usr/bin/gaze
+    backup_and_link "$LOCAL_BIN_DIR/gaze-gui" /usr/bin/gaze-gui
 }
 
 restore_binaries() {
     restore_or_remove /usr/bin/gazed
     restore_or_remove /usr/bin/gaze
     restore_or_remove /usr/bin/gaze-gui
+    restore_or_remove "$LOCAL_BIN_DIR/gazed"
+    restore_or_remove "$LOCAL_BIN_DIR/gaze"
+    restore_or_remove "$LOCAL_BIN_DIR/gaze-gui"
 }
 
 link_pam_dir() {
     dir=$1
     [ -d "$dir" ] || return 1
-    backup_and_link "$(artifact libpam_gaze.so)" "$dir/pam_gaze.so"
-    backup_and_link "$(artifact libpam_gaze_grosshack.so)" "$dir/pam_gaze_grosshack.so"
+    backup_and_install "$(artifact libpam_gaze.so)" "$dir/pam_gaze.so" 0755
+    backup_and_install "$(artifact libpam_gaze_grosshack.so)" "$dir/pam_gaze_grosshack.so" 0755
     return 0
 }
 
@@ -191,9 +236,9 @@ restore_pam_modules() {
 link_extension_files() {
     dir=$1
     install -d "$dir"
-    backup_and_link "$REPO/gnome-shell-extension/metadata.json" "$dir/metadata.json"
-    backup_and_link "$REPO/gnome-shell-extension/extension.js" "$dir/extension.js"
-    backup_and_link "$REPO/gnome-shell-extension/prefs.js" "$dir/prefs.js"
+    backup_and_install "$REPO/gnome-shell-extension/metadata.json" "$dir/metadata.json" 0644
+    backup_and_install "$REPO/gnome-shell-extension/extension.js" "$dir/extension.js" 0644
+    backup_and_install "$REPO/gnome-shell-extension/prefs.js" "$dir/prefs.js" 0644
 }
 
 restore_extension_files() {
@@ -211,12 +256,17 @@ sudo_user_home() {
 
 link_gnome_extension() {
     link_extension_files "$SYSTEM_EXTENSION_DIR"
-    backup_and_link "$SCHEMA_SRC" "$SCHEMA_DST"
+    backup_and_install "$SCHEMA_SRC" "$SCHEMA_DST" 0644
 
     if home=$(sudo_user_home); then
         user_extension_dir="$home/.local/share/gnome-shell/extensions/gaze@gundulabs.com"
-        install -d -o "$SUDO_USER" -g "$(id -gn "$SUDO_USER")" "$user_extension_dir"
+        sudo_user_group=$(id -gn "$SUDO_USER")
+        install -d -o "$SUDO_USER" -g "$sudo_user_group" "$user_extension_dir"
         link_extension_files "$user_extension_dir"
+        chown "$SUDO_USER:$sudo_user_group" \
+            "$user_extension_dir/metadata.json" \
+            "$user_extension_dir/extension.js" \
+            "$user_extension_dir/prefs.js"
     fi
 
     if command -v glib-compile-schemas >/dev/null 2>&1; then
@@ -266,6 +316,9 @@ show_status() {
         /usr/bin/gazed \
         /usr/bin/gaze \
         /usr/bin/gaze-gui \
+        "$LOCAL_BIN_DIR/gazed" \
+        "$LOCAL_BIN_DIR/gaze" \
+        "$LOCAL_BIN_DIR/gaze-gui" \
         "$SYSTEM_EXTENSION_DIR/extension.js" \
         "$SYSTEM_EXTENSION_DIR/prefs.js" \
         "$SCHEMA_DST"
