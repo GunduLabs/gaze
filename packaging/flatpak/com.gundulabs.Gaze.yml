@@ -1,0 +1,92 @@
+app-id: com.gundulabs.Gaze
+branch: stable
+runtime: org.gnome.Platform
+runtime-version: "49"
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.llvm20
+command: gaze-gui
+finish-args:
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  - --system-talk-name=com.gundulabs.Gaze
+  - --filesystem=xdg-run/gvfsd
+  - --filesystem=xdg-run/gvfs:ro
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/pkgconfig
+  - /share/man
+  - /share/doc
+modules:
+  - name: opencv
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+      - -DCMAKE_INSTALL_PREFIX=/app
+      - -DCMAKE_INSTALL_LIBDIR=lib
+      - -DBUILD_SHARED_LIBS=ON
+      - -DBUILD_TESTS=OFF
+      - -DBUILD_PERF_TESTS=OFF
+      - -DBUILD_EXAMPLES=OFF
+      - -DBUILD_DOCS=OFF
+      - -DBUILD_opencv_python3=OFF
+      - -DBUILD_opencv_java=OFF
+      - -DBUILD_opencv_world=OFF
+      - -DOPENCV_GENERATE_PKGCONFIG=ON
+      - -DWITH_IPP=OFF
+      - -DWITH_CUDA=OFF
+      - -DWITH_OPENCL=ON
+      - -DWITH_OPENMP=ON
+      - -DWITH_GTK=ON
+      - -DWITH_QT=OFF
+      - -DBUILD_LIST=core,dnn,imgproc,videoio
+    sources:
+      - type: archive
+        url: https://github.com/opencv/opencv/archive/refs/tags/4.12.0.tar.gz
+        sha256: 44c106d5bb47efec04e531fd93008b3fcd1d27138985c5baf4eafac0e1ec9e9d
+
+  - name: gaze-gui
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/llvm20/bin
+      env:
+        CARGO_HOME: /run/build/gaze-gui/cargo
+        CARGO_TARGET_DIR: /run/build/gaze-gui/target
+        LLVM_CONFIG_PATH: /usr/lib/sdk/llvm20/bin/llvm-config
+        LIBCLANG_PATH: /usr/lib/sdk/llvm20/lib
+        ORT_STRATEGY: system
+        ORT_LIB_LOCATION: /app/lib
+        ORT_PREFER_DYNAMIC_LINK: "1"
+    build-commands:
+      - install -Dm644 .flatpak-cache/cargo/config.toml /run/build/gaze-gui/cargo/config.toml
+      - mkdir -p /run/build/gaze-gui/ort
+      - tar -xzf .flatpak-cache/ort/onnxruntime.tgz -C /run/build/gaze-gui/ort --strip-components=1
+      - mkdir -p /app/lib
+      - cp -a /run/build/gaze-gui/ort/lib/libonnxruntime.so* /app/lib/
+      - cargo build --release --locked --offline -p gaze-gui
+      - install -Dm755 target/release/gaze-gui /app/bin/gaze-gui
+      - install -Dm644 packaging/gui/com.gundulabs.Gaze.desktop /app/share/applications/com.gundulabs.Gaze.desktop
+      - rsvg-convert --width=64 --height=64 packaging/gui/com.gundulabs.Gaze.svg -o com.gundulabs.Gaze-64.png
+      - rsvg-convert --width=128 --height=128 packaging/gui/com.gundulabs.Gaze.svg -o com.gundulabs.Gaze-128.png
+      - install -Dm644 com.gundulabs.Gaze-64.png /app/share/icons/hicolor/64x64/apps/com.gundulabs.Gaze.png
+      - install -Dm644 com.gundulabs.Gaze-128.png /app/share/icons/hicolor/128x128/apps/com.gundulabs.Gaze.png
+      - install -Dm644 packaging/gui/com.gundulabs.Gaze.metainfo.xml /app/share/metainfo/com.gundulabs.Gaze.metainfo.xml
+    sources:
+      - type: dir
+        path: ../../
+        skip:
+          - .git
+          - target
+          - dist
+          - node_modules
+          - docs/.vitepress/dist
+          - docs/.vitepress/cache
+          - .flatpak-builder
+          - flatpak-build
+          - .direnv

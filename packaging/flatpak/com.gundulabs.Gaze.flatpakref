@@ -1,0 +1,7 @@
+[Flatpak Ref]
+Name=com.gundulabs.Gaze
+Branch=stable
+Title=Gaze
+IsRuntime=false
+Url=https://packages.gundulabs.com/flatpak/repo/
+RuntimeRepo=https://flathub.org/repo/flathub.flatpakrepo
