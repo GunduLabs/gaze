@@ -41,7 +41,8 @@ repo_root() {
 REPO=$(repo_root)
 TARGET="$REPO/target/release"
 BACKUP_DIR=/usr/local/share/gaze-dev/originals
-SYSTEMD_DROPIN=/etc/systemd/system/gazed.service.d/dev-checkout.conf
+SYSTEMD_DROPIN=/etc/systemd/system/gazed.service.d/zz-gaze-dev-checkout.conf
+LEGACY_SYSTEMD_DROPIN=/etc/systemd/system/gazed.service.d/dev-checkout.conf
 SYSTEM_EXTENSION_DIR=/usr/share/gnome-shell/extensions/gaze@gundulabs.com
 SCHEMA_SRC="$REPO/packaging/config/org.gnome.shell.extensions.gaze.gschema.xml"
 SCHEMA_DST=/usr/share/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml
@@ -240,15 +241,21 @@ install_systemd_dropin() {
     install -d "$(dirname -- "$SYSTEMD_DROPIN")"
     cat >"$SYSTEMD_DROPIN" <<'EOF'
 [Service]
+# Keep this drop-in lexically late so it wins over older local ExecStart overrides.
+ExecStart=
+ExecStart=/usr/bin/gazed
+
 # The packaged unit hides /home, but dev symlink targets live in the checkout.
 InaccessiblePaths=
 EOF
+    rm -f "$LEGACY_SYSTEMD_DROPIN"
     systemctl daemon-reload
     systemctl restart gazed
 }
 
 remove_systemd_dropin() {
     rm -f "$SYSTEMD_DROPIN"
+    rm -f "$LEGACY_SYSTEMD_DROPIN"
     systemctl daemon-reload
     systemctl restart gazed || true
 }
@@ -271,7 +278,7 @@ show_status() {
             printf '%s is missing\n' "$path"
         fi
     done
-    systemctl cat gazed 2>/dev/null | sed -n '/dev-checkout.conf/,$p' || true
+    systemctl show gazed -p DropInPaths -p ExecStart -p InaccessiblePaths 2>/dev/null || true
 }
 
 cmd=${1:-}
