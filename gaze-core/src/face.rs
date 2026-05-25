@@ -36,8 +36,7 @@ pub struct FaceChecker {
 }
 
 impl FaceChecker {
-    pub fn new() -> anyhow::Result<Self> {
-        let config = Config::load().unwrap_or_default();
+    pub fn new(config: &Config) -> anyhow::Result<Self> {
         let model_path = Path::new(MODELS_DIR).join(config.security.detector());
 
         if !model_path.exists() {
@@ -48,7 +47,7 @@ impl FaceChecker {
         }
 
         let detector = FaceDetector::new(model_path.to_str().unwrap())?;
-        Ok(Self::from_detector_with_config(detector, &config))
+        Ok(Self::from_detector_with_config(detector, config))
     }
 
     pub fn from_detector(detector: FaceDetector) -> Self {
@@ -62,7 +61,7 @@ impl FaceChecker {
     pub fn from_detector_with_config(detector: FaceDetector, config: &Config) -> Self {
         Self {
             detector,
-            dark_threshold: config.cameras.dark_threshold,
+            dark_threshold: config.cameras.dark_threshold as f32,
             dark_pixel_value: config.cameras.dark_pixel_value,
         }
     }

@@ -68,6 +68,7 @@ async fn main() -> anyhow::Result<()> {
         abort_if_lid_closed: Arc::new(Mutex::new(config.auth.abort_if_lid_closed)),
         claim_state: Arc::new(Mutex::new(None)),
         active_cancel: Arc::new(Mutex::new(None)),
+        active_extensions: Arc::new(Mutex::new(std::collections::HashMap::new())),
         rt_handle: tokio::runtime::Handle::current(),
     };
 

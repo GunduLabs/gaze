@@ -100,7 +100,17 @@ require_confirmation = false
 
 `abort_if_ssh` detects SSH sessions from the DBus caller process environment. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor.
 
-Setting `require_confirmation = true` adds an optional confirmation step (e.g., "Press Enter to confirm, Esc to cancel") after a successful face match. This provides a natural intent check before executing privileged commands.
+Setting `require_confirmation = true` adds a manual intent check step after a successful face match (applies **only** to the `pam-gaze-grosshack` module). 
+
+With `require_confirmation = true`:
+- The password prompt still comes up immediately so you are never blocked.
+- If face verification succeeds before you finish entering your password:
+  - In a text-based (TTY) environment, it cancels the password prompt and asks for text confirmation ("Press Enter to confirm, Esc to cancel").
+  - In a graphical Polkit environment:
+    - On **GNOME** (with the Gaze Extension active), it hides the password field, activates the "Authenticate" button, and lets you confirm with a single click. If the extension is inactive, it bypasses confirmation entirely to avoid locking you out.
+    - On **KDE Plasma & LXQt**, it prompts you to press "OK" to confirm.
+    - On **Hyprland**, it prompts you to press "Authenticate" to confirm.
+    - On other graphical environments, it prompts you to press "Enter" to confirm.
 
 After changing config:
 

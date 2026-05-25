@@ -15,10 +15,6 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     };
 
     rt.block_on(async {
-        let require_confirmation = gaze_core::config::Config::load()
-            .map(|c| c.auth.require_confirmation)
-            .unwrap_or(false);
-
         if let Ok(false) = has_enrolled_faces(&username).await {
             return PAM_IGNORE;
         }
@@ -31,17 +27,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         )
         .await
         {
-            Ok(Ok(Some(true))) => {
-                if require_confirmation {
-                    if unsafe { confirm_authentication(pamh) } {
-                        PAM_SUCCESS
-                    } else {
-                        PAM_AUTH_ERR
-                    }
-                } else {
-                    PAM_SUCCESS
-                }
-            }
+            Ok(Ok(Some(true))) => PAM_SUCCESS,
             Ok(Ok(Some(false))) => PAM_AUTH_ERR,
             Ok(Ok(None)) => PAM_IGNORE,
             _ => PAM_AUTHINFO_UNAVAIL,
