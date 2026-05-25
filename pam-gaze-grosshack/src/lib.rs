@@ -149,7 +149,8 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
                 return PAM_SUCCESS;
             }
 
-            let is_polkit = matches!(unsafe { get_pam_service(pamh) }, Some(ref s) if s == "polkit-1");
+            let is_polkit =
+                matches!(unsafe { get_pam_service(pamh) }, Some(ref s) if s == "polkit-1");
 
             if !is_polkit {
                 if unblock_terminal() {
@@ -163,11 +164,13 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
                     PAM_AUTH_ERR
                 }
             } else {
-                let active_uid = rt.block_on(async {
-                    gaze_core::dbus::get_active_session_uid().await.ok()
-                }).or_else(|| get_user_uid(&username));
+                let active_uid = rt
+                    .block_on(async { gaze_core::dbus::get_active_session_uid().await.ok() })
+                    .or_else(|| get_user_uid(&username));
 
-                let de = active_uid.map(detect_desktop_environment).unwrap_or_else(|| "Other".to_string());
+                let de = active_uid
+                    .map(detect_desktop_environment)
+                    .unwrap_or_else(|| "Other".to_string());
 
                 if de == "GNOME" {
                     let is_ext_active = rt.block_on(async {

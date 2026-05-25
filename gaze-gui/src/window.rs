@@ -180,7 +180,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
     let require_confirm_row = libadwaita::ActionRow::new();
     require_confirm_row.set_title("Require Confirmation");
-    require_confirm_row.set_subtitle("Require pressing Enter or clicking OK to authorize after face matches");
+    require_confirm_row
+        .set_subtitle("Require pressing Enter or clicking OK to authorize after face matches");
     let require_confirm_switch = gtk4::Switch::new();
     require_confirm_switch.set_valign(gtk4::Align::Center);
     require_confirm_row.add_suffix(&require_confirm_switch);
@@ -198,9 +199,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         };
 
     let update_liveness_visibility =
-        move |sw: &gtk4::Switch,
-              thr: &libadwaita::SpinRow,
-              fr: &libadwaita::SpinRow| {
+        move |sw: &gtk4::Switch, thr: &libadwaita::SpinRow, fr: &libadwaita::SpinRow| {
             let active = sw.is_active();
             thr.set_visible(active);
             fr.set_visible(active);
@@ -447,7 +446,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         abort_ssh_switch.set_active(cfg.auth.abort_if_ssh);
         abort_lid_switch.set_active(cfg.auth.abort_if_lid_closed);
 
-        update_liveness_visibility(&liveness_enabled_switch, &liveness_threshold_row, &liveness_max_frames_row);
+        update_liveness_visibility(
+            &liveness_enabled_switch,
+            &liveness_threshold_row,
+            &liveness_max_frames_row,
+        );
     }
     is_loading.set(false);
 
@@ -621,7 +624,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 abort_ssh_switch.set_active(cfg.auth.abort_if_ssh);
                 abort_lid_switch.set_active(cfg.auth.abort_if_lid_closed);
 
-                update_liveness_visibility(&liveness_enabled_switch, &liveness_threshold_row, &liveness_max_frames_row);
+                update_liveness_visibility(
+                    &liveness_enabled_switch,
+                    &liveness_threshold_row,
+                    &liveness_max_frames_row,
+                );
 
                 *config.borrow_mut() = cfg;
                 is_loading.set(false);

@@ -409,10 +409,7 @@ impl AuthDaemon {
         Ok(())
     }
 
-    async fn is_extension_active(
-        &self,
-        uid: u32,
-    ) -> fdo::Result<bool> {
+    async fn is_extension_active(&self, uid: u32) -> fdo::Result<bool> {
         let extensions = self.active_extensions.lock().await;
         let is_active = extensions.get(&uid).copied().unwrap_or(false);
         Ok(is_active)
@@ -984,7 +981,8 @@ impl AuthDaemon {
         #[zbus(header)] header: Option<Header<'_>>,
         new_config: Config,
     ) -> fdo::Result<()> {
-        let header = header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
+        let header =
+            header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
 
         self.cancel_active_tasks();

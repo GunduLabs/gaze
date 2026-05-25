@@ -168,7 +168,8 @@ async fn run_config_wizard(
         2 => config.security = SecurityLevel::high(),
         3 => config.security = SecurityLevel::maximum(),
         _ => {
-            let (old_detector, old_recognizer, old_threshold) = if config.security.level == "custom" {
+            let (old_detector, old_recognizer, old_threshold) = if config.security.level == "custom"
+            {
                 (
                     config.security.detector.clone(),
                     config.security.recognizer.clone(),
@@ -199,11 +200,7 @@ async fn run_config_wizard(
                 .parse::<f64>()
                 .unwrap_or(0.6);
 
-            config.security = SecurityLevel::custom(
-                detector,
-                recognizer,
-                threshold,
-            );
+            config.security = SecurityLevel::custom(detector, recognizer, threshold);
         }
     };
 
@@ -250,7 +247,9 @@ async fn run_config_wizard(
         .interact()?;
 
     config.auth.require_confirmation = Confirm::with_theme(&theme)
-        .with_prompt("Require confirmation (press Enter/Authenticate/OK) to authorize after face matches")
+        .with_prompt(
+            "Require confirmation (press Enter/Authenticate/OK) to authorize after face matches",
+        )
         .default(config.auth.require_confirmation)
         .interact()?;
 

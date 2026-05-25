@@ -96,8 +96,6 @@ pub enum VerifyResult {
     VerifyNoMatch,
 }
 
-
-
 pub fn dbus_error_message(err: &zbus::Error) -> String {
     let text = err.to_string();
     if let Some((_, inner)) = text.split_once(':') {
@@ -111,11 +109,17 @@ pub fn dbus_is_file_not_found(err: &zbus::Error) -> bool {
 }
 
 pub async fn load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Config> {
-    proxy.config().await.map_err(|e| anyhow::anyhow!("Failed to read config property: {}", e))
+    proxy
+        .config()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to read config property: {}", e))
 }
 
 pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> anyhow::Result<()> {
-    proxy.set_config(config.clone()).await.map_err(|e| anyhow::anyhow!("Failed to set config property: {}", e))
+    proxy
+        .set_config(config.clone())
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to set config property: {}", e))
 }
 
 pub async fn get_active_session_uid() -> anyhow::Result<u32> {

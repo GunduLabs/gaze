@@ -178,7 +178,9 @@ pub use zbus::Connection;
 pub async fn setup_auth_env() -> Result<(Config, GazeProxy<'static>), c_int> {
     let conn = Connection::system().await.map_err(|_| PAM_SERVICE_ERR)?;
     let proxy = GazeProxy::new(&conn).await.map_err(|_| PAM_SERVICE_ERR)?;
-    let config = gaze_core::dbus::load_config_from_daemon(&proxy).await.map_err(|_| PAM_SERVICE_ERR)?;
+    let config = gaze_core::dbus::load_config_from_daemon(&proxy)
+        .await
+        .map_err(|_| PAM_SERVICE_ERR)?;
     Ok((config, proxy))
 }
 
@@ -267,7 +269,11 @@ pub fn get_user_name_by_uid(uid: u32) -> Option<String> {
     unsafe {
         let pwd = libc::getpwuid(uid);
         if !pwd.is_null() {
-            Some(CStr::from_ptr((*pwd).pw_name).to_string_lossy().into_owned())
+            Some(
+                CStr::from_ptr((*pwd).pw_name)
+                    .to_string_lossy()
+                    .into_owned(),
+            )
         } else {
             None
         }
@@ -280,7 +286,12 @@ pub unsafe fn get_pam_service(pamh: PamHandle) -> Option<String> {
     if ret != PAM_SUCCESS || service_ptr.is_null() {
         return None;
     }
-    unsafe { CStr::from_ptr(service_ptr as *const c_char).to_str().ok().map(|s| s.to_owned()) }
+    unsafe {
+        CStr::from_ptr(service_ptr as *const c_char)
+            .to_str()
+            .ok()
+            .map(|s| s.to_owned())
+    }
 }
 
 pub fn detect_desktop_environment(uid: u32) -> String {
@@ -302,7 +313,12 @@ pub fn detect_desktop_environment(uid: u32) -> String {
                         && let Ok(comm) = std::fs::read_to_string(path.join("comm"))
                     {
                         let comm_trim = comm.trim();
-                        if comm_trim == "plasmashell" || comm_trim == "kwin_wayland" || comm_trim == "kwin_x11" || comm_trim == "lxqt-policykit-agent" || comm_trim == "lxqt-policykit" {
+                        if comm_trim == "plasmashell"
+                            || comm_trim == "kwin_wayland"
+                            || comm_trim == "kwin_x11"
+                            || comm_trim == "lxqt-policykit-agent"
+                            || comm_trim == "lxqt-policykit"
+                        {
                             is_kde = true;
                         } else if comm_trim == "hyprland" || comm_trim == "Hyprland" {
                             is_hyprland = true;
@@ -328,7 +344,12 @@ pub fn detect_desktop_environment(uid: u32) -> String {
 
 pub fn is_text_environment() -> bool {
     let is_tty = unsafe { libc::isatty(0) == 1 };
-    is_tty && std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty").is_ok()
+    is_tty
+        && std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/tty")
+            .is_ok()
 }
 
 #[cfg(test)]

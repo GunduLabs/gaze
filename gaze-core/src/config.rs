@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
-use zvariant::{OwnedValue, Value, Type};
+use zvariant::{OwnedValue, Type, Value};
 
 const DEFAULT_CONFIG_PATH: &str = "/etc/gaze/config.toml";
 pub const USERS_DIR: &str = "/var/lib/gaze/users";
@@ -236,7 +236,6 @@ impl Default for CameraConfig {
 }
 
 impl Config {
-
     pub fn load() -> anyhow::Result<Self> {
         Self::load_from(DEFAULT_CONFIG_PATH)
     }
@@ -370,7 +369,10 @@ mod tests {
         let path = temp.path().join("missing.toml");
 
         let config = Config::load_from(path.to_str().unwrap()).unwrap();
-        assert_eq!(config.security.detector(), SecurityLevel::medium().detector());
+        assert_eq!(
+            config.security.detector(),
+            SecurityLevel::medium().detector()
+        );
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
         assert!((config.cameras.dark_threshold - 0.6).abs() < f64::EPSILON);
         assert_eq!(config.cameras.dark_pixel_value, 10);
