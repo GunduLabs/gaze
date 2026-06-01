@@ -154,6 +154,10 @@ pub trait Gaze {
         config: HashMap<String, HashMap<String, OwnedValue>>,
     ) -> zbus::Result<bool>;
 
+    async fn get_gdm_face_auth(&self) -> zbus::Result<bool>;
+    #[zbus(allow_interactive_auth)]
+    async fn set_gdm_face_auth(&self, enabled: bool) -> zbus::Result<bool>;
+
     #[zbus(signal)]
     fn face_status(&self, status: CaptureStatus) -> zbus::Result<()>;
 

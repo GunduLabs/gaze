@@ -39,34 +39,31 @@ When that happens, apps that read saved secrets (browser credentials, git creden
 
 ## Optional: enable face at GDM login
 
-If you still want this, enable it in GDM's system dconf profile:
+The easiest way is the **Enable face auth at GDM login** switch in the Gaze extension preferences (Extensions app → Gaze → cog icon). Toggling it triggers a polkit prompt, then the daemon writes `/etc/dconf/db/gdm.d/99-gaze` and runs `dconf update` for you.
+
+Reboot to apply. Restarting GDM also works, but it immediately logs out active desktop sessions.
 
 ```bash
-sudo mkdir -p /etc/dconf/profile /etc/dconf/db/gdm.d
-sudo tee /etc/dconf/profile/gdm >/dev/null <<'EOF'
-user-db:user
-system-db:gdm
-file-db:/usr/share/gdm/greeter-dconf-defaults
-EOF
-sudo tee /etc/dconf/db/gdm.d/99-gaze >/dev/null <<'EOF'
-[org/gnome/shell]
-enabled-extensions=['gaze@gundulabs.com']
+sudo reboot
+```
 
+### Manual alternative
+
+If you prefer to do it from a terminal:
+
+```bash
+sudo tee /etc/dconf/db/gdm.d/99-gaze >/dev/null <<'EOF'
 [org/gnome/shell/extensions/gaze]
 enable-face-authentication=true
 EOF
 sudo dconf update
 ```
 
-Then reboot. Restarting GDM also works, but it immediately logs out active desktop sessions.
-
-```bash
-sudo reboot
-```
-
 At the GDM login screen, the selected user's desktop session may not exist yet. Gaze still matches against that user's enrolled faces, but uses the active greeter PipeWire camera session when needed.
 
 ## Disable face at GDM login
+
+Flip the **Enable face auth at GDM login** switch back off in the extension preferences, or remove the override manually:
 
 ```bash
 sudo rm -f /etc/dconf/db/gdm.d/99-gaze*

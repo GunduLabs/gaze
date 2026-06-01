@@ -24,6 +24,10 @@ use gaze_core::face::FaceChecker;
 const CONFIG_PATH: &str = "/etc/gaze/config.toml";
 const POLKIT_ACTION_MANAGE_FACES: &str = "com.gundulabs.gaze.manage-faces";
 const POLKIT_ACTION_MANAGE_CONFIG: &str = "com.gundulabs.gaze.manage-config";
+const POLKIT_ACTION_MANAGE_GDM_PROFILE: &str = "com.gundulabs.gaze.manage-gdm-profile";
+const GDM_DCONF_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
+const GDM_DCONF_OVERRIDE_CONTENT: &str =
+    "[org/gnome/shell/extensions/gaze]\nenable-face-authentication=true\n";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
 const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -1068,6 +1072,48 @@ impl AuthDaemon {
 
         info!("Config reloaded successfully");
         Ok(true)
+    }
+
+    async fn get_gdm_face_auth(&self) -> fdo::Result<bool> {
+        Ok(std::path::Path::new(GDM_DCONF_OVERRIDE_PATH).exists())
+    }
+
+    async fn set_gdm_face_auth(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        enabled: bool,
+    ) -> fdo::Result<bool> {
+        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_GDM_PROFILE).await?;
+
+        let path = std::path::Path::new(GDM_DCONF_OVERRIDE_PATH);
+        if enabled {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    fdo::Error::Failed(format!("Failed to create {}: {e}", parent.display()))
+                })?;
+            }
+            std::fs::write(path, GDM_DCONF_OVERRIDE_CONTENT).map_err(|e| {
+                fdo::Error::Failed(format!("Failed to write {GDM_DCONF_OVERRIDE_PATH}: {e}"))
+            })?;
+        } else if path.exists() {
+            std::fs::remove_file(path).map_err(|e| {
+                fdo::Error::Failed(format!("Failed to remove {GDM_DCONF_OVERRIDE_PATH}: {e}"))
+            })?;
+        }
+
+        let status = std::process::Command::new("dconf")
+            .arg("update")
+            .status()
+            .map_err(|e| fdo::Error::Failed(format!("Failed to run dconf update: {e}")))?;
+        if !status.success() {
+            return Err(fdo::Error::Failed(format!(
+                "dconf update exited with status {}",
+                status.code().unwrap_or(-1)
+            )));
+        }
+
+        info!(enabled, "Updated GDM face authentication override");
+        Ok(enabled)
     }
 
     #[zbus(signal)]
