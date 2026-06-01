@@ -27,6 +27,8 @@ dark_pixel_value = 10
 [auth]
 abort_if_ssh = true
 abort_if_lid_closed = true
+# Require manual intent confirmation (Press Enter to confirm, Esc to cancel) after successful face auth
+require_confirmation = false
 
 [enrollment]
 max_templates = 3

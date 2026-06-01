@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info, warn};
 use zbus::names::BusName;
-use zbus::zvariant::OwnedValue;
 use zbus::{fdo, interface, message::Header, object_server::SignalEmitter};
 
 use crate::align::{align_face, mat_to_rgb};
@@ -58,6 +57,7 @@ pub struct AuthDaemon {
     pub abort_if_lid_closed: Arc<Mutex<bool>>,
     pub claim_state: Arc<Mutex<Option<ClaimState>>>,
     pub active_cancel: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    pub active_extensions: Arc<Mutex<std::collections::HashMap<u32, bool>>>,
     pub rt_handle: tokio::runtime::Handle,
 }
 
@@ -389,29 +389,7 @@ mod tests {
     }
 }
 
-pub async fn get_active_session_uid() -> anyhow::Result<u32> {
-    let connection = zbus::Connection::system().await?;
-    let proxy = zbus::Proxy::new(
-        &connection,
-        "org.freedesktop.login1",
-        "/org/freedesktop/login1/seat/seat0",
-        "org.freedesktop.login1.Seat",
-    )
-    .await?;
-    let active_session: (String, zbus::zvariant::ObjectPath) =
-        proxy.get_property("ActiveSession").await?;
-
-    let session_proxy = zbus::Proxy::new(
-        &connection,
-        "org.freedesktop.login1",
-        active_session.1,
-        "org.freedesktop.login1.Session",
-    )
-    .await?;
-    let user: (u32, zbus::zvariant::ObjectPath) = session_proxy.get_property("User").await?;
-
-    Ok(user.0)
-}
+pub use gaze_core::dbus::get_active_session_uid;
 
 pub fn set_pipewire_runtime_for_uid(uid: u32) {
     unsafe {
@@ -421,6 +399,26 @@ pub fn set_pipewire_runtime_for_uid(uid: u32) {
 
 #[interface(name = "com.gundulabs.Gaze")]
 impl AuthDaemon {
+    async fn register_extension(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        active: bool,
+    ) -> fdo::Result<()> {
+        let caller_uid = Self::caller_uid(&header)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        let mut extensions = self.active_extensions.lock().await;
+        extensions.insert(caller_uid, active);
+        info!(caller_uid, active, "Registered extension status");
+        Ok(())
+    }
+
+    async fn is_extension_active(&self, uid: u32) -> fdo::Result<bool> {
+        let extensions = self.active_extensions.lock().await;
+        let is_active = extensions.get(&uid).copied().unwrap_or(false);
+        Ok(is_active)
+    }
+
     async fn claim(
         &self,
         #[zbus(header)] header: Header<'_>,
@@ -698,7 +696,7 @@ impl AuthDaemon {
                     drop(live_guard);
                     live_scores.push(live_score);
 
-                    if crate::liveness::liveness_passes(&live_scores, liveness_cfg.threshold) {
+                    if crate::liveness::liveness_passes(&live_scores, liveness_cfg.threshold as f32) {
                         info!(
                             live_score,
                             live_samples = live_scores.len(),
@@ -976,27 +974,22 @@ impl AuthDaemon {
         Ok(true)
     }
 
-    async fn get_config(
-        &self,
-        #[zbus(header)] header: Header<'_>,
-    ) -> fdo::Result<HashMap<String, HashMap<String, OwnedValue>>> {
-        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
-        let config = Config::load_from(CONFIG_PATH)
-            .map_err(|e| fdo::Error::Failed(format!("Failed to load config: {e}")))?;
-        Ok(config.to_map())
+    #[zbus(property)]
+    async fn config(&self) -> Config {
+        Config::load_from(CONFIG_PATH).unwrap_or_default()
     }
 
+    #[zbus(property)]
     async fn set_config(
         &self,
-        #[zbus(header)] header: Header<'_>,
-        config: HashMap<String, HashMap<String, OwnedValue>>,
-    ) -> fdo::Result<bool> {
+        #[zbus(header)] header: Option<Header<'_>>,
+        new_config: Config,
+    ) -> fdo::Result<()> {
+        let header =
+            header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
 
         self.cancel_active_tasks();
-
-        let new_config = Config::from_map(config)
-            .map_err(|e| fdo::Error::Failed(format!("Invalid config: {e}")))?;
 
         let new_liveness_detector = if new_config.liveness.enabled {
             let path = crate::models::ensure_liveness_model(gaze_core::config::MODELS_DIR)
@@ -1071,7 +1064,7 @@ impl AuthDaemon {
             .map_err(|e| fdo::Error::Failed(format!("Failed to save config: {e}")))?;
 
         info!("Config reloaded successfully");
-        Ok(true)
+        Ok(())
     }
 
     async fn get_gdm_face_auth(&self) -> fdo::Result<bool> {

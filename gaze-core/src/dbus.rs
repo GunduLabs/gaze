@@ -96,9 +96,6 @@ pub enum VerifyResult {
     VerifyNoMatch,
 }
 
-use std::collections::HashMap;
-use zvariant::OwnedValue;
-
 pub fn dbus_error_message(err: &zbus::Error) -> String {
     let text = err.to_string();
     if let Some((_, inner)) = text.split_once(':') {
@@ -112,13 +109,41 @@ pub fn dbus_is_file_not_found(err: &zbus::Error) -> bool {
 }
 
 pub async fn load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Config> {
-    let map = proxy.get_config().await?;
-    Config::from_map(map)
+    proxy
+        .config()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to read config property: {}", e))
 }
 
 pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> anyhow::Result<()> {
-    proxy.set_config(config.to_map()).await?;
-    Ok(())
+    proxy
+        .set_config(config.clone())
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to set config property: {}", e))
+}
+
+pub async fn get_active_session_uid() -> anyhow::Result<u32> {
+    let connection = zbus::Connection::system().await?;
+    let proxy = zbus::Proxy::new(
+        &connection,
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1/seat/seat0",
+        "org.freedesktop.login1.Seat",
+    )
+    .await?;
+    let active_session: (String, zbus::zvariant::ObjectPath) =
+        proxy.get_property("ActiveSession").await?;
+
+    let session_proxy = zbus::Proxy::new(
+        &connection,
+        "org.freedesktop.login1",
+        active_session.1,
+        "org.freedesktop.login1.Session",
+    )
+    .await?;
+    let user: (u32, zbus::zvariant::ObjectPath) = session_proxy.get_property("User").await?;
+
+    Ok(user.0)
 }
 
 #[proxy(
@@ -129,6 +154,9 @@ pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> a
 pub trait Gaze {
     async fn claim(&self, username: &str) -> zbus::Result<()>;
     async fn release(&self) -> zbus::Result<()>;
+
+    async fn register_extension(&self, active: bool) -> zbus::Result<()>;
+    async fn is_extension_active(&self, uid: u32) -> zbus::Result<bool>;
 
     async fn verify_start(&self, face_name: &str) -> zbus::Result<()>;
     async fn verify_stop(&self) -> zbus::Result<()>;
@@ -146,13 +174,11 @@ pub trait Gaze {
     ) -> zbus::Result<bool>;
     async fn delete_faces(&self, username: &str) -> zbus::Result<bool>;
 
-    #[zbus(allow_interactive_auth)]
-    async fn get_config(&self) -> zbus::Result<HashMap<String, HashMap<String, OwnedValue>>>;
-    #[zbus(allow_interactive_auth)]
-    async fn set_config(
-        &self,
-        config: HashMap<String, HashMap<String, OwnedValue>>,
-    ) -> zbus::Result<bool>;
+    #[zbus(property)]
+    fn config(&self) -> zbus::Result<Config>;
+
+    #[zbus(property)]
+    fn set_config(&self, value: Config) -> zbus::Result<()>;
 
     async fn get_gdm_face_auth(&self) -> zbus::Result<bool>;
     #[zbus(allow_interactive_auth)]
