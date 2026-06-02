@@ -1,5 +1,9 @@
 #![allow(clippy::missing_safety_doc)]
 use std::ffi::{CStr, CString};
+use std::fs::OpenOptions;
+use std::io::{Read, Write};
+use std::mem::MaybeUninit;
+use std::os::fd::AsRawFd;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 
@@ -13,10 +17,12 @@ pub const PAM_SERVICE: c_int = 1;
 pub const PAM_AUTHTOK: c_int = 6;
 pub const PAM_TEXT_INFO: c_int = 4;
 pub const PAM_PROMPT_ECHO_OFF: c_int = 1;
+pub const PAM_PROMPT_ECHO_ON: c_int = 2;
 pub const PAM_AUTHINFO_UNAVAIL: c_int = 9;
 pub const PAM_IGNORE: c_int = 25;
 
 pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
+const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to cancel.";
 
 pub type PamHandle = *mut c_void;
 
@@ -51,7 +57,7 @@ unsafe extern "C" {
     pub fn pam_set_item(pamh: PamHandle, item_type: c_int, item: *const c_void) -> c_int;
 }
 
-unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<String> {
+pub unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<String> {
     unsafe {
         let mut item: *const c_void = ptr::null();
         if pam_get_item(pamh, PAM_CONV, &mut item) != PAM_SUCCESS || item.is_null() {
@@ -85,6 +91,64 @@ unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<Stri
     }
 }
 
+struct TermiosGuard {
+    fd: c_int,
+    original: libc::termios,
+}
+
+impl Drop for TermiosGuard {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = libc::tcsetattr(self.fd, libc::TCSANOW, &self.original);
+        }
+    }
+}
+
+fn confirm_from_tty() -> Option<bool> {
+    let mut tty = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .ok()?;
+    let fd = tty.as_raw_fd();
+
+    let mut original = MaybeUninit::<libc::termios>::uninit();
+    unsafe {
+        if libc::tcgetattr(fd, original.as_mut_ptr()) != 0 {
+            return None;
+        }
+        let original = original.assume_init();
+        let mut raw = original;
+        raw.c_lflag &= !(libc::ICANON | libc::ECHO);
+        raw.c_cc[libc::VMIN] = 1;
+        raw.c_cc[libc::VTIME] = 0;
+        if libc::tcsetattr(fd, libc::TCSANOW, &raw) != 0 {
+            return None;
+        }
+
+        let _guard = TermiosGuard { fd, original };
+        write!(tty, "\x1B[1A\x1B[2K\r{CONFIRMATION_PROMPT}").ok()?;
+        tty.flush().ok()?;
+
+        let mut key = [0_u8; 1];
+        tty.read_exact(&mut key).ok()?;
+        writeln!(tty).ok()?;
+
+        let confirmed = matches!(key[0], b'\n' | b'\r');
+        Some(confirmed)
+    }
+}
+
+pub unsafe fn confirm_authentication(pamh: PamHandle) -> bool {
+    if let Some(confirmed) = confirm_from_tty() {
+        return confirmed;
+    }
+
+    unsafe { converse(pamh, PAM_PROMPT_ECHO_ON, CONFIRMATION_PROMPT) }
+        .map(|resp| resp.is_empty())
+        .unwrap_or(false)
+}
+
 pub unsafe fn say(pamh: PamHandle, text: &str) {
     unsafe {
         let _ = converse(pamh, PAM_TEXT_INFO, text);
@@ -112,9 +176,11 @@ use gaze_core::dbus::GazeProxy;
 pub use zbus::Connection;
 
 pub async fn setup_auth_env() -> Result<(Config, GazeProxy<'static>), c_int> {
-    let config = Config::load().map_err(|_| PAM_SERVICE_ERR)?;
     let conn = Connection::system().await.map_err(|_| PAM_SERVICE_ERR)?;
     let proxy = GazeProxy::new(&conn).await.map_err(|_| PAM_SERVICE_ERR)?;
+    let config = gaze_core::dbus::load_config_from_daemon(&proxy)
+        .await
+        .map_err(|_| PAM_SERVICE_ERR)?;
     Ok((config, proxy))
 }
 
@@ -185,6 +251,105 @@ pub async fn authenticate_biometric(username: &str) -> anyhow::Result<Option<boo
     guard.active = false;
     let _ = proxy.release().await;
     Ok(Some(matched))
+}
+
+pub fn get_user_uid(username: &str) -> Option<u32> {
+    let username_cstr = CString::new(username).ok()?;
+    unsafe {
+        let pwd = libc::getpwnam(username_cstr.as_ptr());
+        if !pwd.is_null() {
+            Some((*pwd).pw_uid)
+        } else {
+            None
+        }
+    }
+}
+
+pub fn get_user_name_by_uid(uid: u32) -> Option<String> {
+    unsafe {
+        let pwd = libc::getpwuid(uid);
+        if !pwd.is_null() {
+            Some(
+                CStr::from_ptr((*pwd).pw_name)
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        } else {
+            None
+        }
+    }
+}
+
+pub unsafe fn get_pam_service(pamh: PamHandle) -> Option<String> {
+    let mut service_ptr: *const c_void = std::ptr::null();
+    let ret = unsafe { pam_get_item(pamh, PAM_SERVICE, &mut service_ptr) };
+    if ret != PAM_SUCCESS || service_ptr.is_null() {
+        return None;
+    }
+    unsafe {
+        CStr::from_ptr(service_ptr as *const c_char)
+            .to_str()
+            .ok()
+            .map(|s| s.to_owned())
+    }
+}
+
+pub fn detect_desktop_environment(uid: u32) -> String {
+    let mut is_kde = false;
+    let mut is_hyprland = false;
+    let mut is_gnome = false;
+
+    if let Ok(entries) = std::fs::read_dir("/proc") {
+        for entry in entries.flatten() {
+            if let Ok(metadata) = entry.metadata()
+                && metadata.is_dir()
+            {
+                let path = entry.path();
+                if let Some(pid_str) = path.file_name().and_then(|s| s.to_str())
+                    && pid_str.chars().all(|c| c.is_ascii_digit())
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    if metadata.uid() == uid
+                        && let Ok(comm) = std::fs::read_to_string(path.join("comm"))
+                    {
+                        let comm_trim = comm.trim();
+                        if comm_trim == "plasmashell"
+                            || comm_trim == "kwin_wayland"
+                            || comm_trim == "kwin_x11"
+                            || comm_trim == "lxqt-policykit-agent"
+                            || comm_trim == "lxqt-policykit"
+                        {
+                            is_kde = true;
+                        } else if comm_trim == "hyprland" || comm_trim == "Hyprland" {
+                            is_hyprland = true;
+                        } else if comm_trim == "gnome-shell" {
+                            is_gnome = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if is_kde {
+        "KDE".to_string()
+    } else if is_hyprland {
+        "Hyprland".to_string()
+    } else if is_gnome {
+        "GNOME".to_string()
+    } else {
+        "Other".to_string()
+    }
+}
+
+pub fn is_text_environment() -> bool {
+    let is_tty = unsafe { libc::isatty(0) == 1 };
+    is_tty
+        && std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/tty")
+            .is_ok()
 }
 
 #[cfg(test)]

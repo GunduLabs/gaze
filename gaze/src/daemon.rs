@@ -9,10 +9,10 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info, warn};
 use zbus::names::BusName;
-use zbus::zvariant::OwnedValue;
 use zbus::{fdo, interface, message::Header, object_server::SignalEmitter};
 
-use crate::align::align_face;
+use crate::align::{align_face, mat_to_rgb};
+use crate::liveness::LivenessDetector;
 use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
 use gaze_core::camera::Camera;
@@ -23,6 +23,10 @@ use gaze_core::face::FaceChecker;
 const CONFIG_PATH: &str = "/etc/gaze/config.toml";
 const POLKIT_ACTION_MANAGE_FACES: &str = "com.gundulabs.gaze.manage-faces";
 const POLKIT_ACTION_MANAGE_CONFIG: &str = "com.gundulabs.gaze.manage-config";
+const POLKIT_ACTION_MANAGE_GDM_PROFILE: &str = "com.gundulabs.gaze.manage-gdm-profile";
+const GDM_DCONF_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
+const GDM_DCONF_OVERRIDE_CONTENT: &str =
+    "[org/gnome/shell/extensions/gaze]\nenable-face-authentication=true\n";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
 const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -34,6 +38,7 @@ pub struct ClaimState {
 
 pub struct FaceData {
     pub embedding: Array1<f32>,
+    pub liveness_face: image::RgbImage,
     pub bbox: [f32; 4],
     pub kpss: ndarray::Array3<f32>,
     pub yaw: f32,
@@ -43,13 +48,16 @@ pub struct FaceData {
 pub struct AuthDaemon {
     pub checker: Arc<Mutex<FaceChecker>>,
     pub recognizer: Arc<Mutex<FaceRecognizer>>,
+    pub liveness: Arc<Mutex<Option<LivenessDetector>>>,
     pub db: Arc<Mutex<UserDatabase>>,
     pub threshold: Arc<Mutex<f32>>,
     pub camera_config: Arc<Mutex<String>>,
+    pub liveness_config: Arc<Mutex<gaze_core::config::LivenessConfig>>,
     pub abort_if_ssh: Arc<Mutex<bool>>,
     pub abort_if_lid_closed: Arc<Mutex<bool>>,
     pub claim_state: Arc<Mutex<Option<ClaimState>>>,
     pub active_cancel: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    pub active_extensions: Arc<Mutex<std::collections::HashMap<u32, bool>>>,
     pub rt_handle: tokio::runtime::Handle,
 }
 
@@ -232,14 +240,18 @@ impl AuthDaemon {
             };
 
             let aligned = align_face(mat_rgb, kpss, 0)?;
-
             let embedding = recognizer.get_embedding(&aligned)?;
 
-            let (x1, y1, x2, y2) = res.bbox.unwrap_or((0.0, 0.0, 0.0, 0.0));
+            let Some((x1, y1, x2, y2)) = res.bbox else {
+                return Ok((status, None));
+            };
+            let rgb = mat_to_rgb(mat_rgb)?;
+            let liveness_face = crate::liveness::crop_face(&rgb, [x1, y1, x2, y2])?;
             Ok((
                 status,
                 Some(FaceData {
                     embedding,
+                    liveness_face,
                     bbox: [x1, y1, x2, y2],
                     kpss: kpss.clone(),
                     yaw: res.yaw,
@@ -377,29 +389,7 @@ mod tests {
     }
 }
 
-pub async fn get_active_session_uid() -> anyhow::Result<u32> {
-    let connection = zbus::Connection::system().await?;
-    let proxy = zbus::Proxy::new(
-        &connection,
-        "org.freedesktop.login1",
-        "/org/freedesktop/login1/seat/seat0",
-        "org.freedesktop.login1.Seat",
-    )
-    .await?;
-    let active_session: (String, zbus::zvariant::ObjectPath) =
-        proxy.get_property("ActiveSession").await?;
-
-    let session_proxy = zbus::Proxy::new(
-        &connection,
-        "org.freedesktop.login1",
-        active_session.1,
-        "org.freedesktop.login1.Session",
-    )
-    .await?;
-    let user: (u32, zbus::zvariant::ObjectPath) = session_proxy.get_property("User").await?;
-
-    Ok(user.0)
-}
+pub use gaze_core::dbus::get_active_session_uid;
 
 pub fn set_pipewire_runtime_for_uid(uid: u32) {
     unsafe {
@@ -409,6 +399,26 @@ pub fn set_pipewire_runtime_for_uid(uid: u32) {
 
 #[interface(name = "com.gundulabs.Gaze")]
 impl AuthDaemon {
+    async fn register_extension(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        active: bool,
+    ) -> fdo::Result<()> {
+        let caller_uid = Self::caller_uid(&header)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        let mut extensions = self.active_extensions.lock().await;
+        extensions.insert(caller_uid, active);
+        info!(caller_uid, active, "Registered extension status");
+        Ok(())
+    }
+
+    async fn is_extension_active(&self, uid: u32) -> fdo::Result<bool> {
+        let extensions = self.active_extensions.lock().await;
+        let is_active = extensions.get(&uid).copied().unwrap_or(false);
+        Ok(is_active)
+    }
+
     async fn claim(
         &self,
         #[zbus(header)] header: Header<'_>,
@@ -558,9 +568,11 @@ impl AuthDaemon {
 
         let checker_arc = self.checker.clone();
         let recognizer_arc = self.recognizer.clone();
+        let liveness_arc = self.liveness.clone();
         let db_arc = self.db.clone();
         let threshold_arc = self.threshold.clone();
         let camera_config = self.camera_config.lock().await.clone();
+        let liveness_cfg = self.liveness_config.lock().await.clone();
 
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
@@ -580,9 +592,17 @@ impl AuthDaemon {
                 }
             };
 
-            info!("VerifyStart: sensing faces for user {}", username);
+            info!(
+                liveness_enabled = liveness_cfg.enabled,
+                liveness_threshold = liveness_cfg.threshold,
+                "VerifyStart: sensing faces for user {}",
+                username
+            );
 
             let mut last_capture_status: Option<CaptureStatus> = None;
+            let mut last_faces: Vec<(String, f64, f64, bool, u32)>;
+            let mut live_scores: Vec<f32> = Vec::new();
+            let mut frames_seen: u32 = 0;
             let mut dark_since: Option<Instant> = None;
             loop {
                 tokio::select! {
@@ -620,36 +640,85 @@ impl AuthDaemon {
                     dark_since = None;
                 }
 
-                if let Some(data) = embed_opt {
-                    let embed = data.embedding;
-                    let db = db_arc.lock().await;
+                let Some(data) = embed_opt else { continue };
+                let embed = data.embedding;
+                let liveness_face = data.liveness_face;
+                let db = db_arc.lock().await;
 
-                    match db.match_faces(&username, &embed, threshold) {
-                        Ok(scores) => {
-                            let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
-                            let faces: Vec<(String, f64, f64, bool, u32)> = scores
-                                .iter()
-                                .map(|(name, sim, pct, passed, count)| {
-                                    (name.clone(), *sim as f64, *pct as f64, *passed, *count)
-                                })
-                                .collect();
-
-                            let result = if matched {
-                                info!("VerifyStart: MATCHED!");
-                                VerifyResult::VerifyMatch
-                            } else {
-                                info!("VerifyStart: no match");
-                                VerifyResult::VerifyNoMatch
-                            };
-                            let _ = Self::verify_status(&ctxt, result, faces).await;
-                            break;
-                        }
-                        Err(e) => {
-                            error!("DB error during verify: {e}");
-                            let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new()).await;
-                            break;
-                        }
+                let scores = match db.match_faces(&username, &embed, threshold) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        error!("DB error during verify: {e}");
+                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new()).await;
+                        break;
                     }
+                };
+                drop(db);
+
+                let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
+                let faces: Vec<(String, f64, f64, bool, u32)> = scores
+                    .iter()
+                    .map(|(name, sim, pct, passed, count)| {
+                        (name.clone(), *sim as f64, *pct as f64, *passed, *count)
+                    })
+                    .collect();
+                last_faces = faces.clone();
+
+                if !liveness_cfg.enabled {
+                    let result = if matched {
+                        info!("VerifyStart: MATCHED!");
+                        VerifyResult::VerifyMatch
+                    } else {
+                        info!("VerifyStart: no match");
+                        VerifyResult::VerifyNoMatch
+                    };
+                    let _ = Self::verify_status(&ctxt, result, faces).await;
+                    break;
+                }
+
+                if matched {
+                    let mut live_guard = liveness_arc.lock().await;
+                    let Some(detector) = live_guard.as_mut() else {
+                        error!("Liveness is enabled but the detector is unavailable");
+                        drop(live_guard);
+                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, last_faces.clone()).await;
+                        break;
+                    };
+                    let live_score = match detector.live_score(&liveness_face) {
+                        Ok(score) => score,
+                        Err(e) => {
+                            error!("Liveness inference failed: {e}");
+                            drop(live_guard);
+                            let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, last_faces.clone()).await;
+                            break;
+                        }
+                    };
+                    drop(live_guard);
+                    live_scores.push(live_score);
+
+                    if crate::liveness::liveness_passes(&live_scores, liveness_cfg.threshold as f32) {
+                        info!(
+                            live_score,
+                            live_samples = live_scores.len(),
+                            "VerifyStart: MATCHED + liveness confirmed"
+                        );
+                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyMatch, last_faces.clone()).await;
+                        break;
+                    }
+                    info!(
+                        live_score,
+                        "VerifyStart: match rejected by liveness gate"
+                    );
+                }
+
+                frames_seen += 1;
+                if frames_seen >= liveness_cfg.max_frames {
+                    info!(
+                        frames = frames_seen,
+                        "VerifyStart: liveness gate timed out"
+                    );
+                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, last_faces.clone()).await;
+                    break;
                 }
             }
         });
@@ -905,33 +974,48 @@ impl AuthDaemon {
         Ok(true)
     }
 
-    async fn get_config(
-        &self,
-        #[zbus(header)] header: Header<'_>,
-    ) -> fdo::Result<HashMap<String, HashMap<String, OwnedValue>>> {
-        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
-        let config = Config::load_from(CONFIG_PATH)
-            .map_err(|e| fdo::Error::Failed(format!("Failed to load config: {e}")))?;
-        Ok(config.to_map())
+    #[zbus(property)]
+    async fn config(&self) -> Config {
+        Config::load_from(CONFIG_PATH).unwrap_or_default()
     }
 
+    #[zbus(property)]
     async fn set_config(
         &self,
-        #[zbus(header)] header: Header<'_>,
-        config: HashMap<String, HashMap<String, OwnedValue>>,
-    ) -> fdo::Result<bool> {
+        #[zbus(header)] header: Option<Header<'_>>,
+        new_config: Config,
+    ) -> fdo::Result<()> {
+        let header =
+            header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
 
         self.cancel_active_tasks();
 
-        let new_config = Config::from_map(config)
-            .map_err(|e| fdo::Error::Failed(format!("Invalid config: {e}")))?;
+        let new_liveness_detector = if new_config.liveness.enabled {
+            let path = crate::models::ensure_liveness_model(gaze_core::config::MODELS_DIR)
+                .map_err(|e| fdo::Error::Failed(format!("Failed to ensure liveness model: {e}")))?;
+            Some(
+                LivenessDetector::new(path.to_str().unwrap()).map_err(|e| {
+                    fdo::Error::Failed(format!("Failed to load liveness model: {e}"))
+                })?,
+            )
+        } else {
+            None
+        };
 
         let mut threshold = self.threshold.lock().await;
         *threshold = new_config.security.threshold();
 
         let mut camera_config = self.camera_config.lock().await;
         *camera_config = new_config.cameras.rgb.clone();
+
+        let mut live_cfg = self.liveness_config.lock().await;
+        *live_cfg = new_config.liveness.clone();
+        drop(live_cfg);
+
+        let mut liveness_slot = self.liveness.lock().await;
+        *liveness_slot = new_liveness_detector;
+        drop(liveness_slot);
 
         let mut abort_if_ssh = self.abort_if_ssh.lock().await;
         *abort_if_ssh = new_config.auth.abort_if_ssh;
@@ -980,7 +1064,49 @@ impl AuthDaemon {
             .map_err(|e| fdo::Error::Failed(format!("Failed to save config: {e}")))?;
 
         info!("Config reloaded successfully");
-        Ok(true)
+        Ok(())
+    }
+
+    async fn get_gdm_face_auth(&self) -> fdo::Result<bool> {
+        Ok(std::path::Path::new(GDM_DCONF_OVERRIDE_PATH).exists())
+    }
+
+    async fn set_gdm_face_auth(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        enabled: bool,
+    ) -> fdo::Result<bool> {
+        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_GDM_PROFILE).await?;
+
+        let path = std::path::Path::new(GDM_DCONF_OVERRIDE_PATH);
+        if enabled {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    fdo::Error::Failed(format!("Failed to create {}: {e}", parent.display()))
+                })?;
+            }
+            std::fs::write(path, GDM_DCONF_OVERRIDE_CONTENT).map_err(|e| {
+                fdo::Error::Failed(format!("Failed to write {GDM_DCONF_OVERRIDE_PATH}: {e}"))
+            })?;
+        } else if path.exists() {
+            std::fs::remove_file(path).map_err(|e| {
+                fdo::Error::Failed(format!("Failed to remove {GDM_DCONF_OVERRIDE_PATH}: {e}"))
+            })?;
+        }
+
+        let status = std::process::Command::new("dconf")
+            .arg("update")
+            .status()
+            .map_err(|e| fdo::Error::Failed(format!("Failed to run dconf update: {e}")))?;
+        if !status.success() {
+            return Err(fdo::Error::Failed(format!(
+                "dconf update exited with status {}",
+                status.code().unwrap_or(-1)
+            )));
+        }
+
+        info!(enabled, "Updated GDM face authentication override");
+        Ok(enabled)
     }
 
     #[zbus(signal)]

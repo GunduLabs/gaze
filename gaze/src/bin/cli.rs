@@ -147,12 +147,13 @@ async fn run_config_wizard(
     ))?;
 
     let level_options = ["low", "medium", "high", "maximum", "custom"];
-    let default_level_idx = match config.security {
-        SecurityLevel::Low => 0,
-        SecurityLevel::Medium => 1,
-        SecurityLevel::High => 2,
-        SecurityLevel::Maximum => 3,
-        SecurityLevel::Custom { .. } => 4,
+    let default_level_idx = match config.security.level.as_str() {
+        "low" => 0,
+        "medium" => 1,
+        "high" => 2,
+        "maximum" => 3,
+        "custom" => 4,
+        _ => 1,
     };
 
     let selected = Select::with_theme(&theme)
@@ -162,22 +163,24 @@ async fn run_config_wizard(
         .interact()?;
 
     match selected {
-        0 => config.security = SecurityLevel::Low,
-        1 => config.security = SecurityLevel::Medium,
-        2 => config.security = SecurityLevel::High,
-        3 => config.security = SecurityLevel::Maximum,
+        0 => config.security = SecurityLevel::low(),
+        1 => config.security = SecurityLevel::medium(),
+        2 => config.security = SecurityLevel::high(),
+        3 => config.security = SecurityLevel::maximum(),
         _ => {
-            let (old_detector, old_recognizer, old_threshold) = match &config.security {
-                SecurityLevel::Custom {
-                    detector,
-                    recognizer,
-                    threshold,
-                } => (detector.clone(), recognizer.clone(), *threshold),
-                _ => (
+            let (old_detector, old_recognizer, old_threshold) = if config.security.level == "custom"
+            {
+                (
+                    config.security.detector.clone(),
+                    config.security.recognizer.clone(),
+                    config.security.threshold,
+                )
+            } else {
+                (
                     "det_10g.onnx".to_string(),
                     "w600k_r50.onnx".to_string(),
                     0.6,
-                ),
+                )
             };
 
             let detector = Input::with_theme(&theme)
@@ -194,14 +197,10 @@ async fn run_config_wizard(
                 .with_prompt("Custom threshold (0.0 - 1.0)")
                 .default(old_threshold.to_string())
                 .interact_text()?
-                .parse::<f32>()
+                .parse::<f64>()
                 .unwrap_or(0.6);
 
-            config.security = SecurityLevel::Custom {
-                detector,
-                recognizer,
-                threshold,
-            };
+            config.security = SecurityLevel::custom(detector, recognizer, threshold);
         }
     };
 
@@ -223,6 +222,20 @@ async fn run_config_wizard(
 
     config.cameras.rgb = cameras[selected_cam_idx].1.clone();
 
+    config.cameras.dark_threshold = Input::with_theme(&theme)
+        .with_prompt("Camera darkness threshold (average pixel intensity ratio)")
+        .default(config.cameras.dark_threshold.to_string())
+        .interact_text()?
+        .parse::<f64>()
+        .unwrap_or(0.6);
+
+    config.cameras.dark_pixel_value = Input::with_theme(&theme)
+        .with_prompt("Camera dark pixel value cutoff (0-255)")
+        .default(config.cameras.dark_pixel_value.to_string())
+        .interact_text()?
+        .parse::<u8>()
+        .unwrap_or(10);
+
     config.auth.abort_if_ssh = Confirm::with_theme(&theme)
         .with_prompt("Abort face auth for SSH sessions")
         .default(config.auth.abort_if_ssh)
@@ -233,10 +246,34 @@ async fn run_config_wizard(
         .default(config.auth.abort_if_lid_closed)
         .interact()?;
 
+    config.auth.require_confirmation = Confirm::with_theme(&theme)
+        .with_prompt(
+            "Require confirmation (press Enter/Authenticate/OK) to authorize after face matches",
+        )
+        .default(config.auth.require_confirmation)
+        .interact()?;
+
     config.enrollment.max_templates = Input::with_theme(&theme)
         .with_prompt("Max templates (sets of captures)")
         .default(config.enrollment.max_templates)
         .interact_text()?;
+
+    config.liveness.enabled = Confirm::with_theme(&theme)
+        .with_prompt("Enable liveness anti-spoofing")
+        .default(config.liveness.enabled)
+        .interact()?;
+    if config.liveness.enabled {
+        config.liveness.threshold = Input::with_theme(&theme)
+            .with_prompt("Liveness threshold (0.0 - 1.0)")
+            .default(config.liveness.threshold.to_string())
+            .interact_text()?
+            .parse::<f64>()
+            .unwrap_or(0.8);
+        config.liveness.max_frames = Input::with_theme(&theme)
+            .with_prompt("Liveness max frames")
+            .default(config.liveness.max_frames)
+            .interact_text()?;
+    }
 
     apply_config_to_daemon(proxy, &config).await?;
     term.write_line(&format!(
@@ -1006,13 +1043,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Config { show } => {
             let config = load_config_from_daemon(&proxy).await?;
             if show {
-                let level_name = match config.security {
-                    SecurityLevel::Low => "low",
-                    SecurityLevel::Medium => "medium",
-                    SecurityLevel::High => "high",
-                    SecurityLevel::Maximum => "maximum",
-                    SecurityLevel::Custom { .. } => "custom",
-                };
+                let level_name = config.security.level.as_str();
                 println!("{} {}", style("security.level:").bold(), level_name);
                 println!(
                     "{} {}",
@@ -1052,8 +1083,28 @@ async fn main() -> anyhow::Result<()> {
                 );
                 println!(
                     "{} {}",
+                    style("auth.require_confirmation:").bold(),
+                    config.auth.require_confirmation
+                );
+                println!(
+                    "{} {}",
                     style("enrollment.max_templates:").bold(),
                     config.enrollment.max_templates
+                );
+                println!(
+                    "{} {}",
+                    style("liveness.enabled:").bold(),
+                    config.liveness.enabled
+                );
+                println!(
+                    "{} {:.2}",
+                    style("liveness.threshold:").bold(),
+                    config.liveness.threshold
+                );
+                println!(
+                    "{} {}",
+                    style("liveness.max_frames:").bold(),
+                    config.liveness.max_frames
                 );
                 return Ok(());
             }

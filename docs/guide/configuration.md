@@ -18,9 +18,15 @@ dark_pixel_value = 10
 [auth]
 abort_if_ssh = true
 abort_if_lid_closed = true
+require_confirmation = false
 
 [enrollment]
 max_templates = 3
+
+[liveness]
+enabled = true
+threshold = 0.8
+max_frames = 40
 ```
 
 ## Change security level
@@ -81,7 +87,7 @@ dark_pixel_value = 10
 
 With the defaults, a frame is skipped when at least 60% of pixels have luminance below 10.
 
-## Authentication aborts
+## Authentication options
 
 Gaze skips face authentication in sessions where the camera is unlikely or unsafe to use:
 
@@ -89,9 +95,22 @@ Gaze skips face authentication in sessions where the camera is unlikely or unsaf
 [auth]
 abort_if_ssh = true
 abort_if_lid_closed = true
+require_confirmation = false
 ```
 
 `abort_if_ssh` detects SSH sessions from the DBus caller process environment. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor.
+
+Setting `require_confirmation = true` adds a manual intent check step after a successful face match (applies **only** to the `pam-gaze-grosshack` module). 
+
+With `require_confirmation = true`:
+- The password prompt still comes up immediately so you are never blocked.
+- If face verification succeeds before you finish entering your password:
+  - In a text-based (TTY) environment, it cancels the password prompt and asks for text confirmation ("Press Enter to confirm, Esc to cancel").
+  - In a graphical Polkit environment:
+    - On **GNOME** (with the Gaze Extension active), it hides the password field, activates the "Authenticate" button, and lets you confirm with a single click. If the extension is inactive, it bypasses confirmation entirely to avoid locking you out.
+    - On **KDE Plasma & LXQt**, it prompts you to press "OK" to confirm.
+    - On **Hyprland**, it prompts you to press "Authenticate" to confirm.
+    - On other graphical environments, it prompts you to press "Enter" to confirm.
 
 After changing config:
 
@@ -117,10 +136,24 @@ max_templates = 3
 
 Increase this if auth is unreliable in varied lighting.
 
+## Liveness Anti-Spoofing
+
+```toml
+[liveness]
+enabled = true
+threshold = 0.8
+max_frames = 40
+```
+
+When enabled, Gaze runs a local MiniFASNet-V2 anti-spoofing model on the detected face crop after a recognition match. Authentication succeeds only when the face matches and either one frame reaches `threshold` or the best few frames show sustained near-threshold liveness.
+
+`max_frames` caps how many valid face frames Gaze will try before returning no match.
+
 ## Recommended tuning workflow
 
 1. Start with `[security] level = "medium"`
 2. Enroll one profile: `gaze add-face default`
 3. Test 5 to 10 times using `gaze auth --verbose`
-4. If false accepts are too high, switch to `high`
-5. If false rejects are too high, run `gaze refine-face default`
+4. If photo or screen spoofing is a concern, keep `[liveness] enabled = true`
+5. If false accepts are too high, switch to `high`
+6. If false rejects are too high, run `gaze refine-face default`
