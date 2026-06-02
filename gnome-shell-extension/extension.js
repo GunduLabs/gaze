@@ -2,6 +2,23 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Util from 'resource:///org/gnome/shell/gdm/util.js';
+import * as PolkitAgent from 'resource:///org/gnome/shell/ui/components/polkitAgent.js';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+
+const GAZE_DBUS_INTERFACE = `
+<node>
+  <interface name="com.gundulabs.Gaze">
+    <method name="RegisterExtension">
+      <arg name="active" type="b" direction="in"/>
+    </method>
+    <method name="IsExtensionActive">
+      <arg name="uid" type="u" direction="in"/>
+      <arg name="active" type="b" direction="out"/>
+    </method>
+  </interface>
+</node>
+`;
+const GazeProxy = Gio.DBusProxy.makeProxyWrapper(GAZE_DBUS_INTERFACE);
 
 const FACE_SERVICE_NAME = 'gdm-face';
 const EXTENSION_SCHEMA_ID = 'org.gnome.shell.extensions.gaze';
@@ -36,11 +53,144 @@ export default class GazeFaceAuthExtension extends Extension {
         this._injectionManager = new InjectionManager();
         this._extensionSettings = new Gio.Settings({schema_id: EXTENSION_SCHEMA_ID});
 
+        // Initialize D-Bus proxy and register extension
+        try {
+            this._dbusProxy = new GazeProxy(
+                Gio.DBus.system,
+                'com.gundulabs.Gaze',
+                '/com/gundulabs/Gaze',
+                (proxy, error) => {
+                    if (error) {
+                        return;
+                    }
+                    try {
+                        proxy.RegisterExtensionRemote(true);
+                    } catch (e) {
+                    }
+                }
+            );
+
+            this._dbusProxy.connect('notify::g-name-owner', () => {
+                if (this._dbusProxy.g_name_owner) {
+                    try {
+                        this._dbusProxy.RegisterExtensionRemote(true);
+                    } catch (e) {
+                    }
+                }
+            });
+        } catch (e) {
+        }
+
         const proto = Util.ShellUserVerifier.prototype;
         const extensionSettings = this._extensionSettings;
 
         const getFaceEnabled = () => extensionSettings.get_boolean(FACE_AUTHENTICATION_KEY);
         const getMaxTries = () => Math.max(1, extensionSettings.get_int(MAX_TRIES_KEY));
+
+        const dbusProxy = this._dbusProxy;
+
+        // UI Interceptor Hook for Polkit Confirmation
+        this._injectionManager.overrideMethod(PolkitAgent.Component.prototype, '_onInitiate',
+            original => {
+                return function (cookie, identity, actionId, message, iconName, details) {
+                    if (dbusProxy) {
+                        try {
+                            dbusProxy.RegisterExtensionRemote(true);
+                        } catch (e) {
+                        }
+                    }
+                    original.call(this, cookie, identity, actionId, message, iconName, details);
+
+                    const dialog = this._currentDialog;
+                    if (!dialog) {
+                        return;
+                    }
+
+                    const klass = dialog.constructor;
+
+                    // 1. Direct session hook for the first dialog to avoid GObject bind races
+                    if (dialog._session) {
+                        dialog._session.connect('show-info', (session, text) => {
+                            if (text && text.trim() === 'GAZE_CONFIRMATION_REQUEST') {
+                                if (dialog._passwordEntry)
+                                    dialog._passwordEntry.hide();
+
+                                if (dialog._infoMessageLabel) {
+                                    dialog._infoMessageLabel.text = 'Face Verified. Press Authenticate to confirm.';
+                                    dialog._infoMessageLabel.show();
+                                }
+
+                                if (dialog._okButton) {
+                                    dialog._okButton.reactive = true;
+                                    dialog._okButton.track_hover = true;
+                                }
+
+                                dialog._confirmMode = true;
+                                dialog._ensureOpen();
+                            }
+                        });
+                    }
+
+                    // 2. Direct _onEntryActivate override for the first dialog
+                    const originalOnEntryActivate = dialog._onEntryActivate;
+                    dialog._onEntryActivate = function () {
+                        if (this._confirmMode) {
+                            this._session.response('CONFIRM');
+                        } else {
+                            originalOnEntryActivate.call(this);
+                        }
+                    };
+
+                    // 3. Class Prototype override for all subsequent dialogs
+                    if (klass && !klass._gazeOverridden) {
+                        klass._gazeOverridden = true;
+
+                        // Override _onSessionShowInfo on prototype
+                        const originalShowInfo = klass.prototype._onSessionShowInfo;
+                        klass.prototype._onSessionShowInfo = function (session, text) {
+                            if (text && text.trim() === 'GAZE_CONFIRMATION_REQUEST') {
+                                if (this._passwordEntry) {
+                                    this._passwordEntry.hide();
+                                }
+
+                                if (this._infoMessageLabel) {
+                                    this._infoMessageLabel.text = 'Face Verified. Press Authenticate to confirm.';
+                                    this._infoMessageLabel.show();
+                                }
+
+                                if (this._okButton) {
+                                    this._okButton.reactive = true;
+                                    this._okButton.track_hover = true;
+                                }
+
+                                this._confirmMode = true;
+                                this._ensureOpen();
+                            } else {
+                                originalShowInfo.call(this, session, text);
+                            }
+                        };
+
+                        // Override _onEntryActivate on prototype
+                        const originalProtoOnEntryActivate = klass.prototype._onEntryActivate;
+                        klass.prototype._onEntryActivate = function () {
+                            if (this._confirmMode) {
+                                this._session.response('CONFIRM');
+                            } else {
+                                originalProtoOnEntryActivate.call(this);
+                            }
+                        };
+                    }
+                };
+            });
+
+        // Restart polkitAgent component to bind overrides
+        const manager = Main.componentManager;
+        if (manager) {
+            manager._disableComponent('polkitAgent');
+            delete manager._allComponents['polkitAgent'];
+            manager._enableComponent('polkitAgent').catch(e => {
+            });
+        }
 
         this._injectionManager.overrideMethod(proto, '_updateEnabledServices',
             original => {
@@ -206,6 +356,15 @@ export default class GazeFaceAuthExtension extends Extension {
     }
 
     disable() {
+        if (this._dbusProxy) {
+            try {
+                this._dbusProxy.RegisterExtensionRemote(false);
+            } catch (e) {
+                logError(e, '[gaze] Failed to unregister extension');
+            }
+            this._dbusProxy = null;
+        }
+
         const proto = Util.ShellUserVerifier.prototype;
         delete proto.serviceIsFace;
         delete proto.serviceIsBiometric;
@@ -215,5 +374,14 @@ export default class GazeFaceAuthExtension extends Extension {
         this._injectionManager.clear();
         this._injectionManager = null;
         this._extensionSettings = null;
+
+        // Restart polkitAgent component to restore standard class
+        const manager = Main.componentManager;
+        if (manager) {
+            manager._disableComponent('polkitAgent');
+            delete manager._allComponents['polkitAgent'];
+            manager._enableComponent('polkitAgent').catch(e => {
+            });
+        }
     }
 }

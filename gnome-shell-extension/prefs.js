@@ -102,7 +102,24 @@ function formatError(error) {
 function labelFor(labels, value) {
     return labels.get(value) ?? value;
 }
+const GAZE_IFACE = 'com.gundulabs.Gaze';
 
+function callGaze(method, params) {
+    const conn = Gio.DBus.system;
+    return new Promise((resolve, reject) => {
+        conn.call(
+            GAZE_BUS_NAME, GAZE_OBJECT_PATH, GAZE_IFACE, method, params,
+            null, Gio.DBusCallFlags.ALLOW_INTERACTIVE_AUTHORIZATION, -1, null,
+            (_src, res) => {
+                try {
+                    resolve(conn.call_finish(res));
+                } catch (e) {
+                    reject(e);
+                }
+            }
+        );
+    });
+}
 export default class GazePreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const extensionSettings = new Gio.Settings({schema_id: EXTENSION_SCHEMA_ID});
@@ -392,6 +409,58 @@ export default class GazePreferences extends ExtensionPreferences {
 
         behaviorPage.add(profileGroup);
         behaviorPage.add(behaviorGroup);
+
+        const loginGroup = new Adw.PreferencesGroup({
+            title: 'GDM login screen',
+            description:
+                'Enable face authentication at the GDM login screen. ' +
+                'Requires administrator authorization. ' +
+                'Note: GNOME keyring is normally unlocked by your password, ' +
+                'so logging in with face only may leave it locked.',
+        });
+
+        const gdmRow = new Adw.SwitchRow({
+            title: 'Enable face auth at GDM login',
+            active: false,
+            sensitive: false,
+        });
+
+        let suppressGdmNotify = false;
+        const setGdmRow = active => {
+            suppressGdmNotify = true;
+            gdmRow.set_active(active);
+            suppressGdmNotify = false;
+        };
+
+        callGaze('GetGdmFaceAuth', null)
+            .then(result => {
+                const [enabled] = result.deepUnpack();
+                setGdmRow(enabled);
+                gdmRow.set_sensitive(true);
+            })
+            .catch(error => {
+                logError(error, '[gaze] Failed to read GDM face auth state');
+                gdmRow.set_subtitle('Gaze daemon unavailable.');
+            });
+
+        gdmRow.connect('notify::active', row => {
+            if (suppressGdmNotify)
+                return;
+            const desired = row.active;
+            row.set_sensitive(false);
+            callGaze('SetGdmFaceAuth', new GLib.Variant('(b)', [desired]))
+                .then(() => {
+                    gdmRow.set_sensitive(true);
+                })
+                .catch(error => {
+                    logError(error, '[gaze] Failed to update GDM face auth');
+                    setGdmRow(!desired);
+                    gdmRow.set_sensitive(true);
+                });
+        });
+        loginGroup.add(gdmRow);
+
+        behaviorPage.add(loginGroup);
 
         window.add(behaviorPage);
     }

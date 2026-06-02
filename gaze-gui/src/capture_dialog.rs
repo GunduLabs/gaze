@@ -1,6 +1,5 @@
 use crate::camera_view::{CameraFeed, build_camera_widget};
 use futures::StreamExt;
-use gaze_core::config::Config;
 use gaze_core::dbus::{EnrollPrompt, GazeProxy};
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -15,10 +14,10 @@ pub fn show_capture_dialog(
     username: &str,
     face_name: Option<&str>,
     proxy: &Rc<GazeProxy<'static>>,
+    camera_device: &str,
     on_done: impl Fn() + 'static,
 ) {
-    let config = Config::load().unwrap_or_default();
-    let feed = match CameraFeed::new(&config.cameras.rgb) {
+    let feed = match CameraFeed::new(camera_device) {
         Ok(f) => {
             f.start();
             f
