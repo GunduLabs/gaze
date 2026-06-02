@@ -36,6 +36,12 @@ gsettings set org.gnome.shell enabled-extensions \
 gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
+## Create a face profile
+
+Open the Gaze extension settings from GNOME Extensions or Extension Manager, then use **Face profiles** to create or refine a profile for your current user. The profile name defaults to `default`, matching the CLI quick-start flow.
+
+Keep the settings window open while enrollment is running. Follow the camera prompts until the profile is saved, or press **Cancel** to stop enrollment.
+
 ## Login warning (GNOME keyring)
 
 GDM loads the extension from package defaults, but face authentication for the GDM login screen is disabled by default.
