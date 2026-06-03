@@ -49,8 +49,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         .transient_for(parent)
         .modal(true)
         .title("Configuration")
-        .default_width(500)
-        .default_height(470)
+        .default_width(600)
+        .default_height(700)
         .build();
 
     let toolbar_view = libadwaita::ToolbarView::new();
@@ -113,6 +113,18 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     camera_row.set_model(Some(&cam_model));
     hardware_group.add(&camera_row);
 
+    let dark_threshold_row = libadwaita::SpinRow::with_range(0.0, 1.0, 0.01);
+    dark_threshold_row.set_digits(3);
+    dark_threshold_row.set_title("Darkness Threshold");
+    dark_threshold_row.set_subtitle("Minimum average pixel intensity ratio");
+    hardware_group.add(&dark_threshold_row);
+
+    let dark_pixel_value_row = libadwaita::SpinRow::with_range(0.0, 255.0, 1.0);
+    dark_pixel_value_row.set_digits(0);
+    dark_pixel_value_row.set_title("Dark Pixel Value Cutoff");
+    dark_pixel_value_row.set_subtitle("Pixel value considered 'dark' (0-255)");
+    hardware_group.add(&dark_pixel_value_row);
+
     let enrollment_group = libadwaita::PreferencesGroup::new();
     enrollment_group.set_title("Enrollment");
     page.add(&enrollment_group);
@@ -121,6 +133,59 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     templates_row.set_title("Max Templates");
     templates_row.set_subtitle("Number of capture sets stored per face");
     enrollment_group.add(&templates_row);
+
+    let liveness_group = libadwaita::PreferencesGroup::new();
+    liveness_group.set_title("Liveness Anti-Spoofing");
+    page.add(&liveness_group);
+
+    let liveness_enabled_row = libadwaita::ActionRow::new();
+    liveness_enabled_row.set_title("Enable Liveness Spoof Prevention");
+    liveness_enabled_row.set_subtitle("Analyze face depth/reflectance to prevent photo spoofing");
+    let liveness_enabled_switch = gtk4::Switch::new();
+    liveness_enabled_switch.set_valign(gtk4::Align::Center);
+    liveness_enabled_row.add_suffix(&liveness_enabled_switch);
+    liveness_group.add(&liveness_enabled_row);
+
+    let liveness_threshold_row = libadwaita::SpinRow::with_range(0.0, 1.0, 0.01);
+    liveness_threshold_row.set_digits(3);
+    liveness_threshold_row.set_title("Liveness Threshold");
+    liveness_threshold_row.set_subtitle("Minimum spoof prevention confidence");
+    liveness_group.add(&liveness_threshold_row);
+
+    let liveness_max_frames_row = libadwaita::SpinRow::with_range(1.0, 500.0, 1.0);
+    liveness_max_frames_row.set_digits(0);
+    liveness_max_frames_row.set_title("Liveness Max Frames");
+    liveness_max_frames_row.set_subtitle("Maximum frames analyzed for liveness verification");
+    liveness_group.add(&liveness_max_frames_row);
+
+    let auth_group = libadwaita::PreferencesGroup::new();
+    auth_group.set_title("Auth");
+    page.add(&auth_group);
+
+    let abort_ssh_row = libadwaita::ActionRow::new();
+    abort_ssh_row.set_title("Abort if SSH");
+    abort_ssh_row.set_subtitle("Prevent authentication over SSH connections");
+    let abort_ssh_switch = gtk4::Switch::new();
+    abort_ssh_switch.set_valign(gtk4::Align::Center);
+    abort_ssh_row.add_suffix(&abort_ssh_switch);
+    auth_group.add(&abort_ssh_row);
+
+    let abort_lid_row = libadwaita::ActionRow::new();
+    abort_lid_row.set_title("Abort if Lid Closed");
+    abort_lid_row.set_subtitle("Prevent authentication when the laptop lid is closed");
+    let abort_lid_switch = gtk4::Switch::new();
+    abort_lid_switch.set_valign(gtk4::Align::Center);
+    abort_lid_row.add_suffix(&abort_lid_switch);
+    auth_group.add(&abort_lid_row);
+
+    let require_confirm_row = libadwaita::ActionRow::new();
+    require_confirm_row.set_title("Require Confirmation");
+    require_confirm_row
+        .set_subtitle("Require pressing Enter or clicking OK to authorize after face matches");
+    let require_confirm_switch = gtk4::Switch::new();
+    require_confirm_switch.set_valign(gtk4::Align::Center);
+    require_confirm_row.add_suffix(&require_confirm_switch);
+    auth_group.add(&require_confirm_row);
 
     let update_custom_visibility =
         move |row: &libadwaita::ComboRow,
@@ -132,6 +197,23 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             rec.set_visible(is_custom);
             thr.set_visible(is_custom);
         };
+
+    let update_liveness_visibility =
+        move |sw: &gtk4::Switch, thr: &libadwaita::SpinRow, fr: &libadwaita::SpinRow| {
+            let active = sw.is_active();
+            thr.set_visible(active);
+            fr.set_visible(active);
+        };
+
+    liveness_enabled_switch.connect_active_notify(glib::clone!(
+        #[weak]
+        liveness_threshold_row,
+        #[weak]
+        liveness_max_frames_row,
+        move |sw| {
+            update_liveness_visibility(sw, &liveness_threshold_row, &liveness_max_frames_row);
+        }
+    ));
 
     let is_loading = Rc::new(std::cell::Cell::new(true));
 
@@ -161,7 +243,23 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         camera_row,
         #[weak]
+        dark_threshold_row,
+        #[weak]
+        dark_pixel_value_row,
+        #[weak]
         templates_row,
+        #[weak]
+        liveness_enabled_switch,
+        #[weak]
+        liveness_threshold_row,
+        #[weak]
+        liveness_max_frames_row,
+        #[weak]
+        require_confirm_switch,
+        #[weak]
+        abort_ssh_switch,
+        #[weak]
+        abort_lid_switch,
         #[strong]
         cameras,
         #[strong]
@@ -175,16 +273,16 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
             let mut cfg = config.borrow_mut();
             match level_row.selected() {
-                0 => cfg.security = SecurityLevel::Low,
-                1 => cfg.security = SecurityLevel::Medium,
-                2 => cfg.security = SecurityLevel::High,
-                3 => cfg.security = SecurityLevel::Maximum,
+                0 => cfg.security = SecurityLevel::low(),
+                1 => cfg.security = SecurityLevel::medium(),
+                2 => cfg.security = SecurityLevel::high(),
+                3 => cfg.security = SecurityLevel::maximum(),
                 4 => {
-                    cfg.security = SecurityLevel::Custom {
-                        detector: detector_row.text().to_string(),
-                        recognizer: recognizer_row.text().to_string(),
-                        threshold: threshold_row.value() as f32,
-                    };
+                    cfg.security = SecurityLevel::custom(
+                        detector_row.text().to_string(),
+                        recognizer_row.text().to_string(),
+                        threshold_row.value(),
+                    );
                 }
                 _ => {}
             }
@@ -193,7 +291,15 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             if let Some((_, target)) = cameras.get(cam_idx) {
                 cfg.cameras.rgb = target.clone();
             }
+            cfg.cameras.dark_threshold = dark_threshold_row.value();
+            cfg.cameras.dark_pixel_value = dark_pixel_value_row.value() as u8;
             cfg.enrollment.max_templates = templates_row.value() as u32;
+            cfg.liveness.enabled = liveness_enabled_switch.is_active();
+            cfg.liveness.threshold = liveness_threshold_row.value();
+            cfg.liveness.max_frames = liveness_max_frames_row.value() as u32;
+            cfg.auth.require_confirmation = require_confirm_switch.is_active();
+            cfg.auth.abort_if_ssh = abort_ssh_switch.is_active();
+            cfg.auth.abort_if_lid_closed = abort_lid_switch.is_active();
 
             let cfg_to_apply = cfg.clone();
             drop(cfg);
@@ -253,29 +359,73 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         move |_| apply_changes()
     ));
 
+    require_confirm_switch.connect_active_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    abort_ssh_switch.connect_active_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    abort_lid_switch.connect_active_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+
+    dark_threshold_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    dark_pixel_value_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    liveness_enabled_switch.connect_active_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    liveness_threshold_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    liveness_max_frames_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+
     {
         let cfg = config.borrow();
-        let level_idx = match cfg.security {
-            SecurityLevel::Low => 0,
-            SecurityLevel::Medium => 1,
-            SecurityLevel::High => 2,
-            SecurityLevel::Maximum => 3,
-            SecurityLevel::Custom { .. } => 4,
+        let level_idx = match cfg.security.level.as_str() {
+            "low" => 0,
+            "medium" => 1,
+            "high" => 2,
+            "maximum" => 3,
+            "custom" => 4,
+            _ => 1,
         };
         level_row.set_selected(level_idx);
         update_custom_visibility(&level_row, &detector_row, &recognizer_row, &threshold_row);
 
-        let (det, rec, thr) = match &cfg.security {
-            SecurityLevel::Custom {
-                detector,
-                recognizer,
-                threshold,
-            } => (detector.clone(), recognizer.clone(), *threshold as f64),
-            _ => (
+        let (det, rec, thr) = if cfg.security.level == "custom" {
+            (
+                cfg.security.detector.clone(),
+                cfg.security.recognizer.clone(),
+                cfg.security.threshold,
+            )
+        } else {
+            (
                 cfg.security.detector().to_string(),
                 cfg.security.recognizer().to_string(),
                 cfg.security.threshold() as f64,
-            ),
+            )
         };
         detector_row.set_text(&det);
         recognizer_row.set_text(&rec);
@@ -286,7 +436,21 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             .position(|(_, t)| t == &cfg.cameras.rgb)
             .unwrap_or(0);
         camera_row.set_selected(cam_idx as u32);
+        dark_threshold_row.set_value(cfg.cameras.dark_threshold);
+        dark_pixel_value_row.set_value(cfg.cameras.dark_pixel_value as f64);
         templates_row.set_value(cfg.enrollment.max_templates as f64);
+        liveness_enabled_switch.set_active(cfg.liveness.enabled);
+        liveness_threshold_row.set_value(cfg.liveness.threshold);
+        liveness_max_frames_row.set_value(cfg.liveness.max_frames as f64);
+        require_confirm_switch.set_active(cfg.auth.require_confirmation);
+        abort_ssh_switch.set_active(cfg.auth.abort_if_ssh);
+        abort_lid_switch.set_active(cfg.auth.abort_if_lid_closed);
+
+        update_liveness_visibility(
+            &liveness_enabled_switch,
+            &liveness_threshold_row,
+            &liveness_max_frames_row,
+        );
     }
     is_loading.set(false);
 
@@ -385,7 +549,23 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         camera_row,
         #[weak]
+        dark_threshold_row,
+        #[weak]
+        dark_pixel_value_row,
+        #[weak]
         templates_row,
+        #[weak]
+        liveness_enabled_switch,
+        #[weak]
+        liveness_threshold_row,
+        #[weak]
+        liveness_max_frames_row,
+        #[weak]
+        require_confirm_switch,
+        #[weak]
+        abort_ssh_switch,
+        #[weak]
+        abort_lid_switch,
         #[strong]
         cameras,
         #[strong]
@@ -402,26 +582,28 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
             if let Ok(cfg) = load_result {
                 is_loading.set(true);
-                let level_idx = match cfg.security {
-                    SecurityLevel::Low => 0,
-                    SecurityLevel::Medium => 1,
-                    SecurityLevel::High => 2,
-                    SecurityLevel::Maximum => 3,
-                    SecurityLevel::Custom { .. } => 4,
+                let level_idx = match cfg.security.level.as_str() {
+                    "low" => 0,
+                    "medium" => 1,
+                    "high" => 2,
+                    "maximum" => 3,
+                    "custom" => 4,
+                    _ => 1,
                 };
                 level_row.set_selected(level_idx);
 
-                let (det, rec, thr) = match &cfg.security {
-                    SecurityLevel::Custom {
-                        detector,
-                        recognizer,
-                        threshold,
-                    } => (detector.clone(), recognizer.clone(), *threshold as f64),
-                    _ => (
+                let (det, rec, thr) = if cfg.security.level == "custom" {
+                    (
+                        cfg.security.detector.clone(),
+                        cfg.security.recognizer.clone(),
+                        cfg.security.threshold,
+                    )
+                } else {
+                    (
                         cfg.security.detector().to_string(),
                         cfg.security.recognizer().to_string(),
                         cfg.security.threshold() as f64,
-                    ),
+                    )
                 };
                 detector_row.set_text(&det);
                 recognizer_row.set_text(&rec);
@@ -432,7 +614,21 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                     .position(|(_, t)| t == &cfg.cameras.rgb)
                     .unwrap_or(0);
                 camera_row.set_selected(cam_idx as u32);
+                dark_threshold_row.set_value(cfg.cameras.dark_threshold);
+                dark_pixel_value_row.set_value(cfg.cameras.dark_pixel_value as f64);
                 templates_row.set_value(cfg.enrollment.max_templates as f64);
+                liveness_enabled_switch.set_active(cfg.liveness.enabled);
+                liveness_threshold_row.set_value(cfg.liveness.threshold);
+                liveness_max_frames_row.set_value(cfg.liveness.max_frames as f64);
+                require_confirm_switch.set_active(cfg.auth.require_confirmation);
+                abort_ssh_switch.set_active(cfg.auth.abort_if_ssh);
+                abort_lid_switch.set_active(cfg.auth.abort_if_lid_closed);
+
+                update_liveness_visibility(
+                    &liveness_enabled_switch,
+                    &liveness_threshold_row,
+                    &liveness_max_frames_row,
+                );
 
                 *config.borrow_mut() = cfg;
                 is_loading.set(false);
@@ -823,11 +1019,17 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                         return;
                                                     }
 
-                                                    capture_dialog::show_capture_dialog(
+                                                     let camera_device = match load_config_from_daemon(&proxy).await {
+                                                         Ok(cfg) => cfg.cameras.rgb,
+                                                         Err(_) => "primary".to_string(),
+                                                     };
+
+                                                     capture_dialog::show_capture_dialog(
                                                         &window,
                                                         &username,
                                                         Some(&face_name),
                                                         &proxy,
+                                                        &camera_device,
                                                         glib::clone!(
                                                             #[strong]
                                                             refresh,
@@ -1049,11 +1251,17 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 return;
                             }
 
+                            let camera_device = match load_config_from_daemon(&proxy).await {
+                                Ok(cfg) => cfg.cameras.rgb,
+                                Err(_) => "primary".to_string(),
+                            };
+
                             capture_dialog::show_capture_dialog(
                                 &window,
                                 &username,
                                 None,
                                 &proxy,
+                                &camera_device,
                                 glib::clone!(
                                     #[strong]
                                     refresh,
