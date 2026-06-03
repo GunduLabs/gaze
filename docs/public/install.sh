@@ -6,6 +6,7 @@ set -e
 
 PKG_BASE_URL="https://packages.gundulabs.com"
 GNOME_DOCS_URL="https://gaze.gundulabs.com/guide/gnome"
+HYPRLAND_DOCS_URL="https://gaze.gundulabs.com/guide/hyprland"
 REPO_KEY_FPR="505AC1C71AFEDBD5555235F6CB4FA24E5C1C7C98"
 AUTO_YES=0
 
@@ -69,6 +70,89 @@ is_gnome_session() {
         *GNOME*|*gnome*) return 0 ;;
     esac
     return 1
+}
+
+is_hyprland_session() {
+    case "${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}" in
+        *Hyprland*|*hyprland*) return 0 ;;
+    esac
+    return 1
+}
+
+has_hyprlock() {
+    command -v hyprlock >/dev/null 2>&1
+}
+
+want_hyprlock_setup() {
+    is_hyprland_session || has_hyprlock
+}
+
+configure_hyprlock_conf() {
+    if [ "$(id -u)" -eq 0 ]; then
+        echo "Running as root; skipping per-user hyprlock.conf edit."
+        echo "As your desktop user, add to ~/.config/hypr/hyprlock.conf:"
+        echo "    general { pam_module = hyprlock-gaze }"
+        echo "Docs: ${HYPRLAND_DOCS_URL}"
+        return 0
+    fi
+
+    conf="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprlock.conf"
+    mkdir -p "$(dirname "$conf")"
+
+    if [ ! -f "$conf" ]; then
+        cat >"$conf" <<'EOF'
+general {
+    pam_module = hyprlock-gaze
+}
+EOF
+        echo "Created $conf with pam_module = hyprlock-gaze."
+        return 0
+    fi
+
+    if grep -qE '^\s*pam_module\s*=' "$conf"; then
+        current_pam="$(grep -E '^\s*pam_module\s*=' "$conf" | head -1 | sed 's/.*=\s*//;s/\s*$//')"
+        case "$current_pam" in
+            hyprlock-gaze|hyprlock-gaze-simultaneous)
+                echo "hyprlock.conf already uses $current_pam."
+                return 0
+                ;;
+            *)
+                echo "hyprlock.conf already sets pam_module = $current_pam; leaving it."
+                echo "To use Gaze, change it to: pam_module = hyprlock-gaze"
+                return 0
+                ;;
+        esac
+    fi
+
+    if grep -qE '^\s*general\s*\{' "$conf"; then
+        cp "$conf" "$conf.gaze-backup"
+        awk '
+            BEGIN { done = 0 }
+            /^\s*general\s*\{/ && !done {
+                print
+                print "    pam_module = hyprlock-gaze"
+                done = 1
+                next
+            }
+            { print }
+        ' "$conf.gaze-backup" >"$conf"
+        echo "Added pam_module = hyprlock-gaze to existing general {} block in $conf."
+        echo "Backup: $conf.gaze-backup"
+    else
+        printf '\ngeneral {\n    pam_module = hyprlock-gaze\n}\n' >>"$conf"
+        echo "Appended general { pam_module = hyprlock-gaze } to $conf."
+    fi
+}
+
+enable_hyprlock() {
+    if ! want_hyprlock_setup; then
+        return 0
+    fi
+    echo ""
+    bold "Hyprland/hyprlock detected"
+    echo "Configuring hyprlock to use Gaze face unlock..."
+    configure_hyprlock_conf
+    echo "Docs: ${HYPRLAND_DOCS_URL}"
 }
 
 _gsettings_add_extension() {
@@ -275,7 +359,7 @@ if is_deb; then
     echo ""
     bold "Planned steps for this system:"
     echo "- Configure the apt repository"
-    echo "- Install gaze, gaze-gui, and gaze-gnome-extension"
+    echo "- Install gaze, gaze-gui, gaze-gnome-extension, and gaze-hyprlock (if Hyprland detected)"
     echo "- Enable GNOME lock screen auth for this user when possible"
     echo "- Set up the PAM modules through pam-auth-update if available"
     echo "- Enable the Gaze daemon"
@@ -289,7 +373,7 @@ elif is_rpm; then
     echo ""
     bold "Planned steps for this system:"
     echo "- Configure the dnf repository"
-    echo "- Install gaze, gaze-gui, and gaze-gnome-extension"
+    echo "- Install gaze, gaze-gui, gaze-gnome-extension, and gaze-hyprlock (if Hyprland detected)"
     echo "- Enable GNOME lock screen auth for this user when possible"
     echo "- Enable the Gaze PAM profile through authselect if available"
     echo "- Enable the Gaze daemon"
@@ -298,7 +382,7 @@ elif is_arch; then
     echo "Package manager: AUR helper (yay/paru)"
     echo ""
     bold "Planned steps for this system:"
-    echo "- Install gaze-bin, gaze-gui-bin, and gaze-gnome-extension-bin from the AUR"
+    echo "- Install gaze-bin, gaze-gui-bin, gaze-gnome-extension-bin, and gaze-hyprlock-bin (if Hyprland detected) from the AUR"
     echo "- Enable GNOME lock screen auth for this user when possible"
     echo "- Enable the Gaze daemon"
 fi
@@ -324,10 +408,15 @@ if is_deb; then
     sudo apt-get update
 
     bold "Step 3/5: Installing packages"
-    sudo apt-get install -y gaze gaze-gui gaze-gnome-extension
+    DEB_PKGS="gaze gaze-gui gaze-gnome-extension"
+    if want_hyprlock_setup; then
+        DEB_PKGS="$DEB_PKGS gaze-hyprlock"
+    fi
+    sudo apt-get install -y $DEB_PKGS
 
     bold "Step 4/5: Enabling GNOME lock screen auth"
     enable_gnome_extension
+    enable_hyprlock
 
     bold "Step 5/5: Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
@@ -358,16 +447,21 @@ EOF
     fi
 
     bold "Step 3/5: Installing packages"
+    RPM_PKGS="gaze gaze-gui gaze-gnome-extension"
+    if want_hyprlock_setup; then
+        RPM_PKGS="$RPM_PKGS gaze-hyprlock"
+    fi
     if command -v dnf >/dev/null 2>&1; then
-        sudo dnf install -y gaze gaze-gui gaze-gnome-extension
+        sudo dnf install -y $RPM_PKGS
     else
-        sudo yum install -y gaze gaze-gui gaze-gnome-extension
+        sudo yum install -y $RPM_PKGS
     fi
 
     configure_authselect
 
     bold "Step 4/5: Enabling GNOME lock screen auth"
     enable_gnome_extension
+    enable_hyprlock
 
     bold "Step 5/5: Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
@@ -400,10 +494,15 @@ elif is_arch; then
     echo "Found AUR helper: $AUR_HELPER"
 
     bold "Step 2/4: Installing packages from AUR"
-    "$AUR_HELPER" -S --noconfirm gaze-bin gaze-gui-bin gaze-gnome-extension-bin
+    AUR_PKGS="gaze-bin gaze-gui-bin gaze-gnome-extension-bin"
+    if want_hyprlock_setup; then
+        AUR_PKGS="$AUR_PKGS gaze-hyprlock-bin"
+    fi
+    "$AUR_HELPER" -S --noconfirm $AUR_PKGS
 
     bold "Step 3/4: Enabling GNOME lock screen auth"
     enable_gnome_extension
+    enable_hyprlock
 
     bold "Step 4/4: Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
@@ -420,6 +519,9 @@ echo "  GUI:                 gaze-gui"
 echo "  GNOME lock screen:   enabled for this GNOME user when possible"
 echo "  GDM extension:       enabled by package defaults"
 echo "  GDM login face auth: disabled until you run the docs command"
+if want_hyprlock_setup; then
+    echo "  hyprlock:            configured (pam_module = hyprlock-gaze)"
+fi
 echo ""
 bold "Optional GDM login setup docs:"
 green "https://gaze.gundulabs.com/guide/gnome#optional-enable-face-at-gdm-login"

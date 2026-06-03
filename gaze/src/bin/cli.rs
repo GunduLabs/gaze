@@ -849,6 +849,17 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     }
 
     plan.push((
+        "Remove hyprlock pam_module references",
+        "for d in /home/*/.config/hypr /root/.config/hypr; do \
+          f=\"$d/hyprlock.conf\"; \
+          [ -f \"$f\" ] || continue; \
+          sudo sed -i.gaze-uninstall-bak \
+            '/^\\s*pam_module\\s*=\\s*hyprlock-gaze\\(-simultaneous\\)\\?\\s*$/d' \"$f\" || true; \
+          done"
+            .into(),
+    ));
+
+    plan.push((
         "Stop and disable daemon",
         "sudo systemctl disable --now gazed 2>/dev/null || true".into(),
     ));
@@ -856,7 +867,7 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     if which("apt-get") {
         plan.push((
             "Remove apt packages",
-            "sudo apt-get remove --purge -y gaze gaze-gui gaze-gnome-extension 2>/dev/null || true"
+            "sudo apt-get remove --purge -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock 2>/dev/null || true"
                 .into(),
         ));
         plan.push((
@@ -869,7 +880,7 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     } else if which("dnf") {
         plan.push((
             "Remove dnf packages",
-            "sudo dnf remove -y gaze gaze-gui gaze-gnome-extension 2>/dev/null || true".into(),
+            "sudo dnf remove -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock 2>/dev/null || true".into(),
         ));
         plan.push((
             "Remove dnf repo",
@@ -878,8 +889,8 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     } else if which("pacman") {
         plan.push((
             "Remove pacman packages",
-            "for pkg in gaze gaze-gui gaze-gnome-extension gaze-bin gaze-gui-bin \
-              gaze-gnome-extension-bin; do \
+            "for pkg in gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-bin gaze-gui-bin \
+              gaze-gnome-extension-bin gaze-hyprlock-bin; do \
               if pacman -Q \"$pkg\" >/dev/null 2>&1; then \
               sudo pacman -Rns --noconfirm \"$pkg\" || true; \
               fi; \
