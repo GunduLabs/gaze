@@ -30,9 +30,10 @@ impl LivenessDetector {
             for x in 0..size {
                 let p = scaled.get_pixel(x as u32, y as u32);
                 for c in 0..3 {
-                    // MiniFASNetV2 was trained on ToTensor()-scaled inputs, so feed
-                    // BGR values normalized to [0, 1] rather than raw 0-255 bytes.
-                    tensor[[0, c, y, x]] = p[2 - c] as f32 / 255.0;
+                    // MiniFASNetV2 expects RGB channels in the raw 0-255 range.
+                    // Swapping to BGR or normalizing to [0, 1] collapses the live
+                    // score (a genuine face drops from ~0.9 to <0.01).
+                    tensor[[0, c, y, x]] = p[c] as f32;
                 }
             }
         }
@@ -146,13 +147,13 @@ mod tests {
     }
 
     #[test]
-    fn pre_process_outputs_nchw_bgr_tensor_normalized_to_unit_range() {
+    fn pre_process_outputs_nchw_rgb_tensor_in_byte_range() {
         let img = RgbImage::from_pixel(80, 80, Rgb([64, 128, 255]));
         let tensor = LivenessDetector::pre_process(&img);
-        // BGR channel order, each value scaled into [0, 1] (ToTensor convention).
-        assert!((tensor[[0, 0, 0, 0]] - 255.0 / 255.0).abs() < 1e-5);
-        assert!((tensor[[0, 1, 0, 0]] - 128.0 / 255.0).abs() < 1e-5);
-        assert!((tensor[[0, 2, 0, 0]] - 64.0 / 255.0).abs() < 1e-5);
+        // RGB channel order, raw 0-255 byte values (the range the model expects).
+        assert!((tensor[[0, 0, 0, 0]] - 64.0).abs() < 1e-5);
+        assert!((tensor[[0, 1, 0, 0]] - 128.0).abs() < 1e-5);
+        assert!((tensor[[0, 2, 0, 0]] - 255.0).abs() < 1e-5);
     }
 
     #[test]
