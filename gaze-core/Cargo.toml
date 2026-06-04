@@ -7,7 +7,7 @@ edition = "2024"
 anyhow = "1.0.102"
 image = "0.25.10"
 libc = "0.2"
-nalgebra = "0.34.2"
+nalgebra = "0.35.0"
 ndarray = "0.17.2"
 opencv = { version = "0.98.2", default-features = false, features = ["imgproc", "videoio"] }
 ort = "2.0.0-rc.12"
