@@ -222,19 +222,12 @@ async fn run_config_wizard(
 
     config.cameras.rgb = cameras[selected_cam_idx].1.clone();
 
-    config.cameras.dark_threshold = Input::with_theme(&theme)
-        .with_prompt("Camera darkness threshold (average pixel intensity ratio)")
-        .default(config.cameras.dark_threshold.to_string())
-        .interact_text()?
-        .parse::<f64>()
-        .unwrap_or(0.6);
-
-    config.cameras.dark_pixel_value = Input::with_theme(&theme)
-        .with_prompt("Camera dark pixel value cutoff (0-255)")
-        .default(config.cameras.dark_pixel_value.to_string())
+    config.cameras.dark_luma_threshold = Input::with_theme(&theme)
+        .with_prompt("Darkness cutoff: reject frames below this mean brightness (0-255)")
+        .default(config.cameras.dark_luma_threshold.to_string())
         .interact_text()?
         .parse::<u8>()
-        .unwrap_or(10);
+        .unwrap_or(70);
 
     config.auth.abort_if_ssh = Confirm::with_theme(&theme)
         .with_prompt("Abort face auth for SSH sessions")
@@ -1069,14 +1062,9 @@ async fn main() -> anyhow::Result<()> {
                 );
                 println!("{} {}", style("cameras.rgb:").bold(), config.cameras.rgb);
                 println!(
-                    "{} {:.2}",
-                    style("cameras.dark_threshold:").bold(),
-                    config.cameras.dark_threshold
-                );
-                println!(
                     "{} {}",
-                    style("cameras.dark_pixel_value:").bold(),
-                    config.cameras.dark_pixel_value
+                    style("cameras.dark_luma_threshold:").bold(),
+                    config.cameras.dark_luma_threshold
                 );
                 println!(
                     "{} {}",

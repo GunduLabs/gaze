@@ -120,8 +120,7 @@ level = "medium"    # low | medium | high | maximum | custom
 
 [cameras]
 rgb = "primary"
-dark_threshold = 0.6
-dark_pixel_value = 10
+dark_luma_threshold = 70
 
 [auth]
 abort_if_ssh = true

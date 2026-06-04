@@ -161,22 +161,17 @@ impl Default for LivenessConfig {
 pub struct CameraConfig {
     #[serde(default = "default_rgb_device")]
     pub rgb: String,
-    #[serde(default = "default_dark_threshold")]
-    pub dark_threshold: f64,
-    #[serde(default = "default_dark_pixel_value")]
-    pub dark_pixel_value: u8,
+    /// Frames whose mean luminance (0-255) is below this are rejected as too dark.
+    #[serde(default = "default_dark_luma_threshold")]
+    pub dark_luma_threshold: u8,
 }
 
 fn default_rgb_device() -> String {
     DEFAULT_RGB_CAMERA.to_string()
 }
 
-fn default_dark_threshold() -> f64 {
-    0.6
-}
-
-fn default_dark_pixel_value() -> u8 {
-    10
+fn default_dark_luma_threshold() -> u8 {
+    70
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
@@ -229,8 +224,7 @@ impl Default for CameraConfig {
     fn default() -> Self {
         Self {
             rgb: default_rgb_device(),
-            dark_threshold: default_dark_threshold(),
-            dark_pixel_value: default_dark_pixel_value(),
+            dark_luma_threshold: default_dark_luma_threshold(),
         }
     }
 }
@@ -374,8 +368,7 @@ mod tests {
             SecurityLevel::medium().detector()
         );
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
-        assert!((config.cameras.dark_threshold - 0.6).abs() < f64::EPSILON);
-        assert_eq!(config.cameras.dark_pixel_value, 10);
+        assert_eq!(config.cameras.dark_luma_threshold, 70);
         assert!(config.auth.abort_if_ssh);
         assert!(config.auth.abort_if_lid_closed);
         assert_eq!(config.enrollment.max_templates, 2);
@@ -389,8 +382,7 @@ mod tests {
             security: SecurityLevel::high(),
             cameras: CameraConfig {
                 rgb: "primary".to_string(),
-                dark_threshold: 0.75,
-                dark_pixel_value: 8,
+                dark_luma_threshold: 55,
             },
             auth: AuthConfig {
                 abort_if_ssh: true,
@@ -414,8 +406,7 @@ mod tests {
             SecurityLevel::high().recognizer()
         );
         assert_eq!(loaded.cameras.rgb, "primary");
-        assert!((loaded.cameras.dark_threshold - 0.75).abs() < f64::EPSILON);
-        assert_eq!(loaded.cameras.dark_pixel_value, 8);
+        assert_eq!(loaded.cameras.dark_luma_threshold, 55);
         assert!(loaded.auth.abort_if_ssh);
         assert!(!loaded.auth.abort_if_lid_closed);
         assert!(loaded.auth.require_confirmation);
@@ -455,8 +446,7 @@ mod tests {
             SecurityLevel::maximum().detector()
         );
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
-        assert!((config.cameras.dark_threshold - 0.6).abs() < f64::EPSILON);
-        assert_eq!(config.cameras.dark_pixel_value, 10);
+        assert_eq!(config.cameras.dark_luma_threshold, 70);
         assert!(config.auth.abort_if_ssh);
         assert!(config.auth.abort_if_lid_closed);
         assert!(!config.auth.require_confirmation);
