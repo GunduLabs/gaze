@@ -45,6 +45,31 @@ pub enum TuiAction {
     Decline,
 }
 
+/// Result of feeding a key action into the two-step "cancel?" confirmation gate.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ConfirmStep {
+    /// Keep looping. `confirm_cancel` may have been toggled in place.
+    Continue,
+    /// The user confirmed cancellation; the caller should abort the loop.
+    CancelConfirmed,
+}
+
+/// Apply a polled action to the cancel-confirmation state machine.
+///
+/// The first `Cancel` arms the prompt (`confirm_cancel = true`); a second `Cancel`
+/// or an explicit `Decline` disarms it; `Confirm` while armed cancels the operation.
+/// Any other action while disarmed is ignored here (it is handled elsewhere in the loop).
+pub fn apply_cancel_action(confirm_cancel: &mut bool, action: Option<TuiAction>) -> ConfirmStep {
+    match action {
+        Some(TuiAction::Cancel) if *confirm_cancel => *confirm_cancel = false,
+        Some(TuiAction::Cancel) => *confirm_cancel = true,
+        Some(TuiAction::Confirm) if *confirm_cancel => return ConfirmStep::CancelConfirmed,
+        Some(TuiAction::Decline) if *confirm_cancel => *confirm_cancel = false,
+        _ => {}
+    }
+    ConfirmStep::Continue
+}
+
 pub struct TuiTerminal {
     terminal: Terminal<CrosstermBackend<Stdout>>,
     restored: bool,
@@ -509,5 +534,66 @@ mod tests {
         let area = Rect::new(5, 7, 20, 10);
         assert_eq!(inset(area, 3, 2), Rect::new(8, 9, 14, 6));
         assert_eq!(inset(area, 20, 20), Rect::new(25, 27, 0, 0));
+    }
+
+    #[test]
+    fn first_cancel_arms_the_confirmation_prompt() {
+        let mut armed = false;
+        assert_eq!(
+            apply_cancel_action(&mut armed, Some(TuiAction::Cancel)),
+            ConfirmStep::Continue
+        );
+        assert!(armed);
+    }
+
+    #[test]
+    fn second_cancel_or_decline_disarms_the_prompt() {
+        let mut armed = true;
+        assert_eq!(
+            apply_cancel_action(&mut armed, Some(TuiAction::Cancel)),
+            ConfirmStep::Continue
+        );
+        assert!(!armed);
+
+        let mut armed = true;
+        assert_eq!(
+            apply_cancel_action(&mut armed, Some(TuiAction::Decline)),
+            ConfirmStep::Continue
+        );
+        assert!(!armed);
+    }
+
+    #[test]
+    fn confirm_while_armed_cancels_the_operation() {
+        let mut armed = true;
+        assert_eq!(
+            apply_cancel_action(&mut armed, Some(TuiAction::Confirm)),
+            ConfirmStep::CancelConfirmed
+        );
+        // State is left armed; the caller breaks out of the loop on CancelConfirmed.
+        assert!(armed);
+    }
+
+    #[test]
+    fn confirm_or_decline_while_disarmed_is_ignored() {
+        for action in [TuiAction::Confirm, TuiAction::Decline] {
+            let mut armed = false;
+            assert_eq!(
+                apply_cancel_action(&mut armed, Some(action)),
+                ConfirmStep::Continue
+            );
+            assert!(!armed);
+        }
+    }
+
+    #[test]
+    fn no_action_leaves_state_unchanged() {
+        let mut armed = true;
+        assert_eq!(apply_cancel_action(&mut armed, None), ConfirmStep::Continue);
+        assert!(armed);
+
+        let mut armed = false;
+        assert_eq!(apply_cancel_action(&mut armed, None), ConfirmStep::Continue);
+        assert!(!armed);
     }
 }

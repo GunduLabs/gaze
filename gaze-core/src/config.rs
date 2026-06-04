@@ -398,7 +398,11 @@ mod tests {
                 require_confirmation: true,
             },
             enrollment: EnrollmentConfig { max_templates: 8 },
-            liveness: LivenessConfig::default(),
+            liveness: LivenessConfig {
+                enabled: true,
+                threshold: 0.9,
+                max_frames: 25,
+            },
         };
 
         config.save_to(path.to_str().unwrap()).unwrap();
@@ -416,6 +420,24 @@ mod tests {
         assert!(!loaded.auth.abort_if_lid_closed);
         assert!(loaded.auth.require_confirmation);
         assert_eq!(loaded.enrollment.max_templates, 8);
+        assert!(loaded.liveness.enabled);
+        assert!((loaded.liveness.threshold - 0.9).abs() < f64::EPSILON);
+        assert_eq!(loaded.liveness.max_frames, 25);
+    }
+
+    #[test]
+    fn partial_toml_uses_liveness_serde_defaults() {
+        let config: Config = toml::from_str(
+            r#"
+            [liveness]
+            enabled = true
+            "#,
+        )
+        .unwrap();
+
+        assert!(config.liveness.enabled);
+        assert!((config.liveness.threshold - 0.8).abs() < f64::EPSILON);
+        assert_eq!(config.liveness.max_frames, 40);
     }
 
     #[test]

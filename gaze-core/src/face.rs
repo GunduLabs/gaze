@@ -228,4 +228,64 @@ mod tests {
 
         assert!(!is_dark_frame(&frame, 0.6, 10).unwrap());
     }
+
+    #[test]
+    fn dark_pixel_value_is_an_exclusive_upper_bound() {
+        // A pixel whose luminance equals dark_pixel_value is *not* counted as dark
+        // (the comparison is strict `<`), so an all-32 frame is dark only below 32.
+        let frame =
+            Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(32.0)).unwrap();
+
+        assert!(is_dark_frame(&frame, 0.6, 33).unwrap());
+        assert!(!is_dark_frame(&frame, 0.6, 32).unwrap());
+    }
+
+    #[test]
+    fn bright_blue_frame_is_dark_due_to_bt601_weighting() {
+        // Pure blue is visually dim: its BT.601 luminance is ~28 even though the raw
+        // byte average is 85. A naive mean would wrongly treat this as a lit frame.
+        // Scalar is ordered (B, G, R, A) to match OpenCV's BGR layout.
+        let frame =
+            Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::new(255.0, 0.0, 0.0, 0.0))
+                .unwrap();
+
+        assert!(is_dark_frame(&frame, 0.6, 30).unwrap());
+
+        // Pure green, by contrast, carries most of the luminance weight (~149).
+        let green =
+            Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::new(0.0, 255.0, 0.0, 0.0))
+                .unwrap();
+        assert!(!is_dark_frame(&green, 0.6, 30).unwrap());
+    }
+
+    #[test]
+    fn single_channel_frames_use_raw_luminance() {
+        // Grayscale frames take the non-BGR averaging branch.
+        let dark = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC1, Scalar::all(5.0)).unwrap();
+        assert!(is_dark_frame(&dark, 0.6, 10).unwrap());
+
+        let lit = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC1, Scalar::all(50.0)).unwrap();
+        assert!(!is_dark_frame(&lit, 0.6, 10).unwrap());
+    }
+
+    #[test]
+    fn dark_ratio_threshold_is_inclusive() {
+        // Half the pixels dark: the bottom row is black, the top row is bright.
+        let mut frame =
+            Mat::new_rows_cols_with_default(2, 1, core::CV_8UC3, Scalar::all(200.0)).unwrap();
+        {
+            let mut bottom = Mat::roi_mut(&mut frame, core::Rect::new(0, 1, 1, 1)).unwrap();
+            bottom.set_to_def(&Scalar::all(0.0)).unwrap();
+        }
+
+        // ratio == 0.5: dark at threshold 0.5 (inclusive `>=`), not at 0.6.
+        assert!(is_dark_frame(&frame, 0.5, 10).unwrap());
+        assert!(!is_dark_frame(&frame, 0.6, 10).unwrap());
+    }
+
+    #[test]
+    fn empty_frame_is_treated_as_dark() {
+        let frame = Mat::default();
+        assert!(is_dark_frame(&frame, 0.6, 10).unwrap());
+    }
 }
