@@ -1,0 +1,56 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+    "schedule:weekly"
+  ],
+  "timezone": "America/New_York",
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 3,
+  "prHourlyLimit": 2,
+  "packageRules": [
+    {
+      "description": "Batch all non-major Rust crate updates into a single PR to avoid one CI run per crate",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "rust dependencies (non-major)"
+    },
+    {
+      "description": "Batch all non-major docs (npm/bun) updates into a single PR",
+      "matchManagers": ["npm", "bun"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "docs dependencies (non-major)"
+    },
+    {
+      "description": "Group GitHub Actions updates (incl. pinned digest bumps) and automerge once CI passes",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "groupName": "github actions",
+      "automerge": true
+    },
+    {
+      "description": "Automerge non-major CI tool version bumps once CI passes",
+      "matchManagers": ["custom.regex"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "automerge": true
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Keep the pinned `just` version in workflow env in sync with upstream releases",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["JUST_VERSION:\\s*(?<currentValue>\\S+)"],
+      "depNameTemplate": "casey/just",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "Keep the pinned `nfpm` version in workflow env in sync with upstream releases",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["NFPM_VERSION:\\s*(?<currentValue>\\S+)"],
+      "depNameTemplate": "goreleaser/nfpm",
+      "datasourceTemplate": "github-releases"
+    }
+  ]
+}
