@@ -12,8 +12,7 @@ level = "medium"
 
 [cameras]
 rgb = "primary"
-dark_threshold = 0.6
-dark_pixel_value = 10
+dark_luma_threshold = 70
 
 [auth]
 abort_if_ssh = true
@@ -81,11 +80,10 @@ Gaze rejects frames that are too dark before running face detection:
 
 ```toml
 [cameras]
-dark_threshold = 0.6
-dark_pixel_value = 10
+dark_luma_threshold = 70
 ```
 
-With the defaults, a frame is skipped when at least 60% of pixels have luminance below 10.
+With the default, a frame is skipped when its mean luminance (0-255, BT.601 weighted) falls below 70. Raise it to reject dimmer scenes, lower it to be more permissive.
 
 ## Authentication options
 

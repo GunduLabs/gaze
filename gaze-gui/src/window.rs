@@ -113,17 +113,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     camera_row.set_model(Some(&cam_model));
     hardware_group.add(&camera_row);
 
-    let dark_threshold_row = libadwaita::SpinRow::with_range(0.0, 1.0, 0.01);
-    dark_threshold_row.set_digits(3);
-    dark_threshold_row.set_title("Darkness Threshold");
-    dark_threshold_row.set_subtitle("Minimum average pixel intensity ratio");
-    hardware_group.add(&dark_threshold_row);
-
-    let dark_pixel_value_row = libadwaita::SpinRow::with_range(0.0, 255.0, 1.0);
-    dark_pixel_value_row.set_digits(0);
-    dark_pixel_value_row.set_title("Dark Pixel Value Cutoff");
-    dark_pixel_value_row.set_subtitle("Pixel value considered 'dark' (0-255)");
-    hardware_group.add(&dark_pixel_value_row);
+    let dark_luma_threshold_row = libadwaita::SpinRow::with_range(0.0, 255.0, 1.0);
+    dark_luma_threshold_row.set_digits(0);
+    dark_luma_threshold_row.set_title("Darkness Cutoff");
+    dark_luma_threshold_row.set_subtitle("Reject frames below this mean brightness (0-255)");
+    hardware_group.add(&dark_luma_threshold_row);
 
     let enrollment_group = libadwaita::PreferencesGroup::new();
     enrollment_group.set_title("Enrollment");
@@ -243,9 +237,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         camera_row,
         #[weak]
-        dark_threshold_row,
-        #[weak]
-        dark_pixel_value_row,
+        dark_luma_threshold_row,
         #[weak]
         templates_row,
         #[weak]
@@ -291,8 +283,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             if let Some((_, target)) = cameras.get(cam_idx) {
                 cfg.cameras.rgb = target.clone();
             }
-            cfg.cameras.dark_threshold = dark_threshold_row.value();
-            cfg.cameras.dark_pixel_value = dark_pixel_value_row.value() as u8;
+            cfg.cameras.dark_luma_threshold = dark_luma_threshold_row.value() as u8;
             cfg.enrollment.max_templates = templates_row.value() as u32;
             cfg.liveness.enabled = liveness_enabled_switch.is_active();
             cfg.liveness.threshold = liveness_threshold_row.value();
@@ -375,12 +366,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         move |_| apply_changes()
     ));
 
-    dark_threshold_row.connect_value_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-    dark_pixel_value_row.connect_value_notify(glib::clone!(
+    dark_luma_threshold_row.connect_value_notify(glib::clone!(
         #[strong]
         apply_changes,
         move |_| apply_changes()
@@ -436,8 +422,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             .position(|(_, t)| t == &cfg.cameras.rgb)
             .unwrap_or(0);
         camera_row.set_selected(cam_idx as u32);
-        dark_threshold_row.set_value(cfg.cameras.dark_threshold);
-        dark_pixel_value_row.set_value(cfg.cameras.dark_pixel_value as f64);
+        dark_luma_threshold_row.set_value(cfg.cameras.dark_luma_threshold as f64);
         templates_row.set_value(cfg.enrollment.max_templates as f64);
         liveness_enabled_switch.set_active(cfg.liveness.enabled);
         liveness_threshold_row.set_value(cfg.liveness.threshold);
@@ -549,9 +534,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         camera_row,
         #[weak]
-        dark_threshold_row,
-        #[weak]
-        dark_pixel_value_row,
+        dark_luma_threshold_row,
         #[weak]
         templates_row,
         #[weak]
@@ -614,8 +597,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                     .position(|(_, t)| t == &cfg.cameras.rgb)
                     .unwrap_or(0);
                 camera_row.set_selected(cam_idx as u32);
-                dark_threshold_row.set_value(cfg.cameras.dark_threshold);
-                dark_pixel_value_row.set_value(cfg.cameras.dark_pixel_value as f64);
+                dark_luma_threshold_row.set_value(cfg.cameras.dark_luma_threshold as f64);
                 templates_row.set_value(cfg.enrollment.max_templates as f64);
                 liveness_enabled_switch.set_active(cfg.liveness.enabled);
                 liveness_threshold_row.set_value(cfg.liveness.threshold);

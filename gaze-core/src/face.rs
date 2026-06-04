@@ -31,8 +31,7 @@ pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
 
 pub struct FaceChecker {
     detector: FaceDetector,
-    dark_threshold: f32,
-    dark_pixel_value: u8,
+    dark_luma_threshold: u8,
 }
 
 impl FaceChecker {
@@ -53,16 +52,14 @@ impl FaceChecker {
     pub fn from_detector(detector: FaceDetector) -> Self {
         Self {
             detector,
-            dark_threshold: 0.6,
-            dark_pixel_value: 10,
+            dark_luma_threshold: 70,
         }
     }
 
     pub fn from_detector_with_config(detector: FaceDetector, config: &Config) -> Self {
         Self {
             detector,
-            dark_threshold: config.cameras.dark_threshold as f32,
-            dark_pixel_value: config.cameras.dark_pixel_value,
+            dark_luma_threshold: config.cameras.dark_luma_threshold,
         }
     }
 
@@ -91,7 +88,7 @@ impl FaceChecker {
         &mut self,
         frame: &Mat,
     ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
-        if is_dark_frame(frame, self.dark_threshold, self.dark_pixel_value)? {
+        if is_dark_frame(frame, self.dark_luma_threshold)? {
             return Ok((CaptureStatus::TooDark, None));
         }
 
@@ -170,11 +167,14 @@ impl FaceChecker {
     }
 }
 
-pub fn is_dark_frame(
-    frame: &Mat,
-    dark_threshold: f32,
-    dark_pixel_value: u8,
-) -> anyhow::Result<bool> {
+/// Returns true when the frame's mean luminance is below `dark_luma_threshold`,
+/// i.e. the scene is too dark to reliably detect or recognize a face.
+///
+/// A per-pixel count of near-black pixels does not work on real webcams: their
+/// auto-gain lifts a dark scene to a noisy mid-grey (mean luma ~50) that never
+/// reaches true black, while a few light-leak pixels skew any ratio. The mean
+/// is robust and separates "covered/dark" from "lit" cleanly.
+pub fn is_dark_frame(frame: &Mat, dark_luma_threshold: u8) -> anyhow::Result<bool> {
     let size = frame.size()?;
     let pixel_count = (size.width.max(0) * size.height.max(0)) as usize;
     if pixel_count == 0 {
@@ -187,25 +187,26 @@ pub fn is_dark_frame(
     }
 
     let bytes = frame.data_bytes()?;
-    let dark_pixels = bytes
+    let total: u64 = bytes
         .chunks_exact(channels)
         .take(pixel_count)
-        .filter(|pixel| {
+        .map(|pixel| {
             let luminance = if channels >= 3 {
                 // OpenCV gives us BGR, not RGB. Weights are BT.601 (0.299/0.587/0.114) scaled
                 // by 256 so the divide becomes a right shift.
                 let b = pixel[0] as u32;
                 let g = pixel[1] as u32;
                 let r = pixel[2] as u32;
-                ((77 * r + 150 * g + 29 * b) >> 8) as u8
+                (77 * r + 150 * g + 29 * b) >> 8
             } else {
-                (pixel.iter().map(|&v| v as u32).sum::<u32>() / channels as u32) as u8
+                pixel.iter().map(|&v| v as u32).sum::<u32>() / channels as u32
             };
-            luminance < dark_pixel_value
+            luminance as u64
         })
-        .count();
+        .sum();
 
-    Ok((dark_pixels as f32 / pixel_count as f32) >= dark_threshold)
+    let mean = total / pixel_count as u64;
+    Ok(mean < dark_luma_threshold as u64)
 }
 
 #[cfg(test)]
@@ -218,74 +219,71 @@ mod tests {
         let frame =
             Mat::new_rows_cols_with_default(12, 12, core::CV_8UC3, Scalar::all(0.0)).unwrap();
 
-        assert!(is_dark_frame(&frame, 0.6, 10).unwrap());
+        assert!(is_dark_frame(&frame, 70).unwrap());
     }
 
     #[test]
     fn dark_frame_detection_accepts_lit_frames() {
         let frame =
-            Mat::new_rows_cols_with_default(12, 12, core::CV_8UC3, Scalar::all(32.0)).unwrap();
+            Mat::new_rows_cols_with_default(12, 12, core::CV_8UC3, Scalar::all(120.0)).unwrap();
 
-        assert!(!is_dark_frame(&frame, 0.6, 10).unwrap());
+        assert!(!is_dark_frame(&frame, 70).unwrap());
     }
 
     #[test]
-    fn dark_pixel_value_is_an_exclusive_upper_bound() {
-        // A pixel whose luminance equals dark_pixel_value is *not* counted as dark
-        // (the comparison is strict `<`), so an all-32 frame is dark only below 32.
+    fn mean_luminance_threshold_is_an_exclusive_lower_bound() {
+        // A frame whose mean luma equals the threshold is *not* dark (strict `<`).
         let frame =
-            Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(32.0)).unwrap();
+            Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(50.0)).unwrap();
 
-        assert!(is_dark_frame(&frame, 0.6, 33).unwrap());
-        assert!(!is_dark_frame(&frame, 0.6, 32).unwrap());
+        assert!(is_dark_frame(&frame, 51).unwrap());
+        assert!(!is_dark_frame(&frame, 50).unwrap());
     }
 
     #[test]
-    fn bright_blue_frame_is_dark_due_to_bt601_weighting() {
+    fn mean_uses_bt601_weighting() {
         // Pure blue is visually dim: its BT.601 luminance is ~28 even though the raw
-        // byte average is 85. A naive mean would wrongly treat this as a lit frame.
+        // byte average is 85, so the frame reads as dark below ~30.
         // Scalar is ordered (B, G, R, A) to match OpenCV's BGR layout.
-        let frame =
+        let blue =
             Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::new(255.0, 0.0, 0.0, 0.0))
                 .unwrap();
+        assert!(is_dark_frame(&blue, 30).unwrap());
 
-        assert!(is_dark_frame(&frame, 0.6, 30).unwrap());
-
-        // Pure green, by contrast, carries most of the luminance weight (~149).
+        // Pure green carries most of the luminance weight (~149) and is not dark.
         let green =
             Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::new(0.0, 255.0, 0.0, 0.0))
                 .unwrap();
-        assert!(!is_dark_frame(&green, 0.6, 30).unwrap());
+        assert!(!is_dark_frame(&green, 30).unwrap());
     }
 
     #[test]
     fn single_channel_frames_use_raw_luminance() {
         // Grayscale frames take the non-BGR averaging branch.
         let dark = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC1, Scalar::all(5.0)).unwrap();
-        assert!(is_dark_frame(&dark, 0.6, 10).unwrap());
+        assert!(is_dark_frame(&dark, 70).unwrap());
 
-        let lit = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC1, Scalar::all(50.0)).unwrap();
-        assert!(!is_dark_frame(&lit, 0.6, 10).unwrap());
+        let lit = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC1, Scalar::all(120.0)).unwrap();
+        assert!(!is_dark_frame(&lit, 70).unwrap());
     }
 
     #[test]
-    fn dark_ratio_threshold_is_inclusive() {
-        // Half the pixels dark: the bottom row is black, the top row is bright.
+    fn mean_is_robust_to_a_few_bright_pixels() {
+        // A mostly-black frame with one bright row stays well below the threshold,
+        // unlike a pixel-count ratio which a bright spot could tip either way.
         let mut frame =
-            Mat::new_rows_cols_with_default(2, 1, core::CV_8UC3, Scalar::all(200.0)).unwrap();
+            Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(0.0)).unwrap();
         {
-            let mut bottom = Mat::roi_mut(&mut frame, core::Rect::new(0, 1, 1, 1)).unwrap();
-            bottom.set_to_def(&Scalar::all(0.0)).unwrap();
+            let mut top = Mat::roi_mut(&mut frame, core::Rect::new(0, 0, 8, 1)).unwrap();
+            top.set_to_def(&Scalar::all(255.0)).unwrap();
         }
-
-        // ratio == 0.5: dark at threshold 0.5 (inclusive `>=`), not at 0.6.
-        assert!(is_dark_frame(&frame, 0.5, 10).unwrap());
-        assert!(!is_dark_frame(&frame, 0.6, 10).unwrap());
+        // One of eight rows bright => mean luma ~32, still dark at threshold 70.
+        assert!(is_dark_frame(&frame, 70).unwrap());
     }
 
     #[test]
     fn empty_frame_is_treated_as_dark() {
         let frame = Mat::default();
-        assert!(is_dark_frame(&frame, 0.6, 10).unwrap());
+        assert!(is_dark_frame(&frame, 70).unwrap());
     }
 }

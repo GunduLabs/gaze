@@ -20,9 +20,8 @@ level = "medium"
 
 [cameras]
 rgb = "primary"
-# Reject frames where this fraction of pixels are below dark_pixel_value.
-dark_threshold = 0.6
-dark_pixel_value = 10
+# Reject frames whose mean brightness (0-255) is below this value as too dark.
+dark_luma_threshold = 70
 
 [auth]
 abort_if_ssh = true
