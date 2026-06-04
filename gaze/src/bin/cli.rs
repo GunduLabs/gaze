@@ -343,15 +343,11 @@ async fn handle_enroll(
             tick,
         })?;
 
-        match tui::poll_action()? {
-            Some(TuiAction::Cancel) if confirm_cancel => confirm_cancel = false,
-            Some(TuiAction::Cancel) => confirm_cancel = true,
-            Some(TuiAction::Confirm) if confirm_cancel => {
-                is_cancelled = true;
-                break;
-            }
-            Some(TuiAction::Decline) if confirm_cancel => confirm_cancel = false,
-            _ => {}
+        if tui::apply_cancel_action(&mut confirm_cancel, tui::poll_action()?)
+            == tui::ConfirmStep::CancelConfirmed
+        {
+            is_cancelled = true;
+            break;
         }
 
         tokio::select! {
