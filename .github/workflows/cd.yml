@@ -249,7 +249,7 @@ jobs:
             gcc
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Install just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
@@ -257,7 +257,7 @@ jobs:
           just-version: ${{ env.JUST_VERSION }}
 
       - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: cd-${{ matrix.id }}-v1
           cache-on-failure: true
@@ -319,7 +319,7 @@ jobs:
           EOF
 
       - name: Upload package artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: packages-${{ matrix.id }}
           path: |
@@ -335,13 +335,13 @@ jobs:
 
     steps:
       - name: Download package artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: packages-*
           path: dist/packages
 
       - name: Dispatch package artifact URLs
-        uses: peter-evans/repository-dispatch@v4
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4
         with:
           token: ${{ secrets.PACKAGES_REPO_PAT }}
           repository: GunduLabs/packages
@@ -349,7 +349,7 @@ jobs:
           client-payload: '{"repo":"${{ github.repository }}","run_id":"${{ github.run_id }}","url":"https://gaze.gundulabs.com"}'
 
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
             dist/packages/**/*.deb
