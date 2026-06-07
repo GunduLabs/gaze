@@ -472,6 +472,70 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     }
     is_loading.set(false);
 
+    // Wire the Unlock button up front so it is always responsive the moment the
+    // dialog is shown, independent of the background state task below. Connecting
+    // it inside that task meant the button stayed dead until several DBus
+    // round-trips finished, and a failing `receive_changed()` could panic the
+    // task before the handler was ever attached. Each click opens the system bus
+    // and runs an interactive polkit check; failures are logged rather than
+    // silently swallowed so a non-working button is diagnosable.
+    banner.connect_button_clicked(glib::clone!(
+        #[weak]
+        banner,
+        #[weak]
+        scrolled,
+        move |_| {
+            glib::MainContext::default().spawn_local(glib::clone!(
+                #[weak]
+                banner,
+                #[weak]
+                scrolled,
+                async move {
+                    let conn = match Connection::system().await {
+                        Ok(conn) => conn,
+                        Err(e) => {
+                            eprintln!("gaze-gui: system bus connection failed: {e}");
+                            return;
+                        }
+                    };
+                    let authority = match AuthorityProxy::new(&conn).await {
+                        Ok(authority) => authority,
+                        Err(e) => {
+                            eprintln!("gaze-gui: polkit proxy creation failed: {e}");
+                            return;
+                        }
+                    };
+                    let subject = match Subject::new_for_owner(std::process::id(), None, None) {
+                        Ok(subject) => subject,
+                        Err(e) => {
+                            eprintln!("gaze-gui: polkit subject creation failed: {e}");
+                            return;
+                        }
+                    };
+
+                    match authority
+                        .check_authorization(
+                            &subject,
+                            "com.gundulabs.gaze.manage-config",
+                            &HashMap::new(),
+                            CheckAuthorizationFlags::AllowUserInteraction.into(),
+                            "",
+                        )
+                        .await
+                    {
+                        Ok(res) => {
+                            banner.set_revealed(!res.is_authorized);
+                            scrolled.set_sensitive(res.is_authorized);
+                        }
+                        Err(e) => eprintln!("gaze-gui: polkit CheckAuthorization failed: {e}"),
+                    }
+                }
+            ));
+        }
+    ));
+
+    // Reflect the current authorization state on open and keep it in sync when
+    // polkit's authorizations change underneath us.
     glib::MainContext::default().spawn_local(glib::clone!(
         #[weak]
         banner,
@@ -485,8 +549,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 return;
             };
 
-            let check_auth = |auth: AuthorityProxy<'static>, _conn: Connection| async move {
-                let subject = Subject::new_for_owner(std::process::id(), None, None).unwrap();
+            let check_auth = |auth: AuthorityProxy<'static>| async move {
+                let subject = Subject::new_for_owner(std::process::id(), None, None).ok()?;
 
                 auth.check_authorization(
                     &subject,
@@ -496,6 +560,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                     "",
                 )
                 .await
+                .ok()
+                .map(|res| res.is_authorized)
             };
 
             let update_ui = glib::clone!(
@@ -509,47 +575,17 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 }
             );
 
-            if let Ok(res) = check_auth(authority.clone(), conn.clone()).await {
-                update_ui(res.is_authorized);
+            if let Some(allowed) = check_auth(authority.clone()).await {
+                update_ui(allowed);
             }
 
-            let mut changed_stream = authority.receive_changed().await.unwrap();
-
-            banner.connect_button_clicked(glib::clone!(
-                #[strong]
-                authority,
-                #[strong]
-                update_ui,
-                move |_| {
-                    glib::MainContext::default().spawn_local(glib::clone!(
-                        #[strong]
-                        authority,
-                        #[strong]
-                        update_ui,
-                        async move {
-                            let subject =
-                                Subject::new_for_owner(std::process::id(), None, None).unwrap();
-
-                            if let Ok(res) = authority
-                                .check_authorization(
-                                    &subject,
-                                    "com.gundulabs.gaze.manage-config",
-                                    &HashMap::new(),
-                                    CheckAuthorizationFlags::AllowUserInteraction.into(),
-                                    "",
-                                )
-                                .await
-                            {
-                                update_ui(res.is_authorized);
-                            }
-                        }
-                    ));
-                }
-            ));
+            let Ok(mut changed_stream) = authority.receive_changed().await else {
+                return;
+            };
 
             while changed_stream.next().await.is_some() {
-                if let Ok(res) = check_auth(authority.clone(), conn.clone()).await {
-                    update_ui(res.is_authorized);
+                if let Some(allowed) = check_auth(authority.clone()).await {
+                    update_ui(allowed);
                 }
             }
         }
