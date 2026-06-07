@@ -17,9 +17,9 @@ use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
 use gaze_core::camera::{Camera, CameraKind, resolve_source};
 use gaze_core::config::Config;
-use gaze_core::ir::led::IrLed;
 use gaze_core::dbus::{CaptureStatus, EnrollPrompt, VerifyResult};
 use gaze_core::face::FaceChecker;
+use gaze_core::ir::led::IrLed;
 
 const CONFIG_PATH: &str = "/etc/gaze/config.toml";
 const POLKIT_ACTION_MANAGE_FACES: &str = "com.gundulabs.gaze.manage-faces";
@@ -439,9 +439,14 @@ mod tests {
 
         assert!(EmitterGuard::engage(&CameraKind::Rgb, true).led.is_none());
         assert!(
-            EmitterGuard::engage(&CameraKind::Ir { node: "/dev/null".to_string() }, false)
-                .led
-                .is_none()
+            EmitterGuard::engage(
+                &CameraKind::Ir {
+                    node: "/dev/null".to_string()
+                },
+                false
+            )
+            .led
+            .is_none()
         );
     }
 

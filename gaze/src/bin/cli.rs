@@ -232,7 +232,9 @@ async fn run_config_wizard(
         .unwrap_or(70);
 
     config.cameras.ir = Input::with_theme(&theme)
-        .with_prompt("IR camera device node (e.g. /dev/video2; blank for none — run `gaze discover`)")
+        .with_prompt(
+            "IR camera device node (e.g. /dev/video2; blank for none — run `gaze discover`)",
+        )
         .allow_empty(true)
         .default(config.cameras.ir.clone())
         .interact_text()?
@@ -1184,7 +1186,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn handle_discover() -> anyhow::Result<()> {
-    use gaze_core::ir::devices::{camera_bus, find_device, usb_ids_of, CameraBus};
+    use gaze_core::ir::devices::{CameraBus, camera_bus, find_device, usb_ids_of};
 
     let configured_ir = Config::load()
         .map(|c| c.cameras.ir.trim().to_string())
