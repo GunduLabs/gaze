@@ -112,39 +112,57 @@ pub fn crop_face(img: &RgbImage, bbox: [f32; 4]) -> anyhow::Result<RgbImage> {
     Ok(crop_imm(img, left, top, right - left + 1, bottom - top + 1).to_image())
 }
 
-pub const MIN_EYE_MOTION_PX: f32 = 0.8;
+/// Minimum eye movement, expressed as a fraction of the inter-eye distance, for a
+/// face to read as live. Normalizing by inter-eye distance (a proxy for face size)
+/// keeps the bar distance-invariant: a small/far face is allowed less absolute
+/// jitter, matching the face-width normalization the enrollment stability check
+/// already uses. A fixed pixel threshold instead let a small replayed screen read
+/// as "static" and risked false-rejecting a genuine but distant user.
+pub const MIN_EYE_MOTION_RATIO: f32 = 0.02;
 
 #[derive(Debug, Clone)]
 pub struct EyeMotion {
     pub live: bool,
-    pub motion_px: f32,
+    pub motion_ratio: f32,
     pub pairs: usize,
 }
 
-pub fn eye_motion_is_live(landmarks: &[[(f32, f32); 5]], min_px: Option<f32>) -> EyeMotion {
-    let threshold = min_px.unwrap_or(MIN_EYE_MOTION_PX);
+pub fn eye_motion_is_live(landmarks: &[[(f32, f32); 5]], min_ratio: Option<f32>) -> EyeMotion {
+    let threshold = min_ratio.unwrap_or(MIN_EYE_MOTION_RATIO);
+
+    let neutral = EyeMotion {
+        live: true,
+        motion_ratio: 0.0,
+        pairs: 0,
+    };
 
     if landmarks.len() < 2 {
-        return EyeMotion {
-            live: true,
-            motion_px: 0.0,
-            pairs: 0,
-        };
+        return neutral;
     }
 
-    let step = |a: (f32, f32), b: (f32, f32)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
+    let dist = |a: (f32, f32), b: (f32, f32)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
 
-    let motions: Vec<f32> = landmarks
+    // Per consecutive frame pair: average left/right eye landmark motion, divided by
+    // the pair's mean inter-eye distance so the ratio does not change with face scale.
+    // Pairs with a degenerate (near-zero) inter-eye distance are dropped.
+    let ratios: Vec<f32> = landmarks
         .windows(2)
-        .map(|pair| (step(pair[0][0], pair[1][0]) + step(pair[0][1], pair[1][1])) / 2.0)
+        .filter_map(|pair| {
+            let motion = (dist(pair[0][0], pair[1][0]) + dist(pair[0][1], pair[1][1])) / 2.0;
+            let ipd = (dist(pair[0][0], pair[0][1]) + dist(pair[1][0], pair[1][1])) / 2.0;
+            (ipd > f32::EPSILON).then(|| motion / ipd)
+        })
         .collect();
 
-    let pairs = motions.len();
-    let motion_px = motions.iter().sum::<f32>() / pairs as f32;
+    let pairs = ratios.len();
+    if pairs == 0 {
+        return neutral;
+    }
+    let motion_ratio = ratios.iter().sum::<f32>() / pairs as f32;
 
     EyeMotion {
-        live: motion_px >= threshold,
-        motion_px,
+        live: motion_ratio >= threshold,
+        motion_ratio,
         pairs,
     }
 }
@@ -252,7 +270,7 @@ mod tests {
         let motion = eye_motion_is_live(&[frame, frame, frame], None);
         assert!(!motion.live);
         assert_eq!(motion.pairs, 2);
-        assert!(motion.motion_px < 1e-6);
+        assert!(motion.motion_ratio < 1e-6);
     }
 
     #[test]
@@ -264,7 +282,7 @@ mod tests {
         ];
         let motion = eye_motion_is_live(&seq, None);
         assert!(!motion.live);
-        assert!(motion.motion_px < MIN_EYE_MOTION_PX);
+        assert!(motion.motion_ratio < MIN_EYE_MOTION_RATIO);
     }
 
     #[test]
@@ -276,7 +294,7 @@ mod tests {
         ];
         let motion = eye_motion_is_live(&seq, None);
         assert!(motion.live);
-        assert!(motion.motion_px >= MIN_EYE_MOTION_PX);
+        assert!(motion.motion_ratio >= MIN_EYE_MOTION_RATIO);
         assert_eq!(motion.pairs, 2);
     }
 
@@ -286,17 +304,20 @@ mod tests {
             eyes((100.0, 50.0), (140.0, 50.0)),
             eyes((100.0, 50.0), (143.0, 54.0)),
         ];
+        // Left eye still (0px), right eye moves 5px -> 2.5px average motion, divided by
+        // the mean inter-eye distance ((40 + 43.186)/2 = 41.593) -> ~0.0601.
         let motion = eye_motion_is_live(&seq, None);
-        assert!((motion.motion_px - 2.5).abs() < 1e-6);
+        assert!((motion.motion_ratio - 0.0601).abs() < 1e-3);
     }
 
     #[test]
     fn caller_threshold_wins_over_default() {
+        // Motion ratio here is ~0.028 of the inter-eye distance.
         let seq = vec![
             eyes((100.0, 50.0), (140.0, 50.0)),
             eyes((101.0, 50.5), (141.0, 50.5)),
         ];
         assert!(!eye_motion_is_live(&seq, Some(5.0)).live);
-        assert!(eye_motion_is_live(&seq, Some(0.1)).live);
+        assert!(eye_motion_is_live(&seq, Some(0.01)).live);
     }
 }

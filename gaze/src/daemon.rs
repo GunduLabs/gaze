@@ -773,7 +773,7 @@ impl AuthDaemon {
                             let motion =
                                 crate::liveness::eye_motion_is_live(&landmark_seq, None);
                             info!(
-                                motion_px = motion.motion_px,
+                                motion_ratio = motion.motion_ratio,
                                 pairs = motion.pairs,
                                 "VerifyStart: IR eye-motion liveness"
                             );
@@ -811,7 +811,7 @@ impl AuthDaemon {
                             let confirmed_static = motion.pairs >= 1 && !motion.live;
                             if confirmed_static {
                                 info!(
-                                    motion_px = motion.motion_px,
+                                    motion_ratio = motion.motion_ratio,
                                     "VerifyStart: RGB match rejected — no eye motion (static)"
                                 );
                             }
