@@ -696,6 +696,15 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     window.present();
 }
 
+fn show_daemon_pending_toast(window: &libadwaita::ApplicationWindow) {
+    if let Some(overlay) = window
+        .content()
+        .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+    {
+        overlay.add_toast(libadwaita::Toast::new("Connecting to the Gaze daemon…"));
+    }
+}
+
 pub fn build_window(app: &libadwaita::Application, username: &str) {
     load_auth_highlight_css();
 
@@ -782,6 +791,199 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
         }
     ));
 
+    // Shared by the synchronously-wired toolbar buttons and populated once the
+    // daemon connection lands in the task below.
+    let proxy_cell: Rc<RefCell<Option<Rc<GazeProxy>>>> = Rc::new(RefCell::new(None));
+    let refresh: Rc<RefCell<Option<RefreshCb>>> = Rc::new(RefCell::new(None));
+    let last_toast: Rc<RefCell<Option<libadwaita::Toast>>> = Rc::new(RefCell::new(None));
+
+    test_btn.connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        #[strong]
+        proxy_cell,
+        #[weak(rename_to = face_list_weak)]
+        face_list,
+        #[strong]
+        username,
+        #[strong]
+        last_toast,
+        move |btn| {
+            let Some(proxy) = proxy_cell.borrow().clone() else {
+                show_daemon_pending_toast(&window);
+                return;
+            };
+            if let Some(prev) = last_toast.borrow_mut().take() {
+                prev.dismiss();
+            }
+            btn.set_sensitive(false);
+            glib::MainContext::default().spawn_local(glib::clone!(
+                #[weak]
+                window,
+                #[strong]
+                username,
+                #[weak]
+                btn,
+                #[strong]
+                proxy,
+                #[strong]
+                face_list_weak,
+                #[strong]
+                last_toast,
+                async move {
+                    use futures::StreamExt;
+
+                    if proxy.claim(&username).await.is_err() {
+                        if let Some(overlay) = window
+                            .content()
+                            .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+                        {
+                            overlay.add_toast(libadwaita::Toast::new("Failed to claim device"));
+                        }
+                        btn.set_sensitive(true);
+                        return;
+                    }
+
+                    if proxy.verify_start("any").await.is_err() {
+                        if let Some(overlay) = window
+                            .content()
+                            .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+                        {
+                            overlay.add_toast(libadwaita::Toast::new(
+                                "Daemon error starting verification",
+                            ));
+                        }
+                        let _ = proxy.release().await;
+                        btn.set_sensitive(true);
+                        return;
+                    }
+
+                    let mut text = "✗ Verification failed".to_string();
+                    let mut matched_face: Option<String> = None;
+
+                    if let Ok(mut stream) = proxy.receive_verify_status().await {
+                        while let Some(signal) = stream.next().await {
+                            if let Ok(args) = signal.args() {
+                                let res = *args.result();
+                                if res == gaze_core::dbus::VerifyResult::VerifyMatch {
+                                    text = "✓ Authentication successful".to_string();
+                                    let faces = args.faces();
+                                    matched_face = faces
+                                        .iter()
+                                        .find(|(_, _, _, p, _)| *p)
+                                        .map(|(n, _, _, _, _)| n.clone());
+                                    break;
+                                } else {
+                                    text = "✗ Authentication failed".to_string();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    let _ = proxy.release().await;
+
+                    if let Some(face_name) = matched_face {
+                        let list = face_list_weak;
+                        let mut child = list.first_child();
+                        while let Some(w) = child {
+                            if let Ok(row) = w.clone().downcast::<libadwaita::ActionRow>() {
+                                let title: gtk4::glib::GString = row.title();
+                                let is_match = title.as_str() == face_name.as_str();
+                                if is_match {
+                                    row.add_css_class("auth-match-highlight");
+                                    let r = row;
+                                    glib::timeout_add_local_once(
+                                        std::time::Duration::from_secs(2),
+                                        move || {
+                                            r.remove_css_class("auth-match-highlight");
+                                        },
+                                    );
+                                    break;
+                                }
+                            }
+                            child = w.next_sibling();
+                        }
+                    }
+
+                    let toast = libadwaita::Toast::new(&text);
+                    if let Some(overlay) = window
+                        .content()
+                        .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+                    {
+                        overlay.add_toast(toast.clone());
+                    }
+                    *last_toast.borrow_mut() = Some(toast);
+                    btn.set_sensitive(true);
+                }
+            ));
+        }
+    ));
+
+    add_btn.connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        #[strong]
+        username,
+        #[strong]
+        refresh,
+        #[strong]
+        proxy_cell,
+        move |_| {
+            let Some(proxy) = proxy_cell.borrow().clone() else {
+                show_daemon_pending_toast(&window);
+                return;
+            };
+            glib::MainContext::default().spawn_local(glib::clone!(
+                #[weak]
+                window,
+                #[strong]
+                username,
+                #[strong]
+                refresh,
+                #[strong]
+                proxy,
+                async move {
+                    if let Err(err) = proxy.claim(&username).await {
+                        let toast = libadwaita::Toast::new(&format!(
+                            "Failed to claim device: {}",
+                            dbus_error_message(&err)
+                        ));
+                        if let Some(overlay) = window
+                            .content()
+                            .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+                        {
+                            overlay.add_toast(toast);
+                        }
+                        return;
+                    }
+
+                    let camera_device = match load_config_from_daemon(&proxy).await {
+                        Ok(cfg) => gaze_core::camera::resolve_source(&cfg.cameras).0,
+                        Err(_) => "primary".to_string(),
+                    };
+
+                    capture_dialog::show_capture_dialog(
+                        &window,
+                        &username,
+                        None,
+                        &proxy,
+                        &camera_device,
+                        glib::clone!(
+                            #[strong]
+                            refresh,
+                            move || {
+                                if let Some(f) = refresh.borrow().as_ref() {
+                                    f();
+                                }
+                            }
+                        ),
+                    );
+                }
+            ));
+        }
+    ));
+
     glib::MainContext::default().spawn_local(glib::clone!(
         #[weak]
         window,
@@ -789,12 +991,12 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
         face_list,
         #[weak]
         status_page,
-        #[weak]
-        add_btn,
-        #[weak]
-        test_btn,
         #[strong]
         username,
+        #[strong]
+        proxy_cell,
+        #[strong]
+        refresh,
         async move {
             let Ok(conn) = Connection::system().await else {
                 tracing::error!("Failed to connect to system DBus");
@@ -809,8 +1011,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
             };
 
             let proxy = Rc::new(proxy);
-
-            let refresh: Rc<RefCell<Option<RefreshCb>>> = Rc::new(RefCell::new(None));
+            *proxy_cell.borrow_mut() = Some(proxy.clone());
 
             *refresh.borrow_mut() = Some(Rc::new(glib::clone!(
                 #[weak]
@@ -1174,178 +1375,6 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 f();
             }
 
-            let last_toast: Rc<RefCell<Option<libadwaita::Toast>>> = Rc::new(RefCell::new(None));
-
-            test_btn.connect_clicked(glib::clone!(
-                #[weak]
-                window,
-                #[strong]
-                proxy,
-                #[weak(rename_to = face_list_weak)]
-                face_list,
-                #[strong]
-                username,
-                #[strong]
-                last_toast,
-                move |btn| {
-                    if let Some(prev) = last_toast.borrow_mut().take() {
-                        prev.dismiss();
-                    }
-                    btn.set_sensitive(false);
-                    glib::MainContext::default().spawn_local(glib::clone!(
-                        #[weak]
-                        window,
-                        #[strong]
-                        username,
-                        #[weak]
-                        btn,
-                        #[strong]
-                        proxy,
-                        #[strong]
-                        face_list_weak,
-                        #[strong]
-                        last_toast,
-                        async move {
-                            use futures::StreamExt;
-
-                            if proxy.claim(&username).await.is_err() {
-                                if let Some(overlay) = window
-                                    .content()
-                                    .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-                                {
-                                    overlay.add_toast(libadwaita::Toast::new("Failed to claim device"));
-                                }
-                                btn.set_sensitive(true);
-                                return;
-                            }
-
-                            if proxy.verify_start("any").await.is_err() {
-                                if let Some(overlay) = window
-                                    .content()
-                                    .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-                                {
-                                    overlay.add_toast(libadwaita::Toast::new("Daemon error starting verification"));
-                                }
-                                let _ = proxy.release().await;
-                                btn.set_sensitive(true);
-                                return;
-                            }
-
-                            let mut text = "✗ Verification failed".to_string();
-                            let mut matched_face: Option<String> = None;
-
-                            if let Ok(mut stream) = proxy.receive_verify_status().await {
-                                while let Some(signal) = stream.next().await {
-                                    if let Ok(args) = signal.args() {
-                                        let res = *args.result();
-                                        if res == gaze_core::dbus::VerifyResult::VerifyMatch {
-                                            text = "✓ Authentication successful".to_string();
-                                            let faces = args.faces();
-                                            matched_face = faces.iter().find(|(_, _, _, p, _)| *p).map(|(n, _, _, _, _)| n.clone());
-                                            break;
-                                        } else {
-                                            text = "✗ Authentication failed".to_string();
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-
-                            let _ = proxy.release().await;
-
-                            if let Some(face_name) = matched_face {
-                                let list = face_list_weak;
-                                let mut child = list.first_child();
-                                while let Some(w) = child {
-                                    if let Ok(row) = w.clone().downcast::<libadwaita::ActionRow>() {
-                                        let title: gtk4::glib::GString = row.title();
-                                        let is_match = title.as_str() == face_name.as_str();
-                                        if is_match {
-                                            row.add_css_class("auth-match-highlight");
-                                            let r = row;
-                                            glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
-                                                r.remove_css_class("auth-match-highlight");
-                                            });
-                                            break;
-                                        }
-                                    }
-                                    child = w.next_sibling();
-                                }
-                            }
-
-                            let toast = libadwaita::Toast::new(&text);
-                            if let Some(overlay) = window
-                                .content()
-                                .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-                            {
-                                overlay.add_toast(toast.clone());
-                            }
-                            *last_toast.borrow_mut() = Some(toast);
-                            btn.set_sensitive(true);
-                        }
-                    ));
-                }
-            ));
-
-            add_btn.connect_clicked(glib::clone!(
-                #[weak]
-                window,
-                #[strong]
-                username,
-                #[strong]
-                refresh,
-                #[strong]
-                proxy,
-                move |_| {
-                    glib::MainContext::default().spawn_local(glib::clone!(
-                        #[weak]
-                        window,
-                        #[strong]
-                        username,
-                        #[strong]
-                        refresh,
-                        #[strong]
-                        proxy,
-                        async move {
-                            if let Err(err) = proxy.claim(&username).await {
-                                let toast = libadwaita::Toast::new(&format!(
-                                    "Failed to claim device: {}",
-                                    dbus_error_message(&err)
-                                ));
-                                if let Some(overlay) = window
-                                    .content()
-                                    .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-                                {
-                                    overlay.add_toast(toast);
-                                }
-                                return;
-                            }
-
-                            let camera_device = match load_config_from_daemon(&proxy).await {
-                                Ok(cfg) => gaze_core::camera::resolve_source(&cfg.cameras).0,
-                                Err(_) => "primary".to_string(),
-                            };
-
-                            capture_dialog::show_capture_dialog(
-                                &window,
-                                &username,
-                                None,
-                                &proxy,
-                                &camera_device,
-                                glib::clone!(
-                                    #[strong]
-                                    refresh,
-                                    move || {
-                                        if let Some(f) = refresh.borrow().as_ref() {
-                                            f();
-                                        }
-                                    }
-                                ),
-                            );
-                        }
-                    ));
-                }
-            ));
         }
     ));
 }
