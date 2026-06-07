@@ -765,15 +765,15 @@ impl AuthDaemon {
                 }
 
                 if matched {
+                    if let Some(eyes) = eyes_from_kpss(&data.kpss) {
+                        landmark_seq.push(eyes);
+                    }
                     let confirmed = match &camera_kind {
                         CameraKind::Ir { .. } => {
-                            if let Some(eyes) = eyes_from_kpss(&data.kpss) {
-                                landmark_seq.push(eyes);
-                            }
                             let motion =
                                 crate::liveness::eye_motion_is_live(&landmark_seq, None);
                             info!(
-                                motion_px = motion.motion_px,
+                                motion_ratio = motion.motion_ratio,
                                 pairs = motion.pairs,
                                 "VerifyStart: IR eye-motion liveness"
                             );
@@ -798,10 +798,24 @@ impl AuthDaemon {
                             };
                             drop(live_guard);
                             live_scores.push(live_score);
-                            crate::liveness::liveness_passes(
+
+                            let model_pass = crate::liveness::liveness_passes(
                                 &live_scores,
                                 liveness_cfg.threshold as f32,
-                            )
+                            );
+                            // Passive second factor, free (reuses detector landmarks): reject
+                            // only a sequence confirmed static. Too few frames pass through, so
+                            // a genuine accept is never delayed.
+                            let motion =
+                                crate::liveness::eye_motion_is_live(&landmark_seq, None);
+                            let confirmed_static = motion.pairs >= 1 && !motion.live;
+                            if confirmed_static {
+                                info!(
+                                    motion_ratio = motion.motion_ratio,
+                                    "VerifyStart: RGB match rejected — no eye motion (static)"
+                                );
+                            }
+                            model_pass && !confirmed_static
                         }
                     };
 
