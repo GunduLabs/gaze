@@ -10,9 +10,27 @@ use daemon::AuthDaemon;
 use gaze_core::config::{Config, MODELS_DIR, USERS_DIR};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use zbus::connection::Builder;
+
+fn warn_on_ir_misconfig(cameras: &gaze_core::config::CameraConfig) {
+    let ir = cameras.ir.trim();
+    if ir.is_empty() {
+        if cameras.emitter_enabled {
+            warn!(
+                "cameras.emitter_enabled is set but cameras.ir is empty; the IR emitter will not be used"
+            );
+        }
+        return;
+    }
+    if !std::path::Path::new(ir).exists() {
+        warn!(
+            node = ir,
+            "cameras.ir device node does not exist; IR capture will fail until it appears"
+        );
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -56,13 +74,19 @@ async fn main() -> anyhow::Result<()> {
 
     let checker = gaze_core::face::FaceChecker::from_detector_with_config(detector, &config);
 
+    warn_on_ir_misconfig(&config.cameras);
+
+    let (camera_source, camera_kind) = gaze_core::camera::resolve_source(&config.cameras);
+
     let daemon = AuthDaemon {
         checker: Arc::new(Mutex::new(checker)),
         recognizer: Arc::new(Mutex::new(recognizer)),
         liveness: Arc::new(Mutex::new(liveness_detector)),
         db: Arc::new(Mutex::new(db)),
         threshold: Arc::new(Mutex::new(security.threshold())),
-        camera_config: Arc::new(Mutex::new(config.cameras.rgb.clone())),
+        camera_config: Arc::new(Mutex::new(camera_source)),
+        camera_kind: Arc::new(Mutex::new(camera_kind)),
+        emitter_enabled: Arc::new(Mutex::new(config.cameras.emitter_enabled)),
         liveness_config: Arc::new(Mutex::new(config.liveness.clone())),
         abort_if_ssh: Arc::new(Mutex::new(config.auth.abort_if_ssh)),
         abort_if_lid_closed: Arc::new(Mutex::new(config.auth.abort_if_lid_closed)),

@@ -1,0 +1,66 @@
+[device]
+vendor_id  = 0x0BDA
+product_id = 0x5767
+name       = "Realtek/Dell 0JCXG0 Integrated_Webcam_HD"
+source     = "SeeleVolleri/research_0jcxg0 kernel patch; MrWinux/rtk-ir-tools"
+
+[[emitter.on]]
+unit = 4
+selector = 10
+query = "set_cur"
+control_bytes = [0xff, 0, 0, 0, 0, 0, 0, 0]
+
+[[emitter.on]]
+unit = 4
+selector = 10
+query = "set_cur"
+control_bytes = [0, 0xfb, 0, 0, 0x05, 0, 0, 0]
+
+[[emitter.on]]
+unit = 4
+selector = 11
+query = "get_cur"
+size = 8
+
+[[emitter.on]]
+unit = 4
+selector = 10
+query = "set_cur"
+control_bytes = [0, 0x9f, 0, 0, 0x01, 0, 0, 0]
+
+[[emitter.on]]
+unit = 4
+selector = 11
+query = "set_cur"
+# Register 0x9f00: 0x00 = IR mode, 0x01 = RGB/default mode (per kernel patch).
+control_bytes = [0x00, 0, 0, 0, 0, 0, 0, 0]
+
+[[emitter.off]]
+unit = 4
+selector = 10
+query = "set_cur"
+control_bytes = [0xff, 0, 0, 0, 0, 0, 0, 0]
+
+[[emitter.off]]
+unit = 4
+selector = 10
+query = "set_cur"
+control_bytes = [0, 0xfb, 0, 0, 0x05, 0, 0, 0]
+
+[[emitter.off]]
+unit = 4
+selector = 11
+query = "get_cur"
+size = 8
+
+[[emitter.off]]
+unit = 4
+selector = 10
+query = "set_cur"
+control_bytes = [0, 0x9f, 0, 0, 0x01, 0, 0, 0]
+
+[[emitter.off]]
+unit = 4
+selector = 11
+query = "set_cur"
+control_bytes = [0x01, 0, 0, 0, 0, 0, 0, 0]

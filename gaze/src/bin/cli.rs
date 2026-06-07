@@ -123,6 +123,8 @@ enum Commands {
         #[arg(long, help = "Print current values and exit")]
         show: bool,
     },
+    /// List video devices and their IR emitter profile status
+    Discover,
     /// Completely uninstall Gaze: packages, PAM integration, config, models, and user data
     Uninstall {
         #[arg(short = 'y', long, help = "Skip the confirmation prompt")]
@@ -229,6 +231,25 @@ async fn run_config_wizard(
         .parse::<u8>()
         .unwrap_or(70);
 
+    config.cameras.ir = Input::with_theme(&theme)
+        .with_prompt(
+            "IR camera device node (e.g. /dev/video2; blank for none — run `gaze discover`)",
+        )
+        .allow_empty(true)
+        .default(config.cameras.ir.clone())
+        .interact_text()?
+        .trim()
+        .to_string();
+
+    if config.cameras.ir.is_empty() {
+        config.cameras.emitter_enabled = false;
+    } else {
+        config.cameras.emitter_enabled = Confirm::with_theme(&theme)
+            .with_prompt("Drive the IR emitter (turn the camera's IR LED on during auth)")
+            .default(config.cameras.emitter_enabled)
+            .interact()?;
+    }
+
     config.auth.abort_if_ssh = Confirm::with_theme(&theme)
         .with_prompt("Abort face auth for SSH sessions")
         .default(config.auth.abort_if_ssh)
@@ -277,6 +298,42 @@ async fn run_config_wizard(
     Ok(())
 }
 
+fn camera_mode_label(cfg: &Config) -> String {
+    use gaze_core::ir::devices::{find_device, usb_ids_of};
+
+    let ir = cfg.cameras.ir.trim();
+    if ir.is_empty() {
+        return format!("RGB ({})", cfg.cameras.rgb);
+    }
+
+    let emitter = if cfg.cameras.emitter_enabled {
+        "emitter on"
+    } else {
+        "emitter off"
+    };
+
+    let profile = if cfg.cameras.emitter_enabled {
+        match usb_ids_of(ir).and_then(|(v, p)| find_device(v, p)) {
+            Some(dev) => format!(", profile: {}", dev.name),
+            None => ", no static profile (runtime probe)".to_string(),
+        }
+    } else {
+        String::new()
+    };
+
+    format!("Infrared ({ir}, {emitter}{profile})")
+}
+
+async fn print_camera_mode(proxy: &GazeProxy<'_>, term: &Term) {
+    if let Ok(cfg) = load_config_from_daemon(proxy).await {
+        let _ = term.write_line(&format!(
+            "{} {}",
+            style("Camera:").bold(),
+            camera_mode_label(&cfg)
+        ));
+    }
+}
+
 async fn handle_enroll(
     proxy: &GazeProxy<'_>,
     user: &str,
@@ -293,6 +350,8 @@ async fn handle_enroll(
         ))?;
         return Ok(());
     }
+
+    print_camera_mode(proxy, &term).await;
 
     let mut enroll_stream = proxy.receive_enroll_status().await?;
     let mut capture_stream = proxy.receive_face_status().await?;
@@ -428,6 +487,10 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
             dbus_error_message(&err)
         ))?;
         return Ok(());
+    }
+
+    if verbose {
+        print_camera_mode(proxy, &term).await;
     }
 
     let mut status_stream = proxy.receive_verify_status().await?;
@@ -1015,6 +1078,10 @@ async fn main() -> anyhow::Result<()> {
         return handle_uninstall(yes, keep_data, dry_run);
     }
 
+    if let Commands::Discover = cli.command {
+        return handle_discover();
+    }
+
     let conn = Connection::system().await?;
     let proxy = GazeProxy::new(&conn).await?;
 
@@ -1061,6 +1128,12 @@ async fn main() -> anyhow::Result<()> {
                     config.security.threshold()
                 );
                 println!("{} {}", style("cameras.rgb:").bold(), config.cameras.rgb);
+                println!("{} {}", style("cameras.ir:").bold(), config.cameras.ir);
+                println!(
+                    "{} {}",
+                    style("cameras.emitter_enabled:").bold(),
+                    config.cameras.emitter_enabled
+                );
                 println!(
                     "{} {}",
                     style("cameras.dark_luma_threshold:").bold(),
@@ -1105,8 +1178,55 @@ async fn main() -> anyhow::Result<()> {
             }
             run_config_wizard(&Term::stdout(), &proxy, config).await?;
         }
+        Commands::Discover => unreachable!("handled before DBus connection"),
         Commands::Uninstall { .. } => unreachable!("handled before DBus connection"),
     }
 
+    Ok(())
+}
+
+fn handle_discover() -> anyhow::Result<()> {
+    use gaze_core::ir::devices::{CameraBus, camera_bus, find_device, usb_ids_of};
+
+    let configured_ir = Config::load()
+        .map(|c| c.cameras.ir.trim().to_string())
+        .unwrap_or_default();
+
+    let mut nodes: Vec<String> = std::fs::read_dir("/dev")
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter_map(|e| e.path().to_str().map(str::to_string))
+                .filter(|p| p.starts_with("/dev/video"))
+                .collect()
+        })
+        .unwrap_or_default();
+    nodes.sort();
+
+    if nodes.is_empty() {
+        println!("No /dev/video* devices found.");
+        return Ok(());
+    }
+
+    for node in nodes {
+        let mut line = node.clone();
+        match usb_ids_of(&node) {
+            Some((vid, pid)) => {
+                line += &format!("  vid={vid:#06x} pid={pid:#06x}");
+                match find_device(vid, pid) {
+                    Some(dev) => line += &format!("  emitter: {} \u{2713}", dev.name),
+                    None => line += "  no emitter profile",
+                }
+            }
+            None => line += "  (no USB id)",
+        }
+        if camera_bus(&node) == CameraBus::Ipu6 {
+            line += "  [IPU6 \u{2014} not UVC, IR emitter unsupported]";
+        }
+        if !configured_ir.is_empty() && node == configured_ir {
+            line += "  \u{2190} configured (cameras.ir)";
+        }
+        println!("{line}");
+    }
     Ok(())
 }

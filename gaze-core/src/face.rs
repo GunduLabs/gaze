@@ -8,6 +8,20 @@ use std::path::Path;
 const MIN_FACE_SIZE_RATIO: f32 = 0.35;
 const MAX_FACE_SIZE_RATIO: f32 = 0.78;
 
+/// On an IR camera the emitter-lit face sits on a near-black background, which
+/// drags the frame mean down. Cap the darkness cutoff here so an IR frame is not
+/// wrongly rejected, while still catching a covered or unlit sensor (mean ~0).
+const IR_DARK_LUMA_CEILING: u8 = 25;
+
+/// The dark-frame cutoff to use, relaxed for IR cameras (never raised).
+pub fn effective_dark_luma_threshold(config: &Config) -> u8 {
+    if config.cameras.ir.trim().is_empty() {
+        config.cameras.dark_luma_threshold
+    } else {
+        config.cameras.dark_luma_threshold.min(IR_DARK_LUMA_CEILING)
+    }
+}
+
 pub struct CaptureResult {
     pub bytes: Vec<u8>,
     pub width: u32,
@@ -59,7 +73,7 @@ impl FaceChecker {
     pub fn from_detector_with_config(detector: FaceDetector, config: &Config) -> Self {
         Self {
             detector,
-            dark_luma_threshold: config.cameras.dark_luma_threshold,
+            dark_luma_threshold: effective_dark_luma_threshold(config),
         }
     }
 
@@ -285,5 +299,20 @@ mod tests {
     fn empty_frame_is_treated_as_dark() {
         let frame = Mat::default();
         assert!(is_dark_frame(&frame, 70).unwrap());
+    }
+
+    #[test]
+    fn ir_camera_relaxes_dark_threshold_without_raising_it() {
+        let mut config = crate::config::Config::default();
+        config.cameras.dark_luma_threshold = 70;
+
+        assert_eq!(effective_dark_luma_threshold(&config), 70);
+
+        config.cameras.ir = "/dev/video2".to_string();
+        assert_eq!(effective_dark_luma_threshold(&config), 25);
+
+        // a user-chosen lower value is never raised
+        config.cameras.dark_luma_threshold = 15;
+        assert_eq!(effective_dark_luma_threshold(&config), 15);
     }
 }

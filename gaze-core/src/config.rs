@@ -161,6 +161,10 @@ impl Default for LivenessConfig {
 pub struct CameraConfig {
     #[serde(default = "default_rgb_device")]
     pub rgb: String,
+    #[serde(default)]
+    pub ir: String,
+    #[serde(default)]
+    pub emitter_enabled: bool,
     /// Frames whose mean luminance (0-255) is below this are rejected as too dark.
     #[serde(default = "default_dark_luma_threshold")]
     pub dark_luma_threshold: u8,
@@ -224,6 +228,8 @@ impl Default for CameraConfig {
     fn default() -> Self {
         Self {
             rgb: default_rgb_device(),
+            ir: String::new(),
+            emitter_enabled: false,
             dark_luma_threshold: default_dark_luma_threshold(),
         }
     }
@@ -382,6 +388,8 @@ mod tests {
             security: SecurityLevel::high(),
             cameras: CameraConfig {
                 rgb: "primary".to_string(),
+                ir: "/dev/video2".to_string(),
+                emitter_enabled: true,
                 dark_luma_threshold: 55,
             },
             auth: AuthConfig {
@@ -406,6 +414,8 @@ mod tests {
             SecurityLevel::high().recognizer()
         );
         assert_eq!(loaded.cameras.rgb, "primary");
+        assert_eq!(loaded.cameras.ir, "/dev/video2");
+        assert!(loaded.cameras.emitter_enabled);
         assert_eq!(loaded.cameras.dark_luma_threshold, 55);
         assert!(loaded.auth.abort_if_ssh);
         assert!(!loaded.auth.abort_if_lid_closed);
@@ -414,6 +424,20 @@ mod tests {
         assert!(loaded.liveness.enabled);
         assert!((loaded.liveness.threshold - 0.9).abs() < f64::EPSILON);
         assert_eq!(loaded.liveness.max_frames, 25);
+    }
+
+    #[test]
+    fn ir_camera_fields_default_empty_and_disabled() {
+        let config: Config = toml::from_str(
+            r#"
+            [cameras]
+            rgb = "primary"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.cameras.ir, "");
+        assert!(!config.cameras.emitter_enabled);
     }
 
     #[test]

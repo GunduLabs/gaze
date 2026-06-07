@@ -15,10 +15,11 @@ use crate::align::{align_face, mat_to_rgb};
 use crate::liveness::LivenessDetector;
 use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
-use gaze_core::camera::Camera;
+use gaze_core::camera::{Camera, CameraKind, resolve_source};
 use gaze_core::config::Config;
 use gaze_core::dbus::{CaptureStatus, EnrollPrompt, VerifyResult};
 use gaze_core::face::FaceChecker;
+use gaze_core::ir::led::IrLed;
 
 const CONFIG_PATH: &str = "/etc/gaze/config.toml";
 const POLKIT_ACTION_MANAGE_FACES: &str = "com.gundulabs.gaze.manage-faces";
@@ -45,6 +46,53 @@ pub struct FaceData {
     pub pitch: f32,
 }
 
+struct EmitterGuard {
+    led: Option<IrLed>,
+}
+
+impl EmitterGuard {
+    fn engage(kind: &CameraKind, enabled: bool) -> Self {
+        let led = match kind {
+            CameraKind::Ir { node } if enabled => match IrLed::for_path(node) {
+                Some(led) => {
+                    if let Err(e) = led.set(true) {
+                        warn!("IR emitter activate failed: {e}");
+                    }
+                    Some(led)
+                }
+                None => {
+                    warn!("no IR emitter profile for {node}; continuing without illumination");
+                    None
+                }
+            },
+            _ => None,
+        };
+        Self { led }
+    }
+}
+
+impl Drop for EmitterGuard {
+    fn drop(&mut self) {
+        if let Some(led) = &self.led
+            && let Err(e) = led.set(false)
+        {
+            warn!("IR emitter deactivate failed: {e}");
+        }
+    }
+}
+
+fn eyes_from_kpss(kpss: &ndarray::Array3<f32>) -> Option<[(f32, f32); 5]> {
+    let shape = kpss.shape();
+    if shape[0] < 1 || shape[1] < 5 || shape[2] < 2 {
+        return None;
+    }
+    let mut pts = [(0.0f32, 0.0f32); 5];
+    for (i, p) in pts.iter_mut().enumerate() {
+        *p = (kpss[[0, i, 0]], kpss[[0, i, 1]]);
+    }
+    Some(pts)
+}
+
 pub struct AuthDaemon {
     pub checker: Arc<Mutex<FaceChecker>>,
     pub recognizer: Arc<Mutex<FaceRecognizer>>,
@@ -52,6 +100,8 @@ pub struct AuthDaemon {
     pub db: Arc<Mutex<UserDatabase>>,
     pub threshold: Arc<Mutex<f32>>,
     pub camera_config: Arc<Mutex<String>>,
+    pub camera_kind: Arc<Mutex<CameraKind>>,
+    pub emitter_enabled: Arc<Mutex<bool>>,
     pub liveness_config: Arc<Mutex<gaze_core::config::LivenessConfig>>,
     pub abort_if_ssh: Arc<Mutex<bool>>,
     pub abort_if_lid_closed: Arc<Mutex<bool>>,
@@ -365,7 +415,40 @@ impl AuthDaemon {
 
 #[cfg(test)]
 mod tests {
-    use super::AuthDaemon;
+    use super::{AuthDaemon, eyes_from_kpss};
+
+    #[test]
+    fn eyes_from_kpss_extracts_first_face_landmarks() {
+        let kpss = ndarray::Array3::from_shape_fn((1, 5, 2), |(_, i, c)| (i * 2 + c) as f32);
+        let eyes = eyes_from_kpss(&kpss).expect("valid kpss shape");
+        assert_eq!(eyes[0], (0.0, 1.0));
+        assert_eq!(eyes[1], (2.0, 3.0));
+    }
+
+    #[test]
+    fn eyes_from_kpss_rejects_malformed_shapes() {
+        assert!(eyes_from_kpss(&ndarray::Array3::zeros((0, 5, 2))).is_none());
+        assert!(eyes_from_kpss(&ndarray::Array3::zeros((1, 3, 2))).is_none());
+        assert!(eyes_from_kpss(&ndarray::Array3::zeros((1, 5, 1))).is_none());
+    }
+
+    #[test]
+    fn emitter_guard_is_inert_for_rgb_and_when_disabled() {
+        use super::EmitterGuard;
+        use gaze_core::camera::CameraKind;
+
+        assert!(EmitterGuard::engage(&CameraKind::Rgb, true).led.is_none());
+        assert!(
+            EmitterGuard::engage(
+                &CameraKind::Ir {
+                    node: "/dev/null".to_string()
+                },
+                false
+            )
+            .led
+            .is_none()
+        );
+    }
 
     #[test]
     fn ssh_marker_detection_requires_non_empty_values() {
@@ -572,6 +655,8 @@ impl AuthDaemon {
         let db_arc = self.db.clone();
         let threshold_arc = self.threshold.clone();
         let camera_config = self.camera_config.lock().await.clone();
+        let camera_kind = self.camera_kind.lock().await.clone();
+        let emitter_enabled = *self.emitter_enabled.lock().await;
         let liveness_cfg = self.liveness_config.lock().await.clone();
 
         let conn = ctxt.connection().clone();
@@ -592,6 +677,8 @@ impl AuthDaemon {
                 }
             };
 
+            let _emitter = EmitterGuard::engage(&camera_kind, emitter_enabled);
+
             info!(
                 liveness_enabled = liveness_cfg.enabled,
                 liveness_threshold = liveness_cfg.threshold,
@@ -602,6 +689,7 @@ impl AuthDaemon {
             let mut last_capture_status: Option<CaptureStatus> = None;
             let mut last_faces: Vec<(String, f64, f64, bool, u32)>;
             let mut live_scores: Vec<f32> = Vec::new();
+            let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
             let mut frames_seen: u32 = 0;
             let mut dark_since: Option<Instant> = None;
             loop {
@@ -677,38 +765,52 @@ impl AuthDaemon {
                 }
 
                 if matched {
-                    let mut live_guard = liveness_arc.lock().await;
-                    let Some(detector) = live_guard.as_mut() else {
-                        error!("Liveness is enabled but the detector is unavailable");
-                        drop(live_guard);
-                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, last_faces.clone()).await;
-                        break;
-                    };
-                    let live_score = match detector.live_score(&liveness_face) {
-                        Ok(score) => score,
-                        Err(e) => {
-                            error!("Liveness inference failed: {e}");
+                    let confirmed = match &camera_kind {
+                        CameraKind::Ir { .. } => {
+                            if let Some(eyes) = eyes_from_kpss(&data.kpss) {
+                                landmark_seq.push(eyes);
+                            }
+                            let motion =
+                                crate::liveness::eye_motion_is_live(&landmark_seq, None);
+                            info!(
+                                motion_px = motion.motion_px,
+                                pairs = motion.pairs,
+                                "VerifyStart: IR eye-motion liveness"
+                            );
+                            motion.pairs >= 1 && motion.live
+                        }
+                        CameraKind::Rgb => {
+                            let mut live_guard = liveness_arc.lock().await;
+                            let Some(detector) = live_guard.as_mut() else {
+                                error!("Liveness is enabled but the detector is unavailable");
+                                drop(live_guard);
+                                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, last_faces.clone()).await;
+                                break;
+                            };
+                            let live_score = match detector.live_score(&liveness_face) {
+                                Ok(score) => score,
+                                Err(e) => {
+                                    error!("Liveness inference failed: {e}");
+                                    drop(live_guard);
+                                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, last_faces.clone()).await;
+                                    break;
+                                }
+                            };
                             drop(live_guard);
-                            let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, last_faces.clone()).await;
-                            break;
+                            live_scores.push(live_score);
+                            crate::liveness::liveness_passes(
+                                &live_scores,
+                                liveness_cfg.threshold as f32,
+                            )
                         }
                     };
-                    drop(live_guard);
-                    live_scores.push(live_score);
 
-                    if crate::liveness::liveness_passes(&live_scores, liveness_cfg.threshold as f32) {
-                        info!(
-                            live_score,
-                            live_samples = live_scores.len(),
-                            "VerifyStart: MATCHED + liveness confirmed"
-                        );
+                    if confirmed {
+                        info!("VerifyStart: MATCHED + liveness confirmed");
                         let _ = Self::verify_status(&ctxt, VerifyResult::VerifyMatch, last_faces.clone()).await;
                         break;
                     }
-                    info!(
-                        live_score,
-                        "VerifyStart: match rejected by liveness gate"
-                    );
+                    info!("VerifyStart: match rejected by liveness gate");
                 }
 
                 frames_seen += 1;
@@ -752,6 +854,8 @@ impl AuthDaemon {
         let recognizer_arc = self.recognizer.clone();
         let db_arc = self.db.clone();
         let camera_config = self.camera_config.lock().await.clone();
+        let camera_kind = self.camera_kind.lock().await.clone();
+        let emitter_enabled = *self.emitter_enabled.lock().await;
 
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
@@ -770,6 +874,8 @@ impl AuthDaemon {
                     return;
                 }
             };
+
+            let _emitter = EmitterGuard::engage(&camera_kind, emitter_enabled);
 
             let template_id = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1006,8 +1112,10 @@ impl AuthDaemon {
         let mut threshold = self.threshold.lock().await;
         *threshold = new_config.security.threshold();
 
-        let mut camera_config = self.camera_config.lock().await;
-        *camera_config = new_config.cameras.rgb.clone();
+        let (source, kind) = resolve_source(&new_config.cameras);
+        *self.camera_config.lock().await = source;
+        *self.camera_kind.lock().await = kind;
+        *self.emitter_enabled.lock().await = new_config.cameras.emitter_enabled;
 
         let mut live_cfg = self.liveness_config.lock().await;
         *live_cfg = new_config.liveness.clone();
