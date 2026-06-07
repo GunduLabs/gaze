@@ -1,0 +1,11 @@
+[device]
+vendor_id  = 0x0BDA
+product_id = 0x5517
+name       = "Realtek Integrated_Webcam_HD (Dell XPS 13 9310 family)"
+source     = "ArchWiki Dell XPS 13 (9310) IR camera IrConfig.yaml; linux-hardware.org 0bda:5517 probes"
+
+[emitter]
+unit              = 4
+selector          = 6
+control_bytes     = [1, 3, 2, 0, 0, 0, 0, 0, 0]
+off_control_bytes = [1, 3, 1, 0, 0, 0, 0, 0, 0]

@@ -8,7 +8,7 @@ Gaze is currently **not suitable for security-critical authentication**.
 
 Its liveness model raises the bar for printed-photo and screen-photo attacks, but it should not be your only authentication factor. Video replay, high-quality presentation attacks, and missing or disabled liveness checks remain risks.
 
-IR camera support and other anti-spoofing protections are planned for upcoming releases.
+Gaze supports infrared (IR) cameras: point `cameras.ir` at the IR `/dev/video*` node and Gaze captures through it, optionally driving the camera's IR emitter during authentication. See the configuration guide for setup. Further anti-spoofing protections are planned for upcoming releases.
 
 ## Privacy model
 

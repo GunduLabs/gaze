@@ -4,7 +4,29 @@ use opencv::prelude::*;
 use opencv::videoio::{CAP_GSTREAMER, VideoCapture};
 use tracing::info;
 
-use crate::config::DEFAULT_RGB_CAMERA;
+use crate::config::{CameraConfig, DEFAULT_RGB_CAMERA};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CameraKind {
+    Rgb,
+    Ir { node: String },
+}
+
+/// Resolve the capture source and kind from config. A set `cameras.ir` wins,
+/// capturing through a GStreamer `v4l2src` on that node instead of RGB.
+pub fn resolve_source(cameras: &CameraConfig) -> (String, CameraKind) {
+    let ir = cameras.ir.trim();
+    if ir.is_empty() {
+        (cameras.rgb.clone(), CameraKind::Rgb)
+    } else {
+        (
+            format!("v4l2src device={ir}"),
+            CameraKind::Ir {
+                node: ir.to_string(),
+            },
+        )
+    }
+}
 
 const PRIMARY_CAMERA_DISPLAY_NAME: &str = "Primary Camera";
 const DEVICE_SETTLE_TIMEOUT_MS: u64 = 100;
@@ -157,6 +179,37 @@ fn is_mono_format(format: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_source_uses_rgb_when_no_ir_configured() {
+        let cameras = CameraConfig {
+            rgb: "primary".to_string(),
+            ir: String::new(),
+            emitter_enabled: false,
+            dark_luma_threshold: 70,
+        };
+        let (source, kind) = resolve_source(&cameras);
+        assert_eq!(source, "primary");
+        assert_eq!(kind, CameraKind::Rgb);
+    }
+
+    #[test]
+    fn resolve_source_builds_v4l2src_pipeline_for_ir_node() {
+        let cameras = CameraConfig {
+            rgb: "primary".to_string(),
+            ir: "/dev/video2".to_string(),
+            emitter_enabled: true,
+            dark_luma_threshold: 70,
+        };
+        let (source, kind) = resolve_source(&cameras);
+        assert_eq!(source, "v4l2src device=/dev/video2");
+        assert_eq!(
+            kind,
+            CameraKind::Ir {
+                node: "/dev/video2".to_string()
+            }
+        );
+    }
 
     #[test]
     fn mono_format_detection_is_case_and_whitespace_insensitive() {

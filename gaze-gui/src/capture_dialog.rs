@@ -57,6 +57,16 @@ pub fn show_capture_dialog(
     body.set_margin_top(16);
     body.set_margin_bottom(16);
 
+    let camera_mode = gtk4::Label::new(Some(if camera_device.starts_with("v4l2src") {
+        "Infrared camera"
+    } else {
+        "RGB camera"
+    }));
+    camera_mode.add_css_class("caption");
+    camera_mode.add_css_class("dim-label");
+    camera_mode.set_halign(gtk4::Align::Start);
+    body.append(&camera_mode);
+
     let resolved_face = Rc::new(RefCell::new(face_name.unwrap_or("default").to_string()));
     let existing_face_names = Rc::new(RefCell::new(HashSet::<String>::new()));
     let face_name_valid = Rc::new(RefCell::new(is_refine));

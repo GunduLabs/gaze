@@ -4,3 +4,4 @@ pub mod config;
 pub mod dbus;
 pub mod detect;
 pub mod face;
+pub mod ir;

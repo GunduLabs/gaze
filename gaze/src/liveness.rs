@@ -112,6 +112,43 @@ pub fn crop_face(img: &RgbImage, bbox: [f32; 4]) -> anyhow::Result<RgbImage> {
     Ok(crop_imm(img, left, top, right - left + 1, bottom - top + 1).to_image())
 }
 
+pub const MIN_EYE_MOTION_PX: f32 = 0.8;
+
+#[derive(Debug, Clone)]
+pub struct EyeMotion {
+    pub live: bool,
+    pub motion_px: f32,
+    pub pairs: usize,
+}
+
+pub fn eye_motion_is_live(landmarks: &[[(f32, f32); 5]], min_px: Option<f32>) -> EyeMotion {
+    let threshold = min_px.unwrap_or(MIN_EYE_MOTION_PX);
+
+    if landmarks.len() < 2 {
+        return EyeMotion {
+            live: true,
+            motion_px: 0.0,
+            pairs: 0,
+        };
+    }
+
+    let step = |a: (f32, f32), b: (f32, f32)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
+
+    let motions: Vec<f32> = landmarks
+        .windows(2)
+        .map(|pair| (step(pair[0][0], pair[1][0]) + step(pair[0][1], pair[1][1])) / 2.0)
+        .collect();
+
+    let pairs = motions.len();
+    let motion_px = motions.iter().sum::<f32>() / pairs as f32;
+
+    EyeMotion {
+        live: motion_px >= threshold,
+        motion_px,
+        pairs,
+    }
+}
+
 pub fn liveness_passes(scores: &[f32], threshold: f32) -> bool {
     let mut finite_scores = scores
         .iter()
@@ -188,5 +225,78 @@ mod tests {
     fn liveness_rejects_low_or_non_finite_scores() {
         assert!(!liveness_passes(&[0.2, 0.4, 0.5, 0.6, 0.61], 0.8));
         assert!(!liveness_passes(&[f32::NAN, f32::INFINITY, 0.7], 0.8));
+    }
+
+    fn eyes(left: (f32, f32), right: (f32, f32)) -> [(f32, f32); 5] {
+        [left, right, (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
+    }
+
+    #[test]
+    fn one_frame_cannot_judge_motion_so_it_passes() {
+        let seq = vec![eyes((100.0, 50.0), (140.0, 50.0))];
+        let motion = eye_motion_is_live(&seq, None);
+        assert!(motion.live);
+        assert_eq!(motion.pairs, 0);
+    }
+
+    #[test]
+    fn no_frames_pass() {
+        let motion = eye_motion_is_live(&[], None);
+        assert!(motion.live);
+        assert_eq!(motion.pairs, 0);
+    }
+
+    #[test]
+    fn frozen_eyes_read_as_spoof() {
+        let frame = eyes((100.0, 50.0), (140.0, 50.0));
+        let motion = eye_motion_is_live(&[frame, frame, frame], None);
+        assert!(!motion.live);
+        assert_eq!(motion.pairs, 2);
+        assert!(motion.motion_px < 1e-6);
+    }
+
+    #[test]
+    fn sensor_jitter_stays_below_threshold() {
+        let seq = vec![
+            eyes((100.0, 50.0), (140.0, 50.0)),
+            eyes((100.1, 50.1), (140.1, 50.1)),
+            eyes((100.0, 50.0), (140.0, 50.0)),
+        ];
+        let motion = eye_motion_is_live(&seq, None);
+        assert!(!motion.live);
+        assert!(motion.motion_px < MIN_EYE_MOTION_PX);
+    }
+
+    #[test]
+    fn micro_saccades_read_as_live() {
+        let seq = vec![
+            eyes((100.0, 50.0), (140.0, 50.0)),
+            eyes((101.2, 50.8), (141.0, 50.6)),
+            eyes((100.5, 49.5), (140.3, 49.8)),
+        ];
+        let motion = eye_motion_is_live(&seq, None);
+        assert!(motion.live);
+        assert!(motion.motion_px >= MIN_EYE_MOTION_PX);
+        assert_eq!(motion.pairs, 2);
+    }
+
+    #[test]
+    fn motion_averages_left_and_right_eye() {
+        let seq = vec![
+            eyes((100.0, 50.0), (140.0, 50.0)),
+            eyes((100.0, 50.0), (143.0, 54.0)),
+        ];
+        let motion = eye_motion_is_live(&seq, None);
+        assert!((motion.motion_px - 2.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn caller_threshold_wins_over_default() {
+        let seq = vec![
+            eyes((100.0, 50.0), (140.0, 50.0)),
+            eyes((101.0, 50.5), (141.0, 50.5)),
+        ];
+        assert!(!eye_motion_is_live(&seq, Some(5.0)).live);
+        assert!(eye_motion_is_live(&seq, Some(0.1)).live);
     }
 }

@@ -113,6 +113,21 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     camera_row.set_model(Some(&cam_model));
     hardware_group.add(&camera_row);
 
+    let ir_row = libadwaita::EntryRow::new();
+    ir_row.set_title("IR Camera Device");
+    ir_row.set_tooltip_text(Some(
+        "Infrared camera node, e.g. /dev/video2 (blank for none). Run `gaze discover`.",
+    ));
+    hardware_group.add(&ir_row);
+
+    let emitter_row = libadwaita::ActionRow::new();
+    emitter_row.set_title("Drive IR Emitter");
+    emitter_row.set_subtitle("Turn the camera's IR LED on during authentication");
+    let emitter_switch = gtk4::Switch::new();
+    emitter_switch.set_valign(gtk4::Align::Center);
+    emitter_row.add_suffix(&emitter_switch);
+    hardware_group.add(&emitter_row);
+
     let dark_luma_threshold_row = libadwaita::SpinRow::with_range(0.0, 255.0, 1.0);
     dark_luma_threshold_row.set_digits(0);
     dark_luma_threshold_row.set_title("Darkness Cutoff");
@@ -237,6 +252,10 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         camera_row,
         #[weak]
+        ir_row,
+        #[weak]
+        emitter_switch,
+        #[weak]
         dark_luma_threshold_row,
         #[weak]
         templates_row,
@@ -283,6 +302,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             if let Some((_, target)) = cameras.get(cam_idx) {
                 cfg.cameras.rgb = target.clone();
             }
+            cfg.cameras.ir = ir_row.text().trim().to_string();
+            cfg.cameras.emitter_enabled = emitter_switch.is_active();
             cfg.cameras.dark_luma_threshold = dark_luma_threshold_row.value() as u8;
             cfg.enrollment.max_templates = templates_row.value() as u32;
             cfg.liveness.enabled = liveness_enabled_switch.is_active();
@@ -371,6 +392,16 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         apply_changes,
         move |_| apply_changes()
     ));
+    ir_row.connect_apply(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    emitter_switch.connect_active_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
     liveness_enabled_switch.connect_active_notify(glib::clone!(
         #[strong]
         apply_changes,
@@ -422,6 +453,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             .position(|(_, t)| t == &cfg.cameras.rgb)
             .unwrap_or(0);
         camera_row.set_selected(cam_idx as u32);
+        ir_row.set_text(&cfg.cameras.ir);
+        emitter_switch.set_active(cfg.cameras.emitter_enabled);
         dark_luma_threshold_row.set_value(cfg.cameras.dark_luma_threshold as f64);
         templates_row.set_value(cfg.enrollment.max_templates as f64);
         liveness_enabled_switch.set_active(cfg.liveness.enabled);
@@ -534,6 +567,10 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         camera_row,
         #[weak]
+        ir_row,
+        #[weak]
+        emitter_switch,
+        #[weak]
         dark_luma_threshold_row,
         #[weak]
         templates_row,
@@ -597,6 +634,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                     .position(|(_, t)| t == &cfg.cameras.rgb)
                     .unwrap_or(0);
                 camera_row.set_selected(cam_idx as u32);
+                ir_row.set_text(&cfg.cameras.ir);
+                emitter_switch.set_active(cfg.cameras.emitter_enabled);
                 dark_luma_threshold_row.set_value(cfg.cameras.dark_luma_threshold as f64);
                 templates_row.set_value(cfg.enrollment.max_templates as f64);
                 liveness_enabled_switch.set_active(cfg.liveness.enabled);
@@ -1002,7 +1041,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                     }
 
                                                      let camera_device = match load_config_from_daemon(&proxy).await {
-                                                         Ok(cfg) => cfg.cameras.rgb,
+                                                         Ok(cfg) => gaze_core::camera::resolve_source(&cfg.cameras).0,
                                                          Err(_) => "primary".to_string(),
                                                      };
 
@@ -1234,7 +1273,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                             }
 
                             let camera_device = match load_config_from_daemon(&proxy).await {
-                                Ok(cfg) => cfg.cameras.rgb,
+                                Ok(cfg) => gaze_core::camera::resolve_source(&cfg.cameras).0,
                                 Err(_) => "primary".to_string(),
                             };
 
