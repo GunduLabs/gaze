@@ -769,6 +769,19 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     window.set_content(Some(&toast_overlay));
     window.present();
 
+    config_btn.connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        move |_| {
+            if let Some(overlay) = window
+                .content()
+                .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+            {
+                show_config_dialog(&window, &overlay)
+            }
+        }
+    ));
+
     glib::MainContext::default().spawn_local(glib::clone!(
         #[weak]
         window,
@@ -1331,19 +1344,6 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                             );
                         }
                     ));
-                }
-            ));
-
-            config_btn.connect_clicked(glib::clone!(
-                #[weak]
-                window,
-                move |_| {
-                    if let Some(overlay) = window
-                        .content()
-                        .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-                    {
-                        show_config_dialog(&window, &overlay)
-                    }
                 }
             ));
         }
