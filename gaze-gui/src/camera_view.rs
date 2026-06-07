@@ -83,6 +83,23 @@ impl CameraFeed {
             }
         });
 
+        Ok(Self::assemble(Some(rx), Some(thread_handle), stop_flag))
+    }
+
+    /// A feed that renders only the face-position guide overlay, driven by the
+    /// daemon's capture status. It never opens the camera, so it is safe for IR
+    /// devices: the daemon is the sole owner of the raw V4L2 node, and a second
+    /// local stream would fail with EBUSY while the emitter is lit only during
+    /// the daemon's own capture window.
+    pub fn new_guidance_only() -> Self {
+        Self::assemble(None, None, Arc::new(AtomicBool::new(false)))
+    }
+
+    fn assemble(
+        rx: Option<mpsc::Receiver<FrameData>>,
+        thread_handle: Option<thread::JoinHandle<()>>,
+        stop_flag: Arc<AtomicBool>,
+    ) -> Self {
         let picture = gtk4::Picture::new();
         picture.set_content_fit(gtk4::ContentFit::Contain);
 
@@ -172,17 +189,17 @@ impl CameraFeed {
         });
         overlay.add_overlay(&guide);
 
-        Ok(Self {
+        Self {
             picture,
             overlay,
             guide,
-            rx: Rc::new(RefCell::new(Some(rx))),
+            rx: Rc::new(RefCell::new(rx)),
             latest_frame: Rc::new(RefCell::new(None)),
-            thread_handle: RefCell::new(Some(thread_handle)),
+            thread_handle: RefCell::new(thread_handle),
             stop_flag,
             face_status,
             is_active,
-        })
+        }
     }
 
     pub fn set_face_status(&self, status: CaptureStatus) {
@@ -203,11 +220,10 @@ impl CameraFeed {
     }
 
     pub fn start(&self) {
-        let rx = self
-            .rx
-            .borrow_mut()
-            .take()
-            .expect("CameraFeed already started");
+        let Some(rx) = self.rx.borrow_mut().take() else {
+            // Guidance-only feed (e.g. IR): no capture thread to pump.
+            return;
+        };
 
         glib::timeout_add_local(
             std::time::Duration::from_millis(33),
