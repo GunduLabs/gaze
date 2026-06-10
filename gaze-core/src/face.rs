@@ -118,9 +118,10 @@ impl FaceChecker {
         let x2 = face[2];
         let y2 = face[3];
 
-        let max_dim = (frame.cols() as f32).max(frame.rows() as f32);
-        let min_dim = (frame.cols() as f32).min(frame.rows() as f32);
-        let edge_margin = 0.05;
+        let frame_w = frame.cols() as f32;
+        let frame_h = frame.rows() as f32;
+        let max_dim = frame_w.max(frame_h);
+        let min_dim = frame_w.min(frame_h);
         let (width, height) = (x2 - x1, y2 - y1);
         let (cx, cy) = (x1 + width / 2.0, y1 + height / 2.0);
         let (norm_cx, norm_cy) = (cx / max_dim, cy / max_dim);
@@ -149,11 +150,7 @@ impl FaceChecker {
             pitch = (ny - eye_y) / face_h;
         }
 
-        let status = if x1 / max_dim < edge_margin
-            || y1 / max_dim < edge_margin
-            || x2 / max_dim > (1.0 - edge_margin)
-            || y2 / max_dim > (1.0 - edge_margin)
-        {
+        let status = if bbox_is_clipped((x1, y1, x2, y2), frame_w, frame_h) {
             CaptureStatus::Clipped
         } else if (norm_cx - 0.5).abs() >= 0.2 || (norm_cy - 0.5).abs() >= 0.2 {
             CaptureStatus::NotCentered
@@ -179,6 +176,27 @@ impl FaceChecker {
             )?),
         ))
     }
+}
+
+/// True when the detected face comes within 5% of the original frame's edges.
+///
+/// Detection runs on the square-padded frame (`pad_to_square`), so the bbox is
+/// offset by the padding. The check must measure against the original frame's
+/// content rect inside that square: against the square's own edges, a face cut
+/// off at the top or bottom of a landscape frame would never read as clipped
+/// because the content boundary sits well inside the padded margin.
+fn bbox_is_clipped(bbox: (f32, f32, f32, f32), frame_w: f32, frame_h: f32) -> bool {
+    const EDGE_MARGIN: f32 = 0.05;
+    let max_dim = frame_w.max(frame_h);
+    // Same integer-truncation split as pad_to_square.
+    let pad_x = ((max_dim - frame_w) / 2.0).floor();
+    let pad_y = ((max_dim - frame_h) / 2.0).floor();
+    let (x1, y1, x2, y2) = bbox;
+
+    x1 - pad_x < EDGE_MARGIN * frame_w
+        || y1 - pad_y < EDGE_MARGIN * frame_h
+        || x2 - pad_x > (1.0 - EDGE_MARGIN) * frame_w
+        || y2 - pad_y > (1.0 - EDGE_MARGIN) * frame_h
 }
 
 /// Returns true when the frame's mean luminance is below `dark_luma_threshold`,
@@ -299,6 +317,31 @@ mod tests {
     fn empty_frame_is_treated_as_dark() {
         let frame = Mat::default();
         assert!(is_dark_frame(&frame, 70).unwrap());
+    }
+
+    #[test]
+    fn clipping_measures_against_content_bounds_not_padded_square() {
+        // 640x480 landscape frame padded to 640x640: content spans y = 80..560
+        // in padded coordinates, so the top margin sits at y = 80 + 24.
+
+        // Face touching the top of the visible frame is clipped even though it
+        // is far from the padded square's edge (the old check missed this).
+        assert!(bbox_is_clipped((300.0, 85.0, 380.0, 200.0), 640.0, 480.0));
+        // Face touching the bottom of the visible frame.
+        assert!(bbox_is_clipped((300.0, 400.0, 380.0, 555.0), 640.0, 480.0));
+        // Well inside the content rect on every side.
+        assert!(!bbox_is_clipped((300.0, 250.0, 380.0, 380.0), 640.0, 480.0));
+        // Left/right margins are unchanged from the old behaviour.
+        assert!(bbox_is_clipped((20.0, 250.0, 380.0, 380.0), 640.0, 480.0));
+        assert!(bbox_is_clipped((300.0, 250.0, 620.0, 380.0), 640.0, 480.0));
+
+        // Square frames have no padding; both axes measure against the edges.
+        assert!(bbox_is_clipped((10.0, 200.0, 300.0, 400.0), 480.0, 480.0));
+        assert!(!bbox_is_clipped((100.0, 200.0, 300.0, 400.0), 480.0, 480.0));
+
+        // Portrait frame: padding is on the x axis instead.
+        assert!(bbox_is_clipped((85.0, 300.0, 200.0, 380.0), 480.0, 640.0));
+        assert!(!bbox_is_clipped((250.0, 300.0, 380.0, 380.0), 480.0, 640.0));
     }
 
     #[test]
