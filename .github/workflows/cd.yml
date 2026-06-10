@@ -200,6 +200,7 @@ jobs:
             libssl-dev \
             gnupg \
             devscripts \
+            gettext-base \
             pkg-config
 
       - name: Install Fedora dependencies
@@ -224,6 +225,7 @@ jobs:
             gnupg2 \
             rpm-sign \
             pkg-config \
+            gettext \
             gcc
 
       - name: Install Arch dependencies
@@ -246,6 +248,7 @@ jobs:
             openssl \
             gnupg \
             pkgconf \
+            gettext \
             gcc
 
       - name: Install Rust toolchain
@@ -340,13 +343,17 @@ jobs:
           pattern: packages-*
           path: dist/packages
 
-      - name: Dispatch package artifact URLs
-        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4
-        with:
-          token: ${{ secrets.PACKAGES_REPO_PAT }}
-          repository: GunduLabs/packages
-          event-type: package-artifacts
-          client-payload: '{"repo":"${{ github.repository }}","run_id":"${{ github.run_id }}","url":"https://gaze.gundulabs.com"}'
+      - name: Install Gemfury CLI
+        run: gem install gemfury --no-document
+
+      - name: Upload to Gemfury
+        env:
+          GEMFURY_PUSH_TOKEN: ${{ secrets.GEMFURY_PUSH_TOKEN }}
+        run: |
+          find dist/packages -type f \( -name "*.deb" -o -name "*.rpm" \) | while read -r pkg; do
+            echo "Uploading $pkg to Gemfury..."
+            fury push "$pkg" --account gundulabs --api-token "$GEMFURY_PUSH_TOKEN"
+          done
 
       - name: Upload to release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3

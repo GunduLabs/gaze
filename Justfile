@@ -32,14 +32,16 @@ build-rust:
 # Compile the SELinux policy module
 [group("build")]
 build-selinux:
+    #!/usr/bin/env bash
+    set -euo pipefail
     mkdir -p dist/selinux
-    if command -v checkmodule >/dev/null 2>&1 && command -v semodule_package >/dev/null 2>&1; then \
-        checkmodule -M -m -o dist/selinux/gaze-gdm-camera.mod packaging/selinux/gaze-gdm-camera.te; \
-        semodule_package -o dist/selinux/gaze-gdm-camera.pp -m dist/selinux/gaze-gdm-camera.mod; \
-        rm -f dist/selinux/gaze-gdm-camera.mod; \
-        echo "Built dist/selinux/gaze-gdm-camera.pp"; \
-    else \
-        echo "WARNING: SELinux tools not found. Skipping SELinux policy build." >&2; \
+    if command -v checkmodule >/dev/null 2>&1 && command -v semodule_package >/dev/null 2>&1; then
+        checkmodule -M -m -o dist/selinux/gaze-gdm-camera.mod packaging/selinux/gaze-gdm-camera.te
+        semodule_package -o dist/selinux/gaze-gdm-camera.pp -m dist/selinux/gaze-gdm-camera.mod
+        rm -f dist/selinux/gaze-gdm-camera.mod
+        echo "Built dist/selinux/gaze-gdm-camera.pp"
+    else
+        echo "WARNING: SELinux tools not found. Skipping SELinux policy build." >&2
     fi
 
 # ── package ───────────────────────────────────────────────────────────────────
@@ -50,8 +52,13 @@ build-selinux:
 [env("VERSION", version)]
 [private]
 _nfpm config format:
-    ARCH="{{ if format == "deb" { deb_arch } else { arch } }}" \
-        {{ quote(nfpm) }} pkg -f {{ quote(config) }} --packager {{ format }} --target dist/packages
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export ARCH="{{ if format == "deb" { deb_arch } else { arch } }}"
+    tmp_config=$(mktemp)
+    envsubst '$MULTIARCH' < {{ quote(config) }} > "$tmp_config"
+    {{ quote(nfpm) }} pkg -f "$tmp_config" --packager {{ format }} --target dist/packages
+    rm -f "$tmp_config"
 
 [private]
 _dist-packages:
