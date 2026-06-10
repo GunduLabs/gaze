@@ -769,19 +769,16 @@ impl AuthDaemon {
                     .collect();
                 last_faces = faces.clone();
 
+                // A below-threshold frame (motion blur, bad angle) is not a
+                // verdict: keep capturing and let the frame budget below decide
+                // when to give up, exactly like the liveness-enabled path.
                 if !liveness_cfg.enabled {
-                    let result = if matched {
+                    if matched {
                         info!("VerifyStart: MATCHED!");
-                        VerifyResult::VerifyMatch
-                    } else {
-                        info!("VerifyStart: no match");
-                        VerifyResult::VerifyNoMatch
-                    };
-                    let _ = Self::verify_status(&ctxt, result, faces).await;
-                    break;
-                }
-
-                if matched {
+                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyMatch, faces).await;
+                        break;
+                    }
+                } else if matched {
                     if let Some(eyes) = eyes_from_kpss(&data.kpss) {
                         landmark_seq.push(eyes);
                     }
@@ -848,7 +845,7 @@ impl AuthDaemon {
                 if frames_seen >= liveness_cfg.max_frames {
                     info!(
                         frames = frames_seen,
-                        "VerifyStart: liveness gate timed out"
+                        "VerifyStart: no match within frame budget"
                     );
                     let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, last_faces.clone()).await;
                     break;
