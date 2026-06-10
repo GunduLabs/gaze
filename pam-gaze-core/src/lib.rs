@@ -276,8 +276,14 @@ pub async fn has_enrolled_faces(username: &str) -> anyhow::Result<bool> {
     let (_config, proxy) = setup_auth_env()
         .await
         .map_err(|e| anyhow::anyhow!("PAM error: {}", e))?;
-    let faces = proxy.list_faces(username).await?;
-    Ok(!faces.is_empty())
+    match proxy.list_faces(username).await {
+        Ok(faces) => Ok(!faces.is_empty()),
+        // A user who never enrolled has no entry in the database; treat that as
+        // "no faces" so the PAM modules return PAM_IGNORE instead of running a
+        // full camera authentication.
+        Err(ref err) if gaze_core::dbus::dbus_is_file_not_found(err) => Ok(false),
+        Err(err) => Err(err.into()),
+    }
 }
 
 struct ReleaseGuard {
