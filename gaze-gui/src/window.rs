@@ -844,6 +844,26 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         return;
                     }
 
+                    // Subscribe before VerifyStart: a fast verdict (e.g. camera
+                    // open failure) would otherwise be emitted before we listen
+                    // and leave this task awaiting the stream forever.
+                    let mut stream = match proxy.receive_verify_status().await {
+                        Ok(stream) => stream,
+                        Err(_) => {
+                            if let Some(overlay) = window
+                                .content()
+                                .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+                            {
+                                overlay.add_toast(libadwaita::Toast::new(
+                                    "Daemon error starting verification",
+                                ));
+                            }
+                            let _ = proxy.release().await;
+                            btn.set_sensitive(true);
+                            return;
+                        }
+                    };
+
                     if proxy.verify_start("any").await.is_err() {
                         if let Some(overlay) = window
                             .content()
@@ -861,23 +881,20 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                     let mut text = "✗ Verification failed".to_string();
                     let mut matched_face: Option<String> = None;
 
-                    if let Ok(mut stream) = proxy.receive_verify_status().await {
-                        while let Some(signal) = stream.next().await {
-                            if let Ok(args) = signal.args() {
-                                let res = *args.result();
-                                if res == gaze_core::dbus::VerifyResult::VerifyMatch {
-                                    text = "✓ Authentication successful".to_string();
-                                    let faces = args.faces();
-                                    matched_face = faces
-                                        .iter()
-                                        .find(|(_, _, _, p, _)| *p)
-                                        .map(|(n, _, _, _, _)| n.clone());
-                                    break;
-                                } else {
-                                    text = "✗ Authentication failed".to_string();
-                                    break;
-                                }
+                    while let Some(signal) = stream.next().await {
+                        if let Ok(args) = signal.args() {
+                            let res = *args.result();
+                            if res == gaze_core::dbus::VerifyResult::VerifyMatch {
+                                text = "✓ Authentication successful".to_string();
+                                let faces = args.faces();
+                                matched_face = faces
+                                    .iter()
+                                    .find(|(_, _, _, p, _)| *p)
+                                    .map(|(n, _, _, _, _)| n.clone());
+                            } else {
+                                text = "✗ Authentication failed".to_string();
                             }
+                            break;
                         }
                     }
 
