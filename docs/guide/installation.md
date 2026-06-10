@@ -2,6 +2,20 @@
 
 Use either of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible. Manual package installs still need GNOME settings commands afterward.
 
+::: warning Upgrading from pre-v0.2.0
+Gaze has migrated its package repository hosting. If you installed Gaze before version v0.2.0, you must clean up the old repository files and reconfigure the package manager.
+
+**Debian/Ubuntu:**
+```bash
+sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
+```
+**Fedora:**
+```bash
+sudo rm -f /etc/yum.repos.d/gundulabs.repo
+```
+After clearing the old files, re-run the installer or follow the manual installation steps.
+:::
+
 Supported installer targets: Ubuntu 24.04/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Manjaro.
 
 ## Path A: one-line installer (recommended)
@@ -38,19 +52,24 @@ Use this if you prefer to configure package sources yourself. Debian/Ubuntu and 
 
 ```bash [Debian/Ubuntu]
 sudo mkdir -p --mode=0755 /usr/share/keyrings
-curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.gpg \
+curl -fsSL https://packages.gundulabs.com/apt/gpg.key \
   | sudo tee /usr/share/keyrings/gundulabs-archive-keyring.gpg >/dev/null
-. /etc/os-release
-printf 'deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb %s main\n' "$VERSION_CODENAME" \
+echo "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/apt/ * *" \
   | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 sudo apt update
 sudo apt install gaze gaze-gui gaze-gnome-extension
 ```
 
 ```bash [Fedora]
-sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
-sudo curl -fsSL https://packages.gundulabs.com/setup/rpm/gundulabs.repo \
-  -o /etc/yum.repos.d/gundulabs.repo
+sudo rpm --import https://packages.gundulabs.com/yum/gpg.key
+sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
+[gundulabs]
+name=Gundu Labs
+baseurl=https://packages.gundulabs.com/yum/
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.gundulabs.com/yum/gpg.key
+EOF
 sudo dnf makecache
 sudo dnf install gaze gaze-gui gaze-gnome-extension
 ```
