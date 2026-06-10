@@ -138,7 +138,7 @@ pub struct LivenessConfig {
 }
 
 fn default_liveness_enabled() -> bool {
-    false
+    true
 }
 fn default_liveness_threshold() -> f64 {
     0.8
