@@ -283,7 +283,7 @@ jobs:
             gcc
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install just
         uses: extractions/setup-just@v2
