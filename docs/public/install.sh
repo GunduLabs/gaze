@@ -389,6 +389,19 @@ fi
 
 prompt_continue
 
+# ── clean up old repo files ──────────────────────────────────────────────────
+if is_deb; then
+    if [ -f /etc/apt/sources.list.d/gundulabs.list ] || [ -f /usr/share/keyrings/gundulabs-archive-keyring.gpg ]; then
+        echo "Cleaning up legacy repository configuration..."
+        sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
+    fi
+elif is_rpm; then
+    if [ -f /etc/yum.repos.d/gundulabs.repo ] || [ -f /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs ]; then
+        echo "Cleaning up legacy repository configuration..."
+        sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+    fi
+fi
+
 # ── configure repositories + install packages ────────────────────────────────
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -424,11 +437,6 @@ if is_deb; then
 elif is_rpm; then
     echo ""
     bold "Step 1/5: Configuring dnf repository"
-    KEY_PATH="$(fetch_repo_key)"
-    sudo mkdir -p -m 0755 /etc/pki/rpm-gpg
-    sudo cp "$KEY_PATH" /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
-    sudo chmod 0644 /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
-    sudo rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
     sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
 [gundulabs]
 name=Gundu Labs
@@ -436,7 +444,7 @@ baseurl=${PKG_BASE_URL}/yum/
 enabled=1
 gpgcheck=1
 repo_gpgcheck=0
-gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+gpgkey=${PKG_BASE_URL}/yum/gpg.key
 EOF
 
     bold "Step 2/5: Refreshing repository metadata"
