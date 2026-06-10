@@ -362,8 +362,8 @@ jobs:
             dist/packages/*.pkg.tar.*
             dist/packages/package-target.env
 
-  release:
-    name: Upload release assets
+  publish-gemfury:
+    name: Publish packages to Gemfury
     runs-on: ubuntu-latest
     needs: [build-packages]
 
@@ -375,7 +375,7 @@ jobs:
           path: dist/packages
 
       - name: Install Gemfury CLI
-        run: gem install gemfury --no-document
+        run: sudo gem install gemfury --no-document
 
       - name: Upload to Gemfury
         env:
@@ -385,6 +385,18 @@ jobs:
             echo "Uploading $pkg to Gemfury..."
             fury push "$pkg" --account gundulabs --api-token "$GEMFURY_PUSH_TOKEN"
           done
+
+  release-github:
+    name: Upload packages to GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-packages]
+
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: packages-*
+          path: dist/packages
 
       - name: Upload to release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
