@@ -3,8 +3,9 @@
       <div class="security-warning" role="alert">
         <div class="security-warning-title">Security warning</div>
         <p>
-          Gaze can currently be spoofed with a photo. Do not use it as your only authentication
-          factor. Liveness detection and IR camera support are planned.
+          Gaze includes local liveness anti-spoofing, but it is still not a substitute for strong
+          system authentication. Do not use it as your only authentication factor for
+          security-critical systems.
         </p>
       </div>
   </div>
