@@ -41,8 +41,9 @@ all clients of it.
   `sudo RUST_LOG=debug ./target/release/gazed`; restart the service when done.
 - Models download from InsightFace/HuggingFace on first run and are SHA-256
   verified. Tests must not depend on the network, models, or a physical camera.
-- Camera config is `primary` or a GStreamer/PipeWire source string; raw
-  `/dev/video*` paths are rejected.
+- RGB camera config is `primary` or a GStreamer/PipeWire source string; raw
+  `/dev/video*` paths are rejected. The optional `cameras.ir` field is the
+  exception: it takes an IR `/dev/video*` node directly.
 
 ## Safety
 

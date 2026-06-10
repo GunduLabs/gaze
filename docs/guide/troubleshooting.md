@@ -122,7 +122,30 @@ What these do:
 - `which gaze`: shows where the CLI binary is located
 - `which gaze-gui`: shows where the GUI binary is located
 
-## 8. Collect useful logs before asking for help
+## 8. Package repository is not loading or signatures mismatch
+
+If you see errors like repository connection failures, metadata hash mismatches, or repository GPG signature failures when running `apt update` or `dnf makecache`, it is likely because Gaze migrated its package repository hosting structure.
+
+**Fix:**
+
+1. Clean up old configuration files left over from pre-v0.2.0 versions:
+   
+   - **Debian / Ubuntu:**
+     ```bash
+     sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
+     ```
+   
+   - **Fedora:**
+     ```bash
+     sudo rm -f /etc/yum.repos.d/gundulabs.repo
+     ```
+
+2. Re-run the one-line installer to configure the new repository layout:
+   ```bash
+   curl -fsSL https://gaze.gundulabs.com/install.sh | sh
+   ```
+
+## 9. Collect useful logs before asking for help
 
 ```bash
 systemctl status gazed
