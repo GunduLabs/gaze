@@ -24,7 +24,7 @@ const FACE_SERVICE_NAME = 'gdm-face';
 const EXTENSION_SCHEMA_ID = 'org.gnome.shell.extensions.gaze';
 const FACE_AUTHENTICATION_KEY = 'enable-face-authentication';
 const MAX_TRIES_KEY = 'max-face-tries';
-const FACE_ERROR_TIMEOUT_WAIT = 15;
+const FACE_ERROR_TIMEOUT_WAIT_MS = 15 * 1000;
 
 const GENERIC_ERROR_MAP = new Map([
     ['Sorry, that did not work. Please try again.',
@@ -36,9 +36,13 @@ const GENERIC_ERROR_MAP = new Map([
 ]);
 
 const FACE_STATUS_UPDATES = new Set([
-    'No faces detected. Please look at the camera...',
-    'Face is clipped. Please move fully into frame...',
+    'Please look at the camera...',
+    'Need more light...',
+    'Face is clipped. Please move back...',
     'Please center your face...',
+    'Please come closer...',
+    'Please back up...',
+    'Hold still...',
 ]);
 
 function clearFaceFailureTimeout(verifier) {
@@ -299,7 +303,7 @@ export default class GazeFaceAuthExtension extends Extension {
 
                             const cancellable = this._cancellable;
                             this._gazeFaceFailedId = GLib.timeout_add_once(GLib.PRIORITY_DEFAULT,
-                                FACE_ERROR_TIMEOUT_WAIT, () => {
+                                FACE_ERROR_TIMEOUT_WAIT_MS, () => {
                                     this._gazeFaceFailedId = 0;
                                     if (cancellable && !cancellable.is_cancelled()) {
                                         this._verificationFailed(serviceName, false)
