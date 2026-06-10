@@ -1,37 +1,50 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:best-practices",
-    "schedule:weekly"
+    "config:best-practices"
   ],
   "timezone": "America/New_York",
   "labels": ["dependencies"],
-  "prConcurrentLimit": 3,
-  "prHourlyLimit": 2,
+  "rangeStrategy": "bump",
+  "prConcurrentLimit": 0,
+  "prHourlyLimit": 0,
   "packageRules": [
     {
-      "description": "Batch all non-major Rust crate updates into a single PR to avoid one CI run per crate",
+      "description": "Non-major Rust crate updates: batch, run daily, automerge once CI passes",
       "matchManagers": ["cargo"],
       "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "rust dependencies (non-major)"
-    },
-    {
-      "description": "Batch all non-major docs (npm/bun) updates into a single PR",
-      "matchManagers": ["npm", "bun"],
-      "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "docs dependencies (non-major)"
-    },
-    {
-      "description": "Group GitHub Actions updates (incl. pinned digest bumps) and automerge once CI passes",
-      "matchManagers": ["github-actions"],
-      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
-      "groupName": "github actions",
+      "groupName": "rust dependencies (non-major)",
+      "schedule": ["* 0-5 * * *"],
       "automerge": true
     },
     {
-      "description": "Automerge non-major CI tool version bumps once CI passes",
+      "description": "Non-major docs (npm/bun) updates: batch, run daily, automerge once CI passes",
+      "matchManagers": ["npm", "bun"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "docs dependencies (non-major)",
+      "schedule": ["* 0-5 * * *"],
+      "automerge": true
+    },
+    {
+      "description": "Major Rust/docs updates: open a PR every other day, never automerge",
+      "matchManagers": ["cargo", "npm", "bun"],
+      "matchUpdateTypes": ["major"],
+      "schedule": ["* 0-5 */2 * *"],
+      "automerge": false
+    },
+    {
+      "description": "Group GitHub Actions updates (incl. pinned digest bumps), run daily, automerge once CI passes",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "groupName": "github actions",
+      "schedule": ["* 0-5 * * *"],
+      "automerge": true
+    },
+    {
+      "description": "Non-major CI tool version bumps: run daily, automerge once CI passes",
       "matchManagers": ["custom.regex"],
       "matchUpdateTypes": ["minor", "patch", "digest"],
+      "schedule": ["* 0-5 * * *"],
       "automerge": true
     }
   ],
