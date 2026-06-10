@@ -48,6 +48,28 @@ jobs:
             rpm_distro: ""
             rpm_version: ""
             package_release: "1~ubuntu24.04"
+          - id: ubuntu-questing-amd64
+            name: deb (Ubuntu 25.10 questing, amd64)
+            runner: ubuntu-latest
+            container: ubuntu:25.10
+            format: deb
+            distro: ubuntu
+            distro_version: "25.10"
+            deb_suite: questing
+            rpm_distro: ""
+            rpm_version: ""
+            package_release: "1~ubuntu25.10"
+          - id: ubuntu-questing-arm64
+            name: deb (Ubuntu 25.10 questing, arm64)
+            runner: ubuntu-24.04-arm
+            container: ubuntu:25.10
+            format: deb
+            distro: ubuntu
+            distro_version: "25.10"
+            deb_suite: questing
+            rpm_distro: ""
+            rpm_version: ""
+            package_release: "1~ubuntu25.10"
           - id: ubuntu-resolute-amd64
             name: deb (Ubuntu 26.04 resolute, amd64)
             runner: ubuntu-latest

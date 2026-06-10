@@ -16,7 +16,7 @@ sudo rm -f /etc/yum.repos.d/gundulabs.repo
 After clearing the old files, re-run the installer or follow the manual installation steps.
 :::
 
-Supported installer targets: Ubuntu 24.04/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Manjaro.
+Supported installer targets: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Manjaro.
 
 ## Path A: one-line installer (recommended)
 

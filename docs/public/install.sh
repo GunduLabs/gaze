@@ -317,7 +317,7 @@ is_arch() {
 
 supported_deb_suite() {
     case "$DISTRO_CODENAME" in
-        noble|resolute|trixie) return 0 ;;
+        noble|questing|resolute|trixie) return 0 ;;
     esac
     return 1
 }
@@ -331,13 +331,13 @@ supported_fedora_version() {
 
 if ! is_rpm && ! is_deb && ! is_arch; then
     red "Unsupported distribution: $DISTRO_ID"
-    echo "Supported: Ubuntu 24.04/26.04, Debian 13, Fedora 42/43/44, Arch Linux, Manjaro"
+    echo "Supported: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44, Arch Linux, Manjaro"
     exit 1
 fi
 
 if is_deb && ! supported_deb_suite; then
     red "Unsupported Debian/Ubuntu release: ${DISTRO_CODENAME:-unknown}"
-    echo "Supported apt suites: noble, resolute, trixie"
+    echo "Supported apt suites: noble, questing, resolute, trixie"
     exit 1
 fi
 
