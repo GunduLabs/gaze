@@ -16,9 +16,9 @@
 ---
 
 > [!WARNING]
-> Gaze includes local liveness anti-spoofing, but it is still not a substitute for strong system authentication. Do not use it as your only authentication factor for security-critical systems. IR camera support is planned.
+> Gaze includes local liveness anti-spoofing, but it is still not a substitute for strong system authentication. Do not use it as your only authentication factor for security-critical systems.
 
-Gaze is a face authentication system for Linux. It runs entirely on-device with no cloud dependency, integrates with PAM for login and lock screen, and works with any standard webcam.
+Gaze is a face authentication system for Linux. It runs entirely on-device with no cloud dependency, integrates with PAM for login and lock screen, and works with any standard webcam or Windows Hello-style infrared camera.
 
 ## Install
 
@@ -98,7 +98,7 @@ Gaze runs a daemon (`gazed`) that communicates over DBus. When authentication is
 All processing happens locally. Face embeddings are stored on disk, not transmitted anywhere.
 
 ```
-Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Match
+Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Match → Liveness (MiniFASNet-V2)
 ```
 
 ## Components
@@ -110,6 +110,7 @@ Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Matc
 | `gaze-gui` | GTK4/Adwaita graphical application |
 | `pam-gaze` | PAM module for login/lock screen integration |
 | `gaze-gnome-extension` | GNOME Shell extension for lock screen auth |
+| `gaze-hyprlock` | PAM service for hyprlock face unlock on Hyprland |
 
 ## Configuration
 
@@ -127,7 +128,11 @@ abort_if_ssh = true
 abort_if_lid_closed = true
 
 [enrollment]
-max_templates = 3
+max_templates = 2
+
+[liveness]
+enabled = true
+threshold = 0.8
 ```
 
 See the [configuration guide](https://gaze.gundulabs.com/guide/configuration) for all options.
@@ -140,8 +145,11 @@ gaze refine-face <name>      Add samples to an existing enrollment
 gaze auth                    Authenticate
 gaze auth --verbose          Authenticate with similarity scores
 gaze list-faces              List enrolled faces
+gaze rename-face <old> <new> Rename a face
 gaze remove-face <name>      Remove a face
 gaze clear-user              Remove all face data for current user
+gaze config                  Interactive configuration editor
+gaze discover                List video devices and IR emitter support
 gaze uninstall               Cleanly remove Gaze (packages, config, models, data)
 ```
 
