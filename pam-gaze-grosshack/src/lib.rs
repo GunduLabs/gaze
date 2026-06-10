@@ -37,7 +37,10 @@ fn stash_password_and_fallback(pamh: PamHandle, password: &str) -> c_int {
     // Stash the typed password as PAM_AUTHTOK and return AUTHINFO_UNAVAIL so the
     // stack falls through to pam_unix (or whatever follows) which will pick it up
     // instead of re-prompting the user.
-    let pw_cstr = CString::new(password).unwrap();
+    let Ok(pw_cstr) = CString::new(password) else {
+        // Password contained a NUL byte; we can't stash it, so fail rather than panic.
+        return PAM_AUTH_ERR;
+    };
     unsafe {
         pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);
     }

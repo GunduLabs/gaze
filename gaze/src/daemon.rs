@@ -676,9 +676,13 @@ impl AuthDaemon {
         let path = ctxt.path().to_owned();
 
         self.rt_handle.spawn(async move {
-            let ctxt = SignalEmitter::new(&conn, path)
-                .unwrap()
-                .set_destination(signal_destination);
+            let ctxt = match SignalEmitter::new(&conn, path) {
+                Ok(emitter) => emitter.set_destination(signal_destination),
+                Err(e) => {
+                    error!("Failed to create signal emitter: {e}");
+                    return;
+                }
+            };
 
 
             let mut cam = match Camera::open(&camera_config) {
@@ -888,9 +892,13 @@ impl AuthDaemon {
         let path = ctxt.path().to_owned();
 
         self.rt_handle.spawn(async move {
-            let ctxt = SignalEmitter::new(&conn, path)
-                .unwrap()
-                .set_destination(signal_destination);
+            let ctxt = match SignalEmitter::new(&conn, path) {
+                Ok(emitter) => emitter.set_destination(signal_destination),
+                Err(e) => {
+                    error!("Failed to create signal emitter: {e}");
+                    return;
+                }
+            };
 
 
             let mut cam = match Camera::open(&camera_config) {

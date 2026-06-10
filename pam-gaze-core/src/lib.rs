@@ -66,7 +66,9 @@ pub unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<
         let conv = &*(item as *const PamConv);
         let conv_fn = conv.conv?;
 
-        let msg_str = CString::new(text).unwrap();
+        let Ok(msg_str) = CString::new(text) else {
+            return None;
+        };
         let msg = PamMessage {
             msg_style,
             msg: msg_str.as_ptr(),
