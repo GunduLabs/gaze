@@ -22,8 +22,7 @@ gaze auth
 Useful options:
 
 ```bash
-gaze auth --verbose   # show score table
-gaze auth --perf      # show timing details
+gaze auth --verbose   # show detailed authentication metrics
 ```
 
 Result meanings:
@@ -98,6 +97,14 @@ gaze config --show
 ```
 
 This prints the current security level, camera source, and enrollment template settings without editing them.
+
+## List video devices
+
+```bash
+gaze discover
+```
+
+Lists `/dev/video*` devices with their USB VID:PID and whether an IR emitter profile is available. Useful for finding the IR camera node when setting up [infrared authentication](/guide/configuration#infrared-ir-camera).
 
 ## Manage another user
 

@@ -22,9 +22,12 @@ Open the config dialog from the header-bar settings button.
 
 From there you can edit:
 
-- Security level (`low`, `medium`, `high`, `maximum`)
-- RGB camera source
+- Security level (`low`, `medium`, `high`, `maximum`, or custom models/threshold)
+- RGB camera source, IR camera device, and IR emitter
+- Dark-frame rejection cutoff
 - Maximum enrollment templates per face
+- Liveness anti-spoofing (enable, threshold, max frames)
+- Auth behavior (abort if SSH, abort if lid closed, require confirmation)
 
 ## Common tasks
 
