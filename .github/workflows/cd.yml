@@ -4,9 +4,15 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag/version to build & deploy (e.g. v0.1.0)"
+        required: true
+        type: string
 
 concurrency:
-  group: cd-${{ github.ref }}
+  group: cd-${{ github.event.inputs.tag || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -16,6 +22,7 @@ env:
   CARGO_TERM_COLOR: always
   JUST_VERSION: 1.52.0
   NFPM_VERSION: v2.46.3
+  GITHUB_REF_NAME: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
   build-packages:
@@ -195,6 +202,8 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Install Debian/Ubuntu dependencies
         if: ${{ matrix.format == 'deb' }}
