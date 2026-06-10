@@ -9,9 +9,9 @@ crate-type = ["cdylib"]
 [dependencies]
 pam-gaze-core = { path = "../pam-gaze-core" }
 gaze-core = { path = "../gaze-core" }
-libc = "0.2"
-zbus = "5.15"
-parking_lot = "0.12"
+libc = "0.2.186"
+zbus = "5.16.0"
+parking_lot = "0.12.5"
 tokio = { version = "1.52.3", features = ["full"] }
 futures = "0.3.32"
-anyhow = "1.0"
+anyhow = "1.0.102"
