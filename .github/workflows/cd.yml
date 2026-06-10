@@ -22,13 +22,14 @@ env:
   CARGO_TERM_COLOR: always
   JUST_VERSION: 1.52.0
   NFPM_VERSION: v2.46.3
-  GITHUB_REF_NAME: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build-packages:
     name: Build ${{ matrix.name }} packages
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
+    env:
+      GITHUB_REF_NAME: ${{ inputs.tag || github.ref_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -366,6 +367,8 @@ jobs:
     name: Publish packages to Gemfury
     runs-on: ubuntu-latest
     needs: [build-packages]
+    env:
+      GITHUB_REF_NAME: ${{ inputs.tag || github.ref_name }}
 
     steps:
       - name: Download package artifacts
@@ -393,6 +396,8 @@ jobs:
     name: Upload packages to GitHub Release
     runs-on: ubuntu-latest
     needs: [build-packages]
+    env:
+      GITHUB_REF_NAME: ${{ inputs.tag || github.ref_name }}
 
     steps:
       - name: Download package artifacts
