@@ -2,7 +2,7 @@
 
 Use either of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible. Manual package installs still need GNOME settings commands afterward.
 
-Supported installer targets: Ubuntu 24.04/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Manjaro.
+Supported installer targets: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Manjaro.
 
 ## Path A: one-line installer (recommended)
 
