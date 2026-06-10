@@ -209,10 +209,13 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
                         PAM_AUTH_ERR
                     }
                 } else {
-                    // No controlling tty (e.g. GDM/SSH): we can neither interrupt the
-                    // conversation prompt nor show a tty confirm, so bypass confirmation
-                    // rather than hang, matching the GNOME-without-extension fallback.
-                    PAM_SUCCESS
+                    // No controlling tty (e.g. GDM/SSH): we cannot show the confirmation
+                    // prompt, so we must not grant on biometric alone. Fail closed by
+                    // falling through to the password the conversation prompt is already
+                    // collecting.
+                    let fallback = wait_for_password_and_fallback(pamh, &state);
+                    let _ = prompt_thread.join();
+                    fallback
                 }
             } else {
                 let active_uid = rt
@@ -258,7 +261,11 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
                             PAM_AUTH_ERR
                         }
                     } else {
-                        PAM_SUCCESS
+                        // Extension inactive: we cannot render the confirmation dialog,
+                        // so fail closed to password rather than bypass confirmation.
+                        let fallback = wait_for_password_and_fallback(pamh, &state);
+                        let _ = prompt_thread.join();
+                        fallback
                     }
                 } else {
                     let prompt = match de.as_str() {
