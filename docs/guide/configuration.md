@@ -22,7 +22,7 @@ abort_if_lid_closed = true
 require_confirmation = false
 
 [enrollment]
-max_templates = 3
+max_templates = 2
 
 [liveness]
 enabled = true
@@ -159,7 +159,7 @@ Models are auto-downloaded on first run if missing.
 
 ```toml
 [enrollment]
-max_templates = 3
+max_templates = 2
 ```
 
 Increase this if auth is unreliable in varied lighting.
