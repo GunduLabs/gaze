@@ -29,7 +29,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
     env:
-      GITHUB_REF_NAME: ${{ inputs.tag || github.ref_name }}
+      DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -324,8 +324,8 @@ jobs:
           CARGO_BUILD_JOBS: 2
           RUSTFLAGS: -Cdebuginfo=0
         run: |
-          VERSION="${GITHUB_REF_NAME#v}" just build-rust
-          VERSION="${GITHUB_REF_NAME#v}" just build-selinux
+          VERSION="${DEPLOY_REF_NAME#v}" just build-rust
+          VERSION="${DEPLOY_REF_NAME#v}" just build-selinux
 
       - name: Prepare nfpm signing key
         env:
@@ -339,7 +339,7 @@ jobs:
 
       - name: Package native artifacts
         run: |
-          VERSION="${GITHUB_REF_NAME#v}" PACKAGE_RELEASE="${{ matrix.package_release }}" just package-prebuilt "${{ matrix.format }}"
+          VERSION="${DEPLOY_REF_NAME#v}" PACKAGE_RELEASE="${{ matrix.package_release }}" just package-prebuilt "${{ matrix.format }}"
           ls -lh dist/packages/
 
       - name: Write package target metadata
@@ -368,7 +368,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-packages]
     env:
-      GITHUB_REF_NAME: ${{ inputs.tag || github.ref_name }}
+      DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
 
     steps:
       - name: Download package artifacts
@@ -397,7 +397,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-packages]
     env:
-      GITHUB_REF_NAME: ${{ inputs.tag || github.ref_name }}
+      DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
 
     steps:
       - name: Download package artifacts
@@ -409,7 +409,7 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.GITHUB_REF_NAME }}
+          tag_name: ${{ env.DEPLOY_REF_NAME }}
           files: |
             dist/packages/**/*.deb
             dist/packages/**/*.rpm
