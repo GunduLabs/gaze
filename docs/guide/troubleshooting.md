@@ -124,26 +124,9 @@ What these do:
 
 ## 8. Package repository is not loading or signatures mismatch
 
-If you see errors like repository connection failures, metadata hash mismatches, or repository GPG signature failures when running `apt update` or `dnf makecache`, it is likely because Gaze migrated its package repository hosting structure.
+If you see errors like repository connection failures, metadata hash mismatches, or repository GPG signature failures when running `apt update` or `dnf makecache`, it is because Gaze migrated its package repository hosting structure starting in `v0.2.0`.
 
-**Fix:**
-
-1. Clean up old configuration files left over from pre-v0.2.0 versions:
-   
-   - **Debian / Ubuntu:**
-     ```bash
-     sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
-     ```
-   
-   - **Fedora:**
-     ```bash
-     sudo rm -f /etc/yum.repos.d/gundulabs.repo
-     ```
-
-2. Re-run the one-line installer to configure the new repository layout:
-   ```bash
-   curl -fsSL https://gaze.gundulabs.com/install.sh | sh
-   ```
+See the repository migration and upgrade instructions in the [Installation guide](/guide/installation) for details on how to clean up legacy configuration files and update your package sources.
 
 ## 9. Collect useful logs before asking for help
 

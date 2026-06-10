@@ -23,17 +23,11 @@ Gaze is a face authentication system for Linux. It runs entirely on-device with 
 ## Install
 
 > [!IMPORTANT]
-> **Upgrading from pre-v0.2.0:** Gaze has migrated its package repository hosting. If you installed Gaze before version v0.2.0, you must clean up the old repository files and reconfigure the package manager.
+> **Upgrading to v0.2.0+:** Gaze has migrated its package repository hosting infrastructure. If you installed Gaze before `v0.2.0`, a regular `apt update` or `dnf update` will not work.
 >
-> **Debian/Ubuntu:**
-> ```bash
-> sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
-> ```
-> **Fedora:**
-> ```bash
-> sudo rm -f /etc/yum.repos.d/gundulabs.repo
-> ```
-> After clearing the old files, re-run the installer below or follow the manual installation steps.
+> Simply run the **one-line installer** below; it will automatically clean up legacy repository configurations and configure the new layout. This migration is a one-time process and won't be necessary for future updates.
+>
+> *(If you are doing a manual installation instead, see the cleanup commands in the [Installation docs](https://gaze.gundulabs.com/guide/installation) before configuring the new sources).*
 
 ```bash
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh

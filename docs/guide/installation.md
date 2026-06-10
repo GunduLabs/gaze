@@ -2,18 +2,10 @@
 
 Use either of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible. Manual package installs still need GNOME settings commands afterward.
 
-::: warning Upgrading from pre-v0.2.0
-Gaze has migrated its package repository hosting. If you installed Gaze before version v0.2.0, you must clean up the old repository files and reconfigure the package manager.
+::: warning Upgrading to v0.2.0+
+Gaze has migrated its package repository hosting infrastructure. If you installed Gaze before `v0.2.0`, a regular `apt update` or `dnf update` will not work.
 
-**Debian/Ubuntu:**
-```bash
-sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
-```
-**Fedora:**
-```bash
-sudo rm -f /etc/yum.repos.d/gundulabs.repo
-```
-After clearing the old files, re-run the installer or follow the manual installation steps.
+Simply run the **one-line installer** below; it will automatically clean up legacy repository configurations and configure the new layout. This migration is a one-time process and won't be necessary for future updates.
 :::
 
 Supported installer targets: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Manjaro.
@@ -47,6 +39,20 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
 ## Path B: manual package install
 
 Use this if you prefer to configure package sources yourself. Debian/Ubuntu and Fedora use Gundu Labs repositories. Arch Linux and Manjaro use the AUR packages.
+
+::: info Manual Upgrades from pre-v0.2.0
+If you are upgrading an existing manual installation built before `v0.2.0`, a normal `apt update` or `dnf update` will fail. You must clean up the legacy files first:
+
+**Debian / Ubuntu:**
+```bash
+sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
+```
+
+**Fedora:**
+```bash
+sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+```
+:::
 
 ::: code-group
 
