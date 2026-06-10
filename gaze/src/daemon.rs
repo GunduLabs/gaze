@@ -496,7 +496,20 @@ impl AuthDaemon {
         Ok(())
     }
 
-    async fn is_extension_active(&self, uid: u32) -> fdo::Result<bool> {
+    async fn is_extension_active(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        uid: u32,
+    ) -> fdo::Result<bool> {
+        // Only root (e.g. the PAM stack) or the owner of the uid may query its
+        // extension state, so an unprivileged caller cannot probe or rely on
+        // another user's flag.
+        let caller_uid = Self::caller_uid(&header).await?;
+        if caller_uid != 0 && caller_uid != uid {
+            return Err(fdo::Error::AccessDenied(
+                "not permitted to query another user's extension state".into(),
+            ));
+        }
         let extensions = self.active_extensions.lock().await;
         let is_active = extensions.get(&uid).copied().unwrap_or(false);
         Ok(is_active)
