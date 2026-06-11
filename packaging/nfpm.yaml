@@ -35,6 +35,16 @@ contents:
   - src: "target/release/libpam_gaze_grosshack.so"
     dst: "/lib/${MULTIARCH}/security/pam_gaze_grosshack.so"
     packager: deb
+  # Ubuntu 26.04's libpam searches /usr/lib/security instead of the
+  # multiarch directory used by older suites, so expose both paths.
+  - src: "/lib/${MULTIARCH}/security/pam_gaze.so"
+    dst: "/usr/lib/security/pam_gaze.so"
+    type: "symlink"
+    packager: deb
+  - src: "/lib/${MULTIARCH}/security/pam_gaze_grosshack.so"
+    dst: "/usr/lib/security/pam_gaze_grosshack.so"
+    type: "symlink"
+    packager: deb
   - src: "target/release/libpam_gaze.so"
     dst: "/usr/lib64/security/pam_gaze.so"
     packager: rpm
