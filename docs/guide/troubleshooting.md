@@ -128,7 +128,26 @@ If you see errors like repository connection failures, metadata hash mismatches,
 
 See the repository migration and upgrade instructions in the [Installation guide](/guide/installation) for details on how to clean up legacy configuration files and update your package sources.
 
-## 9. Collect useful logs before asking for help
+## 9. PAM module fails to load on Ubuntu 26.04+
+
+If `journalctl` shows lines like:
+
+```
+PAM unable to dlopen(pam_gaze.so): /usr/lib/security/pam_gaze.so: cannot open shared object file
+PAM adding faulty module: pam_gaze.so
+```
+
+your installed package predates the fix for Ubuntu 26.04's PAM module search path. Update to the latest packages with the one-line installer:
+
+```bash
+curl -fsSL https://gaze.gundulabs.com/install.sh | sh
+```
+
+## 10. Crash on launch (SIGSEGV) on older CPUs
+
+On CPUs without AVX2 (roughly pre-2013), older builds of `gaze` and `gaze-gui` crashed immediately with a segmentation fault because the ONNX Runtime they statically linked requires AVX2. Current packages no longer link ONNX Runtime into the client binaries, so update to the latest packages if you see this. The `gazed` daemon itself still requires a CPU with AVX2.
+
+## 11. Collect useful logs before asking for help
 
 ```bash
 systemctl status gazed

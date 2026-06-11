@@ -50,6 +50,14 @@ just --list
 
 Git hooks are local to each clone. `just setup-hooks` points Git at the tracked hook scripts so pre-commit checks stay up to date when the repo changes. CI still runs the same required checks for pushes and pull requests.
 
+## Workspace layout
+
+- `gaze` - the `gazed` daemon, ML pipeline, and user database.
+- `gaze-cli` - the `gaze` CLI binary. Lives in its own crate so the client binary does not statically link ONNX Runtime (see warning below).
+- `gaze-core` - shared camera/config/DBus library. Face detection sits behind the `detection` cargo feature (on by default); client crates opt out with `default-features = false`.
+- `pam-gaze`, `pam-gaze-grosshack` - `cdylib` PAM modules; shared FFI/auth logic lives in `pam-gaze-core`.
+- `gaze-gui` - GTK4/libadwaita app. `gnome-shell-extension/` is packaged separately.
+
 ## Build and test rust components
 
 ```bash
@@ -57,11 +65,17 @@ just build-rust
 just test
 just lint
 just fmt-check
+just audit        # check dependencies for known CVEs
+just fmt          # apply formatting (fmt-check only checks)
 ```
+
+::: warning Build with `just build-rust`, not `cargo build --workspace`
+`just build-rust` builds the daemon and the clients in separate cargo invocations so feature unification cannot link ONNX Runtime into the CLI, GUI, or PAM modules. ONNX Runtime's startup code requires AVX2, and a single workspace build would silently reintroduce crashes on older CPUs (issue #14).
+:::
 
 ## Run a locally-built daemon
 
-The daemon takes no CLI arguments — paths are compiled in:
+The daemon takes no CLI arguments; paths are compiled in:
 
 - Config: `/etc/gaze/config.toml`
 - User templates: `/var/lib/gaze/users`
@@ -69,7 +83,16 @@ The daemon takes no CLI arguments — paths are compiled in:
 
 It also owns `com.gundulabs.Gaze` on the **system** DBus bus, which requires root. You cannot run a second daemon as your user.
 
-Easiest iteration loop: stop the installed service, run your build in the foreground.
+**Option A: link your build over the installed files** (easier for repeated iteration):
+
+```bash
+just build-rust
+just dev-link-system    # symlinks /usr/bin/gazed, /usr/bin/gaze, PAM modules, and extension over your build
+```
+
+`just dev-unlink-system` restores the package-installed files from backup. `just dev-link-status` shows what is currently linked.
+
+**Option B: run the daemon in the foreground**:
 
 ```bash
 sudo systemctl stop gazed
@@ -88,7 +111,7 @@ sudo install -Dm644 packaging/config/config.toml /etc/gaze/config.toml
 sudo systemctl reload dbus
 ```
 
-The CLI and GUI need no special setup — they talk to whichever `gazed` currently owns the bus name:
+The CLI and GUI need no special setup; they talk to whichever `gazed` currently owns the bus name:
 
 ```bash
 ./target/release/gaze list-faces
@@ -173,7 +196,7 @@ just build-flatpak
 
 Output bundle:
 
-- `dist/packages/com.gundulabs.Gaze.flatpak`
+- `dist/packages/com.gundulabs.Gaze-<arch>.flatpak` (e.g. `com.gundulabs.Gaze-x86_64.flatpak`)
 
 ## Cleaning build artifacts
 

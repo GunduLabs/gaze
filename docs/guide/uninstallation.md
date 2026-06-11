@@ -10,9 +10,9 @@ gaze uninstall
 
 This runs the full cleanup sequence (reset GNOME/GDM lock and login settings, revert PAM, stop daemon, remove packages and repo, wipe `/etc/gaze`, `/var/cache/gaze`, and `/var/lib/gaze`). It prints the plan and asks for confirmation first. Useful flags:
 
-- `--keep-data` — preserve `/var/lib/gaze` (enrolled faces)
-- `--dry-run` — print the plan without running anything
-- `--yes` — skip the confirmation prompt
+- `--keep-data`: preserve `/var/lib/gaze` (enrolled faces)
+- `--dry-run`: print the plan without running anything
+- `--yes`: skip the confirmation prompt
 
 If you'd rather run the steps yourself, follow the manual procedure below.
 

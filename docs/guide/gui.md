@@ -38,7 +38,7 @@ From there you can edit:
 ## When to use GUI vs CLI
 
 - Use GUI for enrollment and quick pass/fail checks.
-- Use CLI (`gaze auth --verbose`) when you want similarity scores and diagnostics.
+- Use CLI (`gaze auth --verbose`) when you want detailed authentication metrics and diagnostics.
 
 ## If the GUI cannot authenticate
 
