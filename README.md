@@ -33,7 +33,7 @@ Gaze is a face authentication system for Linux. It runs entirely on-device with 
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 ```
 
-The installer installs the GNOME Shell extension package and tries to enable lock screen face unlock for the current GNOME user. If you installed packages manually or automatic enablement was not possible, reboot (so GNOME Shell scans the new extension) and then run:
+The installer installs the Gaze daemon, CLI, and GUI. It installs the GNOME Shell extension only when it detects a GNOME desktop session; on KDE Plasma and other non-GNOME desktops it skips GNOME-specific packages so it does not pull in GNOME Shell. If you installed the GNOME extension manually or automatic enablement was not possible, reboot (so GNOME Shell scans the new extension) and then run from GNOME:
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
@@ -43,7 +43,7 @@ gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 > Running `gnome-extensions enable` before rebooting will return `Extension "gaze@gundulabs.com" does not exist`. Shell only rescans extension directories at session start.
 
 <details>
-<summary>Manual install (Debian/Ubuntu, Fedora, Arch/Manjaro)</summary>
+<summary>Manual install (Debian/Ubuntu, Fedora, Arch/Manjaro/CachyOS)</summary>
 
 **Debian / Ubuntu**
 
@@ -54,7 +54,7 @@ curl -fsSL https://packages.gundulabs.com/apt/gpg.key \
 echo "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/apt/ * *" \
   | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 sudo apt update
-sudo apt install gaze gaze-gui gaze-gnome-extension
+sudo apt install gaze gaze-gui
 ```
 
 **Fedora**
@@ -70,14 +70,14 @@ gpgcheck=1
 gpgkey=https://packages.gundulabs.com/yum/gpg.key
 EOF
 sudo dnf makecache
-sudo dnf install gaze gaze-gui gaze-gnome-extension
+sudo dnf install gaze gaze-gui
 ```
 
-**Arch / Manjaro**
+**Arch / Manjaro / CachyOS**
 
 ```bash
 # Requires an AUR helper such as yay or paru. yay shown here.
-yay -S --needed gaze-bin gaze-gui-bin gaze-gnome-extension-bin
+yay -S --needed gaze-bin gaze-gui-bin
 ```
 
 **Flatpak (GUI only; also install one of the system packages above for the `gazed` daemon)**
@@ -87,7 +87,7 @@ flatpak remote-add --if-not-exists gundulabs https://packages.gundulabs.com/setu
 flatpak install gundulabs com.gundulabs.Gaze
 ```
 
-For GNOME lock screen face unlock after manual package installation, reboot, then from your GNOME session run `gnome-extensions enable gaze@gundulabs.com` and `gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true`.
+For GNOME lock screen face unlock after manual package installation, also install `gaze-gnome-extension` (`gaze-gnome-extension-bin` on Arch), reboot, then from your GNOME session run `gnome-extensions enable gaze@gundulabs.com` and `gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true`. On KDE Plasma, use the base packages and follow the PAM guide for login/lock integration.
 
 </details>
 
