@@ -7,6 +7,7 @@ set -e
 PKG_BASE_URL="https://packages.gundulabs.com"
 GNOME_DOCS_URL="https://gaze.gundulabs.com/guide/gnome"
 HYPRLAND_DOCS_URL="https://gaze.gundulabs.com/guide/hyprland"
+PAM_DOCS_URL="https://gaze.gundulabs.com/guide/pam"
 REPO_KEY_FPR="505AC1C71AFEDBD5555235F6CB4FA24E5C1C7C98"
 AUTO_YES=0
 
@@ -25,10 +26,12 @@ Options:
   -y, --yes                  Use detected defaults without prompting
   -h, --help                 Show this help
 
-The GNOME extension package is installed by default. When run from a GNOME
-desktop session as your normal user, this installer also enables lock screen
-face unlock for that user. GDM loads the extension by default, but GDM login
-face auth is not enabled unless you explicitly run the docs command for it.
+The GNOME extension package is installed only when a GNOME desktop session is
+detected. On KDE Plasma and other desktops, the installer skips GNOME-specific
+packages so it does not pull in GNOME Shell. When run from GNOME as your normal
+user, it also enables lock screen face unlock for that user. GDM loads the
+extension by default, but GDM login face auth is not enabled unless you
+explicitly run the docs command for it.
 EOF
 }
 
@@ -70,6 +73,17 @@ is_gnome_session() {
         *GNOME*|*gnome*) return 0 ;;
     esac
     return 1
+}
+
+is_kde_session() {
+    case "${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}" in
+        *KDE*|*kde*|*Plasma*|*plasma*) return 0 ;;
+    esac
+    return 1
+}
+
+want_gnome_extension_package() {
+    is_gnome_session
 }
 
 is_hyprland_session() {
@@ -215,6 +229,30 @@ enable_gnome_extension() {
     echo "GDM loads the extension by default. Login face auth requires the docs command: ${GNOME_DOCS_URL}"
 }
 
+explain_gnome_extension_skipped() {
+    if want_gnome_extension_package; then
+        return 0
+    fi
+
+    if is_kde_session; then
+        echo "KDE Plasma desktop detected; skipping the GNOME Shell extension package."
+    else
+        echo "GNOME desktop session not detected; skipping the GNOME Shell extension package."
+    fi
+    echo "CLI, GUI, and PAM modules are still installed."
+    echo "For non-GNOME desktop/login integration, see: ${PAM_DOCS_URL}"
+    echo "If you later use GNOME lock screen auth, install gaze-gnome-extension and follow: ${GNOME_DOCS_URL}"
+}
+
+enable_desktop_integrations() {
+    if want_gnome_extension_package; then
+        enable_gnome_extension
+    else
+        explain_gnome_extension_skipped
+    fi
+    enable_hyprlock
+}
+
 configure_authselect() {
     if ! command -v authselect >/dev/null 2>&1; then
         return 0
@@ -331,7 +369,7 @@ supported_fedora_version() {
 
 if ! is_rpm && ! is_deb && ! is_arch; then
     red "Unsupported distribution: $DISTRO_ID"
-    echo "Supported: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44, Arch Linux, Manjaro"
+    echo "Supported: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Arch-compatible AUR distros"
     exit 1
 fi
 
@@ -359,8 +397,17 @@ if is_deb; then
     echo ""
     bold "Planned steps for this system:"
     echo "- Configure the apt repository"
-    echo "- Install gaze, gaze-gui, gaze-gnome-extension, and gaze-hyprlock (if Hyprland detected)"
-    echo "- Enable GNOME lock screen auth for this user when possible"
+    if want_gnome_extension_package; then
+        echo "- Install gaze, gaze-gui, and gaze-gnome-extension"
+        echo "- Enable GNOME lock screen auth for this user when possible"
+    elif is_kde_session; then
+        echo "- Install gaze and gaze-gui (KDE Plasma detected; skip GNOME Shell extension)"
+    else
+        echo "- Install gaze and gaze-gui (skip GNOME Shell extension; GNOME not detected)"
+    fi
+    if want_hyprlock_setup; then
+        echo "- Install gaze-hyprlock and configure hyprlock"
+    fi
     echo "- Set up the PAM modules through pam-auth-update if available"
     echo "- Enable the Gaze daemon"
 elif is_rpm; then
@@ -373,17 +420,35 @@ elif is_rpm; then
     echo ""
     bold "Planned steps for this system:"
     echo "- Configure the dnf repository"
-    echo "- Install gaze, gaze-gui, gaze-gnome-extension, and gaze-hyprlock (if Hyprland detected)"
-    echo "- Enable GNOME lock screen auth for this user when possible"
+    if want_gnome_extension_package; then
+        echo "- Install gaze, gaze-gui, and gaze-gnome-extension"
+        echo "- Enable GNOME lock screen auth for this user when possible"
+    elif is_kde_session; then
+        echo "- Install gaze and gaze-gui (KDE Plasma detected; skip GNOME Shell extension)"
+    else
+        echo "- Install gaze and gaze-gui (skip GNOME Shell extension; GNOME not detected)"
+    fi
+    if want_hyprlock_setup; then
+        echo "- Install gaze-hyprlock and configure hyprlock"
+    fi
     echo "- Enable the Gaze PAM profile through authselect if available"
     echo "- Enable the Gaze daemon"
 elif is_arch; then
-    echo "Detected platform: Arch/Manjaro (${PKG_ARCH})"
+    echo "Detected platform: Arch-compatible (${PKG_ARCH})"
     echo "Package manager: AUR helper (yay/paru)"
     echo ""
     bold "Planned steps for this system:"
-    echo "- Install gaze-bin, gaze-gui-bin, gaze-gnome-extension-bin, and gaze-hyprlock-bin (if Hyprland detected) from the AUR"
-    echo "- Enable GNOME lock screen auth for this user when possible"
+    if want_gnome_extension_package; then
+        echo "- Install gaze-bin, gaze-gui-bin, and gaze-gnome-extension-bin from the AUR"
+        echo "- Enable GNOME lock screen auth for this user when possible"
+    elif is_kde_session; then
+        echo "- Install gaze-bin and gaze-gui-bin from the AUR (KDE Plasma detected; skip GNOME Shell extension)"
+    else
+        echo "- Install gaze-bin and gaze-gui-bin from the AUR (skip GNOME Shell extension; GNOME not detected)"
+    fi
+    if want_hyprlock_setup; then
+        echo "- Install gaze-hyprlock-bin and configure hyprlock"
+    fi
     echo "- Enable the Gaze daemon"
 fi
 
@@ -421,15 +486,17 @@ if is_deb; then
     sudo apt-get update
 
     bold "Step 3/5: Installing packages"
-    DEB_PKGS="gaze gaze-gui gaze-gnome-extension"
+    DEB_PKGS="gaze gaze-gui"
+    if want_gnome_extension_package; then
+        DEB_PKGS="$DEB_PKGS gaze-gnome-extension"
+    fi
     if want_hyprlock_setup; then
         DEB_PKGS="$DEB_PKGS gaze-hyprlock"
     fi
     sudo apt-get install -y $DEB_PKGS
 
-    bold "Step 4/5: Enabling GNOME lock screen auth"
-    enable_gnome_extension
-    enable_hyprlock
+    bold "Step 4/5: Desktop integration"
+    enable_desktop_integrations
 
     bold "Step 5/5: Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
@@ -455,7 +522,10 @@ EOF
     fi
 
     bold "Step 3/5: Installing packages"
-    RPM_PKGS="gaze gaze-gui gaze-gnome-extension"
+    RPM_PKGS="gaze gaze-gui"
+    if want_gnome_extension_package; then
+        RPM_PKGS="$RPM_PKGS gaze-gnome-extension"
+    fi
     if want_hyprlock_setup; then
         RPM_PKGS="$RPM_PKGS gaze-hyprlock"
     fi
@@ -467,9 +537,8 @@ EOF
 
     configure_authselect
 
-    bold "Step 4/5: Enabling GNOME lock screen auth"
-    enable_gnome_extension
-    enable_hyprlock
+    bold "Step 4/5: Desktop integration"
+    enable_desktop_integrations
 
     bold "Step 5/5: Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
@@ -502,15 +571,17 @@ elif is_arch; then
     echo "Found AUR helper: $AUR_HELPER"
 
     bold "Step 2/4: Installing packages from AUR"
-    AUR_PKGS="gaze-bin gaze-gui-bin gaze-gnome-extension-bin"
+    AUR_PKGS="gaze-bin gaze-gui-bin"
+    if want_gnome_extension_package; then
+        AUR_PKGS="$AUR_PKGS gaze-gnome-extension-bin"
+    fi
     if want_hyprlock_setup; then
         AUR_PKGS="$AUR_PKGS gaze-hyprlock-bin"
     fi
     "$AUR_HELPER" -S --noconfirm $AUR_PKGS
 
-    bold "Step 3/4: Enabling GNOME lock screen auth"
-    enable_gnome_extension
-    enable_hyprlock
+    bold "Step 3/4: Desktop integration"
+    enable_desktop_integrations
 
     bold "Step 4/4: Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
@@ -524,14 +595,24 @@ echo ""
 echo "  Enroll your face:    gaze add-face <name>"
 echo "  Test authentication: gaze auth"
 echo "  GUI:                 gaze-gui"
-echo "  GNOME lock screen:   enabled for this GNOME user when possible"
-echo "  GDM extension:       enabled by package defaults"
-echo "  GDM login face auth: disabled until you run the docs command"
+if want_gnome_extension_package; then
+    echo "  GNOME lock screen:   enabled for this GNOME user when possible"
+    echo "  GDM extension:       enabled by package defaults"
+    echo "  GDM login face auth: disabled until you run the docs command"
+elif is_kde_session; then
+    echo "  KDE Plasma:          GNOME extension skipped; use PAM docs for login/lock integration"
+    echo "  PAM integration:     ${PAM_DOCS_URL}"
+else
+    echo "  GNOME lock screen:   skipped (GNOME desktop not detected)"
+    echo "  PAM integration:     ${PAM_DOCS_URL}"
+fi
 if want_hyprlock_setup; then
     echo "  hyprlock:            configured (pam_module = hyprlock-gaze)"
 fi
-echo ""
-bold "Optional GDM login setup docs:"
-green "https://gaze.gundulabs.com/guide/gnome#optional-enable-face-at-gdm-login"
+if want_gnome_extension_package; then
+    echo ""
+    bold "Optional GDM login setup docs:"
+    green "https://gaze.gundulabs.com/guide/gnome#optional-enable-face-at-gdm-login"
+fi
 echo ""
 echo "Docs: https://gaze.gundulabs.com"
