@@ -73,7 +73,7 @@ Easiest iteration loop: stop the installed service, run your build in the foregr
 
 ```bash
 sudo systemctl stop gazed
-cargo build --workspace --release
+just build-rust
 sudo RUST_LOG=debug ./target/release/gazed
 ```
 
@@ -98,7 +98,7 @@ The CLI and GUI need no special setup — they talk to whichever `gazed` current
 
 ## Iterating on the PAM module
 
-`pam-gaze` and `pam-gaze-grosshack` build as `cdylib`s. After `cargo build --release` you'll have:
+`pam-gaze` and `pam-gaze-grosshack` build as `cdylib`s. After `just build-rust` you'll have:
 
 - `target/release/libpam_gaze.so`
 - `target/release/libpam_gaze_grosshack.so`
@@ -106,8 +106,11 @@ The CLI and GUI need no special setup — they talk to whichever `gazed` current
 To exercise them through real PAM, copy into the system PAM library directory (path is distro-specific):
 
 ```bash
-# Debian/Ubuntu
+# Debian/Ubuntu up to 25.10
 sudo cp target/release/libpam_gaze.so /lib/x86_64-linux-gnu/security/pam_gaze.so
+
+# Ubuntu 26.04+ (libpam looks in /usr/lib/security)
+sudo cp target/release/libpam_gaze.so /usr/lib/security/pam_gaze.so
 
 # Fedora/RHEL
 sudo cp target/release/libpam_gaze.so /lib64/security/pam_gaze.so

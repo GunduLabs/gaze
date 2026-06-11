@@ -185,7 +185,7 @@ sudo apt install build-essential pkg-config clang libclang-dev \
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
 # Build
-cargo build --workspace --release
+just build-rust
 
 # Package
 just package <deb | rpm | archlinux>

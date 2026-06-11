@@ -12,7 +12,7 @@ name = "gaze-gui"
 path = "src/main.rs"
 
 [dependencies]
-gaze-core = { path = "../gaze-core" }
+gaze-core = { path = "../gaze-core", default-features = false }
 gtk4 = { version = "0.11.3", features = ["gnome_46"] }
 libadwaita = { version = "0.9.1", features = ["v1_4"] }
 zbus = "5.16.0"
