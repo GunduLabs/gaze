@@ -27,9 +27,9 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         )
         .await
         {
-            Ok(Ok(Some(true))) => PAM_SUCCESS,
-            Ok(Ok(Some(false))) => PAM_AUTH_ERR,
-            Ok(Ok(None)) => PAM_IGNORE,
+            Ok(Ok(AuthOutcome::Match)) => PAM_SUCCESS,
+            Ok(Ok(AuthOutcome::NoMatch)) => PAM_AUTH_ERR,
+            Ok(Ok(AuthOutcome::Unavailable)) => PAM_AUTHINFO_UNAVAIL,
             _ => PAM_AUTHINFO_UNAVAIL,
         }
     })

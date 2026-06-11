@@ -23,9 +23,8 @@ async fn authenticate_biometric_with_timeout(username: &str) -> Option<c_int> {
     tokio::select! {
         res = auth_future => {
             match res {
-                Ok(Some(true)) => Some(PAM_SUCCESS),
-                Ok(Some(false)) => Some(PAM_AUTH_ERR),
-                Ok(None) => Some(PAM_IGNORE),
+                Ok(AuthOutcome::Match) => Some(PAM_SUCCESS),
+                Ok(AuthOutcome::NoMatch) | Ok(AuthOutcome::Unavailable) => Some(PAM_AUTH_ERR),
                 Err(_) => None,
             }
         }

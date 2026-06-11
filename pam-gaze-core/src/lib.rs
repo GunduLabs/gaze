@@ -304,7 +304,13 @@ impl Drop for ReleaseGuard {
     }
 }
 
-pub async fn authenticate_biometric(username: &str) -> anyhow::Result<Option<bool>> {
+pub enum AuthOutcome {
+    Match,
+    NoMatch,
+    Unavailable,
+}
+
+pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcome> {
     let (_config, proxy) = setup_auth_env()
         .await
         .map_err(|e| anyhow::anyhow!("PAM error: {}", e))?;
@@ -319,8 +325,12 @@ pub async fn authenticate_biometric(username: &str) -> anyhow::Result<Option<boo
         active: true,
     };
 
-    let mut status_stream = proxy
+    let mut verify_stream = proxy
         .receive_verify_status()
+        .await
+        .map_err(|e| anyhow::anyhow!("Stream failed: {}", e))?;
+    let mut face_stream = proxy
+        .receive_face_status()
         .await
         .map_err(|e| anyhow::anyhow!("Stream failed: {}", e))?;
     proxy
@@ -328,23 +338,34 @@ pub async fn authenticate_biometric(username: &str) -> anyhow::Result<Option<boo
         .await
         .map_err(|e| anyhow::anyhow!("Verify start failed: {}", e))?;
 
-    let mut matched = false;
     use futures::StreamExt;
-    while let Some(signal) = status_stream.next().await {
-        if let Ok(args) = signal.args() {
-            match *args.result() {
-                gaze_core::dbus::VerifyResult::VerifyMatch => {
-                    matched = true;
-                    break;
+    let mut last_status: Option<gaze_core::dbus::CaptureStatus> = None;
+    let outcome = loop {
+        tokio::select! {
+            Some(signal) = verify_stream.next() => {
+                if let Ok(args) = signal.args() {
+                    match *args.result() {
+                        gaze_core::dbus::VerifyResult::VerifyMatch => break AuthOutcome::Match,
+                        gaze_core::dbus::VerifyResult::VerifyNoMatch => {
+                            break match last_status {
+                                Some(gaze_core::dbus::CaptureStatus::TooDark) => AuthOutcome::Unavailable,
+                                _ => AuthOutcome::NoMatch,
+                            };
+                        }
+                    }
                 }
-                gaze_core::dbus::VerifyResult::VerifyNoMatch => break,
+            }
+            Some(signal) = face_stream.next() => {
+                if let Ok(args) = signal.args() {
+                    last_status = Some(*args.status());
+                }
             }
         }
-    }
+    };
 
     guard.active = false;
     let _ = proxy.release().await;
-    Ok(Some(matched))
+    Ok(outcome)
 }
 
 pub fn get_user_uid(username: &str) -> Option<u32> {
