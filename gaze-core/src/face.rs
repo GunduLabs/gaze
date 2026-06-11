@@ -111,11 +111,10 @@ impl FaceChecker {
 
         let frame_w = frame.cols() as f32;
         let frame_h = frame.rows() as f32;
-        let max_dim = frame_w.max(frame_h);
         let min_dim = frame_w.min(frame_h);
         let (width, height) = (x2 - x1, y2 - y1);
         let (cx, cy) = (x1 + width / 2.0, y1 + height / 2.0);
-        let (norm_cx, norm_cy) = (cx / max_dim, cy / max_dim);
+        let (norm_cx, norm_cy) = (cx / frame_w, cy / frame_h);
         let face_size_ratio = width.max(height) / min_dim;
 
         let mut yaw = 0.0;
