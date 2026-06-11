@@ -90,7 +90,7 @@ For daemon changes, stop the installed service and run the local build in the fo
 
 ```bash
 sudo systemctl stop gazed
-cargo build --workspace --release
+just build-rust
 sudo RUST_LOG=debug ./target/release/gazed
 ```
 

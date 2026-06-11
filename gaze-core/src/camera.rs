@@ -35,6 +35,16 @@ pub struct Camera {
     cap: VideoCapture,
 }
 
+pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
+    let sz = frame.size()?;
+    let total = (sz.width * sz.height * 3) as usize;
+    let mut bytes = vec![0u8; total];
+    unsafe {
+        std::ptr::copy_nonoverlapping(frame.data(), bytes.as_mut_ptr(), total);
+    }
+    Ok(bytes)
+}
+
 impl Camera {
     pub fn open(camera_source: &str) -> anyhow::Result<Self> {
         let source = camera_source.trim();

@@ -1,3 +1,4 @@
+use crate::camera::frame_to_bytes;
 use crate::config::{Config, MODELS_DIR};
 use crate::dbus::CaptureStatus;
 use crate::detect::{DetectError, FaceDetector};
@@ -31,16 +32,6 @@ pub struct CaptureResult {
     pub mat_rgb: Option<opencv::core::Mat>,
     pub yaw: f32,
     pub pitch: f32,
-}
-
-pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
-    let sz = frame.size()?;
-    let total = (sz.width * sz.height * 3) as usize;
-    let mut bytes = vec![0u8; total];
-    unsafe {
-        std::ptr::copy_nonoverlapping(frame.data(), bytes.as_mut_ptr(), total);
-    }
-    Ok(bytes)
 }
 
 pub struct FaceChecker {

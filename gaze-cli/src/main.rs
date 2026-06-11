@@ -1,4 +1,3 @@
-#[path = "cli/tui.rs"]
 mod tui;
 
 use clap::{Parser, Subcommand};
