@@ -50,6 +50,14 @@ just --list
 
 Git hooks are local to each clone. `just setup-hooks` points Git at the tracked hook scripts so pre-commit checks stay up to date when the repo changes. CI still runs the same required checks for pushes and pull requests.
 
+## Workspace layout
+
+- `gaze` — the `gazed` daemon, ML pipeline, and user database.
+- `gaze-cli` — the `gaze` CLI binary.
+- `gaze-core` — shared camera/config/DBus library. Face detection (and its ONNX Runtime dependency) sits behind the `detection` cargo feature, on by default; client crates depend on it with `default-features = false`.
+- `pam-gaze`, `pam-gaze-grosshack` — the PAM modules; shared FFI/auth logic lives in `pam-gaze-core`.
+- `gaze-gui` — the GTK4/libadwaita app. `gnome-shell-extension/` is packaged separately.
+
 ## Build and test rust components
 
 ```bash
@@ -58,6 +66,10 @@ just test
 just lint
 just fmt-check
 ```
+
+::: warning Build with `just build-rust`, not `cargo build --workspace`
+`just build-rust` builds the daemon and the clients in separate cargo invocations so feature unification cannot link ONNX Runtime into the CLI, GUI, or PAM modules. ONNX Runtime's startup code requires AVX2, and a single workspace build would silently reintroduce crashes on older CPUs (issue #14).
+:::
 
 ## Run a locally-built daemon
 

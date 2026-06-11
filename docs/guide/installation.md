@@ -8,7 +8,7 @@ Gaze has migrated its package repository hosting infrastructure. If you installe
 Simply run the **one-line installer** below; it will automatically clean up legacy repository configurations and configure the new layout. This migration is a one-time process and won't be necessary for future updates.
 :::
 
-Supported installer targets: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Manjaro.
+Supported installer targets: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Manjaro, on x86_64 and arm64.
 
 ## Path A: one-line installer (recommended)
 
