@@ -2,6 +2,7 @@
 use pam_gaze_core::*;
 use parking_lot::{Condvar, Mutex};
 use std::ffi::CString;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::raw::c_void;
 use std::os::raw::{c_char, c_int};
 use std::sync::Arc;
@@ -36,7 +37,10 @@ fn stash_password_and_fallback(pamh: PamHandle, password: &str) -> c_int {
     // Stash the typed password as PAM_AUTHTOK and return AUTHINFO_UNAVAIL so the
     // stack falls through to pam_unix (or whatever follows) which will pick it up
     // instead of re-prompting the user.
-    let pw_cstr = CString::new(password).unwrap();
+    let Ok(pw_cstr) = CString::new(password) else {
+        // Password contained a NUL byte; we can't stash it, so fail rather than panic.
+        return PAM_AUTH_ERR;
+    };
     unsafe {
         pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);
     }
@@ -65,6 +69,34 @@ fn wait_for_password_and_fallback(pamh: PamHandle, state: &SharedAuthState) -> c
     }
 }
 
+// Retire the simultaneous password prompt once biometric auth has won.
+//
+// With our own /dev/tty reader we signal the cancel pipe so its `poll` returns
+// and the thread exits cleanly. For the legacy PAM-conversation prompt we fall
+// back to TIOCSTI; if that fails (modern kernels, GDM/SSH) the conversation read
+// cannot be interrupted, so we detach the thread instead of joining it (which
+// would hang) — the leaked thread ends when the application tears down the
+// conversation.
+fn retire_prompt(
+    use_tty_prompt: bool,
+    cancel_write: &Option<OwnedFd>,
+    state: &SharedAuthState,
+    prompt_thread: thread::JoinHandle<()>,
+) {
+    if use_tty_prompt {
+        if let Some(w) = cancel_write {
+            let byte = [0_u8; 1];
+            unsafe { libc::write(w.as_raw_fd(), byte.as_ptr() as *const c_void, 1) };
+        }
+        wait_for_prompt_finish(state);
+        let _ = prompt_thread.join();
+    } else if unblock_terminal() {
+        wait_for_prompt_finish(state);
+        let _ = prompt_thread.join();
+    }
+    // else: cannot interrupt the conversation read; let the thread detach.
+}
+
 unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     let username = match unsafe { get_username(pamh) } {
         Some(u) => u,
@@ -88,6 +120,24 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
     unsafe { say(pamh, "Please look at the camera or enter password") };
 
+    // On a real terminal we read the password ourselves so the read can be
+    // cancelled when biometric auth wins (TIOCSTI, the old unblock mechanism, is
+    // disabled on modern kernels). Graphical/polkit agents answer the PAM
+    // conversation instead, so keep using it there.
+    let is_polkit = matches!(unsafe { get_pam_service(pamh) }, Some(ref s) if s == "polkit-1");
+    let mut use_tty_prompt = !is_polkit && has_controlling_tty();
+    let mut cancel_read: Option<OwnedFd> = None;
+    let mut cancel_write: Option<OwnedFd> = None;
+    if use_tty_prompt {
+        let mut fds = [0 as c_int; 2];
+        if unsafe { libc::pipe(fds.as_mut_ptr()) } == 0 {
+            cancel_read = Some(unsafe { OwnedFd::from_raw_fd(fds[0]) });
+            cancel_write = Some(unsafe { OwnedFd::from_raw_fd(fds[1]) });
+        } else {
+            use_tty_prompt = false; // pipe failed; fall back to the conversation prompt
+        }
+    }
+
     let state: SharedAuthState = Arc::new((
         Mutex::new(AuthState {
             password: None,
@@ -102,7 +152,14 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     let notify_clone = Arc::clone(&notify);
     let pamh_worker = pamh as usize;
     let prompt_thread = thread::spawn(move || {
-        let password = unsafe { prompt_password(pamh_worker as PamHandle) };
+        let password = match cancel_read {
+            Some(cancel) if use_tty_prompt => {
+                let pw = prompt_password_from_tty(cancel.as_raw_fd());
+                drop(cancel);
+                pw
+            }
+            _ => unsafe { prompt_password(pamh_worker as PamHandle) },
+        };
         let (lock, condvar) = &*thread_state;
         let mut shared_state = lock.lock();
         if let Some(pw) = password {
@@ -142,26 +199,26 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
             }
 
             if !require_confirmation {
-                if unblock_terminal() {
-                    wait_for_prompt_finish(&state);
-                    let _ = prompt_thread.join();
-                }
+                retire_prompt(use_tty_prompt, &cancel_write, &state, prompt_thread);
                 return PAM_SUCCESS;
             }
 
-            let is_polkit =
-                matches!(unsafe { get_pam_service(pamh) }, Some(ref s) if s == "polkit-1");
-
             if !is_polkit {
-                if unblock_terminal() {
-                    wait_for_prompt_finish(&state);
-                }
-                let _ = prompt_thread.join();
-
-                if unsafe { confirm_authentication(pamh) } {
-                    PAM_SUCCESS
+                if use_tty_prompt {
+                    retire_prompt(use_tty_prompt, &cancel_write, &state, prompt_thread);
+                    if unsafe { confirm_authentication(pamh) } {
+                        PAM_SUCCESS
+                    } else {
+                        PAM_AUTH_ERR
+                    }
                 } else {
-                    PAM_AUTH_ERR
+                    // No controlling tty (e.g. GDM/SSH): we cannot show the confirmation
+                    // prompt, so we must not grant on biometric alone. Fail closed by
+                    // falling through to the password the conversation prompt is already
+                    // collecting.
+                    let fallback = wait_for_password_and_fallback(pamh, &state);
+                    let _ = prompt_thread.join();
+                    fallback
                 }
             } else {
                 let active_uid = rt
@@ -207,7 +264,11 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
                             PAM_AUTH_ERR
                         }
                     } else {
-                        PAM_SUCCESS
+                        // Extension inactive: we cannot render the confirmation dialog,
+                        // so fail closed to password rather than bypass confirmation.
+                        let fallback = wait_for_password_and_fallback(pamh, &state);
+                        let _ = prompt_thread.join();
+                        fallback
                     }
                 } else {
                     let prompt = match de.as_str() {

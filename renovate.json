@@ -1,0 +1,69 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices"
+  ],
+  "timezone": "America/New_York",
+  "labels": ["dependencies"],
+  "rangeStrategy": "bump",
+  "prConcurrentLimit": 0,
+  "prHourlyLimit": 0,
+  "packageRules": [
+    {
+      "description": "Non-major Rust crate updates: batch, run daily, automerge once CI passes",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "rust dependencies (non-major)",
+      "schedule": ["* 0-5 * * *"],
+      "automerge": true
+    },
+    {
+      "description": "Non-major docs (npm/bun) updates: batch, run daily, automerge once CI passes",
+      "matchManagers": ["npm", "bun"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "docs dependencies (non-major)",
+      "schedule": ["* 0-5 * * *"],
+      "automerge": true
+    },
+    {
+      "description": "Major Rust/docs updates: open a PR every other day, never automerge",
+      "matchManagers": ["cargo", "npm", "bun"],
+      "matchUpdateTypes": ["major"],
+      "schedule": ["* 0-5 */2 * *"],
+      "automerge": false
+    },
+    {
+      "description": "Group GitHub Actions updates (incl. pinned digest bumps), run daily, automerge once CI passes",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "groupName": "github actions",
+      "schedule": ["* 0-5 * * *"],
+      "automerge": true
+    },
+    {
+      "description": "Non-major CI tool version bumps: run daily, automerge once CI passes",
+      "matchManagers": ["custom.regex"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "schedule": ["* 0-5 * * *"],
+      "automerge": true
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Keep the pinned `just` version in workflow env in sync with upstream releases",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["JUST_VERSION:\\s*(?<currentValue>\\S+)"],
+      "depNameTemplate": "casey/just",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "Keep the pinned `nfpm` version in workflow env in sync with upstream releases",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["NFPM_VERSION:\\s*(?<currentValue>\\S+)"],
+      "depNameTemplate": "goreleaser/nfpm",
+      "datasourceTemplate": "github-releases"
+    }
+  ]
+}

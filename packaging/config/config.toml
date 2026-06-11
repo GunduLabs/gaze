@@ -20,9 +20,13 @@ level = "medium"
 
 [cameras]
 rgb = "primary"
-# Reject frames where this fraction of pixels are below dark_pixel_value.
-dark_threshold = 0.6
-dark_pixel_value = 10
+# Infrared (Windows Hello) camera. Set to the IR /dev/video* node to authenticate
+# via infrared instead of the RGB camera. Run `gaze discover` to find the node.
+# ir = "/dev/video2"
+# Drive the camera's IR emitter (turn the IR LED on during auth). Requires `ir`.
+# emitter_enabled = false
+# Reject frames whose mean brightness (0-255) is below this value as too dark.
+dark_luma_threshold = 70
 
 [auth]
 abort_if_ssh = true
@@ -31,7 +35,7 @@ abort_if_lid_closed = true
 require_confirmation = false
 
 [enrollment]
-max_templates = 3
+max_templates = 2
 
 # Liveness anti-spoofing runs a local MiniFASNet-V2 PAD model on the detected face crop.
 # The model is downloaded into /var/cache/gaze on first use if missing.

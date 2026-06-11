@@ -1,0 +1,12 @@
+[device]
+vendor_id  = 0x04F2
+product_id = 0xB6BE
+name       = "Chicony Integrated Camera (Lenovo ThinkPad L14 AMD family)"
+source     = "boltgolt/howdy#269 comment reporting 04f2:b6be works with unit 0x0d selector 0x0e payload 0x02 0x20"
+
+[emitter]
+# Same Realtek/Chicony XU family as 04f2:b67c, but a different unit and intensity byte.
+unit              = 13
+selector          = 14
+control_bytes     = [0x02, 0x20]
+off_control_bytes = [0x00, 0x00]

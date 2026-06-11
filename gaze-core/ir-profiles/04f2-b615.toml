@@ -1,0 +1,12 @@
+[device]
+vendor_id  = 0x04F2
+product_id = 0xB615
+name       = "Chicony Integrated IR Camera (ThinkPad X1 Carbon 6th Gen / T480s / P52 family)"
+source     = "PetePriority/chicony-ir-toggle (unit 0x0e selector 0x0e, on [0x02,0x19] off [0x00,0x00]); linux-hardware.org usb:04f2-b615 lists this as the Integrated IR Camera (04f2:b604 is the RGB node)"
+
+[emitter]
+# Chicony two-byte enable on extension unit 0x0e / selector 0x0e.
+unit              = 14
+selector          = 14
+control_bytes     = [0x02, 0x19]
+off_control_bytes = [0x00, 0x00]

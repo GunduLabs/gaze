@@ -17,16 +17,22 @@ pub fn show_capture_dialog(
     camera_device: &str,
     on_done: impl Fn() + 'static,
 ) {
-    let feed = match CameraFeed::new(camera_device) {
-        Ok(f) => {
-            f.start();
-            f
-        }
-        Err(err) => {
-            error!(%err, "Camera init failed");
-            return;
+    // IR cameras are driven straight off the raw V4L2 node by the daemon, which
+    // is the device's sole owner. Opening a second local preview stream here
+    // would fail with EBUSY (and the emitter is only lit during the daemon's own
+    // capture), so for IR we show a guidance-only overlay fed by daemon status.
+    let feed = if camera_device.starts_with("v4l2src") {
+        CameraFeed::new_guidance_only()
+    } else {
+        match CameraFeed::new(camera_device) {
+            Ok(f) => f,
+            Err(err) => {
+                error!(%err, "Camera init failed");
+                return;
+            }
         }
     };
+    feed.start();
     let feed = Rc::new(feed);
     let on_done = Rc::new(on_done);
 
@@ -56,6 +62,16 @@ pub fn show_capture_dialog(
     body.set_margin_end(16);
     body.set_margin_top(16);
     body.set_margin_bottom(16);
+
+    let camera_mode = gtk4::Label::new(Some(if camera_device.starts_with("v4l2src") {
+        "Infrared camera · live preview unavailable, look at the camera"
+    } else {
+        "RGB camera"
+    }));
+    camera_mode.add_css_class("caption");
+    camera_mode.add_css_class("dim-label");
+    camera_mode.set_halign(gtk4::Align::Start);
+    body.append(&camera_mode);
 
     let resolved_face = Rc::new(RefCell::new(face_name.unwrap_or("default").to_string()));
     let existing_face_names = Rc::new(RefCell::new(HashSet::<String>::new()));

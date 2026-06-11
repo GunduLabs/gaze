@@ -7,10 +7,10 @@ edition = "2024"
 
 [dependencies]
 gaze-core = { path = "../gaze-core" }
-libc = "0.2"
+libc = "0.2.186"
 opencv = { version = "0.98.2", default-features = false, features = ["imgproc", "videoio"] }
-zbus = "5.15"
-tokio = { version = "1.52", features = ["rt-multi-thread"] }
-parking_lot = "0.12"
-anyhow = "1.0"
-futures = "0.3"
+zbus = "5.16.0"
+tokio = { version = "1.52.3", features = ["rt-multi-thread"] }
+parking_lot = "0.12.5"
+anyhow = "1.0.102"
+futures = "0.3.32"

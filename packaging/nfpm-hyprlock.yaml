@@ -1,0 +1,62 @@
+name: "gaze-hyprlock"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+release: "${PACKAGE_RELEASE}"
+section: "admin"
+priority: "optional"
+maintainer: "Gundu Labs <maintainers@gundulabs.com>"
+description: "Hyprlock PAM integration for Gaze face authentication"
+vendor: "Gundu Labs"
+homepage: "https://gaze.gundulabs.com"
+license: "MIT"
+
+contents:
+  - src: "packaging/pam/hyprlock-gaze"
+    dst: "/etc/pam.d/hyprlock-gaze"
+    type: "config"
+    packager: rpm
+  - src: "packaging/pam/hyprlock-gaze-simultaneous"
+    dst: "/etc/pam.d/hyprlock-gaze-simultaneous"
+    type: "config"
+    packager: rpm
+  - src: "packaging/pam/hyprlock-gaze"
+    dst: "/etc/pam.d/hyprlock-gaze"
+    type: "config"
+    packager: archlinux
+  - src: "packaging/pam/hyprlock-gaze-simultaneous"
+    dst: "/etc/pam.d/hyprlock-gaze-simultaneous"
+    type: "config"
+    packager: archlinux
+  - src: "packaging/pam/hyprlock-gaze.deb"
+    dst: "/etc/pam.d/hyprlock-gaze"
+    type: "config"
+    packager: deb
+  - src: "packaging/pam/hyprlock-gaze-simultaneous.deb"
+    dst: "/etc/pam.d/hyprlock-gaze-simultaneous"
+    type: "config"
+    packager: deb
+
+deb:
+  signature:
+    method: debsign
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+rpm:
+  signature:
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+scripts:
+  postinstall: "packaging/postinst-hyprlock.sh"
+  postremove: "packaging/postrm-hyprlock.sh"
+
+overrides:
+  deb:
+    recommends:
+      - gaze
+  rpm:
+    recommends:
+      - gaze
+  archlinux:
+    recommends:
+      - gaze

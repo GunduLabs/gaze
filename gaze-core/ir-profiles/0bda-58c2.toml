@@ -1,0 +1,65 @@
+[device]
+vendor_id  = 0x0BDA
+product_id = 0x58C2
+name       = "Realtek Integrated Webcam HD (Dell Inspiron 15 5567 / 0JCXG0 module family)"
+source     = "EmixamPP/linux-enable-ir-emitter#9 reports 0bda:58c2; linux-hardware.org subsystem CN0JCXG0; same Realtek sequence as research_0jcxg0/rtk-ir-tools"
+
+[[emitter.on]]
+unit = 4
+selector = 10
+query = "set_cur"
+control_bytes = [0xff, 0, 0, 0, 0, 0, 0, 0]
+
+[[emitter.on]]
+unit = 4
+selector = 10
+query = "set_cur"
+control_bytes = [0, 0xfb, 0, 0, 0x05, 0, 0, 0]
+
+[[emitter.on]]
+unit = 4
+selector = 11
+query = "get_cur"
+size = 8
+
+[[emitter.on]]
+unit = 4
+selector = 10
+query = "set_cur"
+control_bytes = [0, 0x9f, 0, 0, 0x01, 0, 0, 0]
+
+[[emitter.on]]
+unit = 4
+selector = 11
+query = "set_cur"
+control_bytes = [0x00, 0, 0, 0, 0, 0, 0, 0]
+
+[[emitter.off]]
+unit = 4
+selector = 10
+query = "set_cur"
+control_bytes = [0xff, 0, 0, 0, 0, 0, 0, 0]
+
+[[emitter.off]]
+unit = 4
+selector = 10
+query = "set_cur"
+control_bytes = [0, 0xfb, 0, 0, 0x05, 0, 0, 0]
+
+[[emitter.off]]
+unit = 4
+selector = 11
+query = "get_cur"
+size = 8
+
+[[emitter.off]]
+unit = 4
+selector = 10
+query = "set_cur"
+control_bytes = [0, 0x9f, 0, 0, 0x01, 0, 0, 0]
+
+[[emitter.off]]
+unit = 4
+selector = 11
+query = "set_cur"
+control_bytes = [0x01, 0, 0, 0, 0, 0, 0, 0]

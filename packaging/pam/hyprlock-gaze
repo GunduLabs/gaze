@@ -1,0 +1,6 @@
+#%PAM-1.0
+auth        [success=done default=ignore]                pam_gaze.so
+auth        include                                      system-auth
+account     include                                      system-auth
+password    include                                      system-auth
+session     include                                      system-auth

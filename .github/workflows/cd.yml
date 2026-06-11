@@ -4,9 +4,15 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag/version to build & deploy (e.g. v0.1.0)"
+        required: true
+        type: string
 
 concurrency:
-  group: cd-${{ github.ref }}
+  group: cd-${{ inputs.tag || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -14,7 +20,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  JUST_VERSION: 1.51.0
+  JUST_VERSION: 1.52.0
   NFPM_VERSION: v2.46.3
 
 jobs:
@@ -22,6 +28,8 @@ jobs:
     name: Build ${{ matrix.name }} packages
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
+    env:
+      DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -48,6 +56,28 @@ jobs:
             rpm_distro: ""
             rpm_version: ""
             package_release: "1~ubuntu24.04"
+          - id: ubuntu-questing-amd64
+            name: deb (Ubuntu 25.10 questing, amd64)
+            runner: ubuntu-latest
+            container: ubuntu:25.10
+            format: deb
+            distro: ubuntu
+            distro_version: "25.10"
+            deb_suite: questing
+            rpm_distro: ""
+            rpm_version: ""
+            package_release: "1~ubuntu25.10"
+          - id: ubuntu-questing-arm64
+            name: deb (Ubuntu 25.10 questing, arm64)
+            runner: ubuntu-24.04-arm
+            container: ubuntu:25.10
+            format: deb
+            distro: ubuntu
+            distro_version: "25.10"
+            deb_suite: questing
+            rpm_distro: ""
+            rpm_version: ""
+            package_release: "1~ubuntu25.10"
           - id: ubuntu-resolute-amd64
             name: deb (Ubuntu 26.04 resolute, amd64)
             runner: ubuntu-latest
@@ -172,7 +202,9 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Install Debian/Ubuntu dependencies
         if: ${{ matrix.format == 'deb' }}
@@ -200,6 +232,7 @@ jobs:
             libssl-dev \
             gnupg \
             devscripts \
+            gettext-base \
             pkg-config
 
       - name: Install Fedora dependencies
@@ -224,6 +257,7 @@ jobs:
             gnupg2 \
             rpm-sign \
             pkg-config \
+            gettext \
             gcc
 
       - name: Install Arch dependencies
@@ -246,18 +280,19 @@ jobs:
             openssl \
             gnupg \
             pkgconf \
+            gettext \
             gcc
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Install just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
         with:
           just-version: ${{ env.JUST_VERSION }}
 
       - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: cd-${{ matrix.id }}-v1
           cache-on-failure: true
@@ -289,8 +324,8 @@ jobs:
           CARGO_BUILD_JOBS: 2
           RUSTFLAGS: -Cdebuginfo=0
         run: |
-          VERSION="${GITHUB_REF_NAME#v}" just build-rust
-          VERSION="${GITHUB_REF_NAME#v}" just build-selinux
+          VERSION="${DEPLOY_REF_NAME#v}" just build-rust
+          VERSION="${DEPLOY_REF_NAME#v}" just build-selinux
 
       - name: Prepare nfpm signing key
         env:
@@ -304,29 +339,17 @@ jobs:
 
       - name: Package native artifacts
         run: |
-          VERSION="${GITHUB_REF_NAME#v}" PACKAGE_RELEASE="${{ matrix.package_release }}" just package-prebuilt "${{ matrix.format }}"
+          VERSION="${DEPLOY_REF_NAME#v}" PACKAGE_RELEASE="${{ matrix.package_release }}" just package-prebuilt "${{ matrix.format }}"
           ls -lh dist/packages/
 
-      - name: Write package target metadata
-        run: |
-          cat > dist/packages/package-target.env <<EOF
-          FORMAT=${{ matrix.format }}
-          DISTRO=${{ matrix.distro }}
-          DISTRO_VERSION=${{ matrix.distro_version }}
-          DEB_SUITE=${{ matrix.deb_suite }}
-          RPM_DISTRO=${{ matrix.rpm_distro }}
-          RPM_VERSION=${{ matrix.rpm_version }}
-          EOF
-
       - name: Upload package artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: packages-${{ matrix.id }}
           path: |
             dist/packages/*.deb
             dist/packages/*.rpm
             dist/packages/*.pkg.tar.*
-            dist/packages/package-target.env
 
   build-flatpak:
     name: Build flatpak (${{ matrix.arch }})
@@ -403,29 +426,53 @@ jobs:
             dist/packages/*.flatpakref
             dist/packages/*.flatpakrepo
 
-  release:
-    name: Upload release assets
+  publish-gemfury:
+    name: Publish packages to Gemfury
     runs-on: ubuntu-latest
-    needs: [build-packages, build-flatpak]
+    needs: [build-packages]
+    env:
+      DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
 
     steps:
       - name: Download package artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: packages-*
           path: dist/packages
 
-      - name: Dispatch package artifact URLs
-        uses: peter-evans/repository-dispatch@v4
+      - name: Install Gemfury CLI
+        run: |
+          echo "deb [trusted=yes] https://apt.fury.io/cli/ * *" | sudo tee /etc/apt/sources.list.d/fury-cli.list
+          sudo apt-get update
+          sudo apt-get install -y fury-cli
+
+      - name: Upload to Gemfury
+        env:
+          GEMFURY_PUSH_TOKEN: ${{ secrets.GEMFURY_PUSH_TOKEN }}
+        run: |
+          find dist/packages -type f \( -name "*.deb" -o -name "*.rpm" \) | while read -r pkg; do
+            echo "Uploading $pkg to Gemfury..."
+            fury push "$pkg" --account gundulabs --api-token "$GEMFURY_PUSH_TOKEN" --public
+          done
+
+  release-github:
+    name: Upload packages to GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-packages, build-flatpak]
+    env:
+      DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          token: ${{ secrets.PACKAGES_REPO_PAT }}
-          repository: GunduLabs/packages
-          event-type: package-artifacts
-          client-payload: '{"repo":"${{ github.repository }}","run_id":"${{ github.run_id }}","url":"https://gaze.gundulabs.com"}'
+          pattern: packages-*
+          path: dist/packages
 
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
+          tag_name: ${{ env.DEPLOY_REF_NAME }}
           files: |
             dist/packages/**/*.deb
             dist/packages/**/*.rpm
@@ -433,3 +480,57 @@ jobs:
             dist/packages/**/*.flatpak
             dist/packages/**/*.flatpakref
             dist/packages/**/*.flatpakrepo
+
+  publish-aur:
+    name: Publish wrapper packages to AUR
+    runs-on: ubuntu-latest
+    needs: [build-packages, release-github]
+    env:
+      DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
+
+    steps:
+      # Intentionally no ref: the AUR scripts/template are publishing infra,
+      # which must come from the workflow's own ref, not the release tag.
+      - name: Checkout source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Install AUR tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libarchive-tools \
+            pacman-package-manager \
+            makepkg \
+            gettext-base \
+            rsync
+
+      - name: Download Arch package artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: packages-arch
+          path: dist/packages
+
+      - name: Generate AUR wrapper packages
+        env:
+          RELEASE_TAG: ${{ env.DEPLOY_REF_NAME }}
+        run: ./scripts/build-aur-packages.sh
+
+      - name: Configure SSH for AUR
+        env:
+          AUR_SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$AUR_SSH_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/aur -o IdentitiesOnly=yes" >> "$GITHUB_ENV"
+
+      - name: Push wrapper packages to AUR
+        run: |
+          for attempt in 1 2 3; do
+            if ./scripts/push-aur-packages.sh; then
+              exit 0
+            fi
+            sleep "$((attempt * 10))"
+          done
+          exit 1

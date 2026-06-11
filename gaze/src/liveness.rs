@@ -30,7 +30,10 @@ impl LivenessDetector {
             for x in 0..size {
                 let p = scaled.get_pixel(x as u32, y as u32);
                 for c in 0..3 {
-                    tensor[[0, c, y, x]] = p[2 - c] as f32;
+                    // MiniFASNetV2 expects RGB channels in the raw 0-255 range.
+                    // Swapping to BGR or normalizing to [0, 1] collapses the live
+                    // score (a genuine face drops from ~0.9 to <0.01).
+                    tensor[[0, c, y, x]] = p[c] as f32;
                 }
             }
         }
@@ -109,6 +112,61 @@ pub fn crop_face(img: &RgbImage, bbox: [f32; 4]) -> anyhow::Result<RgbImage> {
     Ok(crop_imm(img, left, top, right - left + 1, bottom - top + 1).to_image())
 }
 
+/// Minimum eye movement, expressed as a fraction of the inter-eye distance, for a
+/// face to read as live. Normalizing by inter-eye distance (a proxy for face size)
+/// keeps the bar distance-invariant: a small/far face is allowed less absolute
+/// jitter, matching the face-width normalization the enrollment stability check
+/// already uses. A fixed pixel threshold instead let a small replayed screen read
+/// as "static" and risked false-rejecting a genuine but distant user.
+pub const MIN_EYE_MOTION_RATIO: f32 = 0.02;
+
+#[derive(Debug, Clone)]
+pub struct EyeMotion {
+    pub live: bool,
+    pub motion_ratio: f32,
+    pub pairs: usize,
+}
+
+pub fn eye_motion_is_live(landmarks: &[[(f32, f32); 5]], min_ratio: Option<f32>) -> EyeMotion {
+    let threshold = min_ratio.unwrap_or(MIN_EYE_MOTION_RATIO);
+
+    let neutral = EyeMotion {
+        live: true,
+        motion_ratio: 0.0,
+        pairs: 0,
+    };
+
+    if landmarks.len() < 2 {
+        return neutral;
+    }
+
+    let dist = |a: (f32, f32), b: (f32, f32)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
+
+    // Per consecutive frame pair: average left/right eye landmark motion, divided by
+    // the pair's mean inter-eye distance so the ratio does not change with face scale.
+    // Pairs with a degenerate (near-zero) inter-eye distance are dropped.
+    let ratios: Vec<f32> = landmarks
+        .windows(2)
+        .filter_map(|pair| {
+            let motion = (dist(pair[0][0], pair[1][0]) + dist(pair[0][1], pair[1][1])) / 2.0;
+            let ipd = (dist(pair[0][0], pair[0][1]) + dist(pair[1][0], pair[1][1])) / 2.0;
+            (ipd > f32::EPSILON).then(|| motion / ipd)
+        })
+        .collect();
+
+    let pairs = ratios.len();
+    if pairs == 0 {
+        return neutral;
+    }
+    let motion_ratio = ratios.iter().sum::<f32>() / pairs as f32;
+
+    EyeMotion {
+        live: motion_ratio >= threshold,
+        motion_ratio,
+        pairs,
+    }
+}
+
 pub fn liveness_passes(scores: &[f32], threshold: f32) -> bool {
     let mut finite_scores = scores
         .iter()
@@ -144,12 +202,13 @@ mod tests {
     }
 
     #[test]
-    fn pre_process_outputs_nchw_bgr_tensor() {
+    fn pre_process_outputs_nchw_rgb_tensor_in_byte_range() {
         let img = RgbImage::from_pixel(80, 80, Rgb([64, 128, 255]));
         let tensor = LivenessDetector::pre_process(&img);
-        assert!((tensor[[0, 0, 0, 0]] - 255.0).abs() < 1e-5);
+        // RGB channel order, raw 0-255 byte values (the range the model expects).
+        assert!((tensor[[0, 0, 0, 0]] - 64.0).abs() < 1e-5);
         assert!((tensor[[0, 1, 0, 0]] - 128.0).abs() < 1e-5);
-        assert!((tensor[[0, 2, 0, 0]] - 64.0).abs() < 1e-5);
+        assert!((tensor[[0, 2, 0, 0]] - 255.0).abs() < 1e-5);
     }
 
     #[test]
@@ -184,5 +243,81 @@ mod tests {
     fn liveness_rejects_low_or_non_finite_scores() {
         assert!(!liveness_passes(&[0.2, 0.4, 0.5, 0.6, 0.61], 0.8));
         assert!(!liveness_passes(&[f32::NAN, f32::INFINITY, 0.7], 0.8));
+    }
+
+    fn eyes(left: (f32, f32), right: (f32, f32)) -> [(f32, f32); 5] {
+        [left, right, (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
+    }
+
+    #[test]
+    fn one_frame_cannot_judge_motion_so_it_passes() {
+        let seq = vec![eyes((100.0, 50.0), (140.0, 50.0))];
+        let motion = eye_motion_is_live(&seq, None);
+        assert!(motion.live);
+        assert_eq!(motion.pairs, 0);
+    }
+
+    #[test]
+    fn no_frames_pass() {
+        let motion = eye_motion_is_live(&[], None);
+        assert!(motion.live);
+        assert_eq!(motion.pairs, 0);
+    }
+
+    #[test]
+    fn frozen_eyes_read_as_spoof() {
+        let frame = eyes((100.0, 50.0), (140.0, 50.0));
+        let motion = eye_motion_is_live(&[frame, frame, frame], None);
+        assert!(!motion.live);
+        assert_eq!(motion.pairs, 2);
+        assert!(motion.motion_ratio < 1e-6);
+    }
+
+    #[test]
+    fn sensor_jitter_stays_below_threshold() {
+        let seq = vec![
+            eyes((100.0, 50.0), (140.0, 50.0)),
+            eyes((100.1, 50.1), (140.1, 50.1)),
+            eyes((100.0, 50.0), (140.0, 50.0)),
+        ];
+        let motion = eye_motion_is_live(&seq, None);
+        assert!(!motion.live);
+        assert!(motion.motion_ratio < MIN_EYE_MOTION_RATIO);
+    }
+
+    #[test]
+    fn micro_saccades_read_as_live() {
+        let seq = vec![
+            eyes((100.0, 50.0), (140.0, 50.0)),
+            eyes((101.2, 50.8), (141.0, 50.6)),
+            eyes((100.5, 49.5), (140.3, 49.8)),
+        ];
+        let motion = eye_motion_is_live(&seq, None);
+        assert!(motion.live);
+        assert!(motion.motion_ratio >= MIN_EYE_MOTION_RATIO);
+        assert_eq!(motion.pairs, 2);
+    }
+
+    #[test]
+    fn motion_averages_left_and_right_eye() {
+        let seq = vec![
+            eyes((100.0, 50.0), (140.0, 50.0)),
+            eyes((100.0, 50.0), (143.0, 54.0)),
+        ];
+        // Left eye still (0px), right eye moves 5px -> 2.5px average motion, divided by
+        // the mean inter-eye distance ((40 + 43.186)/2 = 41.593) -> ~0.0601.
+        let motion = eye_motion_is_live(&seq, None);
+        assert!((motion.motion_ratio - 0.0601).abs() < 1e-3);
+    }
+
+    #[test]
+    fn caller_threshold_wins_over_default() {
+        // Motion ratio here is ~0.028 of the inter-eye distance.
+        let seq = vec![
+            eyes((100.0, 50.0), (140.0, 50.0)),
+            eyes((101.0, 50.5), (141.0, 50.5)),
+        ];
+        assert!(!eye_motion_is_live(&seq, Some(5.0)).live);
+        assert!(eye_motion_is_live(&seq, Some(0.01)).live);
     }
 }

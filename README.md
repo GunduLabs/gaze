@@ -16,11 +16,18 @@
 ---
 
 > [!WARNING]
-> Gaze includes local liveness anti-spoofing, but it is still not a substitute for strong system authentication. Do not use it as your only authentication factor for security-critical systems. IR camera support is planned.
+> Gaze includes local liveness anti-spoofing, but it is still not a substitute for strong system authentication. Do not use it as your only authentication factor for security-critical systems.
 
-Gaze is a face authentication system for Linux. It runs entirely on-device with no cloud dependency, integrates with PAM for login and lock screen, and works with any standard webcam.
+Gaze is a face authentication system for Linux. It runs entirely on-device with no cloud dependency, integrates with PAM for login and lock screen, and works with any standard webcam or Windows Hello-style infrared camera.
 
 ## Install
+
+> [!IMPORTANT]
+> **Upgrading to v0.2.0+:** Gaze has migrated its package repository hosting infrastructure. If you installed Gaze before `v0.2.0`, a regular `apt update` or `dnf update` will not work.
+>
+> Simply run the **one-line installer** below; it will automatically clean up legacy repository configurations and configure the new layout. This migration is a one-time process and won't be necessary for future updates.
+>
+> *(If you are doing a manual installation instead, see the cleanup commands in the [Installation docs](https://gaze.gundulabs.com/guide/installation) before configuring the new sources).*
 
 ```bash
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh
@@ -42,10 +49,9 @@ gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 
 ```bash
 sudo mkdir -p --mode=0755 /usr/share/keyrings
-curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.gpg \
+curl -fsSL https://packages.gundulabs.com/apt/gpg.key \
   | sudo tee /usr/share/keyrings/gundulabs-archive-keyring.gpg >/dev/null
-. /etc/os-release
-printf 'deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb %s main\n' "$VERSION_CODENAME" \
+echo "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/apt/ * *" \
   | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 sudo apt update
 sudo apt install gaze gaze-gui gaze-gnome-extension
@@ -54,9 +60,15 @@ sudo apt install gaze gaze-gui gaze-gnome-extension
 **Fedora**
 
 ```bash
-sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
-sudo curl -fsSL https://packages.gundulabs.com/setup/rpm/gundulabs.repo \
-  -o /etc/yum.repos.d/gundulabs.repo
+sudo rpm --import https://packages.gundulabs.com/yum/gpg.key
+sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
+[gundulabs]
+name=Gundu Labs
+baseurl=https://packages.gundulabs.com/yum/
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.gundulabs.com/yum/gpg.key
+EOF
 sudo dnf makecache
 sudo dnf install gaze gaze-gui gaze-gnome-extension
 ```
@@ -105,7 +117,7 @@ Gaze runs a daemon (`gazed`) that communicates over DBus. When authentication is
 All processing happens locally. Face embeddings are stored on disk, not transmitted anywhere.
 
 ```
-Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Match
+Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Match → Liveness (MiniFASNet-V2)
 ```
 
 ## Components
@@ -117,6 +129,7 @@ Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Matc
 | `gaze-gui` | GTK4/Adwaita graphical application |
 | `pam-gaze` | PAM module for login/lock screen integration |
 | `gaze-gnome-extension` | GNOME Shell extension for lock screen auth |
+| `gaze-hyprlock` | PAM service for hyprlock face unlock on Hyprland |
 
 ## Configuration
 
@@ -127,15 +140,18 @@ level = "medium"    # low | medium | high | maximum | custom
 
 [cameras]
 rgb = "primary"
-dark_threshold = 0.6
-dark_pixel_value = 10
+dark_luma_threshold = 70
 
 [auth]
 abort_if_ssh = true
 abort_if_lid_closed = true
 
 [enrollment]
-max_templates = 3
+max_templates = 2
+
+[liveness]
+enabled = true
+threshold = 0.8
 ```
 
 See the [configuration guide](https://gaze.gundulabs.com/guide/configuration) for all options.
@@ -148,8 +164,11 @@ gaze refine-face <name>      Add samples to an existing enrollment
 gaze auth                    Authenticate
 gaze auth --verbose          Authenticate with similarity scores
 gaze list-faces              List enrolled faces
+gaze rename-face <old> <new> Rename a face
 gaze remove-face <name>      Remove a face
 gaze clear-user              Remove all face data for current user
+gaze config                  Interactive configuration editor
+gaze discover                List video devices and IR emitter support
 gaze uninstall               Cleanly remove Gaze (packages, config, models, data)
 ```
 

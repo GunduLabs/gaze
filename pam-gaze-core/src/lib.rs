@@ -3,7 +3,7 @@ use std::ffi::{CStr, CString};
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::mem::MaybeUninit;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, RawFd};
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 
@@ -66,7 +66,9 @@ pub unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<
         let conv = &*(item as *const PamConv);
         let conv_fn = conv.conv?;
 
-        let msg_str = CString::new(text).unwrap();
+        let Ok(msg_str) = CString::new(text) else {
+            return None;
+        };
         let msg = PamMessage {
             msg_style,
             msg: msg_str.as_ptr(),
@@ -139,6 +141,92 @@ fn confirm_from_tty() -> Option<bool> {
     }
 }
 
+/// True if the process has a controlling terminal we can prompt on.
+pub fn has_controlling_tty() -> bool {
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .is_ok()
+}
+
+/// Prompt for a password on the controlling terminal, cancellable via `cancel_fd`.
+///
+/// Reads one line from `/dev/tty` with echo disabled (kernel line-editing stays
+/// on). It `poll`s the tty alongside `cancel_fd`; when the caller makes
+/// `cancel_fd` readable (after biometric auth wins the race) the prompt is
+/// abandoned, any half-typed input is flushed, and `None` is returned. This lets
+/// the caller retire the prompt thread cleanly without TIOCSTI, which modern
+/// kernels disable (`dev.tty.legacy_tiocsti=0`).
+pub fn prompt_password_from_tty(cancel_fd: RawFd) -> Option<String> {
+    let mut tty = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .ok()?;
+    let fd = tty.as_raw_fd();
+
+    let mut original = MaybeUninit::<libc::termios>::uninit();
+    unsafe {
+        if libc::tcgetattr(fd, original.as_mut_ptr()) != 0 {
+            return None;
+        }
+        let original = original.assume_init();
+        let mut raw = original;
+        raw.c_lflag &= !libc::ECHO; // hide the password; keep ICANON for line editing
+        if libc::tcsetattr(fd, libc::TCSANOW, &raw) != 0 {
+            return None;
+        }
+
+        let _guard = TermiosGuard { fd, original };
+        write!(tty, "Password: ").ok()?;
+        tty.flush().ok()?;
+
+        let mut poll_fds = [
+            libc::pollfd {
+                fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: cancel_fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+
+        loop {
+            if libc::poll(poll_fds.as_mut_ptr(), 2, -1) < 0 {
+                if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+                    continue;
+                }
+                return None;
+            }
+
+            // Cancelled (biometric won): drop any half-typed line and give up.
+            if poll_fds[1].revents != 0 {
+                let _ = libc::tcflush(fd, libc::TCIFLUSH);
+                let _ = writeln!(tty);
+                return None;
+            }
+
+            if poll_fds[0].revents != 0 {
+                let mut buf = [0_u8; 1024];
+                let n = libc::read(fd, buf.as_mut_ptr() as *mut c_void, buf.len());
+                let _ = writeln!(tty);
+                if n <= 0 {
+                    return None;
+                }
+                let mut pw = String::from_utf8_lossy(&buf[..n as usize]).into_owned();
+                while pw.ends_with('\n') || pw.ends_with('\r') {
+                    pw.pop();
+                }
+                return Some(pw);
+            }
+        }
+    }
+}
+
 pub unsafe fn confirm_authentication(pamh: PamHandle) -> bool {
     if let Some(confirmed) = confirm_from_tty() {
         return confirmed;
@@ -188,8 +276,14 @@ pub async fn has_enrolled_faces(username: &str) -> anyhow::Result<bool> {
     let (_config, proxy) = setup_auth_env()
         .await
         .map_err(|e| anyhow::anyhow!("PAM error: {}", e))?;
-    let faces = proxy.list_faces(username).await?;
-    Ok(!faces.is_empty())
+    match proxy.list_faces(username).await {
+        Ok(faces) => Ok(!faces.is_empty()),
+        // A user who never enrolled has no entry in the database; treat that as
+        // "no faces" so the PAM modules return PAM_IGNORE instead of running a
+        // full camera authentication.
+        Err(ref err) if gaze_core::dbus::dbus_is_file_not_found(err) => Ok(false),
+        Err(err) => Err(err.into()),
+    }
 }
 
 struct ReleaseGuard {
