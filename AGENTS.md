@@ -6,10 +6,14 @@ all clients of it.
 
 ## Workspace
 
-- `gaze` — both binaries: the `gazed` daemon (`src/main.rs`) and the `gaze` CLI
-  (`src/bin/cli.rs`), plus the ML pipeline and user database.
-- `gaze-core` — shared camera/config/DBus/detection library. DBus proxy and
-  types are generated from `src/dbus.rs` with `zbus` macros.
+- `gaze` — the `gazed` daemon (`src/main.rs`), plus the ML pipeline and user
+  database.
+- `gaze-cli` — the `gaze` CLI binary. Lives in its own crate so the client
+  binary does not statically link ONNX Runtime (see "Runtime").
+- `gaze-core` — shared camera/config/DBus library. Face detection sits behind
+  the `detection` feature (on by default); client crates opt out with
+  `default-features = false`. DBus proxy and types are generated from
+  `src/dbus.rs` with `zbus` macros.
 - `pam-gaze`, `pam-gaze-grosshack` — `cdylib` PAM modules; shared FFI/auth logic
   lives in `pam-gaze-core`.
 - `gaze-gui` — GTK4/libadwaita app. `gnome-shell-extension/` ships separately.
@@ -18,7 +22,10 @@ all clients of it.
 
 ## Commands
 
-- Build: `just build-rust` (`cargo build --workspace --release`).
+- Build: `just build-rust`. It runs two `cargo build --release` invocations
+  (daemon first, then clients) so feature unification on `gaze-core/detection`
+  does not pull ONNX Runtime into the client binaries; never replace it with a
+  single `--workspace` build.
 - Test: `just test` (`cargo test --workspace --release`); focused:
   `cargo test -p <crate> --release <name>`.
 - Lint/format: `just lint` (`clippy --workspace --all-targets -- -D warnings`),
@@ -44,6 +51,10 @@ all clients of it.
 - RGB camera config is `primary` or a GStreamer/PipeWire source string; raw
   `/dev/video*` paths are rejected. The optional `cameras.ir` field is the
   exception: it takes an IR `/dev/video*` node directly.
+- ONNX Runtime (via `ort`) is statically linked and its global constructors use
+  AVX2. Only `gazed` may link `ort`; the CLI, GUI, and PAM modules must depend
+  on `gaze-core` with `default-features = false` or they will SIGSEGV on launch
+  on pre-AVX2 CPUs (see issue #14).
 
 ## Safety
 

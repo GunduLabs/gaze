@@ -1331,10 +1331,6 @@ name = "gaze"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap",
- "console",
- "crossterm",
- "dialoguer",
  "futures",
  "gaze-core",
  "image",
@@ -1343,11 +1339,9 @@ dependencies = [
  "ndarray",
  "opencv",
  "ort",
- "ratatui",
  "rayon",
  "sha2 0.11.0",
  "tokio",
- "toml",
  "tracing",
  "tracing-subscriber",
  "ureq",
@@ -1355,6 +1349,22 @@ dependencies = [
  "zbus",
  "zbus_polkit",
  "zip",
+]
+
+[[package]]
+name = "gaze-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "console",
+ "crossterm",
+ "dialoguer",
+ "futures",
+ "gaze-core",
+ "ratatui",
+ "tokio",
+ "zbus",
 ]
 
 [[package]]
@@ -2818,7 +2828,6 @@ dependencies = [
  "futures",
  "gaze-core",
  "libc",
- "opencv",
  "parking_lot",
  "tokio",
  "zbus",
