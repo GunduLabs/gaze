@@ -228,8 +228,7 @@ export default class GazeFaceAuthExtension extends Extension {
         };
 
         proto._canFaceRetry = function () {
-            return this._userName &&
-                (this._reauthOnly || this._failCounter < (this._faceMaxTries ?? 1));
+            return this._userName && this._failCounter < (this._faceMaxTries ?? 1);
         };
 
         proto._getHint = function () {
