@@ -6,7 +6,7 @@ use opencv::core::Mat;
 use opencv::prelude::*;
 use std::path::Path;
 
-const MIN_FACE_SIZE_RATIO: f32 = 0.35;
+const MIN_FACE_SIZE_RATIO: f32 = 0.25;
 const MAX_FACE_SIZE_RATIO: f32 = 0.78;
 
 /// On an IR camera the emitter-lit face sits on a near-black background, which
@@ -111,10 +111,11 @@ impl FaceChecker {
 
         let frame_w = frame.cols() as f32;
         let frame_h = frame.rows() as f32;
+        let max_dim = frame_w.max(frame_h);
         let min_dim = frame_w.min(frame_h);
         let (width, height) = (x2 - x1, y2 - y1);
         let (cx, cy) = (x1 + width / 2.0, y1 + height / 2.0);
-        let (norm_cx, norm_cy) = (cx / frame_w, cy / frame_h);
+        let (norm_cx, norm_cy) = (cx / max_dim, cy / max_dim);
         let face_size_ratio = width.max(height) / min_dim;
 
         let mut yaw = 0.0;
