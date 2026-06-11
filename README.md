@@ -80,6 +80,13 @@ sudo dnf install gaze gaze-gui gaze-gnome-extension
 yay -S --needed gaze-bin gaze-gui-bin gaze-gnome-extension-bin
 ```
 
+**Flatpak (GUI only — also install one of the system packages above for the `gazed` daemon)**
+
+```bash
+flatpak remote-add --if-not-exists gundulabs https://packages.gundulabs.com/setup/flatpak/gundulabs.flatpakrepo
+flatpak install gundulabs com.gundulabs.Gaze
+```
+
 For GNOME lock screen face unlock after manual package installation, reboot, then from your GNOME session run `gnome-extensions enable gaze@gundulabs.com` and `gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true`.
 
 </details>

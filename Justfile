@@ -44,6 +44,61 @@ build-selinux:
         echo "WARNING: SELinux tools not found. Skipping SELinux policy build." >&2
     fi
 
+[private]
+prepare-flatpak-vendor:
+    mkdir -p .flatpak-cache/cargo
+    cargo vendor --locked --versioned-dirs > .flatpak-cache/cargo/config.toml
+
+[private]
+prepare-flatpak-ort:
+    mkdir -p .flatpak-cache/ort
+    arch="$(flatpak --default-arch)"; \
+    case "$arch" in \
+        x86_64) ort_arch="x64" ;; \
+        aarch64) ort_arch="aarch64" ;; \
+        *) echo "Unsupported Flatpak arch for ORT bootstrap: $arch" >&2; exit 1 ;; \
+    esac; \
+    ort_version="1.22.0"; \
+    ort_file="onnxruntime-linux-${ort_arch}-${ort_version}.tgz"; \
+    ort_url="https://github.com/microsoft/onnxruntime/releases/download/v${ort_version}/${ort_file}"; \
+    if [ ! -s .flatpak-cache/ort/onnxruntime.tgz ]; then \
+        curl -fsSL "$ort_url" -o .flatpak-cache/ort/onnxruntime.tgz; \
+    fi
+
+# Build flatpak repo and bundle
+[group("build")]
+build-flatpak: prepare-flatpak-vendor prepare-flatpak-ort
+    mkdir -p dist/packages dist/flatpak-repo
+
+    flatpak-builder \
+        --force-clean \
+        --disable-rofiles-fuse \
+        --jobs="${FLATPAK_BUILDER_JOBS:-2}" \
+        --repo=dist/flatpak-repo \
+        --arch="$(flatpak --default-arch)" \
+        --default-branch=stable \
+        --user \
+        $( [ -n "${FLATPAK_GPG_SIGN:-}" ] && printf '%s' "--gpg-sign=${FLATPAK_GPG_SIGN}" ) \
+        flatpak-build \
+        packaging/flatpak/com.gundulabs.Gaze.yml
+
+    arch="$(flatpak --default-arch)"; \
+    flatpak build-bundle \
+        --arch="$arch" \
+        $( [ -n "${FLATPAK_GPG_SIGN:-}" ] && printf '%s' "--gpg-sign=${FLATPAK_GPG_SIGN}" ) \
+        dist/flatpak-repo \
+        "dist/packages/com.gundulabs.Gaze-${arch}.flatpak" \
+        com.gundulabs.Gaze \
+        stable
+
+    install -Dm644 packaging/flatpak/com.gundulabs.Gaze.flatpakref dist/packages/com.gundulabs.Gaze.flatpakref
+    install -Dm644 packaging/flatpak/com.gundulabs.Gaze.flatpakrepo dist/packages/com.gundulabs.Gaze.flatpakrepo
+    if [ -n "${FLATPAK_GPG_SIGN:-}" ]; then \
+        pubkey="$(gpg --export "${FLATPAK_GPG_SIGN}" | base64 -w0)"; \
+        printf 'GPGKey=%s\n' "$pubkey" >> dist/packages/com.gundulabs.Gaze.flatpakref; \
+        printf 'GPGKey=%s\n' "$pubkey" >> dist/packages/com.gundulabs.Gaze.flatpakrepo; \
+    fi
+
 # ── package ───────────────────────────────────────────────────────────────────
 
 [arg("format", pattern="deb|rpm|archlinux")]
@@ -81,6 +136,8 @@ package-prebuilt format: _dist-packages (_nfpm "packaging/nfpm.yaml" format) (_n
 clean:
     cargo clean
     rm -rf dist
+    rm -rf flatpak-build .flatpak-builder
+    rm -rf .flatpak-cache
     rm -rf vendor
 
 # ── dev helpers ───────────────────────────────────────────────────────────────

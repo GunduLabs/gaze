@@ -1,6 +1,6 @@
 # Development
 
-This page covers source builds, tests, and packaging workflows for contributors.
+This page covers source builds, tests, packaging, and Flatpak workflows for contributors.
 
 For pull request workflow, testing expectations, and safety notes, see [Contributing](/guide/contributing).
 
@@ -9,6 +9,7 @@ For pull request workflow, testing expectations, and safety notes, see [Contribu
 - Rust 1.85+ (or install current stable via `rustup`)
 - `just` 1.51+ (https://github.com/casey/just) for task automation
 - `nfpm` (https://nfpm.goreleaser.com) for packaging
+- `flatpak-builder` (https://github.com/flatpak/flatpak-builder) for flatpak
 
 ::: code-group
 
@@ -160,6 +161,16 @@ just package <deb | rpm | archlinux>
 Package output:
 
 - `dist/packages/`
+
+## Flatpak build
+
+```bash
+just build-flatpak
+```
+
+Output bundle:
+
+- `dist/packages/com.gundulabs.Gaze.flatpak`
 
 ## Cleaning build artifacts
 

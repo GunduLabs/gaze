@@ -1,6 +1,6 @@
 # Installation
 
-Use either of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible. Manual package installs still need GNOME settings commands afterward.
+Use one of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible. Manual package installs still need GNOME settings commands afterward.
 
 ::: warning Upgrading to v0.2.0+
 Gaze has migrated its package repository hosting infrastructure. If you installed Gaze before `v0.2.0`, a regular `apt update` or `dnf update` will not work.
@@ -87,6 +87,15 @@ yay -S --needed gaze-bin gaze-gui-bin gaze-gnome-extension-bin
 
 :::
 
+## Path C: GUI-only via Flatpak
+
+```bash
+flatpak remote-add --if-not-exists gundulabs https://packages.gundulabs.com/setup/flatpak/gundulabs.flatpakrepo
+flatpak install gundulabs com.gundulabs.Gaze
+```
+
+This installs the sandboxed Gaze GUI only. It talks to the `gazed` daemon on the system bus, so you still need to install one of the system packages (Path A or B) for the daemon and PAM integration. Use this path when you want the GUI updated independently of the system package.
+
 ### Enable GNOME lock screen auth after manual install
 
 Only run this on GNOME desktops where you want face unlock from the lock screen. The package is already installed by the default install commands above, but package managers do not safely change per-user extension settings.
@@ -133,4 +142,4 @@ gaze auth --verbose
 
 ## Development and source builds
 
-See the [Development guide](/guide/development) for source builds, tests, and packaging workflows.
+See the [Development guide](/guide/development) for source builds, tests, packaging, and Flatpak development workflows.

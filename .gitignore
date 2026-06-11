@@ -2,6 +2,9 @@ debug
 target
 .cargo/
 vendor/
+.flatpak-cache/
+flatpak-build/
+.flatpak-builder/
 
 **/*.rs.bk
 

@@ -351,6 +351,81 @@ jobs:
             dist/packages/*.rpm
             dist/packages/*.pkg.tar.*
 
+  build-flatpak:
+    name: Build flatpak (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install flatpak tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cd-flatpak-vendor-${{ matrix.arch }}-v1
+          cache-on-failure: true
+
+      - name: Add flathub remote
+        run: flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Install Flatpak GNOME SDK
+        run: flatpak install --user -y flathub org.gnome.Sdk//49 org.gnome.Platform//49
+
+      - name: Install Flatpak Rust SDK extension
+        run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.rust-stable//25.08
+
+      - name: Install Flatpak LLVM SDK extension
+        run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.llvm20//25.08
+
+      - name: Import GPG key for flatpak signing
+        id: import_gpg
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.PACKAGE_SIGNING_KEY }}
+
+      - name: Build flatpak repo and bundle
+        env:
+          FLATPAK_GPG_SIGN: ${{ steps.import_gpg.outputs.fingerprint }}
+          FLATPAK_BUILDER_JOBS: 4
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}" just build-flatpak
+
+      - name: Upload flatpak bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-flatpak-${{ matrix.arch }}
+          path: dist/packages/*.flatpak
+
+      - name: Upload flatpak remote metadata
+        if: ${{ matrix.arch == 'amd64' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-flatpak-metadata
+          path: |
+            dist/packages/*.flatpakref
+            dist/packages/*.flatpakrepo
+
   publish-gemfury:
     name: Publish packages to Gemfury
     runs-on: ubuntu-latest
@@ -383,7 +458,7 @@ jobs:
   release-github:
     name: Upload packages to GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-packages]
+    needs: [build-packages, build-flatpak]
     env:
       DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
 
@@ -402,6 +477,9 @@ jobs:
             dist/packages/**/*.deb
             dist/packages/**/*.rpm
             dist/packages/**/*.pkg.tar.*
+            dist/packages/**/*.flatpak
+            dist/packages/**/*.flatpakref
+            dist/packages/**/*.flatpakrepo
 
   publish-aur:
     name: Publish wrapper packages to AUR
