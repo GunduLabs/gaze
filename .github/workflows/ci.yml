@@ -64,7 +64,7 @@ jobs:
         run: just --fmt --check
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@08b635a8ab62d28d92494f1a6ebd22feeb2be229 # cargo-audit
+        uses: taiki-e/install-action@1cacf5c5198b25f60b90968ce45860e926d584b0 # cargo-audit
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
