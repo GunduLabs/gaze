@@ -365,7 +365,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install flatpak tooling
         run: |
@@ -373,15 +373,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Install just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
         with:
           just-version: ${{ env.JUST_VERSION }}
 
       - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: cd-flatpak-vendor-${{ matrix.arch }}-v1
           cache-on-failure: true
@@ -400,7 +400,7 @@ jobs:
 
       - name: Import GPG key for flatpak signing
         id: import_gpg
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@e89d40939c28e39f97cf32126055eeae86ba74ec # v6
         with:
           gpg_private_key: ${{ secrets.PACKAGE_SIGNING_KEY }}
 
@@ -412,14 +412,14 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}" just build-flatpak
 
       - name: Upload flatpak bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: packages-flatpak-${{ matrix.arch }}
           path: dist/packages/*.flatpak
 
       - name: Upload flatpak remote metadata
         if: ${{ matrix.arch == 'amd64' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: packages-flatpak-metadata
           path: |
