@@ -22,13 +22,16 @@ gaze auth
 Useful options:
 
 ```bash
-gaze auth --verbose   # show detailed authentication metrics
+gaze auth -v          # show detailed authentication metrics (short form)
+gaze auth --verbose   # same
 ```
 
 Result meanings:
 
-- `Authenticated as: ...`: pass
-- `Access Denied`: no stored face passed current threshold
+- `✓ Authenticated as: <face> (XX.X%, XXXms)`: pass - matched face name, score percentage, and elapsed time
+- `✗ Authentication failed (XXXms)`: no face passed the current threshold or liveness check
+
+With `--verbose`, a per-face table is printed before the result showing similarity score, match percentage, passed/failed, and template count for each enrolled face.
 
 ## Enroll a new face profile
 
@@ -78,7 +81,7 @@ gaze uninstall --keep-data  # preserve enrolled faces in /var/lib/gaze
 gaze uninstall --dry-run    # preview the plan, run nothing
 ```
 
-Removes the installed packages, repository config, GNOME/GDM lock and login settings, PAM/authselect integration, SELinux policy, the model cache (`/var/cache/gaze`), the system config (`/etc/gaze`), and — unless `--keep-data` is set — enrolled face data (`/var/lib/gaze`). Each step is best-effort and uses `sudo`, so you'll be prompted for your password.
+Removes the installed packages, repository config, GNOME/GDM lock and login settings, PAM/authselect integration, SELinux policy, the model cache (`/var/cache/gaze`), the system config (`/etc/gaze`), and (unless `--keep-data` is set) enrolled face data (`/var/lib/gaze`). Each step is best-effort and uses `sudo`, so you'll be prompted for your password.
 
 See the [uninstallation guide](/guide/uninstallation) if you'd rather run the steps manually.
 
@@ -96,7 +99,7 @@ Show-only mode:
 gaze config --show
 ```
 
-This prints the current security level, camera source, and enrollment template settings without editing them.
+Prints all current config values (security level, detector and recognizer model, threshold, camera sources, emitter state, dark-frame threshold, auth behavior, enrollment limit, and liveness settings) without opening the editor.
 
 ## List video devices
 

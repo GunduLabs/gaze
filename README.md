@@ -80,7 +80,7 @@ sudo dnf install gaze gaze-gui gaze-gnome-extension
 yay -S --needed gaze-bin gaze-gui-bin gaze-gnome-extension-bin
 ```
 
-**Flatpak (GUI only — also install one of the system packages above for the `gazed` daemon)**
+**Flatpak (GUI only; also install one of the system packages above for the `gazed` daemon)**
 
 ```bash
 flatpak remote-add --if-not-exists gundulabs https://packages.gundulabs.com/setup/flatpak/gundulabs.flatpakrepo
@@ -112,7 +112,7 @@ gaze-gui
 
 ## How it works
 
-Gaze runs a daemon (`gazed`) that communicates over DBus. When authentication is requested — by PAM at login, the GNOME extension on the lock screen, or the CLI — the daemon captures a frame from your webcam, detects and aligns the face, computes an embedding using an ONNX model, and compares it against stored enrollments.
+Gaze runs a daemon (`gazed`) that communicates over DBus. When authentication is requested (by PAM at login, the GNOME extension on the lock screen, or the CLI), the daemon captures a frame from your webcam, detects and aligns the face, computes an embedding using an ONNX model, and compares it against stored enrollments.
 
 All processing happens locally. Face embeddings are stored on disk, not transmitted anywhere.
 
@@ -125,7 +125,7 @@ Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Matc
 | Component | Description |
 |-----------|-------------|
 | `gazed` | System daemon exposing `com.gundulabs.Gaze` on DBus |
-| `gaze` | CLI for enrollment and authentication |
+| `gaze` | CLI for enrollment and authentication (crate: `gaze-cli`) |
 | `gaze-gui` | GTK4/Adwaita graphical application |
 | `pam-gaze` | PAM module for login/lock screen integration |
 | `gaze-gnome-extension` | GNOME Shell extension for lock screen auth |
@@ -162,14 +162,16 @@ See the [configuration guide](https://gaze.gundulabs.com/guide/configuration) fo
 gaze add-face <name>         Enroll a new face
 gaze refine-face <name>      Add samples to an existing enrollment
 gaze auth                    Authenticate
-gaze auth --verbose          Authenticate with similarity scores
+gaze auth --verbose          Authenticate with detailed metrics
 gaze list-faces              List enrolled faces
 gaze rename-face <old> <new> Rename a face
 gaze remove-face <name>      Remove a face
 gaze clear-user              Remove all face data for current user
 gaze config                  Interactive configuration editor
+gaze config --show           Print current config and exit
 gaze discover                List video devices and IR emitter support
-gaze uninstall               Cleanly remove Gaze (packages, config, models, data)
+gaze uninstall               Completely remove Gaze (packages, PAM, config, models, data)
+gaze uninstall -y            Skip confirmation prompt
 ```
 
 ## Building from source

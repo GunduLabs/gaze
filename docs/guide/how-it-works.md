@@ -19,7 +19,7 @@ Gaze supports infrared (IR) cameras: point `cameras.ir` at the IR `/dev/video*` 
 ## Authentication pipeline
 
 ```text
-Camera frame -> Face detection -> Face alignment -> Embedding -> Similarity match -> Liveness check
+Camera frame -> Face detection (SCRFD) -> Face alignment -> Embedding (ArcFace/ResNet50) -> Similarity match -> Liveness check (MiniFASNet-V2 / eye-motion on IR)
 ```
 
 High level:
@@ -53,8 +53,8 @@ Default locations:
 
 ## Components
 
-- `gazed`: daemon that performs detection and recognition
-- `gaze`: CLI client
+- `gazed`: daemon that performs detection and recognition (crate: `gaze`)
+- `gaze`: CLI client (crate: `gaze-cli`, kept separate so the client binary does not link ONNX Runtime)
 - `gaze-gui`: GTK app
 - PAM integration and GNOME extension for login/lock screen flow
 

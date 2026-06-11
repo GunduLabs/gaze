@@ -40,7 +40,7 @@ Restart hyprlock or lock the session again. Face unlock runs first; if it fails 
 
 ## Simultaneous mode
 
-For password-and-face authentication in parallel (type your password while the camera matches your face — whichever succeeds first unlocks), use:
+For password-and-face authentication in parallel (type your password while the camera matches your face; whichever succeeds first unlocks), use:
 
 ```ini
 general {
@@ -90,6 +90,6 @@ yay -R gaze-hyprlock-bin
 
 ## Troubleshooting
 
-- **Falls back to password every time** — daemon may not be running, or no faces enrolled for the current user. Check `systemctl status gazed` and `gaze list-faces`.
-- **Camera busy** — another Gaze client (GUI, GNOME extension) may hold the camera. Close it and retry.
-- **PAM error in logs** — check `journalctl -u gazed` and `journalctl --user -t hyprlock`.
+- **Falls back to password every time**: daemon may not be running, or no faces enrolled for the current user. Check `systemctl status gazed` and `gaze list-faces`.
+- **Camera busy**: another Gaze client (GUI, GNOME extension) may hold the camera. Close it and retry.
+- **PAM error in logs**: check `journalctl -u gazed` and `journalctl --user -t hyprlock`.

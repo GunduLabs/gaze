@@ -6,17 +6,17 @@ all clients of it.
 
 ## Workspace
 
-- `gaze` — the `gazed` daemon (`src/main.rs`), plus the ML pipeline and user
+- `gaze`: the `gazed` daemon (`src/main.rs`), plus the ML pipeline and user
   database.
-- `gaze-cli` — the `gaze` CLI binary. Lives in its own crate so the client
+- `gaze-cli`: the `gaze` CLI binary. Lives in its own crate so the client
   binary does not statically link ONNX Runtime (see "Runtime").
-- `gaze-core` — shared camera/config/DBus library. Face detection sits behind
+- `gaze-core`: shared camera/config/DBus library. Face detection sits behind
   the `detection` feature (on by default); client crates opt out with
   `default-features = false`. DBus proxy and types are generated from
   `src/dbus.rs` with `zbus` macros.
-- `pam-gaze`, `pam-gaze-grosshack` — `cdylib` PAM modules; shared FFI/auth logic
+- `pam-gaze`, `pam-gaze-grosshack`: `cdylib` PAM modules; shared FFI/auth logic
   lives in `pam-gaze-core`.
-- `gaze-gui` — GTK4/libadwaita app. `gnome-shell-extension/` ships separately.
+- `gaze-gui`: GTK4/libadwaita app. `gnome-shell-extension/` ships separately.
 - Root `default-members` omit the two `*-core` libraries, so use `--workspace`
   for whole-repo checks.
 
@@ -33,7 +33,7 @@ all clients of it.
 - CI runs, in order: fmt checks → `just lint` → `just test` → `just audit` →
   `just build-rust`.
 - Package: `just package <deb|rpm|archlinux>`.
-- Docs (VitePress under `docs/`): use **bun** — `bun run docs:dev`,
+- Docs (VitePress under `docs/`): use **bun**: `bun run docs:dev`,
   `bun run docs:build`. Never create `package-lock.json`.
 - Native builds need OpenCV, clang/libclang, v4l, PAM, GTK4/libadwaita, and
   GStreamer dev packages (see `.github/workflows/ci.yml` for exact names).
