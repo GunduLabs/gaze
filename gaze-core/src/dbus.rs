@@ -191,7 +191,9 @@ pub trait Gaze {
     fn verify_status(
         &self,
         result: VerifyResult,
-        faces: Vec<(String, f64, f64, bool, u32)>,
+        faces: Vec<(String, f64, f64, bool, f64, f64, bool)>,
+        rgb_status: CaptureStatus,
+        ir_status: CaptureStatus,
     ) -> zbus::Result<()>;
 
     #[zbus(signal)]

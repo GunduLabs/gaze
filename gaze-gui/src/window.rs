@@ -915,8 +915,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 let faces = args.faces();
                                 matched_face = faces
                                     .iter()
-                                    .find(|(_, _, _, p, _)| *p)
-                                    .map(|(n, _, _, _, _)| n.clone());
+                                    .find(|(_, _, _, rgb_p, _, _, ir_p)| *rgb_p || *ir_p)
+                                    .map(|(n, _, _, _, _, _, _)| n.clone());
                             } else {
                                 text = "✗ Authentication failed".to_string();
                             }

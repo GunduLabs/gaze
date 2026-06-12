@@ -305,53 +305,6 @@ async fn run_config_wizard(
     Ok(())
 }
 
-fn camera_mode_label(cfg: &Config) -> String {
-    use gaze_core::ir::devices::{find_device, usb_ids_of};
-
-    let ir = cfg.cameras.ir.trim();
-    if ir.is_empty() {
-        return format!("RGB ({})", cfg.cameras.rgb);
-    }
-
-    let emitter = if cfg.cameras.emitter_enabled {
-        "emitter on"
-    } else {
-        "emitter off"
-    };
-
-    let resolved = gaze_core::camera::resolve_node_for_source(ir);
-    let profile = if cfg.cameras.emitter_enabled {
-        match resolved
-            .as_deref()
-            .and_then(usb_ids_of)
-            .and_then(|(v, p)| find_device(v, p))
-        {
-            Some(dev) => format!(", profile: {}", dev.name),
-            None => ", no static profile (runtime probe)".to_string(),
-        }
-    } else {
-        String::new()
-    };
-
-    let node_desc = if let Some(node) = resolved {
-        format!("{ir} [{node}]")
-    } else {
-        ir.to_string()
-    };
-
-    format!("Infrared ({node_desc}, {emitter}{profile})")
-}
-
-async fn print_camera_mode(proxy: &GazeProxy<'_>, term: &Term) {
-    if let Ok(cfg) = load_config_from_daemon(proxy).await {
-        let _ = term.write_line(&format!(
-            "{} {}",
-            style("Camera:").bold(),
-            camera_mode_label(&cfg)
-        ));
-    }
-}
-
 async fn handle_enroll(
     proxy: &GazeProxy<'_>,
     user: &str,
@@ -368,8 +321,6 @@ async fn handle_enroll(
         ))?;
         return Ok(());
     }
-
-    print_camera_mode(proxy, &term).await;
 
     let mut enroll_stream = proxy.receive_enroll_status().await?;
     let mut capture_stream = proxy.receive_face_status().await?;
@@ -507,10 +458,6 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
         return Ok(());
     }
 
-    if verbose {
-        print_camera_mode(proxy, &term).await;
-    }
-
     let mut status_stream = proxy.receive_verify_status().await?;
     let mut capture_stream = proxy.receive_face_status().await?;
     let mut terminal = match TuiTerminal::new() {
@@ -552,7 +499,7 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
                 if let Some(signal) = signal
                     && let Ok(args) = signal.args()
                 {
-                    verify_result = Some((*args.result(), args.faces().clone()));
+                    verify_result = Some((*args.result(), args.faces().clone(), *args.rgb_status(), *args.ir_status()));
                     break;
                 }
             }
@@ -582,40 +529,86 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
         std::process::exit(130);
     }
 
-    if let Some((result, faces)) = verify_result {
+    if let Some((result, faces, rgb_status, ir_status)) = verify_result {
         if verbose {
             println!(
-                "\n{:<20} {:>10} {:>8} {:>8} {:>6}",
+                "\n{:<20} {:>10} {:>8} {:>8} {:>10} {:>8} {:>8}",
                 style("Face").bold(),
-                style("Similarity").bold(),
-                style("Match %").bold(),
-                style("Passed").bold(),
-                style("Count").bold()
+                style("RGB Sim").bold(),
+                style("RGB %").bold(),
+                style("RGB Pass").bold(),
+                style("IR Sim").bold(),
+                style("IR %").bold(),
+                style("IR Pass").bold()
             );
-            println!("{}", style("-".repeat(56)).dim());
-            for (name, score, pct, passed, count) in &faces {
-                let check = if *passed {
+            println!("{}", style("-".repeat(78)).dim());
+            for (name, rgb_sim, rgb_pct, rgb_passed, ir_sim, ir_pct, ir_passed) in &faces {
+                let rgb_check = if *rgb_passed {
+                    style("✓").green()
+                } else {
+                    style("✗").red()
+                };
+                let ir_check = if *ir_passed {
                     style("✓").green()
                 } else {
                     style("✗").red()
                 };
                 println!(
-                    "{:<20} {:>10.4} {:>7.1}% {:>8} {:>6}",
+                    "{:<20} {:>10.4} {:>7.1}% {:>8} {:>10.4} {:>7.1}% {:>8}",
                     style(name).cyan(),
-                    score,
-                    pct,
-                    check,
-                    count
+                    rgb_sim,
+                    rgb_pct,
+                    rgb_check,
+                    ir_sim,
+                    ir_pct,
+                    ir_check
                 );
             }
+            println!();
+            let matched_rgb = faces.iter().any(|(_, _, _, rgb_p, _, _, _)| *rgb_p);
+            let matched_ir = faces.iter().any(|(_, _, _, _, _, _, ir_p)| *ir_p);
+
+            let rgb_display = if result == VerifyResult::VerifyMatch
+                && !matched_rgb
+                && rgb_status == CaptureStatus::NoFace
+            {
+                "Unused".to_string()
+            } else {
+                format!("{:?}", rgb_status)
+            };
+
+            let ir_display = if result == VerifyResult::VerifyMatch
+                && !matched_ir
+                && ir_status == CaptureStatus::NoFace
+            {
+                "Unused".to_string()
+            } else {
+                format!("{:?}", ir_status)
+            };
+
+            println!(
+                "{} RGB: {} | IR: {}",
+                style("Status:").bold(),
+                style(rgb_display).cyan(),
+                style(ir_display).cyan()
+            );
             println!();
         }
 
         if result == VerifyResult::VerifyMatch {
             let matched = faces
                 .iter()
-                .find(|(_, _, _, p, _)| *p)
-                .map(|(n, _, pct, _, _)| (n.clone(), *pct));
+                .find(|(_, _, _, rgb_p, _, _, ir_p)| *rgb_p || *ir_p)
+                .map(|(n, _, rgb_pct, rgb_p, _, ir_pct, ir_p)| {
+                    let pct = if *rgb_p && *ir_p {
+                        rgb_pct.max(*ir_pct)
+                    } else if *rgb_p {
+                        *rgb_pct
+                    } else {
+                        *ir_pct
+                    };
+                    (n.clone(), pct)
+                });
             if let Some((face, pct)) = matched {
                 term.write_line(&format!(
                     "{} Authenticated as: {} ({:.1}%, {}ms)",

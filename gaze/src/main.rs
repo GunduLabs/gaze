@@ -65,10 +65,14 @@ async fn main() -> anyhow::Result<()> {
     let (det_path, rec_path) =
         models::ensure_models(MODELS_DIR, security.detector(), security.recognizer())?;
 
-    let detector = gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap())
+    let detector_rgb = gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap())
+        .expect("Failed to load detection model");
+    let detector_ir = gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap())
         .expect("Failed to load detection model");
 
-    let recognizer = recognize::FaceRecognizer::new(rec_path.to_str().unwrap())
+    let recognizer_rgb = recognize::FaceRecognizer::new(rec_path.to_str().unwrap())
+        .expect("Failed to load recognition model");
+    let recognizer_ir = recognize::FaceRecognizer::new(rec_path.to_str().unwrap())
         .expect("Failed to load recognition model");
 
     let liveness_detector = if config.liveness.enabled {
@@ -80,15 +84,19 @@ async fn main() -> anyhow::Result<()> {
 
     let db = UserDatabase::new(USERS_DIR, config.enrollment.max_templates as usize)?;
 
-    let checker = gaze_core::face::FaceChecker::from_detector_with_config(detector, &config);
+    let checker_rgb =
+        gaze_core::face::FaceChecker::from_detector_with_config(detector_rgb, &config);
+    let checker_ir = gaze_core::face::FaceChecker::from_detector_with_config(detector_ir, &config);
 
     warn_on_ir_misconfig(&config.cameras);
 
     let (camera_source, camera_kind) = gaze_core::camera::resolve_source(&config.cameras);
 
     let daemon = AuthDaemon {
-        checker: Arc::new(Mutex::new(checker)),
-        recognizer: Arc::new(Mutex::new(recognizer)),
+        checker_rgb: Arc::new(Mutex::new(checker_rgb)),
+        checker_ir: Arc::new(Mutex::new(checker_ir)),
+        recognizer_rgb: Arc::new(Mutex::new(recognizer_rgb)),
+        recognizer_ir: Arc::new(Mutex::new(recognizer_ir)),
         liveness: Arc::new(Mutex::new(liveness_detector)),
         db: Arc::new(Mutex::new(db)),
         threshold: Arc::new(Mutex::new(security.threshold())),
