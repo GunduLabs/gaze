@@ -299,8 +299,8 @@ impl Config {
         } else {
             match self.security.level.as_str() {
                 "low" => "or",
-                "medium" => "fallback_on_dark",
-                "high" | "maximum" => "and",
+                "medium" | "high" => "fallback_on_dark",
+                "maximum" => "and",
                 _ => "fallback_on_dark",
             }
         }
@@ -509,7 +509,7 @@ mod tests {
         assert_eq!(config.hybrid_policy(), "fallback_on_dark");
 
         config.security.level = "high".to_string();
-        assert_eq!(config.hybrid_policy(), "and");
+        assert_eq!(config.hybrid_policy(), "fallback_on_dark");
 
         config.security.level = "maximum".to_string();
         assert_eq!(config.hybrid_policy(), "and");

@@ -49,6 +49,11 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     info!("Initializing Gaze Daemon...");
+
+    if let Ok(uid) = daemon::get_active_session_uid().await {
+        daemon::set_pipewire_runtime_for_uid(uid);
+    }
+
     let t_load = std::time::Instant::now();
 
     let config = Config::load()?;
@@ -90,7 +95,13 @@ async fn main() -> anyhow::Result<()> {
 
     warn_on_ir_misconfig(&config.cameras);
 
-    let (camera_source, camera_kind) = gaze_core::camera::resolve_source(&config.cameras);
+    let rgb_device = gaze_core::camera::resolve_rgb_source(&config.cameras).unwrap_or_default();
+    let ir_res = gaze_core::camera::resolve_ir_source(&config.cameras);
+    let (ir_device, ir_node) = if let Some((src, node)) = ir_res {
+        (src, node)
+    } else {
+        (String::new(), String::new())
+    };
 
     let daemon = AuthDaemon {
         checker_rgb: Arc::new(Mutex::new(checker_rgb)),
@@ -100,8 +111,9 @@ async fn main() -> anyhow::Result<()> {
         liveness: Arc::new(Mutex::new(liveness_detector)),
         db: Arc::new(Mutex::new(db)),
         threshold: Arc::new(Mutex::new(security.threshold())),
-        camera_config: Arc::new(Mutex::new(camera_source)),
-        camera_kind: Arc::new(Mutex::new(camera_kind)),
+        rgb_device: Arc::new(Mutex::new(rgb_device)),
+        ir_device: Arc::new(Mutex::new(ir_device)),
+        ir_node: Arc::new(Mutex::new(ir_node)),
         emitter_enabled: Arc::new(Mutex::new(config.cameras.emitter_enabled)),
         liveness_config: Arc::new(Mutex::new(config.liveness.clone())),
         abort_if_ssh: Arc::new(Mutex::new(config.auth.abort_if_ssh)),
@@ -113,10 +125,6 @@ async fn main() -> anyhow::Result<()> {
     };
 
     info!(elapsed = ?t_load.elapsed(), "Models & user DB loaded");
-
-    if let Ok(uid) = daemon::get_active_session_uid().await {
-        daemon::set_pipewire_runtime_for_uid(uid);
-    }
 
     let _conn = Builder::system()?
         .name("com.gundulabs.Gaze")?
