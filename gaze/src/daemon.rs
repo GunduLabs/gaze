@@ -355,8 +355,9 @@ impl AuthDaemon {
         checker: &mut FaceChecker,
         recognizer: &mut FaceRecognizer,
         frame: &Mat,
+        check_centering_and_proximity: bool,
     ) -> anyhow::Result<(CaptureStatus, Option<FaceData>)> {
-        let (status, result_opt) = checker.capture_status(frame)?;
+        let (status, result_opt) = checker.capture_status(frame, check_centering_and_proximity)?;
 
         if matches!(status, CaptureStatus::Clipped) {
             return Ok((status, None));
@@ -907,7 +908,16 @@ impl AuthDaemon {
 
                 let threshold = *threshold_arc.lock().await;
 
-                let (status, embed_opt) = match Self::process_and_emit_status(&ctxt, &checker_arc, &recognizer_arc, &frame, &mut last_capture_status).await {
+                let (status, embed_opt) = match Self::process_and_emit_status(
+                    &ctxt,
+                    &checker_arc,
+                    &recognizer_arc,
+                    &frame,
+                    &mut last_capture_status,
+                    false,
+                )
+                .await
+                {
                     Ok(res) => res,
                     Err(_) => continue,
                 };
@@ -1129,7 +1139,16 @@ impl AuthDaemon {
                     Err(_) => continue,
                 };
 
-                let (status, result_opt) = match Self::process_and_emit_status(&ctxt, &checker_arc, &recognizer_arc, &frame, &mut last_capture_status).await {
+                let (status, result_opt) = match Self::process_and_emit_status(
+                    &ctxt,
+                    &checker_arc,
+                    &recognizer_arc,
+                    &frame,
+                    &mut last_capture_status,
+                    true,
+                )
+                .await
+                {
                     Ok(res) => res,
                     Err(_) => {
                         stable_frames = 0;
@@ -1459,11 +1478,17 @@ impl AuthDaemon {
         recognizer_arc: &Arc<Mutex<FaceRecognizer>>,
         frame: &Mat,
         last_status: &mut Option<CaptureStatus>,
+        check_centering_and_proximity: bool,
     ) -> anyhow::Result<(CaptureStatus, Option<FaceData>)> {
         let (status, embed_opt) = {
             let mut checker = checker_arc.lock().await;
             let mut recognizer = recognizer_arc.lock().await;
-            Self::process_frame(&mut checker, &mut recognizer, frame)?
+            Self::process_frame(
+                &mut checker,
+                &mut recognizer,
+                frame,
+                check_centering_and_proximity,
+            )?
         };
 
         if last_status.as_ref() != Some(&status) {

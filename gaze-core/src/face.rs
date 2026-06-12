@@ -92,6 +92,7 @@ impl FaceChecker {
     pub fn capture_status(
         &mut self,
         frame: &Mat,
+        check_centering_and_proximity: bool,
     ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
         if is_dark_frame(frame, self.dark_luma_threshold)? {
             return Ok((CaptureStatus::TooDark, None));
@@ -143,11 +144,13 @@ impl FaceChecker {
 
         let status = if bbox_is_clipped((x1, y1, x2, y2), frame_w, frame_h) {
             CaptureStatus::Clipped
-        } else if (norm_cx - 0.5).abs() >= 0.2 || (norm_cy - 0.5).abs() >= 0.2 {
+        } else if check_centering_and_proximity
+            && ((norm_cx - 0.5).abs() >= 0.2 || (norm_cy - 0.5).abs() >= 0.2)
+        {
             CaptureStatus::NotCentered
-        } else if face_size_ratio < MIN_FACE_SIZE_RATIO {
+        } else if check_centering_and_proximity && face_size_ratio < MIN_FACE_SIZE_RATIO {
             CaptureStatus::TooFar
-        } else if face_size_ratio > MAX_FACE_SIZE_RATIO {
+        } else if check_centering_and_proximity && face_size_ratio > MAX_FACE_SIZE_RATIO {
             CaptureStatus::TooClose
         } else if kps.is_none() {
             return Ok((CaptureStatus::NoFace, None));

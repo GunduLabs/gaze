@@ -28,7 +28,7 @@ pub fn try_capture(
     checker: &mut FaceChecker,
 ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
     let frame = cam.capture_frame()?;
-    checker.capture_status(&frame)
+    checker.capture_status(&frame, true)
 }
 
 pub fn wait_for_capture(
@@ -61,7 +61,7 @@ pub fn wait_for_capture_until(
         }
 
         let frame = cam.capture_frame()?;
-        let (status, result) = checker.capture_status(&frame)?;
+        let (status, result) = checker.capture_status(&frame, centering_required)?;
 
         match (status, result) {
             (CaptureStatus::Ready, Some(result)) => return Ok(Some(result)),
