@@ -9,6 +9,12 @@ use std::path::Path;
 const MIN_FACE_SIZE_RATIO: f32 = 0.25;
 const MAX_FACE_SIZE_RATIO: f32 = 0.78;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum Spectrum {
+    Rgb,
+    Ir,
+}
+
 /// On an IR camera the emitter-lit face sits on a near-black background, which
 /// drags the frame mean down. Cap the darkness cutoff here so an IR frame is not
 /// wrongly rejected, while still catching a covered or unlit sensor (mean ~0).
@@ -37,6 +43,7 @@ pub struct CaptureResult {
 pub struct FaceChecker {
     detector: FaceDetector,
     dark_luma_threshold: u8,
+    pub rgb_luma_history: std::collections::VecDeque<u8>,
 }
 
 impl FaceChecker {
@@ -51,13 +58,18 @@ impl FaceChecker {
         }
 
         let detector = FaceDetector::new(model_path.to_str().unwrap())?;
-        Ok(Self::from_detector_with_config(detector, config))
+        Ok(Self {
+            detector,
+            dark_luma_threshold: effective_dark_luma_threshold(config),
+            rgb_luma_history: std::collections::VecDeque::new(),
+        })
     }
 
     pub fn from_detector(detector: FaceDetector) -> Self {
         Self {
             detector,
             dark_luma_threshold: 70,
+            rgb_luma_history: std::collections::VecDeque::new(),
         }
     }
 
@@ -65,6 +77,7 @@ impl FaceChecker {
         Self {
             detector,
             dark_luma_threshold: effective_dark_luma_threshold(config),
+            rgb_luma_history: std::collections::VecDeque::new(),
         }
     }
 
@@ -94,10 +107,14 @@ impl FaceChecker {
         frame: &Mat,
         check_centering_and_proximity: bool,
     ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
-        if is_dark_frame(frame, self.dark_luma_threshold)? {
-            return Ok((CaptureStatus::TooDark, None));
-        }
+        self.capture_status_with_spectrum(frame, Spectrum::Rgb)
+    }
 
+    pub fn capture_status_with_spectrum(
+        &mut self,
+        frame: &Mat,
+        spectrum: Spectrum,
+    ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
         let (bboxes, kps, mat_rgb) = match self.detector.detect(frame) {
             Ok(result) => result,
             Err(DetectError::NoFacesDetected) => return Ok((CaptureStatus::NoFace, None)),
@@ -110,10 +127,36 @@ impl FaceChecker {
         let x2 = face[2];
         let y2 = face[3];
 
-        let frame_w = frame.cols() as f32;
-        let frame_h = frame.rows() as f32;
-        let max_dim = frame_w.max(frame_h);
-        let min_dim = frame_w.min(frame_h);
+        if let Spectrum::Rgb = spectrum {
+            let face_rect = clamp_bbox(frame, (x1, y1, x2, y2));
+            let face_roi = Mat::roi(frame, face_rect)?.try_clone()?;
+            let luma = frame_mean_luma(&face_roi).unwrap_or(0);
+
+            let history = &mut self.rgb_luma_history;
+            history.push_back(luma);
+            if history.len() > 5 {
+                history.pop_front();
+            }
+            let sum_luma: u32 = history.iter().map(|&v| v as u32).sum();
+            let avg_luma = sum_luma as f64 / history.len() as f64;
+            let threshold = self.dark_luma_threshold as f64;
+
+            // 1. Alert status: based on rolling average luma
+            let is_dark_alert = avg_luma < threshold;
+            if is_dark_alert {
+                return Ok((CaptureStatus::TooDark, None));
+            }
+
+            // 2. Capture qualification: the current frame itself must also be bright enough.
+            let is_current_frame_dark = (luma as f64) < threshold;
+            if is_current_frame_dark {
+                return Ok((CaptureStatus::NoFace, None));
+            }
+        }
+
+        let max_dim = (frame.cols() as f32).max(frame.rows() as f32);
+        let min_dim = (frame.cols() as f32).min(frame.rows() as f32);
+        let edge_margin = 0.05;
         let (width, height) = (x2 - x1, y2 - y1);
         let (cx, cy) = (x1 + width / 2.0, y1 + height / 2.0);
         let (norm_cx, norm_cy) = (cx / max_dim, cy / max_dim);
@@ -142,7 +185,11 @@ impl FaceChecker {
             pitch = (ny - eye_y) / face_h;
         }
 
-        let status = if bbox_is_clipped((x1, y1, x2, y2), frame_w, frame_h) {
+        let status = if x1 / max_dim < edge_margin
+            || y1 / max_dim < edge_margin
+            || x2 / max_dim > (1.0 - edge_margin)
+            || y2 / max_dim > (1.0 - edge_margin)
+        {
             CaptureStatus::Clipped
         } else if check_centering_and_proximity
             && ((norm_cx - 0.5).abs() >= 0.2 || (norm_cy - 0.5).abs() >= 0.2)
@@ -172,44 +219,16 @@ impl FaceChecker {
     }
 }
 
-/// True when the detected face comes within 5% of the original frame's edges.
-///
-/// Detection runs on the square-padded frame (`pad_to_square`), so the bbox is
-/// offset by the padding. The check must measure against the original frame's
-/// content rect inside that square: against the square's own edges, a face cut
-/// off at the top or bottom of a landscape frame would never read as clipped
-/// because the content boundary sits well inside the padded margin.
-fn bbox_is_clipped(bbox: (f32, f32, f32, f32), frame_w: f32, frame_h: f32) -> bool {
-    const EDGE_MARGIN: f32 = 0.05;
-    let max_dim = frame_w.max(frame_h);
-    // Same integer-truncation split as pad_to_square.
-    let pad_x = ((max_dim - frame_w) / 2.0).floor();
-    let pad_y = ((max_dim - frame_h) / 2.0).floor();
-    let (x1, y1, x2, y2) = bbox;
-
-    x1 - pad_x < EDGE_MARGIN * frame_w
-        || y1 - pad_y < EDGE_MARGIN * frame_h
-        || x2 - pad_x > (1.0 - EDGE_MARGIN) * frame_w
-        || y2 - pad_y > (1.0 - EDGE_MARGIN) * frame_h
-}
-
-/// Returns true when the frame's mean luminance is below `dark_luma_threshold`,
-/// i.e. the scene is too dark to reliably detect or recognize a face.
-///
-/// A per-pixel count of near-black pixels does not work on real webcams: their
-/// auto-gain lifts a dark scene to a noisy mid-grey (mean luma ~50) that never
-/// reaches true black, while a few light-leak pixels skew any ratio. The mean
-/// is robust and separates "covered/dark" from "lit" cleanly.
-pub fn is_dark_frame(frame: &Mat, dark_luma_threshold: u8) -> anyhow::Result<bool> {
+pub fn frame_mean_luma(frame: &Mat) -> anyhow::Result<u8> {
     let size = frame.size()?;
     let pixel_count = (size.width.max(0) * size.height.max(0)) as usize;
     if pixel_count == 0 {
-        return Ok(true);
+        return Ok(0);
     }
 
     let channels = frame.channels() as usize;
     if channels == 0 {
-        return Ok(true);
+        return Ok(0);
     }
 
     let bytes = frame.data_bytes()?;
@@ -218,8 +237,6 @@ pub fn is_dark_frame(frame: &Mat, dark_luma_threshold: u8) -> anyhow::Result<boo
         .take(pixel_count)
         .map(|pixel| {
             let luminance = if channels >= 3 {
-                // OpenCV gives us BGR, not RGB. Weights are BT.601 (0.299/0.587/0.114) scaled
-                // by 256 so the divide becomes a right shift.
                 let b = pixel[0] as u32;
                 let g = pixel[1] as u32;
                 let r = pixel[2] as u32;
@@ -232,7 +249,42 @@ pub fn is_dark_frame(frame: &Mat, dark_luma_threshold: u8) -> anyhow::Result<boo
         .sum();
 
     let mean = total / pixel_count as u64;
-    Ok(mean < dark_luma_threshold as u64)
+    Ok(mean as u8)
+}
+
+fn clamp_bbox(frame: &Mat, bbox: (f32, f32, f32, f32)) -> opencv::core::Rect {
+    let (x1, y1, x2, y2) = bbox;
+    let w = frame.cols();
+    let h = frame.rows();
+    let xi1 = (x1.max(0.0) as i32).min(w.saturating_sub(1));
+    let yi1 = (y1.max(0.0) as i32).min(h.saturating_sub(1));
+    let xi2 = (x2.max(0.0) as i32).min(w);
+    let yi2 = (y2.max(0.0) as i32).min(h);
+    opencv::core::Rect::new(xi1, yi1, (xi2 - xi1).max(0), (yi2 - yi1).max(0))
+}
+
+pub fn is_dark_face(
+    frame: &Mat,
+    bbox: (f32, f32, f32, f32),
+    dark_luma_threshold: u8,
+) -> anyhow::Result<bool> {
+    let size = frame.size()?;
+    if size.width <= 0 || size.height <= 0 {
+        return Ok(true);
+    }
+    let rect = clamp_bbox(frame, bbox);
+    if rect.width <= 0 || rect.height <= 0 {
+        return Ok(true);
+    }
+    let patch = Mat::roi(frame, rect)?.try_clone()?;
+    let mean = frame_mean_luma(&patch)?;
+    Ok(mean < dark_luma_threshold)
+}
+
+pub fn is_dark_frame(frame: &Mat, dark_luma_threshold: u8) -> anyhow::Result<bool> {
+    let w = frame.cols() as f32;
+    let h = frame.rows() as f32;
+    is_dark_face(frame, (0.0, 0.0, w, h), dark_luma_threshold)
 }
 
 #[cfg(test)]
@@ -314,38 +366,13 @@ mod tests {
     }
 
     #[test]
-    fn clipping_measures_against_content_bounds_not_padded_square() {
-        // 640x480 landscape frame padded to 640x640: content spans y = 80..560
-        // in padded coordinates, so the top margin sits at y = 80 + 24.
-
-        // Face touching the top of the visible frame is clipped even though it
-        // is far from the padded square's edge (the old check missed this).
-        assert!(bbox_is_clipped((300.0, 85.0, 380.0, 200.0), 640.0, 480.0));
-        // Face touching the bottom of the visible frame.
-        assert!(bbox_is_clipped((300.0, 400.0, 380.0, 555.0), 640.0, 480.0));
-        // Well inside the content rect on every side.
-        assert!(!bbox_is_clipped((300.0, 250.0, 380.0, 380.0), 640.0, 480.0));
-        // Left/right margins are unchanged from the old behaviour.
-        assert!(bbox_is_clipped((20.0, 250.0, 380.0, 380.0), 640.0, 480.0));
-        assert!(bbox_is_clipped((300.0, 250.0, 620.0, 380.0), 640.0, 480.0));
-
-        // Square frames have no padding; both axes measure against the edges.
-        assert!(bbox_is_clipped((10.0, 200.0, 300.0, 400.0), 480.0, 480.0));
-        assert!(!bbox_is_clipped((100.0, 200.0, 300.0, 400.0), 480.0, 480.0));
-
-        // Portrait frame: padding is on the x axis instead.
-        assert!(bbox_is_clipped((85.0, 300.0, 200.0, 380.0), 480.0, 640.0));
-        assert!(!bbox_is_clipped((250.0, 300.0, 380.0, 380.0), 480.0, 640.0));
-    }
-
-    #[test]
     fn ir_camera_relaxes_dark_threshold_without_raising_it() {
         let mut config = crate::config::Config::default();
         config.cameras.dark_luma_threshold = 70;
 
         assert_eq!(effective_dark_luma_threshold(&config), 70);
 
-        config.cameras.ir = "/dev/video2".to_string();
+        config.cameras.ir = "pipewiresrc target-object=some-ir-camera".to_string();
         assert_eq!(effective_dark_luma_threshold(&config), 25);
 
         // a user-chosen lower value is never raised

@@ -1,3 +1,4 @@
+use gaze_core::face::Spectrum;
 use ndarray::Array1;
 
 use std::collections::HashMap;
@@ -6,7 +7,7 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-type FaceMap = HashMap<String, HashMap<String, Array1<f32>>>;
+type FaceMap = HashMap<String, HashMap<String, (Array1<f32>, Spectrum)>>;
 pub type FaceScore = (String, f32, f32, bool, u32);
 
 #[derive(Debug)]
@@ -207,8 +208,18 @@ impl UserDatabase {
                             && path.extension().and_then(|e| e.to_str()) == Some("bin")
                             && let Ok(embed) = Self::read_embedding(&path)
                         {
-                            let uuid = path.file_stem().unwrap().to_string_lossy().into_owned();
-                            embeddings.insert(uuid, embed);
+                            let stem = path.file_stem().unwrap().to_string_lossy();
+                            let (uuid, spectrum) = if stem.ends_with("_ir") {
+                                (stem.strip_suffix("_ir").unwrap().to_string(), Spectrum::Ir)
+                            } else if stem.ends_with("_rgb") {
+                                (
+                                    stem.strip_suffix("_rgb").unwrap().to_string(),
+                                    Spectrum::Rgb,
+                                )
+                            } else {
+                                (stem.into_owned(), Spectrum::Rgb)
+                            };
+                            embeddings.insert(uuid, (embed, spectrum));
                         }
                     }
                 }
@@ -224,7 +235,7 @@ impl UserDatabase {
         username: &str,
         face_name: &str,
         template_id: &str,
-        embeddings: Vec<Array1<f32>>,
+        embeddings: Vec<(Array1<f32>, Spectrum)>,
     ) -> Result<(), UserDbError> {
         self.init_dirs()?;
         Self::validate_username(username)?;
@@ -248,9 +259,13 @@ impl UserDatabase {
 
         Self::ensure_private_dir(&template_dir)?;
 
-        for embed in embeddings {
+        for (embed, spectrum) in embeddings {
             let uuid = uuid::Uuid::new_v4().to_string();
-            let file_path = template_dir.join(format!("{}.bin", uuid));
+            let suffix = match spectrum {
+                Spectrum::Rgb => "rgb",
+                Spectrum::Ir => "ir",
+            };
+            let file_path = template_dir.join(format!("{}_{}.bin", uuid, suffix));
             Self::write_embedding(&file_path, &embed)
                 .map_err(|err| UserDbError::Io(std::io::Error::other(err.to_string())))?;
         }
@@ -405,6 +420,7 @@ impl UserDatabase {
         username: &str,
         embed: &ndarray::Array1<f32>,
         threshold: f32,
+        spectrum: Spectrum,
     ) -> Result<Vec<FaceScore>, UserDbError> {
         Self::validate_username(username)?;
         let faces = self
@@ -415,9 +431,26 @@ impl UserDatabase {
         let mut results: Vec<FaceScore> = faces
             .iter()
             .map(|(name, uuid_map)| {
-                let best = uuid_map
+                let matching_embeds: Vec<&Array1<f32>> = uuid_map
                     .values()
-                    .filter(|ref_embed| ref_embed.len() == embed.len())
+                    .filter(|(ref_embed, spec)| *spec == spectrum && ref_embed.len() == embed.len())
+                    .map(|(ref_embed, _)| ref_embed)
+                    .collect();
+
+                let ref_list = if matching_embeds.is_empty() {
+                    uuid_map
+                        .values()
+                        .filter(|(ref_embed, spec)| {
+                            *spec == Spectrum::Rgb && ref_embed.len() == embed.len()
+                        })
+                        .map(|(ref_embed, _)| ref_embed)
+                        .collect()
+                } else {
+                    matching_embeds
+                };
+
+                let best = ref_list
+                    .into_iter()
                     .map(|ref_embed| embed.dot(ref_embed))
                     .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                     .unwrap_or(0.0);
@@ -438,7 +471,10 @@ impl UserDatabase {
         Ok(results)
     }
 
-    pub fn list_faces(&self, username: &str) -> Result<Vec<(String, u32)>, UserDbError> {
+    pub fn list_faces(
+        &self,
+        username: &str,
+    ) -> Result<Vec<(String, u32, bool, bool)>, UserDbError> {
         Self::validate_username(username)?;
         let Some(face_map) = self.users.get(username) else {
             return Err(UserDbError::UserNotFound(username.to_string()));
@@ -446,7 +482,17 @@ impl UserDatabase {
 
         let faces = face_map
             .iter()
-            .map(|(name, embeds)| (name.clone(), embeds.len() as u32))
+            .map(|(name, embeds)| {
+                let mut has_rgb = false;
+                let mut has_ir = false;
+                for (_, spectrum) in embeds.values() {
+                    match spectrum {
+                        Spectrum::Rgb => has_rgb = true,
+                        Spectrum::Ir => has_ir = true,
+                    }
+                }
+                (name.clone(), embeds.len() as u32, has_rgb, has_ir)
+            })
             .collect();
         Ok(faces)
     }
@@ -455,9 +501,12 @@ impl UserDatabase {
         if Self::validate_username(username).is_err() {
             return None;
         }
-        self.users
-            .get(username)
-            .map(|faces| faces.values().flat_map(|embeds| embeds.values()).collect())
+        self.users.get(username).map(|faces| {
+            faces
+                .values()
+                .flat_map(|embeds| embeds.values().map(|(embed, _)| embed))
+                .collect()
+        })
     }
 
     pub fn set_max_templates(&mut self, max: usize) {
@@ -506,7 +555,11 @@ mod tests {
         Array1::from_vec(values.to_vec())
     }
 
-    fn sorted_faces(db: &UserDatabase, username: &str) -> Vec<(String, u32)> {
+    fn rgb_embeds(embeds: Vec<Array1<f32>>) -> Vec<(Array1<f32>, Spectrum)> {
+        embeds.into_iter().map(|e| (e, Spectrum::Rgb)).collect()
+    }
+
+    fn sorted_faces(db: &UserDatabase, username: &str) -> Vec<(String, u32, bool, bool)> {
         let mut faces = db.list_faces(username).unwrap();
         faces.sort_by(|a, b| a.0.cmp(&b.0));
         faces
@@ -562,15 +615,21 @@ mod tests {
             "alice",
             "work",
             "1",
-            vec![embedding(&[1.0, 0.0]), embedding(&[0.0, 1.0])],
+            rgb_embeds(vec![embedding(&[1.0, 0.0]), embedding(&[0.0, 1.0])]),
         )
         .unwrap();
 
-        assert_eq!(sorted_faces(&db, "alice"), vec![("work".to_string(), 2)]);
+        assert_eq!(
+            sorted_faces(&db, "alice"),
+            vec![("work".to_string(), 2, true, false)]
+        );
         assert_eq!(db.get_user_embeddings("alice").unwrap().len(), 2);
 
         let db = UserDatabase::new(base, 4).unwrap();
-        assert_eq!(sorted_faces(&db, "alice"), vec![("work".to_string(), 2)]);
+        assert_eq!(
+            sorted_faces(&db, "alice"),
+            vec![("work".to_string(), 2, true, false)]
+        );
         assert_eq!(db.get_user_embeddings("alice").unwrap().len(), 2);
     }
 
@@ -583,7 +642,7 @@ mod tests {
                 "alice",
                 "work",
                 id,
-                vec![embedding(&[id.parse::<f32>().unwrap()])],
+                rgb_embeds(vec![embedding(&[id.parse::<f32>().unwrap()])]),
             )
             .unwrap();
         }
@@ -592,16 +651,19 @@ mod tests {
             db.list_template_ids("alice", "work").unwrap(),
             vec!["2", "3"]
         );
-        assert_eq!(sorted_faces(&db, "alice"), vec![("work".to_string(), 2)]);
+        assert_eq!(
+            sorted_faces(&db, "alice"),
+            vec![("work".to_string(), 2, true, false)]
+        );
     }
 
     #[test]
     fn rename_remove_and_clear_update_memory_and_disk() {
         let temp = TempDir::new("rename-remove");
         let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 2).unwrap();
-        db.add_template("alice", "work", "1", vec![embedding(&[1.0])])
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
             .unwrap();
-        db.add_template("alice", "home", "1", vec![embedding(&[0.5])])
+        db.add_template("alice", "home", "1", rgb_embeds(vec![embedding(&[0.5])]))
             .unwrap();
 
         assert!(matches!(
@@ -613,12 +675,18 @@ mod tests {
         assert!(temp.path().join("alice/office").exists());
         assert_eq!(
             sorted_faces(&db, "alice"),
-            vec![("home".to_string(), 1), ("office".to_string(), 1)]
+            vec![
+                ("home".to_string(), 1, true, false),
+                ("office".to_string(), 1, true, false)
+            ]
         );
 
         db.remove_face("alice", "home").unwrap();
         assert!(!temp.path().join("alice/home").exists());
-        assert_eq!(sorted_faces(&db, "alice"), vec![("office".to_string(), 1)]);
+        assert_eq!(
+            sorted_faces(&db, "alice"),
+            vec![("office".to_string(), 1, true, false)]
+        );
 
         db.clear_user("alice").unwrap();
         assert!(!temp.path().join("alice").exists());
@@ -632,13 +700,23 @@ mod tests {
     fn match_faces_sorts_scores_and_uses_strict_threshold() {
         let temp = TempDir::new("match");
         let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 3).unwrap();
-        db.add_template("alice", "strong", "1", vec![embedding(&[1.0, 0.0])])
-            .unwrap();
-        db.add_template("alice", "weak", "1", vec![embedding(&[0.25, 0.0])])
-            .unwrap();
+        db.add_template(
+            "alice",
+            "strong",
+            "1",
+            rgb_embeds(vec![embedding(&[1.0, 0.0])]),
+        )
+        .unwrap();
+        db.add_template(
+            "alice",
+            "weak",
+            "1",
+            rgb_embeds(vec![embedding(&[0.25, 0.0])]),
+        )
+        .unwrap();
 
         let results = db
-            .match_faces("alice", &embedding(&[1.0, 0.0]), 0.5)
+            .match_faces("alice", &embedding(&[1.0, 0.0]), 0.5, Spectrum::Rgb)
             .unwrap();
         assert_eq!(results[0].0, "strong");
         assert_eq!(results[0].1, 1.0);
@@ -648,7 +726,7 @@ mod tests {
         assert!(!results[1].3);
 
         let results = db
-            .match_faces("alice", &embedding(&[1.0, 0.0]), 1.0)
+            .match_faces("alice", &embedding(&[1.0, 0.0]), 1.0, Spectrum::Rgb)
             .unwrap();
         assert_eq!(results[0].0, "strong");
         assert!(!results[0].3, "threshold comparison should be strict");
@@ -658,11 +736,16 @@ mod tests {
     fn match_faces_ignores_dimension_mismatches() {
         let temp = TempDir::new("dimension-mismatch");
         let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 3).unwrap();
-        db.add_template("alice", "odd", "1", vec![embedding(&[1.0, 0.0, 0.0])])
-            .unwrap();
+        db.add_template(
+            "alice",
+            "odd",
+            "1",
+            rgb_embeds(vec![embedding(&[1.0, 0.0, 0.0])]),
+        )
+        .unwrap();
 
         let results = db
-            .match_faces("alice", &embedding(&[1.0, 0.0]), 0.0)
+            .match_faces("alice", &embedding(&[1.0, 0.0]), 0.0, Spectrum::Rgb)
             .unwrap();
 
         assert_eq!(results.len(), 1);
@@ -670,5 +753,43 @@ mod tests {
         assert_eq!(results[0].1, 0.0);
         assert!(!results[0].3);
         assert_eq!(results[0].4, 1);
+    }
+
+    #[test]
+    fn match_faces_partitions_by_spectrum() {
+        let temp = TempDir::new("spectrum-partition");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 3).unwrap();
+        db.add_template(
+            "alice",
+            "face",
+            "1",
+            vec![
+                (embedding(&[1.0, 0.0]), Spectrum::Rgb),
+                (embedding(&[0.0, 1.0]), Spectrum::Ir),
+            ],
+        )
+        .unwrap();
+
+        // When matching with RGB:
+        let results_rgb = db
+            .match_faces("alice", &embedding(&[1.0, 0.0]), 0.5, Spectrum::Rgb)
+            .unwrap();
+        assert!(results_rgb[0].3); // matches RGB template (1.0 vs 1.0)
+
+        let results_rgb_wrong = db
+            .match_faces("alice", &embedding(&[0.0, 1.0]), 0.5, Spectrum::Rgb)
+            .unwrap();
+        assert!(!results_rgb_wrong[0].3); // does not match RGB template (0.0 vs 1.0)
+
+        // When matching with IR:
+        let results_ir = db
+            .match_faces("alice", &embedding(&[0.0, 1.0]), 0.5, Spectrum::Ir)
+            .unwrap();
+        assert!(results_ir[0].3); // matches IR template (1.0 vs 1.0)
+
+        let results_ir_wrong = db
+            .match_faces("alice", &embedding(&[1.0, 0.0]), 0.5, Spectrum::Ir)
+            .unwrap();
+        assert!(!results_ir_wrong[0].3); // does not match IR template (0.0 vs 1.0)
     }
 }

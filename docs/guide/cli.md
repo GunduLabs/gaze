@@ -107,7 +107,7 @@ Prints all current config values (security level, detector and recognizer model,
 gaze discover
 ```
 
-Lists `/dev/video*` devices with their USB VID:PID and whether an IR emitter profile is available. Useful for finding the IR camera node when setting up [infrared authentication](/guide/configuration#infrared-ir-camera).
+Lists `/dev/video*` devices with their USB VID:PID and whether an IR emitter profile is available. Useful for checking the IR emitter status when setting up [infrared authentication](/guide/configuration#infrared-ir-camera).
 
 ## Manage another user
 

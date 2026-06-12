@@ -113,16 +113,27 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     camera_row.set_model(Some(&cam_model));
     hardware_group.add(&camera_row);
 
-    let ir_row = libadwaita::EntryRow::new();
-    ir_row.set_title("IR Camera Device");
-    ir_row.set_tooltip_text(Some(
-        "Infrared camera node, e.g. /dev/video2 (blank for none). Run `gaze discover`.",
-    ));
+    let ir_cameras = gaze_core::camera::enumerate_ir_cameras().unwrap_or_default();
+    let mut ir_options = vec![
+        ("None".to_string(), String::new()),
+        ("Primary IR Camera".to_string(), "primary".to_string()),
+    ];
+    ir_options.extend(ir_cameras);
+    let ir_names = ir_options
+        .iter()
+        .map(|(n, _)| n.clone())
+        .collect::<Vec<_>>();
+
+    let ir_row = libadwaita::ComboRow::new();
+    ir_row.set_title("IR Camera Source");
+    let ir_model = gtk4::StringList::new(&ir_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+    ir_row.set_model(Some(&ir_model));
     hardware_group.add(&ir_row);
 
     let emitter_row = libadwaita::ActionRow::new();
-    emitter_row.set_title("Drive IR Emitter");
-    emitter_row.set_subtitle("Turn the camera's IR LED on during authentication");
+    emitter_row.set_title("Force IR Emitter");
+    emitter_row
+        .set_subtitle("Override emitter control (only use if camera stays unlit automatically)");
     let emitter_switch = gtk4::Switch::new();
     emitter_switch.set_valign(gtk4::Align::Center);
     emitter_row.add_suffix(&emitter_switch);
@@ -274,6 +285,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[strong]
         cameras,
         #[strong]
+        ir_options,
+        #[strong]
         config,
         #[strong]
         is_loading,
@@ -302,7 +315,10 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             if let Some((_, target)) = cameras.get(cam_idx) {
                 cfg.cameras.rgb = target.clone();
             }
-            cfg.cameras.ir = ir_row.text().trim().to_string();
+            let ir_idx = ir_row.selected() as usize;
+            if let Some((_, target)) = ir_options.get(ir_idx) {
+                cfg.cameras.ir = target.clone();
+            }
             cfg.cameras.emitter_enabled = emitter_switch.is_active();
             cfg.cameras.dark_luma_threshold = dark_luma_threshold_row.value() as u8;
             cfg.enrollment.max_templates = templates_row.value() as u32;
@@ -392,7 +408,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         apply_changes,
         move |_| apply_changes()
     ));
-    ir_row.connect_apply(glib::clone!(
+    ir_row.connect_selected_notify(glib::clone!(
         #[strong]
         apply_changes,
         move |_| apply_changes()
@@ -453,7 +469,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             .position(|(_, t)| t == &cfg.cameras.rgb)
             .unwrap_or(0);
         camera_row.set_selected(cam_idx as u32);
-        ir_row.set_text(&cfg.cameras.ir);
+        let ir_idx = ir_options
+            .iter()
+            .position(|(_, t)| t == &cfg.cameras.ir)
+            .unwrap_or(0);
+        ir_row.set_selected(ir_idx as u32);
         emitter_switch.set_active(cfg.cameras.emitter_enabled);
         dark_luma_threshold_row.set_value(cfg.cameras.dark_luma_threshold as f64);
         templates_row.set_value(cfg.enrollment.max_templates as f64);
@@ -625,6 +645,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[strong]
         cameras,
         #[strong]
+        ir_options,
+        #[strong]
         config,
         #[strong]
         is_loading,
@@ -670,7 +692,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                     .position(|(_, t)| t == &cfg.cameras.rgb)
                     .unwrap_or(0);
                 camera_row.set_selected(cam_idx as u32);
-                ir_row.set_text(&cfg.cameras.ir);
+                let ir_idx = ir_options
+                    .iter()
+                    .position(|(_, t)| t == &cfg.cameras.ir)
+                    .unwrap_or(0);
+                ir_row.set_selected(ir_idx as u32);
                 emitter_switch.set_active(cfg.cameras.emitter_enabled);
                 dark_luma_threshold_row.set_value(cfg.cameras.dark_luma_threshold as f64);
                 templates_row.set_value(cfg.enrollment.max_templates as f64);
@@ -975,9 +1001,21 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         return;
                     }
 
-                    let camera_device = match load_config_from_daemon(&proxy).await {
-                        Ok(cfg) => gaze_core::camera::resolve_source(&cfg.cameras).0,
-                        Err(_) => "primary".to_string(),
+                    let (camera_device, is_ir) = match load_config_from_daemon(&proxy).await {
+                        Ok(cfg) => {
+                            if let Some(rgb_source) =
+                                gaze_core::camera::resolve_rgb_source(&cfg.cameras)
+                            {
+                                (rgb_source, false)
+                            } else if let Some((ir_source, _)) =
+                                gaze_core::camera::resolve_ir_source(&cfg.cameras)
+                            {
+                                (ir_source, true)
+                            } else {
+                                ("primary".to_string(), false)
+                            }
+                        }
+                        Err(_) => ("primary".to_string(), false),
                     };
 
                     capture_dialog::show_capture_dialog(
@@ -986,6 +1024,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         None,
                         &proxy,
                         &camera_device,
+                        is_ir,
                         glib::clone!(
                             #[strong]
                             refresh,
@@ -1093,9 +1132,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 face_list.set_visible(true);
 
                                 let existing_face_names: Rc<std::collections::HashSet<String>> =
-                                    Rc::new(faces.iter().map(|(name, _): &(String, u32)| name.clone()).collect());
+                                    Rc::new(faces.iter().map(|(name, _, _, _): &(String, u32, bool, bool)| name.clone()).collect());
 
-                                for (face_name, count) in faces {
+                                for (face_name, count, has_rgb, has_ir) in faces {
                                     let row = libadwaita::ActionRow::new();
                                     row.set_title(&face_name);
                                     row.set_subtitle(&format!(
@@ -1103,6 +1142,27 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         count,
                                         if count == 1 { "" } else { "s" }
                                     ));
+
+                                    let rgb_badge = gtk4::Label::new(Some("RGB"));
+                                    rgb_badge.set_valign(gtk4::Align::Center);
+                                    if has_rgb {
+                                        rgb_badge.add_css_class("badge-success");
+                                    } else {
+                                        rgb_badge.add_css_class("badge-error");
+                                    }
+
+                                    let ir_badge = gtk4::Label::new(Some("IR"));
+                                    ir_badge.set_valign(gtk4::Align::Center);
+                                    if has_ir {
+                                        ir_badge.add_css_class("badge-success");
+                                    } else {
+                                        ir_badge.add_css_class("badge-error");
+                                    }
+
+                                    let badge_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+                                    badge_box.set_valign(gtk4::Align::Center);
+                                    badge_box.append(&rgb_badge);
+                                    badge_box.append(&ir_badge);
 
                                     let btn_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
                                     btn_box.set_valign(gtk4::Align::Center);
@@ -1120,6 +1180,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                     btn_box.append(&rename_btn);
                                     btn_box.append(&refine_btn);
                                     btn_box.append(&delete_btn);
+                                    row.add_suffix(&badge_box);
                                     row.add_suffix(&btn_box);
 
                                     rename_btn.connect_clicked(glib::clone!(
@@ -1307,10 +1368,18 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                         return;
                                                     }
 
-                                                     let camera_device = match load_config_from_daemon(&proxy).await {
-                                                         Ok(cfg) => gaze_core::camera::resolve_source(&cfg.cameras).0,
-                                                         Err(_) => "primary".to_string(),
-                                                     };
+                                                    let (camera_device, is_ir) = match load_config_from_daemon(&proxy).await {
+                                                          Ok(cfg) => {
+                                                              if let Some(rgb_source) = gaze_core::camera::resolve_rgb_source(&cfg.cameras) {
+                                                                  (rgb_source, false)
+                                                              } else if let Some((ir_source, _)) = gaze_core::camera::resolve_ir_source(&cfg.cameras) {
+                                                                  (ir_source, true)
+                                                              } else {
+                                                                  ("primary".to_string(), false)
+                                                              }
+                                                          }
+                                                          Err(_) => ("primary".to_string(), false),
+                                                      };
 
                                                      capture_dialog::show_capture_dialog(
                                                         &window,
@@ -1318,6 +1387,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                         Some(&face_name),
                                                         &proxy,
                                                         &camera_device,
+                                                        is_ir,
                                                         glib::clone!(
                                                             #[strong]
                                                             refresh,

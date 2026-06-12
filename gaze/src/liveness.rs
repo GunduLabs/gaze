@@ -123,6 +123,7 @@ pub const MIN_EYE_MOTION_RATIO: f32 = 0.02;
 #[derive(Debug, Clone)]
 pub struct EyeMotion {
     pub live: bool,
+    #[allow(dead_code)]
     pub motion_ratio: f32,
     pub pairs: usize,
 }

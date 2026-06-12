@@ -15,13 +15,14 @@ pub fn show_capture_dialog(
     face_name: Option<&str>,
     proxy: &Rc<GazeProxy<'static>>,
     camera_device: &str,
+    is_ir: bool,
     on_done: impl Fn() + 'static,
 ) {
-    // IR cameras are driven straight off the raw V4L2 node by the daemon, which
+    // IR cameras are driven straight off the device node by the daemon, which
     // is the device's sole owner. Opening a second local preview stream here
     // would fail with EBUSY (and the emitter is only lit during the daemon's own
     // capture), so for IR we show a guidance-only overlay fed by daemon status.
-    let feed = if camera_device.starts_with("v4l2src") {
+    let feed = if is_ir {
         CameraFeed::new_guidance_only()
     } else {
         match CameraFeed::new(camera_device) {
@@ -63,7 +64,7 @@ pub fn show_capture_dialog(
     body.set_margin_top(16);
     body.set_margin_bottom(16);
 
-    let camera_mode = gtk4::Label::new(Some(if camera_device.starts_with("v4l2src") {
+    let camera_mode = gtk4::Label::new(Some(if is_ir {
         "Infrared camera · live preview unavailable, look at the camera"
     } else {
         "RGB camera"
@@ -96,10 +97,15 @@ pub fn show_capture_dialog(
 
     let cam_widget = build_camera_widget(&feed);
     cam_widget.set_height_request(320);
-    let cam_frame = gtk4::Frame::new(None);
-    cam_frame.set_child(Some(&cam_widget));
-    cam_frame.set_vexpand(true);
-    body.append(&cam_frame);
+    if is_ir {
+        feed.picture.set_visible(false);
+        body.append(&cam_widget);
+    } else {
+        let cam_frame = gtk4::Frame::new(None);
+        cam_frame.set_child(Some(&cam_widget));
+        cam_frame.set_vexpand(true);
+        body.append(&cam_frame);
+    }
 
     let prompt_label = gtk4::Label::new(None);
     prompt_label.add_css_class("title-4");
@@ -229,7 +235,7 @@ pub fn show_capture_dialog(
                 if let Ok(faces) = proxy.list_faces(&username).await {
                     let mut names = existing_face_names.borrow_mut();
                     names.clear();
-                    names.extend(faces.into_iter().map(|(name, _)| name));
+                    names.extend(faces.into_iter().map(|(name, _, _, _)| name));
                 }
 
                 let current_name = resolved_face.borrow().trim().to_string();

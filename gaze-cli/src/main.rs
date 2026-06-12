@@ -230,21 +230,29 @@ async fn run_config_wizard(
         .parse::<u8>()
         .unwrap_or(70);
 
-    config.cameras.ir = Input::with_theme(&theme)
-        .with_prompt(
-            "IR camera device node (e.g. /dev/video2; blank for none — run `gaze discover`)",
-        )
-        .allow_empty(true)
-        .default(config.cameras.ir.clone())
-        .interact_text()?
-        .trim()
-        .to_string();
+    let ir_cameras = gaze_core::camera::enumerate_ir_cameras().unwrap_or_default();
+    let mut ir_options = vec![("None".to_string(), String::new())];
+    ir_options.extend(ir_cameras);
+
+    let ir_names: Vec<String> = ir_options.iter().map(|(n, _)| n.clone()).collect();
+    let default_ir_idx = ir_options
+        .iter()
+        .position(|(_, target)| target == &config.cameras.ir)
+        .unwrap_or(0);
+
+    let selected_ir_idx = Select::with_theme(&theme)
+        .with_prompt("IR camera source")
+        .items(&ir_names)
+        .default(default_ir_idx)
+        .interact()?;
+
+    config.cameras.ir = ir_options[selected_ir_idx].1.clone();
 
     if config.cameras.ir.is_empty() {
         config.cameras.emitter_enabled = false;
     } else {
         config.cameras.emitter_enabled = Confirm::with_theme(&theme)
-            .with_prompt("Drive the IR emitter (turn the camera's IR LED on during auth)")
+            .with_prompt("Force IR emitter override (only use if emitter stays off automatically)")
             .default(config.cameras.emitter_enabled)
             .interact()?;
     }
@@ -311,8 +319,13 @@ fn camera_mode_label(cfg: &Config) -> String {
         "emitter off"
     };
 
+    let resolved = gaze_core::camera::resolve_node_for_source(ir);
     let profile = if cfg.cameras.emitter_enabled {
-        match usb_ids_of(ir).and_then(|(v, p)| find_device(v, p)) {
+        match resolved
+            .as_deref()
+            .and_then(usb_ids_of)
+            .and_then(|(v, p)| find_device(v, p))
+        {
             Some(dev) => format!(", profile: {}", dev.name),
             None => ", no static profile (runtime probe)".to_string(),
         }
@@ -320,7 +333,13 @@ fn camera_mode_label(cfg: &Config) -> String {
         String::new()
     };
 
-    format!("Infrared ({ir}, {emitter}{profile})")
+    let node_desc = if let Some(node) = resolved {
+        format!("{ir} [{node}]")
+    } else {
+        ir.to_string()
+    };
+
+    format!("Infrared ({node_desc}, {emitter}{profile})")
 }
 
 async fn print_camera_mode(proxy: &GazeProxy<'_>, term: &Term) {
@@ -649,11 +668,23 @@ async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
                     style(faces.len()).green().bold(),
                     style(user).bold()
                 ))?;
-                for (face, count) in faces {
+                for (face, count, has_rgb, has_ir) in faces {
+                    let rgb_badge = if has_rgb {
+                        style("[RGB]").green().bold().to_string()
+                    } else {
+                        style("[RGB]").red().bold().to_string()
+                    };
+                    let ir_badge = if has_ir {
+                        style("[IR]").green().bold().to_string()
+                    } else {
+                        style("[IR]").red().bold().to_string()
+                    };
                     term.write_line(&format!(
-                        "  {} {} ({} captures)",
+                        "  {} {} {} {} ({} captures)",
                         style("•").cyan(),
                         style(face).bold(),
+                        rgb_badge,
+                        ir_badge,
                         count
                     ))?;
                 }
@@ -1222,7 +1253,8 @@ fn handle_discover() -> anyhow::Result<()> {
         if camera_bus(&node) == CameraBus::Ipu6 {
             line += "  [IPU6 \u{2014} not UVC, IR emitter unsupported]";
         }
-        if !configured_ir.is_empty() && node == configured_ir {
+        let resolved_ir = gaze_core::camera::resolve_node_for_source(&configured_ir);
+        if resolved_ir.as_ref() == Some(&node) {
             line += "  \u{2190} configured (cameras.ir)";
         }
         println!("{line}");

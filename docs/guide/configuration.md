@@ -89,31 +89,31 @@ With the default, a frame is skipped when its mean luminance (0-255, BT.601 weig
 
 ## Infrared (IR) camera
 
-Gaze can authenticate through a Windows Hello-style infrared camera instead of the RGB webcam. Point `ir` at the IR camera's `/dev/video*` node:
+Gaze can authenticate through a Windows Hello-style infrared camera instead of the RGB webcam. Point `ir` to the IR camera's GStreamer/PipeWire source string (just like the RGB camera):
 
 ```toml
 [cameras]
-ir = "/dev/video2"
-emitter_enabled = true
+ir = "pipewiresrc target-object=<pipewire-target>"
+emitter_enabled = false
 ```
 
-When `ir` is set, Gaze captures from that node (through GStreamer `v4l2src`) for both enrollment and verification, and `rgb` is ignored. Use `gaze discover` to list video devices and find the IR node:
+When `ir` is set, Gaze captures from that source (through PipeWire) for both enrollment and verification, and `rgb` is ignored. Use `gaze discover` to list video devices, check if their emitter profiles are supported, and see which node is configured:
 
 ```
 $ gaze discover
 /dev/video0  vid=0x04f2 pid=0xb604  no emitter profile
-/dev/video2  vid=0x04f2 pid=0xb615  emitter: Chicony Integrated IR Camera ✓
+/dev/video2  vid=0x04f2 pid=0xb615  emitter: Chicony Integrated IR Camera ✓  ← configured (cameras.ir)
 ```
 
-### IR emitter
+### IR emitter blaster
 
-Many IR cameras keep their infrared LED off until told otherwise, leaving frames too dark to recognize. Set `emitter_enabled = true` and Gaze switches the emitter on during capture and off afterwards.
+Many IR cameras automatically light their infrared LED when streaming starts. If yours does not, set `emitter_enabled = true` to manually drive the emitter during authentication.
 
-Gaze matches cameras by USB VID:PID against a small built-in table and also probes at runtime for the standard Microsoft Face Authentication control, so most Windows Hello cameras work with no manual setup. If `gaze discover` reports "no emitter profile" for your IR node and the emitter does not light, the camera needs a profile added under `gaze-core/ir-profiles/`.
+Gaze resolves the underlying `/dev/video*` node from the PipeWire camera, matches it by USB VID:PID against a small built-in table, and also probes at runtime for the standard Microsoft Face Authentication control to send UVC toggle requests. If `gaze discover` reports "no emitter profile" and the emitter does not light even with `emitter_enabled = true`, the camera needs a profile added under `gaze-core/ir-profiles/`.
 
 On the IR path, liveness uses eye-motion analysis across frames; the RGB MiniFASNet model is not applied to infrared.
 
-Driving the emitter needs read/write access to the IR `/dev/video*` node. The daemon runs as root and is a member of the `video` group, so the default `root:video` device permissions are sufficient; no extra udev rule is required.
+Driving the emitter blaster needs read/write access to the IR `/dev/video*` node. The daemon runs as root and is a member of the `video` group, so the default `root:video` device permissions are sufficient; no extra udev rule is required.
 
 ## Authentication options
 

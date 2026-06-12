@@ -214,7 +214,9 @@ impl CameraFeed {
     pub fn stop(&self) {
         self.stop_flag.store(true, Ordering::Relaxed);
         if let Some(handle) = self.thread_handle.borrow_mut().take() {
-            let _ = handle.join();
+            thread::spawn(move || {
+                let _ = handle.join();
+            });
         }
     }
 

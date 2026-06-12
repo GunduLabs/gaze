@@ -388,7 +388,7 @@ mod tests {
             security: SecurityLevel::high(),
             cameras: CameraConfig {
                 rgb: "primary".to_string(),
-                ir: "/dev/video2".to_string(),
+                ir: "pipewiresrc target-object=some-ir-camera".to_string(),
                 emitter_enabled: true,
                 dark_luma_threshold: 55,
             },
@@ -414,7 +414,10 @@ mod tests {
             SecurityLevel::high().recognizer()
         );
         assert_eq!(loaded.cameras.rgb, "primary");
-        assert_eq!(loaded.cameras.ir, "/dev/video2");
+        assert_eq!(
+            loaded.cameras.ir,
+            "pipewiresrc target-object=some-ir-camera"
+        );
         assert!(loaded.cameras.emitter_enabled);
         assert_eq!(loaded.cameras.dark_luma_threshold, 55);
         assert!(loaded.auth.abort_if_ssh);

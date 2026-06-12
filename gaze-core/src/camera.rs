@@ -8,24 +8,108 @@ use crate::config::{CameraConfig, DEFAULT_RGB_CAMERA};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CameraKind {
-    Rgb,
-    Ir { node: String },
+    Rgb { source: String },
+    Ir { source: String, node: String },
+}
+
+pub fn resolve_ir_source(cameras: &CameraConfig) -> Option<(String, String)> {
+    let ir = cameras.ir.trim();
+    if ir.is_empty() {
+        None
+    } else if ir == "primary" {
+        if let Ok(list) = enumerate_ir_cameras() {
+            if let Some((_name, source)) = list.into_iter().next() {
+                let node = resolve_node_for_source(&source).unwrap_or_default();
+                Some((source, node))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        let node = resolve_node_for_source(ir).unwrap_or_default();
+        Some((ir.to_string(), node))
+    }
+}
+
+pub fn resolve_rgb_source(cameras: &CameraConfig) -> Option<String> {
+    let rgb = cameras.rgb.trim();
+    if rgb.is_empty() {
+        None
+    } else {
+        Some(rgb.to_string())
+    }
 }
 
 /// Resolve the capture source and kind from config. A set `cameras.ir` wins,
-/// capturing through a GStreamer `v4l2src` on that node instead of RGB.
+/// capturing through GStreamer on that source instead of RGB.
 pub fn resolve_source(cameras: &CameraConfig) -> (String, CameraKind) {
-    let ir = cameras.ir.trim();
-    if ir.is_empty() {
-        (cameras.rgb.clone(), CameraKind::Rgb)
-    } else {
+    if let Some((ir_source, ir_node)) = resolve_ir_source(cameras) {
         (
-            format!("v4l2src device={ir}"),
+            ir_source.clone(),
             CameraKind::Ir {
-                node: ir.to_string(),
+                source: ir_source,
+                node: ir_node,
             },
         )
+    } else {
+        let rgb_source =
+            resolve_rgb_source(cameras).unwrap_or_else(|| DEFAULT_RGB_CAMERA.to_string());
+        (rgb_source.clone(), CameraKind::Rgb { source: rgb_source })
     }
+}
+
+/// Resolve the `/dev/video*` node path corresponding to a GStreamer/PipeWire camera source string.
+pub fn resolve_node_for_source(source: &str) -> Option<String> {
+    let source = source.trim();
+    if source.is_empty() {
+        return None;
+    }
+
+    if let Some(pos) = source.find("/dev/video") {
+        let prefix_len = "/dev/video".len();
+        let tail = &source[pos + prefix_len..];
+        let end_digits = tail
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(tail.len());
+        return Some(format!("/dev/video{}", &tail[..end_digits]));
+    }
+
+    let target = if let Some(stripped) = source.strip_prefix("pipewiresrc target-object=") {
+        stripped.trim()
+    } else {
+        return None;
+    };
+
+    let target = target.trim_matches(|c| c == '"' || c == '\'');
+
+    gstreamer::init().ok()?;
+    let monitor = gstreamer::DeviceMonitor::new();
+    let caps = gstreamer::Caps::builder("video/x-raw").build();
+    monitor.add_filter(Some("Video/Source"), Some(&caps));
+    monitor.start().ok()?;
+    wait_for_device_updates(&monitor);
+    let devices = monitor.devices();
+    monitor.stop();
+
+    for device in devices {
+        if let Some(props) = device.properties()
+            && let Some(t) = pipewire_target(&props)
+            && t == target
+        {
+            if let Some(path) = string_property(&props, "api.v4l2.path") {
+                return Some(path);
+            }
+            if let Some(path) = string_property(&props, "device.path")
+                && path.starts_with("/dev/video")
+            {
+                return Some(path);
+            }
+        }
+    }
+
+    None
 }
 
 const PRIMARY_CAMERA_DISPLAY_NAME: &str = "Primary Camera";
@@ -82,6 +166,14 @@ impl Camera {
 }
 
 pub fn enumerate_cameras() -> anyhow::Result<Vec<(String, String)>> {
+    enumerate_cameras_filtered(false)
+}
+
+pub fn enumerate_ir_cameras() -> anyhow::Result<Vec<(String, String)>> {
+    enumerate_cameras_filtered(true)
+}
+
+fn enumerate_cameras_filtered(mono_only: bool) -> anyhow::Result<Vec<(String, String)>> {
     gstreamer::init()?;
     let monitor = gstreamer::DeviceMonitor::new();
     let caps = gstreamer::Caps::builder("video/x-raw").build();
@@ -91,14 +183,26 @@ pub fn enumerate_cameras() -> anyhow::Result<Vec<(String, String)>> {
     let devices = monitor.devices();
     monitor.stop();
 
-    let mut cameras = vec![(
-        PRIMARY_CAMERA_DISPLAY_NAME.to_string(),
-        DEFAULT_RGB_CAMERA.to_string(),
-    )];
+    let mut cameras = if !mono_only {
+        vec![(
+            PRIMARY_CAMERA_DISPLAY_NAME.to_string(),
+            DEFAULT_RGB_CAMERA.to_string(),
+        )]
+    } else {
+        Vec::new()
+    };
+
     for device in devices {
         let display_name = device.display_name().to_string();
         if let Some(props) = device.properties() {
-            if !props.has_name("pipewire-proplist") || !has_color_caps(&device) {
+            if !props.has_name("pipewire-proplist") {
+                continue;
+            }
+            let is_color = has_color_caps(&device);
+            if !mono_only && !is_color {
+                continue;
+            }
+            if mono_only && is_color {
                 continue;
             }
             let Some(target) = pipewire_target(&props) else {
@@ -200,7 +304,12 @@ mod tests {
         };
         let (source, kind) = resolve_source(&cameras);
         assert_eq!(source, "primary");
-        assert_eq!(kind, CameraKind::Rgb);
+        assert_eq!(
+            kind,
+            CameraKind::Rgb {
+                source: "primary".to_string()
+            }
+        );
     }
 
     #[test]
@@ -212,11 +321,31 @@ mod tests {
             dark_luma_threshold: 70,
         };
         let (source, kind) = resolve_source(&cameras);
-        assert_eq!(source, "v4l2src device=/dev/video2");
+        assert_eq!(source, "/dev/video2");
         assert_eq!(
             kind,
             CameraKind::Ir {
+                source: "/dev/video2".to_string(),
                 node: "/dev/video2".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_source_builds_pipewiresrc_pipeline_for_ir() {
+        let cameras = CameraConfig {
+            rgb: "primary".to_string(),
+            ir: "pipewiresrc target-object=device-name".to_string(),
+            emitter_enabled: true,
+            dark_luma_threshold: 70,
+        };
+        let (source, kind) = resolve_source(&cameras);
+        assert_eq!(source, "pipewiresrc target-object=device-name");
+        assert_eq!(
+            kind,
+            CameraKind::Ir {
+                source: "pipewiresrc target-object=device-name".to_string(),
+                node: String::new()
             }
         );
     }

@@ -24,10 +24,18 @@ fn warn_on_ir_misconfig(cameras: &gaze_core::config::CameraConfig) {
         }
         return;
     }
-    if !std::path::Path::new(ir).exists() {
+    if let Some(node) = gaze_core::camera::resolve_node_for_source(ir) {
+        if !std::path::Path::new(&node).exists() {
+            warn!(
+                node = ir,
+                resolved = node,
+                "resolved cameras.ir device node does not exist; IR capture will fail until it appears"
+            );
+        }
+    } else {
         warn!(
             node = ir,
-            "cameras.ir device node does not exist; IR capture will fail until it appears"
+            "could not resolve a physical V4L2 device node for cameras.ir; the IR emitter will not be driven"
         );
     }
 }

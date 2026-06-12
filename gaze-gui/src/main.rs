@@ -24,6 +24,22 @@ fn main() {
             r#"
             .success { color: #2ec27e; }
             .error { color: #e01b24; }
+            .badge-success {
+                background-color: #2ec27e;
+                color: white;
+                border-radius: 6px;
+                padding: 1px 6px;
+                font-weight: bold;
+                font-size: 0.75rem;
+            }
+            .badge-error {
+                background-color: #e01b24;
+                color: white;
+                border-radius: 6px;
+                padding: 1px 6px;
+                font-weight: bold;
+                font-size: 0.75rem;
+            }
             "#,
         );
         gtk4::style_context_add_provider_for_display(
