@@ -225,7 +225,35 @@ impl AuthDaemon {
         })
     }
 
-    fn is_lid_closed() -> bool {
+    fn upower_lid_closed(present: bool, closed: bool) -> bool {
+        present && closed
+    }
+
+    /// Authoritative lid state from UPower, when available.
+    ///
+    /// `/proc/acpi/button/lid` is absent on most current hardware, so relying on
+    /// it alone makes `abort_if_lid_closed` silently no-op. UPower exposes the
+    /// lid via D-Bus on modern systems; prefer it and treat a missing/absent lid
+    /// as "not closed".
+    async fn lid_is_closed_via_upower() -> Option<bool> {
+        let conn = zbus::Connection::system().await.ok()?;
+        let proxy = zbus::Proxy::new(
+            &conn,
+            "org.freedesktop.UPower",
+            "/org/freedesktop/UPower",
+            "org.freedesktop.UPower",
+        )
+        .await
+        .ok()?;
+        let present: bool = proxy.get_property("LidIsPresent").await.ok()?;
+        let closed: bool = proxy.get_property("LidIsClosed").await.ok()?;
+        Some(Self::upower_lid_closed(present, closed))
+    }
+
+    async fn is_lid_closed() -> bool {
+        if let Some(closed) = Self::lid_is_closed_via_upower().await {
+            return closed;
+        }
         Self::is_lid_closed_at(std::path::Path::new("/proc/acpi/button/lid"))
     }
 
@@ -243,7 +271,7 @@ impl AuthDaemon {
         }
 
         let abort_if_lid_closed = *self.abort_if_lid_closed.lock().await;
-        if abort_if_lid_closed && Self::is_lid_closed() {
+        if abort_if_lid_closed && Self::is_lid_closed().await {
             warn!("Laptop lid is closed, aborting face auth");
             return Err(fdo::Error::Failed("lid closed".into()));
         }
@@ -469,6 +497,15 @@ mod tests {
         assert!(AuthDaemon::lid_state_is_closed("state:      closed\n"));
         assert!(AuthDaemon::lid_state_is_closed("State: CLOSED\n"));
         assert!(!AuthDaemon::lid_state_is_closed("state:      open\n"));
+    }
+
+    #[test]
+    fn upower_lid_closed_requires_present_and_closed() {
+        assert!(AuthDaemon::upower_lid_closed(true, true));
+        assert!(!AuthDaemon::upower_lid_closed(true, false));
+        // A machine without a lid (e.g. a desktop) is never "closed".
+        assert!(!AuthDaemon::upower_lid_closed(false, true));
+        assert!(!AuthDaemon::upower_lid_closed(false, false));
     }
 }
 
