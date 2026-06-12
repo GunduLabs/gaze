@@ -30,6 +30,10 @@ const GDM_DCONF_OVERRIDE_CONTENT: &str =
     "[org/gnome/shell/extensions/gaze]\nenable-face-authentication=true\n";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
 const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
+/// Maximum number of process-tree ancestors to inspect when deciding whether a
+/// caller belongs to an SSH session. Bounds the walk so a malformed `/proc`
+/// chain cannot loop.
+const SSH_PROC_CHAIN_MAX_DEPTH: usize = 16;
 
 #[derive(Clone)]
 pub struct ClaimState {
@@ -198,10 +202,58 @@ impl AuthDaemon {
         })
     }
 
-    fn process_is_ssh_session(pid: u32) -> Option<bool> {
-        std::fs::read(format!("/proc/{pid}/environ"))
+    /// Parse the parent pid out of `/proc/<pid>/stat`.
+    ///
+    /// The format is `pid (comm) state ppid ...`; `comm` itself can contain
+    /// spaces and parentheses, so split after the final `)` before reading the
+    /// space-separated fields (state, then ppid).
+    fn read_ppid_at(base: &std::path::Path, pid: u32) -> Option<u32> {
+        let stat = std::fs::read_to_string(base.join(pid.to_string()).join("stat")).ok()?;
+        let after_comm = stat.rsplit_once(')')?.1;
+        let mut fields = after_comm.split_whitespace();
+        let _state = fields.next()?;
+        fields.next()?.parse::<u32>().ok()
+    }
+
+    fn proc_is_sshd_at(base: &std::path::Path, pid: u32) -> bool {
+        std::fs::read_to_string(base.join(pid.to_string()).join("comm"))
+            .map(|comm| {
+                let comm = comm.trim();
+                comm == "sshd" || comm == "sshd-session"
+            })
+            .unwrap_or(false)
+    }
+
+    fn proc_environ_is_ssh_at(base: &std::path::Path, pid: u32) -> bool {
+        std::fs::read(base.join(pid.to_string()).join("environ"))
             .map(|env| Self::environ_has_ssh_marker(&env))
-            .ok()
+            .unwrap_or(false)
+    }
+
+    /// True if `pid` or any of its ancestors looks like an SSH session.
+    ///
+    /// The immediate PAM caller (e.g. the privileged `sshd` doing
+    /// `pam_authenticate`) often does not yet carry `SSH_CONNECTION`/`SSH_TTY`
+    /// in its own environment, so checking only that process lets remote logins
+    /// slip past. Walking up the process tree and also matching an `sshd`
+    /// ancestor by name closes that gap and fails closed (detects SSH) rather
+    /// than open.
+    fn process_chain_is_ssh_at(base: &std::path::Path, pid: u32) -> bool {
+        let mut current = pid;
+        for _ in 0..SSH_PROC_CHAIN_MAX_DEPTH {
+            if Self::proc_environ_is_ssh_at(base, current) || Self::proc_is_sshd_at(base, current) {
+                return true;
+            }
+            match Self::read_ppid_at(base, current) {
+                Some(ppid) if ppid != 0 && ppid != current => current = ppid,
+                _ => break,
+            }
+        }
+        false
+    }
+
+    fn process_is_ssh_session(pid: u32) -> bool {
+        Self::process_chain_is_ssh_at(std::path::Path::new("/proc"), pid)
     }
 
     fn current_env_is_ssh_session() -> bool {
@@ -261,9 +313,10 @@ impl AuthDaemon {
         let abort_if_ssh = *self.abort_if_ssh.lock().await;
         if abort_if_ssh {
             let caller_pid = Self::caller_pid(header).await.ok();
-            let is_ssh = caller_pid
-                .and_then(Self::process_is_ssh_session)
-                .unwrap_or_else(Self::current_env_is_ssh_session);
+            let is_ssh = match caller_pid {
+                Some(pid) => Self::process_is_ssh_session(pid),
+                None => Self::current_env_is_ssh_session(),
+            };
             if is_ssh {
                 warn!(caller_pid, "SSH session detected, aborting face auth");
                 return Err(fdo::Error::Failed("SSH session detected".into()));
@@ -506,6 +559,97 @@ mod tests {
         // A machine without a lid (e.g. a desktop) is never "closed".
         assert!(!AuthDaemon::upower_lid_closed(false, true));
         assert!(!AuthDaemon::upower_lid_closed(false, false));
+    }
+
+    struct FakeProc {
+        root: std::path::PathBuf,
+    }
+
+    impl FakeProc {
+        fn new(name: &str) -> Self {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "gaze-proc-test-{}-{}-{name}",
+                std::process::id(),
+                unique
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            Self { root }
+        }
+
+        fn add(&self, pid: u32, ppid: u32, comm: &str, environ: &[u8]) {
+            let dir = self.root.join(pid.to_string());
+            std::fs::create_dir_all(&dir).unwrap();
+            // Embed parens/spaces in comm to exercise the stat parser.
+            std::fs::write(
+                dir.join("stat"),
+                format!("{pid} ({comm}) S {ppid} 1 1 0 -1 0\n"),
+            )
+            .unwrap();
+            std::fs::write(dir.join("comm"), format!("{comm}\n")).unwrap();
+            std::fs::write(dir.join("environ"), environ).unwrap();
+        }
+
+        fn root(&self) -> &std::path::Path {
+            &self.root
+        }
+    }
+
+    impl Drop for FakeProc {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn read_ppid_parses_stat_with_parenthesised_comm() {
+        let proc = FakeProc::new("ppid");
+        proc.add(42, 7, "weird (name)", b"");
+        assert_eq!(AuthDaemon::read_ppid_at(proc.root(), 42), Some(7));
+        assert_eq!(AuthDaemon::read_ppid_at(proc.root(), 999), None);
+    }
+
+    #[test]
+    fn ssh_detected_via_ancestor_environ_marker() {
+        let proc = FakeProc::new("ancestor-env");
+        // login(1000) -> sshd has SSH_CONNECTION, its child PAM process does not.
+        proc.add(1000, 900, "sshd", b"SSH_CONNECTION=1.2.3.4 5 6.7.8.9 22\0");
+        proc.add(1001, 1000, "sudo", b"USER=alice\0");
+        proc.add(1002, 1001, "unix_chkpwd", b"USER=alice\0");
+
+        assert!(AuthDaemon::process_chain_is_ssh_at(proc.root(), 1002));
+    }
+
+    #[test]
+    fn ssh_detected_via_ancestor_comm_when_environ_is_bare() {
+        let proc = FakeProc::new("ancestor-comm");
+        // Even with no SSH_* in any environ, an sshd ancestor reveals the session.
+        proc.add(2000, 1, "sshd-session", b"PATH=/usr/bin\0");
+        proc.add(2001, 2000, "bash", b"PATH=/usr/bin\0");
+        proc.add(2002, 2001, "sudo", b"PATH=/usr/bin\0");
+
+        assert!(AuthDaemon::process_chain_is_ssh_at(proc.root(), 2002));
+    }
+
+    #[test]
+    fn local_session_chain_is_not_flagged_as_ssh() {
+        let proc = FakeProc::new("local");
+        proc.add(3000, 1, "systemd", b"PATH=/usr/bin\0");
+        proc.add(3001, 3000, "gdm-session-wor", b"PATH=/usr/bin\0");
+        proc.add(3002, 3001, "sudo", b"USER=alice\0");
+
+        assert!(!AuthDaemon::process_chain_is_ssh_at(proc.root(), 3002));
+    }
+
+    #[test]
+    fn process_chain_walk_terminates_on_self_referential_ppid() {
+        let proc = FakeProc::new("cycle");
+        // A pid whose ppid points at itself must not loop forever.
+        proc.add(4000, 4000, "bash", b"USER=alice\0");
+        assert!(!AuthDaemon::process_chain_is_ssh_at(proc.root(), 4000));
     }
 }
 
