@@ -6,8 +6,8 @@ use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 use futures::StreamExt;
 use gaze_core::config::{Config, SecurityLevel};
 use gaze_core::dbus::{
-    CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon,
-    dbus_error_message, dbus_is_file_not_found, load_config_from_daemon,
+    CaptureStatus, EnrollPrompt, GazeProxy, VerifyFailureReason, VerifyResult,
+    apply_config_to_daemon, dbus_error_message, dbus_is_file_not_found, load_config_from_daemon,
 };
 use std::{future::Future, time::Duration};
 use tui::{AuthScreen, BusyScreen, EnrollScreen, Tone, TuiAction, TuiTerminal};
@@ -499,7 +499,13 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
                 if let Some(signal) = signal
                     && let Ok(args) = signal.args()
                 {
-                    verify_result = Some((*args.result(), args.faces().clone(), *args.rgb_status(), *args.ir_status()));
+                    verify_result = Some((
+                        *args.result(),
+                        args.faces().clone(),
+                        *args.rgb_status(),
+                        *args.ir_status(),
+                        *args.reason(),
+                    ));
                     break;
                 }
             }
@@ -529,7 +535,7 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
         std::process::exit(130);
     }
 
-    if let Some((result, faces, rgb_status, ir_status)) = verify_result {
+    if let Some((result, faces, rgb_status, ir_status, reason)) = verify_result {
         if verbose {
             println!(
                 "\n{:<20} {:>10} {:>8} {:>8} {:>10} {:>8} {:>8}",
@@ -592,6 +598,13 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
                 style(rgb_display).cyan(),
                 style(ir_display).cyan()
             );
+            if reason != VerifyFailureReason::None {
+                println!(
+                    "{} {}",
+                    style("Reason:").bold(),
+                    style(reason.to_string()).cyan()
+                );
+            }
             println!();
         }
 
@@ -627,8 +640,9 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
             }
         } else {
             term.write_line(&format!(
-                "{} Authentication failed ({}ms)",
+                "{} Authentication failed: {} ({}ms)",
                 style("✗").red().bold(),
+                style(reason.to_string()).red(),
                 start.elapsed().as_millis()
             ))?;
         }

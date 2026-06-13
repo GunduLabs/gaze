@@ -8,6 +8,7 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 
 use gaze_core::config::Config;
+use gaze_core::dbus::VerifyFailureReason;
 
 pub const PAM_SUCCESS: c_int = 0;
 pub const PAM_AUTH_ERR: c_int = 7;
@@ -21,7 +22,7 @@ pub const PAM_PROMPT_ECHO_ON: c_int = 2;
 pub const PAM_AUTHINFO_UNAVAIL: c_int = 9;
 pub const PAM_IGNORE: c_int = 25;
 
-pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
+pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 7;
 const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to cancel.";
 
 pub type PamHandle = *mut c_void;
@@ -306,8 +307,40 @@ impl Drop for ReleaseGuard {
 
 pub enum AuthOutcome {
     Match,
-    NoMatch,
-    Unavailable,
+    NoMatch(VerifyFailureReason),
+    Unavailable(VerifyFailureReason),
+}
+
+pub fn failure_reason_marker(reason: VerifyFailureReason) -> String {
+    format!("GAZE_FACE_RESULT:{}", reason)
+}
+
+pub fn verify_failure_is_retryable(reason: VerifyFailureReason) -> bool {
+    matches!(reason, VerifyFailureReason::NoUsableFace)
+}
+
+pub fn verify_failure_is_unavailable(reason: VerifyFailureReason) -> bool {
+    matches!(
+        reason,
+        VerifyFailureReason::NoUsableFace
+            | VerifyFailureReason::TooDark
+            | VerifyFailureReason::CameraUnavailable
+            | VerifyFailureReason::NoTemplates
+            | VerifyFailureReason::Canceled
+            | VerifyFailureReason::AuthAborted
+            | VerifyFailureReason::InternalError
+    )
+}
+
+fn reason_from_verify_start_error(err: &zbus::Error) -> VerifyFailureReason {
+    let text = err.to_string();
+    if text.contains("SSH session detected") || text.contains("lid closed") {
+        VerifyFailureReason::AuthAborted
+    } else if text.contains("camera") || text.contains("Camera") {
+        VerifyFailureReason::CameraUnavailable
+    } else {
+        VerifyFailureReason::InternalError
+    }
 }
 
 pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcome> {
@@ -333,10 +366,9 @@ pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcom
         .receive_face_status()
         .await
         .map_err(|e| anyhow::anyhow!("Stream failed: {}", e))?;
-    proxy
-        .verify_start("any")
-        .await
-        .map_err(|e| anyhow::anyhow!("Verify start failed: {}", e))?;
+    if let Err(e) = proxy.verify_start("any").await {
+        return Ok(AuthOutcome::Unavailable(reason_from_verify_start_error(&e)));
+    }
 
     use futures::StreamExt;
     let mut last_status: Option<gaze_core::dbus::CaptureStatus> = None;
@@ -347,9 +379,18 @@ pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcom
                     match *args.result() {
                         gaze_core::dbus::VerifyResult::VerifyMatch => break AuthOutcome::Match,
                         gaze_core::dbus::VerifyResult::VerifyNoMatch => {
-                            break match last_status {
-                                Some(gaze_core::dbus::CaptureStatus::TooDark) => AuthOutcome::Unavailable,
-                                _ => AuthOutcome::NoMatch,
+                            let reason = *args.reason();
+                            break if verify_failure_is_unavailable(reason) {
+                                AuthOutcome::Unavailable(reason)
+                            } else if reason == VerifyFailureReason::None {
+                                match last_status {
+                                    Some(gaze_core::dbus::CaptureStatus::TooDark) => {
+                                        AuthOutcome::Unavailable(VerifyFailureReason::TooDark)
+                                    }
+                                    _ => AuthOutcome::NoMatch(VerifyFailureReason::DefiniteNoMatch),
+                                }
+                            } else {
+                                AuthOutcome::NoMatch(reason)
                             };
                         }
                     }
@@ -481,5 +522,53 @@ mod tests {
     fn ordinary_errors_are_not_retryable() {
         let err = zbus::Error::Failure("camera is unavailable".to_string());
         assert!(!is_retryable(&err));
+    }
+
+    #[test]
+    fn face_failure_reason_markers_are_machine_readable() {
+        assert_eq!(
+            failure_reason_marker(VerifyFailureReason::NoUsableFace),
+            "GAZE_FACE_RESULT:no-usable-face"
+        );
+        assert_eq!(
+            failure_reason_marker(VerifyFailureReason::DefiniteNoMatch),
+            "GAZE_FACE_RESULT:definite-no-match"
+        );
+    }
+
+    #[test]
+    fn only_acquisition_failures_are_retryable() {
+        assert!(verify_failure_is_retryable(
+            VerifyFailureReason::NoUsableFace
+        ));
+        assert!(!verify_failure_is_retryable(VerifyFailureReason::TooDark));
+        assert!(!verify_failure_is_retryable(
+            VerifyFailureReason::DefiniteNoMatch
+        ));
+        assert!(!verify_failure_is_retryable(
+            VerifyFailureReason::LivenessFailed
+        ));
+    }
+
+    #[test]
+    fn pam_falls_through_only_for_unavailable_failures() {
+        assert!(verify_failure_is_unavailable(
+            VerifyFailureReason::NoUsableFace
+        ));
+        assert!(verify_failure_is_unavailable(
+            VerifyFailureReason::CameraUnavailable
+        ));
+        assert!(verify_failure_is_unavailable(
+            VerifyFailureReason::InternalError
+        ));
+        assert!(!verify_failure_is_unavailable(
+            VerifyFailureReason::DefiniteNoMatch
+        ));
+        assert!(!verify_failure_is_unavailable(
+            VerifyFailureReason::LivenessFailed
+        ));
+        assert!(!verify_failure_is_unavailable(
+            VerifyFailureReason::PolicyUnsatisfied
+        ));
     }
 }

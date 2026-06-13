@@ -29,7 +29,12 @@ pub fn resolve_ir_source(cameras: &CameraConfig) -> Option<(String, String)> {
         }
     } else {
         let node = resolve_node_for_source(ir).unwrap_or_default();
-        Some((ir.to_string(), node))
+        let source = if ir.starts_with("/dev/video") {
+            format!("v4l2src device={ir}")
+        } else {
+            ir.to_string()
+        };
+        Some((source, node))
     }
 }
 
@@ -321,11 +326,11 @@ mod tests {
             dark_luma_threshold: 70,
         };
         let (source, kind) = resolve_source(&cameras);
-        assert_eq!(source, "/dev/video2");
+        assert_eq!(source, "v4l2src device=/dev/video2");
         assert_eq!(
             kind,
             CameraKind::Ir {
-                source: "/dev/video2".to_string(),
+                source: "v4l2src device=/dev/video2".to_string(),
                 node: "/dev/video2".to_string()
             }
         );

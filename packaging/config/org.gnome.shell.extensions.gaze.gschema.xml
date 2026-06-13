@@ -14,8 +14,9 @@
       <default>3</default>
       <summary>Maximum face authentication attempts</summary>
       <description>
-        Number of failed face attempts before face auth is stopped for the
-        current authentication cycle.
+        Number of retryable acquisition failures before face auth is stopped
+        for the current authentication cycle. Definite biometric failures stop
+        after one attempt.
       </description>
     </key>
   </schema>

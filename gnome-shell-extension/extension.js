@@ -24,7 +24,13 @@ const FACE_SERVICE_NAME = 'gdm-face';
 const EXTENSION_SCHEMA_ID = 'org.gnome.shell.extensions.gaze';
 const FACE_AUTHENTICATION_KEY = 'enable-face-authentication';
 const MAX_TRIES_KEY = 'max-face-tries';
+const FACE_RESULT_PREFIX = 'GAZE_FACE_RESULT:';
 const FACE_ERROR_TIMEOUT_WAIT_MS = 15 * 1000;
+const FACE_STOP_NOW_WAIT_MS = 1;
+
+const RETRYABLE_FACE_REASONS = new Set([
+    'no-usable-face',
+]);
 
 const GENERIC_ERROR_MAP = new Map([
     ['Sorry, that did not work. Please try again.',
@@ -258,6 +264,9 @@ export default class GazeFaceAuthExtension extends Extension {
                 return function (client, serviceName) {
                     original.call(this, client, serviceName);
 
+                    if (this.serviceIsFace(serviceName))
+                        this._gazeLastFaceReason = null;
+
                     if (this.serviceIsBiometric(serviceName)) {
                         const hint = this._getHint();
                         if (hint) {
@@ -273,7 +282,15 @@ export default class GazeFaceAuthExtension extends Extension {
                 return function (client, serviceName, info) {
                     if (this.serviceIsFace(serviceName)) {
                         const text = info?.trim();
-                        if (!text || !FACE_STATUS_UPDATES.has(text))
+                        if (!text)
+                            return;
+
+                        if (text.startsWith(FACE_RESULT_PREFIX)) {
+                            this._gazeLastFaceReason = text.slice(FACE_RESULT_PREFIX.length);
+                            return;
+                        }
+
+                        if (!FACE_STATUS_UPDATES.has(text))
                             return;
 
                         this._filterServiceMessages(serviceName, Util.MessageType.HINT);
@@ -295,14 +312,20 @@ export default class GazeFaceAuthExtension extends Extension {
                         const mapped = GENERIC_ERROR_MAP.get(problem) ?? problem;
                         this._queuePriorityMessage(serviceName, mapped, Util.MessageType.ERROR);
 
-                        this._failCounter++;
+                        const reason = this._gazeLastFaceReason ?? 'unknown';
+                        const retryable = RETRYABLE_FACE_REASONS.has(reason);
+
+                        if (retryable)
+                            this._failCounter++;
+                        else
+                            this._failCounter = this._faceMaxTries ?? 1;
 
                         if (!this._canFaceRetry()) {
                             clearFaceFailureTimeout(this);
 
                             const cancellable = this._cancellable;
                             this._gazeFaceFailedId = GLib.timeout_add_once(GLib.PRIORITY_DEFAULT,
-                                FACE_ERROR_TIMEOUT_WAIT_MS, () => {
+                                retryable ? FACE_ERROR_TIMEOUT_WAIT_MS : FACE_STOP_NOW_WAIT_MS, () => {
                                     this._gazeFaceFailedId = 0;
                                     if (cancellable && !cancellable.is_cancelled()) {
                                         this._verificationFailed(serviceName, false)
@@ -343,6 +366,7 @@ export default class GazeFaceAuthExtension extends Extension {
             original => {
                 return function () {
                     clearFaceFailureTimeout(this);
+                    this._gazeLastFaceReason = null;
                     original.call(this);
                 };
             });

@@ -17,7 +17,7 @@ use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
 use gaze_core::camera::{Camera, CameraKind, resolve_ir_source, resolve_rgb_source};
 use gaze_core::config::Config;
-use gaze_core::dbus::{CaptureStatus, EnrollPrompt, VerifyResult};
+use gaze_core::dbus::{CaptureStatus, EnrollPrompt, VerifyFailureReason, VerifyResult};
 use gaze_core::face::{FaceChecker, Spectrum};
 use gaze_core::ir::led::IrLed;
 
@@ -29,6 +29,7 @@ const GDM_DCONF_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
 const GDM_DCONF_OVERRIDE_CONTENT: &str =
     "[org/gnome/shell/extensions/gaze]\nenable-face-authentication=true\n";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
+const VERIFY_ACQUISITION_TIMEOUT: Duration = Duration::from_secs(5);
 const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
 /// Maximum number of process-tree ancestors to inspect when deciding whether a
 /// caller belongs to an SSH session. Bounds the walk so a malformed `/proc`
@@ -456,7 +457,12 @@ impl AuthDaemon {
 
 #[cfg(test)]
 mod tests {
-    use super::{AuthDaemon, eyes_from_kpss};
+    use super::{
+        AuthDaemon, can_continue_after_spectrum_error, classify_verify_failure, eyes_from_kpss,
+        hybrid_auth_passed,
+    };
+    use gaze_core::dbus::{CaptureStatus, VerifyFailureReason};
+    use gaze_core::face::Spectrum;
 
     #[test]
     fn eyes_from_kpss_extracts_first_face_landmarks() {
@@ -471,6 +477,215 @@ mod tests {
         assert!(eyes_from_kpss(&ndarray::Array3::zeros((0, 5, 2))).is_none());
         assert!(eyes_from_kpss(&ndarray::Array3::zeros((1, 3, 2))).is_none());
         assert!(eyes_from_kpss(&ndarray::Array3::zeros((1, 5, 1))).is_none());
+    }
+
+    #[test]
+    fn hybrid_or_allows_either_spectrum_to_pass() {
+        assert!(hybrid_auth_passed(
+            "or",
+            true,
+            true,
+            CaptureStatus::Ready,
+            true,
+            false,
+            true,
+            false
+        ));
+        assert!(hybrid_auth_passed(
+            "or",
+            true,
+            true,
+            CaptureStatus::NoFace,
+            true,
+            false,
+            false,
+            true
+        ));
+    }
+
+    #[test]
+    fn fallback_on_dark_allows_ir_only_when_rgb_is_unusable() {
+        assert!(hybrid_auth_passed(
+            "fallback_on_dark",
+            true,
+            true,
+            CaptureStatus::TooDark,
+            true,
+            false,
+            false,
+            true
+        ));
+        assert!(hybrid_auth_passed(
+            "fallback_on_dark",
+            true,
+            true,
+            CaptureStatus::NoFace,
+            true,
+            false,
+            false,
+            true
+        ));
+        assert!(hybrid_auth_passed(
+            "fallback_on_dark",
+            true,
+            true,
+            CaptureStatus::NoFace,
+            true,
+            true,
+            false,
+            true
+        ));
+        assert!(!hybrid_auth_passed(
+            "fallback_on_dark",
+            true,
+            true,
+            CaptureStatus::Ready,
+            true,
+            false,
+            true,
+            false
+        ));
+    }
+
+    #[test]
+    fn maximum_and_policy_requires_both_spectra() {
+        assert!(!hybrid_auth_passed(
+            "and",
+            true,
+            true,
+            CaptureStatus::Ready,
+            true,
+            false,
+            true,
+            false
+        ));
+        assert!(hybrid_auth_passed(
+            "and",
+            true,
+            true,
+            CaptureStatus::Ready,
+            true,
+            false,
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    fn spectrum_error_continuation_matches_hybrid_policy() {
+        assert!(can_continue_after_spectrum_error(
+            "or",
+            Spectrum::Ir,
+            true,
+            true
+        ));
+        assert!(can_continue_after_spectrum_error(
+            "fallback_on_dark",
+            Spectrum::Rgb,
+            true,
+            true
+        ));
+        assert!(!can_continue_after_spectrum_error(
+            "fallback_on_dark",
+            Spectrum::Ir,
+            true,
+            true
+        ));
+        assert!(!can_continue_after_spectrum_error(
+            "and",
+            Spectrum::Rgb,
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    fn failure_classification_prefers_actionable_reasons() {
+        assert_eq!(
+            classify_verify_failure(
+                "fallback_on_dark",
+                true,
+                true,
+                CaptureStatus::NoFace,
+                CaptureStatus::NoFace,
+                true,
+                true,
+                false,
+                false,
+                false,
+                0,
+                false,
+            ),
+            VerifyFailureReason::CameraUnavailable
+        );
+        assert_eq!(
+            classify_verify_failure(
+                "fallback_on_dark",
+                true,
+                false,
+                CaptureStatus::Ready,
+                CaptureStatus::NoFace,
+                true,
+                false,
+                false,
+                false,
+                false,
+                3,
+                true,
+            ),
+            VerifyFailureReason::LivenessFailed
+        );
+        assert_eq!(
+            classify_verify_failure(
+                "and",
+                true,
+                true,
+                CaptureStatus::Ready,
+                CaptureStatus::Ready,
+                true,
+                false,
+                false,
+                true,
+                false,
+                4,
+                false,
+            ),
+            VerifyFailureReason::PolicyUnsatisfied
+        );
+        assert_eq!(
+            classify_verify_failure(
+                "or",
+                true,
+                false,
+                CaptureStatus::TooDark,
+                CaptureStatus::NoFace,
+                true,
+                false,
+                false,
+                false,
+                false,
+                0,
+                false,
+            ),
+            VerifyFailureReason::TooDark
+        );
+        assert_eq!(
+            classify_verify_failure(
+                "or",
+                true,
+                false,
+                CaptureStatus::NoFace,
+                CaptureStatus::NoFace,
+                true,
+                false,
+                false,
+                false,
+                false,
+                0,
+                false,
+            ),
+            VerifyFailureReason::NoUsableFace
+        );
     }
 
     #[test]
@@ -634,7 +849,8 @@ pub fn set_pipewire_runtime_for_uid(uid: u32) {
 enum VerifyMsg {
     Status(Spectrum, CaptureStatus, Option<ndarray::Array1<f32>>),
     Success(Spectrum, ndarray::Array1<f32>),
-    Error(String),
+    LivenessRejected(Spectrum, ndarray::Array1<f32>),
+    Error(Option<Spectrum>, VerifyFailureReason, String),
 }
 
 fn status_priority(status: CaptureStatus) -> u32 {
@@ -646,6 +862,142 @@ fn status_priority(status: CaptureStatus) -> u32 {
         | CaptureStatus::Clipped => 3,
         CaptureStatus::TooDark => 2,
         CaptureStatus::NoFace => 1,
+    }
+}
+
+fn fallback_policy_treats_rgb_as_unusable(
+    rgb_status: CaptureStatus,
+    rgb_attempted: bool,
+    rgb_failed: bool,
+) -> bool {
+    rgb_failed
+        || (rgb_attempted && matches!(rgb_status, CaptureStatus::TooDark | CaptureStatus::NoFace))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn hybrid_auth_passed(
+    policy: &str,
+    run_rgb: bool,
+    run_ir: bool,
+    rgb_status: CaptureStatus,
+    rgb_attempted: bool,
+    rgb_failed: bool,
+    rgb_success: bool,
+    ir_success: bool,
+) -> bool {
+    match (run_rgb, run_ir) {
+        (true, true) => match policy {
+            "or" => rgb_success || ir_success,
+            "and" => rgb_success && ir_success,
+            "fallback_on_dark" => {
+                if !rgb_attempted && !rgb_failed {
+                    rgb_success && ir_success
+                } else if fallback_policy_treats_rgb_as_unusable(
+                    rgb_status,
+                    rgb_attempted,
+                    rgb_failed,
+                ) {
+                    ir_success
+                } else {
+                    rgb_success && ir_success
+                }
+            }
+            _ => {
+                if !rgb_attempted && !rgb_failed {
+                    rgb_success && ir_success
+                } else if fallback_policy_treats_rgb_as_unusable(
+                    rgb_status,
+                    rgb_attempted,
+                    rgb_failed,
+                ) {
+                    ir_success
+                } else {
+                    rgb_success && ir_success
+                }
+            }
+        },
+        (true, false) => rgb_success,
+        (false, true) => ir_success,
+        (false, false) => false,
+    }
+}
+
+fn can_continue_after_spectrum_error(
+    policy: &str,
+    spectrum: Spectrum,
+    run_rgb: bool,
+    run_ir: bool,
+) -> bool {
+    if !(run_rgb && run_ir) {
+        return false;
+    }
+
+    match policy {
+        "or" => true,
+        "and" => false,
+        // In fallback mode RGB can disappear and IR can still authenticate.
+        // If IR disappears, no configured fallback path remains.
+        "fallback_on_dark" => spectrum == Spectrum::Rgb,
+        _ => spectrum == Spectrum::Rgb,
+    }
+}
+
+fn active_statuses_all_dark(
+    run_rgb: bool,
+    run_ir: bool,
+    rgb_status: CaptureStatus,
+    ir_status: CaptureStatus,
+) -> bool {
+    match (run_rgb, run_ir) {
+        (true, true) => rgb_status == CaptureStatus::TooDark && ir_status == CaptureStatus::TooDark,
+        (true, false) => rgb_status == CaptureStatus::TooDark,
+        (false, true) => ir_status == CaptureStatus::TooDark,
+        (false, false) => false,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn classify_verify_failure(
+    policy: &str,
+    run_rgb: bool,
+    run_ir: bool,
+    rgb_status: CaptureStatus,
+    ir_status: CaptureStatus,
+    rgb_attempted: bool,
+    rgb_failed: bool,
+    ir_failed: bool,
+    rgb_success: bool,
+    ir_success: bool,
+    frames_seen: u32,
+    liveness_rejected: bool,
+) -> VerifyFailureReason {
+    if rgb_failed || ir_failed {
+        return VerifyFailureReason::CameraUnavailable;
+    }
+    if liveness_rejected {
+        return VerifyFailureReason::LivenessFailed;
+    }
+    if frames_seen > 0 {
+        if (rgb_success || ir_success)
+            && !hybrid_auth_passed(
+                policy,
+                run_rgb,
+                run_ir,
+                rgb_status,
+                rgb_attempted,
+                rgb_failed,
+                rgb_success,
+                ir_success,
+            )
+        {
+            VerifyFailureReason::PolicyUnsatisfied
+        } else {
+            VerifyFailureReason::DefiniteNoMatch
+        }
+    } else if active_statuses_all_dark(run_rgb, run_ir, rgb_status, ir_status) {
+        VerifyFailureReason::TooDark
+    } else {
+        VerifyFailureReason::NoUsableFace
     }
 }
 
@@ -954,6 +1306,7 @@ impl AuthDaemon {
         let emitter_enabled = *self.emitter_enabled.lock().await;
         let liveness_cfg = self.liveness_config.lock().await.clone();
         let rgb_dark_threshold = config.cameras.dark_luma_threshold;
+        let ir_dark_threshold = gaze_core::face::effective_dark_luma_threshold(&config);
 
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
@@ -986,7 +1339,14 @@ impl AuthDaemon {
 
             if !run_rgb && !run_ir {
                 error!("No matching templates or cameras configured for auth");
-                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                let _ = Self::verify_status(
+                    &ctxt,
+                    VerifyResult::VerifyNoMatch,
+                    Vec::new(),
+                    CaptureStatus::NoFace,
+                    CaptureStatus::NoFace,
+                    VerifyFailureReason::NoTemplates,
+                ).await;
                 return;
             }
 
@@ -1021,7 +1381,11 @@ impl AuthDaemon {
                     let mut cam = match Camera::open(&rgb_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
-                            let _ = tx.blocking_send(VerifyMsg::Error(format!("RGB Camera open error: {e}")));
+                            let _ = tx.blocking_send(VerifyMsg::Error(
+                                Some(Spectrum::Rgb),
+                                VerifyFailureReason::CameraUnavailable,
+                                format!("RGB Camera open error: {e}"),
+                            ));
                             return;
                         }
                     };
@@ -1068,7 +1432,11 @@ impl AuthDaemon {
                             let scores = match db.match_faces(&username_clone, &data.embedding, threshold, Spectrum::Rgb) {
                                 Ok(s) => s,
                                 Err(e) => {
-                                    let _ = tx.blocking_send(VerifyMsg::Error(format!("DB error: {e}")));
+                                    let _ = tx.blocking_send(VerifyMsg::Error(
+                                        None,
+                                        VerifyFailureReason::InternalError,
+                                        format!("DB error: {e}"),
+                                    ));
                                     return;
                                 }
                             };
@@ -1083,13 +1451,21 @@ impl AuthDaemon {
                                     }
                                     let mut live_guard = liveness_arc.blocking_lock();
                                     let Some(detector) = live_guard.as_mut() else {
-                                        error!("Liveness is enabled but detector is unavailable");
+                                        let _ = tx.blocking_send(VerifyMsg::Error(
+                                            None,
+                                            VerifyFailureReason::InternalError,
+                                            "Liveness is enabled but detector is unavailable".to_string(),
+                                        ));
                                         return;
                                     };
                                     let live_score = match detector.live_score(&data.liveness_face) {
                                         Ok(score) => score,
                                         Err(e) => {
-                                            error!("Liveness inference failed: {e}");
+                                            let _ = tx.blocking_send(VerifyMsg::Error(
+                                                None,
+                                                VerifyFailureReason::InternalError,
+                                                format!("Liveness inference failed: {e}"),
+                                            ));
                                             return;
                                         }
                                     };
@@ -1105,6 +1481,11 @@ impl AuthDaemon {
                                 if liveness_passed {
                                     let _ = tx.blocking_send(VerifyMsg::Success(Spectrum::Rgb, data.embedding));
                                     return;
+                                } else {
+                                    let _ = tx.try_send(VerifyMsg::LivenessRejected(
+                                        Spectrum::Rgb,
+                                        data.embedding,
+                                    ));
                                 }
                             }
                         }
@@ -1132,6 +1513,7 @@ impl AuthDaemon {
                 let ir_device_clone = ir_device.clone();
                 let ir_node_clone = ir_node.clone();
                 let emitter_enabled = emitter_enabled;
+                let ir_dark_threshold = ir_dark_threshold;
 
                 ir_thread = Some(std::thread::spawn(move || {
                     let _emitter = EmitterGuard::engage(
@@ -1142,7 +1524,11 @@ impl AuthDaemon {
                     let mut cam = match Camera::open(&ir_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
-                            let _ = tx.blocking_send(VerifyMsg::Error(format!("IR Camera open error: {e}")));
+                            let _ = tx.blocking_send(VerifyMsg::Error(
+                                Some(Spectrum::Ir),
+                                VerifyFailureReason::CameraUnavailable,
+                                format!("IR Camera open error: {e}"),
+                            ));
                             return;
                         }
                     };
@@ -1158,7 +1544,7 @@ impl AuthDaemon {
                             }
                         };
 
-                        let (status, embed_opt) = {
+                        let (mut status, embed_opt) = {
                             let mut checker = checker_ir_arc.blocking_lock();
                             let mut recognizer = recognizer_ir_arc.blocking_lock();
                             match process_frame_sync(&mut checker, &mut recognizer, &frame, Spectrum::Ir, false) {
@@ -1166,6 +1552,12 @@ impl AuthDaemon {
                                 Err(_) => (CaptureStatus::NoFace, None),
                             }
                         };
+
+                        if status == CaptureStatus::NoFace
+                            && gaze_core::face::is_dark_frame(&frame, ir_dark_threshold).unwrap_or(true)
+                        {
+                            status = CaptureStatus::TooDark;
+                        }
 
                         let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
                         let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, status, latest_embed));
@@ -1176,7 +1568,11 @@ impl AuthDaemon {
                             let scores = match db.match_faces(&username_clone, &data.embedding, threshold, Spectrum::Ir) {
                                 Ok(s) => s,
                                 Err(e) => {
-                                    let _ = tx.blocking_send(VerifyMsg::Error(format!("DB error: {e}")));
+                                    let _ = tx.blocking_send(VerifyMsg::Error(
+                                        None,
+                                        VerifyFailureReason::InternalError,
+                                        format!("DB error: {e}"),
+                                    ));
                                     return;
                                 }
                             };
@@ -1196,6 +1592,11 @@ impl AuthDaemon {
                                 if liveness_passed {
                                     let _ = tx.blocking_send(VerifyMsg::Success(Spectrum::Ir, data.embedding));
                                     return;
+                                } else {
+                                    let _ = tx.try_send(VerifyMsg::LivenessRejected(
+                                        Spectrum::Ir,
+                                        data.embedding,
+                                    ));
                                 }
                             }
                         }
@@ -1209,24 +1610,113 @@ impl AuthDaemon {
             let mut rgb_status = CaptureStatus::NoFace;
             let mut ir_status = CaptureStatus::NoFace;
             let mut rgb_attempted = false;
+            let mut rgb_failed = false;
+            let mut ir_failed = false;
+            let mut liveness_rejected = false;
             let mut dark_since: Option<Instant> = None;
             let mut frames_seen: u32 = 0;
+            let mut rgb_frames_seen: u32 = 0;
+            let mut ir_frames_seen: u32 = 0;
 
             let mut rgb_success_embed = None;
             let mut ir_success_embed = None;
             let mut rgb_latest_embed = None;
             let mut ir_latest_embed = None;
 
+            let attempt_timeout = tokio::time::sleep(VERIFY_ACQUISITION_TIMEOUT);
+            tokio::pin!(attempt_timeout);
+
             loop {
                 tokio::select! {
                     _ = &mut rx => {
                         info!("VerifyStart: cancelled");
                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                        let _ = Self::verify_status(
+                            &ctxt,
+                            VerifyResult::VerifyNoMatch,
+                            Vec::new(),
+                            rgb_status,
+                            ir_status,
+                            VerifyFailureReason::Canceled,
+                        ).await;
+                        break;
+                    }
+                    _ = &mut attempt_timeout => {
+                        info!("VerifyStart: acquisition timed out");
+                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        let policy = config.hybrid_policy();
+                        let reason = classify_verify_failure(
+                            policy,
+                            run_rgb,
+                            run_ir,
+                            rgb_status,
+                            ir_status,
+                            rgb_attempted,
+                            rgb_failed,
+                            ir_failed,
+                            rgb_success_embed.is_some(),
+                            ir_success_embed.is_some(),
+                            frames_seen,
+                            liveness_rejected,
+                        );
+                        let threshold = *threshold_arc.lock().await;
+                        let db = db_arc.lock().await;
+                        let final_scores = build_hybrid_scores(
+                            &db,
+                            &username,
+                            threshold,
+                            rgb_success_embed.as_ref().or(rgb_latest_embed.as_ref()),
+                            ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
+                        );
+                        drop(db);
+                        let _ = Self::verify_status(
+                            &ctxt,
+                            VerifyResult::VerifyNoMatch,
+                            final_scores,
+                            rgb_status,
+                            ir_status,
+                            reason,
+                        ).await;
                         break;
                     }
                     msg_opt = result_rx.recv() => {
-                        let Some(msg) = msg_opt else { break };
+                        let Some(msg) = msg_opt else {
+                            stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            let policy = config.hybrid_policy();
+                            let reason = classify_verify_failure(
+                                policy,
+                                run_rgb,
+                                run_ir,
+                                rgb_status,
+                                ir_status,
+                                rgb_attempted,
+                                rgb_failed,
+                                ir_failed,
+                                rgb_success_embed.is_some(),
+                                ir_success_embed.is_some(),
+                                frames_seen,
+                                liveness_rejected,
+                            );
+                            let threshold = *threshold_arc.lock().await;
+                            let db = db_arc.lock().await;
+                            let final_scores = build_hybrid_scores(
+                                &db,
+                                &username,
+                                threshold,
+                                rgb_success_embed.as_ref().or(rgb_latest_embed.as_ref()),
+                                ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
+                            );
+                            drop(db);
+                            let _ = Self::verify_status(
+                                &ctxt,
+                                VerifyResult::VerifyNoMatch,
+                                final_scores,
+                                rgb_status,
+                                ir_status,
+                                reason,
+                            ).await;
+                            break;
+                        };
                         match msg {
                             VerifyMsg::Status(spectrum, status, embed_opt) => {
                                 let has_face = embed_opt.is_some();
@@ -1248,9 +1738,28 @@ impl AuthDaemon {
 
                                 if has_face {
                                     frames_seen += 1;
-                                    if frames_seen >= liveness_cfg.max_frames {
+                                    match spectrum {
+                                        Spectrum::Rgb => rgb_frames_seen += 1,
+                                        Spectrum::Ir => ir_frames_seen += 1,
+                                    }
+                                    if rgb_frames_seen.max(ir_frames_seen) >= liveness_cfg.max_frames {
                                         info!("VerifyStart: liveness gate timed out");
                                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                        let policy = config.hybrid_policy();
+                                        let reason = classify_verify_failure(
+                                            policy,
+                                            run_rgb,
+                                            run_ir,
+                                            rgb_status,
+                                            ir_status,
+                                            rgb_attempted,
+                                            rgb_failed,
+                                            ir_failed,
+                                            rgb_success_embed.is_some(),
+                                            ir_success_embed.is_some(),
+                                            frames_seen,
+                                            liveness_rejected,
+                                        );
                                         let threshold = *threshold_arc.lock().await;
                                         let db = db_arc.lock().await;
                                         let final_scores = build_hybrid_scores(
@@ -1261,7 +1770,14 @@ impl AuthDaemon {
                                             ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
                                         );
                                         drop(db);
-                                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, final_scores, rgb_status, ir_status).await;
+                                        let _ = Self::verify_status(
+                                            &ctxt,
+                                            VerifyResult::VerifyNoMatch,
+                                            final_scores,
+                                            rgb_status,
+                                            ir_status,
+                                            reason,
+                                        ).await;
                                         break;
                                     }
                                 }
@@ -1277,14 +1793,9 @@ impl AuthDaemon {
                                     last_emitted_status = Some(effective_status);
                                 }
 
-                                let both_dark = match (run_rgb, run_ir) {
-                                    (true, true) => rgb_status == CaptureStatus::TooDark && ir_status == CaptureStatus::TooDark,
-                                    (true, false) => rgb_status == CaptureStatus::TooDark,
-                                    (false, true) => ir_status == CaptureStatus::TooDark,
-                                    (false, false) => false,
-                                };
-
-                                if both_dark {
+                                if frames_seen == 0
+                                    && active_statuses_all_dark(run_rgb, run_ir, rgb_status, ir_status)
+                                {
                                     let started = *dark_since.get_or_insert_with(Instant::now);
                                     if started.elapsed() >= VERIFY_TOO_DARK_TIMEOUT {
                                         info!(
@@ -1292,7 +1803,14 @@ impl AuthDaemon {
                                             VERIFY_TOO_DARK_TIMEOUT.as_secs()
                                         );
                                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                        let _ = Self::verify_status(
+                                            &ctxt,
+                                            VerifyResult::VerifyNoMatch,
+                                            Vec::new(),
+                                            rgb_status,
+                                            ir_status,
+                                            VerifyFailureReason::TooDark,
+                                        ).await;
                                         break;
                                     }
                                 } else {
@@ -1300,35 +1818,16 @@ impl AuthDaemon {
                                 }
 
                                 let policy = config.hybrid_policy();
-                                let auth_passed = match (run_rgb, run_ir) {
-                                    (true, true) => {
-                                        match policy {
-                                            "or" => rgb_success_embed.is_some() || ir_success_embed.is_some(),
-                                            "and" => rgb_success_embed.is_some() && ir_success_embed.is_some(),
-                                            "fallback_on_dark" => {
-                                                if !rgb_attempted {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                } else if rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace {
-                                                    ir_success_embed.is_some()
-                                                } else {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                }
-                                            }
-                                            _ => {
-                                                if !rgb_attempted {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                } else if rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace {
-                                                    ir_success_embed.is_some()
-                                                } else {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                }
-                                            }
-                                        }
-                                    }
-                                    (true, false) => rgb_success_embed.is_some(),
-                                    (false, true) => ir_success_embed.is_some(),
-                                    (false, false) => false,
-                                };
+                                let auth_passed = hybrid_auth_passed(
+                                    policy,
+                                    run_rgb,
+                                    run_ir,
+                                    rgb_status,
+                                    rgb_attempted,
+                                    rgb_failed,
+                                    rgb_success_embed.is_some(),
+                                    ir_success_embed.is_some(),
+                                );
 
                                 if auth_passed {
                                     stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1342,7 +1841,14 @@ impl AuthDaemon {
                                         ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
                                     );
                                     drop(db);
-                                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyMatch, final_scores, rgb_status, ir_status).await;
+                                    let _ = Self::verify_status(
+                                        &ctxt,
+                                        VerifyResult::VerifyMatch,
+                                        final_scores,
+                                        rgb_status,
+                                        ir_status,
+                                        VerifyFailureReason::None,
+                                    ).await;
                                     break;
                                 }
                             }
@@ -1356,35 +1862,16 @@ impl AuthDaemon {
                                 }
 
                                 let policy = config.hybrid_policy();
-                                let auth_passed = match (run_rgb, run_ir) {
-                                    (true, true) => {
-                                        match policy {
-                                            "or" => rgb_success_embed.is_some() || ir_success_embed.is_some(),
-                                            "and" => rgb_success_embed.is_some() && ir_success_embed.is_some(),
-                                            "fallback_on_dark" => {
-                                                if !rgb_attempted {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                } else if rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace {
-                                                    ir_success_embed.is_some()
-                                                } else {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                }
-                                            }
-                                            _ => {
-                                                if !rgb_attempted {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                } else if rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace {
-                                                    ir_success_embed.is_some()
-                                                } else {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                }
-                                            }
-                                        }
-                                    }
-                                    (true, false) => rgb_success_embed.is_some(),
-                                    (false, true) => ir_success_embed.is_some(),
-                                    (false, false) => false,
-                                };
+                                let auth_passed = hybrid_auth_passed(
+                                    policy,
+                                    run_rgb,
+                                    run_ir,
+                                    rgb_status,
+                                    rgb_attempted,
+                                    rgb_failed,
+                                    rgb_success_embed.is_some(),
+                                    ir_success_embed.is_some(),
+                                );
 
                                 if auth_passed {
                                     stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1398,14 +1885,49 @@ impl AuthDaemon {
                                         ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
                                     );
                                     drop(db);
-                                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyMatch, final_scores, rgb_status, ir_status).await;
+                                    let _ = Self::verify_status(
+                                        &ctxt,
+                                        VerifyResult::VerifyMatch,
+                                        final_scores,
+                                        rgb_status,
+                                        ir_status,
+                                        VerifyFailureReason::None,
+                                    ).await;
                                     break;
                                 }
                             }
-                            VerifyMsg::Error(e) => {
+                            VerifyMsg::LivenessRejected(spectrum, embedding) => {
+                                liveness_rejected = true;
+                                match spectrum {
+                                    Spectrum::Rgb => rgb_latest_embed = Some(embedding),
+                                    Spectrum::Ir => ir_latest_embed = Some(embedding),
+                                }
+                            }
+                            VerifyMsg::Error(spectrum, reason, e) => {
                                 error!("VerifyStart loop error: {e}");
+                                if let Some(spectrum) = spectrum {
+                                    match spectrum {
+                                        Spectrum::Rgb => {
+                                            rgb_failed = true;
+                                            rgb_attempted = true;
+                                        }
+                                        Spectrum::Ir => ir_failed = true,
+                                    }
+                                    let policy = config.hybrid_policy();
+                                    if can_continue_after_spectrum_error(policy, spectrum, run_rgb, run_ir) {
+                                        continue;
+                                    }
+                                }
+
                                 stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                let _ = Self::verify_status(
+                                    &ctxt,
+                                    VerifyResult::VerifyNoMatch,
+                                    Vec::new(),
+                                    rgb_status,
+                                    ir_status,
+                                    reason,
+                                ).await;
                                 break;
                             }
                         }
@@ -2107,6 +2629,7 @@ impl AuthDaemon {
         faces: Vec<(String, f64, f64, bool, f64, f64, bool)>,
         rgb_status: CaptureStatus,
         ir_status: CaptureStatus,
+        reason: VerifyFailureReason,
     ) -> zbus::Result<()>;
 
     #[zbus(signal)]

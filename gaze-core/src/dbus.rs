@@ -96,6 +96,47 @@ pub enum VerifyResult {
     VerifyNoMatch,
 }
 
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Serialize,
+    Deserialize,
+    Type,
+    PartialEq,
+    Eq,
+    Display,
+    EnumString,
+    AsRefStr,
+    VariantNames,
+)]
+#[zvariant(signature = "s")]
+#[serde(rename_all = "kebab-case")]
+pub enum VerifyFailureReason {
+    #[strum(serialize = "none")]
+    None,
+    #[strum(serialize = "no-usable-face")]
+    NoUsableFace,
+    #[strum(serialize = "too-dark")]
+    TooDark,
+    #[strum(serialize = "camera-unavailable")]
+    CameraUnavailable,
+    #[strum(serialize = "no-templates")]
+    NoTemplates,
+    #[strum(serialize = "definite-no-match")]
+    DefiniteNoMatch,
+    #[strum(serialize = "liveness-failed")]
+    LivenessFailed,
+    #[strum(serialize = "policy-unsatisfied")]
+    PolicyUnsatisfied,
+    #[strum(serialize = "canceled")]
+    Canceled,
+    #[strum(serialize = "auth-aborted")]
+    AuthAborted,
+    #[strum(serialize = "internal-error")]
+    InternalError,
+}
+
 pub fn dbus_error_message(err: &zbus::Error) -> String {
     let text = err.to_string();
     if let Some((_, inner)) = text.split_once(':') {
@@ -194,6 +235,7 @@ pub trait Gaze {
         faces: Vec<(String, f64, f64, bool, f64, f64, bool)>,
         rgb_status: CaptureStatus,
         ir_status: CaptureStatus,
+        reason: VerifyFailureReason,
     ) -> zbus::Result<()>;
 
     #[zbus(signal)]
@@ -245,6 +287,14 @@ mod tests {
             serde_plain::to_string(&VerifyResult::VerifyMatch).unwrap(),
             "verify-match"
         );
+        assert_eq!(
+            serde_plain::to_string(&VerifyFailureReason::NoUsableFace).unwrap(),
+            "no-usable-face"
+        );
+        assert_eq!(
+            VerifyFailureReason::LivenessFailed.as_ref(),
+            "liveness-failed"
+        );
 
         assert_eq!(
             serde_plain::from_str::<CaptureStatus>("not-centered").unwrap(),
@@ -257,6 +307,10 @@ mod tests {
         assert_eq!(
             serde_plain::from_str::<VerifyResult>("verify-no-match").unwrap(),
             VerifyResult::VerifyNoMatch
+        );
+        assert_eq!(
+            serde_plain::from_str::<VerifyFailureReason>("camera-unavailable").unwrap(),
+            VerifyFailureReason::CameraUnavailable
         );
     }
 

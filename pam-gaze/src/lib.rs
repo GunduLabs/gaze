@@ -4,6 +4,12 @@ use std::os::raw::{c_char, c_int};
 use std::time::Duration;
 use tokio::time::timeout;
 
+unsafe fn say_gnome_failure_reason(pamh: PamHandle, reason: gaze_core::dbus::VerifyFailureReason) {
+    if matches!(unsafe { get_pam_service(pamh) }, Some(ref service) if service == "gdm-face") {
+        unsafe { say(pamh, &failure_reason_marker(reason)) };
+    }
+}
+
 unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     let Some(username) = (unsafe { get_username(pamh) }) else {
         return PAM_AUTH_ERR;
@@ -28,9 +34,32 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         .await
         {
             Ok(Ok(AuthOutcome::Match)) => PAM_SUCCESS,
-            Ok(Ok(AuthOutcome::NoMatch)) => PAM_AUTH_ERR,
-            Ok(Ok(AuthOutcome::Unavailable)) => PAM_AUTHINFO_UNAVAIL,
-            _ => PAM_AUTHINFO_UNAVAIL,
+            Ok(Ok(AuthOutcome::NoMatch(reason))) => {
+                unsafe { say_gnome_failure_reason(pamh, reason) };
+                PAM_AUTH_ERR
+            }
+            Ok(Ok(AuthOutcome::Unavailable(reason))) => {
+                unsafe { say_gnome_failure_reason(pamh, reason) };
+                PAM_AUTHINFO_UNAVAIL
+            }
+            Err(_) => {
+                unsafe {
+                    say_gnome_failure_reason(
+                        pamh,
+                        gaze_core::dbus::VerifyFailureReason::NoUsableFace,
+                    )
+                };
+                PAM_AUTHINFO_UNAVAIL
+            }
+            Ok(Err(_)) => {
+                unsafe {
+                    say_gnome_failure_reason(
+                        pamh,
+                        gaze_core::dbus::VerifyFailureReason::InternalError,
+                    )
+                };
+                PAM_AUTHINFO_UNAVAIL
+            }
         }
     })
 }

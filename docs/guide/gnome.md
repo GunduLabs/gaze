@@ -4,6 +4,8 @@ Gaze lock screen and GDM integration are GNOME-specific and require the `gaze-gn
 
 This extension starts the `gdm-face` PAM service inside GNOME Shell authentication flows.
 
+GNOME lock screen face auth retries only when the daemon never got a usable face frame, up to the extension's **Maximum face tries** setting. Definite face mismatches, liveness failures, camera/configuration errors, and too-dark failures stop face auth for that authentication cycle and leave password authentication available.
+
 You do not need to enable this extension for the CLI, the GUI, or normal PAM prompts such as `sudo`. Leave it disabled on non-GNOME desktops.
 
 > [!IMPORTANT]

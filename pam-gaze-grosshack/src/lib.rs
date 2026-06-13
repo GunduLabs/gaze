@@ -24,7 +24,7 @@ async fn authenticate_biometric_with_timeout(username: &str) -> Option<c_int> {
         res = auth_future => {
             match res {
                 Ok(AuthOutcome::Match) => Some(PAM_SUCCESS),
-                Ok(AuthOutcome::NoMatch) | Ok(AuthOutcome::Unavailable) => Some(PAM_AUTH_ERR),
+                Ok(AuthOutcome::NoMatch(_)) | Ok(AuthOutcome::Unavailable(_)) => Some(PAM_AUTH_ERR),
                 Err(_) => None,
             }
         }

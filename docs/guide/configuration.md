@@ -89,15 +89,15 @@ With the default, a frame is skipped when its mean luminance (0-255, BT.601 weig
 
 ## Infrared (IR) camera
 
-Gaze can authenticate through a Windows Hello-style infrared camera instead of the RGB webcam. Point `ir` to the IR camera's GStreamer/PipeWire source string (just like the RGB camera):
+Gaze can authenticate through a Windows Hello-style infrared camera alongside the RGB webcam. Point `ir` to the IR camera's `/dev/video*` node or a GStreamer/PipeWire source string:
 
 ```toml
 [cameras]
-ir = "pipewiresrc target-object=<pipewire-target>"
+ir = "/dev/video2"
 emitter_enabled = false
 ```
 
-When `ir` is set, Gaze captures from that source (through PipeWire) for both enrollment and verification, and `rgb` is ignored. Use `gaze discover` to list video devices, check if their emitter profiles are supported, and see which node is configured:
+When `ir` is set, Gaze enrolls and verifies IR templates in addition to RGB templates when both cameras are configured. Hybrid auth policy depends on the security level: `low` accepts either spectrum, `medium`/`high` use IR as a fallback when RGB is dark or unavailable, and `maximum` requires both. Use `gaze discover` to list video devices, check if their emitter profiles are supported, and see which node is configured:
 
 ```
 $ gaze discover
