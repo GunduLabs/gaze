@@ -402,21 +402,6 @@ pub fn get_user_uid(username: &str) -> Option<u32> {
     }
 }
 
-pub fn get_user_name_by_uid(uid: u32) -> Option<String> {
-    unsafe {
-        let pwd = libc::getpwuid(uid);
-        if !pwd.is_null() {
-            Some(
-                CStr::from_ptr((*pwd).pw_name)
-                    .to_string_lossy()
-                    .into_owned(),
-            )
-        } else {
-            None
-        }
-    }
-}
-
 pub unsafe fn get_pam_service(pamh: PamHandle) -> Option<String> {
     let mut service_ptr: *const c_void = std::ptr::null();
     let ret = unsafe { pam_get_item(pamh, PAM_SERVICE, &mut service_ptr) };
@@ -477,16 +462,6 @@ pub fn detect_desktop_environment(uid: u32) -> String {
     } else {
         "Other".to_string()
     }
-}
-
-pub fn is_text_environment() -> bool {
-    let is_tty = unsafe { libc::isatty(0) == 1 };
-    is_tty
-        && std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open("/dev/tty")
-            .is_ok()
 }
 
 #[cfg(test)]

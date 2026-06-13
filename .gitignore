@@ -17,3 +17,5 @@ docs/.vitepress/dist
 docs/.vitepress/cache
 
 dist/
+
+index.scip

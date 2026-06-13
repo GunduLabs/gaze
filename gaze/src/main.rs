@@ -24,7 +24,9 @@ fn warn_on_ir_misconfig(cameras: &gaze_core::config::CameraConfig) {
         }
         return;
     }
-    if let Some(node) = gaze_core::camera::resolve_node(ir) {
+    if let Some(node) = gaze_core::camera::resolve_node(ir)
+        && cameras.emitter_enabled
+    {
         if !std::path::Path::new(&node).exists() {
             warn!(
                 node = ir,

@@ -698,7 +698,7 @@ fn process_frame_sync(
     check_centering_and_proximity: bool,
 ) -> anyhow::Result<(CaptureStatus, Option<FaceData>)> {
     let (status, result_opt) =
-        checker.capture_status_with_spectrum(frame, spectrum, check_centering_and_proximity)?;
+        checker.capture_status(frame, spectrum, check_centering_and_proximity)?;
 
     if status != CaptureStatus::Usable {
         return Ok((status, None));

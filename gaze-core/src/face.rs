@@ -83,14 +83,6 @@ impl FaceChecker {
     pub fn capture_status(
         &mut self,
         frame: &Mat,
-        check_centering_and_proximity: bool,
-    ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
-        self.capture_status_with_spectrum(frame, Spectrum::Rgb, check_centering_and_proximity)
-    }
-
-    pub fn capture_status_with_spectrum(
-        &mut self,
-        frame: &Mat,
         spectrum: Spectrum,
         check_centering_and_proximity: bool,
     ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
