@@ -44,6 +44,19 @@ pub enum CaptureStatus {
     Usable,
 }
 
+impl CaptureStatus {
+    pub fn priority(self) -> u8 {
+        match self {
+            Self::Usable => 5,
+            Self::Ready => 4,
+            Self::NotCentered | Self::TooFar | Self::TooClose | Self::Clipped => 3,
+            Self::TooDark => 2,
+            Self::NoFace => 1,
+            Self::Unused => 0,
+        }
+    }
+}
+
 #[derive(
     Clone,
     Copy,
@@ -112,6 +125,11 @@ pub fn dbus_error_message(err: &zbus::Error) -> String {
 
 pub fn dbus_is_file_not_found(err: &zbus::Error) -> bool {
     err.to_string().contains("FileNotFound")
+}
+
+pub async fn connect_gaze() -> zbus::Result<GazeProxy<'static>> {
+    let connection = zbus::Connection::system().await?;
+    GazeProxy::new(&connection).await
 }
 
 pub async fn load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Config> {

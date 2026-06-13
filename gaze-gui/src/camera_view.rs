@@ -55,8 +55,8 @@ impl CameraFeed {
                 let Ok(bytes) = frame_to_bytes(&frame) else {
                     continue;
                 };
+                // GTK's R8g8b8 texture format expects RGB, so swap each pixel.
 
-                // OpenCV gives us BGR; GTK's R8g8b8 texture format expects RGB, so swap each pixel.
                 let mut rgb = bytes;
                 for chunk in rgb.chunks_exact_mut(3) {
                     chunk.swap(0, 2);
@@ -82,12 +82,6 @@ impl CameraFeed {
 
         Ok(Self::assemble(Some(rx), Some(thread_handle), stop_flag))
     }
-
-    /// A feed that renders only the face-position guide overlay, driven by the
-    /// daemon's capture status. It never opens the camera, so it is safe for IR
-    /// devices: the daemon is the sole owner of the raw V4L2 node, and a second
-    /// local stream would fail with EBUSY while the emitter is lit only during
-    /// the daemon's own capture window.
     pub fn new_guidance_only() -> Self {
         Self::assemble(None, None, Arc::new(AtomicBool::new(false)))
     }
@@ -168,7 +162,8 @@ impl CameraFeed {
 
             if active {
                 let label = match status {
-                    CaptureStatus::NoFace | CaptureStatus::Unused => "No Face",
+                    CaptureStatus::Unused => "Camera Not Activated", // This should never be shown
+                    CaptureStatus::NoFace => "No Face",
                     CaptureStatus::TooDark => "Need More Light",
                     CaptureStatus::NotCentered => "Not Centered",
                     CaptureStatus::Clipped => "Face Clipped",
@@ -219,8 +214,8 @@ impl CameraFeed {
     }
 
     pub fn start(&self) {
+        // Guidance-only feed (e.g. IR): no capture thread to pump.
         let Some(rx) = self.rx.borrow_mut().take() else {
-            // Guidance-only feed (e.g. IR): no capture thread to pump.
             return;
         };
 

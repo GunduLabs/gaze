@@ -9,6 +9,9 @@ const DEFAULT_CONFIG_PATH: &str = "/etc/gaze/config.toml";
 pub const USERS_DIR: &str = "/var/lib/gaze/users";
 pub const MODELS_DIR: &str = "/var/cache/gaze";
 pub const DEFAULT_RGB_CAMERA: &str = "primary";
+pub const SECURITY_LEVEL_OPTIONS: [&str; 5] = ["low", "medium", "high", "maximum", "custom"];
+pub const MODEL_QUALITY_OPTIONS: [&str; 2] = ["standard", "accurate"];
+pub const HYBRID_POLICY_OPTIONS: [&str; 4] = ["default", "or", "fallback_on_dark", "and"];
 
 fn default_level() -> String {
     "medium".to_string()
@@ -41,6 +44,8 @@ impl Default for SecurityLevel {
 }
 
 impl SecurityLevel {
+    pub const CUSTOM_LEVEL_INDEX: u32 = 4;
+
     pub fn low() -> Self {
         Self {
             level: "low".to_string(),
@@ -96,6 +101,59 @@ impl SecurityLevel {
         }
     }
 
+    pub fn preset_from_index(index: usize) -> Option<Self> {
+        match index {
+            0 => Some(Self::low()),
+            1 => Some(Self::medium()),
+            2 => Some(Self::high()),
+            3 => Some(Self::maximum()),
+            _ => None,
+        }
+    }
+
+    pub fn level_index(&self) -> u32 {
+        SECURITY_LEVEL_OPTIONS
+            .iter()
+            .position(|level| *level == self.level.as_str())
+            .map(|idx| idx as u32)
+            .unwrap_or(1)
+    }
+
+    pub fn model_quality_index(value: &str) -> u32 {
+        MODEL_QUALITY_OPTIONS
+            .iter()
+            .position(|quality| *quality == value)
+            .map(|idx| idx as u32)
+            .unwrap_or(0)
+    }
+
+    pub fn model_quality_from_index(index: usize) -> &'static str {
+        MODEL_QUALITY_OPTIONS
+            .get(index)
+            .copied()
+            .unwrap_or("standard")
+    }
+
+    pub fn hybrid_policy_index_for_value(value: &str) -> u32 {
+        HYBRID_POLICY_OPTIONS
+            .iter()
+            .position(|policy| *policy == value)
+            .map(|idx| idx as u32)
+            .unwrap_or(0)
+    }
+
+    pub fn hybrid_policy_from_index(index: usize) -> String {
+        if index == 0 {
+            String::new()
+        } else {
+            HYBRID_POLICY_OPTIONS
+                .get(index)
+                .copied()
+                .unwrap_or_default()
+                .to_string()
+        }
+    }
+
     pub fn detector(&self) -> &str {
         match self.level.as_str() {
             "low" | "medium" => "det_500m.onnx",
@@ -122,7 +180,6 @@ impl SecurityLevel {
         }
     }
 
-    /// Validates custom-level fields. Called after TOML deserialization.
     pub fn validate(&self) -> anyhow::Result<()> {
         if self.level == "custom" {
             match self.detector.as_str() {
@@ -221,7 +278,6 @@ pub struct CameraConfig {
     pub ir: String,
     #[serde(default)]
     pub emitter_enabled: bool,
-    /// Frames whose mean luminance (0-255) is below this are rejected as too dark.
     #[serde(default = "default_dark_luma_threshold")]
     pub dark_luma_threshold: u8,
 }
@@ -552,7 +608,6 @@ mod tests {
     fn hybrid_policy_mappings() {
         let mut config = Config::default();
 
-        // Test defaults based on security level when hybrid_policy is empty
         config.security.level = "low".to_string();
         assert_eq!(config.security.hybrid_policy(), "or");
 
@@ -568,7 +623,6 @@ mod tests {
         config.security.level = "unknown".to_string();
         assert_eq!(config.security.hybrid_policy(), "fallback_on_dark");
 
-        // Test explicit override under custom level
         config.security.level = "custom".to_string();
         config.security.hybrid_policy = "custom_policy".to_string();
         assert_eq!(config.security.hybrid_policy(), "custom_policy");

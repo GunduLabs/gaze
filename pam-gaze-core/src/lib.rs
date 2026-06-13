@@ -26,6 +26,31 @@ const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to
 
 pub type PamHandle = *mut c_void;
 
+#[macro_export]
+macro_rules! pam_success_stubs {
+    () => {
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn pam_sm_setcred(
+            _pamh: $crate::PamHandle,
+            _flags: ::std::os::raw::c_int,
+            _argc: ::std::os::raw::c_int,
+            _argv: *const *const ::std::os::raw::c_char,
+        ) -> ::std::os::raw::c_int {
+            $crate::PAM_SUCCESS
+        }
+
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn pam_sm_acct_mgmt(
+            _pamh: $crate::PamHandle,
+            _flags: ::std::os::raw::c_int,
+            _argc: ::std::os::raw::c_int,
+            _argv: *const *const ::std::os::raw::c_char,
+        ) -> ::std::os::raw::c_int {
+            $crate::PAM_SUCCESS
+        }
+    };
+}
+
 #[repr(C)]
 pub struct PamMessage {
     pub msg_style: c_int,
@@ -140,8 +165,6 @@ fn confirm_from_tty() -> Option<bool> {
         Some(confirmed)
     }
 }
-
-/// True if the process has a controlling terminal we can prompt on.
 pub fn has_controlling_tty() -> bool {
     OpenOptions::new()
         .read(true)
@@ -149,15 +172,6 @@ pub fn has_controlling_tty() -> bool {
         .open("/dev/tty")
         .is_ok()
 }
-
-/// Prompt for a password on the controlling terminal, cancellable via `cancel_fd`.
-///
-/// Reads one line from `/dev/tty` with echo disabled (kernel line-editing stays
-/// on). It `poll`s the tty alongside `cancel_fd`; when the caller makes
-/// `cancel_fd` readable (after biometric auth wins the race) the prompt is
-/// abandoned, any half-typed input is flushed, and `None` is returned. This lets
-/// the caller retire the prompt thread cleanly without TIOCSTI, which modern
-/// kernels disable (`dev.tty.legacy_tiocsti=0`).
 pub fn prompt_password_from_tty(cancel_fd: RawFd) -> Option<String> {
     let mut tty = OpenOptions::new()
         .read(true)
@@ -173,7 +187,7 @@ pub fn prompt_password_from_tty(cancel_fd: RawFd) -> Option<String> {
         }
         let original = original.assume_init();
         let mut raw = original;
-        raw.c_lflag &= !libc::ECHO; // hide the password; keep ICANON for line editing
+        raw.c_lflag &= !libc::ECHO;
         if libc::tcsetattr(fd, libc::TCSANOW, &raw) != 0 {
             return None;
         }
@@ -203,7 +217,6 @@ pub fn prompt_password_from_tty(cancel_fd: RawFd) -> Option<String> {
                 return None;
             }
 
-            // Cancelled (biometric won): drop any half-typed line and give up.
             if poll_fds[1].revents != 0 {
                 let _ = libc::tcflush(fd, libc::TCIFLUSH);
                 let _ = writeln!(tty);
@@ -256,16 +269,27 @@ pub unsafe fn get_username(pamh: PamHandle) -> Option<String> {
     unsafe { CStr::from_ptr(user_ptr).to_str().ok().map(|s| s.to_owned()) }
 }
 
+pub unsafe fn username_and_runtime(
+    pamh: PamHandle,
+) -> Result<(String, tokio::runtime::Runtime), c_int> {
+    let Some(username) = (unsafe { get_username(pamh) }) else {
+        return Err(PAM_AUTH_ERR);
+    };
+
+    let rt = tokio::runtime::Runtime::new().map_err(|_| PAM_AUTHINFO_UNAVAIL)?;
+    Ok((username, rt))
+}
+
 pub fn is_retryable(err: &zbus::Error) -> bool {
     err.to_string().contains("RETRYABLE:")
 }
 
 use gaze_core::dbus::GazeProxy;
-pub use zbus::Connection;
 
 pub async fn setup_auth_env() -> Result<(Config, GazeProxy<'static>), c_int> {
-    let conn = Connection::system().await.map_err(|_| PAM_SERVICE_ERR)?;
-    let proxy = GazeProxy::new(&conn).await.map_err(|_| PAM_SERVICE_ERR)?;
+    let proxy = gaze_core::dbus::connect_gaze()
+        .await
+        .map_err(|_| PAM_SERVICE_ERR)?;
     let config = gaze_core::dbus::load_config_from_daemon(&proxy)
         .await
         .map_err(|_| PAM_SERVICE_ERR)?;
@@ -277,10 +301,8 @@ pub async fn has_enrolled_faces(username: &str) -> anyhow::Result<bool> {
         .await
         .map_err(|e| anyhow::anyhow!("PAM error: {}", e))?;
     match proxy.list_faces(username).await {
+        // Treat unenrolled users as having no faces.
         Ok(faces) => Ok(!faces.is_empty()),
-        // A user who never enrolled has no entry in the database; treat that as
-        // "no faces" so the PAM modules return PAM_IGNORE instead of running a
-        // full camera authentication.
         Err(ref err) if gaze_core::dbus::dbus_is_file_not_found(err) => Ok(false),
         Err(err) => Err(err.into()),
     }

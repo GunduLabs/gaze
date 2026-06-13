@@ -5,13 +5,9 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
-    let Some(username) = (unsafe { get_username(pamh) }) else {
-        return PAM_AUTH_ERR;
-    };
-
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(rt) => rt,
-        Err(_) => return PAM_AUTHINFO_UNAVAIL,
+    let (username, rt) = match unsafe { username_and_runtime(pamh) } {
+        Ok(ctx) => ctx,
+        Err(code) => return code,
     };
 
     rt.block_on(async {
@@ -45,22 +41,4 @@ pub unsafe extern "C" fn pam_sm_authenticate(
     unsafe { do_authenticate(pamh) }
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pam_sm_setcred(
-    _pamh: PamHandle,
-    _flags: c_int,
-    _argc: c_int,
-    _argv: *const *const c_char,
-) -> c_int {
-    PAM_SUCCESS
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pam_sm_acct_mgmt(
-    _pamh: PamHandle,
-    _flags: c_int,
-    _argc: c_int,
-    _argv: *const *const c_char,
-) -> c_int {
-    PAM_SUCCESS
-}
+pam_gaze_core::pam_success_stubs!();

@@ -15,20 +15,6 @@ pub enum Spectrum {
     Ir,
 }
 
-/// On an IR camera the emitter-lit face sits on a near-black background, which
-/// drags the frame mean down. Cap the darkness cutoff here so an IR frame is not
-/// wrongly rejected, while still catching a covered or unlit sensor (mean ~0).
-const IR_DARK_LUMA_CEILING: u8 = 25;
-
-/// The dark-frame cutoff to use, relaxed for IR cameras (never raised).
-pub fn effective_dark_luma_threshold(config: &Config) -> u8 {
-    if config.cameras.ir.trim().is_empty() {
-        config.cameras.dark_luma_threshold
-    } else {
-        config.cameras.dark_luma_threshold.min(IR_DARK_LUMA_CEILING)
-    }
-}
-
 pub struct CaptureResult {
     pub bytes: Vec<u8>,
     pub width: u32,
@@ -60,23 +46,15 @@ impl FaceChecker {
         let detector = FaceDetector::new(model_path.to_str().unwrap())?;
         Ok(Self {
             detector,
-            dark_luma_threshold: effective_dark_luma_threshold(config),
+            dark_luma_threshold: config.cameras.dark_luma_threshold,
             rgb_luma_history: std::collections::VecDeque::new(),
         })
-    }
-
-    pub fn from_detector(detector: FaceDetector) -> Self {
-        Self {
-            detector,
-            dark_luma_threshold: 30,
-            rgb_luma_history: std::collections::VecDeque::new(),
-        }
     }
 
     pub fn from_detector_with_config(detector: FaceDetector, config: &Config) -> Self {
         Self {
             detector,
-            dark_luma_threshold: effective_dark_luma_threshold(config),
+            dark_luma_threshold: config.cameras.dark_luma_threshold,
             rgb_luma_history: std::collections::VecDeque::new(),
         }
     }
@@ -303,7 +281,6 @@ mod tests {
 
     #[test]
     fn mean_luminance_threshold_is_an_exclusive_lower_bound() {
-        // A frame whose mean luma equals the threshold is *not* dark (strict `<`).
         let frame =
             Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(50.0)).unwrap();
 
@@ -313,15 +290,11 @@ mod tests {
 
     #[test]
     fn mean_uses_bt601_weighting() {
-        // Pure blue is visually dim: its BT.601 luminance is ~28 even though the raw
-        // byte average is 85, so the frame reads as dark below ~30.
-        // Scalar is ordered (B, G, R, A) to match OpenCV's BGR layout.
         let blue =
             Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::new(255.0, 0.0, 0.0, 0.0))
                 .unwrap();
         assert!(frame_mean_luma(&blue).unwrap() < 30);
 
-        // Pure green carries most of the luminance weight (~149) and is not dark.
         let green =
             Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::new(0.0, 255.0, 0.0, 0.0))
                 .unwrap();
@@ -330,7 +303,6 @@ mod tests {
 
     #[test]
     fn single_channel_frames_use_raw_luminance() {
-        // Grayscale frames take the non-BGR averaging branch.
         let dark = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC1, Scalar::all(5.0)).unwrap();
         assert!(frame_mean_luma(&dark).unwrap() < 70);
 
@@ -340,15 +312,12 @@ mod tests {
 
     #[test]
     fn mean_is_robust_to_a_few_bright_pixels() {
-        // A mostly-black frame with one bright row stays well below the threshold,
-        // unlike a pixel-count ratio which a bright spot could tip either way.
         let mut frame =
             Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(0.0)).unwrap();
         {
             let mut top = Mat::roi_mut(&mut frame, core::Rect::new(0, 0, 8, 1)).unwrap();
             top.set_to_def(&Scalar::all(255.0)).unwrap();
         }
-        // One of eight rows bright => mean luma ~32, still dark at threshold 70.
         assert!(frame_mean_luma(&frame).unwrap() < 70);
     }
 
@@ -356,20 +325,5 @@ mod tests {
     fn empty_frame_is_treated_as_dark() {
         let frame = Mat::default();
         assert!(frame_mean_luma(&frame).unwrap_or(0) < 70);
-    }
-
-    #[test]
-    fn ir_camera_relaxes_dark_threshold_without_raising_it() {
-        let mut config = crate::config::Config::default();
-        config.cameras.dark_luma_threshold = 30;
-
-        assert_eq!(effective_dark_luma_threshold(&config), 30);
-
-        config.cameras.ir = "pipewiresrc target-object=some-ir-camera".to_string();
-        assert_eq!(effective_dark_luma_threshold(&config), 25);
-
-        // a user-chosen lower value is never raised
-        config.cameras.dark_luma_threshold = 15;
-        assert_eq!(effective_dark_luma_threshold(&config), 15);
     }
 }

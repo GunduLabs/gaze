@@ -12,7 +12,6 @@ pub struct IrControl {
     pub unit: u8,
     pub selector: u8,
     pub query: IrQuery,
-    /// Bytes written for SET_CUR, or a zero-filled scratch buffer whose length is used for GET_CUR.
     pub payload: &'static [u8],
 }
 
@@ -43,7 +42,6 @@ pub enum CameraBus {
     Other,
 }
 
-/// Reads USB vendor/product id from the node's sysfs `modalias`.
 pub fn usb_ids_of(node: &str) -> Option<(u16, u16)> {
     parse_modalias(&read_modalias(node)?)
 }

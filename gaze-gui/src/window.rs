@@ -1,7 +1,7 @@
 use crate::capture_dialog;
 use gaze_core::config::{Config, DEFAULT_RGB_CAMERA, SecurityLevel};
 use gaze_core::dbus::{
-    GazeProxy, apply_config_to_daemon, dbus_error_message, dbus_is_file_not_found,
+    GazeProxy, apply_config_to_daemon, connect_gaze, dbus_error_message, dbus_is_file_not_found,
     load_config_from_daemon,
 };
 use gtk4::glib;
@@ -39,6 +39,133 @@ fn load_auth_highlight_css() {
             );
         }
     });
+}
+
+fn toast_overlay(window: &libadwaita::ApplicationWindow) -> Option<libadwaita::ToastOverlay> {
+    window
+        .content()
+        .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
+}
+
+fn add_toast(window: &libadwaita::ApplicationWindow, text: impl AsRef<str>) -> libadwaita::Toast {
+    let toast = libadwaita::Toast::new(text.as_ref());
+    if let Some(overlay) = toast_overlay(window) {
+        overlay.add_toast(toast.clone());
+    }
+    toast
+}
+
+fn add_dbus_error_toast(window: &libadwaita::ApplicationWindow, prefix: &str, err: &zbus::Error) {
+    add_toast(window, format!("{}: {}", prefix, dbus_error_message(err)));
+}
+
+fn show_daemon_pending_toast(window: &libadwaita::ApplicationWindow) {
+    add_toast(window, "Connecting to the Gaze daemon…");
+}
+
+fn set_custom_config_rows_visible(
+    level_row: &libadwaita::ComboRow,
+    detector_row: &libadwaita::ComboRow,
+    recognizer_row: &libadwaita::ComboRow,
+    threshold_row: &libadwaita::SpinRow,
+    hybrid_row: &libadwaita::ComboRow,
+) {
+    let is_custom = level_row.selected() == SecurityLevel::CUSTOM_LEVEL_INDEX;
+    detector_row.set_visible(is_custom);
+    recognizer_row.set_visible(is_custom);
+    threshold_row.set_visible(is_custom);
+    hybrid_row.set_visible(is_custom);
+}
+
+fn set_liveness_config_rows_visible(
+    enabled_switch: &gtk4::Switch,
+    threshold_row: &libadwaita::SpinRow,
+    max_frames_row: &libadwaita::SpinRow,
+) {
+    let active = enabled_switch.is_active();
+    threshold_row.set_visible(active);
+    max_frames_row.set_visible(active);
+}
+
+struct ConfigRows<'a> {
+    level: &'a libadwaita::ComboRow,
+    detector: &'a libadwaita::ComboRow,
+    recognizer: &'a libadwaita::ComboRow,
+    threshold: &'a libadwaita::SpinRow,
+    camera: &'a libadwaita::ComboRow,
+    ir: &'a libadwaita::ComboRow,
+    emitter: &'a gtk4::Switch,
+    dark_luma_threshold: &'a libadwaita::SpinRow,
+    templates: &'a libadwaita::SpinRow,
+    liveness_enabled: &'a gtk4::Switch,
+    liveness_threshold: &'a libadwaita::SpinRow,
+    liveness_max_frames: &'a libadwaita::SpinRow,
+    require_confirm: &'a gtk4::Switch,
+    hybrid: &'a libadwaita::ComboRow,
+    abort_ssh: &'a gtk4::Switch,
+    abort_lid: &'a gtk4::Switch,
+}
+
+struct CameraChoices<'a> {
+    cameras: &'a [(String, String)],
+    ir_options: &'a [(String, String)],
+}
+
+fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoices<'_>) {
+    rows.level.set_selected(cfg.security.level_index());
+    set_custom_config_rows_visible(
+        rows.level,
+        rows.detector,
+        rows.recognizer,
+        rows.threshold,
+        rows.hybrid,
+    );
+
+    rows.detector
+        .set_selected(SecurityLevel::model_quality_index(&cfg.security.detector));
+    rows.recognizer
+        .set_selected(SecurityLevel::model_quality_index(&cfg.security.recognizer));
+    rows.threshold.set_value(if cfg.security.level == "custom" {
+        cfg.security.threshold
+    } else {
+        cfg.security.threshold() as f64
+    });
+
+    let cam_idx = choices
+        .cameras
+        .iter()
+        .position(|(_, target)| target == &cfg.cameras.rgb)
+        .unwrap_or(0);
+    rows.camera.set_selected(cam_idx as u32);
+    let ir_idx = choices
+        .ir_options
+        .iter()
+        .position(|(_, target)| target == &cfg.cameras.ir)
+        .unwrap_or(0);
+    rows.ir.set_selected(ir_idx as u32);
+    rows.emitter.set_active(cfg.cameras.emitter_enabled);
+    rows.dark_luma_threshold
+        .set_value(cfg.cameras.dark_luma_threshold as f64);
+    rows.templates
+        .set_value(cfg.enrollment.max_templates as f64);
+    rows.liveness_enabled.set_active(cfg.liveness.enabled);
+    rows.liveness_threshold.set_value(cfg.liveness.threshold);
+    rows.liveness_max_frames
+        .set_value(cfg.liveness.max_frames as f64);
+    rows.require_confirm
+        .set_active(cfg.auth.require_confirmation);
+    rows.hybrid
+        .set_selected(SecurityLevel::hybrid_policy_index_for_value(
+            &cfg.security.hybrid_policy,
+        ));
+    rows.abort_ssh.set_active(cfg.auth.abort_if_ssh);
+    rows.abort_lid.set_active(cfg.auth.abort_if_lid_closed);
+
+    set_liveness_config_rows_visible(
+        rows.liveness_enabled,
+        rows.liveness_threshold,
+        rows.liveness_max_frames,
+    );
 }
 
 #[allow(deprecated)]
@@ -216,33 +343,13 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     hybrid_row.set_model(Some(&hybrid_model));
     security_group.add(&hybrid_row);
 
-    let update_custom_visibility =
-        move |row: &libadwaita::ComboRow,
-              det: &libadwaita::ComboRow,
-              rec: &libadwaita::ComboRow,
-              thr: &libadwaita::SpinRow,
-              hybrid: &libadwaita::ComboRow| {
-            let is_custom = row.selected() == 4;
-            det.set_visible(is_custom);
-            rec.set_visible(is_custom);
-            thr.set_visible(is_custom);
-            hybrid.set_visible(is_custom);
-        };
-
-    let update_liveness_visibility =
-        move |sw: &gtk4::Switch, thr: &libadwaita::SpinRow, fr: &libadwaita::SpinRow| {
-            let active = sw.is_active();
-            thr.set_visible(active);
-            fr.set_visible(active);
-        };
-
     liveness_enabled_switch.connect_active_notify(glib::clone!(
         #[weak]
         liveness_threshold_row,
         #[weak]
         liveness_max_frames_row,
         move |sw| {
-            update_liveness_visibility(sw, &liveness_threshold_row, &liveness_max_frames_row);
+            set_liveness_config_rows_visible(sw, &liveness_threshold_row, &liveness_max_frames_row);
         }
     ));
 
@@ -258,7 +365,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         hybrid_row,
         move |row| {
-            update_custom_visibility(
+            set_custom_config_rows_visible(
                 row,
                 &detector_row,
                 &recognizer_row,
@@ -317,32 +424,21 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             }
 
             let mut cfg = config.borrow_mut();
-            let hybrid_policy_options = ["default", "or", "fallback_on_dark", "and"];
             let hybrid_idx = hybrid_row.selected() as usize;
-            let hybrid_policy = if hybrid_idx == 0 {
-                String::new()
-            } else {
-                hybrid_policy_options[hybrid_idx].to_string()
-            };
+            let hybrid_policy = SecurityLevel::hybrid_policy_from_index(hybrid_idx);
 
-            match level_row.selected() {
-                0 => cfg.security = SecurityLevel::low(),
-                1 => cfg.security = SecurityLevel::medium(),
-                2 => cfg.security = SecurityLevel::high(),
-                3 => cfg.security = SecurityLevel::maximum(),
-                4 => {
-                    let det_idx = detector_row.selected();
-                    let det = if det_idx == 1 { "accurate" } else { "standard" };
-                    let rec_idx = recognizer_row.selected();
-                    let rec = if rec_idx == 1 { "accurate" } else { "standard" };
-                    cfg.security = SecurityLevel::custom(
-                        det.to_string(),
-                        rec.to_string(),
-                        threshold_row.value(),
-                        hybrid_policy,
-                    );
-                }
-                _ => {}
+            if let Some(level) = SecurityLevel::preset_from_index(level_row.selected() as usize) {
+                cfg.security = level;
+            } else if level_row.selected() == SecurityLevel::CUSTOM_LEVEL_INDEX {
+                let det = SecurityLevel::model_quality_from_index(detector_row.selected() as usize);
+                let rec =
+                    SecurityLevel::model_quality_from_index(recognizer_row.selected() as usize);
+                cfg.security = SecurityLevel::custom(
+                    det.to_string(),
+                    rec.to_string(),
+                    threshold_row.value(),
+                    hybrid_policy,
+                );
             }
 
             let cam_idx = camera_row.selected() as usize;
@@ -373,8 +469,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 cfg_to_apply,
                 async move {
                     let result = async {
-                        let conn = Connection::system().await?;
-                        let proxy = GazeProxy::new(&conn).await?;
+                        let proxy = connect_gaze().await?;
                         apply_config_to_daemon(&proxy, &cfg_to_apply).await
                     }
                     .await;
@@ -475,76 +570,34 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
     {
         let cfg = config.borrow();
-        let level_idx = match cfg.security.level.as_str() {
-            "low" => 0,
-            "medium" => 1,
-            "high" => 2,
-            "maximum" => 3,
-            "custom" => 4,
-            _ => 1,
-        };
-        level_row.set_selected(level_idx);
-        update_custom_visibility(
-            &level_row,
-            &detector_row,
-            &recognizer_row,
-            &threshold_row,
-            &hybrid_row,
-        );
-
-        let thr = if cfg.security.level == "custom" {
-            cfg.security.threshold
-        } else {
-            cfg.security.threshold() as f64
-        };
-        let det_idx: u32 = if cfg.security.detector == "accurate" { 1 } else { 0 };
-        let rec_idx: u32 = if cfg.security.recognizer == "accurate" { 1 } else { 0 };
-        detector_row.set_selected(det_idx);
-        recognizer_row.set_selected(rec_idx);
-        threshold_row.set_value(thr);
-
-        let cam_idx = cameras
-            .iter()
-            .position(|(_, t)| t == &cfg.cameras.rgb)
-            .unwrap_or(0);
-        camera_row.set_selected(cam_idx as u32);
-        let ir_idx = ir_options
-            .iter()
-            .position(|(_, t)| t == &cfg.cameras.ir)
-            .unwrap_or(0);
-        ir_row.set_selected(ir_idx as u32);
-        emitter_switch.set_active(cfg.cameras.emitter_enabled);
-        dark_luma_threshold_row.set_value(cfg.cameras.dark_luma_threshold as f64);
-        templates_row.set_value(cfg.enrollment.max_templates as f64);
-        liveness_enabled_switch.set_active(cfg.liveness.enabled);
-        liveness_threshold_row.set_value(cfg.liveness.threshold);
-        liveness_max_frames_row.set_value(cfg.liveness.max_frames as f64);
-        require_confirm_switch.set_active(cfg.auth.require_confirmation);
-        let hybrid_idx = match cfg.security.hybrid_policy.as_str() {
-            "or" => 1,
-            "fallback_on_dark" => 2,
-            "and" => 3,
-            _ => 0,
-        };
-        hybrid_row.set_selected(hybrid_idx);
-        abort_ssh_switch.set_active(cfg.auth.abort_if_ssh);
-        abort_lid_switch.set_active(cfg.auth.abort_if_lid_closed);
-
-        update_liveness_visibility(
-            &liveness_enabled_switch,
-            &liveness_threshold_row,
-            &liveness_max_frames_row,
+        populate_config_rows(
+            &cfg,
+            ConfigRows {
+                level: &level_row,
+                detector: &detector_row,
+                recognizer: &recognizer_row,
+                threshold: &threshold_row,
+                camera: &camera_row,
+                ir: &ir_row,
+                emitter: &emitter_switch,
+                dark_luma_threshold: &dark_luma_threshold_row,
+                templates: &templates_row,
+                liveness_enabled: &liveness_enabled_switch,
+                liveness_threshold: &liveness_threshold_row,
+                liveness_max_frames: &liveness_max_frames_row,
+                require_confirm: &require_confirm_switch,
+                hybrid: &hybrid_row,
+                abort_ssh: &abort_ssh_switch,
+                abort_lid: &abort_lid_switch,
+            },
+            CameraChoices {
+                cameras: &cameras,
+                ir_options: &ir_options,
+            },
         );
     }
     is_loading.set(false);
 
-    // Wire the Unlock button up front so it is always responsive the moment the
-    // dialog is shown, independent of the background state task below. Connecting
-    // it inside that task meant the button stayed dead until several DBus
-    // round-trips finished, and a failing `receive_changed()` could panic the
-    // task before the handler was ever attached. Each click opens the system bus
-    // and runs an interactive polkit check; failures are logged rather than
-    // silently swallowed so a non-working button is diagnosable.
     banner.connect_button_clicked(glib::clone!(
         #[weak]
         banner,
@@ -600,8 +653,6 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         }
     ));
 
-    // Reflect the current authorization state on open and keep it in sync when
-    // polkit's authorizations change underneath us.
     glib::MainContext::default().spawn_local(glib::clone!(
         #[weak]
         banner,
@@ -700,66 +751,37 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         is_loading,
         async move {
             let load_result = async {
-                let conn = Connection::system().await?;
-                let proxy = GazeProxy::new(&conn).await?;
+                let proxy = connect_gaze().await?;
                 load_config_from_daemon(&proxy).await
             }
             .await;
 
             if let Ok(cfg) = load_result {
                 is_loading.set(true);
-                let level_idx = match cfg.security.level.as_str() {
-                    "low" => 0,
-                    "medium" => 1,
-                    "high" => 2,
-                    "maximum" => 3,
-                    "custom" => 4,
-                    _ => 1,
-                };
-                level_row.set_selected(level_idx);
-
-                let thr = if cfg.security.level == "custom" {
-                    cfg.security.threshold
-                } else {
-                    cfg.security.threshold() as f64
-                };
-                let det_idx: u32 = if cfg.security.detector == "accurate" { 1 } else { 0 };
-                let rec_idx: u32 = if cfg.security.recognizer == "accurate" { 1 } else { 0 };
-                detector_row.set_selected(det_idx);
-                recognizer_row.set_selected(rec_idx);
-                threshold_row.set_value(thr);
-
-                let cam_idx = cameras
-                    .iter()
-                    .position(|(_, t)| t == &cfg.cameras.rgb)
-                    .unwrap_or(0);
-                camera_row.set_selected(cam_idx as u32);
-                let ir_idx = ir_options
-                    .iter()
-                    .position(|(_, t)| t == &cfg.cameras.ir)
-                    .unwrap_or(0);
-                ir_row.set_selected(ir_idx as u32);
-                emitter_switch.set_active(cfg.cameras.emitter_enabled);
-                dark_luma_threshold_row.set_value(cfg.cameras.dark_luma_threshold as f64);
-                templates_row.set_value(cfg.enrollment.max_templates as f64);
-                liveness_enabled_switch.set_active(cfg.liveness.enabled);
-                liveness_threshold_row.set_value(cfg.liveness.threshold);
-                liveness_max_frames_row.set_value(cfg.liveness.max_frames as f64);
-                require_confirm_switch.set_active(cfg.auth.require_confirmation);
-                let hybrid_idx = match cfg.security.hybrid_policy.as_str() {
-                    "or" => 1,
-                    "fallback_on_dark" => 2,
-                    "and" => 3,
-                    _ => 0,
-                };
-                hybrid_row.set_selected(hybrid_idx);
-                abort_ssh_switch.set_active(cfg.auth.abort_if_ssh);
-                abort_lid_switch.set_active(cfg.auth.abort_if_lid_closed);
-
-                update_liveness_visibility(
-                    &liveness_enabled_switch,
-                    &liveness_threshold_row,
-                    &liveness_max_frames_row,
+                populate_config_rows(
+                    &cfg,
+                    ConfigRows {
+                        level: &level_row,
+                        detector: &detector_row,
+                        recognizer: &recognizer_row,
+                        threshold: &threshold_row,
+                        camera: &camera_row,
+                        ir: &ir_row,
+                        emitter: &emitter_switch,
+                        dark_luma_threshold: &dark_luma_threshold_row,
+                        templates: &templates_row,
+                        liveness_enabled: &liveness_enabled_switch,
+                        liveness_threshold: &liveness_threshold_row,
+                        liveness_max_frames: &liveness_max_frames_row,
+                        require_confirm: &require_confirm_switch,
+                        hybrid: &hybrid_row,
+                        abort_ssh: &abort_ssh_switch,
+                        abort_lid: &abort_lid_switch,
+                    },
+                    CameraChoices {
+                        cameras: &cameras,
+                        ir_options: &ir_options,
+                    },
                 );
 
                 *config.borrow_mut() = cfg;
@@ -769,15 +791,6 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     ));
 
     window.present();
-}
-
-fn show_daemon_pending_toast(window: &libadwaita::ApplicationWindow) {
-    if let Some(overlay) = window
-        .content()
-        .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-    {
-        overlay.add_toast(libadwaita::Toast::new("Connecting to the Gaze daemon…"));
-    }
 }
 
 pub fn build_window(app: &libadwaita::Application, username: &str) {
@@ -866,8 +879,6 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
         }
     ));
 
-    // Shared by the synchronously-wired toolbar buttons and populated once the
-    // daemon connection lands in the task below.
     let proxy_cell: Rc<RefCell<Option<Rc<GazeProxy>>>> = Rc::new(RefCell::new(None));
     let refresh: Rc<RefCell<Option<RefreshCb>>> = Rc::new(RefCell::new(None));
     let last_toast: Rc<RefCell<Option<libadwaita::Toast>>> = Rc::new(RefCell::new(None));
@@ -909,30 +920,14 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                     use futures::StreamExt;
 
                     if proxy.claim(&username).await.is_err() {
-                        if let Some(overlay) = window
-                            .content()
-                            .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-                        {
-                            overlay.add_toast(libadwaita::Toast::new("Failed to claim device"));
-                        }
+                        add_toast(&window, "Failed to claim device");
                         btn.set_sensitive(true);
                         return;
                     }
-
-                    // Subscribe before VerifyStart: a fast verdict (e.g. camera
-                    // open failure) would otherwise be emitted before we listen
-                    // and leave this task awaiting the stream forever.
                     let mut stream = match proxy.receive_verify_status().await {
                         Ok(stream) => stream,
                         Err(_) => {
-                            if let Some(overlay) = window
-                                .content()
-                                .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-                            {
-                                overlay.add_toast(libadwaita::Toast::new(
-                                    "Daemon error starting verification",
-                                ));
-                            }
+                            add_toast(&window, "Daemon error starting verification");
                             let _ = proxy.release().await;
                             btn.set_sensitive(true);
                             return;
@@ -940,14 +935,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                     };
 
                     if proxy.verify_start("any").await.is_err() {
-                        if let Some(overlay) = window
-                            .content()
-                            .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-                        {
-                            overlay.add_toast(libadwaita::Toast::new(
-                                "Daemon error starting verification",
-                            ));
-                        }
+                        add_toast(&window, "Daemon error starting verification");
                         let _ = proxy.release().await;
                         btn.set_sensitive(true);
                         return;
@@ -998,13 +986,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         }
                     }
 
-                    let toast = libadwaita::Toast::new(&text);
-                    if let Some(overlay) = window
-                        .content()
-                        .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-                    {
-                        overlay.add_toast(toast.clone());
-                    }
+                    let toast = add_toast(&window, &text);
                     *last_toast.borrow_mut() = Some(toast);
                     btn.set_sensitive(true);
                 }
@@ -1037,34 +1019,13 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 proxy,
                 async move {
                     if let Err(err) = proxy.claim(&username).await {
-                        let toast = libadwaita::Toast::new(&format!(
-                            "Failed to claim device: {}",
-                            dbus_error_message(&err)
-                        ));
-                        if let Some(overlay) = window
-                            .content()
-                            .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-                        {
-                            overlay.add_toast(toast);
-                        }
+                        add_dbus_error_toast(&window, "Failed to claim device", &err);
                         return;
                     }
 
                     let (camera_device, is_ir) = match load_config_from_daemon(&proxy).await {
-                        Ok(cfg) => {
-                            if let Some(rgb_source) =
-                                gaze_core::camera::resolve_rgb_source(&cfg.cameras)
-                            {
-                                (rgb_source, false)
-                            } else if let Some((ir_source, _)) =
-                                gaze_core::camera::resolve_ir_source(&cfg.cameras)
-                            {
-                                (ir_source, true)
-                            } else {
-                                ("primary".to_string(), false)
-                            }
-                        }
-                        Err(_) => ("primary".to_string(), false),
+                        Ok(cfg) => gaze_core::camera::preferred_capture_source(&cfg.cameras),
+                        Err(_) => (DEFAULT_RGB_CAMERA.to_string(), false),
                     };
 
                     capture_dialog::show_capture_dialog(
@@ -1103,15 +1064,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
         #[strong]
         refresh,
         async move {
-            let Ok(conn) = Connection::system().await else {
-                tracing::error!("Failed to connect to system DBus");
-                status_page.set_description(Some("Failed to connect to system DBus"));
-                return;
-            };
-
-            let Ok(proxy) = GazeProxy::new(&conn).await else {
-                tracing::error!("Failed to create GazeProxy");
-                status_page.set_description(Some("Failed to create GazeProxy"));
+            let Ok(proxy) = connect_gaze().await else {
+                tracing::error!("Failed to connect to Gaze daemon");
+                status_page.set_description(Some("Failed to connect to Gaze daemon"));
                 return;
             };
 
@@ -1152,16 +1107,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                     if dbus_is_file_not_found(&err) {
                                         Vec::new()
                                     } else {
-                                        let toast = libadwaita::Toast::new(&format!(
-                                            "Failed to load faces: {}",
-                                            dbus_error_message(&err)
-                                        ));
-                                        if let Some(overlay) = window
-                                            .content()
-                                            .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-                                        {
-                                            overlay.add_toast(toast);
-                                        }
+                                        add_dbus_error_toast(&window, "Failed to load faces", &err);
                                         Vec::new()
                                     }
                                 }
@@ -1341,16 +1287,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                                 &face_name,
                                                                 &new_name,
                                                             ).await {
-                                                                let toast = libadwaita::Toast::new(&format!(
-                                                                    "Failed to rename face: {}",
-                                                                    dbus_error_message(&err)
-                                                                ));
-                                                                if let Some(overlay) = window
-                                                                    .content()
-                                                                    .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-                                                                {
-                                                                    overlay.add_toast(toast);
-                                                                }
+                                                                add_dbus_error_toast(&window, "Failed to rename face", &err);
                                                             } else {
                                                                 if let Some(f) = refresh.borrow().as_ref() {
                                                                     f();
@@ -1361,13 +1298,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                                     face_name,
                                                                     new_name
                                                                 );
-                                                                let toast = libadwaita::Toast::new(&text);
-                                                                if let Some(overlay) = window
-                                                                    .content()
-                                                                    .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-                                                                {
-                                                                    overlay.add_toast(toast);
-                                                                }
+                                                                add_toast(&window, text);
                                                             }
                                                         }
                                                     ));
@@ -1404,30 +1335,13 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                 proxy,
                                                 async move {
                                                     if let Err(err) = proxy.claim(&username).await {
-                                                        let toast = libadwaita::Toast::new(&format!(
-                                                            "Failed to claim device: {}",
-                                                            dbus_error_message(&err)
-                                                        ));
-                                                        if let Some(overlay) = window
-                                                            .content()
-                                                            .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-                                                        {
-                                                            overlay.add_toast(toast);
-                                                        }
+                                                        add_dbus_error_toast(&window, "Failed to claim device", &err);
                                                         return;
                                                     }
 
                                                     let (camera_device, is_ir) = match load_config_from_daemon(&proxy).await {
-                                                          Ok(cfg) => {
-                                                              if let Some(rgb_source) = gaze_core::camera::resolve_rgb_source(&cfg.cameras) {
-                                                                  (rgb_source, false)
-                                                              } else if let Some((ir_source, _)) = gaze_core::camera::resolve_ir_source(&cfg.cameras) {
-                                                                  (ir_source, true)
-                                                              } else {
-                                                                  ("primary".to_string(), false)
-                                                              }
-                                                          }
-                                                          Err(_) => ("primary".to_string(), false),
+                                                          Ok(cfg) => gaze_core::camera::preferred_capture_source(&cfg.cameras),
+                                                          Err(_) => (DEFAULT_RGB_CAMERA.to_string(), false),
                                                       };
 
                                                      capture_dialog::show_capture_dialog(
@@ -1480,16 +1394,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                         .delete_face(&username, &face_name)
                                                         .await
                                                     {
-                                                        let toast = libadwaita::Toast::new(&format!(
-                                                            "Failed to remove face: {}",
-                                                            dbus_error_message(&err)
-                                                        ));
-                                                        if let Some(overlay) = window
-                                                            .content()
-                                                            .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
-                                                        {
-                                                            overlay.add_toast(toast);
-                                                        }
+                                                        add_dbus_error_toast(&window, "Failed to remove face", &err);
                                                     }
                                                     if let Some(f) = refresh.borrow().as_ref() {
                                                         f();

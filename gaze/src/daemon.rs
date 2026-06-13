@@ -15,7 +15,7 @@ use crate::align::{align_face, mat_to_rgb};
 use crate::liveness::LivenessDetector;
 use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
-use gaze_core::camera::{Camera, CameraKind, resolve_ir_source, resolve_rgb_source};
+use gaze_core::camera::{Camera, CameraKind, resolve_configured_sources};
 use gaze_core::config::Config;
 use gaze_core::dbus::{CaptureStatus, EnrollPrompt, VerifyResult};
 use gaze_core::face::{FaceChecker, Spectrum};
@@ -30,9 +30,6 @@ const GDM_DCONF_OVERRIDE_CONTENT: &str =
     "[org/gnome/shell/extensions/gaze]\nenable-face-authentication=true\n";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
 const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
-/// Maximum number of process-tree ancestors to inspect when deciding whether a
-/// caller belongs to an SSH session. Bounds the walk so a malformed `/proc`
-/// chain cannot loop.
 const SSH_PROC_CHAIN_MAX_DEPTH: usize = 16;
 
 #[derive(Clone)]
@@ -129,6 +126,23 @@ impl AuthDaemon {
         }
     }
 
+    async fn emit_effective_face_status(
+        ctxt: &SignalEmitter<'_>,
+        last_emitted_status: &mut Option<CaptureStatus>,
+        rgb_status: CaptureStatus,
+        ir_status: CaptureStatus,
+    ) {
+        let effective_status = if rgb_status.priority() >= ir_status.priority() {
+            rgb_status
+        } else {
+            ir_status
+        };
+        if last_emitted_status.as_ref() != Some(&effective_status) {
+            let _ = Self::face_status(ctxt, effective_status).await;
+            *last_emitted_status = Some(effective_status);
+        }
+    }
+
     fn username_uid(username: &str) -> fdo::Result<u32> {
         UserDatabase::validate_username(username).map_err(Self::map_user_db_error)?;
 
@@ -205,11 +219,6 @@ impl AuthDaemon {
         })
     }
 
-    /// Parse the parent pid out of `/proc/<pid>/stat`.
-    ///
-    /// The format is `pid (comm) state ppid ...`; `comm` itself can contain
-    /// spaces and parentheses, so split after the final `)` before reading the
-    /// space-separated fields (state, then ppid).
     fn read_ppid_at(base: &std::path::Path, pid: u32) -> Option<u32> {
         let stat = std::fs::read_to_string(base.join(pid.to_string()).join("stat")).ok()?;
         let after_comm = stat.rsplit_once(')')?.1;
@@ -232,15 +241,6 @@ impl AuthDaemon {
             .map(|env| Self::environ_has_ssh_marker(&env))
             .unwrap_or(false)
     }
-
-    /// True if `pid` or any of its ancestors looks like an SSH session.
-    ///
-    /// The immediate PAM caller (e.g. the privileged `sshd` doing
-    /// `pam_authenticate`) often does not yet carry `SSH_CONNECTION`/`SSH_TTY`
-    /// in its own environment, so checking only that process lets remote logins
-    /// slip past. Walking up the process tree and also matching an `sshd`
-    /// ancestor by name closes that gap and fails closed (detects SSH) rather
-    /// than open.
     fn process_chain_is_ssh_at(base: &std::path::Path, pid: u32) -> bool {
         let mut current = pid;
         for _ in 0..SSH_PROC_CHAIN_MAX_DEPTH {
@@ -283,13 +283,6 @@ impl AuthDaemon {
     fn upower_lid_closed(present: bool, closed: bool) -> bool {
         present && closed
     }
-
-    /// Authoritative lid state from UPower, when available.
-    ///
-    /// `/proc/acpi/button/lid` is absent on most current hardware, so relying on
-    /// it alone makes `abort_if_lid_closed` silently no-op. UPower exposes the
-    /// lid via D-Bus on modern systems; prefer it and treat a missing/absent lid
-    /// as "not closed".
     async fn lid_is_closed_via_upower() -> Option<bool> {
         let conn = zbus::Connection::system().await.ok()?;
         let proxy = zbus::Proxy::new(
@@ -406,11 +399,6 @@ impl AuthDaemon {
         std::path::Path::new(&format!("/run/user/{uid}/pipewire-0")).exists()
     }
 
-    // PipeWire lives under /run/user/<uid> and we have to set XDG_RUNTIME_DIR to a uid that
-    // actually has a session running. Priority: (1) caller==target with a runtime, (2) any
-    // non-root caller with a runtime, (3) root calling on behalf of the active seat session,
-    // (4) target's runtime, (5) the active seat session's runtime. Falls back to target if
-    // nothing matches so the caller still gets a meaningful "no camera" error.
     async fn camera_runtime_uid(caller_uid: u32, target_uid: u32) -> u32 {
         if caller_uid == target_uid && Self::has_pipewire_runtime(target_uid) {
             return target_uid;
@@ -525,8 +513,8 @@ mod tests {
     #[test]
     fn upower_lid_closed_requires_present_and_closed() {
         assert!(AuthDaemon::upower_lid_closed(true, true));
-        assert!(!AuthDaemon::upower_lid_closed(true, false));
         // A machine without a lid (e.g. a desktop) is never "closed".
+        assert!(!AuthDaemon::upower_lid_closed(true, false));
         assert!(!AuthDaemon::upower_lid_closed(false, true));
         assert!(!AuthDaemon::upower_lid_closed(false, false));
     }
@@ -552,8 +540,8 @@ mod tests {
 
         fn add(&self, pid: u32, ppid: u32, comm: &str, environ: &[u8]) {
             let dir = self.root.join(pid.to_string());
-            std::fs::create_dir_all(&dir).unwrap();
             // Embed parens/spaces in comm to exercise the stat parser.
+            std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(
                 dir.join("stat"),
                 format!("{pid} ({comm}) S {ppid} 1 1 0 -1 0\n"),
@@ -585,7 +573,6 @@ mod tests {
     #[test]
     fn ssh_detected_via_ancestor_environ_marker() {
         let proc = FakeProc::new("ancestor-env");
-        // login(1000) -> sshd has SSH_CONNECTION, its child PAM process does not.
         proc.add(1000, 900, "sshd", b"SSH_CONNECTION=1.2.3.4 5 6.7.8.9 22\0");
         proc.add(1001, 1000, "sudo", b"USER=alice\0");
         proc.add(1002, 1001, "unix_chkpwd", b"USER=alice\0");
@@ -596,7 +583,6 @@ mod tests {
     #[test]
     fn ssh_detected_via_ancestor_comm_when_environ_is_bare() {
         let proc = FakeProc::new("ancestor-comm");
-        // Even with no SSH_* in any environ, an sshd ancestor reveals the session.
         proc.add(2000, 1, "sshd-session", b"PATH=/usr/bin\0");
         proc.add(2001, 2000, "bash", b"PATH=/usr/bin\0");
         proc.add(2002, 2001, "sudo", b"PATH=/usr/bin\0");
@@ -617,7 +603,6 @@ mod tests {
     #[test]
     fn process_chain_walk_terminates_on_self_referential_ppid() {
         let proc = FakeProc::new("cycle");
-        // A pid whose ppid points at itself must not loop forever.
         proc.add(4000, 4000, "bash", b"USER=alice\0");
         assert!(!AuthDaemon::process_chain_is_ssh_at(proc.root(), 4000));
     }
@@ -637,16 +622,71 @@ enum VerifyMsg {
     Error(String),
 }
 
-fn status_priority(status: CaptureStatus) -> u32 {
-    match status {
-        CaptureStatus::Usable => 5,
-        CaptureStatus::Ready => 4,
-        CaptureStatus::NotCentered
-        | CaptureStatus::TooFar
-        | CaptureStatus::TooClose
-        | CaptureStatus::Clipped => 3,
-        CaptureStatus::TooDark => 2,
-        CaptureStatus::NoFace | CaptureStatus::Unused => 1,
+fn hybrid_auth_passed(
+    policy: &str,
+    run_rgb: bool,
+    run_ir: bool,
+    rgb_attempted: bool,
+    rgb_status: CaptureStatus,
+    rgb_success: bool,
+    ir_success: bool,
+) -> bool {
+    match (run_rgb, run_ir) {
+        (true, true) => match policy {
+            "or" => rgb_success || ir_success,
+            "and" => rgb_success && ir_success,
+            _ => {
+                if !rgb_attempted {
+                    rgb_success && ir_success
+                } else if matches!(rgb_status, CaptureStatus::TooDark | CaptureStatus::NoFace) {
+                    ir_success
+                } else {
+                    rgb_success && ir_success
+                }
+            }
+        },
+        (true, false) => rgb_success,
+        (false, true) => ir_success,
+        (false, false) => false,
+    }
+}
+
+fn update_stability(
+    last_kpss: &mut Option<ndarray::Array3<f32>>,
+    stable_frames: &mut u32,
+    data: &FaceData,
+) -> bool {
+    if let Some(prev_kps) = last_kpss.as_ref() {
+        let cur_kps = &data.kpss;
+        let delta: f32 = cur_kps
+            .iter()
+            .zip(prev_kps.iter())
+            .map(|(current, previous)| (current - previous).abs())
+            .sum();
+        let [x1, _, x2, _] = data.bbox;
+        let face_w = x2 - x1;
+        let norm_delta = delta / face_w;
+        if norm_delta < 0.05 {
+            *stable_frames += 1;
+        } else {
+            *stable_frames = 0;
+        }
+        *last_kpss = Some(cur_kps.clone());
+        *stable_frames >= 3
+    } else {
+        *last_kpss = Some(data.kpss.clone());
+        false
+    }
+}
+
+fn enroll_pose_matches(prompt: EnrollPrompt, yaw: f32, pitch: f32) -> bool {
+    match prompt {
+        EnrollPrompt::LookStraight => yaw.abs() < 0.16 && (pitch - 0.48).abs() < 0.18,
+        EnrollPrompt::LookUp => pitch < 0.35,
+        EnrollPrompt::LookDown => pitch > 0.55,
+        EnrollPrompt::LookLeft => yaw < -0.15,
+        EnrollPrompt::LookRight => yaw > 0.15,
+        _ => false,
     }
 }
 
@@ -779,9 +819,6 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         uid: u32,
     ) -> fdo::Result<bool> {
-        // Only root (e.g. the PAM stack) or the owner of the uid may query its
-        // extension state, so an unprivileged caller cannot probe or rely on
-        // another user's flag.
         let caller_uid = Self::caller_uid(&header).await?;
         if caller_uid != 0 && caller_uid != uid {
             return Err(fdo::Error::AccessDenied(
@@ -1095,8 +1132,8 @@ impl AuthDaemon {
             }
 
             let mut ir_thread = None;
-            if run_ir {
                 // If RGB is also running, introduce a short delay to ensure RGB gets the head start on PipeWire/USB resource access.
+            if run_ir {
                 if run_rgb {
                     std::thread::sleep(std::time::Duration::from_millis(2));
                 }
@@ -1191,6 +1228,42 @@ impl AuthDaemon {
             let mut rgb_latest_embed = None;
             let mut ir_latest_embed = None;
 
+            macro_rules! emit_verify_with_scores {
+                ($result:expr) => {{
+                    let threshold = *threshold_arc.lock().await;
+                    let db = db_arc.lock().await;
+                    let final_scores = build_hybrid_scores(
+                        &db,
+                        &username,
+                        threshold,
+                        rgb_success_embed.as_ref().or(rgb_latest_embed.as_ref()),
+                        ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
+                    );
+                    drop(db);
+                    let _ = Self::verify_status(&ctxt, $result, final_scores, rgb_status, ir_status).await;
+                }};
+            }
+
+            macro_rules! finish_if_auth_passed {
+                () => {{
+                    if hybrid_auth_passed(
+                        config.security.hybrid_policy(),
+                        run_rgb,
+                        run_ir,
+                        rgb_attempted,
+                        rgb_status,
+                        rgb_success_embed.is_some(),
+                        ir_success_embed.is_some(),
+                    ) {
+                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        emit_verify_with_scores!(VerifyResult::VerifyMatch);
+                        true
+                    } else {
+                        false
+                    }
+                }};
+            }
+
             loop {
                 tokio::select! {
                     _ = &mut rx => {
@@ -1225,31 +1298,17 @@ impl AuthDaemon {
                                     if frames_seen >= liveness_cfg.max_frames {
                                         info!("VerifyStart: liveness gate timed out");
                                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                        let threshold = *threshold_arc.lock().await;
-                                        let db = db_arc.lock().await;
-                                        let final_scores = build_hybrid_scores(
-                                            &db,
-                                            &username,
-                                            threshold,
-                                            rgb_success_embed.as_ref().or(rgb_latest_embed.as_ref()),
-                                            ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
-                                        );
-                                        drop(db);
-                                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, final_scores, rgb_status, ir_status).await;
+                                        emit_verify_with_scores!(VerifyResult::VerifyNoMatch);
                                         break;
                                     }
                                 }
 
-                                let effective_status = if status_priority(rgb_status) >= status_priority(ir_status) {
-                                    rgb_status
-                                } else {
-                                    ir_status
-                                };
-
-                                if last_emitted_status.as_ref() != Some(&effective_status) {
-                                    let _ = Self::face_status(&ctxt, effective_status).await;
-                                    last_emitted_status = Some(effective_status);
-                                }
+                                Self::emit_effective_face_status(
+                                    &ctxt,
+                                    &mut last_emitted_status,
+                                    rgb_status,
+                                    ir_status,
+                                ).await;
 
                                 let both_dark = match (run_rgb, run_ir) {
                                     (true, true) => rgb_status == CaptureStatus::TooDark && ir_status == CaptureStatus::TooDark,
@@ -1273,50 +1332,7 @@ impl AuthDaemon {
                                     dark_since = None;
                                 }
 
-                                let policy = config.security.hybrid_policy();
-                                let auth_passed = match (run_rgb, run_ir) {
-                                    (true, true) => {
-                                        match policy {
-                                            "or" => rgb_success_embed.is_some() || ir_success_embed.is_some(),
-                                            "and" => rgb_success_embed.is_some() && ir_success_embed.is_some(),
-                                            "fallback_on_dark" => {
-                                                if !rgb_attempted {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                } else if rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace {
-                                                    ir_success_embed.is_some()
-                                                } else {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                }
-                                            }
-                                            _ => {
-                                                if !rgb_attempted {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                } else if rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace {
-                                                    ir_success_embed.is_some()
-                                                } else {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                }
-                                            }
-                                        }
-                                    }
-                                    (true, false) => rgb_success_embed.is_some(),
-                                    (false, true) => ir_success_embed.is_some(),
-                                    (false, false) => false,
-                                };
-
-                                if auth_passed {
-                                    stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                    let threshold = *threshold_arc.lock().await;
-                                    let db = db_arc.lock().await;
-                                    let final_scores = build_hybrid_scores(
-                                        &db,
-                                        &username,
-                                        threshold,
-                                        rgb_success_embed.as_ref().or(rgb_latest_embed.as_ref()),
-                                        ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
-                                    );
-                                    drop(db);
-                                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyMatch, final_scores, rgb_status, ir_status).await;
+                                if finish_if_auth_passed!() {
                                     break;
                                 }
                             }
@@ -1329,50 +1345,7 @@ impl AuthDaemon {
                                     Spectrum::Ir => ir_success_embed = Some(embedding),
                                 }
 
-                                let policy = config.security.hybrid_policy();
-                                let auth_passed = match (run_rgb, run_ir) {
-                                    (true, true) => {
-                                        match policy {
-                                            "or" => rgb_success_embed.is_some() || ir_success_embed.is_some(),
-                                            "and" => rgb_success_embed.is_some() && ir_success_embed.is_some(),
-                                            "fallback_on_dark" => {
-                                                if !rgb_attempted {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                } else if rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace {
-                                                    ir_success_embed.is_some()
-                                                } else {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                }
-                                            }
-                                            _ => {
-                                                if !rgb_attempted {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                } else if rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace {
-                                                    ir_success_embed.is_some()
-                                                } else {
-                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
-                                                }
-                                            }
-                                        }
-                                    }
-                                    (true, false) => rgb_success_embed.is_some(),
-                                    (false, true) => ir_success_embed.is_some(),
-                                    (false, false) => false,
-                                };
-
-                                if auth_passed {
-                                    stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                    let threshold = *threshold_arc.lock().await;
-                                    let db = db_arc.lock().await;
-                                    let final_scores = build_hybrid_scores(
-                                        &db,
-                                        &username,
-                                        threshold,
-                                        rgb_success_embed.as_ref().or(rgb_latest_embed.as_ref()),
-                                        ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
-                                    );
-                                    drop(db);
-                                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyMatch, final_scores, rgb_status, ir_status).await;
+                                if finish_if_auth_passed!() {
                                     break;
                                 }
                             }
@@ -1427,13 +1400,10 @@ impl AuthDaemon {
         let db_arc = self.db.clone();
 
         let config = Config::load_from(CONFIG_PATH).unwrap_or_default();
-        let rgb_device = resolve_rgb_source(&config.cameras).unwrap_or_default();
-        let ir_res = resolve_ir_source(&config.cameras);
-        let (ir_device, ir_node) = if let Some((src, node)) = ir_res {
-            (src, node)
-        } else {
-            (String::new(), String::new())
-        };
+        let sources = resolve_configured_sources(&config.cameras);
+        let rgb_device = sources.rgb;
+        let ir_device = sources.ir;
+        let ir_node = sources.ir_node;
         let emitter_enabled = config.cameras.emitter_enabled;
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
@@ -1539,36 +1509,8 @@ impl AuthDaemon {
                         let _ = tx.try_send(EnrollMsg::Status(current_step, Spectrum::Rgb, status));
 
                         if status == CaptureStatus::Usable && let Some(data) = result_opt {
-                            let is_stable = if let Some(prev_kps) = last_kpss.as_ref() {
-                                let cur_kps = &data.kpss;
-                                let delta: f32 = cur_kps.iter().zip(prev_kps.iter()).map(|(c, p)| (c - p).abs()).sum();
-                                let [x1, _, x2, _] = data.bbox;
-                                let face_w = x2 - x1;
-                                let norm_delta = delta / face_w;
-                                if norm_delta < 0.05 {
-                                    stable_frames += 1;
-                                } else {
-                                    stable_frames = 0;
-                                }
-                                last_kpss = Some(cur_kps.clone());
-                                stable_frames >= 3
-                            } else {
-                                last_kpss = Some(data.kpss.clone());
-                                false
-                            };
-
-                            let pose_matches = {
-                                let yaw = data.yaw;
-                                let pitch = data.pitch;
-                                match prompt {
-                                    EnrollPrompt::LookStraight => yaw.abs() < 0.16 && (pitch - 0.48).abs() < 0.18,
-                                    EnrollPrompt::LookUp => pitch < 0.35,
-                                    EnrollPrompt::LookDown => pitch > 0.55,
-                                    EnrollPrompt::LookLeft => yaw < -0.15,
-                                    EnrollPrompt::LookRight => yaw > 0.15,
-                                    _ => false,
-                                }
-                            };
+                            let is_stable = update_stability(&mut last_kpss, &mut stable_frames, &data);
+                            let pose_matches = enroll_pose_matches(prompt, data.yaw, data.pitch);
 
                             if is_stable && pose_matches {
                                 rgb_captured_for_step_clone.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1647,37 +1589,14 @@ impl AuthDaemon {
                         if status == CaptureStatus::Usable && let Some(data) = result_opt {
                             let is_stable = if run_rgb {
                                 rgb_captured_for_step_clone.load(std::sync::atomic::Ordering::Relaxed)
-                            } else if let Some(prev_kps) = last_kpss.as_ref() {
-                                let cur_kps = &data.kpss;
-                                let delta: f32 = cur_kps.iter().zip(prev_kps.iter()).map(|(c, p)| (c - p).abs()).sum();
-                                let [x1, _, x2, _] = data.bbox;
-                                let face_w = x2 - x1;
-                                let norm_delta = delta / face_w;
-                                if norm_delta < 0.05 {
-                                    stable_frames += 1;
-                                } else {
-                                    stable_frames = 0;
-                                }
-                                last_kpss = Some(cur_kps.clone());
-                                stable_frames >= 3
                             } else {
-                                last_kpss = Some(data.kpss.clone());
-                                false
+                                update_stability(&mut last_kpss, &mut stable_frames, &data)
                             };
 
                             let pose_matches = if run_rgb {
                                 rgb_captured_for_step_clone.load(std::sync::atomic::Ordering::Relaxed)
                             } else {
-                                let yaw = data.yaw;
-                                let pitch = data.pitch;
-                                match prompt {
-                                    EnrollPrompt::LookStraight => yaw.abs() < 0.16 && (pitch - 0.48).abs() < 0.18,
-                                    EnrollPrompt::LookUp => pitch < 0.35,
-                                    EnrollPrompt::LookDown => pitch > 0.55,
-                                    EnrollPrompt::LookLeft => yaw < -0.15,
-                                    EnrollPrompt::LookRight => yaw > 0.15,
-                                    _ => false,
-                                }
+                                enroll_pose_matches(prompt, data.yaw, data.pitch)
                             };
 
                             if is_stable && pose_matches {
@@ -1730,15 +1649,12 @@ impl AuthDaemon {
                                 let r_status = if has_rgb_for_step { CaptureStatus::NoFace } else { rgb_status };
                                 let i_status = if has_ir_for_step { CaptureStatus::NoFace } else { ir_status };
 
-                                let effective_status = if status_priority(r_status) >= status_priority(i_status) {
-                                    r_status
-                                } else {
-                                    i_status
-                                };
-                                if last_emitted_status.as_ref() != Some(&effective_status) {
-                                    let _ = Self::face_status(&ctxt, effective_status).await;
-                                    last_emitted_status = Some(effective_status);
-                                }
+                                Self::emit_effective_face_status(
+                                    &ctxt,
+                                    &mut last_emitted_status,
+                                    r_status,
+                                    i_status,
+                                ).await;
                             }
                             EnrollMsg::Captured(step, spectrum, embed) => {
                                 if step != completed_steps {
@@ -1758,15 +1674,12 @@ impl AuthDaemon {
                                 let r_status = if has_rgb_for_step { CaptureStatus::NoFace } else { rgb_status };
                                 let i_status = if has_ir_for_step { CaptureStatus::NoFace } else { ir_status };
 
-                                let effective_status = if status_priority(r_status) >= status_priority(i_status) {
-                                    r_status
-                                } else {
-                                    i_status
-                                };
-                                if last_emitted_status.as_ref() != Some(&effective_status) {
-                                    let _ = Self::face_status(&ctxt, effective_status).await;
-                                    last_emitted_status = Some(effective_status);
-                                }
+                                Self::emit_effective_face_status(
+                                    &ctxt,
+                                    &mut last_emitted_status,
+                                    r_status,
+                                    i_status,
+                                ).await;
 
                                 let step_done = match (run_rgb, run_ir) {
                                     (true, true) => has_rgb_for_step && has_ir_for_step,
@@ -1915,16 +1828,10 @@ impl AuthDaemon {
         let mut threshold = self.threshold.lock().await;
         *threshold = new_config.security.threshold();
 
-        let rgb_device = resolve_rgb_source(&new_config.cameras).unwrap_or_default();
-        let ir_res = resolve_ir_source(&new_config.cameras);
-        let (ir_device, ir_node) = if let Some((src, node)) = ir_res {
-            (src, node)
-        } else {
-            (String::new(), String::new())
-        };
-        *self.rgb_device.lock().await = rgb_device;
-        *self.ir_device.lock().await = ir_device;
-        *self.ir_node.lock().await = ir_node;
+        let sources = resolve_configured_sources(&new_config.cameras);
+        *self.rgb_device.lock().await = sources.rgb;
+        *self.ir_device.lock().await = sources.ir;
+        *self.ir_node.lock().await = sources.ir_node;
         *self.emitter_enabled.lock().await = new_config.cameras.emitter_enabled;
 
         let mut live_cfg = self.liveness_config.lock().await;

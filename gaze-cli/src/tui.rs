@@ -45,20 +45,12 @@ pub enum TuiAction {
     Decline,
 }
 
-/// Result of feeding a key action into the two-step "cancel?" confirmation gate.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ConfirmStep {
-    /// Keep looping. `confirm_cancel` may have been toggled in place.
     Continue,
-    /// The user confirmed cancellation; the caller should abort the loop.
     CancelConfirmed,
 }
 
-/// Apply a polled action to the cancel-confirmation state machine.
-///
-/// The first `Cancel` arms the prompt (`confirm_cancel = true`); a second `Cancel`
-/// or an explicit `Decline` disarms it; `Confirm` while armed cancels the operation.
-/// Any other action while disarmed is ignored here (it is handled elsewhere in the loop).
 pub fn apply_cancel_action(confirm_cancel: &mut bool, action: Option<TuiAction>) -> ConfirmStep {
     match action {
         Some(TuiAction::Cancel) if *confirm_cancel => *confirm_cancel = false,
@@ -570,7 +562,6 @@ mod tests {
             apply_cancel_action(&mut armed, Some(TuiAction::Confirm)),
             ConfirmStep::CancelConfirmed
         );
-        // State is left armed; the caller breaks out of the loop on CancelConfirmed.
         assert!(armed);
     }
 

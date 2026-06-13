@@ -24,7 +24,7 @@ fn warn_on_ir_misconfig(cameras: &gaze_core::config::CameraConfig) {
         }
         return;
     }
-    if let Some(node) = gaze_core::camera::resolve_node_for_source(ir) {
+    if let Some(node) = gaze_core::camera::resolve_node(ir) {
         if !std::path::Path::new(&node).exists() {
             warn!(
                 node = ir,
@@ -95,13 +95,7 @@ async fn main() -> anyhow::Result<()> {
 
     warn_on_ir_misconfig(&config.cameras);
 
-    let rgb_device = gaze_core::camera::resolve_rgb_source(&config.cameras).unwrap_or_default();
-    let ir_res = gaze_core::camera::resolve_ir_source(&config.cameras);
-    let (ir_device, ir_node) = if let Some((src, node)) = ir_res {
-        (src, node)
-    } else {
-        (String::new(), String::new())
-    };
+    let sources = gaze_core::camera::resolve_configured_sources(&config.cameras);
 
     let daemon = AuthDaemon {
         checker_rgb: Arc::new(Mutex::new(checker_rgb)),
@@ -111,9 +105,9 @@ async fn main() -> anyhow::Result<()> {
         liveness: Arc::new(Mutex::new(liveness_detector)),
         db: Arc::new(Mutex::new(db)),
         threshold: Arc::new(Mutex::new(security.threshold())),
-        rgb_device: Arc::new(Mutex::new(rgb_device)),
-        ir_device: Arc::new(Mutex::new(ir_device)),
-        ir_node: Arc::new(Mutex::new(ir_node)),
+        rgb_device: Arc::new(Mutex::new(sources.rgb)),
+        ir_device: Arc::new(Mutex::new(sources.ir)),
+        ir_node: Arc::new(Mutex::new(sources.ir_node)),
         emitter_enabled: Arc::new(Mutex::new(config.cameras.emitter_enabled)),
         liveness_config: Arc::new(Mutex::new(config.liveness.clone())),
         abort_if_ssh: Arc::new(Mutex::new(config.auth.abort_if_ssh)),

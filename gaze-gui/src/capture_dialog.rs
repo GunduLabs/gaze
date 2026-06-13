@@ -18,10 +18,6 @@ pub fn show_capture_dialog(
     is_ir: bool,
     on_done: impl Fn() + 'static,
 ) {
-    // IR cameras are driven straight off the device node by the daemon, which
-    // is the device's sole owner. Opening a second local preview stream here
-    // would fail with EBUSY (and the emitter is only lit during the daemon's own
-    // capture), so for IR we show a guidance-only overlay fed by daemon status.
     let feed = if is_ir {
         CameraFeed::new_guidance_only()
     } else {

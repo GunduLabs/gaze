@@ -83,7 +83,6 @@ impl IrProfile {
     }
 }
 
-/// Controls a camera's IR emitter LED over its UVC extension unit.
 pub struct IrLed {
     node: String,
     profile: IrProfile,
@@ -188,13 +187,6 @@ fn xu_ioctl(
 
 static PROBE_CACHE: OnceLock<Mutex<HashMap<String, Option<IrProfile>>>> = OnceLock::new();
 
-/// Resolve a runtime Face-Authentication profile for `node`, caching the result.
-///
-/// The probe opens the device and issues up to 31 ioctls, so it must not run on
-/// every authentication. A definitive result (a found profile, or a confirmed
-/// absence) is cached per device node. A transient failure (e.g. the device was
-/// busy) is not cached, so it can be retried on the next call. IPU6 cameras are
-/// not UVC and are never probed.
 fn cached_face_auth_profile(node: &str, vid: u16, pid: u16) -> Option<IrProfile> {
     let cache = PROBE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
@@ -207,7 +199,6 @@ fn cached_face_auth_profile(node: &str, vid: u16, pid: u16) -> Option<IrProfile>
         return None;
     }
 
-    // The probe does blocking device I/O; do not hold the lock across it.
     match probe_face_auth_profile(node, vid, pid) {
         Ok(result) => {
             cache

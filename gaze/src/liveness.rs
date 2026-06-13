@@ -30,9 +30,6 @@ impl LivenessDetector {
             for x in 0..size {
                 let p = scaled.get_pixel(x as u32, y as u32);
                 for c in 0..3 {
-                    // MiniFASNetV2 expects RGB channels in the raw 0-255 range.
-                    // Swapping to BGR or normalizing to [0, 1] collapses the live
-                    // score (a genuine face drops from ~0.9 to <0.01).
                     tensor[[0, c, y, x]] = p[c] as f32;
                 }
             }
@@ -112,12 +109,6 @@ pub fn crop_face(img: &RgbImage, bbox: [f32; 4]) -> anyhow::Result<RgbImage> {
     Ok(crop_imm(img, left, top, right - left + 1, bottom - top + 1).to_image())
 }
 
-/// Minimum eye movement, expressed as a fraction of the inter-eye distance, for a
-/// face to read as live. Normalizing by inter-eye distance (a proxy for face size)
-/// keeps the bar distance-invariant: a small/far face is allowed less absolute
-/// jitter, matching the face-width normalization the enrollment stability check
-/// already uses. A fixed pixel threshold instead let a small replayed screen read
-/// as "static" and risked false-rejecting a genuine but distant user.
 pub const MIN_EYE_MOTION_RATIO: f32 = 0.02;
 
 #[derive(Debug, Clone)]
@@ -143,9 +134,6 @@ pub fn eye_motion_is_live(landmarks: &[[(f32, f32); 5]], min_ratio: Option<f32>)
 
     let dist = |a: (f32, f32), b: (f32, f32)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
 
-    // Per consecutive frame pair: average left/right eye landmark motion, divided by
-    // the pair's mean inter-eye distance so the ratio does not change with face scale.
-    // Pairs with a degenerate (near-zero) inter-eye distance are dropped.
     let ratios: Vec<f32> = landmarks
         .windows(2)
         .filter_map(|pair| {
@@ -206,7 +194,6 @@ mod tests {
     fn pre_process_outputs_nchw_rgb_tensor_in_byte_range() {
         let img = RgbImage::from_pixel(80, 80, Rgb([64, 128, 255]));
         let tensor = LivenessDetector::pre_process(&img);
-        // RGB channel order, raw 0-255 byte values (the range the model expects).
         assert!((tensor[[0, 0, 0, 0]] - 64.0).abs() < 1e-5);
         assert!((tensor[[0, 1, 0, 0]] - 128.0).abs() < 1e-5);
         assert!((tensor[[0, 2, 0, 0]] - 255.0).abs() < 1e-5);
@@ -305,15 +292,12 @@ mod tests {
             eyes((100.0, 50.0), (140.0, 50.0)),
             eyes((100.0, 50.0), (143.0, 54.0)),
         ];
-        // Left eye still (0px), right eye moves 5px -> 2.5px average motion, divided by
-        // the mean inter-eye distance ((40 + 43.186)/2 = 41.593) -> ~0.0601.
         let motion = eye_motion_is_live(&seq, None);
         assert!((motion.motion_ratio - 0.0601).abs() < 1e-3);
     }
 
     #[test]
     fn caller_threshold_wins_over_default() {
-        // Motion ratio here is ~0.028 of the inter-eye distance.
         let seq = vec![
             eyes((100.0, 50.0), (140.0, 50.0)),
             eyes((101.0, 50.5), (141.0, 50.5)),

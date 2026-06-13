@@ -142,8 +142,7 @@ impl UserDatabase {
 
     fn write_embedding(path: &Path, embed: &Array1<f32>) -> anyhow::Result<()> {
         let embed_slice = embed.as_slice().expect("Failed to get embedding slice");
-        // Stored as raw native-endian f32s and read back the same way; templates are not
-        // portable across architectures with different endianness.
+        // Templates are not portable across architectures with different endianness.
         let bytes: &[u8] = unsafe {
             std::slice::from_raw_parts(
                 embed_slice.as_ptr() as *const u8,
@@ -454,8 +453,7 @@ impl UserDatabase {
                     .map(|ref_embed| embed.dot(ref_embed))
                     .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                     .unwrap_or(0.0);
-                // Sigmoid maps cosine similarity to a 0-100% display number, centered at 0.4
-                // (medium threshold) with slope 15 so values near the threshold spread out nicely.
+                // Center at 0.4 with slope 15 so values near the threshold spread out nicely.
                 let pct = 100.0 / (1.0 + (-15.0_f32 * (best - 0.4)).exp());
                 (
                     name.clone(),
@@ -770,26 +768,24 @@ mod tests {
         )
         .unwrap();
 
-        // When matching with RGB:
         let results_rgb = db
             .match_faces("alice", &embedding(&[1.0, 0.0]), 0.5, Spectrum::Rgb)
             .unwrap();
-        assert!(results_rgb[0].3); // matches RGB template (1.0 vs 1.0)
+        assert!(results_rgb[0].3);
 
         let results_rgb_wrong = db
             .match_faces("alice", &embedding(&[0.0, 1.0]), 0.5, Spectrum::Rgb)
             .unwrap();
-        assert!(!results_rgb_wrong[0].3); // does not match RGB template (0.0 vs 1.0)
+        assert!(!results_rgb_wrong[0].3);
 
-        // When matching with IR:
         let results_ir = db
             .match_faces("alice", &embedding(&[0.0, 1.0]), 0.5, Spectrum::Ir)
             .unwrap();
-        assert!(results_ir[0].3); // matches IR template (1.0 vs 1.0)
+        assert!(results_ir[0].3);
 
         let results_ir_wrong = db
             .match_faces("alice", &embedding(&[1.0, 0.0]), 0.5, Spectrum::Ir)
             .unwrap();
-        assert!(!results_ir_wrong[0].3); // does not match IR template (0.0 vs 1.0)
+        assert!(!results_ir_wrong[0].3);
     }
 }

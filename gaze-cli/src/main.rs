@@ -4,14 +4,15 @@ use clap::{Parser, Subcommand};
 use console::{Term, style};
 use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 use futures::StreamExt;
-use gaze_core::config::{Config, SecurityLevel};
+use gaze_core::config::{
+    Config, HYBRID_POLICY_OPTIONS, MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS, SecurityLevel,
+};
 use gaze_core::dbus::{
-    CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon,
+    CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon, connect_gaze,
     dbus_error_message, dbus_is_file_not_found, load_config_from_daemon,
 };
 use std::{future::Future, time::Duration};
 use tui::{AuthScreen, BusyScreen, EnrollScreen, Tone, TuiAction, TuiTerminal};
-use zbus::Connection;
 
 fn get_current_user() -> String {
     std::env::var("USER").unwrap_or_else(|_| "root".into())
@@ -20,7 +21,7 @@ fn get_current_user() -> String {
 fn capture_tone(status: CaptureStatus) -> Tone {
     match status {
         CaptureStatus::Ready | CaptureStatus::Usable => Tone::Good,
-        CaptureStatus::NoFace | CaptureStatus::Unused => Tone::Error,
+        CaptureStatus::Unused | CaptureStatus::NoFace => Tone::Error,
         CaptureStatus::TooDark
         | CaptureStatus::Clipped
         | CaptureStatus::NotCentered
@@ -122,7 +123,6 @@ enum Commands {
         #[arg(long, help = "Print current values and exit")]
         show: bool,
     },
-
     /// Completely uninstall Gaze: packages, PAM integration, config, models, and user data
     Uninstall {
         #[arg(short = 'y', long, help = "Skip the confirmation prompt")]
@@ -146,89 +146,61 @@ async fn run_config_wizard(
         style("Gaze Config Wizard").cyan().bold()
     ))?;
 
-    let level_options = ["low", "medium", "high", "maximum", "custom"];
-    let default_level_idx = match config.security.level.as_str() {
-        "low" => 0,
-        "medium" => 1,
-        "high" => 2,
-        "maximum" => 3,
-        "custom" => 4,
-        _ => 1,
-    };
-
     let selected = Select::with_theme(&theme)
         .with_prompt("Security level")
-        .items(level_options)
-        .default(default_level_idx)
+        .items(SECURITY_LEVEL_OPTIONS)
+        .default(config.security.level_index() as usize)
         .interact()?;
 
-    match selected {
-        0 => config.security = SecurityLevel::low(),
-        1 => config.security = SecurityLevel::medium(),
-        2 => config.security = SecurityLevel::high(),
-        3 => config.security = SecurityLevel::maximum(),
-        _ => {
-            let (old_detector, old_recognizer, old_threshold, old_hybrid_policy) =
-                if config.security.level == "custom" {
-                    (
-                        config.security.detector.clone(),
-                        config.security.recognizer.clone(),
-                        config.security.threshold,
-                        config.security.hybrid_policy.clone(),
-                    )
-                } else {
-                    (
-                        "accurate".to_string(),
-                        "accurate".to_string(),
-                        0.6,
-                        String::new(),
-                    )
-                };
-
-            let default_det_idx = if old_detector == "accurate" { 1 } else { 0 };
-            let detector_options = ["standard", "accurate"];
-            let selected_det_idx = Select::with_theme(&theme)
-                .with_prompt("Custom detector level")
-                .items(&detector_options)
-                .default(default_det_idx)
-                .interact()?;
-            let detector = detector_options[selected_det_idx].to_string();
-
-            let default_rec_idx = if old_recognizer == "accurate" { 1 } else { 0 };
-            let recognizer_options = ["standard", "accurate"];
-            let selected_rec_idx = Select::with_theme(&theme)
-                .with_prompt("Custom recognizer level")
-                .items(&recognizer_options)
-                .default(default_rec_idx)
-                .interact()?;
-            let recognizer = recognizer_options[selected_rec_idx].to_string();
-
-            let threshold = Input::with_theme(&theme)
-                .with_prompt("Custom threshold (0.0 - 1.0)")
-                .default(old_threshold.to_string())
-                .interact_text()?
-                .parse::<f64>()
-                .unwrap_or(0.6);
-
-            let hybrid_policy_options = ["default", "or", "fallback_on_dark", "and"];
-            let default_hybrid_idx = match old_hybrid_policy.as_str() {
-                "or" => 1,
-                "fallback_on_dark" => 2,
-                "and" => 3,
-                _ => 0,
-            };
-            let selected_hybrid_idx = Select::with_theme(&theme)
-                .with_prompt("Custom hybrid combining policy")
-                .items(hybrid_policy_options)
-                .default(default_hybrid_idx)
-                .interact()?;
-            let hybrid_policy = match selected_hybrid_idx {
-                0 => String::new(),
-                _ => hybrid_policy_options[selected_hybrid_idx].to_string(),
+    if let Some(level) = SecurityLevel::preset_from_index(selected) {
+        config.security = level;
+    } else {
+        let (old_detector, old_recognizer, old_threshold, old_hybrid_policy) =
+            if config.security.level == "custom" {
+                (
+                    config.security.detector.clone(),
+                    config.security.recognizer.clone(),
+                    config.security.threshold,
+                    config.security.hybrid_policy.clone(),
+                )
+            } else {
+                (
+                    "accurate".to_string(),
+                    "accurate".to_string(),
+                    0.6,
+                    String::new(),
+                )
             };
 
-            config.security = SecurityLevel::custom(detector, recognizer, threshold, hybrid_policy);
-        }
+        let selected_det_idx = Select::with_theme(&theme)
+            .with_prompt("Custom detector level")
+            .items(MODEL_QUALITY_OPTIONS)
+            .default(SecurityLevel::model_quality_index(&old_detector) as usize)
+            .interact()?;
+        let detector = SecurityLevel::model_quality_from_index(selected_det_idx).to_string();
+
+        let selected_rec_idx = Select::with_theme(&theme)
+            .with_prompt("Custom recognizer level")
+            .items(MODEL_QUALITY_OPTIONS)
+            .default(SecurityLevel::model_quality_index(&old_recognizer) as usize)
+            .interact()?;
+        let recognizer = SecurityLevel::model_quality_from_index(selected_rec_idx).to_string();
+
+        let threshold = Input::with_theme(&theme)
+            .with_prompt("Custom threshold (0.0 - 1.0)")
+            .default(old_threshold.to_string())
+            .interact_text()?
+            .parse::<f64>()
+            .unwrap_or(0.6);
+
+        let selected_hybrid_idx = Select::with_theme(&theme)
+            .with_prompt("Custom hybrid combining policy")
+            .items(HYBRID_POLICY_OPTIONS)
+            .default(SecurityLevel::hybrid_policy_index_for_value(&old_hybrid_policy) as usize)
+            .interact()?;
+        let hybrid_policy = SecurityLevel::hybrid_policy_from_index(selected_hybrid_idx);
+
+        config.security = SecurityLevel::custom(detector, recognizer, threshold, hybrid_policy);
     };
 
     let cameras = gaze_core::camera::enumerate_cameras().unwrap_or_default();
@@ -1107,8 +1079,7 @@ async fn main() -> anyhow::Result<()> {
         return handle_uninstall(yes, keep_data, dry_run);
     }
 
-    let conn = Connection::system().await?;
-    let proxy = GazeProxy::new(&conn).await?;
+    let proxy = connect_gaze().await?;
 
     match cli.command {
         Commands::Auth { user, verbose } => {
