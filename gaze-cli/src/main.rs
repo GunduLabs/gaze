@@ -19,7 +19,7 @@ fn get_current_user() -> String {
 
 fn capture_tone(status: CaptureStatus) -> Tone {
     match status {
-        CaptureStatus::Ready => Tone::Good,
+        CaptureStatus::Ready | CaptureStatus::Usable => Tone::Good,
         CaptureStatus::NoFace => Tone::Error,
         CaptureStatus::TooDark
         | CaptureStatus::Clipped
@@ -510,7 +510,7 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
                     let status = *args.status();
                     status_tone = capture_tone(status);
                     status_msg = match status {
-                        CaptureStatus::Ready => format!("Scanning face for {user}..."),
+                        CaptureStatus::Ready | CaptureStatus::Usable => format!("Scanning face for {user}..."),
                         _ => status.to_string(),
                     };
                 }

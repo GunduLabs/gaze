@@ -62,7 +62,7 @@ pub fn wait_for_capture_until(
         }
         let (status, result) = checker.capture_status(&frame, centering_required)?;
         match (status, result) {
-            (CaptureStatus::Ready, Some(result)) => return Ok(Some(result)),
+            (CaptureStatus::Usable, Some(result)) => return Ok(Some(result)),
             (CaptureStatus::NotCentered, Some(result)) if !centering_required => {
                 return Ok(Some(result));
             }

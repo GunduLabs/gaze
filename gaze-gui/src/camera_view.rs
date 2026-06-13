@@ -126,7 +126,7 @@ impl CameraFeed {
                     | CaptureStatus::Clipped
                     | CaptureStatus::TooFar
                     | CaptureStatus::TooClose => (1.0, 0.8, 0.2, 0.7),
-                    CaptureStatus::Ready => (0.2, 0.9, 0.4, 0.85),
+                    CaptureStatus::Ready | CaptureStatus::Usable => (0.2, 0.9, 0.4, 0.85),
                 }
             } else {
                 (0.6, 0.6, 0.6, 0.4)
@@ -174,7 +174,7 @@ impl CameraFeed {
                     CaptureStatus::Clipped => "Face Clipped",
                     CaptureStatus::TooFar => "Come Closer",
                     CaptureStatus::TooClose => "Back Up",
-                    CaptureStatus::Ready => "Ready",
+                    CaptureStatus::Ready | CaptureStatus::Usable => "Ready",
                 };
                 cr.set_font_size(min_dim * 0.035);
                 if let Ok(extents) = cr.text_extents(label) {

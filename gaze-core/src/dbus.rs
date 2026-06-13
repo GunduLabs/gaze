@@ -1,3 +1,4 @@
+#![allow(unreachable_patterns)]
 use crate::config::Config;
 use serde::{Deserialize, Serialize};
 use zbus::proxy;
@@ -5,6 +6,7 @@ use zbus::zvariant::Type;
 
 use strum_macros::{AsRefStr, Display, EnumString, VariantNames};
 
+#[allow(unreachable_patterns)]
 #[derive(
     Clone,
     Copy,
@@ -36,6 +38,8 @@ pub enum CaptureStatus {
     TooClose,
     #[strum(serialize = "Hold still...")]
     Ready,
+    #[strum(serialize = "Hold still...")]
+    Usable,
 }
 
 #[derive(
@@ -220,6 +224,7 @@ mod tests {
         );
         assert_eq!(CaptureStatus::TooDark.to_string(), "Need more light...");
         assert_eq!(CaptureStatus::Ready.to_string(), "Hold still...");
+        assert_eq!(CaptureStatus::Usable.to_string(), "Hold still...");
         assert_eq!(
             EnrollPrompt::LookLeft.to_string(),
             "Turn your face slightly left"
@@ -236,6 +241,14 @@ mod tests {
         assert_eq!(
             serde_plain::to_string(&CaptureStatus::TooDark).unwrap(),
             "too-dark"
+        );
+        assert_eq!(
+            serde_plain::to_string(&CaptureStatus::Ready).unwrap(),
+            "ready"
+        );
+        assert_eq!(
+            serde_plain::to_string(&CaptureStatus::Usable).unwrap(),
+            "usable"
         );
         assert_eq!(
             serde_plain::to_string(&EnrollPrompt::LookStraight).unwrap(),

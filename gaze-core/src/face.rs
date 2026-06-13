@@ -128,33 +128,6 @@ impl FaceChecker {
         let x2 = face[2];
         let y2 = face[3];
 
-        if let Spectrum::Rgb = spectrum {
-            let face_rect = clamp_bbox(frame, (x1, y1, x2, y2));
-            let face_roi = Mat::roi(frame, face_rect)?.try_clone()?;
-            let luma = frame_mean_luma(&face_roi).unwrap_or(0);
-
-            let history = &mut self.rgb_luma_history;
-            history.push_back(luma);
-            if history.len() > 5 {
-                history.pop_front();
-            }
-            let sum_luma: u32 = history.iter().map(|&v| v as u32).sum();
-            let avg_luma = sum_luma as f64 / history.len() as f64;
-            let threshold = self.dark_luma_threshold as f64;
-
-            // 1. Alert status: based on rolling average luma
-            let is_dark_alert = avg_luma < threshold;
-            if is_dark_alert {
-                return Ok((CaptureStatus::TooDark, None));
-            }
-
-            // 2. Capture qualification: the current frame itself must also be bright enough.
-            let is_current_frame_dark = (luma as f64) < threshold;
-            if is_current_frame_dark {
-                return Ok((CaptureStatus::NoFace, None));
-            }
-        }
-
         let max_dim = (frame.cols() as f32).max(frame.rows() as f32);
         let min_dim = (frame.cols() as f32).min(frame.rows() as f32);
         let edge_margin = 0.05;
@@ -203,7 +176,54 @@ impl FaceChecker {
         } else if kps.is_none() {
             return Ok((CaptureStatus::NoFace, None));
         } else {
-            CaptureStatus::Ready
+            let mut is_dark = false;
+            if let Spectrum::Rgb = spectrum {
+                let w = frame.cols() as f32;
+                let h = frame.rows() as f32;
+                let max_dim = w.max(h);
+                let top = (max_dim - h) / 2.0;
+                let left = (max_dim - w) / 2.0;
+
+                let x1_unpadded = x1 - left;
+                let y1_unpadded = y1 - top;
+                let x2_unpadded = x2 - left;
+                let y2_unpadded = y2 - top;
+
+                let face_rect =
+                    clamp_bbox(frame, (x1_unpadded, y1_unpadded, x2_unpadded, y2_unpadded));
+                if let Ok(face_roi) = Mat::roi(frame, face_rect).and_then(|r| r.try_clone()) {
+                    let luma = frame_mean_luma(&face_roi).unwrap_or(0);
+
+                    let history = &mut self.rgb_luma_history;
+                    history.push_back(luma);
+                    if history.len() > 5 {
+                        history.pop_front();
+                    }
+                    let sum_luma: u32 = history.iter().map(|&v| v as u32).sum();
+                    let avg_luma = sum_luma as f64 / history.len() as f64;
+                    let threshold = self.dark_luma_threshold as f64;
+
+                    tracing::info!(
+                        "is_dark_face: calculated mean luma = {}, threshold = {}",
+                        luma,
+                        self.dark_luma_threshold
+                    );
+
+                    let is_dark_alert = avg_luma < threshold;
+                    let is_current_frame_dark = (luma as f64) < threshold;
+                    if is_dark_alert || is_current_frame_dark {
+                        is_dark = true;
+                    }
+                } else {
+                    is_dark = true;
+                }
+            }
+
+            if is_dark {
+                CaptureStatus::Ready
+            } else {
+                CaptureStatus::Usable
+            }
         };
 
         Ok((
@@ -264,30 +284,6 @@ fn clamp_bbox(frame: &Mat, bbox: (f32, f32, f32, f32)) -> opencv::core::Rect {
     opencv::core::Rect::new(xi1, yi1, (xi2 - xi1).max(0), (yi2 - yi1).max(0))
 }
 
-pub fn is_dark_face(
-    frame: &Mat,
-    bbox: (f32, f32, f32, f32),
-    dark_luma_threshold: u8,
-) -> anyhow::Result<bool> {
-    let size = frame.size()?;
-    if size.width <= 0 || size.height <= 0 {
-        return Ok(true);
-    }
-    let rect = clamp_bbox(frame, bbox);
-    if rect.width <= 0 || rect.height <= 0 {
-        return Ok(true);
-    }
-    let patch = Mat::roi(frame, rect)?.try_clone()?;
-    let mean = frame_mean_luma(&patch)?;
-    Ok(mean < dark_luma_threshold)
-}
-
-pub fn is_dark_frame(frame: &Mat, dark_luma_threshold: u8) -> anyhow::Result<bool> {
-    let w = frame.cols() as f32;
-    let h = frame.rows() as f32;
-    is_dark_face(frame, (0.0, 0.0, w, h), dark_luma_threshold)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,7 +294,7 @@ mod tests {
         let frame =
             Mat::new_rows_cols_with_default(12, 12, core::CV_8UC3, Scalar::all(0.0)).unwrap();
 
-        assert!(is_dark_frame(&frame, 70).unwrap());
+        assert!(frame_mean_luma(&frame).unwrap() < 70);
     }
 
     #[test]
@@ -306,7 +302,7 @@ mod tests {
         let frame =
             Mat::new_rows_cols_with_default(12, 12, core::CV_8UC3, Scalar::all(120.0)).unwrap();
 
-        assert!(!is_dark_frame(&frame, 70).unwrap());
+        assert!(frame_mean_luma(&frame).unwrap() >= 70);
     }
 
     #[test]
@@ -315,8 +311,8 @@ mod tests {
         let frame =
             Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(50.0)).unwrap();
 
-        assert!(is_dark_frame(&frame, 51).unwrap());
-        assert!(!is_dark_frame(&frame, 50).unwrap());
+        assert!(frame_mean_luma(&frame).unwrap() < 51);
+        assert!(frame_mean_luma(&frame).unwrap() >= 50);
     }
 
     #[test]
@@ -327,23 +323,23 @@ mod tests {
         let blue =
             Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::new(255.0, 0.0, 0.0, 0.0))
                 .unwrap();
-        assert!(is_dark_frame(&blue, 30).unwrap());
+        assert!(frame_mean_luma(&blue).unwrap() < 30);
 
         // Pure green carries most of the luminance weight (~149) and is not dark.
         let green =
             Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::new(0.0, 255.0, 0.0, 0.0))
                 .unwrap();
-        assert!(!is_dark_frame(&green, 30).unwrap());
+        assert!(frame_mean_luma(&green).unwrap() >= 30);
     }
 
     #[test]
     fn single_channel_frames_use_raw_luminance() {
         // Grayscale frames take the non-BGR averaging branch.
         let dark = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC1, Scalar::all(5.0)).unwrap();
-        assert!(is_dark_frame(&dark, 70).unwrap());
+        assert!(frame_mean_luma(&dark).unwrap() < 70);
 
         let lit = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC1, Scalar::all(120.0)).unwrap();
-        assert!(!is_dark_frame(&lit, 70).unwrap());
+        assert!(frame_mean_luma(&lit).unwrap() >= 70);
     }
 
     #[test]
@@ -357,13 +353,13 @@ mod tests {
             top.set_to_def(&Scalar::all(255.0)).unwrap();
         }
         // One of eight rows bright => mean luma ~32, still dark at threshold 70.
-        assert!(is_dark_frame(&frame, 70).unwrap());
+        assert!(frame_mean_luma(&frame).unwrap() < 70);
     }
 
     #[test]
     fn empty_frame_is_treated_as_dark() {
         let frame = Mat::default();
-        assert!(is_dark_frame(&frame, 70).unwrap());
+        assert!(frame_mean_luma(&frame).unwrap_or(0) < 70);
     }
 
     #[test]

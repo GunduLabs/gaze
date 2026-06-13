@@ -154,7 +154,9 @@ impl Camera {
             source.to_string()
         };
 
-        let pipeline_str = format!("{src_element} ! videoconvert ! appsink name=gaze_sink");
+        let pipeline_str = format!(
+            "{src_element} ! video/x-raw; image/jpeg ! decodebin ! videoconvert ! videoscale ! appsink name=gaze_sink"
+        );
         info!("Attempting to open GStreamer camera: {}", pipeline_str);
 
         let pipeline = gstreamer::parse::launch(&pipeline_str)
@@ -170,6 +172,8 @@ impl Camera {
 
         let caps = gstreamer::Caps::builder("video/x-raw")
             .field("format", "BGR")
+            .field("width", 640)
+            .field("height", 480)
             .build();
         appsink.set_caps(Some(&caps));
 
