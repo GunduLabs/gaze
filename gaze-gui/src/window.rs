@@ -84,12 +84,16 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     level_row.set_model(Some(&level_model));
     security_group.add(&level_row);
 
-    let detector_row = libadwaita::EntryRow::new();
-    detector_row.set_title("Detector Model");
+    let detector_row = libadwaita::ComboRow::new();
+    detector_row.set_title("Detector Level");
+    let detector_model = gtk4::StringList::new(&["Standard", "Accurate"]);
+    detector_row.set_model(Some(&detector_model));
     security_group.add(&detector_row);
 
-    let recognizer_row = libadwaita::EntryRow::new();
-    recognizer_row.set_title("Recognizer Model");
+    let recognizer_row = libadwaita::ComboRow::new();
+    recognizer_row.set_title("Recognizer Level");
+    let recognizer_model = gtk4::StringList::new(&["Standard", "Accurate"]);
+    recognizer_row.set_model(Some(&recognizer_model));
     security_group.add(&recognizer_row);
 
     let threshold_row = libadwaita::SpinRow::with_range(0.0, 1.0, 0.01);
@@ -114,10 +118,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     hardware_group.add(&camera_row);
 
     let ir_cameras = gaze_core::camera::enumerate_ir_cameras().unwrap_or_default();
-    let mut ir_options = vec![
-        ("None".to_string(), String::new()),
-        ("Primary IR Camera".to_string(), "primary".to_string()),
-    ];
+    let mut ir_options = vec![("None".to_string(), String::new())];
     ir_options.extend(ir_cameras);
     let ir_names = ir_options
         .iter()
@@ -207,15 +208,25 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     require_confirm_row.add_suffix(&require_confirm_switch);
     auth_group.add(&require_confirm_row);
 
+    let hybrid_names = ["Default", "Or", "Fallback on Dark", "And"];
+    let hybrid_row = libadwaita::ComboRow::new();
+    hybrid_row.set_title("Hybrid combining policy");
+    hybrid_row.set_subtitle("Combining policy when both RGB and IR cameras are active");
+    let hybrid_model = gtk4::StringList::new(&hybrid_names);
+    hybrid_row.set_model(Some(&hybrid_model));
+    security_group.add(&hybrid_row);
+
     let update_custom_visibility =
         move |row: &libadwaita::ComboRow,
-              det: &libadwaita::EntryRow,
-              rec: &libadwaita::EntryRow,
-              thr: &libadwaita::SpinRow| {
+              det: &libadwaita::ComboRow,
+              rec: &libadwaita::ComboRow,
+              thr: &libadwaita::SpinRow,
+              hybrid: &libadwaita::ComboRow| {
             let is_custom = row.selected() == 4;
             det.set_visible(is_custom);
             rec.set_visible(is_custom);
             thr.set_visible(is_custom);
+            hybrid.set_visible(is_custom);
         };
 
     let update_liveness_visibility =
@@ -244,8 +255,16 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         recognizer_row,
         #[weak]
         threshold_row,
+        #[weak]
+        hybrid_row,
         move |row| {
-            update_custom_visibility(row, &detector_row, &recognizer_row, &threshold_row);
+            update_custom_visibility(
+                row,
+                &detector_row,
+                &recognizer_row,
+                &threshold_row,
+                &hybrid_row,
+            );
         }
     ));
 
@@ -277,6 +296,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         liveness_max_frames_row,
         #[weak]
+        hybrid_row,
+        #[weak]
         require_confirm_switch,
         #[weak]
         abort_ssh_switch,
@@ -296,16 +317,29 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             }
 
             let mut cfg = config.borrow_mut();
+            let hybrid_policy_options = ["default", "or", "fallback_on_dark", "and"];
+            let hybrid_idx = hybrid_row.selected() as usize;
+            let hybrid_policy = if hybrid_idx == 0 {
+                String::new()
+            } else {
+                hybrid_policy_options[hybrid_idx].to_string()
+            };
+
             match level_row.selected() {
                 0 => cfg.security = SecurityLevel::low(),
                 1 => cfg.security = SecurityLevel::medium(),
                 2 => cfg.security = SecurityLevel::high(),
                 3 => cfg.security = SecurityLevel::maximum(),
                 4 => {
+                    let det_idx = detector_row.selected();
+                    let det = if det_idx == 1 { "accurate" } else { "standard" };
+                    let rec_idx = recognizer_row.selected();
+                    let rec = if rec_idx == 1 { "accurate" } else { "standard" };
                     cfg.security = SecurityLevel::custom(
-                        detector_row.text().to_string(),
-                        recognizer_row.text().to_string(),
+                        det.to_string(),
+                        rec.to_string(),
                         threshold_row.value(),
+                        hybrid_policy,
                     );
                 }
                 _ => {}
@@ -376,18 +410,23 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         apply_changes,
         move |_| apply_changes()
     ));
-    detector_row.connect_apply(glib::clone!(
+    detector_row.connect_selected_notify(glib::clone!(
         #[strong]
         apply_changes,
         move |_| apply_changes()
     ));
-    recognizer_row.connect_apply(glib::clone!(
+    recognizer_row.connect_selected_notify(glib::clone!(
         #[strong]
         apply_changes,
         move |_| apply_changes()
     ));
 
     require_confirm_switch.connect_active_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    hybrid_row.connect_selected_notify(glib::clone!(
         #[strong]
         apply_changes,
         move |_| apply_changes()
@@ -445,23 +484,23 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             _ => 1,
         };
         level_row.set_selected(level_idx);
-        update_custom_visibility(&level_row, &detector_row, &recognizer_row, &threshold_row);
+        update_custom_visibility(
+            &level_row,
+            &detector_row,
+            &recognizer_row,
+            &threshold_row,
+            &hybrid_row,
+        );
 
-        let (det, rec, thr) = if cfg.security.level == "custom" {
-            (
-                cfg.security.detector.clone(),
-                cfg.security.recognizer.clone(),
-                cfg.security.threshold,
-            )
+        let thr = if cfg.security.level == "custom" {
+            cfg.security.threshold
         } else {
-            (
-                cfg.security.detector().to_string(),
-                cfg.security.recognizer().to_string(),
-                cfg.security.threshold() as f64,
-            )
+            cfg.security.threshold() as f64
         };
-        detector_row.set_text(&det);
-        recognizer_row.set_text(&rec);
+        let det_idx: u32 = if cfg.security.detector == "accurate" { 1 } else { 0 };
+        let rec_idx: u32 = if cfg.security.recognizer == "accurate" { 1 } else { 0 };
+        detector_row.set_selected(det_idx);
+        recognizer_row.set_selected(rec_idx);
         threshold_row.set_value(thr);
 
         let cam_idx = cameras
@@ -481,6 +520,13 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         liveness_threshold_row.set_value(cfg.liveness.threshold);
         liveness_max_frames_row.set_value(cfg.liveness.max_frames as f64);
         require_confirm_switch.set_active(cfg.auth.require_confirmation);
+        let hybrid_idx = match cfg.security.hybrid_policy.as_str() {
+            "or" => 1,
+            "fallback_on_dark" => 2,
+            "and" => 3,
+            _ => 0,
+        };
+        hybrid_row.set_selected(hybrid_idx);
         abort_ssh_switch.set_active(cfg.auth.abort_if_ssh);
         abort_lid_switch.set_active(cfg.auth.abort_if_lid_closed);
 
@@ -639,6 +685,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         require_confirm_switch,
         #[weak]
+        hybrid_row,
+        #[weak]
         abort_ssh_switch,
         #[weak]
         abort_lid_switch,
@@ -670,21 +718,15 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 };
                 level_row.set_selected(level_idx);
 
-                let (det, rec, thr) = if cfg.security.level == "custom" {
-                    (
-                        cfg.security.detector.clone(),
-                        cfg.security.recognizer.clone(),
-                        cfg.security.threshold,
-                    )
+                let thr = if cfg.security.level == "custom" {
+                    cfg.security.threshold
                 } else {
-                    (
-                        cfg.security.detector().to_string(),
-                        cfg.security.recognizer().to_string(),
-                        cfg.security.threshold() as f64,
-                    )
+                    cfg.security.threshold() as f64
                 };
-                detector_row.set_text(&det);
-                recognizer_row.set_text(&rec);
+                let det_idx: u32 = if cfg.security.detector == "accurate" { 1 } else { 0 };
+                let rec_idx: u32 = if cfg.security.recognizer == "accurate" { 1 } else { 0 };
+                detector_row.set_selected(det_idx);
+                recognizer_row.set_selected(rec_idx);
                 threshold_row.set_value(thr);
 
                 let cam_idx = cameras
@@ -704,6 +746,13 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 liveness_threshold_row.set_value(cfg.liveness.threshold);
                 liveness_max_frames_row.set_value(cfg.liveness.max_frames as f64);
                 require_confirm_switch.set_active(cfg.auth.require_confirmation);
+                let hybrid_idx = match cfg.security.hybrid_policy.as_str() {
+                    "or" => 1,
+                    "fallback_on_dark" => 2,
+                    "and" => 3,
+                    _ => 0,
+                };
+                hybrid_row.set_selected(hybrid_idx);
                 abort_ssh_switch.set_active(cfg.auth.abort_if_ssh);
                 abort_lid_switch.set_active(cfg.auth.abort_if_lid_closed);
 

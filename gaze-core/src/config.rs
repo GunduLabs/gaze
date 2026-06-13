@@ -24,6 +24,8 @@ pub struct SecurityLevel {
     pub recognizer: String,
     #[serde(default)]
     pub threshold: f64,
+    #[serde(default)]
+    pub hybrid_policy: String,
 }
 
 impl Default for SecurityLevel {
@@ -33,6 +35,7 @@ impl Default for SecurityLevel {
             detector: String::new(),
             recognizer: String::new(),
             threshold: 0.0,
+            hybrid_policy: String::new(),
         }
     }
 }
@@ -44,6 +47,7 @@ impl SecurityLevel {
             detector: String::new(),
             recognizer: String::new(),
             threshold: 0.0,
+            hybrid_policy: String::new(),
         }
     }
 
@@ -53,6 +57,7 @@ impl SecurityLevel {
             detector: String::new(),
             recognizer: String::new(),
             threshold: 0.0,
+            hybrid_policy: String::new(),
         }
     }
 
@@ -62,6 +67,7 @@ impl SecurityLevel {
             detector: String::new(),
             recognizer: String::new(),
             threshold: 0.0,
+            hybrid_policy: String::new(),
         }
     }
 
@@ -71,15 +77,22 @@ impl SecurityLevel {
             detector: String::new(),
             recognizer: String::new(),
             threshold: 0.0,
+            hybrid_policy: String::new(),
         }
     }
 
-    pub fn custom(detector: String, recognizer: String, threshold: f64) -> Self {
+    pub fn custom(
+        detector: String,
+        recognizer: String,
+        threshold: f64,
+        hybrid_policy: String,
+    ) -> Self {
         Self {
             level: "custom".to_string(),
             detector,
             recognizer,
             threshold,
+            hybrid_policy,
         }
     }
 
@@ -87,8 +100,12 @@ impl SecurityLevel {
         match self.level.as_str() {
             "low" | "medium" => "det_500m.onnx",
             "high" | "maximum" => "det_10g.onnx",
-            "custom" => &self.detector,
-            _ => "det_500m.onnx",
+            "custom" => match self.detector.as_str() {
+                "accurate" => "det_10g.onnx",
+                "standard" => "det_500m.onnx",
+                other => unreachable!("invalid detector level in config: {other:?}"),
+            },
+            _ => unreachable!("invalid security level in config: {:?}", self.level),
         }
     }
 
@@ -96,9 +113,32 @@ impl SecurityLevel {
         match self.level.as_str() {
             "low" | "medium" => "w600k_mbf.onnx",
             "high" | "maximum" => "w600k_r50.onnx",
-            "custom" => &self.recognizer,
-            _ => "w600k_mbf.onnx",
+            "custom" => match self.recognizer.as_str() {
+                "accurate" => "w600k_r50.onnx",
+                "standard" => "w600k_mbf.onnx",
+                other => unreachable!("invalid recognizer level in config: {other:?}"),
+            },
+            _ => unreachable!("invalid security level in config: {:?}", self.level),
         }
+    }
+
+    /// Validates custom-level fields. Called after TOML deserialization.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if self.level == "custom" {
+            match self.detector.as_str() {
+                "standard" | "accurate" => {}
+                other => anyhow::bail!(
+                    "invalid detector level {other:?}: expected \"standard\" or \"accurate\""
+                ),
+            }
+            match self.recognizer.as_str() {
+                "standard" | "accurate" => {}
+                other => anyhow::bail!(
+                    "invalid recognizer level {other:?}: expected \"standard\" or \"accurate\""
+                ),
+            }
+        }
+        Ok(())
     }
 
     pub fn threshold(&self) -> f32 {
@@ -109,6 +149,22 @@ impl SecurityLevel {
             "maximum" => 0.6,
             "custom" => self.threshold as f32,
             _ => 0.4,
+        }
+    }
+
+    pub fn hybrid_policy(&self) -> &str {
+        match self.level.as_str() {
+            "low" => "or",
+            "medium" | "high" => "fallback_on_dark",
+            "maximum" => "and",
+            "custom" => {
+                if self.hybrid_policy.is_empty() {
+                    "fallback_on_dark"
+                } else {
+                    &self.hybrid_policy
+                }
+            }
+            _ => "fallback_on_dark",
         }
     }
 }
@@ -175,7 +231,7 @@ fn default_rgb_device() -> String {
 }
 
 fn default_dark_luma_threshold() -> u8 {
-    70
+    30
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
@@ -186,8 +242,6 @@ pub struct AuthConfig {
     pub abort_if_lid_closed: bool,
     #[serde(default = "default_false")]
     pub require_confirmation: bool,
-    #[serde(default)]
-    pub hybrid_policy: String,
 }
 
 fn default_false() -> bool {
@@ -222,7 +276,6 @@ impl Default for AuthConfig {
             abort_if_ssh: true,
             abort_if_lid_closed: true,
             require_confirmation: false,
-            hybrid_policy: String::new(),
         }
     }
 }
@@ -247,6 +300,7 @@ impl Config {
         if Path::new(path).exists() {
             let contents = std::fs::read_to_string(path)?;
             let config: Config = toml::from_str(&contents)?;
+            config.security.validate()?;
             Ok(config)
         } else {
             Ok(Config::default())
@@ -291,19 +345,6 @@ impl Config {
         std::fs::rename(&tmp_path, path)
             .with_context(|| format!("failed to replace config file: {}", path.display()))?;
         Ok(())
-    }
-
-    pub fn hybrid_policy(&self) -> &str {
-        if !self.auth.hybrid_policy.is_empty() {
-            self.auth.hybrid_policy.as_str()
-        } else {
-            match self.security.level.as_str() {
-                "low" => "or",
-                "medium" | "high" => "fallback_on_dark",
-                "maximum" => "and",
-                _ => "fallback_on_dark",
-            }
-        }
     }
 }
 
@@ -370,13 +411,24 @@ mod tests {
         }
 
         let custom = SecurityLevel::custom(
-            "custom-det.onnx".to_string(),
-            "custom-rec.onnx".to_string(),
+            "accurate".to_string(),
+            "accurate".to_string(),
             0.73,
+            String::new(),
         );
-        assert_eq!(custom.detector(), "custom-det.onnx");
-        assert_eq!(custom.recognizer(), "custom-rec.onnx");
+        assert_eq!(custom.detector(), "det_10g.onnx");
+        assert_eq!(custom.recognizer(), "w600k_r50.onnx");
         assert!((custom.threshold() - 0.73).abs() < f32::EPSILON);
+
+        let custom_standard = SecurityLevel::custom(
+            "standard".to_string(),
+            "standard".to_string(),
+            0.35,
+            String::new(),
+        );
+        assert_eq!(custom_standard.detector(), "det_500m.onnx");
+        assert_eq!(custom_standard.recognizer(), "w600k_mbf.onnx");
+        assert!((custom_standard.threshold() - 0.35).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -390,7 +442,7 @@ mod tests {
             SecurityLevel::medium().detector()
         );
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
-        assert_eq!(config.cameras.dark_luma_threshold, 70);
+        assert_eq!(config.cameras.dark_luma_threshold, 30);
         assert!(config.auth.abort_if_ssh);
         assert!(config.auth.abort_if_lid_closed);
         assert_eq!(config.enrollment.max_templates, 2);
@@ -412,7 +464,6 @@ mod tests {
                 abort_if_ssh: true,
                 abort_if_lid_closed: false,
                 require_confirmation: true,
-                hybrid_policy: String::new(),
             },
             enrollment: EnrollmentConfig { max_templates: 8 },
             liveness: LivenessConfig {
@@ -442,7 +493,7 @@ mod tests {
         assert!(loaded.auth.require_confirmation);
         assert_eq!(loaded.enrollment.max_templates, 8);
         assert!(loaded.liveness.enabled);
-        assert!((loaded.liveness.threshold - 0.9).abs() < f64::EPSILON);
+        assert_eq!(loaded.liveness.threshold, 0.9);
         assert_eq!(loaded.liveness.max_frames, 25);
     }
 
@@ -490,7 +541,7 @@ mod tests {
             SecurityLevel::maximum().detector()
         );
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
-        assert_eq!(config.cameras.dark_luma_threshold, 70);
+        assert_eq!(config.cameras.dark_luma_threshold, 30);
         assert!(config.auth.abort_if_ssh);
         assert!(config.auth.abort_if_lid_closed);
         assert!(!config.auth.require_confirmation);
@@ -503,22 +554,23 @@ mod tests {
 
         // Test defaults based on security level when hybrid_policy is empty
         config.security.level = "low".to_string();
-        assert_eq!(config.hybrid_policy(), "or");
+        assert_eq!(config.security.hybrid_policy(), "or");
 
         config.security.level = "medium".to_string();
-        assert_eq!(config.hybrid_policy(), "fallback_on_dark");
+        assert_eq!(config.security.hybrid_policy(), "fallback_on_dark");
 
         config.security.level = "high".to_string();
-        assert_eq!(config.hybrid_policy(), "fallback_on_dark");
+        assert_eq!(config.security.hybrid_policy(), "fallback_on_dark");
 
         config.security.level = "maximum".to_string();
-        assert_eq!(config.hybrid_policy(), "and");
+        assert_eq!(config.security.hybrid_policy(), "and");
 
         config.security.level = "unknown".to_string();
-        assert_eq!(config.hybrid_policy(), "fallback_on_dark");
+        assert_eq!(config.security.hybrid_policy(), "fallback_on_dark");
 
-        // Test explicit override
-        config.auth.hybrid_policy = "custom_policy".to_string();
-        assert_eq!(config.hybrid_policy(), "custom_policy");
+        // Test explicit override under custom level
+        config.security.level = "custom".to_string();
+        config.security.hybrid_policy = "custom_policy".to_string();
+        assert_eq!(config.security.hybrid_policy(), "custom_policy");
     }
 }

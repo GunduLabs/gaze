@@ -14,15 +14,17 @@ level = "medium"
 
 # Custom level example:
 # level = "custom"
-# detector = "det_10g.onnx"
-# recognizer = "w600k_r50.onnx"
+# detector = "accurate"          # "standard" or "accurate"
+# recognizer = "accurate"        # "standard" or "accurate"
 # threshold = 0.45
+# hybrid_policy = "fallback_on_dark"  # optional; default, or, fallback_on_dark, and
 
 [cameras]
 rgb = "primary"
-# Infrared (Windows Hello) camera. Set to the IR /dev/video* node to authenticate
-# via infrared instead of the RGB camera. Run `gaze discover` to find the node.
-# ir = "/dev/video2"
+# Infrared (Windows Hello) camera. Set to the IR camera's GStreamer source string
+# (e.g. "pipewiresrc target-object=<pipewire-target>").
+# Direct /dev/video* paths are not supported.
+# ir = "pipewiresrc target-object=<pipewire-target>"
 # Drive the camera's IR emitter (turn the IR LED on during auth). Requires `ir`.
 # emitter_enabled = false
 # Reject frames whose mean brightness (0-255) is below this value as too dark.

@@ -15,17 +15,6 @@ pub fn resolve_ir_source(cameras: &CameraConfig) -> Option<(String, String)> {
     let ir = cameras.ir.trim();
     if ir.is_empty() {
         None
-    } else if ir == "primary" {
-        if let Ok(list) = enumerate_ir_cameras() {
-            if let Some((_name, source)) = list.into_iter().next() {
-                let node = resolve_node_for_source(&source).unwrap_or_default();
-                Some((source, node))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
     } else {
         let node = resolve_node_for_source(ir).unwrap_or_default();
         Some((ir.to_string(), node))
@@ -388,7 +377,7 @@ mod tests {
             rgb: "primary".to_string(),
             ir: String::new(),
             emitter_enabled: false,
-            dark_luma_threshold: 70,
+            dark_luma_threshold: 30,
         };
         let (source, kind) = resolve_source(&cameras);
         assert_eq!(source, "primary");
@@ -406,7 +395,7 @@ mod tests {
             rgb: "primary".to_string(),
             ir: "/dev/video2".to_string(),
             emitter_enabled: true,
-            dark_luma_threshold: 70,
+            dark_luma_threshold: 30,
         };
         let (source, kind) = resolve_source(&cameras);
         assert_eq!(source, "/dev/video2");
@@ -425,7 +414,7 @@ mod tests {
             rgb: "primary".to_string(),
             ir: "pipewiresrc target-object=device-name".to_string(),
             emitter_enabled: true,
-            dark_luma_threshold: 70,
+            dark_luma_threshold: 30,
         };
         let (source, kind) = resolve_source(&cameras);
         assert_eq!(source, "pipewiresrc target-object=device-name");

@@ -8,13 +8,12 @@ Launch it:
 gaze-gui
 ```
 
-## What you can do in the GUI
-
-- Enroll a new face profile
-- Test authentication with immediate pass/fail feedback
-- View and remove enrolled profiles
-- Configure daemon settings from the header-bar config button
-- Toggle GDM face auth 
+- **Enroll a new face profile**: Initiates a guided camera capture. If both RGB and IR cameras are configured, it captures from both.
+- **View enrolled profiles**: The main window lists enrolled faces with green/red `RGB` and `IR` badges indicating which capture types are active, along with the total template capture count.
+- **Refine profiles**: Tap the edit/refine icon on a profile to capture additional samples or add a missing spectrum (e.g. adding IR captures to an existing RGB-only face profile after configuring an IR camera).
+- **Test authentication**: Check Gaze's recognition with immediate pass/fail visual feedback.
+- **Remove profiles**: Delete specific face profiles.
+- **Configure daemon settings**: Change security levels, cameras, liveness settings, and hybrid policies.
 
 ## Configuration dialog
 

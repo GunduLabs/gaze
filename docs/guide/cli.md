@@ -54,7 +54,7 @@ Use separate profiles when your appearance changes often.
 gaze refine-face <name>
 ```
 
-Use this if recognition is inconsistent in dim light or side angles.
+Use this if recognition is inconsistent in dim light or side angles. This also captures and adds missing camera spectra (e.g. adding IR captures to an RGB-only face profile if an IR camera was configured after initial enrollment).
 
 ## List, rename, and remove
 
@@ -63,6 +63,8 @@ gaze list-faces
 gaze rename-face <old> <new>
 gaze remove-face <name>
 ```
+
+`gaze list-faces` prints all enrolled face profiles for the user, showing how many template captures each face has, and displaying `[RGB]` and `[IR]` status badges in green/red to indicate which camera spectrums are enrolled for that profile.
 
 ## Delete all faces for current user
 
@@ -99,15 +101,7 @@ Show-only mode:
 gaze config --show
 ```
 
-Prints all current config values (security level, detector and recognizer model, threshold, camera sources, emitter state, dark-frame threshold, auth behavior, enrollment limit, and liveness settings) without opening the editor.
-
-## List video devices
-
-```bash
-gaze discover
-```
-
-Lists `/dev/video*` devices with their USB VID:PID and whether an IR emitter profile is available. Useful for checking the IR emitter status when setting up [infrared authentication](/guide/configuration#infrared-ir-camera).
+Prints all current config values (security level, detector and recognizer model, threshold, camera sources, emitter state, dark-frame threshold, auth behavior, hybrid combining policy, enrollment limit, and liveness settings) without opening the editor.
 
 ## Manage another user
 

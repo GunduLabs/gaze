@@ -20,7 +20,7 @@ fn get_current_user() -> String {
 fn capture_tone(status: CaptureStatus) -> Tone {
     match status {
         CaptureStatus::Ready | CaptureStatus::Usable => Tone::Good,
-        CaptureStatus::NoFace => Tone::Error,
+        CaptureStatus::NoFace | CaptureStatus::Unused => Tone::Error,
         CaptureStatus::TooDark
         | CaptureStatus::Clipped
         | CaptureStatus::NotCentered
@@ -122,8 +122,7 @@ enum Commands {
         #[arg(long, help = "Print current values and exit")]
         show: bool,
     },
-    /// List video devices and their IR emitter profile status
-    Discover,
+
     /// Completely uninstall Gaze: packages, PAM integration, config, models, and user data
     Uninstall {
         #[arg(short = 'y', long, help = "Skip the confirmation prompt")]
@@ -169,30 +168,40 @@ async fn run_config_wizard(
         2 => config.security = SecurityLevel::high(),
         3 => config.security = SecurityLevel::maximum(),
         _ => {
-            let (old_detector, old_recognizer, old_threshold) = if config.security.level == "custom"
-            {
-                (
-                    config.security.detector.clone(),
-                    config.security.recognizer.clone(),
-                    config.security.threshold,
-                )
-            } else {
-                (
-                    "det_10g.onnx".to_string(),
-                    "w600k_r50.onnx".to_string(),
-                    0.6,
-                )
-            };
+            let (old_detector, old_recognizer, old_threshold, old_hybrid_policy) =
+                if config.security.level == "custom" {
+                    (
+                        config.security.detector.clone(),
+                        config.security.recognizer.clone(),
+                        config.security.threshold,
+                        config.security.hybrid_policy.clone(),
+                    )
+                } else {
+                    (
+                        "accurate".to_string(),
+                        "accurate".to_string(),
+                        0.6,
+                        String::new(),
+                    )
+                };
 
-            let detector = Input::with_theme(&theme)
-                .with_prompt("Custom detector model")
-                .default(old_detector)
-                .interact_text()?;
+            let default_det_idx = if old_detector == "accurate" { 1 } else { 0 };
+            let detector_options = ["standard", "accurate"];
+            let selected_det_idx = Select::with_theme(&theme)
+                .with_prompt("Custom detector level")
+                .items(&detector_options)
+                .default(default_det_idx)
+                .interact()?;
+            let detector = detector_options[selected_det_idx].to_string();
 
-            let recognizer = Input::with_theme(&theme)
-                .with_prompt("Custom recognizer model")
-                .default(old_recognizer)
-                .interact_text()?;
+            let default_rec_idx = if old_recognizer == "accurate" { 1 } else { 0 };
+            let recognizer_options = ["standard", "accurate"];
+            let selected_rec_idx = Select::with_theme(&theme)
+                .with_prompt("Custom recognizer level")
+                .items(&recognizer_options)
+                .default(default_rec_idx)
+                .interact()?;
+            let recognizer = recognizer_options[selected_rec_idx].to_string();
 
             let threshold = Input::with_theme(&theme)
                 .with_prompt("Custom threshold (0.0 - 1.0)")
@@ -201,7 +210,24 @@ async fn run_config_wizard(
                 .parse::<f64>()
                 .unwrap_or(0.6);
 
-            config.security = SecurityLevel::custom(detector, recognizer, threshold);
+            let hybrid_policy_options = ["default", "or", "fallback_on_dark", "and"];
+            let default_hybrid_idx = match old_hybrid_policy.as_str() {
+                "or" => 1,
+                "fallback_on_dark" => 2,
+                "and" => 3,
+                _ => 0,
+            };
+            let selected_hybrid_idx = Select::with_theme(&theme)
+                .with_prompt("Custom hybrid combining policy")
+                .items(hybrid_policy_options)
+                .default(default_hybrid_idx)
+                .interact()?;
+            let hybrid_policy = match selected_hybrid_idx {
+                0 => String::new(),
+                _ => hybrid_policy_options[selected_hybrid_idx].to_string(),
+            };
+
+            config.security = SecurityLevel::custom(detector, recognizer, threshold, hybrid_policy);
         }
     };
 
@@ -565,32 +591,12 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
                 );
             }
             println!();
-            let matched_rgb = faces.iter().any(|(_, _, _, rgb_p, _, _, _)| *rgb_p);
-            let matched_ir = faces.iter().any(|(_, _, _, _, _, _, ir_p)| *ir_p);
-
-            let rgb_display = if result == VerifyResult::VerifyMatch
-                && !matched_rgb
-                && rgb_status == CaptureStatus::NoFace
-            {
-                "Unused".to_string()
-            } else {
-                format!("{:?}", rgb_status)
-            };
-
-            let ir_display = if result == VerifyResult::VerifyMatch
-                && !matched_ir
-                && ir_status == CaptureStatus::NoFace
-            {
-                "Unused".to_string()
-            } else {
-                format!("{:?}", ir_status)
-            };
 
             println!(
                 "{} RGB: {} | IR: {}",
                 style("Status:").bold(),
-                style(rgb_display).cyan(),
-                style(ir_display).cyan()
+                style(format!("{:?}", rgb_status)).cyan(),
+                style(format!("{:?}", ir_status)).cyan()
             );
             println!();
         }
@@ -1101,10 +1107,6 @@ async fn main() -> anyhow::Result<()> {
         return handle_uninstall(yes, keep_data, dry_run);
     }
 
-    if let Commands::Discover = cli.command {
-        return handle_discover();
-    }
-
     let conn = Connection::system().await?;
     let proxy = GazeProxy::new(&conn).await?;
 
@@ -1150,6 +1152,15 @@ async fn main() -> anyhow::Result<()> {
                     style("security.threshold:").bold(),
                     config.security.threshold()
                 );
+                println!(
+                    "{} {}",
+                    style("security.hybrid_policy:").bold(),
+                    if config.security.hybrid_policy.is_empty() {
+                        format!("\"\" (resolved: {})", config.security.hybrid_policy())
+                    } else {
+                        config.security.hybrid_policy.clone()
+                    }
+                );
                 println!("{} {}", style("cameras.rgb:").bold(), config.cameras.rgb);
                 println!("{} {}", style("cameras.ir:").bold(), config.cameras.ir);
                 println!(
@@ -1177,6 +1188,7 @@ async fn main() -> anyhow::Result<()> {
                     style("auth.require_confirmation:").bold(),
                     config.auth.require_confirmation
                 );
+
                 println!(
                     "{} {}",
                     style("enrollment.max_templates:").bold(),
@@ -1201,56 +1213,9 @@ async fn main() -> anyhow::Result<()> {
             }
             run_config_wizard(&Term::stdout(), &proxy, config).await?;
         }
-        Commands::Discover => unreachable!("handled before DBus connection"),
+
         Commands::Uninstall { .. } => unreachable!("handled before DBus connection"),
     }
 
-    Ok(())
-}
-
-fn handle_discover() -> anyhow::Result<()> {
-    use gaze_core::ir::devices::{CameraBus, camera_bus, find_device, usb_ids_of};
-
-    let configured_ir = Config::load()
-        .map(|c| c.cameras.ir.trim().to_string())
-        .unwrap_or_default();
-
-    let mut nodes: Vec<String> = std::fs::read_dir("/dev")
-        .map(|entries| {
-            entries
-                .filter_map(|e| e.ok())
-                .filter_map(|e| e.path().to_str().map(str::to_string))
-                .filter(|p| p.starts_with("/dev/video"))
-                .collect()
-        })
-        .unwrap_or_default();
-    nodes.sort();
-
-    if nodes.is_empty() {
-        println!("No /dev/video* devices found.");
-        return Ok(());
-    }
-
-    for node in nodes {
-        let mut line = node.clone();
-        match usb_ids_of(&node) {
-            Some((vid, pid)) => {
-                line += &format!("  vid={vid:#06x} pid={pid:#06x}");
-                match find_device(vid, pid) {
-                    Some(dev) => line += &format!("  emitter: {} \u{2713}", dev.name),
-                    None => line += "  no emitter profile",
-                }
-            }
-            None => line += "  (no USB id)",
-        }
-        if camera_bus(&node) == CameraBus::Ipu6 {
-            line += "  [IPU6 \u{2014} not UVC, IR emitter unsupported]";
-        }
-        let resolved_ir = gaze_core::camera::resolve_node_for_source(&configured_ir);
-        if resolved_ir.as_ref() == Some(&node) {
-            line += "  \u{2190} configured (cameras.ir)";
-        }
-        println!("{line}");
-    }
     Ok(())
 }

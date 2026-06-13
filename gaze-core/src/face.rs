@@ -68,7 +68,7 @@ impl FaceChecker {
     pub fn from_detector(detector: FaceDetector) -> Self {
         Self {
             detector,
-            dark_luma_threshold: 70,
+            dark_luma_threshold: 30,
             rgb_luma_history: std::collections::VecDeque::new(),
         }
     }
@@ -176,7 +176,6 @@ impl FaceChecker {
         } else if kps.is_none() {
             return Ok((CaptureStatus::NoFace, None));
         } else {
-            let mut is_dark = false;
             if let Spectrum::Rgb = spectrum {
                 let w = frame.cols() as f32;
                 let h = frame.rows() as f32;
@@ -203,24 +202,21 @@ impl FaceChecker {
                     let avg_luma = sum_luma as f64 / history.len() as f64;
                     let threshold = self.dark_luma_threshold as f64;
 
-                    tracing::info!(
-                        "is_dark_face: calculated mean luma = {}, threshold = {}",
-                        luma,
-                        self.dark_luma_threshold
-                    );
-
-                    let is_dark_alert = avg_luma < threshold;
                     let is_current_frame_dark = (luma as f64) < threshold;
-                    if is_dark_alert || is_current_frame_dark {
-                        is_dark = true;
+                    let is_avg_dark = avg_luma < threshold;
+
+                    tracing::info!("luma: {} avg_luma: {}", luma, avg_luma);
+
+                    if !is_current_frame_dark {
+                        CaptureStatus::Usable
+                    } else if is_avg_dark {
+                        CaptureStatus::TooDark
+                    } else {
+                        CaptureStatus::Ready
                     }
                 } else {
-                    is_dark = true;
+                    CaptureStatus::TooDark
                 }
-            }
-
-            if is_dark {
-                CaptureStatus::Ready
             } else {
                 CaptureStatus::Usable
             }
@@ -365,9 +361,9 @@ mod tests {
     #[test]
     fn ir_camera_relaxes_dark_threshold_without_raising_it() {
         let mut config = crate::config::Config::default();
-        config.cameras.dark_luma_threshold = 70;
+        config.cameras.dark_luma_threshold = 30;
 
-        assert_eq!(effective_dark_luma_threshold(&config), 70);
+        assert_eq!(effective_dark_luma_threshold(&config), 30);
 
         config.cameras.ir = "pipewiresrc target-object=some-ir-camera".to_string();
         assert_eq!(effective_dark_luma_threshold(&config), 25);

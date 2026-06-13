@@ -24,6 +24,8 @@ use strum_macros::{AsRefStr, Display, EnumString, VariantNames};
 #[zvariant(signature = "s")]
 #[serde(rename_all = "kebab-case")]
 pub enum CaptureStatus {
+    #[strum(serialize = "Camera is not in use...")]
+    Unused,
     #[strum(serialize = "Please look at the camera...")]
     NoFace,
     #[strum(serialize = "Need more light...")]

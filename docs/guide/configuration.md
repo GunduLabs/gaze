@@ -12,9 +12,9 @@ level = "medium"
 
 [cameras]
 rgb = "primary"
-# ir = "/dev/video2"        # optional infrared camera
+# ir = "pipewiresrc target-object=<pipewire-target>" # optional infrared camera GStreamer source
 # emitter_enabled = false   # drive the IR emitter (requires ir)
-dark_luma_threshold = 70
+dark_luma_threshold = 30
 
 [auth]
 abort_if_ssh = true
@@ -34,13 +34,12 @@ max_frames = 40
 
 `level` (under `[security]`) controls model choice and match strictness.
 
-| Level | Detector | Recognizer | Threshold | Notes |
-|---|---|---|---|---|
-| `low` | SCRFD-500M | MobileFaceNet | 0.30 | Fastest |
-| `medium` | SCRFD-500M | MobileFaceNet | 0.40 | Default |
-| `high` | SCRFD-10G | ResNet50 | 0.50 | More accurate |
-| `maximum` | SCRFD-10G | ResNet50 | 0.60 | Most strict |
-| `custom` | n/a | n/a | n/a | See below |
+| Level | Detector | Recognizer | Threshold | Hybrid Policy | Notes |
+|---|---|---|---|---|---|
+| `low` | SCRFD-500M | MobileFaceNet | 0.30 | `or` | Fastest |
+| `medium` | SCRFD-500M | MobileFaceNet | 0.40 | `fallback_on_dark` | Default |
+| `high` | SCRFD-10G | ResNet50 | 0.50 | `fallback_on_dark` | More accurate |
+| `maximum` | SCRFD-10G | ResNet50 | 0.60 | `and` | Most strict |
 
 Practical guidance:
 
@@ -53,10 +52,21 @@ Practical guidance:
 ```toml
 [security]
 level = "custom"
-detector = "det_10g.onnx"
-recognizer = "w600k_r50.onnx"
+detector = "accurate"   # "standard" or "accurate"
+recognizer = "accurate" # "standard" or "accurate"
 threshold = 0.55
+hybrid_policy = "or"    # optional; default, or, fallback_on_dark, and
 ```
+
+### Hybrid combining policy
+
+`hybrid_policy` (under `[security]`, only configurable when `level = "custom"`) controls how RGB and IR (infrared) authentication results are combined when templates are enrolled for both modes and both cameras are available.
+
+Supported policies:
+- `default`: uses the policy shown in the table above for the active level.
+- `or`: auth succeeds if either RGB or IR matches.
+- `fallback_on_dark`: requires both, unless RGB is too dark (below `dark_luma_threshold`), in which case only IR is required.
+- `and`: auth succeeds only if both RGB and IR match.
 
 ## Select Camera Source
 
@@ -82,14 +92,14 @@ Gaze rejects frames that are too dark before running face detection:
 
 ```toml
 [cameras]
-dark_luma_threshold = 70
+dark_luma_threshold = 30
 ```
 
-With the default, a frame is skipped when its mean luminance (0-255, BT.601 weighted) falls below 70. Raise it to reject dimmer scenes, lower it to be more permissive.
+With the default, a frame is skipped when its mean luminance (0-255, BT.601 weighted) falls below 30. Raise it to reject dimmer scenes, lower it to be more permissive.
 
 ## Infrared (IR) camera
 
-Gaze can authenticate through a Windows Hello-style infrared camera instead of the RGB webcam. Point `ir` to the IR camera's GStreamer/PipeWire source string (just like the RGB camera):
+Gaze supports Windows Hello-style infrared (IR) cameras to enable multi-camera hybrid authentication. Point `ir` to the IR camera's GStreamer/PipeWire source string (just like the RGB camera):
 
 ```toml
 [cameras]
@@ -97,19 +107,15 @@ ir = "pipewiresrc target-object=<pipewire-target>"
 emitter_enabled = false
 ```
 
-When `ir` is set, Gaze captures from that source (through PipeWire) for both enrollment and verification, and `rgb` is ignored. Use `gaze discover` to list video devices, check if their emitter profiles are supported, and see which node is configured:
+Direct `/dev/video*` node paths are not supported for configuration; instead, Gaze always resolves the corresponding PipeWire/GStreamer target.
 
-```
-$ gaze discover
-/dev/video0  vid=0x04f2 pid=0xb604  no emitter profile
-/dev/video2  vid=0x04f2 pid=0xb615  emitter: Chicony Integrated IR Camera ✓  ← configured (cameras.ir)
-```
+When `ir` is configured, Gaze captures from both the RGB and IR cameras. During enrollment, both cameras will capture templates, and during verification, they will authenticate in parallel, combining results according to the configured `hybrid_policy`.
 
 ### IR emitter blaster
 
 Many IR cameras automatically light their infrared LED when streaming starts. If yours does not, set `emitter_enabled = true` to manually drive the emitter during authentication.
 
-Gaze resolves the underlying `/dev/video*` node from the PipeWire camera, matches it by USB VID:PID against a small built-in table, and also probes at runtime for the standard Microsoft Face Authentication control to send UVC toggle requests. If `gaze discover` reports "no emitter profile" and the emitter does not light even with `emitter_enabled = true`, the camera needs a profile added under `gaze-core/ir-profiles/`.
+Gaze resolves the underlying `/dev/video*` node from the PipeWire camera, matches it by USB VID:PID against a small built-in table, and also probes at runtime for the standard Microsoft Face Authentication control to send UVC toggle requests. If the emitter does not light even with `emitter_enabled = true`, the camera may need a profile added under `gaze-core/ir-profiles/`.
 
 On the IR path, liveness uses eye-motion analysis across frames; the RGB MiniFASNet model is not applied to infrared.
 
@@ -163,6 +169,23 @@ max_templates = 2
 ```
 
 Increase this if auth is unreliable in varied lighting.
+
+### Multi-Camera & Hybrid Enrollment
+
+Gaze supports enrolling face profiles for both RGB and IR cameras. Depending on your camera configuration at the time of enrollment:
+
+- **Single Camera Setup**: If only the RGB camera is configured (the default), Gaze will capture and save templates only for the RGB spectrum.
+- **Dual Camera (Hybrid) Setup**: If both the RGB and IR cameras are configured, Gaze will capture from both cameras concurrently. Each enrollment step will wait for valid aligned frames from both sensors.
+
+### Upgrading Existing Profiles
+
+If you connect or configure an IR camera after you have already enrolled a face, your existing face profiles will only contain RGB captures. 
+- You can see which capture types exist for each face profile in the CLI (`gaze list-faces`) and the GUI settings window, which display `[RGB]` and `[IR]` status badges.
+- To add the missing IR captures to an existing profile, ensure your IR camera is configured, and run:
+  ```bash
+  gaze refine-face <profile-name>
+  ```
+  Or refine the profile using the GUI. Gaze will run the camera stream to capture the missing spectrum and merge the new templates into your existing profile.
 
 ## Liveness Anti-Spoofing
 

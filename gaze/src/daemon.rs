@@ -646,7 +646,7 @@ fn status_priority(status: CaptureStatus) -> u32 {
         | CaptureStatus::TooClose
         | CaptureStatus::Clipped => 3,
         CaptureStatus::TooDark => 2,
-        CaptureStatus::NoFace => 1,
+        CaptureStatus::NoFace | CaptureStatus::Unused => 1,
     }
 }
 
@@ -1026,37 +1026,10 @@ impl AuthDaemon {
 
                     let mut live_scores: Vec<f32> = Vec::new();
                     let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
-                    let mut saved_count = 0;
 
                     for frame in &mut cam {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
                             break;
-                        }
-
-                        if saved_count < 30 {
-                            use opencv::prelude::*;
-                            let mut rgb_mat = opencv::core::Mat::default();
-                            if opencv::imgproc::cvt_color_def(&frame, &mut rgb_mat, opencv::imgproc::COLOR_BGR2RGB).is_ok()
-                                && let Ok(sz) = rgb_mat.size()
-                            {
-                                let total_bytes = (sz.width * sz.height * 3) as usize;
-                                let mut img_bytes = vec![0u8; total_bytes];
-                                unsafe {
-                                    std::ptr::copy_nonoverlapping(rgb_mat.data(), img_bytes.as_mut_ptr(), total_bytes);
-                                }
-                                if let Some(img) = image::RgbImage::from_raw(sz.width as u32, sz.height as u32, img_bytes) {
-                                    let path = format!("/etc/gaze/gaze_rgb_{saved_count}.png");
-                                    match img.save(&path) {
-                                        Ok(_) => {
-                                            tracing::info!("Saved RGB capture frame to {}", path);
-                                            saved_count += 1;
-                                        }
-                                        Err(e) => {
-                                            tracing::error!("Failed to save RGB capture frame to {}: {}", path, e);
-                                        }
-                                    }
-                                }
-                            }
                         }
 
                         let (status, embed_opt) = {
@@ -1207,8 +1180,8 @@ impl AuthDaemon {
             }
 
             let mut last_emitted_status: Option<CaptureStatus> = None;
-            let mut rgb_status = CaptureStatus::NoFace;
-            let mut ir_status = CaptureStatus::NoFace;
+            let mut rgb_status = CaptureStatus::Unused;
+            let mut ir_status = CaptureStatus::Unused;
             let mut rgb_attempted = false;
             let mut dark_since: Option<Instant> = None;
             let mut frames_seen: u32 = 0;
@@ -1300,7 +1273,7 @@ impl AuthDaemon {
                                     dark_since = None;
                                 }
 
-                                let policy = config.hybrid_policy();
+                                let policy = config.security.hybrid_policy();
                                 let auth_passed = match (run_rgb, run_ir) {
                                     (true, true) => {
                                         match policy {
@@ -1356,7 +1329,7 @@ impl AuthDaemon {
                                     Spectrum::Ir => ir_success_embed = Some(embedding),
                                 }
 
-                                let policy = config.hybrid_policy();
+                                let policy = config.security.hybrid_policy();
                                 let auth_passed = match (run_rgb, run_ir) {
                                     (true, true) => {
                                         match policy {

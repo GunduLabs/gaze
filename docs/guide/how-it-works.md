@@ -28,7 +28,7 @@ High level:
 2. Detector finds a face and facial landmarks.
 3. Face is aligned into a standard input shape.
 4. Recognition model creates an embedding vector.
-5. Embedding is compared against your enrolled profiles.
+5. Embedding is compared against your enrolled profiles. When both RGB and IR cameras are active, authentication results are combined based on the configured hybrid combining policy (e.g. requiring both to match, either to match, or dynamically falling back to IR in dark scenes).
 6. If liveness is enabled, a MiniFASNet-V2 anti-spoofing model checks the detected face crop (on the IR camera path, an eye-motion check across frames is used instead).
 
 If best similarity passes threshold and the liveness score passes threshold, auth succeeds.
