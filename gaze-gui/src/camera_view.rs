@@ -47,11 +47,10 @@ impl CameraFeed {
                 }
             };
 
-            while !stop_clone.load(Ordering::Relaxed) {
-                let Ok(frame) = cam.capture_frame() else {
-                    thread::sleep(std::time::Duration::from_millis(33));
-                    continue;
-                };
+            for frame in &mut cam {
+                if stop_clone.load(Ordering::Relaxed) {
+                    break;
+                }
 
                 let Ok(bytes) = frame_to_bytes(&frame) else {
                     continue;
@@ -78,7 +77,6 @@ impl CameraFeed {
                     Err(TrySendError::Full(_)) => {}
                     Err(TrySendError::Disconnected(_)) => break,
                 }
-                thread::sleep(std::time::Duration::from_millis(33));
             }
         });
 

@@ -1034,14 +1034,10 @@ impl AuthDaemon {
                     let mut live_scores: Vec<f32> = Vec::new();
                     let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
 
-                    while !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                        let frame = match cam.capture_frame() {
-                            Ok(f) => f,
-                            Err(_) => {
-                                std::thread::sleep(Duration::from_millis(33));
-                                continue;
-                            }
-                        };
+                    for frame in &mut cam {
+                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                            break;
+                        }
 
                         let is_dark = gaze_core::face::is_dark_frame(&frame, rgb_dark_threshold).unwrap_or(true);
                         let (mut status, mut embed_opt) = if is_dark {
@@ -1113,8 +1109,6 @@ impl AuthDaemon {
                                 }
                             }
                         }
-
-                        std::thread::sleep(Duration::from_millis(33));
                     }
                 }));
             }
@@ -1148,14 +1142,10 @@ impl AuthDaemon {
 
                     let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
 
-                    while !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                        let frame = match cam.capture_frame() {
-                            Ok(f) => f,
-                            Err(_) => {
-                                std::thread::sleep(Duration::from_millis(33));
-                                continue;
-                            }
-                        };
+                    for frame in &mut cam {
+                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                            break;
+                        }
 
                         let (status, embed_opt) = {
                             let mut checker = checker_ir_arc.blocking_lock();
@@ -1198,8 +1188,6 @@ impl AuthDaemon {
                                 }
                             }
                         }
-
-                        std::thread::sleep(Duration::from_millis(33));
                     }
                 }));
             }
@@ -1497,7 +1485,10 @@ impl AuthDaemon {
                     let mut stable_frames = 0;
                     let mut last_kpss: Option<ndarray::Array3<f32>> = None;
 
-                    while !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    for frame in &mut cam {
+                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                            break;
+                        }
                         let current_step = completed_steps_clone.load(std::sync::atomic::Ordering::Relaxed) as usize;
                         if current_step >= max_steps as usize {
                             break;
@@ -1516,14 +1507,6 @@ impl AuthDaemon {
                         }
 
                         let prompt = prompts[current_step];
-
-                        let frame = match cam.capture_frame() {
-                            Ok(f) => f,
-                            Err(_) => {
-                                std::thread::sleep(Duration::from_millis(33));
-                                continue;
-                            }
-                        };
 
                         let (status, result_opt) = {
                             let mut checker = checker_rgb_arc.blocking_lock();
@@ -1578,8 +1561,6 @@ impl AuthDaemon {
                                 }
                             }
                         }
-
-                        std::thread::sleep(Duration::from_millis(33));
                     }
                 }));
             }
@@ -1614,7 +1595,10 @@ impl AuthDaemon {
                     let mut stable_frames = 0;
                     let mut last_kpss: Option<ndarray::Array3<f32>> = None;
 
-                    while !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    for frame in &mut cam {
+                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                            break;
+                        }
                         let current_step = completed_steps_clone.load(std::sync::atomic::Ordering::Relaxed) as usize;
                         if current_step >= max_steps as usize {
                             break;
@@ -1633,14 +1617,6 @@ impl AuthDaemon {
                         }
 
                         let prompt = prompts[current_step];
-
-                        let frame = match cam.capture_frame() {
-                            Ok(f) => f,
-                            Err(_) => {
-                                std::thread::sleep(Duration::from_millis(33));
-                                continue;
-                            }
-                        };
 
                         let (status, result_opt) = {
                             let mut checker = checker_ir_arc.blocking_lock();
@@ -1694,8 +1670,6 @@ impl AuthDaemon {
                                 captured_for_step = true;
                             }
                         }
-
-                        std::thread::sleep(Duration::from_millis(33));
                     }
                 }));
             }

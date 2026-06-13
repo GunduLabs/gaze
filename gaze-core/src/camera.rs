@@ -1,7 +1,6 @@
 use gstreamer::prelude::*;
 use opencv::core::Mat;
 use opencv::prelude::*;
-use opencv::videoio::{CAP_GSTREAMER, VideoCapture};
 use tracing::info;
 
 use crate::config::{CameraConfig, DEFAULT_RGB_CAMERA};
@@ -116,7 +115,17 @@ const PRIMARY_CAMERA_DISPLAY_NAME: &str = "Primary Camera";
 const DEVICE_SETTLE_TIMEOUT_MS: u64 = 100;
 
 pub struct Camera {
-    cap: VideoCapture,
+    pipeline: gstreamer::Pipeline,
+    appsink: gstreamer_app::AppSink,
+}
+
+impl Drop for Camera {
+    fn drop(&mut self) {
+        let _ = self.pipeline.set_state(gstreamer::State::Null);
+        let _ = self
+            .pipeline
+            .state(Some(gstreamer::ClockTime::from_seconds(2)));
+    }
 }
 
 pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
@@ -131,37 +140,112 @@ pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
 
 impl Camera {
     pub fn open(camera_source: &str) -> anyhow::Result<Self> {
+        gstreamer::init()?;
         let source = camera_source.trim();
-        let p = if source.is_empty() {
+        let src_element = if source.is_empty() {
             anyhow::bail!("camera source cannot be empty; use \"primary\" or a GStreamer source");
         } else if source == DEFAULT_RGB_CAMERA {
-            "pipewiresrc ! videoconvert ! appsink".to_string()
+            "pipewiresrc".to_string()
         } else if source.starts_with("/dev/video") {
             anyhow::bail!(
                 "direct /dev/video* camera paths are not supported; use \"primary\" or a GStreamer source"
             );
         } else {
-            format!("{} ! videoconvert ! appsink", source)
+            source.to_string()
         };
-        info!("Attempting to open GStreamer camera: {}", p);
 
-        let cap = VideoCapture::from_file(&p, CAP_GSTREAMER)?;
+        let pipeline_str = format!("{src_element} ! videoconvert ! appsink name=gaze_sink");
+        info!("Attempting to open GStreamer camera: {}", pipeline_str);
 
-        if !cap.is_opened()? {
-            anyhow::bail!("Failed to open camera source {}", camera_source);
-        }
-        Ok(Self { cap })
+        let pipeline = gstreamer::parse::launch(&pipeline_str)
+            .map_err(|e| anyhow::anyhow!("Failed to parse pipeline for {camera_source}: {e}"))?
+            .downcast::<gstreamer::Pipeline>()
+            .map_err(|_| anyhow::anyhow!("Pipeline is not a gst::Pipeline"))?;
+
+        let appsink = pipeline
+            .by_name("gaze_sink")
+            .ok_or_else(|| anyhow::anyhow!("appsink element not found in pipeline"))?
+            .downcast::<gstreamer_app::AppSink>()
+            .map_err(|_| anyhow::anyhow!("gaze_sink is not an AppSink"))?;
+
+        let caps = gstreamer::Caps::builder("video/x-raw")
+            .field("format", "BGR")
+            .build();
+        appsink.set_caps(Some(&caps));
+
+        appsink.set_drop(true);
+        appsink.set_max_buffers(1);
+
+        pipeline
+            .set_state(gstreamer::State::Playing)
+            .map_err(|e| anyhow::anyhow!("Failed to start pipeline for {camera_source}: {e}"))?;
+
+        Ok(Self { pipeline, appsink })
     }
 
-    pub fn capture_frame(&mut self) -> anyhow::Result<Mat> {
-        let mut frame = Mat::default();
-        self.cap.read(&mut frame)?;
-        if frame.empty() {
-            anyhow::bail!("Captured an empty frame from camera");
-        }
+    fn sample_to_mat(&self, sample: &gstreamer::Sample) -> anyhow::Result<Mat> {
+        let buffer = sample
+            .buffer()
+            .ok_or_else(|| anyhow::anyhow!("Sample has no buffer"))?;
+        let caps = sample
+            .caps()
+            .ok_or_else(|| anyhow::anyhow!("Sample has no caps"))?;
+
+        let video_info = gstreamer_video::VideoInfo::from_caps(caps)
+            .map_err(|e| anyhow::anyhow!("Failed to parse video info: {e}"))?;
+
+        anyhow::ensure!(
+            video_info.format() == gstreamer_video::VideoFormat::Bgr,
+            "Expected BGR format, got {:?}",
+            video_info.format()
+        );
+
+        let width = video_info.width() as usize;
+        let height = video_info.height() as usize;
+        let stride = video_info.stride()[0] as usize;
+
+        let map = buffer
+            .map_readable()
+            .map_err(|_| anyhow::anyhow!("Buffer is not readable"))?;
+
+        let frame = unsafe {
+            opencv::core::Mat::new_rows_cols_with_data_unsafe(
+                height as i32,
+                width as i32,
+                opencv::core::CV_8UC3,
+                map.as_ptr() as *mut std::ffi::c_void,
+                stride,
+            )?
+        };
+
         let mut mirrored = Mat::default();
         opencv::core::flip(&frame, &mut mirrored, 1)?;
         Ok(mirrored)
+    }
+}
+
+impl Iterator for Camera {
+    type Item = Mat;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(sample) = self
+                .appsink
+                .try_pull_sample(gstreamer::ClockTime::from_seconds(5))
+            {
+                if let Ok(mat) = self.sample_to_mat(&sample) {
+                    return Some(mat);
+                }
+            } else {
+                let (_, current_state, _) = self.pipeline.state(Some(gstreamer::ClockTime::ZERO));
+                if current_state != gstreamer::State::Playing
+                    && current_state != gstreamer::State::Paused
+                {
+                    info!("Camera pipeline stopped: {:?}", current_state);
+                    return None;
+                }
+            }
+        }
     }
 }
 

@@ -2,7 +2,6 @@ use crate::camera::Camera;
 use crate::config::Config;
 use crate::face::FaceChecker;
 use std::thread;
-use std::time::Duration;
 
 use crate::dbus::CaptureStatus;
 pub use crate::face::CaptureResult;
@@ -27,7 +26,9 @@ pub fn try_capture(
     cam: &mut Camera,
     checker: &mut FaceChecker,
 ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
-    let frame = cam.capture_frame()?;
+    let frame = cam
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Camera stopped"))?;
     checker.capture_status(&frame, true)
 }
 
@@ -55,14 +56,11 @@ pub fn wait_for_capture_until(
     mut on_status: impl FnMut(&(CaptureStatus, Option<CaptureResult>)),
     mut should_abort: impl FnMut() -> bool,
 ) -> anyhow::Result<Option<CaptureResult>> {
-    loop {
+    for frame in cam {
         if should_abort() {
             return Ok(None);
         }
-
-        let frame = cam.capture_frame()?;
         let (status, result) = checker.capture_status(&frame, centering_required)?;
-
         match (status, result) {
             (CaptureStatus::Ready, Some(result)) => return Ok(Some(result)),
             (CaptureStatus::NotCentered, Some(result)) if !centering_required => {
@@ -70,6 +68,6 @@ pub fn wait_for_capture_until(
             }
             (s, r) => on_status(&(s, r)),
         }
-        thread::sleep(Duration::from_millis(100));
     }
+    anyhow::bail!("Camera stopped delivering frames")
 }
