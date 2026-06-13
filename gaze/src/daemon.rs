@@ -15,9 +15,7 @@ use crate::align::{align_face, mat_to_rgb};
 use crate::liveness::LivenessDetector;
 use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
-use gaze_core::camera::{
-    Camera, CameraKind, resolve_ir_source, resolve_rgb_source, resolve_source,
-};
+use gaze_core::camera::{Camera, CameraKind, resolve_ir_source, resolve_rgb_source};
 use gaze_core::config::Config;
 use gaze_core::dbus::{CaptureStatus, EnrollPrompt, VerifyResult};
 use gaze_core::face::{FaceChecker, Spectrum};
@@ -107,8 +105,9 @@ pub struct AuthDaemon {
     pub liveness: Arc<Mutex<Option<LivenessDetector>>>,
     pub db: Arc<Mutex<UserDatabase>>,
     pub threshold: Arc<Mutex<f32>>,
-    pub camera_config: Arc<Mutex<String>>,
-    pub camera_kind: Arc<Mutex<CameraKind>>,
+    pub rgb_device: Arc<Mutex<String>>,
+    pub ir_device: Arc<Mutex<String>>,
+    pub ir_node: Arc<Mutex<String>>,
     pub emitter_enabled: Arc<Mutex<bool>>,
     pub liveness_config: Arc<Mutex<gaze_core::config::LivenessConfig>>,
     pub abort_if_ssh: Arc<Mutex<bool>>,
@@ -950,14 +949,10 @@ impl AuthDaemon {
         let threshold_arc = self.threshold.clone();
 
         let config = Config::load_from(CONFIG_PATH).unwrap_or_default();
-        let rgb_device = resolve_rgb_source(&config.cameras).unwrap_or_default();
-        let ir_res = resolve_ir_source(&config.cameras);
-        let (ir_device, ir_node) = if let Some((src, node)) = ir_res {
-            (src, node)
-        } else {
-            (String::new(), String::new())
-        };
-        let emitter_enabled = config.cameras.emitter_enabled;
+        let rgb_device = self.rgb_device.lock().await.clone();
+        let ir_device = self.ir_device.lock().await.clone();
+        let ir_node = self.ir_node.lock().await.clone();
+        let emitter_enabled = *self.emitter_enabled.lock().await;
         let liveness_cfg = self.liveness_config.lock().await.clone();
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
@@ -1128,6 +1123,11 @@ impl AuthDaemon {
 
             let mut ir_thread = None;
             if run_ir {
+                // If RGB is also running, introduce a short delay to ensure RGB gets the head start on PipeWire/USB resource access.
+                if run_rgb {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+
                 let stop_clone = stop_flag.clone();
                 let tx = result_tx.clone();
                 let checker_ir_arc = checker_ir_arc.clone();
@@ -1138,6 +1138,7 @@ impl AuthDaemon {
                 let liveness_enabled = liveness_cfg.enabled;
                 let ir_device_clone = ir_device.clone();
                 let ir_node_clone = ir_node.clone();
+                let emitter_enabled = emitter_enabled;
 
                 ir_thread = Some(std::thread::spawn(move || {
                     let _emitter = EmitterGuard::engage(
@@ -1208,6 +1209,7 @@ impl AuthDaemon {
             let mut last_emitted_status: Option<CaptureStatus> = None;
             let mut rgb_status = CaptureStatus::NoFace;
             let mut ir_status = CaptureStatus::NoFace;
+            let mut rgb_attempted = false;
             let mut dark_since: Option<Instant> = None;
             let mut frames_seen: u32 = 0;
 
@@ -1228,9 +1230,11 @@ impl AuthDaemon {
                         let Some(msg) = msg_opt else { break };
                         match msg {
                             VerifyMsg::Status(spectrum, status, embed_opt) => {
+                                let has_face = embed_opt.is_some();
                                 match spectrum {
                                     Spectrum::Rgb => {
                                         rgb_status = status;
+                                        rgb_attempted = true;
                                         if let Some(embed) = embed_opt {
                                             rgb_latest_embed = Some(embed);
                                         }
@@ -1240,6 +1244,26 @@ impl AuthDaemon {
                                         if let Some(embed) = embed_opt {
                                             ir_latest_embed = Some(embed);
                                         }
+                                    }
+                                }
+
+                                if has_face {
+                                    frames_seen += 1;
+                                    if frames_seen >= liveness_cfg.max_frames {
+                                        info!("VerifyStart: liveness gate timed out");
+                                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                        let threshold = *threshold_arc.lock().await;
+                                        let db = db_arc.lock().await;
+                                        let final_scores = build_hybrid_scores(
+                                            &db,
+                                            &username,
+                                            threshold,
+                                            rgb_success_embed.as_ref().or(rgb_latest_embed.as_ref()),
+                                            ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
+                                        );
+                                        drop(db);
+                                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, final_scores, rgb_status, ir_status).await;
+                                        break;
                                     }
                                 }
 
@@ -1283,9 +1307,23 @@ impl AuthDaemon {
                                             "or" => rgb_success_embed.is_some() || ir_success_embed.is_some(),
                                             "and" => rgb_success_embed.is_some() && ir_success_embed.is_some(),
                                             "fallback_on_dark" => {
-                                                rgb_success_embed.is_some() || (ir_success_embed.is_some() && (rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace))
+                                                if !rgb_attempted {
+                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
+                                                } else if rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace {
+                                                    ir_success_embed.is_some()
+                                                } else {
+                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
+                                                }
                                             }
-                                            _ => rgb_success_embed.is_some() || (ir_success_embed.is_some() && (rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace)),
+                                            _ => {
+                                                if !rgb_attempted {
+                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
+                                                } else if rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace {
+                                                    ir_success_embed.is_some()
+                                                } else {
+                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
+                                                }
+                                            }
                                         }
                                     }
                                     (true, false) => rgb_success_embed.is_some(),
@@ -1311,7 +1349,10 @@ impl AuthDaemon {
                             }
                             VerifyMsg::Success(spectrum, embedding) => {
                                 match spectrum {
-                                    Spectrum::Rgb => rgb_success_embed = Some(embedding),
+                                    Spectrum::Rgb => {
+                                        rgb_success_embed = Some(embedding);
+                                        rgb_attempted = true;
+                                    }
                                     Spectrum::Ir => ir_success_embed = Some(embedding),
                                 }
 
@@ -1322,9 +1363,23 @@ impl AuthDaemon {
                                             "or" => rgb_success_embed.is_some() || ir_success_embed.is_some(),
                                             "and" => rgb_success_embed.is_some() && ir_success_embed.is_some(),
                                             "fallback_on_dark" => {
-                                                rgb_success_embed.is_some() || (ir_success_embed.is_some() && (rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace))
+                                                if !rgb_attempted {
+                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
+                                                } else if rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace {
+                                                    ir_success_embed.is_some()
+                                                } else {
+                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
+                                                }
                                             }
-                                            _ => rgb_success_embed.is_some() || (ir_success_embed.is_some() && (rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace)),
+                                            _ => {
+                                                if !rgb_attempted {
+                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
+                                                } else if rgb_status == CaptureStatus::TooDark || rgb_status == CaptureStatus::NoFace {
+                                                    ir_success_embed.is_some()
+                                                } else {
+                                                    rgb_success_embed.is_some() && ir_success_embed.is_some()
+                                                }
+                                            }
                                         }
                                     }
                                     (true, false) => rgb_success_embed.is_some(),
@@ -1354,25 +1409,6 @@ impl AuthDaemon {
                                 let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
                                 break;
                             }
-                        }
-                    }
-                    _ = tokio::time::sleep(Duration::from_millis(33)) => {
-                        frames_seen += 1;
-                        if frames_seen >= liveness_cfg.max_frames {
-                            info!("VerifyStart: liveness gate timed out");
-                            stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                            let threshold = *threshold_arc.lock().await;
-                            let db = db_arc.lock().await;
-                            let final_scores = build_hybrid_scores(
-                                &db,
-                                &username,
-                                threshold,
-                                rgb_success_embed.as_ref().or(rgb_latest_embed.as_ref()),
-                                ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
-                            );
-                            drop(db);
-                            let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, final_scores, rgb_status, ir_status).await;
-                            break;
                         }
                     }
                 }
@@ -1906,9 +1942,16 @@ impl AuthDaemon {
         let mut threshold = self.threshold.lock().await;
         *threshold = new_config.security.threshold();
 
-        let (source, kind) = resolve_source(&new_config.cameras);
-        *self.camera_config.lock().await = source;
-        *self.camera_kind.lock().await = kind;
+        let rgb_device = resolve_rgb_source(&new_config.cameras).unwrap_or_default();
+        let ir_res = resolve_ir_source(&new_config.cameras);
+        let (ir_device, ir_node) = if let Some((src, node)) = ir_res {
+            (src, node)
+        } else {
+            (String::new(), String::new())
+        };
+        *self.rgb_device.lock().await = rgb_device;
+        *self.ir_device.lock().await = ir_device;
+        *self.ir_node.lock().await = ir_node;
         *self.emitter_enabled.lock().await = new_config.cameras.emitter_enabled;
 
         let mut live_cfg = self.liveness_config.lock().await;
