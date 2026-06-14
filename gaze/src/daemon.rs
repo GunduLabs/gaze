@@ -1007,7 +1007,10 @@ impl AuthDaemon {
                     .unwrap_or(0),
             );
             if !grace.is_zero() {
-                info!(?grace, "Resumed from suspend, delaying face auth for display");
+                info!(
+                    ?grace,
+                    "Resumed from suspend, delaying face auth for display"
+                );
                 tokio::time::sleep(grace).await;
             }
         }
