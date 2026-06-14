@@ -35,6 +35,10 @@ abort_if_ssh = true
 abort_if_lid_closed = true
 # Require manual intent confirmation (Press Enter to confirm, Esc to cancel) after successful face auth
 require_confirmation = false
+# Delay face auth by this many milliseconds on the first unlock after resuming from
+# suspend, so the display has time to come back instead of unlocking behind a black
+# screen. 0 disables it. Increase (e.g. 3000) if your GPU is slow to repaint.
+resume_grace_ms = 0
 
 [enrollment]
 max_templates = 2

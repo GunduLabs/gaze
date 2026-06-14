@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::ptr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info, warn};
@@ -112,6 +113,7 @@ pub struct AuthDaemon {
     pub claim_state: Arc<Mutex<Option<ClaimState>>>,
     pub active_cancel: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     pub active_extensions: Arc<Mutex<std::collections::HashMap<u32, bool>>>,
+    pub resume_pending: Arc<AtomicBool>,
     pub rt_handle: tokio::runtime::Handle,
 }
 
@@ -616,6 +618,33 @@ pub fn set_pipewire_runtime_for_uid(uid: u32) {
     }
 }
 
+async fn prepare_for_sleep_stream(conn: &zbus::Connection) -> zbus::Result<zbus::MessageStream> {
+    let rule = zbus::MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .sender("org.freedesktop.login1")?
+        .interface("org.freedesktop.login1.Manager")?
+        .member("PrepareForSleep")?
+        .path("/org/freedesktop/login1")?
+        .build();
+    zbus::MessageStream::for_match_rule(rule, conn, None).await
+}
+
+pub async fn watch_resume(conn: zbus::Connection, resume_pending: Arc<AtomicBool>) {
+    let mut stream = match prepare_for_sleep_stream(&conn).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            warn!("Failed to subscribe to PrepareForSleep, resume handling disabled: {e}");
+            return;
+        }
+    };
+
+    while let Some(Ok(msg)) = stream.next().await {
+        if let Ok(false) = msg.body().deserialize::<bool>() {
+            resume_pending.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
 enum VerifyMsg {
     Status(Spectrum, CaptureStatus, Option<ndarray::Array1<f32>>),
     Success(Spectrum, ndarray::Array1<f32>),
@@ -970,6 +999,19 @@ impl AuthDaemon {
     ) -> fdo::Result<()> {
         let claim = self.check_claim(&header).await?;
         self.ensure_auth_not_aborted(&header).await?;
+
+        if self.resume_pending.swap(false, Ordering::SeqCst) {
+            let grace = Duration::from_millis(
+                Config::load_from(CONFIG_PATH)
+                    .map(|c| c.auth.resume_grace_ms)
+                    .unwrap_or(0),
+            );
+            if !grace.is_zero() {
+                info!(?grace, "Resumed from suspend, delaying face auth for display");
+                tokio::time::sleep(grace).await;
+            }
+        }
+
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
         self.cancel_active_tasks();

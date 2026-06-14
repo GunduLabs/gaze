@@ -99,6 +99,8 @@ async fn main() -> anyhow::Result<()> {
 
     let sources = gaze_core::camera::resolve_configured_sources(&config.cameras);
 
+    let resume_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
     let daemon = AuthDaemon {
         checker_rgb: Arc::new(Mutex::new(checker_rgb)),
         checker_ir: Arc::new(Mutex::new(checker_ir)),
@@ -117,16 +119,19 @@ async fn main() -> anyhow::Result<()> {
         claim_state: Arc::new(Mutex::new(None)),
         active_cancel: Arc::new(Mutex::new(None)),
         active_extensions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        resume_pending: resume_pending.clone(),
         rt_handle: tokio::runtime::Handle::current(),
     };
 
     info!(elapsed = ?t_load.elapsed(), "Models & user DB loaded");
 
-    let _conn = Builder::system()?
+    let conn = Builder::system()?
         .name("com.gundulabs.Gaze")?
         .serve_at("/com/gundulabs/Gaze", daemon)?
         .build()
         .await?;
+
+    tokio::spawn(daemon::watch_resume(conn.clone(), resume_pending));
 
     info!("Gaze Daemon listening on System Bus");
     std::future::pending::<()>().await;

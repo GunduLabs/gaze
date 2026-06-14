@@ -298,10 +298,16 @@ pub struct AuthConfig {
     pub abort_if_lid_closed: bool,
     #[serde(default = "default_false")]
     pub require_confirmation: bool,
+    #[serde(default = "default_resume_grace_ms")]
+    pub resume_grace_ms: u64,
 }
 
 fn default_false() -> bool {
     false
+}
+
+fn default_resume_grace_ms() -> u64 {
+    0
 }
 
 fn default_true() -> bool {
@@ -332,6 +338,7 @@ impl Default for AuthConfig {
             abort_if_ssh: true,
             abort_if_lid_closed: true,
             require_confirmation: false,
+            resume_grace_ms: default_resume_grace_ms(),
         }
     }
 }
@@ -520,6 +527,7 @@ mod tests {
                 abort_if_ssh: true,
                 abort_if_lid_closed: false,
                 require_confirmation: true,
+                resume_grace_ms: 3000,
             },
             enrollment: EnrollmentConfig { max_templates: 8 },
             liveness: LivenessConfig {
