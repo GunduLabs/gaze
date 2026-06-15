@@ -1018,6 +1018,8 @@ impl AuthDaemon {
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
         self.cancel_active_tasks();
+        self.checker_rgb.lock().await.rgb_luma_history.clear();
+        self.checker_ir.lock().await.rgb_luma_history.clear();
 
         let (tx, mut rx) = oneshot::channel();
         *self.active_cancel.lock().await = Some(tx);
@@ -1432,6 +1434,8 @@ impl AuthDaemon {
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
         self.cancel_active_tasks();
+        self.checker_rgb.lock().await.rgb_luma_history.clear();
+        self.checker_ir.lock().await.rgb_luma_history.clear();
 
         UserDatabase::validate_face_name(&face_name).map_err(Self::map_user_db_error)?;
 
