@@ -1,10 +1,9 @@
 use crate::camera::frame_to_bytes;
-use crate::config::{Config, MODELS_DIR};
+use crate::config::Config;
 use crate::dbus::CaptureStatus;
 use crate::detect::{DetectError, FaceDetector};
 use opencv::core::Mat;
 use opencv::prelude::*;
-use std::path::Path;
 
 const MIN_FACE_SIZE_RATIO: f32 = 0.25;
 const MAX_FACE_SIZE_RATIO: f32 = 0.78;
@@ -27,37 +26,29 @@ pub struct CaptureResult {
 }
 
 pub struct FaceChecker {
-    detector: FaceDetector,
-    dark_luma_threshold: u8,
+    pub detector: std::sync::Arc<std::sync::Mutex<FaceDetector>>,
+    pub dark_luma_threshold: u8,
     pub rgb_luma_history: std::collections::VecDeque<u8>,
+    pub spectrum: Spectrum,
+    pub check_centering_and_proximity: bool,
 }
 
 impl FaceChecker {
-    pub fn new(config: &Config) -> anyhow::Result<Self> {
-        let model_path = Path::new(MODELS_DIR).join(config.security.detector());
-
-        if !model_path.exists() {
-            anyhow::bail!(
-                "Model not found at {}. Run 'gazed' once to download models, or install the gaze package.",
-                model_path.display()
-            );
-        }
-
-        let detector = FaceDetector::new(model_path.to_str().unwrap())?;
-        Ok(Self {
-            detector,
-            dark_luma_threshold: config.cameras.dark_luma_threshold,
-            rgb_luma_history: std::collections::VecDeque::new(),
-        })
-    }
-
-    pub fn from_detector_with_config(detector: FaceDetector, config: &Config) -> Self {
+    pub fn new(
+        detector: std::sync::Arc<std::sync::Mutex<FaceDetector>>,
+        config: &Config,
+        spectrum: Spectrum,
+        check_centering_and_proximity: bool,
+    ) -> Self {
         Self {
             detector,
             dark_luma_threshold: config.cameras.dark_luma_threshold,
             rgb_luma_history: std::collections::VecDeque::new(),
+            spectrum,
+            check_centering_and_proximity,
         }
     }
+
 
     fn build_capture_result(
         frame: &Mat,
@@ -83,10 +74,8 @@ impl FaceChecker {
     pub fn capture_status(
         &mut self,
         frame: &Mat,
-        spectrum: Spectrum,
-        check_centering_and_proximity: bool,
     ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
-        let (bboxes, kps, mat_rgb) = match self.detector.detect(frame) {
+        let (bboxes, kps, mat_rgb) = match self.detector.lock().unwrap().detect(frame) {
             Ok(result) => result,
             Err(DetectError::NoFacesDetected) => return Ok((CaptureStatus::NoFace, None)),
             Err(err) => return Err(err.into()),
@@ -135,18 +124,18 @@ impl FaceChecker {
             || y2 / max_dim > (1.0 - edge_margin)
         {
             CaptureStatus::Clipped
-        } else if check_centering_and_proximity
+        } else if self.check_centering_and_proximity
             && ((norm_cx - 0.5).abs() >= 0.2 || (norm_cy - 0.5).abs() >= 0.2)
         {
             CaptureStatus::NotCentered
-        } else if check_centering_and_proximity && face_size_ratio < MIN_FACE_SIZE_RATIO {
+        } else if self.check_centering_and_proximity && face_size_ratio < MIN_FACE_SIZE_RATIO {
             CaptureStatus::TooFar
-        } else if check_centering_and_proximity && face_size_ratio > MAX_FACE_SIZE_RATIO {
+        } else if self.check_centering_and_proximity && face_size_ratio > MAX_FACE_SIZE_RATIO {
             CaptureStatus::TooClose
         } else if kps.is_none() {
             return Ok((CaptureStatus::NoFace, None));
         } else {
-            if let Spectrum::Rgb = spectrum {
+            if let Spectrum::Rgb = self.spectrum {
                 let w = frame.cols() as f32;
                 let h = frame.rows() as f32;
                 let max_dim = w.max(h);

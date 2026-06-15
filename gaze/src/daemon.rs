@@ -19,6 +19,7 @@ use crate::users::{UserDatabase, UserDbError};
 use gaze_core::camera::{Camera, CameraKind, resolve_configured_sources};
 use gaze_core::config::Config;
 use gaze_core::dbus::{CaptureStatus, EnrollPrompt, VerifyResult};
+use gaze_core::detect::FaceDetector;
 use gaze_core::face::{FaceChecker, Spectrum};
 use gaze_core::ir::led::IrLed;
 
@@ -96,8 +97,7 @@ fn eyes_from_kpss(kpss: &ndarray::Array3<f32>) -> Option<[(f32, f32); 5]> {
 }
 
 pub struct AuthDaemon {
-    pub checker_rgb: Arc<Mutex<FaceChecker>>,
-    pub checker_ir: Arc<Mutex<FaceChecker>>,
+    pub detector: Arc<std::sync::Mutex<FaceDetector>>,
     pub recognizer_rgb: Arc<Mutex<FaceRecognizer>>,
     pub recognizer_ir: Arc<Mutex<FaceRecognizer>>,
     pub liveness: Arc<Mutex<Option<LivenessDetector>>>,
@@ -723,11 +723,9 @@ fn process_frame_sync(
     checker: &mut FaceChecker,
     recognizer: &mut FaceRecognizer,
     frame: &Mat,
-    spectrum: Spectrum,
-    check_centering_and_proximity: bool,
 ) -> anyhow::Result<(CaptureStatus, Option<FaceData>)> {
     let (status, result_opt) =
-        checker.capture_status(frame, spectrum, check_centering_and_proximity)?;
+        checker.capture_status(frame)?;
 
     if status != CaptureStatus::Usable {
         return Ok((status, None));
@@ -1018,14 +1016,11 @@ impl AuthDaemon {
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
         self.cancel_active_tasks();
-        self.checker_rgb.lock().await.rgb_luma_history.clear();
-        self.checker_ir.lock().await.rgb_luma_history.clear();
 
         let (tx, mut rx) = oneshot::channel();
         *self.active_cancel.lock().await = Some(tx);
 
-        let checker_rgb_arc = self.checker_rgb.clone();
-        let checker_ir_arc = self.checker_ir.clone();
+        let detector_arc = self.detector.clone();
         let recognizer_rgb_arc = self.recognizer_rgb.clone();
         let recognizer_ir_arc = self.recognizer_ir.clone();
         let liveness_arc = self.liveness.clone();
@@ -1089,7 +1084,8 @@ impl AuthDaemon {
             if run_rgb {
                 let stop_clone = stop_flag.clone();
                 let tx = result_tx.clone();
-                let checker_rgb_arc = checker_rgb_arc.clone();
+                let detector_arc = detector_arc.clone();
+                let config_clone = config.clone();
                 let recognizer_rgb_arc = recognizer_rgb_arc.clone();
                 let liveness_arc = liveness_arc.clone();
                 let db_arc = db_arc.clone();
@@ -1108,6 +1104,7 @@ impl AuthDaemon {
                         }
                     };
 
+                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, false);
                     let mut live_scores: Vec<f32> = Vec::new();
                     let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
 
@@ -1117,9 +1114,8 @@ impl AuthDaemon {
                         }
 
                         let (status, embed_opt) = {
-                            let mut checker = checker_rgb_arc.blocking_lock();
                             let mut recognizer = recognizer_rgb_arc.blocking_lock();
-                            match process_frame_sync(&mut checker, &mut recognizer, &frame, Spectrum::Rgb, false) {
+                            match process_frame_sync(&mut checker, &mut recognizer, &frame) {
                                 Ok(res) => res,
                                 Err(_) => (CaptureStatus::NoFace, None),
                             }
@@ -1187,7 +1183,8 @@ impl AuthDaemon {
 
                 let stop_clone = stop_flag.clone();
                 let tx = result_tx.clone();
-                let checker_ir_arc = checker_ir_arc.clone();
+                let detector_arc = detector_arc.clone();
+                let config_clone = config.clone();
                 let recognizer_ir_arc = recognizer_ir_arc.clone();
                 let db_arc = db_arc.clone();
                 let username_clone = username.clone();
@@ -1211,6 +1208,7 @@ impl AuthDaemon {
                         }
                     };
 
+                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, false);
                     let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
 
                     for frame in &mut cam {
@@ -1219,9 +1217,8 @@ impl AuthDaemon {
                         }
 
                         let (status, embed_opt) = {
-                            let mut checker = checker_ir_arc.blocking_lock();
                             let mut recognizer = recognizer_ir_arc.blocking_lock();
-                            match process_frame_sync(&mut checker, &mut recognizer, &frame, Spectrum::Ir, false) {
+                            match process_frame_sync(&mut checker, &mut recognizer, &frame) {
                                 Ok(res) => res,
                                 Err(_) => (CaptureStatus::NoFace, None),
                             }
@@ -1434,16 +1431,13 @@ impl AuthDaemon {
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
         self.cancel_active_tasks();
-        self.checker_rgb.lock().await.rgb_luma_history.clear();
-        self.checker_ir.lock().await.rgb_luma_history.clear();
 
         UserDatabase::validate_face_name(&face_name).map_err(Self::map_user_db_error)?;
 
         let (tx, mut rx) = oneshot::channel();
         *self.active_cancel.lock().await = Some(tx);
 
-        let checker_rgb_arc = self.checker_rgb.clone();
-        let checker_ir_arc = self.checker_ir.clone();
+        let detector_arc = self.detector.clone();
         let recognizer_rgb_arc = self.recognizer_rgb.clone();
         let recognizer_ir_arc = self.recognizer_ir.clone();
         let db_arc = self.db.clone();
@@ -1503,7 +1497,8 @@ impl AuthDaemon {
             if run_rgb {
                 let stop_clone = stop_flag.clone();
                 let tx = enroll_tx.clone();
-                let checker_rgb_arc = checker_rgb_arc.clone();
+                let detector_arc = detector_arc.clone();
+                let config_clone = config.clone();
                 let recognizer_rgb_arc = recognizer_rgb_arc.clone();
                 let completed_steps_clone = completed_steps_atomic.clone();
                 let rgb_device_clone = rgb_device.clone();
@@ -1518,6 +1513,7 @@ impl AuthDaemon {
                         }
                     };
 
+                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, true);
                     let mut last_processed_step = 999;
                     let mut captured_for_step = false;
                     let mut stable_frames = 0;
@@ -1547,9 +1543,8 @@ impl AuthDaemon {
                         let prompt = prompts[current_step];
 
                         let (status, result_opt) = {
-                            let mut checker = checker_rgb_arc.blocking_lock();
                             let mut recognizer = recognizer_rgb_arc.blocking_lock();
-                            match process_frame_sync(&mut checker, &mut recognizer, &frame, Spectrum::Rgb, true) {
+                            match process_frame_sync(&mut checker, &mut recognizer, &frame) {
                                 Ok(res) => res,
                                 Err(_) => (CaptureStatus::NoFace, None),
                             }
@@ -1575,7 +1570,8 @@ impl AuthDaemon {
             if run_ir {
                 let stop_clone = stop_flag.clone();
                 let tx = enroll_tx.clone();
-                let checker_ir_arc = checker_ir_arc.clone();
+                let detector_arc = detector_arc.clone();
+                let config_clone = config.clone();
                 let recognizer_ir_arc = recognizer_ir_arc.clone();
                 let completed_steps_clone = completed_steps_atomic.clone();
                 let ir_device_clone = ir_device.clone();
@@ -1596,6 +1592,7 @@ impl AuthDaemon {
                         }
                     };
 
+                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, true);
                     let mut last_processed_step = 999;
                     let mut captured_for_step = false;
                     let mut stable_frames = 0;
@@ -1625,9 +1622,8 @@ impl AuthDaemon {
                         let prompt = prompts[current_step];
 
                         let (status, result_opt) = {
-                            let mut checker = checker_ir_arc.blocking_lock();
                             let mut recognizer = recognizer_ir_arc.blocking_lock();
-                            match process_frame_sync(&mut checker, &mut recognizer, &frame, Spectrum::Ir, true) {
+                            match process_frame_sync(&mut checker, &mut recognizer, &frame) {
                                 Ok(res) => res,
                                 Err(_) => (CaptureStatus::NoFace, None),
                             }
@@ -1900,10 +1896,9 @@ impl AuthDaemon {
         let mut db = self.db.lock().await;
         db.set_max_templates(new_config.enrollment.max_templates as usize);
 
-        let mut checker_rgb = self.checker_rgb.lock().await;
-        let mut checker_ir = self.checker_ir.lock().await;
         let mut recognizer_rgb = self.recognizer_rgb.lock().await;
         let mut recognizer_ir = self.recognizer_ir.lock().await;
+        let mut detector = self.detector.lock().unwrap();
 
         let security = &new_config.security;
         info!(
@@ -1922,22 +1917,12 @@ impl AuthDaemon {
         };
 
         match gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap()) {
-            Ok(det_rgb) => {
-                let det_ir = match gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap())
-                {
-                    Ok(d) => d,
-                    Err(e) => {
-                        return Err(fdo::Error::Failed(format!(
-                            "Failed to load IR detector: {e}"
-                        )));
-                    }
-                };
-                *checker_rgb = FaceChecker::from_detector_with_config(det_rgb, &new_config);
-                *checker_ir = FaceChecker::from_detector_with_config(det_ir, &new_config);
+            Ok(det) => {
+                *detector = det;
             }
             Err(e) => {
                 return Err(fdo::Error::Failed(format!(
-                    "Failed to load RGB detector: {e}"
+                    "Failed to load detector: {e}"
                 )));
             }
         }

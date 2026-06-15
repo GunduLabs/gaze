@@ -72,9 +72,7 @@ async fn main() -> anyhow::Result<()> {
     let (det_path, rec_path) =
         models::ensure_models(MODELS_DIR, security.detector(), security.recognizer())?;
 
-    let detector_rgb = gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap())
-        .expect("Failed to load detection model");
-    let detector_ir = gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap())
+    let detector = gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap())
         .expect("Failed to load detection model");
 
     let recognizer_rgb = recognize::FaceRecognizer::new(rec_path.to_str().unwrap())
@@ -91,10 +89,6 @@ async fn main() -> anyhow::Result<()> {
 
     let db = UserDatabase::new(USERS_DIR, config.enrollment.max_templates as usize)?;
 
-    let checker_rgb =
-        gaze_core::face::FaceChecker::from_detector_with_config(detector_rgb, &config);
-    let checker_ir = gaze_core::face::FaceChecker::from_detector_with_config(detector_ir, &config);
-
     warn_on_ir_misconfig(&config.cameras);
 
     let sources = gaze_core::camera::resolve_configured_sources(&config.cameras);
@@ -102,8 +96,7 @@ async fn main() -> anyhow::Result<()> {
     let resume_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     let daemon = AuthDaemon {
-        checker_rgb: Arc::new(Mutex::new(checker_rgb)),
-        checker_ir: Arc::new(Mutex::new(checker_ir)),
+        detector: Arc::new(std::sync::Mutex::new(detector)),
         recognizer_rgb: Arc::new(Mutex::new(recognizer_rgb)),
         recognizer_ir: Arc::new(Mutex::new(recognizer_ir)),
         liveness: Arc::new(Mutex::new(liveness_detector)),
