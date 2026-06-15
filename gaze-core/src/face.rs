@@ -49,7 +49,6 @@ impl FaceChecker {
         }
     }
 
-
     fn build_capture_result(
         frame: &Mat,
         bbox: Option<(f32, f32, f32, f32)>,

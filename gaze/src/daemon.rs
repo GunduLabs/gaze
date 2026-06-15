@@ -724,8 +724,7 @@ fn process_frame_sync(
     recognizer: &mut FaceRecognizer,
     frame: &Mat,
 ) -> anyhow::Result<(CaptureStatus, Option<FaceData>)> {
-    let (status, result_opt) =
-        checker.capture_status(frame)?;
+    let (status, result_opt) = checker.capture_status(frame)?;
 
     if status != CaptureStatus::Usable {
         return Ok((status, None));
@@ -1921,9 +1920,7 @@ impl AuthDaemon {
                 *detector = det;
             }
             Err(e) => {
-                return Err(fdo::Error::Failed(format!(
-                    "Failed to load detector: {e}"
-                )));
+                return Err(fdo::Error::Failed(format!("Failed to load detector: {e}")));
             }
         }
 
