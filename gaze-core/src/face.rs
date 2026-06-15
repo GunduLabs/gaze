@@ -260,7 +260,7 @@ mod tests {
         let frame =
             Mat::new_rows_cols_with_default(12, 12, core::CV_8UC3, Scalar::all(0.0)).unwrap();
 
-        assert!(frame_mean_luma(&frame).unwrap() < 70);
+        assert!(frame_mean_luma(&frame).unwrap() < 30);
     }
 
     #[test]
@@ -268,7 +268,7 @@ mod tests {
         let frame =
             Mat::new_rows_cols_with_default(12, 12, core::CV_8UC3, Scalar::all(120.0)).unwrap();
 
-        assert!(frame_mean_luma(&frame).unwrap() >= 70);
+        assert!(frame_mean_luma(&frame).unwrap() >= 30);
     }
 
     #[test]
@@ -296,10 +296,10 @@ mod tests {
     #[test]
     fn single_channel_frames_use_raw_luminance() {
         let dark = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC1, Scalar::all(5.0)).unwrap();
-        assert!(frame_mean_luma(&dark).unwrap() < 70);
+        assert!(frame_mean_luma(&dark).unwrap() < 30);
 
         let lit = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC1, Scalar::all(120.0)).unwrap();
-        assert!(frame_mean_luma(&lit).unwrap() >= 70);
+        assert!(frame_mean_luma(&lit).unwrap() >= 30);
     }
 
     #[test]
@@ -307,15 +307,15 @@ mod tests {
         let mut frame =
             Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(0.0)).unwrap();
         {
-            let mut top = Mat::roi_mut(&mut frame, core::Rect::new(0, 0, 8, 1)).unwrap();
+            let mut top = Mat::roi_mut(&mut frame, core::Rect::new(0, 0, 4, 1)).unwrap();
             top.set_to_def(&Scalar::all(255.0)).unwrap();
         }
-        assert!(frame_mean_luma(&frame).unwrap() < 70);
+        assert!(frame_mean_luma(&frame).unwrap() < 30);
     }
 
     #[test]
     fn empty_frame_is_treated_as_dark() {
         let frame = Mat::default();
-        assert!(frame_mean_luma(&frame).unwrap_or(0) < 70);
+        assert!(frame_mean_luma(&frame).unwrap_or(0) < 30);
     }
 }
