@@ -72,7 +72,7 @@ export default class GazePreferences extends ExtensionPreferences {
         const triesRow = new Adw.SpinRow({
             title: 'Maximum face tries',
             adjustment: new Gtk.Adjustment({
-                lower: 1,
+                lower: 2,
                 upper: 20,
                 step_increment: 1,
                 page_increment: 1,

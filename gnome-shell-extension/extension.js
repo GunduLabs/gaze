@@ -91,7 +91,7 @@ export default class GazeFaceAuthExtension extends Extension {
     const getFaceEnabled = () =>
       extensionSettings.get_boolean(FACE_AUTHENTICATION_KEY);
     const getMaxTries = () =>
-      Math.max(1, extensionSettings.get_int(MAX_TRIES_KEY));
+      Math.max(2, extensionSettings.get_int(MAX_TRIES_KEY));
     const getRetryMode = () => {
       try {
         return extensionSettings.get_string(RETRY_MODE_KEY);
