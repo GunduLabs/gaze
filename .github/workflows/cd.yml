@@ -365,6 +365,7 @@ jobs:
 
   build-flatpak:
     name: Build flatpak (${{ matrix.arch }})
+    if: ${{ false }} # Temporary: disable flatpak for v0.1.0 compatibility run
     runs-on: ${{ matrix.runner }}
     env:
       DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
@@ -444,11 +445,12 @@ jobs:
 
   dispatch-packages:
     name: Dispatch packages to self-hosted repo
+    if: ${{ false }} # Temporary: disable self-hosted publish for v0.1.0 compatibility run
     runs-on: ubuntu-latest
     # Must wait for build-flatpak too: the packages repo downloads ALL of this
     # run's artifacts by run_id when the dispatch lands, so every artifact
     # (deb/rpm/arch AND the flatpak bundles) has to be uploaded first.
-    needs: [build-packages, build-flatpak]
+    needs: [build-packages]
 
     steps:
       # No checkout or artifact download needed: GunduLabs/packages pulls the
@@ -464,7 +466,7 @@ jobs:
   release-github:
     name: Upload packages to GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-packages, build-flatpak]
+    needs: [build-packages]
     env:
       DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
 
