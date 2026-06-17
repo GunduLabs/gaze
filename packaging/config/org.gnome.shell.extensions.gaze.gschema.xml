@@ -18,5 +18,18 @@
         current authentication cycle.
       </description>
     </key>
+
+    <key name="face-retry-mode" type="s">
+      <choices>
+        <choice value="disabled"/>
+        <choice value="fixed"/>
+        <choice value="infinite"/>
+      </choices>
+      <default>'fixed'</default>
+      <summary>Face retry mode</summary>
+      <description>
+        Whether face authentication retries are disabled, limited to a fixed number, or infinite.
+      </description>
+    </key>
   </schema>
 </schemalist>
