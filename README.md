@@ -49,9 +49,9 @@ gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 
 ```bash
 sudo mkdir -p --mode=0755 /usr/share/keyrings
-curl -fsSL https://packages.gundulabs.com/apt/gpg.key \
+curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.gpg \
   | sudo tee /usr/share/keyrings/gundulabs-archive-keyring.gpg >/dev/null
-echo "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/apt/ * *" \
+echo "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb stable main" \
   | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 sudo apt update
 sudo apt install gaze gaze-gui
@@ -60,14 +60,15 @@ sudo apt install gaze gaze-gui
 **Fedora**
 
 ```bash
-sudo rpm --import https://packages.gundulabs.com/yum/gpg.key
-sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
+sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
+sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<'EOF'
 [gundulabs]
 name=Gundu Labs
-baseurl=https://packages.gundulabs.com/yum/
+baseurl=https://packages.gundulabs.com/rpm/fedora/$releasever/$basearch
 enabled=1
 gpgcheck=1
-gpgkey=https://packages.gundulabs.com/yum/gpg.key
+repo_gpgcheck=1
+gpgkey=https://packages.gundulabs.com/keys/gundulabs-repo.asc
 EOF
 sudo dnf makecache
 sudo dnf install gaze gaze-gui
@@ -83,8 +84,7 @@ yay -S --needed gaze-bin gaze-gui-bin
 **Flatpak (GUI only; also install one of the system packages above for the `gazed` daemon)**
 
 ```bash
-flatpak remote-add --if-not-exists gundulabs https://packages.gundulabs.com/setup/flatpak/gundulabs.flatpakrepo
-flatpak install gundulabs com.gundulabs.Gaze
+flatpak install --from https://packages.gundulabs.com/flatpak/com.gundulabs.Gaze.flatpakref
 ```
 
 For GNOME lock screen face unlock after manual package installation, also install `gaze-gnome-extension` (`gaze-gnome-extension-bin` on Arch), reboot, then from your GNOME session run `gnome-extensions enable gaze@gundulabs.com` and `gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true`. On KDE Plasma, use the base packages and follow the PAM guide for login/lock integration.

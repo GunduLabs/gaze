@@ -59,23 +59,24 @@ sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulab
 
 ```bash [Debian/Ubuntu]
 sudo mkdir -p --mode=0755 /usr/share/keyrings
-curl -fsSL https://packages.gundulabs.com/apt/gpg.key \
+curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.gpg \
   | sudo tee /usr/share/keyrings/gundulabs-archive-keyring.gpg >/dev/null
-echo "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/apt/ * *" \
+echo "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb stable main" \
   | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 sudo apt update
 sudo apt install gaze gaze-gui
 ```
 
 ```bash [Fedora]
-sudo rpm --import https://packages.gundulabs.com/yum/gpg.key
-sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
+sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
+sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<'EOF'
 [gundulabs]
 name=Gundu Labs
-baseurl=https://packages.gundulabs.com/yum/
+baseurl=https://packages.gundulabs.com/rpm/fedora/$releasever/$basearch
 enabled=1
 gpgcheck=1
-gpgkey=https://packages.gundulabs.com/yum/gpg.key
+repo_gpgcheck=1
+gpgkey=https://packages.gundulabs.com/keys/gundulabs-repo.asc
 EOF
 sudo dnf makecache
 sudo dnf install gaze gaze-gui
@@ -90,9 +91,12 @@ yay -S --needed gaze-bin gaze-gui-bin
 
 ## Path C: GUI-only via Flatpak
 
+The Flatpak is published to the Gundu Labs repository. The signing key and repo
+URL are embedded in the `.flatpakref`, so one command adds the remote and installs
+the app:
+
 ```bash
-flatpak remote-add --if-not-exists gundulabs https://packages.gundulabs.com/setup/flatpak/gundulabs.flatpakrepo
-flatpak install gundulabs com.gundulabs.Gaze
+flatpak install --from https://packages.gundulabs.com/flatpak/com.gundulabs.Gaze.flatpakref
 ```
 
 This installs the sandboxed Gaze GUI only. It talks to the `gazed` daemon on the system bus, so you still need to install one of the system packages (Path A or B) for the daemon and PAM integration. Use this path when you want the GUI updated independently of the system package.

@@ -342,6 +342,17 @@ jobs:
           VERSION="${DEPLOY_REF_NAME#v}" PACKAGE_RELEASE="${{ matrix.package_release }}" just package-prebuilt "${{ matrix.format }}"
           ls -lh dist/packages/
 
+      - name: Write package target metadata
+        run: |
+          cat > dist/packages/package-target.env <<EOF
+          FORMAT=${{ matrix.format }}
+          DISTRO=${{ matrix.distro }}
+          DISTRO_VERSION=${{ matrix.distro_version }}
+          DEB_SUITE=${{ matrix.deb_suite }}
+          RPM_DISTRO=${{ matrix.rpm_distro }}
+          RPM_VERSION=${{ matrix.rpm_version }}
+          EOF
+
       - name: Upload package artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -350,10 +361,13 @@ jobs:
             dist/packages/*.deb
             dist/packages/*.rpm
             dist/packages/*.pkg.tar.*
+            dist/packages/package-target.env
 
   build-flatpak:
     name: Build flatpak (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    env:
+      DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -366,6 +380,8 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Install flatpak tooling
         run: |
@@ -409,7 +425,7 @@ jobs:
           FLATPAK_GPG_SIGN: ${{ steps.import_gpg.outputs.fingerprint }}
           FLATPAK_BUILDER_JOBS: 4
         run: |
-          VERSION="${GITHUB_REF_NAME#v}" just build-flatpak
+          VERSION="${DEPLOY_REF_NAME#v}" just build-flatpak
 
       - name: Upload flatpak bundle artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -426,34 +442,24 @@ jobs:
             dist/packages/*.flatpakref
             dist/packages/*.flatpakrepo
 
-  publish-gemfury:
-    name: Publish packages to Gemfury
+  dispatch-packages:
+    name: Dispatch packages to self-hosted repo
     runs-on: ubuntu-latest
-    needs: [build-packages]
-    env:
-      DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
+    # Must wait for build-flatpak too: the packages repo downloads ALL of this
+    # run's artifacts by run_id when the dispatch lands, so every artifact
+    # (deb/rpm/arch AND the flatpak bundles) has to be uploaded first.
+    needs: [build-packages, build-flatpak]
 
     steps:
-      - name: Download package artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      # No checkout or artifact download needed: GunduLabs/packages pulls the
+      # packages-* artifacts itself by run_id and builds the apt/rpm/flatpak/aur repos.
+      - name: Trigger GunduLabs/packages publish
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4
         with:
-          pattern: packages-*
-          path: dist/packages
-
-      - name: Install Gemfury CLI
-        run: |
-          echo "deb [trusted=yes] https://apt.fury.io/cli/ * *" | sudo tee /etc/apt/sources.list.d/fury-cli.list
-          sudo apt-get update
-          sudo apt-get install -y fury-cli
-
-      - name: Upload to Gemfury
-        env:
-          GEMFURY_PUSH_TOKEN: ${{ secrets.GEMFURY_PUSH_TOKEN }}
-        run: |
-          find dist/packages -type f \( -name "*.deb" -o -name "*.rpm" \) | while read -r pkg; do
-            echo "Uploading $pkg to Gemfury..."
-            fury push "$pkg" --account gundulabs --api-token "$GEMFURY_PUSH_TOKEN" --public
-          done
+          token: ${{ secrets.PACKAGES_REPO_PAT }}
+          repository: GunduLabs/packages
+          event-type: package-artifacts
+          client-payload: '{"repo":"${{ github.repository }}","run_id":"${{ github.run_id }}","url":"https://gaze.gundulabs.com"}'
 
   release-github:
     name: Upload packages to GitHub Release
@@ -481,56 +487,7 @@ jobs:
             dist/packages/**/*.flatpakref
             dist/packages/**/*.flatpakrepo
 
-  publish-aur:
-    name: Publish wrapper packages to AUR
-    runs-on: ubuntu-latest
-    needs: [build-packages, release-github]
-    env:
-      DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
-
-    steps:
-      # Intentionally no ref: the AUR scripts/template are publishing infra,
-      # which must come from the workflow's own ref, not the release tag.
-      - name: Checkout source
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-      - name: Install AUR tooling
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libarchive-tools \
-            pacman-package-manager \
-            makepkg \
-            gettext-base \
-            rsync
-
-      - name: Download Arch package artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: packages-arch
-          path: dist/packages
-
-      - name: Generate AUR wrapper packages
-        env:
-          RELEASE_TAG: ${{ env.DEPLOY_REF_NAME }}
-        run: ./scripts/build-aur-packages.sh
-
-      - name: Configure SSH for AUR
-        env:
-          AUR_SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$AUR_SSH_KEY" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
-          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
-          echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/aur -o IdentitiesOnly=yes" >> "$GITHUB_ENV"
-
-      - name: Push wrapper packages to AUR
-        run: |
-          for attempt in 1 2 3; do
-            if ./scripts/push-aur-packages.sh; then
-              exit 0
-            fi
-            sleep "$((attempt * 10))"
-          done
-          exit 1
+  # AUR publishing lives in GunduLabs/packages (its publish-repos.yml builds the
+  # Arch binary repo and pushes the AUR wrapper packages from the artifacts it
+  # downloads via the dispatch above). Publishing it from here too raced the
+  # packages repo on aur.archlinux.org, so it was removed.
