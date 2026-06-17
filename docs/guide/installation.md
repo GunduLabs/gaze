@@ -35,7 +35,7 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
 
 Use this if you prefer to configure package sources yourself. Debian/Ubuntu and Fedora use Gundu Labs repositories. Arch Linux and Arch-compatible distributions such as Manjaro and CachyOS use the AUR packages.
 
-If you are replacing an older manual repository configuration, remove the legacy files first:
+If you are replacing an existing manual repository configuration, remove the current repo files first:
 
 **Debian / Ubuntu:**
 ```bash

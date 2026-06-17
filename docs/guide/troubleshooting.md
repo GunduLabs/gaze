@@ -124,7 +124,7 @@ What these do:
 
 ## 8. Package repository is not loading or signatures mismatch
 
-If you see errors like repository connection failures, metadata hash mismatches, or repository GPG signature failures when running `apt update` or `dnf makecache`, remove any older Gundu Labs repository files and reinstall the current package source configuration from the [Installation guide](/guide/installation).
+If you see errors like repository connection failures, metadata hash mismatches, or repository GPG signature failures when running `apt update` or `dnf makecache`, reinstall the current package source configuration from the [Installation guide](/guide/installation).
 
 ## 9. PAM module fails to load on Ubuntu 26.04+
 
