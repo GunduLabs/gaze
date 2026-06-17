@@ -291,7 +291,7 @@ need gpg
 
 fetch_repo_key() {
     key_path="$TMP/gundulabs-repo.asc"
-    curl -fsSL "${PKG_BASE_URL}/apt/gpg.key" -o "$key_path"
+    curl -fsSL "${PKG_BASE_URL}/keys/gundulabs-repo.asc" -o "$key_path"
     actual_fpr="$(gpg --show-keys --with-colons "$key_path" | awk -F: '$1 == "fpr" { print $10; exit }')"
     if [ "$actual_fpr" != "$REPO_KEY_FPR" ]; then
         red "Repository signing key fingerprint mismatch."
@@ -457,12 +457,12 @@ prompt_continue
 # ── clean up old repo files ──────────────────────────────────────────────────
 if is_deb; then
     if [ -f /etc/apt/sources.list.d/gundulabs.list ] || [ -f /usr/share/keyrings/gundulabs-archive-keyring.gpg ]; then
-        echo "Cleaning up legacy repository configuration..."
+        echo "Refreshing repository configuration..."
         sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
     fi
 elif is_rpm; then
     if [ -f /etc/yum.repos.d/gundulabs.repo ] || [ -f /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs ]; then
-        echo "Cleaning up legacy repository configuration..."
+        echo "Refreshing repository configuration..."
         sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
     fi
 fi
@@ -479,7 +479,10 @@ if is_deb; then
     sudo mkdir -p -m 0755 /usr/share/keyrings
     sudo cp "$TMP/gundulabs-archive-keyring.gpg" /usr/share/keyrings/gundulabs-archive-keyring.gpg
     sudo chmod 0644 /usr/share/keyrings/gundulabs-archive-keyring.gpg
-    printf '%s\n' "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] ${PKG_BASE_URL}/apt/ * *" \
+    # Pin to the detected release suite so each distro gets the package built
+    # against its own toolchain/glibc (see issue #125); supported_deb_suite
+    # above already guaranteed DISTRO_CODENAME is one we publish.
+    printf '%s\n' "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] ${PKG_BASE_URL}/deb ${DISTRO_CODENAME} main" \
         | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 
     bold "Step 2/5: Updating package index"
@@ -507,11 +510,11 @@ elif is_rpm; then
     sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
 [gundulabs]
 name=Gundu Labs
-baseurl=${PKG_BASE_URL}/yum/
+baseurl=${PKG_BASE_URL}/rpm/fedora/\$releasever/\$basearch
 enabled=1
 gpgcheck=1
-repo_gpgcheck=0
-gpgkey=${PKG_BASE_URL}/yum/gpg.key
+repo_gpgcheck=1
+gpgkey=${PKG_BASE_URL}/keys/gundulabs-repo.asc
 EOF
 
     bold "Step 2/5: Refreshing repository metadata"

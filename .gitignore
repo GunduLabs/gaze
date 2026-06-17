@@ -19,3 +19,4 @@ docs/.vitepress/cache
 dist/
 
 index.scip
+.wrangler/

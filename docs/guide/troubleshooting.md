@@ -124,9 +124,7 @@ What these do:
 
 ## 8. Package repository is not loading or signatures mismatch
 
-If you see errors like repository connection failures, metadata hash mismatches, or repository GPG signature failures when running `apt update` or `dnf makecache`, it is because Gaze migrated its package repository hosting structure starting in `v0.2.0`.
-
-See the repository migration and upgrade instructions in the [Installation guide](/guide/installation) for details on how to clean up legacy configuration files and update your package sources.
+If you see errors like repository connection failures, metadata hash mismatches, or repository GPG signature failures when running `apt update` or `dnf makecache`, reinstall the current package source configuration from the [Installation guide](/guide/installation).
 
 ## 9. PAM module fails to load on Ubuntu 26.04+
 
