@@ -202,7 +202,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -284,15 +284,15 @@ jobs:
             gcc
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        uses: extractions/setup-just@v4
         with:
           just-version: ${{ env.JUST_VERSION }}
 
       - name: Restore Rust cache
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        uses: Swatinem/rust-cache@v2
         with:
           shared-key: cd-${{ matrix.id }}-v1
           cache-on-failure: true
@@ -313,11 +313,13 @@ jobs:
       - name: Configure Arch LLVM/Clang environment
         if: ${{ matrix.id == 'arch' }}
         run: |
-          echo "LLVM_CONFIG_PATH=/usr/bin/llvm-config" >> "$GITHUB_ENV"
-          echo "LIBCLANG_PATH=/usr/lib" >> "$GITHUB_ENV"
-          echo "CLANG_PATH=/usr/bin/clang" >> "$GITHUB_ENV"
-          echo "CC=/usr/bin/clang" >> "$GITHUB_ENV"
-          echo "CXX=/usr/bin/clang++" >> "$GITHUB_ENV"
+          {
+            echo "LLVM_CONFIG_PATH=/usr/bin/llvm-config"
+            echo "LIBCLANG_PATH=/usr/lib"
+            echo "CLANG_PATH=/usr/bin/clang"
+            echo "CC=/usr/bin/clang"
+            echo "CXX=/usr/bin/clang++"
+          } >> "$GITHUB_ENV"
 
       - name: Build native artifacts
         env:
@@ -354,7 +356,7 @@ jobs:
           EOF
 
       - name: Upload package artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@v7
         with:
           name: packages-${{ matrix.id }}
           path: |
@@ -379,7 +381,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -389,15 +391,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        uses: extractions/setup-just@v4
         with:
           just-version: ${{ env.JUST_VERSION }}
 
       - name: Restore Rust cache
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        uses: Swatinem/rust-cache@v2
         with:
           shared-key: cd-flatpak-vendor-${{ matrix.arch }}-v1
           cache-on-failure: true
@@ -416,7 +418,7 @@ jobs:
 
       - name: Import GPG key for flatpak signing
         id: import_gpg
-        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7
+        uses: crazy-max/ghaction-import-gpg@v7
         with:
           gpg_private_key: ${{ secrets.PACKAGE_SIGNING_KEY }}
 
@@ -428,14 +430,14 @@ jobs:
           VERSION="${DEPLOY_REF_NAME#v}" just build-flatpak
 
       - name: Upload flatpak bundle artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@v7
         with:
           name: packages-flatpak-${{ matrix.arch }}
           path: dist/packages/*.flatpak
 
       - name: Upload flatpak remote metadata
         if: ${{ matrix.arch == 'amd64' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@v7
         with:
           name: packages-flatpak-metadata
           path: |
@@ -454,7 +456,7 @@ jobs:
       # No checkout or artifact download needed: GunduLabs/packages pulls the
       # packages-* artifacts itself by run_id and builds the apt/rpm/flatpak/aur repos.
       - name: Trigger GunduLabs/packages publish
-        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4
+        uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.PACKAGES_REPO_PAT }}
           repository: GunduLabs/packages
@@ -470,13 +472,13 @@ jobs:
 
     steps:
       - name: Download package artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@v8
         with:
           pattern: packages-*
           path: dist/packages
 
       - name: Upload to release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.DEPLOY_REF_NAME }}
           files: |
