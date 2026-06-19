@@ -27,7 +27,21 @@ export default defineConfig({
   title: "Gaze",
   description: "Facial authentication for Linux",
   head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }]],
+  lastUpdated: true,
+  sitemap: {
+    hostname: 'https://gaze.gundulabs.com'
+  },
   themeConfig: {
+    search: {
+      provider: 'local'
+    },
+    outline: {
+      level: [2, 3]
+    },
+    editLink: {
+      pattern: 'https://github.com/GunduLabs/gaze/edit/main/docs/:path',
+      text: 'Edit this page on GitHub'
+    },
     logo: '/favicon.svg',
     nav: [
       { text: 'Home', link: '/' },
