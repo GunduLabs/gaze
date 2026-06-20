@@ -401,38 +401,41 @@ impl AuthDaemon {
         std::path::Path::new(&format!("/run/user/{uid}/pipewire-0")).exists()
     }
 
-    async fn camera_runtime_uid(caller_uid: u32, target_uid: u32) -> u32 {
-        if caller_uid == target_uid && Self::has_pipewire_runtime(target_uid) {
-            return target_uid;
+    // Bind capture to the target's own session; a bystander's camera must never authenticate
+    // another user. `active` is (uid, is_greeter, has_pipewire) for the active seat.
+    fn resolve_camera_uid(
+        caller_uid: u32,
+        target_uid: u32,
+        target_has_pipewire: bool,
+        caller_has_pipewire: bool,
+        active: Option<(u32, bool, bool)>,
+    ) -> Option<u32> {
+        if target_has_pipewire {
+            return Some(target_uid);
         }
-
-        if caller_uid != 0 && Self::has_pipewire_runtime(caller_uid) {
-            return caller_uid;
+        if caller_uid != 0 {
+            return caller_has_pipewire.then_some(caller_uid);
         }
-
-        let active_uid = get_active_session_uid().await.ok();
-        if let Some(active_uid) = active_uid
-            && caller_uid == 0
-            && Self::has_pipewire_runtime(active_uid)
-        {
-            return active_uid;
+        match active {
+            Some((active_uid, is_greeter, has_pipewire)) if is_greeter && has_pipewire => {
+                Some(active_uid)
+            }
+            _ => None,
         }
+    }
 
-        if Self::has_pipewire_runtime(target_uid) {
-            return target_uid;
-        }
-
-        if let Some(active_uid) = active_uid
-            && Self::has_pipewire_runtime(active_uid)
-        {
-            return active_uid;
-        }
-
-        warn!(
+    async fn camera_runtime_uid(caller_uid: u32, target_uid: u32) -> Option<u32> {
+        let active = match gaze_core::dbus::get_active_session_uid_and_class().await {
+            Ok((uid, class)) => Some((uid, class == "greeter", Self::has_pipewire_runtime(uid))),
+            Err(_) => None,
+        };
+        Self::resolve_camera_uid(
+            caller_uid,
             target_uid,
-            caller_uid, "No PipeWire runtime found for target, caller, or active session"
-        );
-        target_uid
+            Self::has_pipewire_runtime(target_uid),
+            Self::has_pipewire_runtime(caller_uid),
+            active,
+        )
     }
 
     fn cancel_active_tasks(&self) {
@@ -607,6 +610,57 @@ mod tests {
         let proc = FakeProc::new("cycle");
         proc.add(4000, 4000, "bash", b"USER=alice\0");
         assert!(!AuthDaemon::process_chain_is_ssh_at(proc.root(), 4000));
+    }
+
+    #[test]
+    fn camera_uses_target_own_session_when_logged_in() {
+        // su victim while victim is logged in -> victim's own camera, not the attacker's.
+        let attacker_active = Some((1000, false, true));
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(0, 1001, true, false, attacker_active),
+            Some(1001)
+        );
+    }
+
+    #[test]
+    fn camera_refuses_bystander_session_for_root_caller() {
+        // su victim while victim has no session; the active seat is a regular user (attacker).
+        let attacker_active = Some((1000, false, true));
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(0, 1001, false, false, attacker_active),
+            None
+        );
+        // No active session info at all -> also refuse.
+        assert_eq!(AuthDaemon::resolve_camera_uid(0, 1001, false, false, None), None);
+    }
+
+    #[test]
+    fn camera_allows_login_greeter_for_root_caller() {
+        // GDM login: target has no session yet, active seat is the greeter.
+        let greeter_active = Some((42, true, true));
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(0, 1001, false, false, greeter_active),
+            Some(42)
+        );
+        // Greeter without a usable camera runtime -> refuse.
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(0, 1001, false, false, Some((42, true, false))),
+            None
+        );
+    }
+
+    #[test]
+    fn camera_uses_caller_session_for_polkit_approved_caller() {
+        // Admin (non-root) acting for another user after a polkit check uses their own camera.
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(1000, 1001, false, true, Some((1000, false, true))),
+            Some(1000)
+        );
+        // ...but refuse if even the caller has no camera session.
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(1000, 1001, false, false, None),
+            None
+        );
     }
 }
 
@@ -873,6 +927,12 @@ impl AuthDaemon {
             Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_FACES).await?;
         }
 
+        let Some(camera_uid) = Self::camera_runtime_uid(caller_uid, target_uid).await else {
+            return Err(fdo::Error::AccessDenied(
+                "refusing face auth: no camera belongs to the target user's session".into(),
+            ));
+        };
+
         let mut state = self.claim_state.lock().await;
         if let Some(existing) = &*state {
             if existing.sender == sender {
@@ -892,7 +952,6 @@ impl AuthDaemon {
             }
         }
 
-        let camera_uid = Self::camera_runtime_uid(caller_uid, target_uid).await;
         info!(
             sender = %sender,
             username = %username,

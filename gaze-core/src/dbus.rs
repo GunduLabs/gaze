@@ -147,6 +147,10 @@ pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> a
 }
 
 pub async fn get_active_session_uid() -> anyhow::Result<u32> {
+    Ok(get_active_session_uid_and_class().await?.0)
+}
+
+pub async fn get_active_session_uid_and_class() -> anyhow::Result<(u32, String)> {
     let connection = zbus::Connection::system().await?;
     let proxy = zbus::Proxy::new(
         &connection,
@@ -166,8 +170,9 @@ pub async fn get_active_session_uid() -> anyhow::Result<u32> {
     )
     .await?;
     let user: (u32, zbus::zvariant::ObjectPath) = session_proxy.get_property("User").await?;
+    let class: String = session_proxy.get_property("Class").await?;
 
-    Ok(user.0)
+    Ok((user.0, class))
 }
 
 #[proxy(
