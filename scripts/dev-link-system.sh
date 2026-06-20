@@ -25,6 +25,12 @@ systemd or PAM from executing files directly under your home directory.
 It also installs a systemd drop-in that clears the packaged unit's
 InaccessiblePaths=/home /root rule for local development.
 
+When a TPM is present, `enable` turns on TPM template encryption
+([storage] encrypt_templates = true); gazed seals a key to this machine's TPM and
+encrypts enrolled templates on restart. Set GAZE_DEV_TPM=0 to skip this. `disable`
+turns it back off (templates enrolled while on stay encrypted; re-link or wipe
+/var/lib/gaze/users to recover).
+
 Use `disable` to restore files backed up during `enable`.
 EOF
 }
@@ -44,6 +50,9 @@ repo_root() {
 
 REPO=$(repo_root)
 TARGET="$REPO/target/release"
+CONFIG_FILE=/etc/gaze/config.toml
+USERS_DIR=/var/lib/gaze/users
+TPM_STATE_DIR=/var/lib/gaze/tpm
 BACKUP_DIR=/usr/local/share/gaze-dev/originals
 LOCAL_BIN_DIR=/usr/local/bin
 SYSTEMD_DROPIN=/etc/systemd/system/gazed.service.d/zz-gaze-dev-checkout.conf
@@ -332,6 +341,75 @@ show_status() {
         fi
     done
     systemctl show gazed -p DropInPaths -p ExecStart -p InaccessiblePaths 2>/dev/null || true
+
+    if tpm_present; then tpm=$([ -e /dev/tpmrm0 ] && echo /dev/tpmrm0 || echo /dev/tpm0); else tpm=none; fi
+    printf 'tpm device: %s\n' "$tpm"
+    flag=$(awk '/^[[:space:]]*encrypt_templates[[:space:]]*=/ {print $3; f=1} END{if(!f) print "unset"}' "$CONFIG_FILE" 2>/dev/null || echo unknown)
+    printf 'encrypt_templates: %s\n' "$flag"
+    printf 'sealed key: %s\n' "$([ -e "$TPM_STATE_DIR/dek.priv" ] && echo present || echo absent)"
+    printf 'encrypted templates on disk: %s\n' "$(encrypted_template_count)"
+}
+
+tpm_present() {
+    [ -e /dev/tpmrm0 ] || [ -e /dev/tpm0 ]
+}
+
+# Set [storage] encrypt_templates to true|false in config.toml, preserving the
+# rest of the file and creating the table if it is missing.
+set_storage_encrypt() {
+    val=$1
+    install -d -m 0755 "$(dirname -- "$CONFIG_FILE")"
+    [ -e "$CONFIG_FILE" ] || : >"$CONFIG_FILE"
+    tmp=$(mktemp)
+    awk -v val="$val" '
+        /^[[:space:]]*\[storage\][[:space:]]*$/ { print; in_s=1; next }
+        /^[[:space:]]*\[/ { if (in_s && !done) { print "encrypt_templates = " val; done=1 } in_s=0; print; next }
+        in_s && /^[[:space:]]*encrypt_templates[[:space:]]*=/ { if (!done) { print "encrypt_templates = " val; done=1 } next }
+        { print }
+        END {
+            if (in_s && !done) print "encrypt_templates = " val
+            else if (!done) { print ""; print "[storage]"; print "encrypt_templates = " val }
+        }
+    ' "$CONFIG_FILE" >"$tmp"
+    install -m 0600 "$tmp" "$CONFIG_FILE"
+    rm -f "$tmp"
+    if command -v restorecon >/dev/null 2>&1; then
+        restorecon "$CONFIG_FILE" >/dev/null 2>&1 || true
+    fi
+}
+
+encrypted_template_count() {
+    [ -d "$USERS_DIR" ] || { echo 0; return 0; }
+    find "$USERS_DIR" -type f -name '*.bin' 2>/dev/null | while IFS= read -r f; do
+        if [ "$(head -c4 "$f" 2>/dev/null)" = "GZE1" ]; then printf '.\n'; fi
+    done | wc -l | tr -d ' '
+}
+
+setup_tpm_encryption() {
+    if [ "${GAZE_DEV_TPM:-1}" = "0" ]; then
+        printf 'GAZE_DEV_TPM=0 set; leaving template encryption disabled.\n'
+        set_storage_encrypt false
+        return 0
+    fi
+    if ! tpm_present; then
+        printf 'WARNING: no TPM device (/dev/tpmrm0); leaving template encryption disabled.\n' >&2
+        printf '         gazed fails closed if encrypt_templates=true without a usable TPM.\n' >&2
+        set_storage_encrypt false
+        return 0
+    fi
+    set_storage_encrypt true
+    printf 'TPM template encryption ON in %s; gazed seals a key to this TPM and encrypts templates on restart.\n' "$CONFIG_FILE"
+}
+
+teardown_tpm_encryption() {
+    [ -e "$CONFIG_FILE" ] || return 0
+    set_storage_encrypt false
+    n=$(encrypted_template_count)
+    if [ "$n" -gt 0 ]; then
+        printf '\nWARNING: %s encrypted template file(s) remain under %s.\n' "$n" "$USERS_DIR" >&2
+        printf '         The package gazed cannot read them. Re-link the dev build to keep using\n' >&2
+        printf '         them, or wipe and re-enroll: sudo rm -rf %s\n' "$USERS_DIR" >&2
+    fi
 }
 
 cmd=${1:-}
@@ -342,6 +420,7 @@ case "$cmd" in
         link_binaries
         link_pam_modules
         link_gnome_extension
+        setup_tpm_encryption
         install_systemd_dropin
         printf '\nGaze is linked to this checkout. Rebuild after switching branches, then restart gazed.\n'
         printf 'Restart GNOME Shell or log out/in for extension.js changes. Reopen preferences for prefs.js changes.\n'
@@ -351,6 +430,7 @@ case "$cmd" in
         restore_binaries
         restore_pam_modules
         restore_gnome_extension
+        teardown_tpm_encryption
         remove_systemd_dropin
         ;;
     status)

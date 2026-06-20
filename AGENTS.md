@@ -35,8 +35,9 @@ all clients of it.
 - Package: `just package <deb|rpm|archlinux>`.
 - Docs (VitePress under `docs/`): use **bun**: `bun run docs:dev`,
   `bun run docs:build`. Never create `package-lock.json`.
-- Native builds need OpenCV, clang/libclang, v4l, PAM, GTK4/libadwaita, and
-  GStreamer dev packages (see `.github/workflows/ci.yml` for exact names).
+- Native builds need OpenCV, clang/libclang, v4l, PAM, GTK4/libadwaita,
+  GStreamer, and tpm2-tss (`libtss2-dev`/`tpm2-tss-devel`) dev packages (see
+  `.github/workflows/ci.yml` for exact names).
 
 ## Runtime
 

@@ -179,9 +179,10 @@ fmt:
     cargo fmt --all
 
 # Link the installed system runtime to this checkout's release build
+# (also enables TPM template encryption when a TPM is present; GAZE_DEV_TPM=0 skips it)
 [group("dev")]
 dev-link-system: build-rust
-    sudo scripts/dev-link-system.sh enable
+    sudo GAZE_DEV_TPM="${GAZE_DEV_TPM:-1}" scripts/dev-link-system.sh enable
 
 # Restore package-installed files that dev-link-system replaced
 [group("dev")]

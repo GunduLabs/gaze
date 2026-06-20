@@ -28,6 +28,9 @@ max_templates = 2
 enabled = true
 threshold = 0.8
 max_frames = 40
+
+[storage]
+encrypt_templates = false
 ```
 
 ## Change security level
@@ -160,6 +163,46 @@ Storage locations are managed by the service setup and are not intended to be ch
 - Downloaded models: `/var/cache/gaze`
 
 Models are auto-downloaded on first run if missing.
+
+## Encrypt face templates with the TPM
+
+By default, enrolled face embeddings are stored as plaintext files under
+`/var/lib/gaze/users` (readable only by root). On a machine with a TPM 2.0 chip
+you can additionally encrypt them at rest:
+
+```toml
+[storage]
+encrypt_templates = true
+```
+
+When enabled, `gazed` seals a random AES-256 key to the TPM and stores every
+embedding AES-256-GCM encrypted under it. The sealed key lives in
+`/var/lib/gaze/tpm` and can only be unsealed by **this** TPM, so a stolen disk
+(or a backup restored on another machine) yields nothing usable.
+
+Behavior to be aware of:
+
+- **Fail-closed.** If `encrypt_templates = true` but no usable TPM is found, the
+  daemon refuses to start rather than silently writing unprotected biometrics.
+  Check `journalctl -u gazed` and either fix the TPM (e.g. enable it in firmware)
+  or set the flag back to `false`.
+- **Machine binding only.** The key is sealed to the TPM's storage hierarchy
+  with no PCR policy, so firmware, kernel, and Secure Boot updates do **not**
+  lock you out. It protects against the disk leaving the machine, not against
+  boot-chain tampering on the machine itself.
+- **Automatic migration.** Edit the flag in `/etc/gaze/config.toml` and restart
+  the daemon. Turning it on encrypts any existing plaintext templates in place;
+  turning it off decrypts them back to plaintext, which also needs the TPM that
+  sealed them.
+- **TPM reset.** If the TPM is cleared, the sealed key (and therefore the
+  encrypted templates) becomes unrecoverable. Delete `/var/lib/gaze/tpm` and
+  re-enroll. The daemon will not start with sealed data it can no longer unseal.
+
+Apply changes with:
+
+```bash
+sudo systemctl restart gazed
+```
 
 ## Enrollment behavior
 

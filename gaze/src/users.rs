@@ -7,6 +7,8 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
+use crate::crypto::{self, EmbeddingCipher};
+
 type FaceMap = HashMap<String, HashMap<String, (Array1<f32>, Spectrum)>>;
 pub type FaceScore = (String, f32, f32, bool, u32);
 
@@ -43,6 +45,7 @@ pub struct UserDatabase {
     base_dir: PathBuf,
     max_templates: usize,
     users: HashMap<String, FaceMap>,
+    cipher: Option<EmbeddingCipher>,
 }
 
 impl UserDatabase {
@@ -103,13 +106,30 @@ impl UserDatabase {
     }
 
     pub fn new(base_dir: &str, max_templates: usize) -> anyhow::Result<Self> {
+        Self::new_with_cipher(base_dir, max_templates, None)
+    }
+
+    pub fn new_with_cipher(
+        base_dir: &str,
+        max_templates: usize,
+        cipher: Option<EmbeddingCipher>,
+    ) -> anyhow::Result<Self> {
         let mut db = Self {
             base_dir: PathBuf::from(base_dir),
             max_templates,
             users: HashMap::new(),
+            cipher,
         };
         db.load_all()?;
         Ok(db)
+    }
+
+    pub fn is_encrypted(&self) -> bool {
+        self.cipher.is_some()
+    }
+
+    pub fn set_cipher(&mut self, cipher: Option<EmbeddingCipher>) {
+        self.cipher = cipher;
     }
 
     fn init_dirs(&self) -> std::io::Result<()> {
@@ -124,12 +144,24 @@ impl UserDatabase {
         self.user_dir(username).join(face_name)
     }
 
-    fn read_embedding(path: &Path) -> anyhow::Result<Array1<f32>> {
+    fn read_embedding(&self, path: &Path) -> anyhow::Result<Array1<f32>> {
         let meta = fs::symlink_metadata(path)?;
         if !meta.file_type().is_file() {
             anyhow::bail!("embedding path is not a regular file: {}", path.display());
         }
-        let bytes = fs::read(path)?;
+        let raw = fs::read(path)?;
+        // Also read legacy plaintext files, so the store can be migrated in place.
+        let bytes = if crypto::is_encrypted(&raw) {
+            let cipher = self.cipher.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "{} is encrypted but template encryption is disabled",
+                    path.display()
+                )
+            })?;
+            cipher.decrypt(&raw)?
+        } else {
+            raw
+        };
         if bytes.is_empty() || bytes.len() % std::mem::size_of::<f32>() != 0 {
             anyhow::bail!("invalid embedding length in {}", path.display());
         }
@@ -140,21 +172,29 @@ impl UserDatabase {
         Ok(Array1::from_vec(embed_vec))
     }
 
-    fn write_embedding(path: &Path, embed: &Array1<f32>) -> anyhow::Result<()> {
+    fn encode_embedding(&self, embed: &Array1<f32>) -> anyhow::Result<Vec<u8>> {
         let embed_slice = embed.as_slice().expect("Failed to get embedding slice");
         // Templates are not portable across architectures with different endianness.
-        let bytes: &[u8] = unsafe {
+        let plain: &[u8] = unsafe {
             std::slice::from_raw_parts(
                 embed_slice.as_ptr() as *const u8,
                 std::mem::size_of_val(embed_slice),
             )
         };
+        match &self.cipher {
+            Some(cipher) => cipher.encrypt(plain),
+            None => Ok(plain.to_vec()),
+        }
+    }
+
+    fn write_embedding(&self, path: &Path, embed: &Array1<f32>) -> anyhow::Result<()> {
+        let bytes = self.encode_embedding(embed)?;
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
             .open(path)?;
-        file.write_all(bytes)?;
+        file.write_all(&bytes)?;
         file.flush()?;
         Ok(())
     }
@@ -205,7 +245,7 @@ impl UserDatabase {
                             walk_stack.push(path);
                         } else if file_type.is_file()
                             && path.extension().and_then(|e| e.to_str()) == Some("bin")
-                            && let Ok(embed) = Self::read_embedding(&path)
+                            && let Ok(embed) = self.read_embedding(&path)
                         {
                             let stem = path.file_stem().unwrap().to_string_lossy();
                             let (uuid, spectrum) = if stem.ends_with("_ir") {
@@ -227,6 +267,82 @@ impl UserDatabase {
             self.users.insert(username, faces);
         }
         Ok(())
+    }
+
+    fn collect_bin_files(&self) -> anyhow::Result<Vec<PathBuf>> {
+        let mut files = Vec::new();
+        if !self.base_dir.exists() {
+            return Ok(files);
+        }
+        let mut stack = vec![self.base_dir.clone()];
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(&dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                let file_type = entry.file_type()?;
+                if file_type.is_dir() {
+                    stack.push(path);
+                } else if file_type.is_file()
+                    && path.extension().and_then(|e| e.to_str()) == Some("bin")
+                {
+                    files.push(path);
+                }
+            }
+        }
+        Ok(files)
+    }
+
+    fn replace_file_bytes(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+        let parent = path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("embedding path has no parent: {}", path.display()))?;
+        let file_name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
+            anyhow::anyhow!("embedding path has no file name: {}", path.display())
+        })?;
+        let tmp = parent.join(format!(".{file_name}.{}.tmp", std::process::id()));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        if let Err(e) = file.write_all(bytes).and_then(|_| file.flush()) {
+            let _ = fs::remove_file(&tmp);
+            return Err(e.into());
+        }
+        drop(file);
+        fs::rename(&tmp, path)?;
+        Ok(())
+    }
+
+    pub fn migrate_plaintext_to_encrypted(&self) -> anyhow::Result<usize> {
+        let Some(cipher) = self.cipher.as_ref() else {
+            return Ok(0);
+        };
+        let mut migrated = 0;
+        for path in self.collect_bin_files()? {
+            let raw = fs::read(&path)?;
+            if crypto::is_encrypted(&raw) {
+                continue;
+            }
+            let blob = cipher.encrypt(&raw)?;
+            Self::replace_file_bytes(&path, &blob)?;
+            migrated += 1;
+        }
+        Ok(migrated)
+    }
+
+    pub fn decrypt_all_with(&self, cipher: &EmbeddingCipher) -> anyhow::Result<usize> {
+        let mut converted = 0;
+        for path in self.collect_bin_files()? {
+            let raw = fs::read(&path)?;
+            if !crypto::is_encrypted(&raw) {
+                continue;
+            }
+            let plain = cipher.decrypt(&raw)?;
+            Self::replace_file_bytes(&path, &plain)?;
+            converted += 1;
+        }
+        Ok(converted)
     }
 
     pub fn add_template(
@@ -265,7 +381,7 @@ impl UserDatabase {
                 Spectrum::Ir => "ir",
             };
             let file_path = template_dir.join(format!("{}_{}.bin", uuid, suffix));
-            Self::write_embedding(&file_path, &embed)
+            self.write_embedding(&file_path, &embed)
                 .map_err(|err| UserDbError::Io(std::io::Error::other(err.to_string())))?;
         }
 
@@ -787,5 +903,108 @@ mod tests {
             .match_faces("alice", &embedding(&[1.0, 0.0]), 0.5, Spectrum::Ir)
             .unwrap();
         assert!(!results_ir_wrong[0].3);
+    }
+
+    fn test_cipher() -> EmbeddingCipher {
+        EmbeddingCipher::new(&[42u8; crypto::KEY_LEN])
+    }
+
+    fn all_bins_encrypted(db: &UserDatabase) -> bool {
+        db.collect_bin_files()
+            .unwrap()
+            .iter()
+            .all(|f| crypto::is_encrypted(&fs::read(f).unwrap()))
+    }
+
+    #[test]
+    fn encrypted_round_trip_persists_and_reloads() {
+        let temp = TempDir::new("enc-persist");
+        let base = temp.path().to_str().unwrap();
+
+        let mut db = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
+        db.add_template(
+            "alice",
+            "work",
+            "1",
+            rgb_embeds(vec![embedding(&[1.0, 0.0]), embedding(&[0.0, 1.0])]),
+        )
+        .unwrap();
+        assert_eq!(db.get_user_embeddings("alice").unwrap().len(), 2);
+
+        let files = db.collect_bin_files().unwrap();
+        assert_eq!(files.len(), 2);
+        assert!(all_bins_encrypted(&db));
+
+        let reopened = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
+        assert_eq!(reopened.get_user_embeddings("alice").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn encrypted_templates_are_unreadable_without_the_key() {
+        let temp = TempDir::new("enc-nokey");
+        let base = temp.path().to_str().unwrap();
+
+        let mut db = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
+        db.add_template(
+            "alice",
+            "work",
+            "1",
+            rgb_embeds(vec![embedding(&[1.0, 0.0])]),
+        )
+        .unwrap();
+
+        let plain = UserDatabase::new(base, 4).unwrap();
+        assert_eq!(plain.get_user_embeddings("alice").map(|v| v.len()), Some(0));
+    }
+
+    #[test]
+    fn migrate_plaintext_to_encrypted_converts_in_place() {
+        let temp = TempDir::new("enc-migrate");
+        let base = temp.path().to_str().unwrap();
+
+        let mut plain = UserDatabase::new(base, 4).unwrap();
+        plain
+            .add_template(
+                "alice",
+                "work",
+                "1",
+                rgb_embeds(vec![embedding(&[1.0, 2.0, 3.0])]),
+            )
+            .unwrap();
+        assert!(!all_bins_encrypted(&plain), "files start as plaintext");
+
+        let enc = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
+        assert_eq!(enc.get_user_embeddings("alice").unwrap().len(), 1);
+
+        let expected = enc.collect_bin_files().unwrap().len();
+        assert_eq!(enc.migrate_plaintext_to_encrypted().unwrap(), expected);
+        assert!(all_bins_encrypted(&enc));
+        assert_eq!(enc.migrate_plaintext_to_encrypted().unwrap(), 0);
+
+        let reopened = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
+        assert_eq!(reopened.get_user_embeddings("alice").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn decrypt_all_with_reverses_encryption() {
+        let temp = TempDir::new("enc-decrypt");
+        let base = temp.path().to_str().unwrap();
+
+        let mut enc = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
+        enc.add_template(
+            "alice",
+            "work",
+            "1",
+            rgb_embeds(vec![embedding(&[1.0, 0.0])]),
+        )
+        .unwrap();
+        assert!(all_bins_encrypted(&enc));
+
+        let expected = enc.collect_bin_files().unwrap().len();
+        assert_eq!(enc.decrypt_all_with(&test_cipher()).unwrap(), expected);
+        assert!(!all_bins_encrypted(&enc));
+
+        let plain = UserDatabase::new(base, 4).unwrap();
+        assert_eq!(plain.get_user_embeddings("alice").unwrap().len(), 1);
     }
 }

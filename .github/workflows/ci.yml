@@ -46,6 +46,7 @@ jobs:
             libopencv-dev \
             libv4l-dev \
             libpam0g-dev \
+            libtss2-dev \
             libgtk-4-dev \
             libadwaita-1-dev \
             pkg-config

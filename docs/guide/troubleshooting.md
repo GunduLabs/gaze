@@ -26,6 +26,26 @@ journalctl -u gazed -n 200 --no-pager
 
 That command shows the most recent daemon log messages.
 
+### Daemon exits when template encryption is enabled
+
+If `gazed` refuses to start and the logs show a message like *"template encryption is enabled ([storage] encrypt_templates) but no usable TPM is available"*, the daemon is failing closed on purpose: it will not store biometric data unencrypted once you have asked for encryption.
+
+```bash
+journalctl -u gazed -n 50 --no-pager
+```
+
+Fix it one of two ways:
+
+- Enable the TPM. Confirm a TPM 2.0 device exists (`ls /dev/tpmrm0`) and is turned on in your firmware/BIOS, then restart: `sudo systemctl restart gazed`.
+- Turn the feature off. Set `encrypt_templates = false` under `[storage]` in `/etc/gaze/config.toml` and restart.
+
+If the TPM was reset/cleared after you enrolled, the previously sealed key can no longer be unsealed. Delete the stale key directory and re-enroll your faces:
+
+```bash
+sudo rm -rf /var/lib/gaze/tpm
+sudo systemctl restart gazed
+```
+
 ## 2. Camera is not detected
 
 Use the primary GStreamer camera source first:

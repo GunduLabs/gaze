@@ -1893,8 +1893,10 @@ impl AuthDaemon {
         let mut abort_if_lid_closed = self.abort_if_lid_closed.lock().await;
         *abort_if_lid_closed = new_config.auth.abort_if_lid_closed;
 
-        let mut db = self.db.lock().await;
-        db.set_max_templates(new_config.enrollment.max_templates as usize);
+        {
+            let mut db = self.db.lock().await;
+            db.set_max_templates(new_config.enrollment.max_templates as usize);
+        }
 
         let mut checker_rgb = self.checker_rgb.lock().await;
         let mut checker_ir = self.checker_ir.lock().await;
@@ -1959,9 +1961,42 @@ impl AuthDaemon {
             }
         }
 
+        // Validate the TPM before persisting; the file migration runs after save_to so disk and config can't disagree.
+        let want_encrypt = new_config.storage.encrypt_templates;
+        let pending_cipher = {
+            let db = self.db.lock().await;
+            if want_encrypt != db.is_encrypted() {
+                let dek =
+                    crate::tpm::load_or_create_dek(std::path::Path::new(crate::tpm::STATE_DIR))
+                        .map_err(|e| {
+                            fdo::Error::Failed(format!("cannot change template encryption: {e}"))
+                        })?;
+                Some(crate::crypto::EmbeddingCipher::new(&dek))
+            } else {
+                None
+            }
+        };
+
         new_config
             .save_to(CONFIG_PATH)
             .map_err(|e| fdo::Error::Failed(format!("Failed to save config: {e}")))?;
+
+        if let Some(cipher) = pending_cipher {
+            let mut db = self.db.lock().await;
+            if want_encrypt {
+                db.set_cipher(Some(cipher));
+                let n = db.migrate_plaintext_to_encrypted().map_err(|e| {
+                    fdo::Error::Failed(format!("failed to encrypt existing templates: {e}"))
+                })?;
+                info!(migrated = n, "Enabled template encryption");
+            } else {
+                let n = db.decrypt_all_with(&cipher).map_err(|e| {
+                    fdo::Error::Failed(format!("failed to decrypt existing templates: {e}"))
+                })?;
+                db.set_cipher(None);
+                info!(decrypted = n, "Disabled template encryption");
+            }
+        }
 
         info!("Config reloaded successfully");
         Ok(())

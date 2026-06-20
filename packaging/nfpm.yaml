@@ -81,15 +81,18 @@ overrides:
     depends:
       - libopencv-dev
       - libpam0g
+      - libtss2-dev
   rpm:
     scripts:
       postinstall: "packaging/postinst-rpm.sh"
     depends:
       - opencv
       - pam
+      - tpm2-tss
   archlinux:
     scripts:
       postinstall: "packaging/postinst-arch.sh"
     depends:
       - opencv
       - pam
+      - tpm2-tss

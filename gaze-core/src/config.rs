@@ -238,6 +238,15 @@ pub struct Config {
     pub enrollment: EnrollmentConfig,
     #[serde(default)]
     pub liveness: LivenessConfig,
+    #[serde(default)]
+    pub storage: StorageConfig,
+}
+
+// Its own table: a security preset replaces `[security]` wholesale, resetting it.
+#[derive(Deserialize, Serialize, Clone, Debug, Default, Value, OwnedValue, Type)]
+pub struct StorageConfig {
+    #[serde(default = "default_false")]
+    pub encrypt_templates: bool,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
@@ -509,6 +518,7 @@ mod tests {
         assert!(config.auth.abort_if_ssh);
         assert!(config.auth.abort_if_lid_closed);
         assert_eq!(config.enrollment.max_templates, 2);
+        assert!(!config.storage.encrypt_templates);
     }
 
     #[test]
@@ -535,6 +545,9 @@ mod tests {
                 threshold: 0.9,
                 max_frames: 25,
             },
+            storage: StorageConfig {
+                encrypt_templates: true,
+            },
         };
 
         config.save_to(path.to_str().unwrap()).unwrap();
@@ -559,6 +572,7 @@ mod tests {
         assert!(loaded.liveness.enabled);
         assert_eq!(loaded.liveness.threshold, 0.9);
         assert_eq!(loaded.liveness.max_frames, 25);
+        assert!(loaded.storage.encrypt_templates);
     }
 
     #[test]
@@ -610,6 +624,31 @@ mod tests {
         assert!(config.auth.abort_if_lid_closed);
         assert!(!config.auth.require_confirmation);
         assert_eq!(config.enrollment.max_templates, 2);
+        assert!(!config.storage.encrypt_templates);
+    }
+
+    #[test]
+    fn storage_encrypt_templates_parses_and_defaults_false() {
+        let enabled: Config = toml::from_str(
+            r#"
+            [storage]
+            encrypt_templates = true
+            "#,
+        )
+        .unwrap();
+        assert!(enabled.storage.encrypt_templates);
+
+        // Selecting a security preset must not disturb the storage table.
+        let mut cfg = enabled.clone();
+        cfg.security = SecurityLevel::high();
+        assert!(cfg.storage.encrypt_templates);
+
+        let absent: Config = toml::from_str(
+            r#"[security]
+level = "low""#,
+        )
+        .unwrap();
+        assert!(!absent.storage.encrypt_templates);
     }
 
     #[test]

@@ -9,8 +9,10 @@ repository = "https://github.com/Gundu-Labs/gaze"
 authors = ["Gundu Labs <maintainers@gundulabs.com>"]
 
 [dependencies]
+aes-gcm = "0.10"
 anyhow = "1.0.102"
 gaze-core = { path = "../gaze-core" }
+getrandom = "0.2"
 image = "0.25.10"
 libc = "0.2.186"
 nalgebra = "0.35.0"
@@ -28,6 +30,9 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 futures = "0.3.32"
 zbus_polkit = "5.0.0"
+# Seals the face-template encryption key to the TPM. Only `gazed` links this;
+# the CLI/GUI/PAM clients must not (mirrors the `ort` isolation in AGENTS.md).
+tss-esapi = "7"
 
 [[bin]]
 name = "gazed"

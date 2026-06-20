@@ -1,8 +1,10 @@
 mod align;
+mod crypto;
 mod daemon;
 mod liveness;
 pub mod models;
 mod recognize;
+mod tpm;
 pub mod users;
 
 use crate::users::UserDatabase;
@@ -89,7 +91,33 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    let db = UserDatabase::new(USERS_DIR, config.enrollment.max_templates as usize)?;
+    let cipher = if config.storage.encrypt_templates {
+        let dek = tpm::load_or_create_dek(std::path::Path::new(tpm::STATE_DIR)).map_err(|e| {
+            anyhow::anyhow!(
+                "template encryption is enabled ([storage] encrypt_templates) but no usable TPM \
+                 is available, so the daemon is refusing to start rather than write unprotected \
+                 biometric data: {e}"
+            )
+        })?;
+        info!("Template encryption enabled (AES-256-GCM under a TPM-sealed key)");
+        Some(crypto::EmbeddingCipher::new(&dek))
+    } else {
+        None
+    };
+
+    let encrypt_templates = config.storage.encrypt_templates;
+    let db =
+        UserDatabase::new_with_cipher(USERS_DIR, config.enrollment.max_templates as usize, cipher)?;
+    if encrypt_templates {
+        match db.migrate_plaintext_to_encrypted() {
+            Ok(0) => {}
+            Ok(n) => info!(
+                migrated = n,
+                "Encrypted existing plaintext templates at rest"
+            ),
+            Err(e) => warn!("Could not migrate some plaintext templates to encrypted: {e}"),
+        }
+    }
 
     let checker_rgb =
         gaze_core::face::FaceChecker::from_detector_with_config(detector_rgb, &config);

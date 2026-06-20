@@ -227,6 +227,7 @@ jobs:
             libopencv-dev \
             libv4l-dev \
             libpam0g-dev \
+            libtss2-dev \
             libgtk-4-dev \
             libadwaita-1-dev \
             libssl-dev \
@@ -247,6 +248,7 @@ jobs:
             opencv-devel \
             libv4l-devel \
             pam-devel \
+            tpm2-tss-devel \
             checkpolicy \
             policycoreutils \
             gtk4-devel \
@@ -273,6 +275,7 @@ jobs:
             opencv \
             v4l-utils \
             pam \
+            tpm2-tss \
             gtk4 \
             libadwaita \
             gstreamer \

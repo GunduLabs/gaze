@@ -14,7 +14,8 @@ Gaze supports infrared (IR) cameras: configure `cameras.ir` with a GStreamer/Pip
 
 - Face processing runs locally on your machine.
 - No cloud account is required.
-- Face embeddings are stored on disk under your local Gaze data path.
+- Face embeddings are stored on disk under your local Gaze data path, readable only by root.
+- They can optionally be encrypted at rest with a key sealed to the TPM, so a stolen disk is useless on another machine. See [template encryption](/guide/configuration#encrypt-face-templates-with-the-tpm).
 
 ## Authentication pipeline
 
@@ -48,6 +49,7 @@ That makes authentication more robust for:
 Default locations:
 
 - User embeddings: `/var/lib/gaze/users`
+- TPM-sealed encryption key (only when template encryption is enabled): `/var/lib/gaze/tpm`
 - Model files: `/var/cache/gaze`
 - Config file: `/etc/gaze/config.toml`
 
