@@ -1897,10 +1897,6 @@ impl AuthDaemon {
             db.set_max_templates(new_config.enrollment.max_templates as usize);
         }
 
-        let mut recognizer_rgb = self.recognizer_rgb.lock().await;
-        let mut recognizer_ir = self.recognizer_ir.lock().await;
-        let mut detector = self.detector.lock().unwrap();
-
         let security = &new_config.security;
         info!(
             detector = security.detector(),
@@ -1917,33 +1913,40 @@ impl AuthDaemon {
             Err(e) => return Err(fdo::Error::Failed(format!("Failed to ensure models: {e}"))),
         };
 
-        match gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap()) {
-            Ok(det) => {
-                *detector = det;
-            }
-            Err(e) => {
-                return Err(fdo::Error::Failed(format!("Failed to load detector: {e}")));
+        {
+            let mut detector = self.detector.lock().unwrap();
+            match gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap()) {
+                Ok(det) => {
+                    *detector = det;
+                }
+                Err(e) => {
+                    return Err(fdo::Error::Failed(format!("Failed to load detector: {e}")));
+                }
             }
         }
 
-        match crate::recognize::FaceRecognizer::new(rec_path.to_str().unwrap()) {
-            Ok(rec_rgb) => {
-                let rec_ir = match crate::recognize::FaceRecognizer::new(rec_path.to_str().unwrap())
-                {
-                    Ok(r) => r,
-                    Err(e) => {
-                        return Err(fdo::Error::Failed(format!(
-                            "Failed to load IR recognizer: {e}"
-                        )));
-                    }
-                };
-                *recognizer_rgb = rec_rgb;
-                *recognizer_ir = rec_ir;
-            }
-            Err(e) => {
-                return Err(fdo::Error::Failed(format!(
-                    "Failed to load RGB recognizer: {e}"
-                )));
+        {
+            let mut recognizer_rgb = self.recognizer_rgb.lock().await;
+            let mut recognizer_ir = self.recognizer_ir.lock().await;
+            match crate::recognize::FaceRecognizer::new(rec_path.to_str().unwrap()) {
+                Ok(rec_rgb) => {
+                    let rec_ir =
+                        match crate::recognize::FaceRecognizer::new(rec_path.to_str().unwrap()) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                return Err(fdo::Error::Failed(format!(
+                                    "Failed to load IR recognizer: {e}"
+                                )));
+                            }
+                        };
+                    *recognizer_rgb = rec_rgb;
+                    *recognizer_ir = rec_ir;
+                }
+                Err(e) => {
+                    return Err(fdo::Error::Failed(format!(
+                        "Failed to load RGB recognizer: {e}"
+                    )));
+                }
             }
         }
 
