@@ -74,7 +74,11 @@ impl FaceChecker {
         &mut self,
         frame: &Mat,
     ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
-        let (bboxes, kps, mat_rgb) = match self.detector.lock().unwrap().detect(frame) {
+        let detection = {
+            let mut detector = self.detector.lock().unwrap_or_else(|e| e.into_inner());
+            detector.detect(frame)
+        };
+        let (bboxes, kps, mat_rgb) = match detection {
             Ok(result) => result,
             Err(DetectError::NoFacesDetected) => return Ok((CaptureStatus::NoFace, None)),
             Err(err) => return Err(err.into()),

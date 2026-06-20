@@ -1914,7 +1914,7 @@ impl AuthDaemon {
         };
 
         {
-            let mut detector = self.detector.lock().unwrap();
+            let mut detector = self.detector.lock().unwrap_or_else(|e| e.into_inner());
             match gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap()) {
                 Ok(det) => {
                     *detector = det;
