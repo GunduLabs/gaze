@@ -546,23 +546,11 @@ impl UserDatabase {
         let mut results: Vec<FaceScore> = faces
             .iter()
             .map(|(name, uuid_map)| {
-                let matching_embeds: Vec<&Array1<f32>> = uuid_map
+                let ref_list: Vec<&Array1<f32>> = uuid_map
                     .values()
                     .filter(|(ref_embed, spec)| *spec == spectrum && ref_embed.len() == embed.len())
                     .map(|(ref_embed, _)| ref_embed)
                     .collect();
-
-                let ref_list = if matching_embeds.is_empty() {
-                    uuid_map
-                        .values()
-                        .filter(|(ref_embed, spec)| {
-                            *spec == Spectrum::Rgb && ref_embed.len() == embed.len()
-                        })
-                        .map(|(ref_embed, _)| ref_embed)
-                        .collect()
-                } else {
-                    matching_embeds
-                };
 
                 let best = ref_list
                     .into_iter()
@@ -903,6 +891,29 @@ mod tests {
             .match_faces("alice", &embedding(&[1.0, 0.0]), 0.5, Spectrum::Ir)
             .unwrap();
         assert!(!results_ir_wrong[0].3);
+    }
+
+    #[test]
+    fn ir_probe_does_not_cross_match_an_rgb_only_face() {
+        let temp = TempDir::new("no-cross-spectrum");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 3).unwrap();
+        db.add_template(
+            "alice",
+            "rgb-only",
+            "1",
+            rgb_embeds(vec![embedding(&[1.0, 0.0])]),
+        )
+        .unwrap();
+
+        let results = db
+            .match_faces("alice", &embedding(&[1.0, 0.0]), 0.5, Spectrum::Ir)
+            .unwrap();
+
+        assert_eq!(
+            results[0].1, 0.0,
+            "IR probe must not score against RGB templates"
+        );
+        assert!(!results[0].3);
     }
 
     fn test_cipher() -> EmbeddingCipher {
