@@ -27,7 +27,7 @@ const FACE_SERVICE_NAME = "gdm-face";
 const EXTENSION_SCHEMA_ID = "org.gnome.shell.extensions.gaze";
 const FACE_AUTHENTICATION_KEY = "enable-face-authentication";
 const MAX_TRIES_KEY = "max-face-tries";
-const FACE_ERROR_TIMEOUT_WAIT_MS = 15 * 1000;
+const RETRY_MODE_KEY = "face-retry-mode";
 
 const GENERIC_ERROR_MAP = new Map([
   [
@@ -53,13 +53,6 @@ const FACE_STATUS_UPDATES = new Set([
   "Please back up...",
   "Hold still...",
 ]);
-
-function clearFaceFailureTimeout(verifier) {
-  if (verifier._gazeFaceFailedId) {
-    GLib.source_remove(verifier._gazeFaceFailedId);
-    verifier._gazeFaceFailedId = 0;
-  }
-}
 
 export default class GazeFaceAuthExtension extends Extension {
   enable() {
@@ -98,7 +91,14 @@ export default class GazeFaceAuthExtension extends Extension {
     const getFaceEnabled = () =>
       extensionSettings.get_boolean(FACE_AUTHENTICATION_KEY);
     const getMaxTries = () =>
-      Math.max(1, extensionSettings.get_int(MAX_TRIES_KEY));
+      Math.max(2, extensionSettings.get_int(MAX_TRIES_KEY));
+    const getRetryMode = () => {
+      try {
+        return extensionSettings.get_string(RETRY_MODE_KEY);
+      } catch (e) {
+        return "fixed";
+      }
+    };
 
     const dbusProxy = this._dbusProxy;
 
@@ -136,7 +136,6 @@ export default class GazeFaceAuthExtension extends Extension {
 
           const klass = dialog.constructor;
 
-          // 1. Direct session hook for the first dialog to avoid GObject bind races
           if (dialog._session) {
             dialog._session.connect("show-info", (session, text) => {
               if (text && text.trim() === "GAZE_CONFIRMATION_REQUEST") {
@@ -159,7 +158,6 @@ export default class GazeFaceAuthExtension extends Extension {
             });
           }
 
-          // 2. Direct _onEntryActivate override for the first dialog
           const originalOnEntryActivate = dialog._onEntryActivate;
           dialog._onEntryActivate = function () {
             if (this._confirmMode) {
@@ -169,11 +167,9 @@ export default class GazeFaceAuthExtension extends Extension {
             }
           };
 
-          // 3. Class Prototype override for all subsequent dialogs
           if (klass && !klass._gazeOverridden) {
             klass._gazeOverridden = true;
 
-            // Override _onSessionShowInfo on prototype
             const originalShowInfo = klass.prototype._onSessionShowInfo;
             klass.prototype._onSessionShowInfo = function (session, text) {
               if (text && text.trim() === "GAZE_CONFIRMATION_REQUEST") {
@@ -199,7 +195,6 @@ export default class GazeFaceAuthExtension extends Extension {
               }
             };
 
-            // Override _onEntryActivate on prototype
             const originalProtoOnEntryActivate =
               klass.prototype._onEntryActivate;
             klass.prototype._onEntryActivate = function () {
@@ -214,7 +209,6 @@ export default class GazeFaceAuthExtension extends Extension {
       },
     );
 
-    // Restart polkitAgent component to bind overrides
     const manager = Main.componentManager;
     if (manager) {
       manager._disableComponent("polkitAgent");
@@ -230,6 +224,20 @@ export default class GazeFaceAuthExtension extends Extension {
           original.call(this);
           this._faceEnabled = getFaceEnabled();
           this._faceMaxTries = getMaxTries();
+          this._faceRetryMode = getRetryMode();
+        };
+      },
+    );
+
+    this._injectionManager.overrideMethod(
+      proto,
+      "begin",
+      (original) => {
+        return function (userName, hold) {
+          if (this._userName !== userName) {
+            this._faceAuthFailed = false;
+          }
+          original.call(this, userName, hold);
         };
       },
     );
@@ -243,10 +251,13 @@ export default class GazeFaceAuthExtension extends Extension {
 
           this._faceEnabled = getFaceEnabled();
           this._faceMaxTries = getMaxTries();
+          this._faceRetryMode = getRetryMode();
+          this._faceFailCounter = 0;
 
           if (
             this._userName &&
             this._faceEnabled &&
+            !this._faceAuthFailed &&
             !this.serviceIsForeground(FACE_SERVICE_NAME)
           )
             this._startService(FACE_SERVICE_NAME);
@@ -267,7 +278,15 @@ export default class GazeFaceAuthExtension extends Extension {
     };
 
     proto._canFaceRetry = function () {
-      return this._userName && this._failCounter < (this._faceMaxTries ?? 1);
+      if (!this._userName) return false;
+      const mode = this._faceRetryMode ?? "fixed";
+      if (mode === "disabled") {
+        return this._faceFailCounter < 1;
+      } else if (mode === "infinite") {
+        return true;
+      } else {
+        return this._faceFailCounter < (this._faceMaxTries ?? 1);
+      }
     };
 
     proto._getHint = function () {
@@ -335,30 +354,6 @@ export default class GazeFaceAuthExtension extends Extension {
             mapped,
             Util.MessageType.ERROR,
           );
-
-          this._failCounter++;
-
-          if (!this._canFaceRetry()) {
-            clearFaceFailureTimeout(this);
-
-            const cancellable = this._cancellable;
-            this._gazeFaceFailedId = GLib.timeout_add_once(
-              GLib.PRIORITY_DEFAULT,
-              FACE_ERROR_TIMEOUT_WAIT_MS,
-              () => {
-                this._gazeFaceFailedId = 0;
-                if (cancellable && !cancellable.is_cancelled()) {
-                  this._verificationFailed(serviceName, false).catch((error) =>
-                    logError(
-                      error,
-                      "[gaze] Failed to stop face auth after max tries",
-                    ),
-                  );
-                }
-              },
-            );
-          }
-
           return;
         }
 
@@ -371,6 +366,10 @@ export default class GazeFaceAuthExtension extends Extension {
       "_onConversationStopped",
       (original) => {
         return function (client, serviceName) {
+          if (serviceName === FACE_SERVICE_NAME) {
+            this._faceFailCounter = (this._faceFailCounter || 0) + 1;
+          }
+
           original.call(this, client, serviceName);
 
           if (this.serviceIsBiometric(serviceName)) {
@@ -392,7 +391,7 @@ export default class GazeFaceAuthExtension extends Extension {
 
     this._injectionManager.overrideMethod(proto, "_onReset", (original) => {
       return function () {
-        clearFaceFailureTimeout(this);
+        this._faceFailCounter = 0;
         original.call(this);
       };
     });
@@ -402,7 +401,12 @@ export default class GazeFaceAuthExtension extends Extension {
       "_verificationFailed",
       (original) => {
         return async function (serviceName, shouldRetry) {
-          if (serviceName === FACE_SERVICE_NAME) clearFaceFailureTimeout(this);
+          if (serviceName === FACE_SERVICE_NAME) {
+            shouldRetry = this._canFaceRetry();
+            if (!shouldRetry) {
+              this._faceAuthFailed = true;
+            }
+          }
 
           return original.call(this, serviceName, shouldRetry);
         };
@@ -430,7 +434,6 @@ export default class GazeFaceAuthExtension extends Extension {
     this._injectionManager = null;
     this._extensionSettings = null;
 
-    // Restart polkitAgent component to restore standard class
     const manager = Main.componentManager;
     if (manager) {
       manager._disableComponent("polkitAgent");

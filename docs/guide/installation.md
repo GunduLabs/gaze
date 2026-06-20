@@ -2,12 +2,6 @@
 
 Use one of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible, and skips GNOME-specific packages on KDE Plasma and other non-GNOME desktops. Manual GNOME package installs still need GNOME settings commands afterward.
 
-::: warning Upgrading to v0.2.0+
-Gaze has migrated its package repository hosting infrastructure. If you installed Gaze before `v0.2.0`, a regular `apt update` or `dnf update` will not work.
-
-Simply run the **one-line installer** below; it will automatically clean up legacy repository configurations and configure the new layout. This migration is a one-time process and won't be necessary for future updates.
-:::
-
 Supported installer targets: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS, on x86_64 and arm64.
 
 ## Path A: one-line installer (recommended)
@@ -41,8 +35,7 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
 
 Use this if you prefer to configure package sources yourself. Debian/Ubuntu and Fedora use Gundu Labs repositories. Arch Linux and Arch-compatible distributions such as Manjaro and CachyOS use the AUR packages.
 
-::: info Manual Upgrades from pre-v0.2.0
-If you are upgrading an existing manual installation built before `v0.2.0`, a normal `apt update` or `dnf update` will fail. You must clean up the legacy files first:
+If you are replacing an existing manual repository configuration, remove the current repo files first:
 
 **Debian / Ubuntu:**
 ```bash
@@ -53,29 +46,29 @@ sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-
 ```bash
 sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
 ```
-:::
 
 ::: code-group
 
 ```bash [Debian/Ubuntu]
 sudo mkdir -p --mode=0755 /usr/share/keyrings
-curl -fsSL https://packages.gundulabs.com/apt/gpg.key \
+curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.gpg \
   | sudo tee /usr/share/keyrings/gundulabs-archive-keyring.gpg >/dev/null
-echo "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/apt/ * *" \
+echo "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb stable main" \
   | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 sudo apt update
 sudo apt install gaze gaze-gui
 ```
 
 ```bash [Fedora]
-sudo rpm --import https://packages.gundulabs.com/yum/gpg.key
-sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
+sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
+sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<'EOF'
 [gundulabs]
 name=Gundu Labs
-baseurl=https://packages.gundulabs.com/yum/
+baseurl=https://packages.gundulabs.com/rpm/fedora/$releasever/$basearch
 enabled=1
 gpgcheck=1
-gpgkey=https://packages.gundulabs.com/yum/gpg.key
+repo_gpgcheck=1
+gpgkey=https://packages.gundulabs.com/keys/gundulabs-repo.asc
 EOF
 sudo dnf makecache
 sudo dnf install gaze gaze-gui
@@ -90,9 +83,12 @@ yay -S --needed gaze-bin gaze-gui-bin
 
 ## Path C: GUI-only via Flatpak
 
+The Flatpak is published to the Gundu Labs repository. The signing key and repo
+URL are embedded in the `.flatpakref`, so one command adds the remote and installs
+the app:
+
 ```bash
-flatpak remote-add --if-not-exists gundulabs https://packages.gundulabs.com/setup/flatpak/gundulabs.flatpakrepo
-flatpak install gundulabs com.gundulabs.Gaze
+flatpak install --from https://packages.gundulabs.com/flatpak/com.gundulabs.Gaze.flatpakref
 ```
 
 This installs the sandboxed Gaze GUI only. It talks to the `gazed` daemon on the system bus, so you still need to install one of the system packages (Path A or B) for the daemon and PAM integration. Use this path when you want the GUI updated independently of the system package.

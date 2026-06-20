@@ -28,7 +28,7 @@ rgb = "primary"
 # Drive the camera's IR emitter (turn the IR LED on during auth). Requires `ir`.
 # emitter_enabled = false
 # Reject frames whose mean brightness (0-255) is below this value as too dark.
-dark_luma_threshold = 70
+dark_luma_threshold = 30
 
 [auth]
 abort_if_ssh = true

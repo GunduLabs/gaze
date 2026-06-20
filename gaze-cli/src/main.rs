@@ -226,7 +226,7 @@ async fn run_config_wizard(
         .default(config.cameras.dark_luma_threshold.to_string())
         .interact_text()?
         .parse::<u8>()
-        .unwrap_or(70);
+        .unwrap_or(30);
 
     let ir_cameras = gaze_core::camera::enumerate_ir_cameras().unwrap_or_default();
     let mut ir_options = vec![("None".to_string(), String::new())];

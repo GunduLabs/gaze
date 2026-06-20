@@ -20,7 +20,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  JUST_VERSION: 1.52.0
+  JUST_VERSION: 1.53.0
   NFPM_VERSION: v2.46.3
 
 jobs:
@@ -202,7 +202,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -287,15 +287,15 @@ jobs:
             gcc
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        uses: extractions/setup-just@v4
         with:
           just-version: ${{ env.JUST_VERSION }}
 
       - name: Restore Rust cache
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        uses: Swatinem/rust-cache@v2
         with:
           shared-key: cd-${{ matrix.id }}-v1
           cache-on-failure: true
@@ -316,11 +316,13 @@ jobs:
       - name: Configure Arch LLVM/Clang environment
         if: ${{ matrix.id == 'arch' }}
         run: |
-          echo "LLVM_CONFIG_PATH=/usr/bin/llvm-config" >> "$GITHUB_ENV"
-          echo "LIBCLANG_PATH=/usr/lib" >> "$GITHUB_ENV"
-          echo "CLANG_PATH=/usr/bin/clang" >> "$GITHUB_ENV"
-          echo "CC=/usr/bin/clang" >> "$GITHUB_ENV"
-          echo "CXX=/usr/bin/clang++" >> "$GITHUB_ENV"
+          {
+            echo "LLVM_CONFIG_PATH=/usr/bin/llvm-config"
+            echo "LIBCLANG_PATH=/usr/lib"
+            echo "CLANG_PATH=/usr/bin/clang"
+            echo "CC=/usr/bin/clang"
+            echo "CXX=/usr/bin/clang++"
+          } >> "$GITHUB_ENV"
 
       - name: Build native artifacts
         env:
@@ -345,18 +347,32 @@ jobs:
           VERSION="${DEPLOY_REF_NAME#v}" PACKAGE_RELEASE="${{ matrix.package_release }}" just package-prebuilt "${{ matrix.format }}"
           ls -lh dist/packages/
 
+      - name: Write package target metadata
+        run: |
+          cat > dist/packages/package-target.env <<EOF
+          FORMAT=${{ matrix.format }}
+          DISTRO=${{ matrix.distro }}
+          DISTRO_VERSION=${{ matrix.distro_version }}
+          DEB_SUITE=${{ matrix.deb_suite }}
+          RPM_DISTRO=${{ matrix.rpm_distro }}
+          RPM_VERSION=${{ matrix.rpm_version }}
+          EOF
+
       - name: Upload package artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@v7
         with:
           name: packages-${{ matrix.id }}
           path: |
             dist/packages/*.deb
             dist/packages/*.rpm
             dist/packages/*.pkg.tar.*
+            dist/packages/package-target.env
 
   build-flatpak:
     name: Build flatpak (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    env:
+      DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -368,7 +384,9 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Install flatpak tooling
         run: |
@@ -376,15 +394,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        uses: extractions/setup-just@v4
         with:
           just-version: ${{ env.JUST_VERSION }}
 
       - name: Restore Rust cache
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        uses: Swatinem/rust-cache@v2
         with:
           shared-key: cd-flatpak-vendor-${{ matrix.arch }}-v1
           cache-on-failure: true
@@ -403,7 +421,7 @@ jobs:
 
       - name: Import GPG key for flatpak signing
         id: import_gpg
-        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7
+        uses: crazy-max/ghaction-import-gpg@v7
         with:
           gpg_private_key: ${{ secrets.PACKAGE_SIGNING_KEY }}
 
@@ -412,51 +430,41 @@ jobs:
           FLATPAK_GPG_SIGN: ${{ steps.import_gpg.outputs.fingerprint }}
           FLATPAK_BUILDER_JOBS: 4
         run: |
-          VERSION="${GITHUB_REF_NAME#v}" just build-flatpak
+          VERSION="${DEPLOY_REF_NAME#v}" just build-flatpak
 
       - name: Upload flatpak bundle artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@v7
         with:
           name: packages-flatpak-${{ matrix.arch }}
           path: dist/packages/*.flatpak
 
       - name: Upload flatpak remote metadata
         if: ${{ matrix.arch == 'amd64' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@v7
         with:
           name: packages-flatpak-metadata
           path: |
             dist/packages/*.flatpakref
             dist/packages/*.flatpakrepo
 
-  publish-gemfury:
-    name: Publish packages to Gemfury
+  dispatch-packages:
+    name: Dispatch packages to self-hosted repo
     runs-on: ubuntu-latest
-    needs: [build-packages]
-    env:
-      DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
+    # Must wait for build-flatpak too: the packages repo downloads ALL of this
+    # run's artifacts by run_id when the dispatch lands, so every artifact
+    # (deb/rpm/arch AND the flatpak bundles) has to be uploaded first.
+    needs: [build-packages, build-flatpak]
 
     steps:
-      - name: Download package artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      # No checkout or artifact download needed: GunduLabs/packages pulls the
+      # packages-* artifacts itself by run_id and builds the apt/rpm/flatpak/aur repos.
+      - name: Trigger GunduLabs/packages publish
+        uses: peter-evans/repository-dispatch@v4
         with:
-          pattern: packages-*
-          path: dist/packages
-
-      - name: Install Gemfury CLI
-        run: |
-          echo "deb [trusted=yes] https://apt.fury.io/cli/ * *" | sudo tee /etc/apt/sources.list.d/fury-cli.list
-          sudo apt-get update
-          sudo apt-get install -y fury-cli
-
-      - name: Upload to Gemfury
-        env:
-          GEMFURY_PUSH_TOKEN: ${{ secrets.GEMFURY_PUSH_TOKEN }}
-        run: |
-          find dist/packages -type f \( -name "*.deb" -o -name "*.rpm" \) | while read -r pkg; do
-            echo "Uploading $pkg to Gemfury..."
-            fury push "$pkg" --account gundulabs --api-token "$GEMFURY_PUSH_TOKEN" --public
-          done
+          token: ${{ secrets.PACKAGES_REPO_PAT }}
+          repository: GunduLabs/packages
+          event-type: package-artifacts
+          client-payload: '{"repo":"${{ github.repository }}","run_id":"${{ github.run_id }}","url":"https://gaze.gundulabs.com"}'
 
   release-github:
     name: Upload packages to GitHub Release
@@ -467,13 +475,13 @@ jobs:
 
     steps:
       - name: Download package artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@v8
         with:
           pattern: packages-*
           path: dist/packages
 
       - name: Upload to release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.DEPLOY_REF_NAME }}
           files: |
@@ -484,56 +492,7 @@ jobs:
             dist/packages/**/*.flatpakref
             dist/packages/**/*.flatpakrepo
 
-  publish-aur:
-    name: Publish wrapper packages to AUR
-    runs-on: ubuntu-latest
-    needs: [build-packages, release-github]
-    env:
-      DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
-
-    steps:
-      # Intentionally no ref: the AUR scripts/template are publishing infra,
-      # which must come from the workflow's own ref, not the release tag.
-      - name: Checkout source
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-      - name: Install AUR tooling
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libarchive-tools \
-            pacman-package-manager \
-            makepkg \
-            gettext-base \
-            rsync
-
-      - name: Download Arch package artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: packages-arch
-          path: dist/packages
-
-      - name: Generate AUR wrapper packages
-        env:
-          RELEASE_TAG: ${{ env.DEPLOY_REF_NAME }}
-        run: ./scripts/build-aur-packages.sh
-
-      - name: Configure SSH for AUR
-        env:
-          AUR_SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$AUR_SSH_KEY" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
-          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
-          echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/aur -o IdentitiesOnly=yes" >> "$GITHUB_ENV"
-
-      - name: Push wrapper packages to AUR
-        run: |
-          for attempt in 1 2 3; do
-            if ./scripts/push-aur-packages.sh; then
-              exit 0
-            fi
-            sleep "$((attempt * 10))"
-          done
-          exit 1
+  # AUR publishing lives in GunduLabs/packages (its publish-repos.yml builds the
+  # Arch binary repo and pushes the AUR wrapper packages from the artifacts it
+  # downloads via the dispatch above). Publishing it from here too raced the
+  # packages repo on aur.archlinux.org, so it was removed.

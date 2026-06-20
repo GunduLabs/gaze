@@ -12,10 +12,24 @@
 
     <key name="max-face-tries" type="i">
       <default>3</default>
+      <range min="2" max="20"/>
       <summary>Maximum face authentication attempts</summary>
       <description>
         Number of failed face attempts before face auth is stopped for the
         current authentication cycle.
+      </description>
+    </key>
+
+    <key name="face-retry-mode" type="s">
+      <choices>
+        <choice value="disabled"/>
+        <choice value="fixed"/>
+        <choice value="infinite"/>
+      </choices>
+      <default>'fixed'</default>
+      <summary>Face retry mode</summary>
+      <description>
+        Whether face authentication retries are disabled, limited to a fixed number, or infinite.
       </description>
     </key>
   </schema>

@@ -6,9 +6,15 @@
   "timezone": "America/New_York",
   "labels": ["dependencies"],
   "rangeStrategy": "bump",
+  "pinDigests": false,
   "prConcurrentLimit": 0,
   "prHourlyLimit": 0,
   "packageRules": [
+    {
+      "description": "Do not pin dependencies or maintain digest-only updates",
+      "matchUpdateTypes": ["pin", "pinDigest", "digest"],
+      "enabled": false
+    },
     {
       "description": "Non-major Rust crate updates: batch, run daily, automerge once CI passes",
       "matchManagers": ["cargo"],
@@ -33,9 +39,9 @@
       "automerge": false
     },
     {
-      "description": "Group GitHub Actions updates (incl. pinned digest bumps), run daily, automerge once CI passes",
+      "description": "Group GitHub Actions version updates, run daily, automerge once CI passes",
       "matchManagers": ["github-actions"],
-      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "matchUpdateTypes": ["minor", "patch"],
       "groupName": "github actions",
       "schedule": ["* 0-5 * * *"],
       "automerge": true
@@ -43,7 +49,7 @@
     {
       "description": "Non-major CI tool version bumps: run daily, automerge once CI passes",
       "matchManagers": ["custom.regex"],
-      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "matchUpdateTypes": ["minor", "patch"],
       "schedule": ["* 0-5 * * *"],
       "automerge": true
     }
@@ -51,7 +57,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Keep the pinned `just` version in workflow env in sync with upstream releases",
+      "description": "Keep the `just` version in workflow env in sync with upstream releases",
       "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
       "matchStrings": ["JUST_VERSION:\\s*(?<currentValue>\\S+)"],
       "depNameTemplate": "casey/just",
@@ -59,7 +65,7 @@
     },
     {
       "customType": "regex",
-      "description": "Keep the pinned `nfpm` version in workflow env in sync with upstream releases",
+      "description": "Keep the `nfpm` version in workflow env in sync with upstream releases",
       "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
       "matchStrings": ["NFPM_VERSION:\\s*(?<currentValue>\\S+)"],
       "depNameTemplate": "goreleaser/nfpm",

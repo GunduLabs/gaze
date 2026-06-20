@@ -1,10 +1,9 @@
 use crate::camera::frame_to_bytes;
-use crate::config::{Config, MODELS_DIR};
+use crate::config::Config;
 use crate::dbus::CaptureStatus;
 use crate::detect::{DetectError, FaceDetector};
 use opencv::core::Mat;
 use opencv::prelude::*;
-use std::path::Path;
 
 const MIN_FACE_SIZE_RATIO: f32 = 0.25;
 const MAX_FACE_SIZE_RATIO: f32 = 0.78;
@@ -27,35 +26,26 @@ pub struct CaptureResult {
 }
 
 pub struct FaceChecker {
-    detector: FaceDetector,
-    dark_luma_threshold: u8,
+    pub detector: std::sync::Arc<std::sync::Mutex<FaceDetector>>,
+    pub dark_luma_threshold: u8,
     pub rgb_luma_history: std::collections::VecDeque<u8>,
+    pub spectrum: Spectrum,
+    pub check_centering_and_proximity: bool,
 }
 
 impl FaceChecker {
-    pub fn new(config: &Config) -> anyhow::Result<Self> {
-        let model_path = Path::new(MODELS_DIR).join(config.security.detector());
-
-        if !model_path.exists() {
-            anyhow::bail!(
-                "Model not found at {}. Run 'gazed' once to download models, or install the gaze package.",
-                model_path.display()
-            );
-        }
-
-        let detector = FaceDetector::new(model_path.to_str().unwrap())?;
-        Ok(Self {
-            detector,
-            dark_luma_threshold: config.cameras.dark_luma_threshold,
-            rgb_luma_history: std::collections::VecDeque::new(),
-        })
-    }
-
-    pub fn from_detector_with_config(detector: FaceDetector, config: &Config) -> Self {
+    pub fn new(
+        detector: std::sync::Arc<std::sync::Mutex<FaceDetector>>,
+        config: &Config,
+        spectrum: Spectrum,
+        check_centering_and_proximity: bool,
+    ) -> Self {
         Self {
             detector,
             dark_luma_threshold: config.cameras.dark_luma_threshold,
             rgb_luma_history: std::collections::VecDeque::new(),
+            spectrum,
+            check_centering_and_proximity,
         }
     }
 
@@ -83,10 +73,8 @@ impl FaceChecker {
     pub fn capture_status(
         &mut self,
         frame: &Mat,
-        spectrum: Spectrum,
-        check_centering_and_proximity: bool,
     ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
-        let (bboxes, kps, mat_rgb) = match self.detector.detect(frame) {
+        let (bboxes, kps, mat_rgb) = match self.detector.lock().unwrap().detect(frame) {
             Ok(result) => result,
             Err(DetectError::NoFacesDetected) => return Ok((CaptureStatus::NoFace, None)),
             Err(err) => return Err(err.into()),
@@ -135,18 +123,18 @@ impl FaceChecker {
             || y2 / max_dim > (1.0 - edge_margin)
         {
             CaptureStatus::Clipped
-        } else if check_centering_and_proximity
+        } else if self.check_centering_and_proximity
             && ((norm_cx - 0.5).abs() >= 0.2 || (norm_cy - 0.5).abs() >= 0.2)
         {
             CaptureStatus::NotCentered
-        } else if check_centering_and_proximity && face_size_ratio < MIN_FACE_SIZE_RATIO {
+        } else if self.check_centering_and_proximity && face_size_ratio < MIN_FACE_SIZE_RATIO {
             CaptureStatus::TooFar
-        } else if check_centering_and_proximity && face_size_ratio > MAX_FACE_SIZE_RATIO {
+        } else if self.check_centering_and_proximity && face_size_ratio > MAX_FACE_SIZE_RATIO {
             CaptureStatus::TooClose
         } else if kps.is_none() {
             return Ok((CaptureStatus::NoFace, None));
         } else {
-            if let Spectrum::Rgb = spectrum {
+            if let Spectrum::Rgb = self.spectrum {
                 let w = frame.cols() as f32;
                 let h = frame.rows() as f32;
                 let max_dim = w.max(h);
@@ -260,7 +248,7 @@ mod tests {
         let frame =
             Mat::new_rows_cols_with_default(12, 12, core::CV_8UC3, Scalar::all(0.0)).unwrap();
 
-        assert!(frame_mean_luma(&frame).unwrap() < 70);
+        assert!(frame_mean_luma(&frame).unwrap() < 30);
     }
 
     #[test]
@@ -268,7 +256,7 @@ mod tests {
         let frame =
             Mat::new_rows_cols_with_default(12, 12, core::CV_8UC3, Scalar::all(120.0)).unwrap();
 
-        assert!(frame_mean_luma(&frame).unwrap() >= 70);
+        assert!(frame_mean_luma(&frame).unwrap() >= 30);
     }
 
     #[test]
@@ -296,10 +284,10 @@ mod tests {
     #[test]
     fn single_channel_frames_use_raw_luminance() {
         let dark = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC1, Scalar::all(5.0)).unwrap();
-        assert!(frame_mean_luma(&dark).unwrap() < 70);
+        assert!(frame_mean_luma(&dark).unwrap() < 30);
 
         let lit = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC1, Scalar::all(120.0)).unwrap();
-        assert!(frame_mean_luma(&lit).unwrap() >= 70);
+        assert!(frame_mean_luma(&lit).unwrap() >= 30);
     }
 
     #[test]
@@ -307,15 +295,15 @@ mod tests {
         let mut frame =
             Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(0.0)).unwrap();
         {
-            let mut top = Mat::roi_mut(&mut frame, core::Rect::new(0, 0, 8, 1)).unwrap();
+            let mut top = Mat::roi_mut(&mut frame, core::Rect::new(0, 0, 4, 1)).unwrap();
             top.set_to_def(&Scalar::all(255.0)).unwrap();
         }
-        assert!(frame_mean_luma(&frame).unwrap() < 70);
+        assert!(frame_mean_luma(&frame).unwrap() < 30);
     }
 
     #[test]
     fn empty_frame_is_treated_as_dark() {
         let frame = Mat::default();
-        assert!(frame_mean_luma(&frame).unwrap_or(0) < 70);
+        assert!(frame_mean_luma(&frame).unwrap_or(0) < 30);
     }
 }
