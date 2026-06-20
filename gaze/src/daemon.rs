@@ -1950,7 +1950,6 @@ impl AuthDaemon {
             }
         }
 
-        // Validate the TPM before persisting; the file migration runs after save_to so disk and config can't disagree.
         let want_encrypt = new_config.storage.encrypt_templates;
         let pending_cipher = {
             let db = self.db.lock().await;
@@ -1966,25 +1965,33 @@ impl AuthDaemon {
             }
         };
 
-        new_config
-            .save_to(CONFIG_PATH)
-            .map_err(|e| fdo::Error::Failed(format!("Failed to save config: {e}")))?;
+        let save_config = || {
+            new_config
+                .save_to(CONFIG_PATH)
+                .map_err(|e| fdo::Error::Failed(format!("Failed to save config: {e}")))
+        };
 
-        if let Some(cipher) = pending_cipher {
-            let mut db = self.db.lock().await;
-            if want_encrypt {
+        match pending_cipher {
+            Some(cipher) if want_encrypt => {
+                save_config()?;
+                let mut db = self.db.lock().await;
                 db.set_cipher(Some(cipher));
                 let n = db.migrate_plaintext_to_encrypted().map_err(|e| {
                     fdo::Error::Failed(format!("failed to encrypt existing templates: {e}"))
                 })?;
                 info!(migrated = n, "Enabled template encryption");
-            } else {
+            }
+            Some(cipher) => {
+                let mut db = self.db.lock().await;
                 let n = db.decrypt_all_with(&cipher).map_err(|e| {
                     fdo::Error::Failed(format!("failed to decrypt existing templates: {e}"))
                 })?;
                 db.set_cipher(None);
+                drop(db);
+                save_config()?;
                 info!(decrypted = n, "Disabled template encryption");
             }
+            None => save_config()?,
         }
 
         info!("Config reloaded successfully");
