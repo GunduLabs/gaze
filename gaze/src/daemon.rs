@@ -631,7 +631,10 @@ mod tests {
             None
         );
         // No active session info at all -> also refuse.
-        assert_eq!(AuthDaemon::resolve_camera_uid(0, 1001, false, false, None), None);
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(0, 1001, false, false, None),
+            None
+        );
     }
 
     #[test]
