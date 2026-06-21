@@ -83,6 +83,7 @@ modules:
         path: ../../
         skip:
           - .git
+          - .cargo
           - target
           - dist
           - node_modules
