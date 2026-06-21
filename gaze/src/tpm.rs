@@ -53,7 +53,7 @@ pub fn load_or_create_dek(state_dir: &Path) -> anyhow::Result<[u8; KEY_LEN]> {
     }
 
     let mut dek = [0u8; KEY_LEN];
-    getrandom::getrandom(&mut dek)
+    getrandom::fill(&mut dek)
         .map_err(|e| anyhow!("failed to draw a random data-encryption key: {e}"))?;
 
     let (public, private) = seal(&mut context, &dek).context("failed to seal the template key")?;

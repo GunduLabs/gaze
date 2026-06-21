@@ -24,7 +24,7 @@ impl EmbeddingCipher {
 
     pub fn encrypt(&self, plaintext: &[u8]) -> anyhow::Result<Vec<u8>> {
         let mut nonce_bytes = [0u8; NONCE_LEN];
-        getrandom::getrandom(&mut nonce_bytes)
+        getrandom::fill(&mut nonce_bytes)
             .map_err(|e| anyhow!("failed to draw a random nonce: {e}"))?;
         let nonce = Nonce::from_slice(&nonce_bytes);
         let ciphertext = self
