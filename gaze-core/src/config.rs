@@ -154,16 +154,20 @@ impl SecurityLevel {
         }
     }
 
+    // Accessors are total: an unknown level falls back to the medium models rather
+    // than panicking the daemon. Bad input is rejected up front by `validate()`.
     pub fn detector(&self) -> &str {
         match self.level.as_str() {
             "low" | "medium" => "det_500m.onnx",
             "high" | "maximum" => "det_10g.onnx",
             "custom" => match self.detector.as_str() {
                 "accurate" => "det_10g.onnx",
-                "standard" => "det_500m.onnx",
-                other => unreachable!("invalid detector level in config: {other:?}"),
+                _ => "det_500m.onnx",
             },
-            _ => unreachable!("invalid security level in config: {:?}", self.level),
+            other => {
+                tracing::warn!("invalid security level {other:?}; using medium detector");
+                "det_500m.onnx"
+            }
         }
     }
 
@@ -173,14 +177,23 @@ impl SecurityLevel {
             "high" | "maximum" => "w600k_r50.onnx",
             "custom" => match self.recognizer.as_str() {
                 "accurate" => "w600k_r50.onnx",
-                "standard" => "w600k_mbf.onnx",
-                other => unreachable!("invalid recognizer level in config: {other:?}"),
+                _ => "w600k_mbf.onnx",
             },
-            _ => unreachable!("invalid security level in config: {:?}", self.level),
+            other => {
+                tracing::warn!("invalid security level {other:?}; using medium recognizer");
+                "w600k_mbf.onnx"
+            }
         }
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
+        if !SECURITY_LEVEL_OPTIONS.contains(&self.level.as_str()) {
+            anyhow::bail!(
+                "invalid security level {:?}: expected one of {:?}",
+                self.level,
+                SECURITY_LEVEL_OPTIONS
+            );
+        }
         if self.level == "custom" {
             match self.detector.as_str() {
                 "standard" | "accurate" => {}
@@ -372,7 +385,11 @@ impl Config {
         if Path::new(path).exists() {
             let contents = std::fs::read_to_string(path)?;
             let config: Config = toml::from_str(&contents)?;
-            config.security.validate()?;
+            // Don't refuse to start on a bad level: warn and let the total accessors
+            // fall back. Rejection is enforced at the set_config (admin input) boundary.
+            if let Err(e) = config.security.validate() {
+                tracing::warn!("{e}; using safe fallbacks for invalid security fields");
+            }
             Ok(config)
         } else {
             Ok(Config::default())
@@ -501,6 +518,38 @@ mod tests {
         assert_eq!(custom_standard.detector(), "det_500m.onnx");
         assert_eq!(custom_standard.recognizer(), "w600k_mbf.onnx");
         assert!((custom_standard.threshold() - 0.35).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn validate_rejects_unknown_security_level() {
+        let mut level = SecurityLevel::medium();
+        level.level = "bogus".to_string();
+        assert!(level.validate().is_err());
+        // Known presets still validate.
+        for preset in ["low", "medium", "high", "maximum"] {
+            let mut l = SecurityLevel::medium();
+            l.level = preset.to_string();
+            l.validate().unwrap();
+        }
+    }
+
+    #[test]
+    fn unknown_level_falls_back_to_medium_without_panicking() {
+        let mut level = SecurityLevel::medium();
+        level.level = "bogus".to_string();
+        assert_eq!(level.detector(), "det_500m.onnx");
+        assert_eq!(level.recognizer(), "w600k_mbf.onnx");
+        assert!((level.threshold() - 0.4).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn load_from_tolerates_invalid_level_with_fallback() {
+        let temp = TempDir::new("bad-level");
+        let path = temp.path().join("config.toml");
+        std::fs::write(&path, "[security]\nlevel = \"bogus\"\n").unwrap();
+
+        let config = Config::load_from(path.to_str().unwrap()).unwrap();
+        assert_eq!(config.security.detector(), "det_500m.onnx");
     }
 
     #[test]

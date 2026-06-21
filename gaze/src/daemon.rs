@@ -1937,6 +1937,11 @@ impl AuthDaemon {
             header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
 
+        new_config
+            .security
+            .validate()
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+
         self.cancel_active_tasks();
 
         let new_liveness_detector = if new_config.liveness.enabled {
