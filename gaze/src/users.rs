@@ -543,31 +543,41 @@ impl UserDatabase {
             .get(username)
             .ok_or_else(|| UserDbError::UserNotFound(username.to_string()))?;
 
-        let mut results: Vec<FaceScore> = faces
-            .iter()
-            .map(|(name, uuid_map)| {
-                let ref_list: Vec<&Array1<f32>> = uuid_map
-                    .values()
-                    .filter(|(ref_embed, spec)| *spec == spectrum && ref_embed.len() == embed.len())
-                    .map(|(ref_embed, _)| ref_embed)
-                    .collect();
+        let embed_len = embed.len();
+        let mut results: Vec<FaceScore> = Vec::with_capacity(faces.len());
+        for (name, uuid_map) in faces {
+            let mut best: Option<f32> = None;
+            for (ref_embed, spec) in uuid_map.values() {
+                if *spec != spectrum || ref_embed.len() != embed_len {
+                    continue;
+                }
 
-                let best = ref_list
-                    .into_iter()
-                    .map(|ref_embed| embed.dot(ref_embed))
-                    .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                    .unwrap_or(0.0);
-                // Center at 0.4 with slope 15 so values near the threshold spread out nicely.
-                let pct = 100.0 / (1.0 + (-15.0_f32 * (best - 0.4)).exp());
-                (
-                    name.clone(),
-                    best,
-                    pct,
-                    best > threshold,
-                    uuid_map.len() as u32,
-                )
-            })
-            .collect();
+                let score = embed.dot(ref_embed);
+                best = Some(match best {
+                    Some(current)
+                        if current
+                            .partial_cmp(&score)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                            == std::cmp::Ordering::Less =>
+                    {
+                        score
+                    }
+                    Some(current) => current,
+                    None => score,
+                });
+            }
+
+            let best = best.unwrap_or(0.0);
+            // Center at 0.4 with slope 15 so values near the threshold spread out nicely.
+            let pct = 100.0 / (1.0 + (-15.0_f32 * (best - 0.4)).exp());
+            results.push((
+                name.clone(),
+                best,
+                pct,
+                best > threshold,
+                uuid_map.len() as u32,
+            ));
+        }
 
         results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         Ok(results)

@@ -124,10 +124,7 @@ pub fn align_face(
         .ok_or_else(|| anyhow::anyhow!("Failed to estimate transform"))?;
 
     let img_rgb = mat_to_rgb(mat_rgb)?;
-    let img_dyn = image::DynamicImage::ImageRgb8(img_rgb);
-
-    let aligned = warp_affine(&img_dyn.to_rgb8(), &transform, 112, 112);
-    Ok(aligned)
+    Ok(warp_affine(&img_rgb, &transform, 112, 112))
 }
 
 #[cfg(test)]

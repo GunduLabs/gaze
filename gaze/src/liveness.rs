@@ -25,13 +25,19 @@ impl LivenessDetector {
     fn pre_process(img: &RgbImage) -> Array4<f32> {
         let scaled = resize(img, INPUT_SIZE, INPUT_SIZE, FilterType::Triangle);
         let size = INPUT_SIZE as usize;
+        let plane_len = size * size;
         let mut tensor = Array4::<f32>::zeros((1, 3, size, size));
+        let data = tensor
+            .as_slice_mut()
+            .expect("preprocess tensor should be contiguous");
+
         for y in 0..size {
             for x in 0..size {
                 let p = scaled.get_pixel(x as u32, y as u32);
-                for c in 0..3 {
-                    tensor[[0, c, y, x]] = p[c] as f32;
-                }
+                let idx = y * size + x;
+                data[idx] = p[0] as f32;
+                data[plane_len + idx] = p[1] as f32;
+                data[2 * plane_len + idx] = p[2] as f32;
             }
         }
         tensor

@@ -42,7 +42,7 @@ pub struct ClaimState {
 
 pub struct FaceData {
     pub embedding: Array1<f32>,
-    pub liveness_face: image::RgbImage,
+    pub liveness_frame: Option<Mat>,
     pub bbox: [f32; 4],
     pub kpss: ndarray::Array3<f32>,
     pub yaw: f32,
@@ -780,6 +780,7 @@ fn process_frame_sync(
     checker: &mut FaceChecker,
     recognizer: &mut FaceRecognizer,
     frame: &Mat,
+    keep_liveness_frame: bool,
 ) -> anyhow::Result<(CaptureStatus, Option<FaceData>)> {
     let (status, result_opt) = checker.capture_status(frame)?;
 
@@ -788,28 +789,31 @@ fn process_frame_sync(
     }
 
     if let Some(res) = result_opt {
-        let Some(kpss) = &res.kpss else {
+        let Some(kpss) = res.kpss else {
             return Ok((status, None));
         };
-        let Some(mat_rgb) = &res.mat_rgb else {
+        let Some(mat_rgb) = res.mat_rgb else {
             return Ok((status, None));
         };
 
-        let aligned = align_face(mat_rgb, kpss, 0)?;
+        let aligned = align_face(&mat_rgb, &kpss, 0)?;
         let embedding = recognizer.get_embedding(&aligned)?;
 
         let Some((x1, y1, x2, y2)) = res.bbox else {
             return Ok((status, None));
         };
-        let rgb = mat_to_rgb(mat_rgb)?;
-        let liveness_face = crate::liveness::crop_face(&rgb, [x1, y1, x2, y2])?;
+        let liveness_frame = if keep_liveness_frame {
+            Some(mat_rgb)
+        } else {
+            None
+        };
         Ok((
             status,
             Some(FaceData {
                 embedding,
-                liveness_face,
+                liveness_frame,
                 bbox: [x1, y1, x2, y2],
-                kpss: kpss.clone(),
+                kpss,
                 yaw: res.yaw,
                 pitch: res.pitch,
             }),
@@ -817,6 +821,15 @@ fn process_frame_sync(
     } else {
         Ok((status, None))
     }
+}
+
+fn crop_liveness_face(data: &FaceData) -> anyhow::Result<image::RgbImage> {
+    let mat_rgb = data
+        .liveness_frame
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("liveness frame was not retained"))?;
+    let rgb = mat_to_rgb(mat_rgb)?;
+    crate::liveness::crop_face(&rgb, data.bbox)
 }
 
 fn build_hybrid_scores(
@@ -1176,7 +1189,7 @@ impl AuthDaemon {
 
                         let (status, embed_opt) = {
                             let mut recognizer = recognizer_rgb_arc.blocking_lock();
-                            match process_frame_sync(&mut checker, &mut recognizer, &frame) {
+                            match process_frame_sync(&mut checker, &mut recognizer, &frame, liveness_enabled) {
                                 Ok(res) => res,
                                 Err(_) => (CaptureStatus::NoFace, None),
                             }
@@ -1204,12 +1217,19 @@ impl AuthDaemon {
                                     if let Some(eyes) = eyes_from_kpss(&data.kpss) {
                                         landmark_seq.push(eyes);
                                     }
+                                    let liveness_face = match crop_liveness_face(&data) {
+                                        Ok(face) => face,
+                                        Err(e) => {
+                                            error!("Liveness crop failed: {e}");
+                                            continue;
+                                        }
+                                    };
                                     let mut live_guard = liveness_arc.blocking_lock();
                                     let Some(detector) = live_guard.as_mut() else {
                                         error!("Liveness is enabled but detector is unavailable");
                                         return;
                                     };
-                                    let live_score = match detector.live_score(&data.liveness_face) {
+                                    let live_score = match detector.live_score(&liveness_face) {
                                         Ok(score) => score,
                                         Err(e) => {
                                             error!("Liveness inference failed: {e}");
@@ -1279,7 +1299,7 @@ impl AuthDaemon {
 
                         let (status, embed_opt) = {
                             let mut recognizer = recognizer_ir_arc.blocking_lock();
-                            match process_frame_sync(&mut checker, &mut recognizer, &frame) {
+                            match process_frame_sync(&mut checker, &mut recognizer, &frame, false) {
                                 Ok(res) => res,
                                 Err(_) => (CaptureStatus::NoFace, None),
                             }
@@ -1605,7 +1625,7 @@ impl AuthDaemon {
 
                         let (status, result_opt) = {
                             let mut recognizer = recognizer_rgb_arc.blocking_lock();
-                            match process_frame_sync(&mut checker, &mut recognizer, &frame) {
+                            match process_frame_sync(&mut checker, &mut recognizer, &frame, false) {
                                 Ok(res) => res,
                                 Err(_) => (CaptureStatus::NoFace, None),
                             }
@@ -1684,7 +1704,7 @@ impl AuthDaemon {
 
                         let (status, result_opt) = {
                             let mut recognizer = recognizer_ir_arc.blocking_lock();
-                            match process_frame_sync(&mut checker, &mut recognizer, &frame) {
+                            match process_frame_sync(&mut checker, &mut recognizer, &frame, false) {
                                 Ok(res) => res,
                                 Err(_) => (CaptureStatus::NoFace, None),
                             }

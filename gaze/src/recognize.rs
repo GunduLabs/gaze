@@ -18,17 +18,24 @@ impl FaceRecognizer {
 
     fn pre_process(img: &RgbImage) -> Array4<f32> {
         let (width, height) = img.dimensions();
-        let mut tensor = Array4::<f32>::zeros((1, 3, height as usize, width as usize));
+        let width = width as usize;
+        let height = height as usize;
+        let plane_len = width * height;
+        let mut tensor = Array4::<f32>::zeros((1, 3, height, width));
+        let data = tensor
+            .as_slice_mut()
+            .expect("preprocess tensor should be contiguous");
 
         for (x, y, pixel) in img.enumerate_pixels() {
             let r = (pixel[0] as f32 - 127.5) / 127.5;
             let g = (pixel[1] as f32 - 127.5) / 127.5;
             let b = (pixel[2] as f32 - 127.5) / 127.5;
+            let idx = y as usize * width + x as usize;
 
             // ArcFace was trained on BGR tensors (OpenCV convention).
-            tensor[[0, 0, y as usize, x as usize]] = b;
-            tensor[[0, 1, y as usize, x as usize]] = g;
-            tensor[[0, 2, y as usize, x as usize]] = r;
+            data[idx] = b;
+            data[plane_len + idx] = g;
+            data[2 * plane_len + idx] = r;
         }
         tensor
     }
