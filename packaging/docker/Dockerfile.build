@@ -1,0 +1,88 @@
+# Linux build environment for building Gaze on a non-Linux host (e.g. macOS).
+#
+# Gaze targets Linux platform APIs (V4L2, PAM, TPM2/tss2, polkit, GTK4/libadwaita,
+# flatpak, SELinux) that do not exist on macOS, so the build cannot run natively.
+# This image reproduces the same toolchain the CD workflow uses (.github/workflows/cd.yml)
+# so the existing `just` targets run unchanged inside a Linux container.
+#
+# Built and driven by the `just docker <target>` recipe.
+FROM ubuntu:24.04
+
+# Provided automatically by buildkit: amd64 | arm64
+ARG TARGETARCH
+ARG JUST_VERSION=1.53.0
+ARG NFPM_VERSION=2.47.0
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System build dependencies: the deb set from cd.yml, plus SELinux policy tools
+# (build-selinux) and flatpak tooling (build-flatpak).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        ca-certificates \
+        curl \
+        build-essential \
+        clang \
+        libclang-dev \
+        libcairo2-dev \
+        libglib2.0-dev \
+        libgdk-pixbuf-2.0-dev \
+        libgstreamer1.0-dev \
+        libgstreamer-plugins-base1.0-dev \
+        libpango1.0-dev \
+        libgraphene-1.0-dev \
+        libopencv-dev \
+        libv4l-dev \
+        libpam0g-dev \
+        libtss2-dev \
+        libgtk-4-dev \
+        libadwaita-1-dev \
+        libssl-dev \
+        gnupg \
+        devscripts \
+        gettext-base \
+        pkg-config \
+        checkpolicy \
+        policycoreutils \
+        semodule-utils \
+        flatpak \
+        flatpak-builder \
+        elfutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Rust (stable, minimal profile)
+RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
+        | sh -s -- -y --default-toolchain stable --profile minimal
+ENV PATH=/root/.cargo/bin:$PATH
+
+# just (pinned to the version CI uses)
+RUN set -eux; \
+    case "$TARGETARCH" in \
+        arm64) triple=aarch64-unknown-linux-musl ;; \
+        amd64) triple=x86_64-unknown-linux-musl ;; \
+        *) echo "Unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${triple}.tar.gz" \
+        -o /tmp/just.tar.gz; \
+    tar -xzf /tmp/just.tar.gz -C /usr/local/bin just; \
+    rm /tmp/just.tar.gz; \
+    just --version
+
+# nfpm (pinned to the version CD uses)
+RUN set -eux; \
+    case "$TARGETARCH" in \
+        arm64) nfpm_arch=arm64 ;; \
+        amd64) nfpm_arch=x86_64 ;; \
+        *) echo "Unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${nfpm_arch}.tar.gz" \
+        -o /tmp/nfpm.tar.gz; \
+    tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm; \
+    rm /tmp/nfpm.tar.gz; \
+    nfpm --version
+
+COPY entrypoint.sh /usr/local/bin/gaze-build-entry
+RUN chmod +x /usr/local/bin/gaze-build-entry
+
+WORKDIR /work
+ENTRYPOINT ["/usr/local/bin/gaze-build-entry"]

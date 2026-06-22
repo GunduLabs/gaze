@@ -193,3 +193,29 @@ dev-unlink-system:
 [group("dev")]
 dev-link-status:
     scripts/dev-link-system.sh status
+
+# ── docker (build the Linux targets on a non-Linux host) ────────────────────────
+
+# Tag for the local Linux build-environment image
+docker_image := env("GAZE_DOCKER_IMAGE", "gaze-build:local")
+
+# Build (or refresh) the Linux build-environment image; cached after the first run
+[group("docker")]
+docker-image:
+    docker build -t {{ quote(docker_image) }} -f packaging/docker/Dockerfile.build packaging/docker
+
+# Run any build/package target inside the Linux container, e.g. `just docker build-rust`,
+# `just docker build-flatpak`, `just docker package-prebuilt deb`. Artifacts land in dist/.
+[group("docker")]
+docker target *args: docker-image
+    docker run --rm --privileged \
+        -v {{ quote(justfile_directory() + ":/work") }} \
+        -v gaze-cargo-registry:/root/.cargo/registry \
+        -v gaze-cargo-git:/root/.cargo/git \
+        -v gaze-target:/work/target \
+        -v gaze-flatpak:/root/.local/share/flatpak \
+        -e CARGO_BUILD_JOBS -e FLATPAK_BUILDER_JOBS -e FLATPAK_GPG_SIGN \
+        -e VERSION -e PACKAGE_RELEASE \
+        -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+        {{ quote(docker_image) }} \
+        {{ target }} {{ args }}
