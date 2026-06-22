@@ -6,7 +6,7 @@
 # so the existing `just` targets run unchanged inside a Linux container.
 #
 # Built and driven by the `just docker <target>` recipe.
-FROM ubuntu:24.04
+FROM ubuntu:26.04@sha256:53958ec7b67c2c9355df922dd08dbf0360611f8c3cdb656875e81873db9ffdba
 
 # Provided automatically by buildkit: amd64 | arm64
 ARG TARGETARCH
