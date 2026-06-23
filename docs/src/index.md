@@ -3,25 +3,45 @@ layout: home
 
 hero:
   name: "Gaze"
-  text: "Facial authentication for Linux"
-  tagline: On-device face recognition for login, lock screen, sudo, and more.
+  text: "Face unlock for Linux"
+  tagline: On-device facial authentication for login, lock screen, sudo, and PAM.
   image:
     src: /favicon.svg
     alt: Gaze icon
   actions:
     - theme: brand
-      text: Install Gaze
+      text: Get started
       link: /guide/getting-started
+    - theme: alt
+      text: Install
+      link: /guide/installation
     - theme: alt
       text: GitHub
       link: https://github.com/GunduLabs/gaze
+
 features:
-  - title: Enroll and test
-    details: Capture a profile with gaze add-face default, then verify with gaze auth.
+  - title: Quick setup
+    details: Install packages, start gazed, enroll a face, and test authentication from the CLI.
+    link: /guide/getting-started
+    linkText: Start setup
+  - title: Desktop login
+    details: Use Gaze with GNOME login, lock screen, GDM, or Hyprland's hyprlock.
+    link: /guide/gnome
+    linkText: Configure desktop auth
   - title: PAM integration
-    details: Works with PAM auth flows and GNOME lock/GDM integration via the extension.
-  - title: DBus API
-    details: com.gundulabs.Gaze exposes authentication and enrollment for third-party apps.
+    details: Add facial authentication to sudo, login managers, and other PAM-backed flows.
+    link: /guide/pam
+    linkText: Read the PAM guide
+  - title: CLI and GUI tools
+    details: Enroll, test, remove profiles, and manage authentication from the terminal or GTK app.
+    link: /guide/cli
+    linkText: See the CLI
   - title: Local-first
-    details: Runs on your machine with configurable security levels and automatic model download.
+    details: Face templates stay on your machine. The root daemon owns the ML pipeline and DBus API.
+    link: /guide/how-it-works
+    linkText: How it works
+  - title: Troubleshooting
+    details: Fix camera selection, daemon startup, DBus permissions, PAM lockouts, and model issues.
+    link: /guide/troubleshooting
+    linkText: Debug issues
 ---
