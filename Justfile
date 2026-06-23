@@ -71,28 +71,36 @@ prepare-flatpak-ort:
         curl -fsSL "$ort_url" -o .flatpak-cache/ort/onnxruntime.tgz; \
     fi
 
+# flatpak-builder's state/build/repo dirs (ostree, needs xattrs + same-filesystem
+# co-location). Default to the repo tree; the `docker` wrapper redirects them to an
+# in-VM volume because the sshfs-backed bind mount can't host ostree.
+flatpak_state_dir := env("FLATPAK_STATE_DIR", ".flatpak-builder")
+flatpak_build_dir := env("FLATPAK_BUILD_DIR", "flatpak-build")
+flatpak_repo_dir := env("FLATPAK_REPO_DIR", "dist/flatpak-repo")
+
 # Build flatpak repo and bundle
 [group("build")]
 build-flatpak: prepare-flatpak-vendor prepare-flatpak-ort
-    mkdir -p dist/packages dist/flatpak-repo
+    mkdir -p dist/packages {{ quote(flatpak_repo_dir) }}
 
     flatpak-builder \
         --force-clean \
         --disable-rofiles-fuse \
+        --state-dir={{ quote(flatpak_state_dir) }} \
         --jobs="${FLATPAK_BUILDER_JOBS:-2}" \
-        --repo=dist/flatpak-repo \
+        --repo={{ quote(flatpak_repo_dir) }} \
         --arch="$(flatpak --default-arch)" \
         --default-branch=stable \
         --user \
         $( [ -n "${FLATPAK_GPG_SIGN:-}" ] && printf '%s' "--gpg-sign=${FLATPAK_GPG_SIGN}" ) \
-        flatpak-build \
+        {{ quote(flatpak_build_dir) }} \
         packaging/flatpak/com.gundulabs.Gaze.yml
 
     arch="$(flatpak --default-arch)"; \
     flatpak build-bundle \
         --arch="$arch" \
         $( [ -n "${FLATPAK_GPG_SIGN:-}" ] && printf '%s' "--gpg-sign=${FLATPAK_GPG_SIGN}" ) \
-        dist/flatpak-repo \
+        {{ quote(flatpak_repo_dir) }} \
         "dist/packages/com.gundulabs.Gaze-${arch}.flatpak" \
         com.gundulabs.Gaze \
         stable
@@ -206,6 +214,11 @@ docker-image:
 
 # Run any build/package target inside the Linux container, e.g. `just docker build-rust`,
 # `just docker build-flatpak`, `just docker package-prebuilt deb`. Artifacts land in dist/.
+#
+# flatpak-builder writes ostree (needs xattrs + same-filesystem co-location) which a
+# sshfs-backed /work bind mount can't host, so its state/build/repo are redirected to a
+# single in-VM volume (/flatpak); the final .flatpak bundle is a plain file and still
+# lands in dist/packages.
 [group("docker")]
 docker target *args: docker-image
     docker run --rm --privileged \
@@ -214,6 +227,10 @@ docker target *args: docker-image
         -v gaze-cargo-git:/root/.cargo/git \
         -v gaze-target:/work/target \
         -v gaze-flatpak:/root/.local/share/flatpak \
+        -v gaze-flatpak-work:/flatpak \
+        -e FLATPAK_STATE_DIR=/flatpak/state \
+        -e FLATPAK_BUILD_DIR=/flatpak/build \
+        -e FLATPAK_REPO_DIR=/flatpak/repo \
         -e CARGO_BUILD_JOBS -e FLATPAK_BUILDER_JOBS -e FLATPAK_GPG_SIGN \
         -e VERSION -e PACKAGE_RELEASE \
         -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \

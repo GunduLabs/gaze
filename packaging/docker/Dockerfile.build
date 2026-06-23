@@ -8,7 +8,8 @@
 # Built and driven by the `just docker <target>` recipe.
 FROM ubuntu:24.04
 
-# Provided automatically by buildkit: amd64 | arm64
+# amd64 | arm64. Auto-populated by buildkit; on the legacy builder it is empty,
+# so the RUN steps below fall back to `dpkg --print-architecture`.
 ARG TARGETARCH
 ARG JUST_VERSION=1.53.0
 ARG NFPM_VERSION=2.47.0
@@ -57,10 +58,11 @@ ENV PATH=/root/.cargo/bin:$PATH
 
 # just (pinned to the version CI uses)
 RUN set -eux; \
-    case "$TARGETARCH" in \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "$arch" in \
         arm64) triple=aarch64-unknown-linux-musl ;; \
         amd64) triple=x86_64-unknown-linux-musl ;; \
-        *) echo "Unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+        *) echo "Unsupported arch: $arch" >&2; exit 1 ;; \
     esac; \
     curl -fsSL "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${triple}.tar.gz" \
         -o /tmp/just.tar.gz; \
@@ -70,16 +72,23 @@ RUN set -eux; \
 
 # nfpm (pinned to the version CD uses)
 RUN set -eux; \
-    case "$TARGETARCH" in \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "$arch" in \
         arm64) nfpm_arch=arm64 ;; \
         amd64) nfpm_arch=x86_64 ;; \
-        *) echo "Unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+        *) echo "Unsupported arch: $arch" >&2; exit 1 ;; \
     esac; \
     curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${nfpm_arch}.tar.gz" \
         -o /tmp/nfpm.tar.gz; \
     tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm; \
     rm /tmp/nfpm.tar.gz; \
     nfpm --version
+
+# bindgen/clang-sys (pulled in by opencv and tss-esapi) locate libclang at runtime
+# via llvm-config, which isn't on PATH here. Point it straight at the libclang.so
+# shipped by libclang-dev so the discovery doesn't fail (matches cd.yml's Arch step).
+# Path is arch-independent; pinned to llvm-18 to match the ubuntu:24.04 base.
+ENV LIBCLANG_PATH=/usr/lib/llvm-18/lib
 
 COPY entrypoint.sh /usr/local/bin/gaze-build-entry
 RUN chmod +x /usr/local/bin/gaze-build-entry
