@@ -6,7 +6,7 @@
 # so the existing `just` targets run unchanged inside a Linux container.
 #
 # Built and driven by the `just docker <target>` recipe.
-FROM ubuntu:24.04
+FROM ubuntu:26.04@sha256:53958ec7b67c2c9355df922dd08dbf0360611f8c3cdb656875e81873db9ffdba
 
 # amd64 | arm64. Auto-populated by buildkit; on the legacy builder it is empty,
 # so the RUN steps below fall back to `dpkg --print-architecture`.
@@ -85,10 +85,11 @@ RUN set -eux; \
     nfpm --version
 
 # bindgen/clang-sys (pulled in by opencv and tss-esapi) locate libclang at runtime
-# via llvm-config, which isn't on PATH here. Point it straight at the libclang.so
-# shipped by libclang-dev so the discovery doesn't fail (matches cd.yml's Arch step).
-# Path is arch-independent; pinned to llvm-18 to match the ubuntu:24.04 base.
-ENV LIBCLANG_PATH=/usr/lib/llvm-18/lib
+# via llvm-config, which isn't on PATH here. Point it at the multiarch dir where
+# libclang-dev ships libclang-*.so so discovery doesn't fail (matches cd.yml's Arch
+# step). Both triples are listed so this stays arch- and llvm-version-agnostic; only
+# the one matching the image's arch exists.
+ENV LIBCLANG_PATH=/usr/lib/aarch64-linux-gnu:/usr/lib/x86_64-linux-gnu
 
 COPY entrypoint.sh /usr/local/bin/gaze-build-entry
 RUN chmod +x /usr/local/bin/gaze-build-entry
