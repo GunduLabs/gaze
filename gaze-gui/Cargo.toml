@@ -19,7 +19,7 @@ zbus = "5.16.0"
 zbus_polkit = "5.0.0"
 enumflags2 = "0.7.12"
 anyhow = "1.0.102"
-opencv = { version = "0.98.2", default-features = false, features = ["imgproc", "videoio"] }
+opencv = { version = "0.99.0", default-features = false, features = ["imgproc", "videoio"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 toml = "1.1.2"
