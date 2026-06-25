@@ -2,15 +2,12 @@
 <component type="desktop-application">
   <id>com.gundulabs.Gaze</id>
   <name>Gaze</name>
-  <summary>Facial authentication manager for Linux</summary>
+  <summary>GTK4/Adwaita GUI for Gaze</summary>
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
   <launchable type="desktop-id">com.gundulabs.Gaze.desktop</launchable>
   <description>
-    <p>
-      Gaze is a local facial authentication system for Linux with a GTK4 GUI for
-      enrollment and authentication checks.
-    </p>
+    <p>GTK4/Adwaita GUI for Gaze with tools for enrollment, face profile management, and authentication checks.</p>
   </description>
   <url type="homepage">https://gaze.gundulabs.com</url>
   <developer_name>Gundu Labs</developer_name>

@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=Gaze
-Comment=Facial Authentication Manager
+Comment=GTK4/Adwaita GUI for Gaze
 Exec=gaze-gui
 Icon=com.gundulabs.Gaze
 Terminal=false
