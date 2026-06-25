@@ -1405,7 +1405,7 @@ dependencies = [
  "libc",
  "nalgebra",
  "ndarray",
- "opencv 0.99.0",
+ "opencv",
  "ort",
  "rayon",
  "sha2 0.11.0",
@@ -1448,7 +1448,7 @@ dependencies = [
  "libc",
  "nalgebra",
  "ndarray",
- "opencv 0.99.0",
+ "opencv",
  "ort",
  "rusty_scrfd",
  "serde",
@@ -1476,7 +1476,7 @@ dependencies = [
  "glib",
  "gtk4",
  "libadwaita",
- "opencv 0.99.0",
+ "opencv",
  "tokio",
  "toml",
  "tracing",
@@ -2756,25 +2756,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "opencv"
-version = "0.99.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e64a4ee03d2ec18c19d62b7fa4f570840c424853343ac085a9e3cedc60d88c4b"
-dependencies = [
- "cc",
- "dunce",
- "jobserver",
- "libc",
- "num-traits",
- "opencv-binding-generator 0.102.0",
- "pkg-config",
- "semver",
- "shlex 2.0.1",
- "vcpkg",
- "windows",
-]
-
-[[package]]
 name = "opencv-binding-generator"
 version = "0.100.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2800,21 +2781,6 @@ dependencies = [
  "percent-encoding",
  "regex",
  "shlex 1.3.0",
-]
-
-[[package]]
-name = "opencv-binding-generator"
-version = "0.102.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6df5c8a6b61606e5581388ce115393f14691d9bbb1756a364c559d94a466405"
-dependencies = [
- "clang",
- "clang-sys",
- "dunce",
- "percent-encoding",
- "regex",
- "semver",
- "shlex 2.0.1",
 ]
 
 [[package]]
@@ -3745,7 +3711,7 @@ dependencies = [
  "log",
  "ndarray",
  "ndarray-stats",
- "opencv 0.98.2",
+ "opencv",
  "opencv-binding-generator 0.100.0",
  "ort",
  "uuid",
