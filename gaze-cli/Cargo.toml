@@ -2,7 +2,7 @@
 name = "gaze-cli"
 version = "0.1.0"
 edition = "2024"
-description = "Facial authentication CLI client for Gaze"
+description = "CLI for Gaze"
 license = "MIT"
 homepage = "https://gaze.gundulabs.com"
 repository = "https://github.com/Gundu-Labs/gaze"

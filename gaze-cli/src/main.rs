@@ -63,7 +63,7 @@ where
 }
 
 #[derive(Parser)]
-#[command(name = "gaze", version, about = "Gaze Facial Authentication CLI")]
+#[command(name = "gaze", version, about = "CLI for Gaze")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Gaze is facial authentication for Linux. A root daemon (`gazed`) runs the ML
+Gaze: Facial authentication for Linux. A root daemon (`gazed`) runs the ML
 pipeline and owns a system-DBus interface; the PAM modules, CLI, and GTK GUI are
 all clients of it.
 
