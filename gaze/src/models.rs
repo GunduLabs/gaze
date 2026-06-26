@@ -29,6 +29,14 @@ fn expected_pack_sha256(pack_name: &str) -> anyhow::Result<&'static str> {
     }
 }
 
+fn pack_for_model(model_name: &str) -> anyhow::Result<&'static str> {
+    match model_name {
+        "det_500m.onnx" | "w600k_mbf.onnx" => Ok("buffalo_sc"),
+        "det_10g.onnx" | "w600k_r50.onnx" => Ok("buffalo_l"),
+        _ => anyhow::bail!("no known model pack provides '{model_name}'"),
+    }
+}
+
 fn expected_model_sha256(model_name: &str) -> Option<&'static str> {
     match model_name {
         "det_500m.onnx" => Some(DET_500M_SHA256),
@@ -198,18 +206,25 @@ pub fn ensure_models(
         return Ok((det_path, rec_path));
     }
 
-    let pack_name = match detector_name {
-        d if d.contains("10g") => "buffalo_l",
-        _ => "buffalo_sc",
-    };
+    let mut needed_packs: Vec<&'static str> = Vec::new();
+    for (model_name, model_path) in [(detector_name, &det_path), (recognizer_name, &rec_path)] {
+        if !model_path.exists() {
+            let pack = pack_for_model(model_name)?;
+            if !needed_packs.contains(&pack) {
+                needed_packs.push(pack);
+            }
+        }
+    }
 
-    let url = zip_url(pack_name);
-    let zip_path = dir.join(format!("{}.zip", pack_name));
-    let expected_sha256 = expected_pack_sha256(pack_name)?;
+    for pack_name in needed_packs {
+        let url = zip_url(pack_name);
+        let zip_path = dir.join(format!("{}.zip", pack_name));
+        let expected_sha256 = expected_pack_sha256(pack_name)?;
 
-    download_file(&url, &zip_path, expected_sha256)?;
-    extract_onnx_from_zip(&zip_path, dir)?;
-    fs::remove_file(&zip_path)?;
+        download_file(&url, &zip_path, expected_sha256)?;
+        extract_onnx_from_zip(&zip_path, dir)?;
+        fs::remove_file(&zip_path)?;
+    }
 
     if !det_path.exists() {
         anyhow::bail!("Detection model '{}' not found in pack", detector_name);
@@ -337,6 +352,31 @@ mod tests {
             Some(LIVENESS_MODEL_SHA256)
         );
         assert_eq!(expected_model_sha256("custom.onnx"), None);
+    }
+
+    #[test]
+    fn pack_for_model_maps_every_quality_combination() {
+        assert_eq!(pack_for_model("det_500m.onnx").unwrap(), "buffalo_sc");
+        assert_eq!(pack_for_model("w600k_mbf.onnx").unwrap(), "buffalo_sc");
+        assert_eq!(pack_for_model("det_10g.onnx").unwrap(), "buffalo_l");
+        assert_eq!(pack_for_model("w600k_r50.onnx").unwrap(), "buffalo_l");
+
+        for (detector, recognizer) in [
+            ("det_500m.onnx", "w600k_mbf.onnx"),
+            ("det_10g.onnx", "w600k_r50.onnx"),
+            ("det_500m.onnx", "w600k_r50.onnx"),
+            ("det_10g.onnx", "w600k_mbf.onnx"),
+        ] {
+            assert!(pack_for_model(detector).is_ok(), "{detector} has no pack");
+            assert!(
+                pack_for_model(recognizer).is_ok(),
+                "{recognizer} has no pack"
+            );
+            assert!(expected_pack_sha256(pack_for_model(detector).unwrap()).is_ok());
+            assert!(expected_pack_sha256(pack_for_model(recognizer).unwrap()).is_ok());
+        }
+
+        assert!(pack_for_model("custom.onnx").is_err());
     }
 
     #[test]
