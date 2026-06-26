@@ -23,6 +23,7 @@ pub const PAM_IGNORE: c_int = 25;
 
 pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
 const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to cancel.";
+const MAX_TTY_PASSWORD_LEN: usize = 64 * 1024;
 
 pub type PamHandle = *mut c_void;
 
@@ -224,13 +225,31 @@ pub fn prompt_password_from_tty(cancel_fd: RawFd) -> Option<String> {
             }
 
             if poll_fds[0].revents != 0 {
-                let mut buf = [0_u8; 1024];
-                let n = libc::read(fd, buf.as_mut_ptr() as *mut c_void, buf.len());
+                let mut collected: Vec<u8> = Vec::new();
+                loop {
+                    let mut buf = [0_u8; 1024];
+                    let n = libc::read(fd, buf.as_mut_ptr() as *mut c_void, buf.len());
+                    if n < 0 {
+                        if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+                            continue;
+                        }
+                        let _ = writeln!(tty);
+                        return None;
+                    }
+                    if n == 0 {
+                        break;
+                    }
+                    let chunk = &buf[..n as usize];
+                    collected.extend_from_slice(chunk);
+                    if chunk.contains(&b'\n') || collected.len() >= MAX_TTY_PASSWORD_LEN {
+                        break;
+                    }
+                }
                 let _ = writeln!(tty);
-                if n <= 0 {
+                if collected.is_empty() {
                     return None;
                 }
-                let mut pw = String::from_utf8_lossy(&buf[..n as usize]).into_owned();
+                let mut pw = String::from_utf8_lossy(&collected).into_owned();
                 while pw.ends_with('\n') || pw.ends_with('\r') {
                     pw.pop();
                 }
