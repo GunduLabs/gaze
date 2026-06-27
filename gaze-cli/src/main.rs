@@ -872,6 +872,46 @@ fn refresh_gnome_system_settings_cmd() -> String {
     .join(" ")
 }
 
+fn remove_unmanaged_install_artifacts_cmd() -> String {
+    [
+        r#"owned_by_pkg() {
+          p=$1;
+          if command -v pacman >/dev/null 2>&1; then pacman -Qo "$p" >/dev/null 2>&1 && return 0; fi;
+          if command -v dpkg-query >/dev/null 2>&1; then dpkg-query -S "$p" >/dev/null 2>&1 && return 0; fi;
+          if command -v rpm >/dev/null 2>&1; then rpm -qf "$p" >/dev/null 2>&1 && return 0; fi;
+          return 1;
+        };
+        remove_if_unmanaged() {
+          p=$1;
+          [ -e "$p" ] || [ -L "$p" ] || return 0;
+          if [ -L "$p" ] || ! owned_by_pkg "$p"; then
+            sudo rm -rf "$p";
+          fi;
+        };
+        for p in
+          /usr/bin/gaze /usr/bin/gazed /usr/bin/gaze-gui
+          /usr/local/bin/gaze /usr/local/bin/gazed /usr/local/bin/gaze-gui
+          /usr/lib/security/pam_gaze.so /usr/lib/security/pam_gaze_grosshack.so
+          /usr/lib64/security/pam_gaze.so /usr/lib64/security/pam_gaze_grosshack.so
+          /usr/share/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml
+          /usr/share/gnome-shell/extensions/gaze@gundulabs.com/extension.js
+          /usr/share/gnome-shell/extensions/gaze@gundulabs.com/metadata.json
+          /usr/share/gnome-shell/extensions/gaze@gundulabs.com/prefs.js
+          /etc/systemd/system/gazed.service.d/zz-gaze-dev-checkout.conf
+          /etc/systemd/system/gazed.service.d/dev-checkout.conf
+        ; do remove_if_unmanaged "$p"; done;
+        for p in /lib/*/security/pam_gaze.so /lib/*/security/pam_gaze_grosshack.so /usr/lib/*/security/pam_gaze.so /usr/lib/*/security/pam_gaze_grosshack.so; do
+          [ -e "$p" ] || [ -L "$p" ] || continue;
+          remove_if_unmanaged "$p";
+        done;
+        sudo rmdir /usr/share/gnome-shell/extensions/gaze@gundulabs.com /etc/systemd/system/gazed.service.d 2>/dev/null || true;
+        sudo rm -rf /usr/local/share/gaze-dev;
+        sudo systemctl daemon-reload >/dev/null 2>&1 || true;
+        if command -v glib-compile-schemas >/dev/null 2>&1; then sudo glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true; fi"#,
+    ]
+    .join(" ")
+}
+
 fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     let mut plan: Vec<(&'static str, String)> = Vec::new();
 
@@ -964,6 +1004,11 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
             "sudo semodule -r gaze-gdm-camera 2>/dev/null || true".into(),
         ));
     }
+
+    plan.push((
+        "Remove unmanaged development links/files",
+        remove_unmanaged_install_artifacts_cmd(),
+    ));
 
     plan.push(("Remove model cache", "sudo rm -rf /var/cache/gaze".into()));
     plan.push(("Remove config", "sudo rm -rf /etc/gaze".into()));
