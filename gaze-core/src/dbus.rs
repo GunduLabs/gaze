@@ -127,6 +127,11 @@ pub fn dbus_is_file_not_found(err: &zbus::Error) -> bool {
     err.to_string().contains("FileNotFound")
 }
 
+pub fn dbus_is_not_activatable(err: &zbus::Error) -> bool {
+    let s = err.to_string();
+    s.contains("not activatable") || s.contains("ServiceUnknown")
+}
+
 pub async fn connect_gaze() -> zbus::Result<GazeProxy<'static>> {
     let connection = zbus::Connection::system().await?;
     GazeProxy::new(&connection).await

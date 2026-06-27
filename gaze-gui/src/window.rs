@@ -2,7 +2,7 @@ use crate::capture_dialog;
 use gaze_core::config::{Config, DEFAULT_RGB_CAMERA, SecurityLevel};
 use gaze_core::dbus::{
     GazeProxy, apply_config_to_daemon, connect_gaze, dbus_error_message, dbus_is_file_not_found,
-    load_config_from_daemon,
+    dbus_is_not_activatable, load_config_from_daemon,
 };
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -1106,6 +1106,26 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 Err(err) => {
                                     if dbus_is_file_not_found(&err) {
                                         Vec::new()
+                                    } else if dbus_is_not_activatable(&err) {
+                                        status_page.set_title("Daemon Starting");
+                                        status_page.set_description(Some(
+                                            "Gaze daemon is starting up, please wait...",
+                                        ));
+                                        status_page.set_visible(true);
+                                        face_list.set_visible(false);
+                                        glib::timeout_add_local_once(
+                                            std::time::Duration::from_secs(3),
+                                            glib::clone!(
+                                                #[strong]
+                                                refresh,
+                                                move || {
+                                                    if let Some(f) = refresh.borrow().as_ref() {
+                                                        f();
+                                                    }
+                                                }
+                                            ),
+                                        );
+                                        return;
                                     } else {
                                         add_dbus_error_toast(&window, "Failed to load faces", &err);
                                         Vec::new()
