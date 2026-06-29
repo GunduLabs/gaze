@@ -104,6 +104,8 @@ struct ConfigRows<'a> {
     hybrid: &'a libadwaita::ComboRow,
     abort_ssh: &'a gtk4::Switch,
     abort_lid: &'a gtk4::Switch,
+    resume_grace: &'a libadwaita::SpinRow,
+    encrypt_templates: &'a gtk4::Switch,
 }
 
 struct CameraChoices<'a> {
@@ -160,6 +162,9 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
         ));
     rows.abort_ssh.set_active(cfg.auth.abort_if_ssh);
     rows.abort_lid.set_active(cfg.auth.abort_if_lid_closed);
+    rows.resume_grace.set_value(cfg.auth.resume_grace_ms as f64);
+    rows.encrypt_templates
+        .set_active(cfg.storage.encrypt_templates);
 
     set_liveness_config_rows_visible(
         rows.liveness_enabled,
@@ -335,6 +340,12 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     require_confirm_row.add_suffix(&require_confirm_switch);
     auth_group.add(&require_confirm_row);
 
+    let resume_grace_row = libadwaita::SpinRow::with_range(0.0, 10000.0, 100.0);
+    resume_grace_row.set_digits(0);
+    resume_grace_row.set_title("Resume Grace Period (ms)");
+    resume_grace_row.set_subtitle("Delay face authentication on wake from suspend");
+    auth_group.add(&resume_grace_row);
+
     let hybrid_names = ["Default", "Or", "Fallback on Dark", "And"];
     let hybrid_row = libadwaita::ComboRow::new();
     hybrid_row.set_title("Hybrid combining policy");
@@ -342,6 +353,18 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     let hybrid_model = gtk4::StringList::new(&hybrid_names);
     hybrid_row.set_model(Some(&hybrid_model));
     security_group.add(&hybrid_row);
+
+    let storage_group = libadwaita::PreferencesGroup::new();
+    storage_group.set_title("Storage");
+    page.add(&storage_group);
+
+    let encrypt_templates_row = libadwaita::ActionRow::new();
+    encrypt_templates_row.set_title("Encrypt Face Templates");
+    encrypt_templates_row.set_subtitle("Encrypt face templates at rest with a TPM-sealed key");
+    let encrypt_templates_switch = gtk4::Switch::new();
+    encrypt_templates_switch.set_valign(gtk4::Align::Center);
+    encrypt_templates_row.add_suffix(&encrypt_templates_switch);
+    storage_group.add(&encrypt_templates_row);
 
     liveness_enabled_switch.connect_active_notify(glib::clone!(
         #[weak]
@@ -410,6 +433,10 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         abort_ssh_switch,
         #[weak]
         abort_lid_switch,
+        #[weak]
+        resume_grace_row,
+        #[weak]
+        encrypt_templates_switch,
         #[strong]
         cameras,
         #[strong]
@@ -458,6 +485,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             cfg.auth.require_confirmation = require_confirm_switch.is_active();
             cfg.auth.abort_if_ssh = abort_ssh_switch.is_active();
             cfg.auth.abort_if_lid_closed = abort_lid_switch.is_active();
+            cfg.auth.resume_grace_ms = resume_grace_row.value() as u64;
+            cfg.storage.encrypt_templates = encrypt_templates_switch.is_active();
 
             let cfg_to_apply = cfg.clone();
             drop(cfg);
@@ -536,6 +565,16 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         apply_changes,
         move |_| apply_changes()
     ));
+    resume_grace_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    encrypt_templates_switch.connect_active_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
 
     dark_luma_threshold_row.connect_value_notify(glib::clone!(
         #[strong]
@@ -589,6 +628,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 hybrid: &hybrid_row,
                 abort_ssh: &abort_ssh_switch,
                 abort_lid: &abort_lid_switch,
+                resume_grace: &resume_grace_row,
+                encrypt_templates: &encrypt_templates_switch,
             },
             CameraChoices {
                 cameras: &cameras,
@@ -741,6 +782,10 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         abort_ssh_switch,
         #[weak]
         abort_lid_switch,
+        #[weak]
+        resume_grace_row,
+        #[weak]
+        encrypt_templates_switch,
         #[strong]
         cameras,
         #[strong]
@@ -777,6 +822,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                         hybrid: &hybrid_row,
                         abort_ssh: &abort_ssh_switch,
                         abort_lid: &abort_lid_switch,
+                        resume_grace: &resume_grace_row,
+                        encrypt_templates: &encrypt_templates_switch,
                     },
                     CameraChoices {
                         cameras: &cameras,
