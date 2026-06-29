@@ -15,8 +15,8 @@
 
 ---
 
-> [!WARNING]
-> Gaze includes local liveness anti-spoofing, but it is still not a substitute for strong system authentication. Do not use it as your only authentication factor for security-critical systems.
+> [!NOTE]
+> Gaze includes local liveness anti-spoofing and support for infrared (IR) cameras to secure authentication against spoofing attacks. For high-security environments, it is recommended to keep standard system authentication active as a fallback.
 
 Facial authentication for Linux with on-device face recognition, PAM integration, and tools for login, lock screen, sudo, and desktop management.
 
