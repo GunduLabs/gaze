@@ -199,6 +199,7 @@ pub trait Gaze {
     async fn enroll_stop(&self) -> zbus::Result<()>;
 
     async fn list_faces(&self, username: &str) -> zbus::Result<Vec<(String, u32, bool, bool)>>;
+    async fn has_enrolled_faces(&self, username: &str) -> zbus::Result<bool>;
     async fn delete_face(&self, username: &str, face_name: &str) -> zbus::Result<bool>;
     async fn rename_face(
         &self,

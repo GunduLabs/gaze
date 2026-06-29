@@ -18,6 +18,10 @@ const GAZE_DBUS_INTERFACE = `
       <arg name="uid" type="u" direction="in"/>
       <arg name="active" type="b" direction="out"/>
     </method>
+    <method name="HasEnrolledFaces">
+      <arg name="username" type="s" direction="in"/>
+      <arg name="result" type="b" direction="out"/>
+    </method>
   </interface>
 </node>
 `;
@@ -255,12 +259,26 @@ export default class GazeFaceAuthExtension extends Extension {
           this._faceFailCounter = 0;
 
           if (
-            this._userName &&
-            this._faceEnabled &&
-            !this._faceAuthFailed &&
-            !this.serviceIsForeground(FACE_SERVICE_NAME)
+            !this._userName ||
+            !this._faceEnabled ||
+            this._faceAuthFailed ||
+            this.serviceIsForeground(FACE_SERVICE_NAME)
           )
-            this._startService(FACE_SERVICE_NAME);
+            return;
+
+          const self = this;
+          const userName = this._userName;
+          if (dbusProxy) {
+            dbusProxy.HasEnrolledFacesRemote(userName, (result, err) => {
+              if (
+                !err &&
+                result[0] &&
+                !self._faceAuthFailed &&
+                !self.serviceIsForeground(FACE_SERVICE_NAME)
+              )
+                self._startService(FACE_SERVICE_NAME);
+            });
+          }
         };
       },
     );

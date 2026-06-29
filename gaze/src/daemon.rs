@@ -1886,6 +1886,15 @@ impl AuthDaemon {
         db.list_faces(&username).map_err(Self::map_user_db_error)
     }
 
+    async fn has_enrolled_faces(&self, username: String) -> fdo::Result<bool> {
+        let db = self.db.lock().await;
+        match db.list_faces(&username) {
+            Ok(faces) => Ok(!faces.is_empty()),
+            Err(UserDbError::UserNotFound(_)) => Ok(false),
+            Err(e) => Err(Self::map_user_db_error(e)),
+        }
+    }
+
     async fn delete_face(
         &self,
         #[zbus(header)] header: Header<'_>,
