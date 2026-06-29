@@ -2,11 +2,14 @@
 name = "gaze-cli"
 version = "0.1.0"
 edition = "2024"
-description = "CLI for Gaze"
-license = "MIT"
-homepage = "https://gaze.gundulabs.com"
-repository = "https://github.com/Gundu-Labs/gaze"
-authors = ["Gundu Labs <maintainers@gundulabs.com>"]
+description = "Command-line facial authentication client for Gaze"
+categories.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "gaze"

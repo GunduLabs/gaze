@@ -10,3 +10,12 @@ members = [
 ]
 default-members = ["gaze", "gaze-cli", "pam-gaze", "pam-gaze-grosshack", "gaze-gui"]
 resolver = "3"
+
+[workspace.package]
+categories = ["authentication"]
+homepage = "https://gaze.gundulabs.com"
+keywords = ["authentication", "biometrics", "face-recognition", "linux", "pam"]
+license = "MIT"
+publish = false
+readme = "README.md"
+repository = "https://github.com/GunduLabs/gaze"

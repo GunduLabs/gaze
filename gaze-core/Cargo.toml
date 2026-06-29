@@ -2,6 +2,14 @@
 name = "gaze-core"
 version = "0.1.0"
 edition = "2024"
+description = "Shared camera, configuration, D-Bus, and face detection library for Gaze"
+categories.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
 
 [features]
 default = ["detection"]
