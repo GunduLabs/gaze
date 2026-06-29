@@ -60,6 +60,8 @@ LEGACY_SYSTEMD_DROPIN=/etc/systemd/system/gazed.service.d/dev-checkout.conf
 SYSTEM_EXTENSION_DIR=/usr/share/gnome-shell/extensions/gaze@gundulabs.com
 SCHEMA_SRC="$REPO/packaging/config/org.gnome.shell.extensions.gaze.gschema.xml"
 SCHEMA_DST=/usr/share/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml
+POLKIT_POLICY_SRC="$REPO/packaging/config/com.gundulabs.gaze.policy"
+POLKIT_POLICY_DST=/usr/share/polkit-1/actions/com.gundulabs.gaze.policy
 
 artifact() {
     printf '%s/%s' "$TARGET" "$1"
@@ -222,6 +224,38 @@ link_pam_modules() {
     [ "$linked" -eq 1 ] || die "Could not find a PAM security module directory."
 }
 
+link_pam_config() {
+    pam_file=/etc/pam.d/sudo
+    [ -f "$pam_file" ] || return 0
+    grep -q "pam_gaze" "$pam_file" 2>/dev/null && { printf 'PAM already configured: %s\n' "$pam_file"; return 0; }
+
+    tmp=$(mktemp)
+    awk '
+        /^[[:space:]]*auth[[:space:]]/ && !done {
+            print "auth        sufficient    pam_gaze.so"
+            done = 1
+        }
+        { print }
+    ' "$pam_file" > "$tmp" && install -m 644 "$tmp" "$pam_file" && \
+        printf 'configured PAM: %s\n' "$pam_file"
+    rm -f "$tmp"
+
+    mkdir -p /etc/gaze
+    printf '%s\n' "$pam_file" > /etc/gaze/pam-arch.dev-configured
+}
+
+restore_pam_config() {
+    flag=/etc/gaze/pam-arch.dev-configured
+    [ -f "$flag" ] || return 0
+
+    while IFS= read -r pam_file; do
+        [ -f "$pam_file" ] || continue
+        sed -i '/pam_gaze/d' "$pam_file" && printf 'restored PAM: %s\n' "$pam_file"
+    done < "$flag"
+
+    rm -f "$flag"
+}
+
 restore_pam_modules() {
     multiarch=
     if command -v gcc >/dev/null 2>&1; then
@@ -240,6 +274,16 @@ restore_pam_modules() {
         restore_or_remove "$dir/pam_gaze.so"
         restore_or_remove "$dir/pam_gaze_grosshack.so"
     done
+}
+
+link_polkit_policy() {
+    backup_and_install "$POLKIT_POLICY_SRC" "$POLKIT_POLICY_DST" 0644
+    systemctl reload polkit >/dev/null 2>&1 || true
+}
+
+restore_polkit_policy() {
+    restore_or_remove "$POLKIT_POLICY_DST"
+    systemctl reload polkit >/dev/null 2>&1 || true
 }
 
 link_extension_files() {
@@ -330,7 +374,8 @@ show_status() {
         "$LOCAL_BIN_DIR/gaze-gui" \
         "$SYSTEM_EXTENSION_DIR/extension.js" \
         "$SYSTEM_EXTENSION_DIR/prefs.js" \
-        "$SCHEMA_DST"
+        "$SCHEMA_DST" \
+        "$POLKIT_POLICY_DST"
     do
         if [ -L "$path" ]; then
             printf '%s -> %s\n' "$path" "$(readlink "$path")"
@@ -419,6 +464,8 @@ case "$cmd" in
         require_artifacts
         link_binaries
         link_pam_modules
+        link_pam_config
+        link_polkit_policy
         link_gnome_extension
         setup_tpm_encryption
         install_systemd_dropin
@@ -429,6 +476,8 @@ case "$cmd" in
         need_root
         restore_binaries
         restore_pam_modules
+        restore_pam_config
+        restore_polkit_policy
         restore_gnome_extension
         teardown_tpm_encryption
         remove_systemd_dropin
