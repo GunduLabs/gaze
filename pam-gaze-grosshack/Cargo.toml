@@ -14,4 +14,4 @@ zbus = "5.16.0"
 parking_lot = "0.12.5"
 tokio = { version = "1.52.3", features = ["full"] }
 futures = "0.3.32"
-anyhow = "1.0.102"
+anyhow = "1.0.103"
