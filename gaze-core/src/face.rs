@@ -25,6 +25,50 @@ pub struct CaptureResult {
     pub pitch: f32,
 }
 
+pub fn estimate_head_pose(kps: &ndarray::Array3<f32>) -> Option<(f32, f32)> {
+    let shape = kps.shape();
+    if shape[0] < 1 || shape[1] < 5 || shape[2] < 2 {
+        return None;
+    }
+
+    let point = |index| (kps[[0, index, 0]], kps[[0, index, 1]]);
+    let (lx, ly) = point(0);
+    let (rx, ry) = point(1);
+    let (nx, ny) = point(2);
+    let (mlx, mly) = point(3);
+    let (mrx, mry) = point(4);
+    if [lx, ly, rx, ry, nx, ny, mlx, mly, mrx, mry]
+        .iter()
+        .any(|value| !value.is_finite())
+    {
+        return None;
+    }
+
+    // Project the nose into a coordinate system defined by the eye line. This
+    // prevents head roll from being misread as yaw or pitch.
+    let eye_dx = rx - lx;
+    let eye_dy = ry - ly;
+    let eye_distance = eye_dx.hypot(eye_dy);
+    if eye_distance <= f32::EPSILON {
+        return None;
+    }
+    let horizontal = (eye_dx / eye_distance, eye_dy / eye_distance);
+    let vertical = (-horizontal.1, horizontal.0);
+
+    let eye_center = ((lx + rx) / 2.0, (ly + ry) / 2.0);
+    let mouth_center = ((mlx + mrx) / 2.0, (mly + mry) / 2.0);
+    let nose_from_eyes = (nx - eye_center.0, ny - eye_center.1);
+    let mouth_from_eyes = (mouth_center.0 - eye_center.0, mouth_center.1 - eye_center.1);
+    let mouth_distance = mouth_from_eyes.0 * vertical.0 + mouth_from_eyes.1 * vertical.1;
+    if mouth_distance <= f32::EPSILON {
+        return None;
+    }
+
+    let yaw = (nose_from_eyes.0 * horizontal.0 + nose_from_eyes.1 * horizontal.1) / eye_distance;
+    let pitch = (nose_from_eyes.0 * vertical.0 + nose_from_eyes.1 * vertical.1) / mouth_distance;
+    (yaw.is_finite() && pitch.is_finite()).then_some((yaw, pitch))
+}
+
 pub struct FaceChecker {
     pub detector: std::sync::Arc<std::sync::Mutex<FaceDetector>>,
     pub dark_luma_threshold: u8,
@@ -98,28 +142,10 @@ impl FaceChecker {
         let (norm_cx, norm_cy) = (cx / max_dim, cy / max_dim);
         let face_size_ratio = width.max(height) / min_dim;
 
-        let mut yaw = 0.0;
-        let mut pitch = 0.0;
-
-        if let Some(lm) = &kps {
-            let lx = lm[[0, 0, 0]];
-            let ly = lm[[0, 0, 1]];
-            let rx = lm[[0, 1, 0]];
-            let ry = lm[[0, 1, 1]];
-            let nx = lm[[0, 2, 0]];
-            let ny = lm[[0, 2, 1]];
-            let mly = lm[[0, 3, 1]];
-            let mry = lm[[0, 4, 1]];
-
-            let eye_w = rx - lx;
-            let eye_center_x = (lx + rx) / 2.0;
-            yaw = (nx - eye_center_x) / eye_w;
-
-            let eye_y = (ly + ry) / 2.0;
-            let mouth_y = (mly + mry) / 2.0;
-            let face_h = mouth_y - eye_y;
-            pitch = (ny - eye_y) / face_h;
-        }
+        let (yaw, pitch) = kps
+            .as_ref()
+            .and_then(estimate_head_pose)
+            .unwrap_or((f32::NAN, f32::NAN));
 
         let status = if x1 / max_dim < edge_margin
             || y1 / max_dim < edge_margin
@@ -309,5 +335,53 @@ mod tests {
     fn empty_frame_is_treated_as_dark() {
         let frame = Mat::default();
         assert!(frame_mean_luma(&frame).unwrap_or(0) < 30);
+    }
+
+    fn landmarks(points: [(f32, f32); 5]) -> ndarray::Array3<f32> {
+        ndarray::Array3::from_shape_fn((1, 5, 2), |(_, point, axis)| {
+            if axis == 0 {
+                points[point].0
+            } else {
+                points[point].1
+            }
+        })
+    }
+
+    #[test]
+    fn head_pose_is_invariant_to_roll() {
+        let level_points = [
+            (10.0, 10.0),
+            (30.0, 10.0),
+            (22.0, 20.0),
+            (14.0, 30.0),
+            (26.0, 30.0),
+        ];
+        let level = landmarks(level_points);
+        let angle = std::f32::consts::FRAC_PI_4;
+        let (sin, cos) = angle.sin_cos();
+        let rolled = landmarks(level_points.map(|(x, y)| {
+            let (dx, dy) = (x - 20.0, y - 10.0);
+            (20.0 + dx * cos - dy * sin, 10.0 + dx * sin + dy * cos)
+        }));
+
+        let level_pose = estimate_head_pose(&level).unwrap();
+        let rolled_pose = estimate_head_pose(&rolled).unwrap();
+        assert!((level_pose.0 - rolled_pose.0).abs() < 0.001);
+        assert!((level_pose.1 - rolled_pose.1).abs() < 0.001);
+    }
+
+    #[test]
+    fn head_pose_rejects_degenerate_landmarks() {
+        let coincident_eyes = landmarks([
+            (10.0, 10.0),
+            (10.0, 10.0),
+            (10.0, 20.0),
+            (5.0, 30.0),
+            (15.0, 30.0),
+        ]);
+        assert!(estimate_head_pose(&coincident_eyes).is_none());
+
+        let malformed = ndarray::Array3::zeros((1, 4, 2));
+        assert!(estimate_head_pose(&malformed).is_none());
     }
 }

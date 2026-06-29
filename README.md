@@ -166,6 +166,9 @@ gaze uninstall               Completely remove Gaze (packages, PAM, config, mode
 gaze uninstall -y            Skip confirmation prompt
 ```
 
+Enrollment first captures a straight-on reference, then asks for small up, down,
+left, and right movements relative to that reference.
+
 ## Building from source
 
 **Dependencies:** Rust 1.85+, [`just` 1.51+](https://github.com/casey/just), [`nfpm`](https://nfpm.goreleaser.com)

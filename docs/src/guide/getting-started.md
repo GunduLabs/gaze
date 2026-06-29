@@ -39,7 +39,9 @@ gaze add-face default
 Tips while enrolling:
 
 - Keep your face centered and well lit.
-- Let it capture multiple angles.
+- Face the camera naturally for the first capture; the remaining direction
+  prompts are measured relative to that pose.
+- Use small, deliberate movements and hold each prompted angle still.
 - Remove strong backlight if possible.
 
 ## Step 4: Test authentication

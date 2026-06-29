@@ -449,7 +449,8 @@ impl AuthDaemon {
 
 #[cfg(test)]
 mod tests {
-    use super::{AuthDaemon, eyes_from_kpss};
+    use super::{AuthDaemon, enroll_pose_matches_baseline, eyes_from_kpss};
+    use gaze_core::dbus::EnrollPrompt;
 
     #[test]
     fn eyes_from_kpss_extracts_first_face_landmarks() {
@@ -464,6 +465,69 @@ mod tests {
         assert!(eyes_from_kpss(&ndarray::Array3::zeros((0, 5, 2))).is_none());
         assert!(eyes_from_kpss(&ndarray::Array3::zeros((1, 3, 2))).is_none());
         assert!(eyes_from_kpss(&ndarray::Array3::zeros((1, 5, 1))).is_none());
+    }
+
+    #[test]
+    fn straight_pose_allows_normal_variation_but_rejects_invalid_geometry() {
+        assert!(enroll_pose_matches_baseline(
+            EnrollPrompt::LookStraight,
+            0.1,
+            0.3,
+            None
+        ));
+        assert!(enroll_pose_matches_baseline(
+            EnrollPrompt::LookStraight,
+            -0.1,
+            0.7,
+            None
+        ));
+        assert!(!enroll_pose_matches_baseline(
+            EnrollPrompt::LookStraight,
+            f32::NAN,
+            0.5,
+            None
+        ));
+        assert!(!enroll_pose_matches_baseline(
+            EnrollPrompt::LookStraight,
+            0.0,
+            0.9,
+            None
+        ));
+    }
+
+    #[test]
+    fn directional_poses_are_relative_to_the_straight_capture() {
+        let baseline = Some((0.08, 0.62));
+        assert!(enroll_pose_matches_baseline(
+            EnrollPrompt::LookLeft,
+            -0.03,
+            0.62,
+            baseline
+        ));
+        assert!(enroll_pose_matches_baseline(
+            EnrollPrompt::LookRight,
+            0.19,
+            0.62,
+            baseline
+        ));
+        assert!(enroll_pose_matches_baseline(
+            EnrollPrompt::LookUp,
+            0.08,
+            0.54,
+            baseline
+        ));
+        assert!(enroll_pose_matches_baseline(
+            EnrollPrompt::LookDown,
+            0.08,
+            0.70,
+            baseline
+        ));
+        assert!(!enroll_pose_matches_baseline(
+            EnrollPrompt::LookLeft,
+            -0.03,
+            0.62,
+            None
+        ));
     }
 
     #[test]
@@ -765,13 +829,25 @@ fn update_stability(
     }
 }
 
-fn enroll_pose_matches(prompt: EnrollPrompt, yaw: f32, pitch: f32) -> bool {
+fn enroll_pose_matches_baseline(
+    prompt: EnrollPrompt,
+    yaw: f32,
+    pitch: f32,
+    baseline: Option<(f32, f32)>,
+) -> bool {
+    if !yaw.is_finite() || !pitch.is_finite() {
+        return false;
+    }
+
     match prompt {
-        EnrollPrompt::LookStraight => yaw.abs() < 0.16 && (pitch - 0.48).abs() < 0.18,
-        EnrollPrompt::LookUp => pitch < 0.35,
-        EnrollPrompt::LookDown => pitch > 0.55,
-        EnrollPrompt::LookLeft => yaw < -0.15,
-        EnrollPrompt::LookRight => yaw > 0.15,
+        // The straight capture establishes a per-person reference. Keep this
+        // initial gate broad enough to accommodate facial proportions and
+        // cameras mounted above or below the display.
+        EnrollPrompt::LookStraight => yaw.abs() < 0.18 && (0.2..0.8).contains(&pitch),
+        EnrollPrompt::LookUp => baseline.is_some_and(|(_, base_pitch)| pitch < base_pitch - 0.07),
+        EnrollPrompt::LookDown => baseline.is_some_and(|(_, base_pitch)| pitch > base_pitch + 0.07),
+        EnrollPrompt::LookLeft => baseline.is_some_and(|(base_yaw, _)| yaw < base_yaw - 0.10),
+        EnrollPrompt::LookRight => baseline.is_some_and(|(base_yaw, _)| yaw > base_yaw + 0.10),
         _ => false,
     }
 }
@@ -1599,6 +1675,7 @@ impl AuthDaemon {
                     let mut captured_for_step = false;
                     let mut stable_frames = 0;
                     let mut last_kpss: Option<ndarray::Array3<f32>> = None;
+                    let mut pose_baseline = None;
 
                     for frame in &mut cam {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1635,9 +1712,17 @@ impl AuthDaemon {
 
                         if status == CaptureStatus::Usable && let Some(data) = result_opt {
                             let is_stable = update_stability(&mut last_kpss, &mut stable_frames, &data);
-                            let pose_matches = enroll_pose_matches(prompt, data.yaw, data.pitch);
+                            let pose_matches = enroll_pose_matches_baseline(
+                                prompt,
+                                data.yaw,
+                                data.pitch,
+                                pose_baseline,
+                            );
 
                             if is_stable && pose_matches {
+                                if prompt == EnrollPrompt::LookStraight {
+                                    pose_baseline = Some((data.yaw, data.pitch));
+                                }
                                 rgb_captured_for_step_clone.store(true, std::sync::atomic::Ordering::Relaxed);
                                 let _ = tx.blocking_send(EnrollMsg::Captured(current_step, Spectrum::Rgb, data.embedding));
                                 captured_for_step = true;
@@ -1678,6 +1763,7 @@ impl AuthDaemon {
                     let mut captured_for_step = false;
                     let mut stable_frames = 0;
                     let mut last_kpss: Option<ndarray::Array3<f32>> = None;
+                    let mut pose_baseline = None;
 
                     for frame in &mut cam {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1722,10 +1808,18 @@ impl AuthDaemon {
                             let pose_matches = if run_rgb {
                                 rgb_captured_for_step_clone.load(std::sync::atomic::Ordering::Relaxed)
                             } else {
-                                enroll_pose_matches(prompt, data.yaw, data.pitch)
+                                enroll_pose_matches_baseline(
+                                    prompt,
+                                    data.yaw,
+                                    data.pitch,
+                                    pose_baseline,
+                                )
                             };
 
                             if is_stable && pose_matches {
+                                if !run_rgb && prompt == EnrollPrompt::LookStraight {
+                                    pose_baseline = Some((data.yaw, data.pitch));
+                                }
                                 let _ = tx.blocking_send(EnrollMsg::Captured(current_step, Spectrum::Ir, data.embedding));
                                 captured_for_step = true;
                             }
