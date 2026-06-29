@@ -1,12 +1,17 @@
 use crate::camera::frame_to_bytes;
 use crate::config::Config;
-use crate::dbus::CaptureStatus;
+use crate::dbus::{CaptureStatus, EnrollPrompt};
 use crate::detect::{DetectError, FaceDetector};
 use opencv::core::Mat;
 use opencv::prelude::*;
 
 const MIN_FACE_SIZE_RATIO: f32 = 0.25;
 const MAX_FACE_SIZE_RATIO: f32 = 0.78;
+const ENROLL_POSE_STABILITY_WINDOW: usize = 2;
+const ENROLL_STABLE_YAW_RANGE: f32 = 0.08;
+const ENROLL_STABLE_PITCH_RANGE: f32 = 0.06;
+const ENROLL_HORIZONTAL_POSE_DELTA: f32 = 0.10;
+const ENROLL_VERTICAL_POSE_DELTA: f32 = 0.04;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Spectrum {
@@ -67,6 +72,78 @@ pub fn estimate_head_pose(kps: &ndarray::Array3<f32>) -> Option<(f32, f32)> {
     let yaw = (nose_from_eyes.0 * horizontal.0 + nose_from_eyes.1 * horizontal.1) / eye_distance;
     let pitch = (nose_from_eyes.0 * vertical.0 + nose_from_eyes.1 * vertical.1) / mouth_distance;
     (yaw.is_finite() && pitch.is_finite()).then_some((yaw, pitch))
+}
+
+#[derive(Default)]
+pub struct EnrollmentPoseStability {
+    samples: std::collections::VecDeque<(f32, f32)>,
+}
+
+impl EnrollmentPoseStability {
+    pub fn reset(&mut self) {
+        self.samples.clear();
+    }
+
+    pub fn update(&mut self, prompt: EnrollPrompt, yaw: f32, pitch: f32) -> bool {
+        if !yaw.is_finite() || !pitch.is_finite() {
+            self.reset();
+            return false;
+        }
+
+        self.samples.push_back((yaw, pitch));
+        if self.samples.len() > ENROLL_POSE_STABILITY_WINDOW {
+            self.samples.pop_front();
+        }
+        if self.samples.len() < ENROLL_POSE_STABILITY_WINDOW {
+            return false;
+        }
+
+        let (mut min_yaw, mut max_yaw) = (f32::INFINITY, f32::NEG_INFINITY);
+        let (mut min_pitch, mut max_pitch) = (f32::INFINITY, f32::NEG_INFINITY);
+        for &(sample_yaw, sample_pitch) in &self.samples {
+            min_yaw = min_yaw.min(sample_yaw);
+            max_yaw = max_yaw.max(sample_yaw);
+            min_pitch = min_pitch.min(sample_pitch);
+            max_pitch = max_pitch.max(sample_pitch);
+        }
+
+        let stable_yaw = max_yaw - min_yaw < ENROLL_STABLE_YAW_RANGE;
+        let stable_pitch = max_pitch - min_pitch < ENROLL_STABLE_PITCH_RANGE;
+        match prompt {
+            EnrollPrompt::LookStraight => stable_yaw && stable_pitch,
+            EnrollPrompt::LookUp | EnrollPrompt::LookDown => stable_yaw,
+            EnrollPrompt::LookLeft | EnrollPrompt::LookRight => stable_pitch,
+            _ => false,
+        }
+    }
+}
+
+pub fn enrollment_pose_matches(
+    prompt: EnrollPrompt,
+    yaw: f32,
+    pitch: f32,
+    baseline: Option<(f32, f32)>,
+) -> bool {
+    if !yaw.is_finite() || !pitch.is_finite() {
+        return false;
+    }
+
+    match prompt {
+        EnrollPrompt::LookStraight => yaw.abs() < 0.18 && (0.2..0.8).contains(&pitch),
+        EnrollPrompt::LookUp => {
+            baseline.is_some_and(|(_, base_pitch)| pitch < base_pitch - ENROLL_VERTICAL_POSE_DELTA)
+        }
+        EnrollPrompt::LookDown => {
+            baseline.is_some_and(|(_, base_pitch)| pitch > base_pitch + ENROLL_VERTICAL_POSE_DELTA)
+        }
+        EnrollPrompt::LookLeft => {
+            baseline.is_some_and(|(base_yaw, _)| yaw < base_yaw - ENROLL_HORIZONTAL_POSE_DELTA)
+        }
+        EnrollPrompt::LookRight => {
+            baseline.is_some_and(|(base_yaw, _)| yaw > base_yaw + ENROLL_HORIZONTAL_POSE_DELTA)
+        }
+        _ => false,
+    }
 }
 
 pub struct FaceChecker {
@@ -383,5 +460,105 @@ mod tests {
 
         let malformed = ndarray::Array3::zeros((1, 4, 2));
         assert!(estimate_head_pose(&malformed).is_none());
+    }
+
+    #[test]
+    fn enrollment_pose_stability_accepts_a_held_pose() {
+        let mut stability = EnrollmentPoseStability::default();
+        assert!(!stability.update(EnrollPrompt::LookStraight, -0.50, 0.48));
+        assert!(stability.update(EnrollPrompt::LookStraight, -0.54, 0.49));
+    }
+
+    #[test]
+    fn enrollment_pose_stability_rejects_motion_and_resets() {
+        let mut stability = EnrollmentPoseStability::default();
+        for (yaw, pitch) in [(-0.10, 0.51), (-0.20, 0.50), (-0.30, 0.49)] {
+            assert!(!stability.update(EnrollPrompt::LookStraight, yaw, pitch));
+        }
+        assert!(!stability.update(EnrollPrompt::LookStraight, f32::NAN, 0.49));
+        assert!(!stability.update(EnrollPrompt::LookStraight, -0.50, 0.48));
+        assert!(stability.update(EnrollPrompt::LookStraight, -0.52, 0.49));
+    }
+
+    #[test]
+    fn enrollment_pose_stability_ignores_motion_on_the_prompted_axis() {
+        let mut stability = EnrollmentPoseStability::default();
+        assert!(!stability.update(EnrollPrompt::LookRight, 0.10, 0.50));
+        assert!(stability.update(EnrollPrompt::LookRight, 0.30, 0.52));
+
+        stability.reset();
+        assert!(!stability.update(EnrollPrompt::LookUp, 0.02, 0.50));
+        assert!(stability.update(EnrollPrompt::LookUp, 0.04, 0.30));
+
+        stability.reset();
+        assert!(!stability.update(EnrollPrompt::LookRight, 0.10, 0.40));
+        assert!(!stability.update(EnrollPrompt::LookRight, 0.30, 0.50));
+
+        stability.reset();
+        assert!(!stability.update(EnrollPrompt::LookUp, -0.10, 0.50));
+        assert!(!stability.update(EnrollPrompt::LookUp, 0.10, 0.30));
+    }
+
+    #[test]
+    fn enrollment_pose_directions_are_relative_to_straight() {
+        let baseline = Some((0.08, 0.62));
+        assert!(enrollment_pose_matches(
+            EnrollPrompt::LookLeft,
+            -0.03,
+            0.62,
+            baseline
+        ));
+        assert!(enrollment_pose_matches(
+            EnrollPrompt::LookRight,
+            0.19,
+            0.62,
+            baseline
+        ));
+        assert!(enrollment_pose_matches(
+            EnrollPrompt::LookUp,
+            0.08,
+            0.57,
+            baseline
+        ));
+        assert!(enrollment_pose_matches(
+            EnrollPrompt::LookDown,
+            0.08,
+            0.67,
+            baseline
+        ));
+        assert!(!enrollment_pose_matches(
+            EnrollPrompt::LookLeft,
+            0.01,
+            0.62,
+            baseline
+        ));
+        assert!(!enrollment_pose_matches(
+            EnrollPrompt::LookRight,
+            0.15,
+            0.62,
+            baseline
+        ));
+    }
+
+    #[test]
+    fn enrollment_straight_pose_rejects_invalid_geometry() {
+        assert!(enrollment_pose_matches(
+            EnrollPrompt::LookStraight,
+            0.1,
+            0.3,
+            None
+        ));
+        assert!(!enrollment_pose_matches(
+            EnrollPrompt::LookStraight,
+            f32::NAN,
+            0.5,
+            None
+        ));
+        assert!(!enrollment_pose_matches(
+            EnrollPrompt::LookStraight,
+            0.0,
+            0.9,
+            None
+        ));
     }
 }
