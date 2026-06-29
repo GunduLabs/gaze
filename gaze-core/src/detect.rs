@@ -156,7 +156,7 @@ impl FaceDetector {
         }
 
         let has_kps = num_outputs == 9;
-        let strides = vec![8, 16, 32];
+        let strides = [8, 16, 32];
         let num_anchors = 2;
 
         let mut candidate_boxes = Vec::new();
@@ -205,7 +205,7 @@ impl FaceDetector {
                             candidate_boxes.push([x1, y1, x2, y2]);
                             candidate_scores.push(score);
 
-                            if let Some(ref kd) = kps_data {
+                            if let Some(kd) = &kps_data {
                                 let k_idx = point_idx * 10;
                                 let mut kps = [0.0f32; 10];
                                 for k in 0..5 {
