@@ -62,6 +62,10 @@ else
 fi
 ```
 
+```bash [Arch Linux]
+sudo sed -i '/pam_gaze/d' /etc/pam.d/sudo
+```
+
 ```bash [Manual PAM setup]
 # Remove any pam_gaze.so or pam_gaze_grosshack.so lines
 # from /etc/pam.d/system-auth or wherever you added them.

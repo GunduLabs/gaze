@@ -57,6 +57,32 @@ sudo authselect current
 sudo -v
 ```
 
+## Arch Linux / Manjaro
+
+The one-liner installer and the AUR package post-install script both configure `/etc/pam.d/sudo` automatically, inserting `pam_gaze.so` before the existing `auth include system-auth` line.
+
+If you need to apply or re-apply it manually:
+
+```bash
+sudo awk '
+    /^[[:space:]]*auth[[:space:]]/ && !done {
+        print "auth        sufficient    pam_gaze.so"
+        done = 1
+    }
+    { print }
+' /etc/pam.d/sudo | sudo tee /tmp/pam-sudo-new && sudo install -m 644 /tmp/pam-sudo-new /etc/pam.d/sudo
+```
+
+Then test:
+
+```bash
+sudo -v
+```
+
+::: warning pambase updates
+`/etc/pam.d/system-auth` is owned by the `pambase` package and gets overwritten on system upgrades. Gaze is added to `/etc/pam.d/sudo` directly to avoid this, but if you manually added `pam_gaze.so` to `system-auth` it will be lost on `pambase` updates.
+:::
+
 ## Other distros (manual)
 
 Edit your shared auth stack (for example `/etc/pam.d/system-auth`) and place Gaze before `pam_unix.so`.
