@@ -455,6 +455,22 @@ async fn handle_enroll(
 
 async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow::Result<()> {
     let term = Term::stdout();
+
+    let has_faces = match proxy.list_faces(user).await {
+        Ok(faces) => !faces.is_empty(),
+        Err(ref e) if gaze_core::dbus::dbus_is_file_not_found(e) => false,
+        Err(e) => return Err(e.into()),
+    };
+    if !has_faces {
+        term.write_line(&format!(
+            "{} No faces enrolled for {}. Run {} to enroll a face.",
+            style("i").cyan().bold(),
+            style(user).bold(),
+            style("gaze add-face <name>").bold()
+        ))?;
+        return Ok(());
+    }
+
     let start = std::time::Instant::now();
 
     if let Err(err) = proxy.claim(user).await {
@@ -949,6 +965,23 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     }
     if which("authselect") {
         plan.push(("Restore authselect profile", restore_authselect_cmd()));
+    }
+
+    if which("pacman") && !which("pam-auth-update") && !which("authselect") {
+        plan.push((
+            "Remove Arch PAM configuration",
+            [
+                "for flag in /etc/gaze/pam-arch.configured /etc/gaze/pam-arch.dev-configured; do",
+                r#"[ -f "$flag" ] || continue;"#,
+                r#"while IFS= read -r f; do"#,
+                r#"[ -f "$f" ] || continue;"#,
+                r#"sudo sed -i '/pam_gaze/d' "$f" || true;"#,
+                "done < \"$flag\";",
+                "done;",
+                "sudo sed -i '/pam_gaze/d' /etc/pam.d/sudo 2>/dev/null || true",
+            ]
+            .join(" "),
+        ));
     }
 
     plan.push((
