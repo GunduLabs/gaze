@@ -253,6 +253,39 @@ enable_desktop_integrations() {
     enable_hyprlock
 }
 
+configure_pam_arch() {
+    pam_file=/etc/pam.d/sudo
+
+    if ! [ -f "$pam_file" ]; then
+        echo "Could not find $pam_file; skipping PAM configuration."
+        echo "To enable Gaze for sudo manually, see: ${PAM_DOCS_URL}"
+        return 0
+    fi
+
+    if grep -q "pam_gaze" "$pam_file" 2>/dev/null; then
+        echo "Gaze already configured in $pam_file."
+        return 0
+    fi
+
+    awk '
+        /^[[:space:]]*auth[[:space:]]/ && !done {
+            print "auth        sufficient    pam_gaze.so"
+            done = 1
+        }
+        { print }
+    ' "$pam_file" > "$TMP/pam-sudo" && \
+    sudo install -m 644 "$TMP/pam-sudo" "$pam_file" && {
+        echo "Configured $pam_file to use Gaze face authentication."
+        sudo mkdir -p /etc/gaze
+        printf '%s\n' "$pam_file" | sudo tee /etc/gaze/pam-arch.configured >/dev/null
+    } || {
+        echo "Could not configure PAM for sudo automatically."
+        echo "To enable Gaze for sudo, add before the auth line in $pam_file:"
+        echo "    auth    sufficient    pam_gaze.so"
+        echo "Docs: ${PAM_DOCS_URL}"
+    }
+}
+
 configure_authselect() {
     if ! command -v authselect >/dev/null 2>&1; then
         return 0
@@ -449,6 +482,7 @@ elif is_arch; then
     if want_hyprlock_setup; then
         echo "- Install gaze-hyprlock-bin and configure hyprlock"
     fi
+    echo "- Configure PAM for sudo"
     echo "- Enable the Gaze daemon"
 fi
 
@@ -583,10 +617,13 @@ elif is_arch; then
     fi
     "$AUR_HELPER" -S --noconfirm $AUR_PKGS
 
-    bold "Step 3/4: Desktop integration"
+    bold "Step 3/5: Configuring PAM"
+    configure_pam_arch
+
+    bold "Step 4/5: Desktop integration"
     enable_desktop_integrations
 
-    bold "Step 4/4: Enabling Gaze daemon"
+    bold "Step 5/5: Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
 fi
 
@@ -595,9 +632,14 @@ fi
 echo ""
 green "Gaze installed successfully!"
 echo ""
-echo "  Enroll your face:    gaze add-face <name>"
-echo "  Test authentication: gaze auth"
-echo "  GUI:                 gaze-gui"
+bold "Required next step: run the setup wizard to configure your camera and enroll a face:"
+echo ""
+echo "  gaze config          # configure camera and security settings"
+echo "  gaze add-face <name> # enroll your face (requires camera to be configured first)"
+echo ""
+echo "Other commands:"
+echo "  gaze auth            # test face authentication"
+echo "  gaze-gui             # open the GUI"
 if want_gnome_extension_package; then
     echo "  GNOME lock screen:   enabled for this GNOME user when possible"
     echo "  GDM extension:       enabled by package defaults"
