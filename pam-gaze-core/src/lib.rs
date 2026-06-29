@@ -24,7 +24,6 @@ pub const PAM_IGNORE: c_int = 25;
 pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
 const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to cancel.";
 
-
 pub type PamHandle = *mut c_void;
 
 #[macro_export]

@@ -74,10 +74,7 @@ fn wait_for_prompt_response(state: &SharedAuthState) -> Option<String> {
     shared_state.password.clone()
 }
 
-fn retire_prompt(
-    state: &SharedAuthState,
-    prompt_thread: thread::JoinHandle<()>,
-) {
+fn retire_prompt(state: &SharedAuthState, prompt_thread: thread::JoinHandle<()>) {
     if unblock_terminal() {
         wait_for_prompt_finish(state);
         let _ = prompt_thread.join();
@@ -240,7 +237,11 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 // Inject newline via TIOCSTI to unblock the PAM conversation read thread.
 
 fn unblock_terminal() -> bool {
-    if let Ok(tty) = std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty") {
+    if let Ok(tty) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+    {
         let fd = tty.as_raw_fd();
         let nl = b'\n' as libc::c_char;
         unsafe { libc::ioctl(fd, libc::TIOCSTI, &nl as *const libc::c_char) == 0 }
