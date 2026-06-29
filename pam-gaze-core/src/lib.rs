@@ -3,7 +3,7 @@ use std::ffi::{CStr, CString};
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::mem::MaybeUninit;
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::AsRawFd;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 
@@ -23,7 +23,6 @@ pub const PAM_IGNORE: c_int = 25;
 
 pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
 const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to cancel.";
-const MAX_TTY_PASSWORD_LEN: usize = 64 * 1024;
 
 pub type PamHandle = *mut c_void;
 
@@ -172,91 +171,6 @@ pub fn has_controlling_tty() -> bool {
         .write(true)
         .open("/dev/tty")
         .is_ok()
-}
-pub fn prompt_password_from_tty(cancel_fd: RawFd) -> Option<String> {
-    let mut tty = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")
-        .ok()?;
-    let fd = tty.as_raw_fd();
-
-    let mut original = MaybeUninit::<libc::termios>::uninit();
-    unsafe {
-        if libc::tcgetattr(fd, original.as_mut_ptr()) != 0 {
-            return None;
-        }
-        let original = original.assume_init();
-        let mut raw = original;
-        raw.c_lflag &= !libc::ECHO;
-        if libc::tcsetattr(fd, libc::TCSANOW, &raw) != 0 {
-            return None;
-        }
-
-        let _guard = TermiosGuard { fd, original };
-        write!(tty, "Password: ").ok()?;
-        tty.flush().ok()?;
-
-        let mut poll_fds = [
-            libc::pollfd {
-                fd,
-                events: libc::POLLIN,
-                revents: 0,
-            },
-            libc::pollfd {
-                fd: cancel_fd,
-                events: libc::POLLIN,
-                revents: 0,
-            },
-        ];
-
-        loop {
-            if libc::poll(poll_fds.as_mut_ptr(), 2, -1) < 0 {
-                if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
-                    continue;
-                }
-                return None;
-            }
-
-            if poll_fds[1].revents != 0 {
-                let _ = libc::tcflush(fd, libc::TCIFLUSH);
-                let _ = writeln!(tty);
-                return None;
-            }
-
-            if poll_fds[0].revents != 0 {
-                let mut collected: Vec<u8> = Vec::new();
-                loop {
-                    let mut buf = [0_u8; 1024];
-                    let n = libc::read(fd, buf.as_mut_ptr() as *mut c_void, buf.len());
-                    if n < 0 {
-                        if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
-                            continue;
-                        }
-                        let _ = writeln!(tty);
-                        return None;
-                    }
-                    if n == 0 {
-                        break;
-                    }
-                    let chunk = &buf[..n as usize];
-                    collected.extend_from_slice(chunk);
-                    if chunk.contains(&b'\n') || collected.len() >= MAX_TTY_PASSWORD_LEN {
-                        break;
-                    }
-                }
-                let _ = writeln!(tty);
-                if collected.is_empty() {
-                    return None;
-                }
-                let mut pw = String::from_utf8_lossy(&collected).into_owned();
-                while pw.ends_with('\n') || pw.ends_with('\r') {
-                    pw.pop();
-                }
-                return Some(pw);
-            }
-        }
-    }
 }
 
 pub unsafe fn confirm_authentication(pamh: PamHandle) -> bool {

@@ -16,9 +16,9 @@ pub struct EmbeddingCipher {
 
 impl EmbeddingCipher {
     pub fn new(key: &[u8; KEY_LEN]) -> Self {
-        let key = Key::<Aes256Gcm>::from_slice(key);
+        let key = Key::<Aes256Gcm>::from(*key);
         Self {
-            cipher: Aes256Gcm::new(key),
+            cipher: Aes256Gcm::new(&key),
         }
     }
 
@@ -26,10 +26,10 @@ impl EmbeddingCipher {
         let mut nonce_bytes = [0u8; NONCE_LEN];
         getrandom::fill(&mut nonce_bytes)
             .map_err(|e| anyhow!("failed to draw a random nonce: {e}"))?;
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = Nonce::from(nonce_bytes);
         let ciphertext = self
             .cipher
-            .encrypt(nonce, plaintext)
+            .encrypt(&nonce, plaintext)
             .map_err(|e| anyhow!("embedding encryption failed: {e}"))?;
 
         let mut out = Vec::with_capacity(MAGIC.len() + NONCE_LEN + ciphertext.len());
@@ -44,7 +44,8 @@ impl EmbeddingCipher {
             return Err(anyhow!("not a Gaze-encrypted embedding"));
         }
         let (nonce_bytes, ciphertext) = data[MAGIC.len()..].split_at(NONCE_LEN);
-        let nonce = Nonce::from_slice(nonce_bytes);
+        let nonce = Nonce::try_from(nonce_bytes).map_err(|e| anyhow!("invalid nonce: {e}"))?;
+        let nonce = &nonce;
         self.cipher
             .decrypt(nonce, ciphertext)
             .map_err(|_| anyhow!("embedding decryption failed (wrong TPM key or corrupt data)"))

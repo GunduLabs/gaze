@@ -48,7 +48,13 @@ impl LivenessDetector {
         let inputs = ort::inputs![TensorRef::from_array_view(&tensor)?];
         let outputs = self.session.run(inputs)?;
         let (_shape, data) = outputs[0].try_extract_tensor::<f32>()?;
-        Self::live_score_from_output(data)
+        let score = Self::live_score_from_output(data)?;
+        tracing::debug!(
+            "Liveness model raw output: {:?}, computed score: {}",
+            data,
+            score
+        );
+        Ok(score)
     }
 
     fn live_score_from_output(data: &[f32]) -> anyhow::Result<f32> {

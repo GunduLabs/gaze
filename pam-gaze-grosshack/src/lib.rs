@@ -2,7 +2,7 @@
 use pam_gaze_core::*;
 use parking_lot::{Condvar, Mutex};
 use std::ffi::CString;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::AsRawFd;
 use std::os::raw::c_void;
 use std::os::raw::{c_char, c_int};
 use std::sync::Arc;
@@ -74,20 +74,8 @@ fn wait_for_prompt_response(state: &SharedAuthState) -> Option<String> {
     shared_state.password.clone()
 }
 
-fn retire_prompt(
-    use_tty_prompt: bool,
-    cancel_write: &Option<OwnedFd>,
-    state: &SharedAuthState,
-    prompt_thread: thread::JoinHandle<()>,
-) {
-    if use_tty_prompt {
-        if let Some(w) = cancel_write {
-            let byte = [0_u8; 1];
-            unsafe { libc::write(w.as_raw_fd(), byte.as_ptr() as *const c_void, 1) };
-        }
-        wait_for_prompt_finish(state);
-        let _ = prompt_thread.join();
-    } else if unblock_terminal() {
+fn retire_prompt(state: &SharedAuthState, prompt_thread: thread::JoinHandle<()>) {
+    if unblock_terminal() {
         wait_for_prompt_finish(state);
         let _ = prompt_thread.join();
     }
@@ -110,21 +98,8 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     let require_confirmation = config.auth.require_confirmation;
 
     unsafe { say(pamh, "Please look at the camera or enter password") };
-    // Use cancellable TTY reads when available; graphical agents use PAM conversation.
 
     let is_polkit = matches!(unsafe { get_pam_service(pamh) }, Some(ref s) if s == "polkit-1");
-    let mut use_tty_prompt = !is_polkit && has_controlling_tty();
-    let mut cancel_read: Option<OwnedFd> = None;
-    let mut cancel_write: Option<OwnedFd> = None;
-    if use_tty_prompt {
-        let mut fds = [0 as c_int; 2];
-        if unsafe { libc::pipe(fds.as_mut_ptr()) } == 0 {
-            cancel_read = Some(unsafe { OwnedFd::from_raw_fd(fds[0]) });
-            cancel_write = Some(unsafe { OwnedFd::from_raw_fd(fds[1]) });
-        } else {
-            use_tty_prompt = false;
-        }
-    }
 
     let state: SharedAuthState = Arc::new((
         Mutex::new(AuthState {
@@ -140,14 +115,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     let notify_clone = Arc::clone(&notify);
     let pamh_worker = pamh as usize;
     let prompt_thread = thread::spawn(move || {
-        let password = match cancel_read {
-            Some(cancel) if use_tty_prompt => {
-                let pw = prompt_password_from_tty(cancel.as_raw_fd());
-                drop(cancel);
-                pw
-            }
-            _ => unsafe { prompt_password(pamh_worker as PamHandle) },
-        };
+        let password = unsafe { prompt_password(pamh_worker as PamHandle) };
         let (lock, condvar) = &*thread_state;
         let mut shared_state = lock.lock();
         if let Some(pw) = password {
@@ -187,22 +155,16 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
             }
 
             if !require_confirmation {
-                retire_prompt(use_tty_prompt, &cancel_write, &state, prompt_thread);
+                retire_prompt(&state, prompt_thread);
                 return PAM_SUCCESS;
             }
 
             if !is_polkit {
-                if use_tty_prompt {
-                    retire_prompt(use_tty_prompt, &cancel_write, &state, prompt_thread);
-                    if unsafe { confirm_authentication(pamh) } {
-                        PAM_SUCCESS
-                    } else {
-                        PAM_AUTH_ERR
-                    }
+                retire_prompt(&state, prompt_thread);
+                if unsafe { confirm_authentication(pamh) } {
+                    PAM_SUCCESS
                 } else {
-                    let fallback = wait_for_password_and_fallback(pamh, &state);
-                    let _ = prompt_thread.join();
-                    fallback
+                    PAM_AUTH_ERR
                 }
             } else {
                 let active_uid = rt
@@ -275,13 +237,16 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 // Inject newline via TIOCSTI to unblock the PAM conversation read thread.
 
 fn unblock_terminal() -> bool {
-    unsafe {
-        if libc::isatty(0) != 1 {
-            return false;
-        }
-
+    if let Ok(tty) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+    {
+        let fd = tty.as_raw_fd();
         let nl = b'\n' as libc::c_char;
-        libc::ioctl(0, libc::TIOCSTI, &nl as *const libc::c_char) == 0
+        unsafe { libc::ioctl(fd, libc::TIOCSTI, &nl as *const libc::c_char) == 0 }
+    } else {
+        false
     }
 }
 
