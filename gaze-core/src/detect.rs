@@ -122,6 +122,8 @@ impl FaceDetector {
 
         let (bboxes, kpss) = result?;
 
+        tracing::debug!("Face detection completed: found {} face(s)", bboxes.nrows());
+
         if bboxes.nrows() == 0 {
             return Err(DetectError::NoFacesDetected);
         }

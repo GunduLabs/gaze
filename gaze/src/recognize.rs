@@ -49,6 +49,7 @@ impl FaceRecognizer {
         let row = Array1::from_vec(data.to_vec());
 
         let norm = row.dot(&row).sqrt();
+        tracing::debug!("Face recognizer computed embedding norm: {}", norm);
         if norm == 0.0 || !norm.is_finite() {
             anyhow::bail!("recognizer produced a degenerate (zero-norm) embedding");
         }

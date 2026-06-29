@@ -52,6 +52,17 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
+    let _initialized = ort::init()
+        .with_name("gazed")
+        .with_logger(std::sync::Arc::new(
+            move |level, category, _id, _location, message| {
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(target: "ort", "[{}] ({:?}) {}", category, level, message);
+                }
+            },
+        ))
+        .commit();
+
     info!("Initializing Gaze Daemon...");
 
     if let Ok(uid) = daemon::get_active_session_uid().await {

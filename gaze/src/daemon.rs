@@ -1177,6 +1177,7 @@ impl AuthDaemon {
                             return;
                         }
                     };
+                    tracing::debug!("RGB camera opened successfully at: {}", rgb_device_clone);
 
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, false);
                     let mut live_scores: Vec<f32> = Vec::new();
@@ -1194,6 +1195,7 @@ impl AuthDaemon {
                                 Err(_) => (CaptureStatus::NoFace, None),
                             }
                         };
+                        tracing::debug!("Processed RGB frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
 
                         let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
                         let _ = tx.try_send(VerifyMsg::Status(Spectrum::Rgb, status, latest_embed));
@@ -1209,6 +1211,8 @@ impl AuthDaemon {
                                 }
                             };
                             drop(db);
+
+                            tracing::debug!("RGB match scores: {:?}", scores);
 
                             let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
                             if matched {
@@ -1243,6 +1247,15 @@ impl AuthDaemon {
                                     let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
                                     let confirmed_static = motion.pairs >= 1 && !motion.live;
                                     liveness_passed = model_pass && !confirmed_static;
+
+                                    tracing::debug!(
+                                        "Liveness checked: score={:?}, pass={}, motion={:?}, confirmed_static={}, overall={}",
+                                        live_scores,
+                                        model_pass,
+                                        motion,
+                                        confirmed_static,
+                                        liveness_passed
+                                    );
                                 }
 
                                 if liveness_passed {
@@ -1288,6 +1301,7 @@ impl AuthDaemon {
                             return;
                         }
                     };
+                    tracing::debug!("IR camera opened successfully at: {}", ir_device_clone);
 
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, false);
                     let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
@@ -1304,6 +1318,7 @@ impl AuthDaemon {
                                 Err(_) => (CaptureStatus::NoFace, None),
                             }
                         };
+                        tracing::debug!("Processed IR frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
 
                         let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
                         let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, status, latest_embed));
@@ -1320,6 +1335,8 @@ impl AuthDaemon {
                             };
                             drop(db);
 
+                            tracing::debug!("IR match scores: {:?}", scores);
+
                             let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
                             if matched {
                                 let mut liveness_passed = true;
@@ -1329,6 +1346,12 @@ impl AuthDaemon {
                                     }
                                     let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
                                     liveness_passed = motion.pairs >= 1 && motion.live;
+
+                                    tracing::debug!(
+                                        "Liveness checked (IR): motion={:?}, overall={}",
+                                        motion,
+                                        liveness_passed
+                                    );
                                 }
 
                                 if liveness_passed {
