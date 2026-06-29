@@ -20,6 +20,7 @@ dark_luma_threshold = 30
 abort_if_ssh = true
 abort_if_lid_closed = true
 require_confirmation = false
+resume_grace_ms = 0
 
 [enrollment]
 max_templates = 2
@@ -133,6 +134,7 @@ Gaze skips face authentication in sessions where the camera is unlikely or unsaf
 abort_if_ssh = true
 abort_if_lid_closed = true
 require_confirmation = false
+resume_grace_ms = 0
 ```
 
 `abort_if_ssh` detects SSH sessions from the DBus caller process environment. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor.
@@ -148,6 +150,8 @@ With `require_confirmation = true`:
     - On **KDE Plasma & LXQt**, it prompts you to press "OK" to confirm.
     - On **Hyprland**, it prompts you to press "Authenticate" to confirm.
     - On other graphical environments, it prompts you to press "Enter" to confirm.
+
+`resume_grace_ms` delays face verification on system resume by the specified number of milliseconds (e.g. `3000` ms) to allow slower displays/GPUs to initialize and repaint, preventing verification from occurring behind a blank screen. Set to `0` to disable the delay.
 
 After changing config:
 
