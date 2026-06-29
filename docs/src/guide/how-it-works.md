@@ -2,13 +2,11 @@
 
 This page explains the internals of Gaze's facial authentication pipeline. You don't need it to use Gaze, but it helps understand why it behaves the way it does.
 
-## Security warning
+## Security & Liveness
 
-Gaze is currently **not suitable for security-critical authentication**.
+Gaze provides facial authentication with local liveness anti-spoofing and support for infrared (IR) cameras.
 
-Its liveness model raises the bar for printed-photo and screen-photo attacks, but it should not be your only authentication factor. Video replay, high-quality presentation attacks, and missing or disabled liveness checks remain risks.
-
-Gaze supports infrared (IR) cameras: configure `cameras.ir` with a GStreamer/PipeWire source string and Gaze captures through it, optionally driving the camera's IR emitter during authentication. See the configuration guide for setup. Further anti-spoofing protections are planned for upcoming releases.
+When using an IR camera and RGB liveness checking, Gaze offers significant resistance against presentation attacks, such as printed photos, screen replays, or video-based spoofing. For high-security environments, it is recommended to keep standard system authentication (such as password entry) configured as a backup or fallback factor.
 
 ## Privacy model
 

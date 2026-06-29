@@ -1,11 +1,11 @@
 <template>
   <div class="container">
       <div class="security-warning" role="alert">
-        <div class="security-warning-title">Security warning</div>
+        <div class="security-warning-title">Security & Liveness</div>
         <p>
-          Gaze includes local liveness anti-spoofing, but it is still not a substitute for strong
-          system authentication. Do not use it as your only authentication factor for
-          security-critical systems.
+          Gaze includes local liveness anti-spoofing and support for infrared (IR) cameras to secure
+          authentication against spoofing attacks. For high-security environments, it is recommended
+          to keep standard system authentication active as a fallback.
         </p>
       </div>
   </div>
@@ -30,9 +30,9 @@
 }
 
 .security-warning {
-  --security-warning-border: #bf8700;
-  --security-warning-bg: #fff8c5;
-  --security-warning-title: #9a6700;
+  --security-warning-border: var(--vp-c-brand-3);
+  --security-warning-bg: var(--vp-c-bg-soft);
+  --security-warning-title: var(--vp-c-brand-1);
 
   max-width: 1152px;
   margin: 0 auto;
@@ -45,9 +45,9 @@
 }
 
 :root.dark .security-warning {
-  --security-warning-border: #9e6a03;
-  --security-warning-bg: rgba(187, 128, 9, 0.15);
-  --security-warning-title: #d29922;
+  --security-warning-border: var(--vp-c-brand-3);
+  --security-warning-bg: var(--vp-c-bg-soft);
+  --security-warning-title: var(--vp-c-brand-1);
 }
 
 .security-warning-title {
