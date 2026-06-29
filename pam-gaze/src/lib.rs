@@ -11,8 +11,10 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     };
 
     rt.block_on(async {
-        if let Ok(false) = has_enrolled_faces(&username).await {
-            return PAM_IGNORE;
+        match has_enrolled_faces(&username).await {
+            Ok(false) => return PAM_IGNORE,
+            Err(_) => return PAM_AUTHINFO_UNAVAIL,
+            Ok(true) => {}
         }
 
         unsafe { say(pamh, "Please look at the camera") };

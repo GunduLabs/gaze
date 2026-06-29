@@ -87,8 +87,10 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         Err(code) => return code,
     };
 
-    if let Ok(false) = rt.block_on(has_enrolled_faces(&username)) {
-        return PAM_IGNORE;
+    match rt.block_on(has_enrolled_faces(&username)) {
+        Ok(false) => return PAM_IGNORE,
+        Err(_) => return PAM_AUTHINFO_UNAVAIL,
+        Ok(true) => {}
     }
 
     let config = match rt.block_on(setup_auth_env()) {
