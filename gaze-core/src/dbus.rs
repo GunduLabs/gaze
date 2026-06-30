@@ -316,5 +316,16 @@ mod tests {
 
         let err = zbus::Error::Failure("plain failure".to_string());
         assert_eq!(dbus_error_message(&err), "plain failure");
+
+        let err = zbus::Error::Failure(
+            "org.freedesktop.DBus.Error.ServiceUnknown: service is not activatable".to_string(),
+        );
+        assert!(dbus_is_not_activatable(&err));
+
+        let err = zbus::Error::Failure("ServiceUnknown".to_string());
+        assert!(dbus_is_not_activatable(&err));
+
+        let err = zbus::Error::Failure("camera unavailable".to_string());
+        assert!(!dbus_is_not_activatable(&err));
     }
 }

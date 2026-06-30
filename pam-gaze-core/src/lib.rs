@@ -241,6 +241,21 @@ pub async fn has_enrolled_faces(username: &str) -> anyhow::Result<bool> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnrollmentDisposition {
+    Continue,
+    Ignore,
+    Unavailable,
+}
+
+pub fn enrollment_disposition<E>(result: Result<bool, E>) -> EnrollmentDisposition {
+    match result {
+        Ok(true) => EnrollmentDisposition::Continue,
+        Ok(false) => EnrollmentDisposition::Ignore,
+        Err(_) => EnrollmentDisposition::Unavailable,
+    }
+}
+
 struct ReleaseGuard {
     proxy: GazeProxy<'static>,
     active: bool,
@@ -259,10 +274,24 @@ impl Drop for ReleaseGuard {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthOutcome {
     Match,
     NoMatch,
     Unavailable,
+}
+
+fn auth_outcome(
+    result: gaze_core::dbus::VerifyResult,
+    last_status: Option<gaze_core::dbus::CaptureStatus>,
+) -> AuthOutcome {
+    match result {
+        gaze_core::dbus::VerifyResult::VerifyMatch => AuthOutcome::Match,
+        gaze_core::dbus::VerifyResult::VerifyNoMatch => match last_status {
+            Some(gaze_core::dbus::CaptureStatus::TooDark) => AuthOutcome::Unavailable,
+            _ => AuthOutcome::NoMatch,
+        },
+    }
 }
 
 pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcome> {
@@ -299,15 +328,7 @@ pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcom
         tokio::select! {
             Some(signal) = verify_stream.next() => {
                 if let Ok(args) = signal.args() {
-                    match *args.result() {
-                        gaze_core::dbus::VerifyResult::VerifyMatch => break AuthOutcome::Match,
-                        gaze_core::dbus::VerifyResult::VerifyNoMatch => {
-                            break match last_status {
-                                Some(gaze_core::dbus::CaptureStatus::TooDark) => AuthOutcome::Unavailable,
-                                _ => AuthOutcome::NoMatch,
-                            };
-                        }
-                    }
+                    break auth_outcome(*args.result(), last_status);
                 }
             }
             Some(signal) = face_stream.next() => {
@@ -411,5 +432,39 @@ mod tests {
     fn ordinary_errors_are_not_retryable() {
         let err = zbus::Error::Failure("camera is unavailable".to_string());
         assert!(!is_retryable(&err));
+    }
+
+    #[test]
+    fn enrollment_gate_ignores_unenrolled_users_but_fails_closed_on_daemon_errors() {
+        assert_eq!(
+            enrollment_disposition::<()>(Ok(true)),
+            EnrollmentDisposition::Continue
+        );
+        assert_eq!(
+            enrollment_disposition::<()>(Ok(false)),
+            EnrollmentDisposition::Ignore
+        );
+        assert_eq!(
+            enrollment_disposition::<&str>(Err("daemon unavailable")),
+            EnrollmentDisposition::Unavailable
+        );
+    }
+
+    #[test]
+    fn too_dark_no_match_is_reported_as_unavailable() {
+        use gaze_core::dbus::{CaptureStatus, VerifyResult};
+
+        assert_eq!(
+            auth_outcome(VerifyResult::VerifyNoMatch, Some(CaptureStatus::TooDark)),
+            AuthOutcome::Unavailable
+        );
+        assert_eq!(
+            auth_outcome(VerifyResult::VerifyNoMatch, Some(CaptureStatus::NoFace)),
+            AuthOutcome::NoMatch
+        );
+        assert_eq!(
+            auth_outcome(VerifyResult::VerifyMatch, Some(CaptureStatus::TooDark)),
+            AuthOutcome::Match
+        );
     }
 }

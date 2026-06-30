@@ -6,6 +6,15 @@ pub struct FaceRecognizer {
     session: Session,
 }
 
+fn normalize_embedding(row: Array1<f32>) -> anyhow::Result<Array1<f32>> {
+    let norm = row.dot(&row).sqrt();
+    tracing::debug!("Face recognizer computed embedding norm: {}", norm);
+    if norm == 0.0 || !norm.is_finite() {
+        anyhow::bail!("recognizer produced a degenerate (zero-norm) embedding");
+    }
+    Ok(row / norm)
+}
+
 impl FaceRecognizer {
     pub fn new(model_path: &str) -> anyhow::Result<Self> {
         let session = Session::builder()
@@ -46,14 +55,7 @@ impl FaceRecognizer {
         let outputs = self.session.run(inputs)?;
 
         let (_shape, data) = outputs[0].try_extract_tensor::<f32>()?;
-        let row = Array1::from_vec(data.to_vec());
-
-        let norm = row.dot(&row).sqrt();
-        tracing::debug!("Face recognizer computed embedding norm: {}", norm);
-        if norm == 0.0 || !norm.is_finite() {
-            anyhow::bail!("recognizer produced a degenerate (zero-norm) embedding");
-        }
-        Ok(row / norm)
+        normalize_embedding(Array1::from_vec(data.to_vec()))
     }
 }
 
@@ -77,5 +79,19 @@ mod tests {
         assert_eq!(tensor[[0, 0, 0, 1]], 1.0);
         assert!((tensor[[0, 1, 0, 1]] - ((128.0 - 127.5) / 127.5)).abs() < f32::EPSILON);
         assert_eq!(tensor[[0, 2, 0, 1]], -1.0);
+    }
+
+    #[test]
+    fn normalize_embedding_produces_a_unit_vector() {
+        let normalized = normalize_embedding(Array1::from_vec(vec![3.0, 4.0])).unwrap();
+        assert!((normalized.dot(&normalized) - 1.0).abs() < f32::EPSILON);
+        assert_eq!(normalized.as_slice().unwrap(), &[0.6, 0.8]);
+    }
+
+    #[test]
+    fn normalize_embedding_rejects_zero_and_non_finite_norms() {
+        assert!(normalize_embedding(Array1::zeros(3)).is_err());
+        assert!(normalize_embedding(Array1::from_vec(vec![f32::NAN, 1.0])).is_err());
+        assert!(normalize_embedding(Array1::from_vec(vec![f32::INFINITY])).is_err());
     }
 }

@@ -128,6 +128,10 @@ impl AuthDaemon {
         }
     }
 
+    fn may_query_extension(caller_uid: u32, target_uid: u32) -> bool {
+        caller_uid == 0 || caller_uid == target_uid
+    }
+
     async fn emit_effective_face_status(
         ctxt: &SignalEmitter<'_>,
         last_emitted_status: &mut Option<CaptureStatus>,
@@ -449,7 +453,8 @@ impl AuthDaemon {
 
 #[cfg(test)]
 mod tests {
-    use super::{AuthDaemon, eyes_from_kpss};
+    use super::{AuthDaemon, auth_streams, eyes_from_kpss, hybrid_auth_passed};
+    use gaze_core::dbus::CaptureStatus;
 
     #[test]
     fn eyes_from_kpss_extracts_first_face_landmarks() {
@@ -665,6 +670,121 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn extension_state_is_visible_only_to_root_or_the_target_user() {
+        assert!(AuthDaemon::may_query_extension(0, 1000));
+        assert!(AuthDaemon::may_query_extension(1000, 1000));
+        assert!(!AuthDaemon::may_query_extension(1001, 1000));
+    }
+
+    #[test]
+    fn authentication_starts_only_streams_with_a_camera_and_matching_templates() {
+        assert_eq!(
+            auth_streams("primary", "/dev/video2", true, true),
+            (true, true)
+        );
+        assert_eq!(
+            auth_streams("primary", "/dev/video2", true, false),
+            (true, false)
+        );
+        assert_eq!(
+            auth_streams("primary", "/dev/video2", false, true),
+            (false, true)
+        );
+        assert_eq!(auth_streams("", "/dev/video2", true, true), (false, true));
+        assert_eq!(auth_streams("primary", "", true, true), (true, false));
+        assert_eq!(auth_streams("", "", true, true), (false, false));
+    }
+
+    #[test]
+    fn hybrid_or_and_policies_require_the_configured_successes() {
+        for rgb_status in [CaptureStatus::Usable, CaptureStatus::TooDark] {
+            assert!(hybrid_auth_passed(
+                "or", true, true, true, rgb_status, true, false
+            ));
+            assert!(hybrid_auth_passed(
+                "or", true, true, true, rgb_status, false, true
+            ));
+            assert!(!hybrid_auth_passed(
+                "and", true, true, true, rgb_status, true, false
+            ));
+            assert!(hybrid_auth_passed(
+                "and", true, true, true, rgb_status, true, true
+            ));
+        }
+    }
+
+    #[test]
+    fn hybrid_fallback_uses_ir_only_after_rgb_is_unavailable() {
+        assert!(!hybrid_auth_passed(
+            "fallback",
+            true,
+            true,
+            false,
+            CaptureStatus::Unused,
+            false,
+            true
+        ));
+        assert!(hybrid_auth_passed(
+            "fallback",
+            true,
+            true,
+            true,
+            CaptureStatus::TooDark,
+            false,
+            true
+        ));
+        assert!(hybrid_auth_passed(
+            "fallback",
+            true,
+            true,
+            true,
+            CaptureStatus::NoFace,
+            false,
+            true
+        ));
+        assert!(!hybrid_auth_passed(
+            "fallback",
+            true,
+            true,
+            true,
+            CaptureStatus::Usable,
+            false,
+            true
+        ));
+    }
+
+    #[test]
+    fn single_spectrum_authentication_ignores_the_other_result() {
+        assert!(hybrid_auth_passed(
+            "and",
+            true,
+            false,
+            true,
+            CaptureStatus::Usable,
+            true,
+            false
+        ));
+        assert!(hybrid_auth_passed(
+            "and",
+            false,
+            true,
+            false,
+            CaptureStatus::Unused,
+            false,
+            true
+        ));
+        assert!(!hybrid_auth_passed(
+            "or",
+            false,
+            false,
+            false,
+            CaptureStatus::Unused,
+            true,
+            true
+        ));
+    }
 }
 
 pub use gaze_core::dbus::get_active_session_uid;
@@ -735,6 +855,18 @@ fn hybrid_auth_passed(
         (false, true) => ir_success,
         (false, false) => false,
     }
+}
+
+fn auth_streams(
+    rgb_device: &str,
+    ir_device: &str,
+    has_rgb_templates: bool,
+    has_ir_templates: bool,
+) -> (bool, bool) {
+    (
+        !rgb_device.is_empty() && has_rgb_templates,
+        !ir_device.is_empty() && has_ir_templates,
+    )
 }
 
 fn process_frame_sync(
@@ -877,7 +1009,7 @@ impl AuthDaemon {
         uid: u32,
     ) -> fdo::Result<bool> {
         let caller_uid = Self::caller_uid(&header).await?;
-        if caller_uid != 0 && caller_uid != uid {
+        if !Self::may_query_extension(caller_uid, uid) {
             return Err(fdo::Error::AccessDenied(
                 "not permitted to query another user's extension state".into(),
             ));
@@ -1094,8 +1226,12 @@ impl AuthDaemon {
             }
             drop(db);
 
-            let run_rgb = !rgb_device.is_empty() && has_rgb_templates;
-            let run_ir = !ir_device.is_empty() && has_ir_templates;
+            let (run_rgb, run_ir) = auth_streams(
+                &rgb_device,
+                &ir_device,
+                has_rgb_templates,
+                has_ir_templates,
+            );
 
             if !run_rgb && !run_ir {
                 error!("No matching templates or cameras configured for auth");
@@ -1888,11 +2024,8 @@ impl AuthDaemon {
 
     async fn has_enrolled_faces(&self, username: String) -> fdo::Result<bool> {
         let db = self.db.lock().await;
-        match db.list_faces(&username) {
-            Ok(faces) => Ok(!faces.is_empty()),
-            Err(UserDbError::UserNotFound(_)) => Ok(false),
-            Err(e) => Err(Self::map_user_db_error(e)),
-        }
+        db.has_enrolled_faces(&username)
+            .map_err(Self::map_user_db_error)
     }
 
     async fn delete_face(

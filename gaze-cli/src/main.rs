@@ -920,6 +920,7 @@ fn remove_unmanaged_install_artifacts_cmd() -> String {
           /usr/lib/security/pam_gaze.so /usr/lib/security/pam_gaze_grosshack.so
           /usr/lib64/security/pam_gaze.so /usr/lib64/security/pam_gaze_grosshack.so
           /usr/share/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml
+          /usr/share/polkit-1/actions/com.gundulabs.gaze.policy
           /usr/share/gnome-shell/extensions/gaze@gundulabs.com/extension.js
           /usr/share/gnome-shell/extensions/gaze@gundulabs.com/metadata.json
           /usr/share/gnome-shell/extensions/gaze@gundulabs.com/prefs.js
@@ -934,6 +935,20 @@ fn remove_unmanaged_install_artifacts_cmd() -> String {
         sudo rm -rf /usr/local/share/gaze-dev;
         sudo systemctl daemon-reload >/dev/null 2>&1 || true;
         if command -v glib-compile-schemas >/dev/null 2>&1; then sudo glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true; fi"#,
+    ]
+    .join(" ")
+}
+
+fn remove_arch_pam_configuration_cmd() -> String {
+    [
+        "for flag in /etc/gaze/pam-arch.configured /etc/gaze/pam-arch.dev-configured; do",
+        r#"[ -f "$flag" ] || continue;"#,
+        r#"while IFS= read -r f; do"#,
+        r#"[ -f "$f" ] || continue;"#,
+        r#"sudo sed -i '/pam_gaze/d' "$f" || true;"#,
+        "done < \"$flag\";",
+        "done;",
+        "sudo sed -i '/pam_gaze/d' /etc/pam.d/sudo 2>/dev/null || true",
     ]
     .join(" ")
 }
@@ -970,17 +985,7 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     if which("pacman") && !which("pam-auth-update") && !which("authselect") {
         plan.push((
             "Remove Arch PAM configuration",
-            [
-                "for flag in /etc/gaze/pam-arch.configured /etc/gaze/pam-arch.dev-configured; do",
-                r#"[ -f "$flag" ] || continue;"#,
-                r#"while IFS= read -r f; do"#,
-                r#"[ -f "$f" ] || continue;"#,
-                r#"sudo sed -i '/pam_gaze/d' "$f" || true;"#,
-                "done < \"$flag\";",
-                "done;",
-                "sudo sed -i '/pam_gaze/d' /etc/pam.d/sudo 2>/dev/null || true",
-            ]
-            .join(" "),
+            remove_arch_pam_configuration_cmd(),
         ));
     }
 
@@ -1287,4 +1292,77 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plan_has(plan: &[(&'static str, String)], label: &str) -> bool {
+        plan.iter().any(|(candidate, _)| *candidate == label)
+    }
+
+    #[test]
+    fn cli_parses_auth_and_safe_uninstall_flags() {
+        let cli = Cli::try_parse_from(["gaze", "auth", "--user", "alice", "--verbose"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Auth {
+                user: Some(ref user),
+                verbose: true
+            } if user == "alice"
+        ));
+
+        let cli = Cli::try_parse_from(["gaze", "uninstall", "--yes", "--keep-data", "--dry-run"])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Uninstall {
+                yes: true,
+                keep_data: true,
+                dry_run: true
+            }
+        ));
+    }
+
+    #[test]
+    fn uninstall_plan_preserves_face_data_only_when_requested() {
+        assert!(plan_has(
+            &build_uninstall_plan(false),
+            "Remove enrolled face data"
+        ));
+        assert!(!plan_has(
+            &build_uninstall_plan(true),
+            "Remove enrolled face data"
+        ));
+    }
+
+    #[test]
+    fn uninstall_always_removes_unmanaged_development_artifacts() {
+        let plan = build_uninstall_plan(true);
+        assert!(plan_has(&plan, "Remove unmanaged development links/files"));
+
+        let command = remove_unmanaged_install_artifacts_cmd();
+        for path in [
+            "/usr/bin/gaze",
+            "/usr/local/bin/gazed",
+            "/usr/lib/security/pam_gaze.so",
+            "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/extension.js",
+            "/usr/share/polkit-1/actions/com.gundulabs.gaze.policy",
+            "/etc/systemd/system/gazed.service.d/zz-gaze-dev-checkout.conf",
+            "/usr/local/share/gaze-dev",
+        ] {
+            assert!(command.contains(path), "missing cleanup for {path}");
+        }
+        assert!(command.contains("[ -L \"$p\" ] || ! owned_by_pkg \"$p\""));
+    }
+
+    #[test]
+    fn arch_pam_cleanup_handles_package_and_dev_link_markers() {
+        let command = remove_arch_pam_configuration_cmd();
+        assert!(command.contains("/etc/gaze/pam-arch.configured"));
+        assert!(command.contains("/etc/gaze/pam-arch.dev-configured"));
+        assert!(command.contains("sed -i '/pam_gaze/d'"));
+        assert!(command.contains("/etc/pam.d/sudo"));
+    }
 }
