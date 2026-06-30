@@ -1,3 +1,4 @@
+mod doctor;
 mod tui;
 
 use clap::{Parser, Subcommand};
@@ -122,6 +123,11 @@ enum Commands {
     Config {
         #[arg(long, help = "Print current values and exit")]
         show: bool,
+    },
+    /// Check the Gaze installation for configuration and runtime problems
+    Doctor {
+        #[arg(short, long, help = "Check enrollments for this user")]
+        user: Option<String>,
     },
     /// Completely uninstall Gaze: packages, PAM integration, config, models, and user data
     Uninstall {
@@ -1163,13 +1169,21 @@ fn handle_uninstall(yes: bool, keep_data: bool, dry_run: bool) -> anyhow::Result
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    if let Commands::Uninstall {
-        yes,
-        keep_data,
-        dry_run,
-    } = cli.command
-    {
-        return handle_uninstall(yes, keep_data, dry_run);
+    match &cli.command {
+        Commands::Uninstall {
+            yes,
+            keep_data,
+            dry_run,
+        } => return handle_uninstall(*yes, *keep_data, *dry_run),
+        Commands::Doctor { user } => {
+            let username = user.clone().unwrap_or_else(get_current_user);
+            let healthy = doctor::run(&username).await?;
+            if !healthy {
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
+        _ => {}
     }
 
     let proxy = connect_gaze().await?;
@@ -1288,7 +1302,9 @@ async fn main() -> anyhow::Result<()> {
             run_config_wizard(&Term::stdout(), &proxy, config).await?;
         }
 
-        Commands::Uninstall { .. } => unreachable!("handled before DBus connection"),
+        Commands::Doctor { .. } | Commands::Uninstall { .. } => {
+            unreachable!("handled before DBus connection")
+        }
     }
 
     Ok(())
@@ -1322,6 +1338,14 @@ mod tests {
                 keep_data: true,
                 dry_run: true
             }
+        ));
+
+        let cli = Cli::try_parse_from(["gaze", "doctor", "--user", "alice"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Doctor {
+                user: Some(ref user)
+            } if user == "alice"
         ));
     }
 

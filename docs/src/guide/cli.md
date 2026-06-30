@@ -11,7 +11,37 @@ gaze add-face default
 gaze auth --verbose
 gaze refine-face default
 gaze list-faces
+gaze doctor
 ```
+
+## Diagnose the installation
+
+Run the read-only diagnostic command from your local graphical session:
+
+```bash
+gaze doctor
+```
+
+It checks:
+
+- CPU and systemd service compatibility
+- `/etc/gaze/config.toml` parsing, permissions, and unsafe values
+- daemon and system DBus responsiveness
+- access to the current PipeWire session and visibility of configured RGB/IR cameras
+- face enrollment and RGB/IR capture coverage for the current user
+- PAM module installation, permissions, and active PAM stack references
+- GNOME or hyprlock integration when running those desktops
+- TPM availability when encrypted template storage is enabled
+
+Every warning or error includes a suggested next step. Errors that can prevent Gaze from working make the command exit with status `1`; warnings are advisory and leave the exit status at `0`.
+
+To inspect enrollment for another user (subject to the normal DBus authorization rules):
+
+```bash
+gaze doctor --user alice
+```
+
+The camera checks enumerate devices but do not capture frames. Use `gaze auth` when you need an end-to-end camera and recognition test.
 
 ## Authenticate
 
@@ -115,6 +145,7 @@ gaze add-face work -u alice
 ## Troubleshooting commands
 
 ```bash
+gaze doctor
 systemctl status gazed
 journalctl -u gazed -n 100 --no-pager
 gaze auth --verbose

@@ -149,6 +149,14 @@ pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
 
 impl Camera {
     pub fn open(camera_source: &str) -> anyhow::Result<Self> {
+        Self::open_with_direct_v4l2(camera_source, false)
+    }
+
+    pub fn open_ir(camera_source: &str) -> anyhow::Result<Self> {
+        Self::open_with_direct_v4l2(camera_source, true)
+    }
+
+    fn open_with_direct_v4l2(camera_source: &str, allow_direct_v4l2: bool) -> anyhow::Result<Self> {
         gstreamer::init()?;
         let source = camera_source.trim();
         let src_element = if source.is_empty() {
@@ -156,9 +164,17 @@ impl Camera {
         } else if source == DEFAULT_RGB_CAMERA {
             "pipewiresrc".to_string()
         } else if source.starts_with("/dev/video") {
-            anyhow::bail!(
-                "direct /dev/video* camera paths are not supported; use \"primary\" or a GStreamer source"
-            );
+            let index = source
+                .strip_prefix("/dev/video")
+                .filter(|index| !index.is_empty() && index.chars().all(|c| c.is_ascii_digit()));
+            if !allow_direct_v4l2 {
+                anyhow::bail!(
+                    "direct /dev/video* RGB camera paths are not supported; use \"primary\" or a GStreamer source"
+                );
+            } else if index.is_none() {
+                anyhow::bail!("invalid V4L2 camera node {source:?}; expected /dev/video<number>");
+            }
+            format!("v4l2src device={source}")
         } else {
             source.to_string()
         };
@@ -426,6 +442,13 @@ mod tests {
                 node: "/dev/video2".to_string()
             }
         );
+    }
+
+    #[test]
+    fn direct_v4l2_open_is_restricted_to_valid_ir_nodes() {
+        assert!(Camera::open("/dev/video2").is_err());
+        assert!(Camera::open_ir("/dev/video").is_err());
+        assert!(Camera::open_ir("/dev/video2 ! fakesink").is_err());
     }
 
     #[test]

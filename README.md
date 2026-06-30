@@ -162,6 +162,7 @@ gaze remove-face <name>      Remove a face
 gaze clear-user              Remove all face data for current user
 gaze config                  Interactive configuration editor
 gaze config --show           Print current config and exit
+gaze doctor                  Check config, daemon, cameras, enrollments, PAM, and TPM
 gaze uninstall               Completely remove Gaze (packages, PAM, config, models, data)
 gaze uninstall -y            Skip confirmation prompt
 ```

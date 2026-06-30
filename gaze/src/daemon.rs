@@ -1391,7 +1391,7 @@ impl AuthDaemon {
                         emitter_enabled
                     );
 
-                    let mut cam = match Camera::open(&ir_device_clone) {
+                    let mut cam = match Camera::open_ir(&ir_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(VerifyMsg::Error(format!("IR Camera open error: {e}")));
@@ -1794,7 +1794,7 @@ impl AuthDaemon {
                         emitter_enabled
                     );
 
-                    let mut cam = match Camera::open(&ir_device_clone) {
+                    let mut cam = match Camera::open_ir(&ir_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(EnrollMsg::Error(format!("IR Camera open error: {e}")));
