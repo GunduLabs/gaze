@@ -2028,6 +2028,13 @@ impl AuthDaemon {
             .map_err(Self::map_user_db_error)
     }
 
+    async fn is_camera_available(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<bool> {
+        let caller_uid = Self::caller_uid(&header).await?;
+        Ok(Self::camera_runtime_uid(caller_uid, caller_uid)
+            .await
+            .is_some())
+    }
+
     async fn delete_face(
         &self,
         #[zbus(header)] header: Header<'_>,

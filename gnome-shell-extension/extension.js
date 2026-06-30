@@ -22,6 +22,9 @@ const GAZE_DBUS_INTERFACE = `
       <arg name="username" type="s" direction="in"/>
       <arg name="result" type="b" direction="out"/>
     </method>
+    <method name="IsCameraAvailable">
+      <arg name="result" type="b" direction="out"/>
+    </method>
   </interface>
 </node>
 `;
@@ -270,13 +273,17 @@ export default class GazeFaceAuthExtension extends Extension {
           const userName = this._userName;
           if (dbusProxy) {
             dbusProxy.HasEnrolledFacesRemote(userName, (result, err) => {
-              if (
-                !err &&
-                result[0] &&
-                !self._faceAuthFailed &&
-                !self.serviceIsForeground(FACE_SERVICE_NAME)
-              )
-                self._startService(FACE_SERVICE_NAME);
+              if (!err && result[0]) {
+                dbusProxy.IsCameraAvailableRemote((camResult, camErr) => {
+                  if (
+                    !camErr &&
+                    camResult[0] &&
+                    !self._faceAuthFailed &&
+                    !self.serviceIsForeground(FACE_SERVICE_NAME)
+                  )
+                    self._startService(FACE_SERVICE_NAME);
+                });
+              }
             });
           }
         };
