@@ -5,6 +5,7 @@ use std::ffi::CString;
 use std::os::fd::AsRawFd;
 use std::os::raw::c_void;
 use std::os::raw::{c_char, c_int};
+use std::os::unix::thread::JoinHandleExt;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -74,11 +75,54 @@ fn wait_for_prompt_response(state: &SharedAuthState) -> Option<String> {
     shared_state.password.clone()
 }
 
+extern "C" fn interrupt_noop_handler(_sig: c_int) {}
+
+unsafe fn install_interrupt_handler() -> Option<libc::sigaction> {
+    unsafe {
+        let mut new_action: libc::sigaction = std::mem::zeroed();
+        new_action.sa_sigaction = interrupt_noop_handler as *const () as usize;
+        libc::sigemptyset(&mut new_action.sa_mask);
+        new_action.sa_flags = 0;
+        let mut old_action: libc::sigaction = std::mem::zeroed();
+        if libc::sigaction(libc::SIGUSR1, &new_action, &mut old_action) == 0 {
+            Some(old_action)
+        } else {
+            None
+        }
+    }
+}
+
+unsafe fn restore_interrupt_handler(old: Option<libc::sigaction>) {
+    if let Some(old) = old {
+        unsafe {
+            libc::sigaction(libc::SIGUSR1, &old, std::ptr::null_mut());
+        }
+    }
+}
+
 fn retire_prompt(state: &SharedAuthState, prompt_thread: thread::JoinHandle<()>) {
     if unblock_terminal() {
         wait_for_prompt_finish(state);
         let _ = prompt_thread.join();
+        return;
     }
+
+    let tid = prompt_thread.as_pthread_t();
+    let old_handler = unsafe { install_interrupt_handler() };
+
+    {
+        let (lock, condvar) = &**state;
+        let mut shared_state = lock.lock();
+        while !shared_state.finished {
+            unsafe {
+                libc::pthread_kill(tid, libc::SIGUSR1);
+            }
+            condvar.wait_for(&mut shared_state, Duration::from_millis(50));
+        }
+    }
+
+    let _ = prompt_thread.join();
+    unsafe { restore_interrupt_handler(old_handler) };
 }
 
 unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
