@@ -20,7 +20,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  JUST_VERSION: 1.55.0
+  JUST_VERSION: 1.55.1
   NFPM_VERSION: v2.47.0
 
 jobs:

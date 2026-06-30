@@ -17,7 +17,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  JUST_VERSION: 1.55.0
+  JUST_VERSION: 1.55.1
 
 jobs:
   checks:
