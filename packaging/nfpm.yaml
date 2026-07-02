@@ -76,6 +76,10 @@ rpm:
   signature:
     key_file: "${NFPM_SIGNING_KEY_FILE}"
 
+archlinux:
+  scripts:
+    postupgrade: "packaging/postinst-arch.sh"
+
 overrides:
   deb:
     scripts:
@@ -95,7 +99,6 @@ overrides:
   archlinux:
     scripts:
       postinstall: "packaging/postinst-arch.sh"
-      postupgrade: "packaging/postinst-arch.sh"
     depends:
       - opencv
       - pam
