@@ -11,9 +11,32 @@ PAM_DOCS_URL="https://gaze.gundulabs.com/guide/pam"
 REPO_KEY_FPR="505AC1C71AFEDBD5555235F6CB4FA24E5C1C7C98"
 AUTO_YES=0
 
-red()   { printf '\033[31m%s\033[0m\n' "$*"; }
-green() { printf '\033[32m%s\033[0m\n' "$*"; }
-bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
+ESC="$(printf '\033')"
+if [ -t 1 ] && [ "${TERM:-}" != "dumb" ] && [ -z "${NO_COLOR:-}" ]; then
+    BOLD="${ESC}[1m" DIM="${ESC}[2m" RED="${ESC}[31m" GREEN="${ESC}[32m"
+    YELLOW="${ESC}[33m" CYAN="${ESC}[36m" RESET="${ESC}[0m"
+else
+    BOLD="" DIM="" RED="" GREEN="" YELLOW="" CYAN="" RESET=""
+fi
+
+say() { printf '%s\n' "$*"; }
+title() { printf '%s\n' "${BOLD}$*${RESET}"; }
+ok() { printf '%s\n' "${GREEN}✓${RESET} $*"; }
+warn() { printf '%s\n' "${YELLOW}!${RESET} $*"; }
+fail() { printf '%s\n' "${RED}error:${RESET} $*" >&2; }
+die() {
+    fail "$@"
+    exit 1
+}
+link() { printf '%s\n' "  ${CYAN}$*${RESET}"; }
+cmd() { printf '  %s\n' "$*"; }
+
+STEP_NO=0
+STEP_TOTAL=0
+step() {
+    STEP_NO=$((STEP_NO + 1))
+    printf '\n%s\n' "${BOLD}${GREEN}==>${RESET}${BOLD} [${STEP_NO}/${STEP_TOTAL}] $*${RESET}"
+}
 
 usage() {
     cat <<'EOF'
@@ -37,15 +60,18 @@ EOF
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        -y|--yes) AUTO_YES=1 ;;
-        -h|--help) usage; exit 0 ;;
-        *) red "Unknown option: $1"; exit 1 ;;
+    -y | --yes) AUTO_YES=1 ;;
+    -h | --help)
+        usage
+        exit 0
+        ;;
+    *) die "Unknown option: $1" ;;
     esac
     shift
 done
 
 need() {
-    command -v "$1" >/dev/null 2>&1 || { red "error: '$1' is required but not installed."; exit 1; }
+    command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not installed."
 }
 
 prompt_continue() {
@@ -54,30 +80,33 @@ prompt_continue() {
     fi
 
     echo ""
-    printf "Continue? [y/N]: "
+    printf '%s' "${BOLD}Continue? [y/N]:${RESET} "
     if [ -r /dev/tty ]; then
         read -r answer </dev/tty
     else
-        red "No interactive terminal available. Re-run with --yes for non-interactive install."
+        fail "No interactive terminal available. Re-run with --yes for non-interactive install."
         exit 1
     fi
 
     case "$answer" in
-        y|Y|yes|YES) return 0 ;;
-        *) echo "Aborted."; exit 0 ;;
+    y | Y | yes | YES) return 0 ;;
+    *)
+        say "Aborted."
+        exit 0
+        ;;
     esac
 }
 
 is_gnome_session() {
     case "${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}" in
-        *GNOME*|*gnome*) return 0 ;;
+    *GNOME* | *gnome*) return 0 ;;
     esac
     return 1
 }
 
 is_kde_session() {
     case "${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}" in
-        *KDE*|*kde*|*Plasma*|*plasma*) return 0 ;;
+    *KDE* | *kde* | *Plasma* | *plasma*) return 0 ;;
     esac
     return 1
 }
@@ -88,7 +117,7 @@ want_gnome_extension_package() {
 
 is_hyprland_session() {
     case "${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}" in
-        *Hyprland*|*hyprland*) return 0 ;;
+    *Hyprland* | *hyprland*) return 0 ;;
     esac
     return 1
 }
@@ -101,12 +130,17 @@ want_hyprlock_setup() {
     is_hyprland_session || has_hyprlock
 }
 
+print_manual_gnome_enable() {
+    cmd "gnome-extensions enable gaze@gundulabs.com"
+    cmd "gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true"
+}
+
 configure_hyprlock_conf() {
     if [ "$(id -u)" -eq 0 ]; then
-        echo "Running as root; skipping per-user hyprlock.conf edit."
-        echo "As your desktop user, add to ~/.config/hypr/hyprlock.conf:"
-        echo "    general { pam_module = hyprlock-gaze }"
-        echo "Docs: ${HYPRLAND_DOCS_URL}"
+        warn "Running as root; skipping per-user hyprlock.conf edit."
+        say "As your desktop user, add to ~/.config/hypr/hyprlock.conf:"
+        cmd "general { pam_module = hyprlock-gaze }"
+        link "$HYPRLAND_DOCS_URL"
         return 0
     fi
 
@@ -119,22 +153,22 @@ general {
     pam_module = hyprlock-gaze
 }
 EOF
-        echo "Created $conf with pam_module = hyprlock-gaze."
+        ok "Created $conf with pam_module = hyprlock-gaze."
         return 0
     fi
 
     if grep -qE '^\s*pam_module\s*=' "$conf"; then
         current_pam="$(grep -E '^\s*pam_module\s*=' "$conf" | head -1 | sed 's/.*=\s*//;s/\s*$//')"
         case "$current_pam" in
-            hyprlock-gaze|hyprlock-gaze-simultaneous)
-                echo "hyprlock.conf already uses $current_pam."
-                return 0
-                ;;
-            *)
-                echo "hyprlock.conf already sets pam_module = $current_pam; leaving it."
-                echo "To use Gaze, change it to: pam_module = hyprlock-gaze"
-                return 0
-                ;;
+        hyprlock-gaze | hyprlock-gaze-simultaneous)
+            ok "hyprlock.conf already uses $current_pam."
+            return 0
+            ;;
+        *)
+            warn "hyprlock.conf already sets pam_module = $current_pam; leaving it."
+            say "To use Gaze, change it to: pam_module = hyprlock-gaze"
+            return 0
+            ;;
         esac
     fi
 
@@ -150,11 +184,11 @@ EOF
             }
             { print }
         ' "$conf.gaze-backup" >"$conf"
-        echo "Added pam_module = hyprlock-gaze to existing general {} block in $conf."
-        echo "Backup: $conf.gaze-backup"
+        ok "Added pam_module = hyprlock-gaze to existing general {} block in $conf."
+        say "${DIM}Backup: $conf.gaze-backup${RESET}"
     else
         printf '\ngeneral {\n    pam_module = hyprlock-gaze\n}\n' >>"$conf"
-        echo "Appended general { pam_module = hyprlock-gaze } to $conf."
+        ok "Appended general { pam_module = hyprlock-gaze } to $conf."
     fi
 }
 
@@ -162,11 +196,8 @@ enable_hyprlock() {
     if ! want_hyprlock_setup; then
         return 0
     fi
-    echo ""
-    bold "Hyprland/hyprlock detected"
-    echo "Configuring hyprlock to use Gaze face unlock..."
+    say "Hyprland/hyprlock detected; configuring hyprlock to use Gaze face unlock..."
     configure_hyprlock_conf
-    echo "Docs: ${HYPRLAND_DOCS_URL}"
 }
 
 _gsettings_add_extension() {
@@ -176,9 +207,9 @@ _gsettings_add_extension() {
     fi
     current=$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null) || return 1
     case "$current" in
-        *"$ext_id"*) return 0 ;;
-        "@as []"|"[]") gsettings set org.gnome.shell enabled-extensions "['$ext_id']" ;;
-        *) gsettings set org.gnome.shell enabled-extensions "$(printf '%s' "$current" | sed "s/]$/, '$ext_id']/")" ;;
+    *"$ext_id"*) return 0 ;;
+    "@as []" | "[]") gsettings set org.gnome.shell enabled-extensions "['$ext_id']" ;;
+    *) gsettings set org.gnome.shell enabled-extensions "$(printf '%s' "$current" | sed "s/]$/, '$ext_id']/")" ;;
     esac
 }
 
@@ -191,20 +222,16 @@ _gsettings_enable_face_auth() {
 
 enable_gnome_extension() {
     if [ "$(id -u)" -eq 0 ]; then
-        echo "Running as root; not changing per-user GNOME extension settings."
-        echo "For GNOME lock screen face unlock, reboot, then run as your desktop user:"
-        echo "  gnome-extensions enable gaze@gundulabs.com"
-        echo "  gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true"
-        echo "GDM loads the extension by default. Login face auth requires the docs command: ${GNOME_DOCS_URL}"
+        warn "Running as root; not changing per-user GNOME extension settings."
+        say "For GNOME lock screen face unlock, reboot, then run as your desktop user:"
+        print_manual_gnome_enable
         return 0
     fi
 
     if ! is_gnome_session; then
-        echo "GNOME desktop session not detected; leaving the extension disabled for this user."
-        echo "For GNOME lock screen face unlock, reboot, then from your GNOME session:"
-        echo "  gnome-extensions enable gaze@gundulabs.com"
-        echo "  gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true"
-        echo "GDM loads the extension by default. Login face auth requires the docs command: ${GNOME_DOCS_URL}"
+        warn "GNOME desktop session not detected; leaving the extension disabled for this user."
+        say "For GNOME lock screen face unlock, reboot, then from your GNOME session:"
+        print_manual_gnome_enable
         return 0
     fi
 
@@ -215,18 +242,15 @@ enable_gnome_extension() {
     # often fails on first install. Fall back to gsettings which writes directly to
     # dconf and takes effect on the next login without needing Shell to know the ext.
     if command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions enable "$EXT_ID" >/dev/null 2>&1 && _gsettings_enable_face_auth; then
-        echo "Enabled GNOME lock screen face unlock for this user."
+        ok "Enabled GNOME lock screen face unlock for this user."
     elif _gsettings_add_extension "$EXT_ID" && _gsettings_enable_face_auth; then
-        echo "Registered GNOME lock screen face unlock via dconf. Reboot to activate it."
-        echo "Note: running 'gnome-extensions enable $EXT_ID' before that reboot will report \"Extension does not exist\"; the dconf entry just written makes that step unnecessary."
+        ok "Registered GNOME lock screen face unlock via dconf; a reboot will activate it."
+        say "${DIM}Note: 'gnome-extensions enable $EXT_ID' before that reboot reports \"Extension does not exist\"; the dconf entry just written makes that step unnecessary.${RESET}"
     else
-        echo "Could not enable the GNOME extension automatically."
-        echo "Reboot, then from your GNOME session run:"
-        echo "  gnome-extensions enable gaze@gundulabs.com"
-        echo "  gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true"
+        warn "Could not enable the GNOME extension automatically."
+        say "Reboot, then from your GNOME session run:"
+        print_manual_gnome_enable
     fi
-
-    echo "GDM loads the extension by default. Login face auth requires the docs command: ${GNOME_DOCS_URL}"
 }
 
 explain_gnome_extension_skipped() {
@@ -235,13 +259,13 @@ explain_gnome_extension_skipped() {
     fi
 
     if is_kde_session; then
-        echo "KDE Plasma desktop detected; skipping the GNOME Shell extension package."
+        say "KDE Plasma desktop detected; skipping the GNOME Shell extension package."
     else
-        echo "GNOME desktop session not detected; skipping the GNOME Shell extension package."
+        say "GNOME desktop session not detected; skipping the GNOME Shell extension package."
     fi
-    echo "CLI, GUI, and PAM modules are still installed."
-    echo "For non-GNOME desktop/login integration, see: ${PAM_DOCS_URL}"
-    echo "If you later use GNOME lock screen auth, install gaze-gnome-extension and follow: ${GNOME_DOCS_URL}"
+    say "CLI, GUI, and PAM modules are still installed."
+    say "For non-GNOME desktop/login integration, see:"
+    link "$PAM_DOCS_URL"
 }
 
 enable_desktop_integrations() {
@@ -257,13 +281,14 @@ configure_pam_arch() {
     pam_file=/etc/pam.d/sudo
 
     if ! [ -f "$pam_file" ]; then
-        echo "Could not find $pam_file; skipping PAM configuration."
-        echo "To enable Gaze for sudo manually, see: ${PAM_DOCS_URL}"
+        warn "Could not find $pam_file; skipping PAM configuration."
+        say "To enable Gaze for sudo manually, see:"
+        link "$PAM_DOCS_URL"
         return 0
     fi
 
     if grep -q "pam_gaze" "$pam_file" 2>/dev/null; then
-        echo "Gaze already configured in $pam_file."
+        ok "Gaze already configured in $pam_file."
         return 0
     fi
 
@@ -273,16 +298,16 @@ configure_pam_arch() {
             done = 1
         }
         { print }
-    ' "$pam_file" > "$TMP/pam-sudo" && \
-    sudo install -m 644 "$TMP/pam-sudo" "$pam_file" && {
-        echo "Configured $pam_file to use Gaze face authentication."
+    ' "$pam_file" >"$TMP/pam-sudo" &&
+        sudo install -m 644 "$TMP/pam-sudo" "$pam_file" && {
+        ok "Configured $pam_file to use Gaze face authentication."
         sudo mkdir -p /etc/gaze
         printf '%s\n' "$pam_file" | sudo tee /etc/gaze/pam-arch.configured >/dev/null
     } || {
-        echo "Could not configure PAM for sudo automatically."
-        echo "To enable Gaze for sudo, add before the auth line in $pam_file:"
-        echo "    auth    sufficient    pam_gaze.so"
-        echo "Docs: ${PAM_DOCS_URL}"
+        warn "Could not configure PAM for sudo automatically."
+        say "To enable Gaze for sudo, add before the auth line in $pam_file:"
+        cmd "auth    sufficient    pam_gaze.so"
+        link "$PAM_DOCS_URL"
     }
 }
 
@@ -294,24 +319,24 @@ configure_authselect() {
     if ! sudo test -f /etc/gaze/authselect.previous; then
         current_authselect="$(sudo authselect current 2>/dev/null || true)"
         case "$current_authselect" in
-            *"Profile ID: gaze"*) ;;
-            "") ;;
-            *)
-                if printf '%s\n' "$current_authselect" >"$TMP/authselect.previous" && \
-                    sudo mkdir -p /etc/gaze && \
-                    sudo cp "$TMP/authselect.previous" /etc/gaze/authselect.previous; then
-                    :
-                fi
-                ;;
+        *"Profile ID: gaze"*) ;;
+        "") ;;
+        *)
+            if printf '%s\n' "$current_authselect" >"$TMP/authselect.previous" &&
+                sudo mkdir -p /etc/gaze &&
+                sudo cp "$TMP/authselect.previous" /etc/gaze/authselect.previous; then
+                :
+            fi
+            ;;
         esac
     fi
 
     if sudo authselect select gaze with-silent-lastlog --force >/dev/null 2>&1; then
-        echo "Enabled the Gaze PAM authselect profile."
+        ok "Enabled the Gaze PAM authselect profile."
     else
-        echo "Could not enable the Gaze PAM authselect profile automatically."
-        echo "After installation, run:"
-        echo "  sudo authselect select gaze with-silent-lastlog --force"
+        warn "Could not enable the Gaze PAM authselect profile automatically."
+        say "After installation, run:"
+        cmd "sudo authselect select gaze with-silent-lastlog --force"
     fi
 }
 
@@ -327,31 +352,30 @@ fetch_repo_key() {
     curl -fsSL "${PKG_BASE_URL}/keys/gundulabs-repo.asc" -o "$key_path"
     actual_fpr="$(gpg --show-keys --with-colons "$key_path" | awk -F: '$1 == "fpr" { print $10; exit }')"
     if [ "$actual_fpr" != "$REPO_KEY_FPR" ]; then
-        red "Repository signing key fingerprint mismatch."
-        red "Expected: $REPO_KEY_FPR"
-        red "Actual:   ${actual_fpr:-unknown}"
+        fail "Repository signing key fingerprint mismatch."
+        fail "Expected: $REPO_KEY_FPR"
+        fail "Actual:   ${actual_fpr:-unknown}"
         exit 1
     fi
     printf '%s\n' "$key_path"
 }
 
-bold "Gaze installer"
+title "Gaze installer"
 echo ""
 
 # ── architecture ──────────────────────────────────────────────────────────────
 
 ARCH="$(uname -m)"
 case "$ARCH" in
-    x86_64)  PKG_ARCH="x86_64" ;;
-    aarch64) PKG_ARCH="aarch64" ;;
-    *) red "Unsupported architecture: $ARCH"; exit 1 ;;
+x86_64) PKG_ARCH="x86_64" ;;
+aarch64) PKG_ARCH="aarch64" ;;
+*) die "Unsupported architecture: $ARCH" ;;
 esac
 
 # ── distro detection ──────────────────────────────────────────────────────────
 
 if [ ! -f /etc/os-release ]; then
-    red "Cannot detect Linux distribution (missing /etc/os-release)"
-    exit 1
+    die "Cannot detect Linux distribution (missing /etc/os-release)"
 fi
 # shellcheck disable=SC1091
 . /etc/os-release
@@ -367,123 +391,128 @@ is_fedora() {
 
 is_rpm() {
     case "$DISTRO_ID $DISTRO_LIKE" in
-        *fedora*|*rhel*|*centos*|*rocky*|*alma*) return 0 ;;
+    *fedora* | *rhel* | *centos* | *rocky* | *alma*) return 0 ;;
     esac
     return 1
 }
 
 is_deb() {
     case "$DISTRO_ID $DISTRO_LIKE" in
-        *debian*|*ubuntu*) return 0 ;;
+    *debian* | *ubuntu*) return 0 ;;
     esac
     return 1
 }
 
 is_arch() {
     case "$DISTRO_ID $DISTRO_LIKE" in
-        *arch*|*manjaro*) return 0 ;;
+    *arch* | *manjaro*) return 0 ;;
     esac
     return 1
 }
 
 supported_deb_suite() {
     case "$DISTRO_CODENAME" in
-        noble|questing|resolute|trixie) return 0 ;;
+    noble | questing | resolute | trixie) return 0 ;;
     esac
     return 1
 }
 
 supported_fedora_version() {
     case "$DISTRO_VERSION_ID" in
-        42|43|44) return 0 ;;
+    42 | 43 | 44) return 0 ;;
     esac
     return 1
 }
 
 if ! is_rpm && ! is_deb && ! is_arch; then
-    red "Unsupported distribution: $DISTRO_ID"
-    echo "Supported: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Arch-compatible AUR distros"
+    fail "Unsupported distribution: $DISTRO_ID"
+    say "Supported: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Arch-compatible AUR distros"
     exit 1
 fi
 
 if is_deb && ! supported_deb_suite; then
-    red "Unsupported Debian/Ubuntu release: ${DISTRO_CODENAME:-unknown}"
-    echo "Supported apt suites: noble, questing, resolute, trixie"
+    fail "Unsupported Debian/Ubuntu release: ${DISTRO_CODENAME:-unknown}"
+    say "Supported apt suites: noble, questing, resolute, trixie"
     exit 1
 fi
 
 if is_rpm && ! is_fedora; then
-    red "Unsupported RPM distribution: $DISTRO_ID"
-    echo "Supported RPM distribution: Fedora"
+    fail "Unsupported RPM distribution: $DISTRO_ID"
+    say "Supported RPM distribution: Fedora"
     exit 1
 fi
 
 if is_fedora && ! supported_fedora_version; then
-    red "Unsupported Fedora version: ${DISTRO_VERSION_ID:-unknown}"
-    echo "Supported Fedora versions: 42, 43, 44"
+    fail "Unsupported Fedora version: ${DISTRO_VERSION_ID:-unknown}"
+    say "Supported Fedora versions: 42, 43, 44"
     exit 1
 fi
 
+# ── plan ──────────────────────────────────────────────────────────────────────
+
+plan() { printf '  %s\n' "• $*"; }
+
 if is_deb; then
-    echo "Detected platform: Debian/Ubuntu ${DISTRO_CODENAME} (${PKG_ARCH})"
-    echo "Package manager: apt"
+    say "Detected platform: ${BOLD}Debian/Ubuntu ${DISTRO_CODENAME}${RESET} (${PKG_ARCH}), package manager: apt"
+    STEP_TOTAL=5
     echo ""
-    bold "Planned steps for this system:"
-    echo "- Configure the apt repository"
+    title "This will:"
+    plan "Configure the apt repository"
     if want_gnome_extension_package; then
-        echo "- Install gaze, gaze-gui, and gaze-gnome-extension"
-        echo "- Enable GNOME lock screen auth for this user when possible"
+        plan "Install gaze, gaze-gui, and gaze-gnome-extension"
+        plan "Enable GNOME lock screen auth for this user when possible"
     elif is_kde_session; then
-        echo "- Install gaze and gaze-gui (KDE Plasma detected; skip GNOME Shell extension)"
+        plan "Install gaze and gaze-gui (KDE Plasma detected; skip GNOME Shell extension)"
     else
-        echo "- Install gaze and gaze-gui (skip GNOME Shell extension; GNOME not detected)"
+        plan "Install gaze and gaze-gui (skip GNOME Shell extension; GNOME not detected)"
     fi
     if want_hyprlock_setup; then
-        echo "- Install gaze-hyprlock and configure hyprlock"
+        plan "Install gaze-hyprlock and configure hyprlock"
     fi
-    echo "- Set up the PAM modules through pam-auth-update if available"
-    echo "- Enable the Gaze daemon"
+    plan "Set up the PAM modules through pam-auth-update if available"
+    plan "Enable the Gaze daemon"
 elif is_rpm; then
-    echo "Detected platform: Fedora ${DISTRO_VERSION_ID} (${PKG_ARCH})"
     if command -v dnf >/dev/null 2>&1; then
-        echo "Package manager: dnf"
+        RPM_TOOL="dnf"
     else
-        echo "Package manager: rpm"
+        RPM_TOOL="yum"
     fi
+    say "Detected platform: ${BOLD}Fedora ${DISTRO_VERSION_ID}${RESET} (${PKG_ARCH}), package manager: ${RPM_TOOL}"
+    STEP_TOTAL=6
     echo ""
-    bold "Planned steps for this system:"
-    echo "- Configure the dnf repository"
+    title "This will:"
+    plan "Configure the dnf repository"
     if want_gnome_extension_package; then
-        echo "- Install gaze, gaze-gui, and gaze-gnome-extension"
-        echo "- Enable GNOME lock screen auth for this user when possible"
+        plan "Install gaze, gaze-gui, and gaze-gnome-extension"
+        plan "Enable GNOME lock screen auth for this user when possible"
     elif is_kde_session; then
-        echo "- Install gaze and gaze-gui (KDE Plasma detected; skip GNOME Shell extension)"
+        plan "Install gaze and gaze-gui (KDE Plasma detected; skip GNOME Shell extension)"
     else
-        echo "- Install gaze and gaze-gui (skip GNOME Shell extension; GNOME not detected)"
+        plan "Install gaze and gaze-gui (skip GNOME Shell extension; GNOME not detected)"
     fi
     if want_hyprlock_setup; then
-        echo "- Install gaze-hyprlock and configure hyprlock"
+        plan "Install gaze-hyprlock and configure hyprlock"
     fi
-    echo "- Enable the Gaze PAM profile through authselect if available"
-    echo "- Enable the Gaze daemon"
+    plan "Enable the Gaze PAM profile through authselect if available"
+    plan "Enable the Gaze daemon"
 elif is_arch; then
-    echo "Detected platform: Arch-compatible (${PKG_ARCH})"
-    echo "Package manager: AUR helper (yay/paru)"
+    say "Detected platform: ${BOLD}Arch-compatible${RESET} (${PKG_ARCH}), package manager: AUR helper (yay/paru)"
+    STEP_TOTAL=5
     echo ""
-    bold "Planned steps for this system:"
+    title "This will:"
     if want_gnome_extension_package; then
-        echo "- Install gaze-bin, gaze-gui-bin, and gaze-gnome-extension-bin from the AUR"
-        echo "- Enable GNOME lock screen auth for this user when possible"
+        plan "Install gaze-bin, gaze-gui-bin, and gaze-gnome-extension-bin from the AUR"
+        plan "Enable GNOME lock screen auth for this user when possible"
     elif is_kde_session; then
-        echo "- Install gaze-bin and gaze-gui-bin from the AUR (KDE Plasma detected; skip GNOME Shell extension)"
+        plan "Install gaze-bin and gaze-gui-bin from the AUR (KDE Plasma detected; skip GNOME Shell extension)"
     else
-        echo "- Install gaze-bin and gaze-gui-bin from the AUR (skip GNOME Shell extension; GNOME not detected)"
+        plan "Install gaze-bin and gaze-gui-bin from the AUR (skip GNOME Shell extension; GNOME not detected)"
     fi
     if want_hyprlock_setup; then
-        echo "- Install gaze-hyprlock-bin and configure hyprlock"
+        plan "Install gaze-hyprlock-bin and configure hyprlock"
     fi
-    echo "- Configure PAM for sudo"
-    echo "- Enable the Gaze daemon"
+    plan "Configure PAM for sudo"
+    plan "Enable the Gaze daemon"
 fi
 
 prompt_continue
@@ -491,12 +520,12 @@ prompt_continue
 # ── clean up old repo files ──────────────────────────────────────────────────
 if is_deb; then
     if [ -f /etc/apt/sources.list.d/gundulabs.list ] || [ -f /usr/share/keyrings/gundulabs-archive-keyring.gpg ]; then
-        echo "Refreshing repository configuration..."
+        say "Refreshing repository configuration..."
         sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
     fi
 elif is_rpm; then
     if [ -f /etc/yum.repos.d/gundulabs.repo ] || [ -f /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs ]; then
-        echo "Refreshing repository configuration..."
+        say "Refreshing repository configuration..."
         sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
     fi
 fi
@@ -506,8 +535,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 if is_deb; then
-    echo ""
-    bold "Step 1/5: Configuring apt repository"
+    step "Configuring apt repository"
     KEY_PATH="$(fetch_repo_key)"
     gpg --dearmor --yes --output "$TMP/gundulabs-archive-keyring.gpg" "$KEY_PATH"
     sudo mkdir -p -m 0755 /usr/share/keyrings
@@ -516,13 +544,13 @@ if is_deb; then
     # Pin to the detected release suite so each distro gets the package built
     # against its own toolchain/glibc (see issue #125); supported_deb_suite
     # above already guaranteed DISTRO_CODENAME is one we publish.
-    printf '%s\n' "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] ${PKG_BASE_URL}/deb ${DISTRO_CODENAME} main" \
-        | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
+    printf '%s\n' "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] ${PKG_BASE_URL}/deb ${DISTRO_CODENAME} main" |
+        sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 
-    bold "Step 2/5: Updating package index"
+    step "Updating package index"
     sudo apt-get update
 
-    bold "Step 3/5: Installing packages"
+    step "Installing packages"
     DEB_PKGS="gaze gaze-gui"
     if want_gnome_extension_package; then
         DEB_PKGS="$DEB_PKGS gaze-gnome-extension"
@@ -532,15 +560,14 @@ if is_deb; then
     fi
     sudo apt-get install -y $DEB_PKGS
 
-    bold "Step 4/5: Desktop integration"
+    step "Desktop integration"
     enable_desktop_integrations
 
-    bold "Step 5/5: Enabling Gaze daemon"
+    step "Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
 
 elif is_rpm; then
-    echo ""
-    bold "Step 1/5: Configuring dnf repository"
+    step "Configuring dnf repository"
     sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
 [gundulabs]
 name=Gundu Labs
@@ -551,14 +578,14 @@ repo_gpgcheck=1
 gpgkey=${PKG_BASE_URL}/keys/gundulabs-repo.asc
 EOF
 
-    bold "Step 2/5: Refreshing repository metadata"
+    step "Refreshing repository metadata"
     if command -v dnf >/dev/null 2>&1; then
         sudo dnf makecache
     else
         sudo yum makecache
     fi
 
-    bold "Step 3/5: Installing packages"
+    step "Installing packages"
     RPM_PKGS="gaze gaze-gui"
     if want_gnome_extension_package; then
         RPM_PKGS="$RPM_PKGS gaze-gnome-extension"
@@ -572,17 +599,17 @@ EOF
         sudo yum install -y $RPM_PKGS
     fi
 
+    step "Configuring PAM"
     configure_authselect
 
-    bold "Step 4/5: Desktop integration"
+    step "Desktop integration"
     enable_desktop_integrations
 
-    bold "Step 5/5: Enabling Gaze daemon"
+    step "Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
 
 elif is_arch; then
-    echo ""
-    bold "Step 1/4: Checking for AUR helper"
+    step "Checking for AUR helper"
     AUR_HELPER=""
     for helper in yay paru; do
         if command -v "$helper" >/dev/null 2>&1; then
@@ -592,22 +619,22 @@ elif is_arch; then
     done
 
     if [ -z "$AUR_HELPER" ]; then
-        red "No AUR helper found (tried: yay, paru)."
-        echo ""
-        echo "Gaze is distributed via the AUR and requires an AUR helper to install."
-        echo "We recommend yay. To install it:"
-        echo ""
-        echo "  sudo pacman -S --needed base-devel git"
-        echo "  git clone https://aur.archlinux.org/yay.git"
-        echo "  cd yay && makepkg -si"
-        echo ""
-        echo "Then re-run this installer."
+        fail "No AUR helper found (tried: yay, paru)."
+        say ""
+        say "Gaze is distributed via the AUR and requires an AUR helper to install."
+        say "We recommend yay. To install it:"
+        say ""
+        cmd "sudo pacman -S --needed base-devel git"
+        cmd "git clone https://aur.archlinux.org/yay.git"
+        cmd "cd yay && makepkg -si"
+        say ""
+        say "Then re-run this installer."
         exit 1
     fi
 
-    echo "Found AUR helper: $AUR_HELPER"
+    ok "Found AUR helper: $AUR_HELPER"
 
-    bold "Step 2/4: Installing packages from AUR"
+    step "Installing packages from AUR"
     AUR_PKGS="gaze-bin gaze-gui-bin"
     if want_gnome_extension_package; then
         AUR_PKGS="$AUR_PKGS gaze-gnome-extension-bin"
@@ -617,47 +644,56 @@ elif is_arch; then
     fi
     "$AUR_HELPER" -S --noconfirm $AUR_PKGS
 
-    bold "Step 3/5: Configuring PAM"
+    step "Configuring PAM"
     configure_pam_arch
 
-    bold "Step 4/5: Desktop integration"
+    step "Desktop integration"
     enable_desktop_integrations
 
-    bold "Step 5/5: Enabling Gaze daemon"
+    step "Enabling Gaze daemon"
     sudo systemctl enable --now gazed 2>/dev/null || true
 fi
 
 # ── done ─────────────────────────────────────────────────────────────────────
 
-echo ""
-green "Gaze installed successfully!"
-echo ""
-bold "Required next step: run the setup wizard to configure your camera and enroll a face:"
-echo ""
-echo "  gaze config          # configure camera and security settings"
-echo "  gaze add-face <name> # enroll your face (requires camera to be configured first)"
-echo ""
-echo "Other commands:"
-echo "  gaze auth            # test face authentication"
-echo "  gaze-gui             # open the GUI"
+printf '\n%s\n\n' "${GREEN}${BOLD}✓ Gaze installed successfully${RESET}"
+
+# Surface problems while the user is still looking at the terminal. Expect a
+# few warnings on a fresh install (nothing enrolled yet, extension loads after
+# a reboot); doctor's exit code must not abort the summary.
+if command -v gaze >/dev/null 2>&1; then
+    title "Health check (gaze doctor)"
+    say "${DIM}Warnings about enrollment or the GNOME extension are expected before the next steps below.${RESET}"
+    gaze doctor || true
+    say ""
+fi
+
+title "Next steps"
+say "  1. ${BOLD}gaze config${RESET}            ${DIM}configure your camera and security settings${RESET}"
+say "  2. ${BOLD}gaze add-face <name>${RESET}   ${DIM}enroll your face${RESET}"
 if want_gnome_extension_package; then
-    echo "  GNOME lock screen:   enabled for this GNOME user when possible"
-    echo "  GDM extension:       enabled by package defaults"
-    echo "  GDM login face auth: disabled until you run the docs command"
+    say "  3. ${BOLD}Reboot${RESET}                 ${DIM}GNOME Shell and GDM only pick up the new extension at startup${RESET}"
+fi
+say ""
+title "Try it"
+say "  ${BOLD}gaze auth${RESET}              ${DIM}test face authentication in the terminal${RESET}"
+say "  ${BOLD}gaze-gui${RESET}               ${DIM}open the settings app${RESET}"
+say ""
+title "Desktop integration"
+if want_gnome_extension_package; then
+    ok "GNOME lock screen face unlock: enabled for this user (active after reboot)"
+    say "  ${DIM}GDM login face auth stays off until you enable it:${RESET}"
+    link "${GNOME_DOCS_URL}#optional-enable-face-at-gdm-login"
 elif is_kde_session; then
-    echo "  KDE Plasma:          GNOME extension skipped; use PAM docs for login/lock integration"
-    echo "  PAM integration:     ${PAM_DOCS_URL}"
+    say "  KDE Plasma: GNOME extension skipped; see the PAM guide for lock/login integration:"
+    link "$PAM_DOCS_URL"
 else
-    echo "  GNOME lock screen:   skipped (GNOME desktop not detected)"
-    echo "  PAM integration:     ${PAM_DOCS_URL}"
+    say "  GNOME extension skipped (GNOME desktop not detected); see the PAM guide:"
+    link "$PAM_DOCS_URL"
 fi
 if want_hyprlock_setup; then
-    echo "  hyprlock:            configured (pam_module = hyprlock-gaze)"
+    ok "hyprlock: configured (pam_module = hyprlock-gaze)"
 fi
-if want_gnome_extension_package; then
-    echo ""
-    bold "Optional GDM login setup docs:"
-    green "https://gaze.gundulabs.com/guide/gnome#optional-enable-face-at-gdm-login"
-fi
-echo ""
-echo "Docs: https://gaze.gundulabs.com"
+say ""
+say "Docs:   ${CYAN}https://gaze.gundulabs.com${RESET}"
+say "GitHub: ${CYAN}https://github.com/GunduLabs/gaze${RESET} ${DIM}(issues and feature requests welcome)${RESET}"
