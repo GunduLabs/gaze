@@ -23,6 +23,8 @@ contents:
   - src: "packaging/config/config.toml"
     dst: "/etc/gaze/config.toml"
     type: "config"
+    file_info:
+      mode: 0644
   - src: "packaging/config/com.gundulabs.Gaze.conf"
     dst: "/etc/dbus-1/system.d/com.gundulabs.Gaze.conf"
   - src: "packaging/config/com.gundulabs.gaze.policy"
