@@ -4,6 +4,7 @@ use crate::dbus::{CaptureStatus, EnrollPrompt};
 use crate::detect::{DetectError, FaceDetector};
 use opencv::core::Mat;
 use opencv::prelude::*;
+use std::sync::{Mutex, MutexGuard};
 
 const MIN_FACE_SIZE_RATIO: f32 = 0.25;
 const MAX_FACE_SIZE_RATIO: f32 = 0.78;
@@ -28,6 +29,56 @@ pub struct CaptureResult {
     pub mat_rgb: Option<opencv::core::Mat>,
     pub yaw: f32,
     pub pitch: f32,
+}
+
+fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|err| err.into_inner())
+}
+
+/// True when a square-padded detector bbox is within 5% of the original image edge.
+fn bbox_is_clipped(bbox: (f32, f32, f32, f32), frame_w: f32, frame_h: f32) -> bool {
+    const EDGE_MARGIN: f32 = 0.05;
+    let max_dim = frame_w.max(frame_h);
+    let pad_x = ((max_dim - frame_w) / 2.0).floor();
+    let pad_y = ((max_dim - frame_h) / 2.0).floor();
+    let (x1, y1, x2, y2) = bbox;
+
+    x1 - pad_x < EDGE_MARGIN * frame_w
+        || y1 - pad_y < EDGE_MARGIN * frame_h
+        || x2 - pad_x > (1.0 - EDGE_MARGIN) * frame_w
+        || y2 - pad_y > (1.0 - EDGE_MARGIN) * frame_h
+}
+
+fn geometry_status(
+    bbox: (f32, f32, f32, f32),
+    frame_w: f32,
+    frame_h: f32,
+    check_centering_and_proximity: bool,
+) -> Option<CaptureStatus> {
+    if bbox_is_clipped(bbox, frame_w, frame_h) {
+        return Some(CaptureStatus::Clipped);
+    }
+    if !check_centering_and_proximity {
+        return None;
+    }
+
+    let (x1, y1, x2, y2) = bbox;
+    let max_dim = frame_w.max(frame_h);
+    let min_dim = frame_w.min(frame_h);
+    let (width, height) = (x2 - x1, y2 - y1);
+    let (cx, cy) = (x1 + width / 2.0, y1 + height / 2.0);
+    let (norm_cx, norm_cy) = (cx / max_dim, cy / max_dim);
+    let face_size_ratio = width.max(height) / min_dim;
+
+    if (norm_cx - 0.5).abs() >= 0.2 || (norm_cy - 0.5).abs() >= 0.2 {
+        Some(CaptureStatus::NotCentered)
+    } else if face_size_ratio < MIN_FACE_SIZE_RATIO {
+        Some(CaptureStatus::TooFar)
+    } else if face_size_ratio > MAX_FACE_SIZE_RATIO {
+        Some(CaptureStatus::TooClose)
+    } else {
+        None
+    }
 }
 
 pub fn estimate_head_pose(kps: &ndarray::Array3<f32>) -> Option<(f32, f32)> {
@@ -196,7 +247,7 @@ impl FaceChecker {
         frame: &Mat,
     ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
         let detection = {
-            let mut detector = self.detector.lock().unwrap_or_else(|e| e.into_inner());
+            let mut detector = lock_recover(&self.detector);
             detector.detect(frame)
         };
         let (bboxes, kps, mat_rgb) = match detection {
@@ -211,33 +262,18 @@ impl FaceChecker {
         let x2 = face[2];
         let y2 = face[3];
 
-        let max_dim = (frame.cols() as f32).max(frame.rows() as f32);
-        let min_dim = (frame.cols() as f32).min(frame.rows() as f32);
-        let edge_margin = 0.05;
-        let (width, height) = (x2 - x1, y2 - y1);
-        let (cx, cy) = (x1 + width / 2.0, y1 + height / 2.0);
-        let (norm_cx, norm_cy) = (cx / max_dim, cy / max_dim);
-        let face_size_ratio = width.max(height) / min_dim;
-
         let (yaw, pitch) = kps
             .as_ref()
             .and_then(estimate_head_pose)
             .unwrap_or((f32::NAN, f32::NAN));
 
-        let status = if x1 / max_dim < edge_margin
-            || y1 / max_dim < edge_margin
-            || x2 / max_dim > (1.0 - edge_margin)
-            || y2 / max_dim > (1.0 - edge_margin)
-        {
-            CaptureStatus::Clipped
-        } else if self.check_centering_and_proximity
-            && ((norm_cx - 0.5).abs() >= 0.2 || (norm_cy - 0.5).abs() >= 0.2)
-        {
-            CaptureStatus::NotCentered
-        } else if self.check_centering_and_proximity && face_size_ratio < MIN_FACE_SIZE_RATIO {
-            CaptureStatus::TooFar
-        } else if self.check_centering_and_proximity && face_size_ratio > MAX_FACE_SIZE_RATIO {
-            CaptureStatus::TooClose
+        let status = if let Some(status) = geometry_status(
+            (x1, y1, x2, y2),
+            frame.cols() as f32,
+            frame.rows() as f32,
+            self.check_centering_and_proximity,
+        ) {
+            status
         } else if kps.is_none() {
             return Ok((CaptureStatus::NoFace, None));
         } else {
@@ -412,6 +448,83 @@ mod tests {
     fn empty_frame_is_treated_as_dark() {
         let frame = Mat::default();
         assert!(frame_mean_luma(&frame).unwrap_or(0) < 30);
+    }
+
+    #[test]
+    fn clipping_uses_landscape_content_bounds_inside_square_padding() {
+        assert!(bbox_is_clipped((300.0, 85.0, 380.0, 200.0), 640.0, 480.0));
+        assert!(bbox_is_clipped((300.0, 400.0, 380.0, 555.0), 640.0, 480.0));
+        assert!(!bbox_is_clipped((300.0, 250.0, 380.0, 380.0), 640.0, 480.0));
+    }
+
+    #[test]
+    fn clipping_uses_portrait_content_bounds_inside_square_padding() {
+        assert!(bbox_is_clipped((85.0, 300.0, 200.0, 380.0), 480.0, 640.0));
+        assert!(!bbox_is_clipped((250.0, 300.0, 380.0, 380.0), 480.0, 640.0));
+    }
+
+    #[test]
+    fn clipping_checks_square_frame_edges_without_padding() {
+        assert!(bbox_is_clipped((10.0, 200.0, 300.0, 400.0), 480.0, 480.0));
+        assert!(!bbox_is_clipped((100.0, 200.0, 300.0, 400.0), 480.0, 480.0));
+    }
+
+    #[test]
+    fn geometry_uses_square_detector_axes_for_centering() {
+        assert_eq!(
+            geometry_status((240.0, 240.0, 400.0, 400.0), 640.0, 480.0, true),
+            None
+        );
+        assert_eq!(
+            geometry_status((240.0, 240.0, 400.0, 400.0), 480.0, 640.0, true),
+            None
+        );
+        assert_eq!(
+            geometry_status((400.0, 240.0, 560.0, 400.0), 640.0, 480.0, true),
+            Some(CaptureStatus::NotCentered)
+        );
+    }
+
+    #[test]
+    fn geometry_keeps_the_lower_face_size_threshold() {
+        assert_eq!(
+            geometry_status((375.0, 375.0, 625.0, 625.0), 1000.0, 1000.0, true),
+            None
+        );
+        assert_eq!(
+            geometry_status((380.0, 380.0, 620.0, 620.0), 1000.0, 1000.0, true),
+            Some(CaptureStatus::TooFar)
+        );
+        assert_eq!(
+            geometry_status((105.0, 105.0, 895.0, 895.0), 1000.0, 1000.0, true),
+            Some(CaptureStatus::TooClose)
+        );
+    }
+
+    #[test]
+    fn authentication_skips_centering_and_proximity_but_still_rejects_clipping() {
+        assert_eq!(
+            geometry_status((400.0, 240.0, 560.0, 400.0), 640.0, 480.0, false),
+            None
+        );
+        assert_eq!(
+            geometry_status((300.0, 85.0, 380.0, 200.0), 640.0, 480.0, false),
+            Some(CaptureStatus::Clipped)
+        );
+    }
+
+    #[test]
+    fn poisoned_detector_style_lock_recovers_the_inner_value() {
+        let value = std::sync::Arc::new(Mutex::new(1_u8));
+        let poison = value.clone();
+        let _ = std::thread::spawn(move || {
+            let mut guard = poison.lock().unwrap();
+            *guard = 2;
+            panic!("poison lock");
+        })
+        .join();
+
+        assert_eq!(*lock_recover(&value), 2);
     }
 
     fn landmarks(points: [(f32, f32); 5]) -> ndarray::Array3<f32> {

@@ -37,6 +37,21 @@ fn pack_for_model(model_name: &str) -> anyhow::Result<&'static str> {
     }
 }
 
+fn required_packs<'a>(
+    models: impl IntoIterator<Item = (&'a str, bool)>,
+) -> anyhow::Result<Vec<&'static str>> {
+    let mut packs = Vec::new();
+    for (model_name, exists) in models {
+        if !exists {
+            let pack = pack_for_model(model_name)?;
+            if !packs.contains(&pack) {
+                packs.push(pack);
+            }
+        }
+    }
+    Ok(packs)
+}
+
 fn expected_model_sha256(model_name: &str) -> Option<&'static str> {
     match model_name {
         "det_500m.onnx" => Some(DET_500M_SHA256),
@@ -206,15 +221,10 @@ pub fn ensure_models(
         return Ok((det_path, rec_path));
     }
 
-    let mut needed_packs: Vec<&'static str> = Vec::new();
-    for (model_name, model_path) in [(detector_name, &det_path), (recognizer_name, &rec_path)] {
-        if !model_path.exists() {
-            let pack = pack_for_model(model_name)?;
-            if !needed_packs.contains(&pack) {
-                needed_packs.push(pack);
-            }
-        }
-    }
+    let needed_packs = required_packs([
+        (detector_name, det_path.exists()),
+        (recognizer_name, rec_path.exists()),
+    ])?;
 
     for pack_name in needed_packs {
         let url = zip_url(pack_name);
@@ -377,6 +387,34 @@ mod tests {
         }
 
         assert!(pack_for_model("custom.onnx").is_err());
+    }
+
+    #[test]
+    fn mixed_quality_models_fetch_both_required_packs() {
+        assert_eq!(
+            required_packs([("det_500m.onnx", false), ("w600k_r50.onnx", false),]).unwrap(),
+            vec!["buffalo_sc", "buffalo_l"]
+        );
+        assert_eq!(
+            required_packs([("det_10g.onnx", false), ("w600k_mbf.onnx", false),]).unwrap(),
+            vec!["buffalo_l", "buffalo_sc"]
+        );
+    }
+
+    #[test]
+    fn required_packs_skip_existing_models_and_deduplicate_downloads() {
+        assert_eq!(
+            required_packs([("det_500m.onnx", false), ("w600k_mbf.onnx", false),]).unwrap(),
+            vec!["buffalo_sc"]
+        );
+        assert_eq!(
+            required_packs([("det_500m.onnx", true), ("w600k_r50.onnx", false),]).unwrap(),
+            vec!["buffalo_l"]
+        );
+        assert!(
+            required_packs([("custom.onnx", false)]).is_err(),
+            "a missing unknown model must not silently skip its download"
+        );
     }
 
     #[test]

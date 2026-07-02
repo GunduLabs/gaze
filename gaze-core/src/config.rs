@@ -5,7 +5,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use zvariant::{OwnedValue, Type, Value};
 
-const DEFAULT_CONFIG_PATH: &str = "/etc/gaze/config.toml";
+pub const CONFIG_PATH: &str = "/etc/gaze/config.toml";
 pub const USERS_DIR: &str = "/var/lib/gaze/users";
 pub const MODELS_DIR: &str = "/var/cache/gaze";
 pub const DEFAULT_RGB_CAMERA: &str = "primary";
@@ -378,7 +378,7 @@ impl Default for CameraConfig {
 
 impl Config {
     pub fn load() -> anyhow::Result<Self> {
-        Self::load_from(DEFAULT_CONFIG_PATH)
+        Self::load_from(CONFIG_PATH)
     }
 
     pub fn load_from(path: &str) -> anyhow::Result<Self> {
@@ -397,7 +397,7 @@ impl Config {
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
-        self.save_to(DEFAULT_CONFIG_PATH)
+        self.save_to(CONFIG_PATH)
     }
 
     pub fn save_to(&self, path: &str) -> anyhow::Result<()> {

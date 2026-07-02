@@ -2,6 +2,14 @@
 
 If Gaze is installed but not authenticating reliably, use this page as a quick diagnostic checklist.
 
+Start from a local graphical session:
+
+```bash
+gaze doctor
+```
+
+This checks the service, config, DBus, PipeWire camera visibility, enrollments, PAM setup, desktop integration, and TPM requirements without capturing camera frames or changing the system. Follow the suggested fix printed below each warning or error. A result with errors exits with status `1`, which also makes the command suitable for support scripts.
+
 ## 1. Daemon is not running
 
 Check the daemon:
@@ -168,9 +176,10 @@ On CPUs without AVX2 (roughly pre-2013), older builds of `gaze` and `gaze-gui` c
 ## 11. Collect useful logs before asking for help
 
 ```bash
+gaze doctor
 systemctl status gazed
 journalctl -u gazed -n 300 --no-pager
 gaze auth --verbose
 ```
 
-Include distro version and desktop environment (GNOME/KDE/etc.) when reporting issues.
+Include the complete `gaze doctor` output, distro version, and desktop environment (GNOME/KDE/etc.) when reporting issues.

@@ -12,7 +12,7 @@ level = "medium"
 
 [cameras]
 rgb = "primary"
-# ir = "pipewiresrc target-object=<pipewire-target>" # optional infrared camera GStreamer source
+# ir = "/dev/video2"        # optional infrared camera; direct nodes are allowed only for IR
 # emitter_enabled = false   # drive the IR emitter (requires ir)
 dark_luma_threshold = 30
 
@@ -103,15 +103,20 @@ With the default, a frame is skipped when its mean luminance (0-255, BT.601 weig
 
 ## Infrared (IR) camera
 
-Gaze supports Windows Hello-style infrared (IR) cameras to enable multi-camera hybrid authentication. Point `ir` to the IR camera's GStreamer/PipeWire source string (just like the RGB camera):
+Gaze supports Windows Hello-style infrared (IR) cameras to enable multi-camera hybrid authentication. Unlike the RGB setting, `ir` may point directly to the IR camera's `/dev/video*` node:
+
+```toml
+[cameras]
+ir = "/dev/video2"
+emitter_enabled = false
+```
+
+You can also use an IR PipeWire/GStreamer source:
 
 ```toml
 [cameras]
 ir = "pipewiresrc target-object=<pipewire-target>"
-emitter_enabled = false
 ```
-
-Direct `/dev/video*` node paths are not supported for configuration; instead, Gaze always resolves the corresponding PipeWire/GStreamer target.
 
 When `ir` is configured, Gaze captures from both the RGB and IR cameras. During enrollment, both cameras will capture templates, and during verification, they will authenticate in parallel, combining results according to the configured `hybrid_policy`.
 

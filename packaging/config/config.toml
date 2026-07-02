@@ -21,10 +21,9 @@ level = "medium"
 
 [cameras]
 rgb = "primary"
-# Infrared (Windows Hello) camera. Set to the IR camera's GStreamer source string
-# (e.g. "pipewiresrc target-object=<pipewire-target>").
-# Direct /dev/video* paths are not supported.
-# ir = "pipewiresrc target-object=<pipewire-target>"
+# Infrared (Windows Hello) camera. Set this to a direct /dev/video* node or the
+# camera's GStreamer source string (e.g. "pipewiresrc target-object=<pipewire-target>").
+# ir = "/dev/video2"
 # Drive the camera's IR emitter (turn the IR LED on during auth). Requires `ir`.
 # emitter_enabled = false
 # Reject frames whose mean brightness (0-255) is below this value as too dark.

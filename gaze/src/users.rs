@@ -609,6 +609,14 @@ impl UserDatabase {
         Ok(faces)
     }
 
+    pub fn has_enrolled_faces(&self, username: &str) -> Result<bool, UserDbError> {
+        Self::validate_username(username)?;
+        Ok(self
+            .users
+            .get(username)
+            .is_some_and(|faces| !faces.is_empty()))
+    }
+
     pub fn get_user_embeddings(&self, username: &str) -> Option<Vec<&Array1<f32>>> {
         if Self::validate_username(username).is_err() {
             return None;
@@ -806,6 +814,20 @@ mod tests {
             db.list_faces("alice"),
             Err(UserDbError::UserNotFound(user)) if user == "alice"
         ));
+    }
+
+    #[test]
+    fn has_enrolled_faces_is_false_for_missing_or_cleared_users() {
+        let temp = TempDir::new("has-enrolled");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 2).unwrap();
+
+        assert!(!db.has_enrolled_faces("alice").unwrap());
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        assert!(db.has_enrolled_faces("alice").unwrap());
+        db.clear_user("alice").unwrap();
+        assert!(!db.has_enrolled_faces("alice").unwrap());
+        assert!(db.has_enrolled_faces("../alice").is_err());
     }
 
     #[test]

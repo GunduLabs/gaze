@@ -141,8 +141,11 @@ sudo reboot
 ```bash
 systemctl status gazed
 gaze --version
+gaze doctor
 gaze-gui --help
 ```
+
+Run `gaze doctor` as your desktop user so it can inspect that user's PipeWire session and desktop integration.
 
 If daemon is inactive:
 

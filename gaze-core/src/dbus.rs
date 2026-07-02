@@ -200,6 +200,7 @@ pub trait Gaze {
 
     async fn list_faces(&self, username: &str) -> zbus::Result<Vec<(String, u32, bool, bool)>>;
     async fn has_enrolled_faces(&self, username: &str) -> zbus::Result<bool>;
+    async fn is_camera_available(&self) -> zbus::Result<bool>;
     async fn delete_face(&self, username: &str, face_name: &str) -> zbus::Result<bool>;
     async fn rename_face(
         &self,
@@ -316,5 +317,16 @@ mod tests {
 
         let err = zbus::Error::Failure("plain failure".to_string());
         assert_eq!(dbus_error_message(&err), "plain failure");
+
+        let err = zbus::Error::Failure(
+            "org.freedesktop.DBus.Error.ServiceUnknown: service is not activatable".to_string(),
+        );
+        assert!(dbus_is_not_activatable(&err));
+
+        let err = zbus::Error::Failure("ServiceUnknown".to_string());
+        assert!(dbus_is_not_activatable(&err));
+
+        let err = zbus::Error::Failure("camera unavailable".to_string());
+        assert!(!dbus_is_not_activatable(&err));
     }
 }

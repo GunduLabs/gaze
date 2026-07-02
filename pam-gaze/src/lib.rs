@@ -11,10 +11,10 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     };
 
     rt.block_on(async {
-        match has_enrolled_faces(&username).await {
-            Ok(false) => return PAM_IGNORE,
-            Err(_) => return PAM_AUTHINFO_UNAVAIL,
-            Ok(true) => {}
+        match enrollment_disposition(has_enrolled_faces(&username).await) {
+            EnrollmentDisposition::Ignore => return PAM_IGNORE,
+            EnrollmentDisposition::Unavailable => return PAM_AUTHINFO_UNAVAIL,
+            EnrollmentDisposition::Continue => {}
         }
 
         unsafe { say(pamh, "Please look at the camera") };
