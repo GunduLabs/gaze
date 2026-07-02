@@ -1,10 +1,10 @@
 import DefaultTheme from 'vitepress/theme'
 import { h } from 'vue'
 import type { Theme } from 'vitepress'
-import VersionSwitcher from '@viteplus/versions/components/version-switcher.component.vue'
 
 import SecurityWarning from './components/SecurityWarning.vue'
 import InstallOneliner from './components/InstallOneliner.vue'
+import VersionSwitcher from './components/VersionSwitcher.vue'
 
 const theme: Theme = {
   ...DefaultTheme,
