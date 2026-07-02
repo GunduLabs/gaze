@@ -133,6 +133,24 @@ _nfpm config format:
 _dist-packages:
     mkdir -p dist/packages
 
+# Assert the arch package embeds a post_upgrade() scriptlet (no-op for deb/rpm).
+# Guards the nfpm archlinux postupgrade mapping: without it, upgrades skip the
+# daemon-reload / polkit-restart / PAM setup in postinst-arch.sh.
+[arg("format", pattern="deb|rpm|archlinux")]
+[private]
+_verify-arch format:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ "{{ format }}" = "archlinux" ] || exit 0
+    pkg=$(ls -t dist/packages/gaze-[0-9]*.pkg.tar.* 2>/dev/null | head -n1 || true)
+    [ -n "$pkg" ] || { echo "verify: no arch gaze package in dist/packages" >&2; exit 1; }
+    if tar -xOf "$pkg" .INSTALL 2>/dev/null | grep -q 'post_upgrade *()'; then
+        echo "verify: $(basename "$pkg") embeds post_upgrade() ✔"
+    else
+        echo "verify: FAIL — $(basename "$pkg") is missing post_upgrade(); arch upgrades will skip postinst-arch.sh" >&2
+        exit 1
+    fi
+
 # Build nfpm packages for a given packager
 [arg("format", pattern="deb|rpm|archlinux")]
 [group("package")]
@@ -142,7 +160,7 @@ package format: build-rust build-selinux && (package-prebuilt format)
 # Package already-built artifacts for a given packager
 [arg("format", pattern="deb|rpm|archlinux")]
 [group("package")]
-package-prebuilt format: _dist-packages (_nfpm "packaging/nfpm.yaml" format) (_nfpm "packaging/nfpm-gui.yaml" format) (_nfpm "packaging/nfpm-gnome-extension.yaml" format) (_nfpm "packaging/nfpm-hyprlock.yaml" format)
+package-prebuilt format: _dist-packages (_nfpm "packaging/nfpm.yaml" format) (_nfpm "packaging/nfpm-gui.yaml" format) (_nfpm "packaging/nfpm-gnome-extension.yaml" format) (_nfpm "packaging/nfpm-hyprlock.yaml" format) && (_verify-arch format)
     @echo "Packages written to dist/packages/"
 
 # Remove all generated artifacts

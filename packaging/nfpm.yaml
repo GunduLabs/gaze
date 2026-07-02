@@ -60,6 +60,9 @@ contents:
   - src: "packaging/pam/gaze"
     dst: "/usr/share/pam-configs/"
     packager: deb
+  - src: "packaging/pam/gaze-simultaneous"
+    dst: "/usr/share/pam-configs/"
+    packager: deb
   - src: "packaging/authselect/custom/gaze/"
     dst: "/usr/share/authselect/vendor/gaze/"
     packager: rpm
@@ -92,6 +95,7 @@ overrides:
   archlinux:
     scripts:
       postinstall: "packaging/postinst-arch.sh"
+      postupgrade: "packaging/postinst-arch.sh"
     depends:
       - opencv
       - pam
