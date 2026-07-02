@@ -414,18 +414,19 @@ impl AuthDaemon {
         caller_has_pipewire: bool,
         active: Option<(u32, bool, bool)>,
     ) -> Option<u32> {
+        // An active greeter holds the seat's camera ACL, so it outranks the target's leftover PipeWire socket.
+        if caller_uid == 0
+            && let Some((active_uid, true, true)) = active
+        {
+            return Some(active_uid);
+        }
         if target_has_pipewire {
             return Some(target_uid);
         }
         if caller_uid != 0 {
             return caller_has_pipewire.then_some(caller_uid);
         }
-        match active {
-            Some((active_uid, is_greeter, has_pipewire)) if is_greeter && has_pipewire => {
-                Some(active_uid)
-            }
-            _ => None,
-        }
+        None
     }
 
     async fn camera_runtime_uid(caller_uid: u32, target_uid: u32) -> Option<u32> {
@@ -654,6 +655,21 @@ mod tests {
         assert_eq!(
             AuthDaemon::resolve_camera_uid(0, 1001, false, false, Some((42, true, false))),
             None
+        );
+    }
+
+    #[test]
+    fn camera_prefers_active_greeter_over_target_leftover_runtime() {
+        // GDM login while the target's runtime lingers: the greeter owns the seat camera (issue #193).
+        let greeter_active = Some((42, true, true));
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(0, 1001, true, false, greeter_active),
+            Some(42)
+        );
+        // Greeter active but without PipeWire -> fall back to the target's runtime.
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(0, 1001, true, false, Some((42, true, false))),
+            Some(1001)
         );
     }
 
@@ -1362,6 +1378,12 @@ impl AuthDaemon {
                             }
                         }
                     }
+
+                    if !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = tx.blocking_send(VerifyMsg::Error(
+                            "RGB camera stream stopped unexpectedly".into(),
+                        ));
+                    }
                 }));
             }
 
@@ -1457,6 +1479,12 @@ impl AuthDaemon {
                                 }
                             }
                         }
+                    }
+
+                    if !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = tx.blocking_send(VerifyMsg::Error(
+                            "IR camera stream stopped unexpectedly".into(),
+                        ));
                     }
                 }));
             }
