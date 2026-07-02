@@ -195,9 +195,12 @@ impl Camera {
             .downcast::<gstreamer_app::AppSink>()
             .map_err(|_| anyhow::anyhow!("gaze_sink is not an AppSink"))?;
 
+        // Fix only the height: pinning both dimensions makes videoscale
+        // stretch 16:9 sensors to 4:3, which deforms faces for every model
+        // downstream. Leaving the width open lets videoscale preserve the
+        // source aspect ratio (sample_to_mat honors the negotiated stride).
         let caps = gstreamer::Caps::builder("video/x-raw")
             .field("format", "BGR")
-            .field("width", 640)
             .field("height", 480)
             .build();
         appsink.set_caps(Some(&caps));

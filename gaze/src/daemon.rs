@@ -43,6 +43,9 @@ pub struct ClaimState {
 pub struct FaceData {
     pub embedding: Array1<f32>,
     pub liveness_frame: Option<Mat>,
+    /// Unpadded camera frame size; `liveness_frame` and `bbox` are in
+    /// square-padded detector coordinates.
+    pub frame_size: (u32, u32),
     pub bbox: [f32; 4],
     pub kpss: ndarray::Array3<f32>,
     pub yaw: f32,
@@ -470,6 +473,35 @@ mod tests {
         assert!(eyes_from_kpss(&ndarray::Array3::zeros((0, 5, 2))).is_none());
         assert!(eyes_from_kpss(&ndarray::Array3::zeros((1, 3, 2))).is_none());
         assert!(eyes_from_kpss(&ndarray::Array3::zeros((1, 5, 1))).is_none());
+    }
+
+    #[test]
+    fn liveness_crop_excludes_square_padding_bars() {
+        use super::{FaceData, crop_liveness_face};
+        use opencv::core::{CV_8UC3, Mat, Scalar};
+
+        // A 640x480 all-white frame square-padded to 640x640 leaves 80px
+        // black bars above and below the content, like the detector's input.
+        let frame = Mat::new_rows_cols_with_default(480, 640, CV_8UC3, Scalar::all(255.0)).unwrap();
+        let padded = gaze_core::detect::FaceDetector::pad_to_square(&frame).unwrap();
+
+        let data = FaceData {
+            embedding: ndarray::Array1::zeros(512),
+            liveness_frame: Some(padded),
+            frame_size: (640, 480),
+            // Large face in padded coordinates: the 2.7x margin would reach
+            // both black bars if padding were not removed.
+            bbox: [220.0, 200.0, 420.0, 440.0],
+            kpss: ndarray::Array3::zeros((1, 5, 2)),
+            yaw: 0.0,
+            pitch: 0.0,
+        };
+
+        let crop = crop_liveness_face(&data).unwrap();
+        assert!(
+            crop.pixels().all(|p| p.0 == [255, 255, 255]),
+            "liveness crop must not contain padding pixels"
+        );
     }
 
     #[test]
@@ -921,6 +953,7 @@ fn process_frame_sync(
             Some(FaceData {
                 embedding,
                 liveness_frame,
+                frame_size: (res.width, res.height),
                 bbox: [x1, y1, x2, y2],
                 kpss,
                 yaw: res.yaw,
@@ -932,13 +965,29 @@ fn process_frame_sync(
     }
 }
 
+// The detector works on a square-padded frame, but the anti-spoof model must
+// never see the synthetic black bars: they read as the bezel of a replayed
+// screen. Crop the padding away and shift the bbox back into frame
+// coordinates before taking the model's 2.7x face crop.
 fn crop_liveness_face(data: &FaceData) -> anyhow::Result<image::RgbImage> {
     let mat_rgb = data
         .liveness_frame
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("liveness frame was not retained"))?;
     let rgb = mat_to_rgb(mat_rgb)?;
-    crate::liveness::crop_face(&rgb, data.bbox)
+    let (frame_w, frame_h) = data.frame_size;
+    let frame_w = frame_w.min(rgb.width()).max(1);
+    let frame_h = frame_h.min(rgb.height()).max(1);
+    let pad_x = (rgb.width() - frame_w) / 2;
+    let pad_y = (rgb.height() - frame_h) / 2;
+    let content = image::imageops::crop_imm(&rgb, pad_x, pad_y, frame_w, frame_h).to_image();
+    let bbox = [
+        data.bbox[0] - pad_x as f32,
+        data.bbox[1] - pad_y as f32,
+        data.bbox[2] - pad_x as f32,
+        data.bbox[3] - pad_y as f32,
+    ];
+    crate::liveness::crop_face(&content, bbox)
 }
 
 fn build_hybrid_scores(

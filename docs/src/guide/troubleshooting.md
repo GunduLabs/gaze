@@ -101,6 +101,11 @@ gaze auth --verbose
 gaze add-face glasses
 ```
 
+If similarity scores dropped right after upgrading Gaze on a machine with a
+widescreen (16:9) camera, re-enroll your faces once: older releases stretched
+widescreen frames to 4:3, so templates enrolled before the fix will not match
+undistorted frames as well as freshly enrolled ones.
+
 ## 4. Lock screen does not trigger face auth
 
 Enable or re-enable the extension from your GNOME session:
