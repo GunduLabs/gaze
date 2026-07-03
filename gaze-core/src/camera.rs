@@ -199,9 +199,13 @@ impl Camera {
         // stretch 16:9 sensors to 4:3, which deforms faces for every model
         // downstream. Leaving the width open lets videoscale preserve the
         // source aspect ratio (sample_to_mat honors the negotiated stride).
+        // pixel-aspect-ratio must stay pinned to 1/1: without it videoscale
+        // keeps the source width and negotiates anamorphic pixels instead of
+        // rescaling, which stretches the buffer for square-pixel consumers.
         let caps = gstreamer::Caps::builder("video/x-raw")
             .field("format", "BGR")
             .field("height", 480)
+            .field("pixel-aspect-ratio", gstreamer::Fraction::new(1, 1))
             .build();
         appsink.set_caps(Some(&caps));
 
@@ -444,6 +448,24 @@ mod tests {
                 source: "/dev/video2".to_string(),
                 node: "/dev/video2".to_string()
             }
+        );
+    }
+
+    #[test]
+    fn open_scales_widescreen_to_square_pixels() {
+        let mut camera = Camera::open(
+            "videotestsrc num-buffers=3 ! capsfilter caps=video/x-raw,width=1280,height=720",
+        )
+        .expect("videotestsrc pipeline");
+        let frame = camera.next().expect("videotestsrc frame");
+        assert_eq!(frame.rows(), 480);
+        // 16:9 input must come out ~853x480 with square pixels. If the caps
+        // stop pinning pixel-aspect-ratio, videoscale keeps the source width
+        // and negotiates anamorphic pixels instead (1280x480 at PAR 2/3).
+        let cols = frame.cols();
+        assert!(
+            (853..=854).contains(&cols),
+            "expected aspect-preserving width, got {cols}"
         );
     }
 

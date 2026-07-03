@@ -41,6 +41,7 @@ jobs:
             libgdk-pixbuf-2.0-dev \
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base \
             libpango1.0-dev \
             libgraphene-1.0-dev \
             libopencv-dev \
