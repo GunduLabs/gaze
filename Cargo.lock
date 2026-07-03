@@ -1375,7 +1375,7 @@ dependencies = [
 
 [[package]]
 name = "gaze"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1403,7 +1403,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1419,7 +1419,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "gstreamer",
@@ -1446,7 +1446,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-gui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "enumflags2",
@@ -2830,7 +2830,7 @@ dependencies = [
 
 [[package]]
 name = "pam-gaze"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "futures",
  "gaze-core",
@@ -2842,7 +2842,7 @@ dependencies = [
 
 [[package]]
 name = "pam-gaze-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "futures",
@@ -2855,7 +2855,7 @@ dependencies = [
 
 [[package]]
 name = "pam-gaze-grosshack"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "futures",
