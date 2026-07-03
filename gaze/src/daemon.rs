@@ -43,8 +43,7 @@ pub struct ClaimState {
 pub struct FaceData {
     pub embedding: Array1<f32>,
     pub liveness_frame: Option<Mat>,
-    /// Unpadded camera frame size; `liveness_frame` and `bbox` are in
-    /// square-padded detector coordinates.
+    /// Unpadded frame size; `liveness_frame` and `bbox` use square-padded coordinates.
     pub frame_size: (u32, u32),
     pub bbox: [f32; 4],
     pub kpss: ndarray::Array3<f32>,
@@ -480,8 +479,6 @@ mod tests {
         use super::{FaceData, crop_liveness_face};
         use opencv::core::{CV_8UC3, Mat, Scalar};
 
-        // A 640x480 all-white frame square-padded to 640x640 leaves 80px
-        // black bars above and below the content, like the detector's input.
         let frame = Mat::new_rows_cols_with_default(480, 640, CV_8UC3, Scalar::all(255.0)).unwrap();
         let padded = gaze_core::detect::FaceDetector::pad_to_square(&frame).unwrap();
 
@@ -489,8 +486,7 @@ mod tests {
             embedding: ndarray::Array1::zeros(512),
             liveness_frame: Some(padded),
             frame_size: (640, 480),
-            // Large face in padded coordinates: the 2.7x margin would reach
-            // both black bars if padding were not removed.
+            // The 2.7x crop margin around this bbox reaches both padding bars.
             bbox: [220.0, 200.0, 420.0, 440.0],
             kpss: ndarray::Array3::zeros((1, 5, 2)),
             yaw: 0.0,
@@ -965,10 +961,7 @@ fn process_frame_sync(
     }
 }
 
-// The detector works on a square-padded frame, but the anti-spoof model must
-// never see the synthetic black bars: they read as the bezel of a replayed
-// screen. Crop the padding away and shift the bbox back into frame
-// coordinates before taking the model's 2.7x face crop.
+// Strip the square padding first: its black bars read as a replay bezel to the anti-spoof model.
 fn crop_liveness_face(data: &FaceData) -> anyhow::Result<image::RgbImage> {
     let mat_rgb = data
         .liveness_frame

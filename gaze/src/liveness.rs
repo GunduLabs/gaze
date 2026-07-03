@@ -22,10 +22,7 @@ impl LivenessDetector {
         Ok(Self { session })
     }
 
-    // MiniFASNet was trained on raw OpenCV frames: BGR channel order and
-    // 0-255 values (upstream's ToTensor deliberately skips the /255). Feeding
-    // RGB flips the scores enough to let printed/replayed faces through and
-    // to reject live faces on dim or low-quality cameras.
+    // MiniFASNet expects BGR in raw 0-255 (upstream's ToTensor skips /255); RGB breaks scoring.
     fn pre_process(img: &RgbImage) -> Array4<f32> {
         let scaled = resize(img, INPUT_SIZE, INPUT_SIZE, FilterType::Triangle);
         let size = INPUT_SIZE as usize;
