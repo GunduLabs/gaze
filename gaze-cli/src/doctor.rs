@@ -1,14 +1,17 @@
 use console::{Term, style};
 use gaze_core::config::{CONFIG_PATH, Config};
-use gaze_core::dbus::{dbus_error_message, dbus_is_file_not_found, load_config_from_daemon};
+use gaze_core::dbus::{
+    GazeProxy, dbus_error_message, dbus_is_file_not_found, dbus_is_not_activatable,
+};
 use std::collections::BTreeSet;
 use std::fs;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
+const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(25);
 const PAM_MODULES: [&str; 2] = ["pam_gaze.so", "pam_gaze_grosshack.so"];
 const GNOME_EXTENSION_ID: &str = "gaze@gundulabs.com";
 
@@ -643,7 +646,30 @@ fn check_tpm(report: &mut Report, config: Option<&Config>) {
     }
 }
 
+async fn read_daemon_config(proxy: &GazeProxy<'_>, ready_wait: Duration) -> zbus::Result<Config> {
+    let deadline = Instant::now() + ready_wait;
+    loop {
+        match proxy.config().await {
+            Ok(config) => return Ok(config),
+            Err(err) if dbus_is_not_activatable(&err) && Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
 async fn check_daemon(report: &mut Report, username: &str, config: Option<&Config>) {
+    let daemon_starting = matches!(
+        command_output("systemctl", &["is-active", "gazed"]),
+        Ok((true, ref state)) if state == "active"
+    );
+    let ready_wait = if daemon_starting {
+        DAEMON_READY_TIMEOUT
+    } else {
+        Duration::ZERO
+    };
+
     let proxy = match tokio::time::timeout(DAEMON_TIMEOUT, gaze_core::dbus::connect_gaze()).await {
         Ok(Ok(proxy)) => {
             report.pass("DBus", "com.gundulabs.Gaze is reachable on the system bus");
@@ -670,7 +696,12 @@ async fn check_daemon(report: &mut Report, username: &str, config: Option<&Confi
     };
 
     let mut daemon_config = None;
-    match tokio::time::timeout(DAEMON_TIMEOUT, load_config_from_daemon(&proxy)).await {
+    match tokio::time::timeout(
+        ready_wait + DAEMON_TIMEOUT,
+        read_daemon_config(&proxy, ready_wait),
+    )
+    .await
+    {
         Ok(Ok(loaded_config)) => {
             report.pass("Daemon", "gazed responded to a configuration request");
             if config.is_none() {
@@ -681,9 +712,17 @@ async fn check_daemon(report: &mut Report, username: &str, config: Option<&Confi
             }
             daemon_config = Some(loaded_config);
         }
+        Ok(Err(err)) if dbus_is_not_activatable(&err) => report.error(
+            "Daemon",
+            "gazed is still starting up (models may be downloading)",
+            "Wait for the first-run model download to finish, then re-run `gaze doctor`.",
+        ),
         Ok(Err(err)) => report.error(
             "Daemon",
-            format!("gazed did not return its configuration: {err}"),
+            format!(
+                "gazed did not return its configuration: {}",
+                dbus_error_message(&err)
+            ),
             "Restart gazed and inspect its journal.",
         ),
         Err(_) => report.error(

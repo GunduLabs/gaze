@@ -664,6 +664,17 @@ printf '\n%s\n\n' "${GREEN}${BOLD}✓ Gaze installed successfully${RESET}"
 if command -v gaze >/dev/null 2>&1; then
     title "Health check (gaze doctor)"
     say "${DIM}Warnings about enrollment or the GNOME extension are expected before the next steps below.${RESET}"
+    if command -v busctl >/dev/null 2>&1; then
+        say "${DIM}Waiting for the daemon to finish first-run model download...${RESET}"
+        i=0
+        while [ "$i" -lt 80 ]; do
+            if busctl --system status com.gundulabs.Gaze >/dev/null 2>&1; then
+                break
+            fi
+            sleep 0.5
+            i=$((i + 1))
+        done
+    fi
     gaze doctor || true
     say ""
 fi

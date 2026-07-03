@@ -43,6 +43,8 @@ gaze doctor --user alice
 
 The camera checks enumerate devices but do not capture frames. Use `gaze auth` when you need an end-to-end camera and recognition test.
 
+The very first time you run any `gaze` command, this diagnostic runs automatically so problems surface right after install. It waits for the daemon to finish its one-time model download before checking it, and it will not run automatically again.
+
 ## Authenticate
 
 ```bash

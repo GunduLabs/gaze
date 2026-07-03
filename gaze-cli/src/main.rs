@@ -12,11 +12,50 @@ use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon, connect_gaze,
     dbus_error_message, dbus_is_file_not_found, load_config_from_daemon,
 };
-use std::{future::Future, time::Duration};
+use std::{future::Future, path::PathBuf, time::Duration};
 use tui::{AuthScreen, BusyScreen, EnrollScreen, Tone, TuiAction, TuiTerminal};
 
 fn get_current_user() -> String {
     std::env::var("USER").unwrap_or_else(|_| "root".into())
+}
+
+fn first_run_marker_path() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
+        })?;
+    Some(base.join("gaze").join("first-run-complete"))
+}
+
+async fn maybe_run_first_run_doctor(command: &Commands) {
+    if matches!(
+        command,
+        Commands::Doctor { .. } | Commands::Uninstall { .. }
+    ) {
+        return;
+    }
+    let Some(marker) = first_run_marker_path() else {
+        return;
+    };
+    if marker.exists() {
+        return;
+    }
+
+    let term = Term::stdout();
+    let _ = term.write_line(&format!(
+        "{} First run: checking your Gaze installation {}\n",
+        style("i").cyan().bold(),
+        style("(this won't appear again)").dim()
+    ));
+    let _ = doctor::run(&get_current_user()).await;
+    let _ = term.write_line("");
+
+    if let Some(parent) = marker.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&marker, b"");
 }
 
 fn capture_tone(status: CaptureStatus) -> Tone {
@@ -1197,6 +1236,8 @@ fn handle_uninstall(yes: bool, keep_data: bool, dry_run: bool) -> anyhow::Result
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    maybe_run_first_run_doctor(&cli.command).await;
 
     match &cli.command {
         Commands::Uninstall {
