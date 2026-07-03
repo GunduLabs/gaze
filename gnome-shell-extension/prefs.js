@@ -150,19 +150,42 @@ export default class GazePreferences extends ExtensionPreferences {
                 gdmRow.set_subtitle('Gaze daemon unavailable.');
             });
 
+        const notifyGdmFailure = (error, desired) => {
+            const accessDenied =
+                Gio.DBusError.is_remote_error(error) &&
+                Gio.DBusError.get_remote_error(error) ===
+                    'org.freedesktop.DBus.Error.AccessDenied';
+            let message;
+            if (accessDenied) {
+                message = desired
+                    ? 'Administrator authorization is required to enable face auth at the GDM login screen.'
+                    : 'Administrator authorization is required to disable face auth at the GDM login screen.';
+            } else {
+                Gio.DBusError.strip_remote_error(error);
+                message = `Could not update GDM login face auth: ${error.message}`;
+            }
+            if (typeof window.add_toast === 'function')
+                window.add_toast(new Adw.Toast({title: message}));
+        };
+
+        let gdmRequestInFlight = false;
         gdmRow.connect('notify::active', row => {
-            if (suppressGdmNotify)
+            if (suppressGdmNotify || gdmRequestInFlight)
                 return;
             const desired = row.active;
+            gdmRequestInFlight = true;
             row.set_sensitive(false);
             callGaze('SetGdmFaceAuth', new GLib.Variant('(b)', [desired]))
                 .then(() => {
+                    gdmRequestInFlight = false;
                     gdmRow.set_sensitive(true);
                 })
                 .catch(error => {
                     logError(error, '[gaze] Failed to update GDM face auth');
+                    gdmRequestInFlight = false;
                     setGdmRow(!desired);
                     gdmRow.set_sensitive(true);
+                    notifyGdmFailure(error, desired);
                 });
         });
         loginGroup.add(gdmRow);
