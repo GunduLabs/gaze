@@ -58,7 +58,7 @@ gaze auth --verbose   # same
 
 Result meanings:
 
-- `✓ Authenticated as: <face> (XX.X%, XXXms)`: pass - matched face name, score percentage, and elapsed time
+- `✓ Authenticated as: <face> (XX.X%, XXXms)`: pass: matched face name, score percentage, and elapsed time
 - `✗ Authentication failed (XXXms)`: no face passed the current threshold or liveness check
 
 With `--verbose`, a per-face table is printed before the result showing similarity score, match percentage, passed/failed, and template count for each enrolled face.

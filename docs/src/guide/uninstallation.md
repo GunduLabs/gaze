@@ -8,7 +8,7 @@ This guide covers completely removing Gaze and all its components from your syst
 gaze uninstall
 ```
 
-This runs the full cleanup sequence (reset GNOME/GDM lock and login settings, revert PAM, stop daemon, remove packages and repo, wipe `/etc/gaze`, `/var/cache/gaze`, and `/var/lib/gaze`). It prints the plan and asks for confirmation first. Useful flags:
+This runs the full cleanup sequence: reset GNOME/GDM lock and login settings, remove system and per-user copies of the GNOME extension, revert PAM, stop the daemon, remove packages (including AUR `-debug` split packages) and the repo, delete `gazed` core dumps, and wipe `/etc/gaze`, `/var/cache/gaze`, and `/var/lib/gaze`. It prints the plan and asks for confirmation first. Useful flags:
 
 - `--keep-data`: preserve `/var/lib/gaze` (enrolled faces)
 - `--dry-run`: print the plan without running anything
@@ -24,10 +24,12 @@ Before removing packages, disable any active integrations to avoid leaving your 
 
 ```bash
 gnome-extensions disable gaze@gundulabs.com 2>/dev/null || true
+gnome-extensions uninstall gaze@gundulabs.com 2>/dev/null || true
 gsettings reset-recursively org.gnome.shell.extensions.gaze
+rm -rf ~/.local/share/gnome-shell/extensions/gaze@gundulabs.com
 ```
 
-Repeat this for each desktop user who enabled lock screen face unlock.
+Repeat this for each desktop user who enabled lock screen face unlock. The last command removes any per-user copy of the extension (left by `gnome-extensions install` or a development checkout); without it GNOME keeps listing the extension as disabled.
 
 ### Revert hyprlock face unlock
 
@@ -96,6 +98,8 @@ sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-hyprlock
 
 ```bash [Arch Linux / Manjaro]
 sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin gaze-hyprlock-bin
+# AUR builds may also have installed -debug split packages:
+pacman -Q | awk '/^gaze.*-debug /{print $1}' | xargs -r sudo pacman -Rns --noconfirm
 ```
 
 ```bash [Flatpak (GUI only)]
@@ -161,6 +165,22 @@ sudo rm -rf /var/cache/gaze
 
 ```bash
 sudo rm -rf /etc/gaze
+```
+
+### Systemd drop-ins
+
+Local overrides for the daemon (debug logging, development checkouts) live in a gazed-specific directory:
+
+```bash
+sudo rm -rf /etc/systemd/system/gazed.service.d
+```
+
+### Core dumps
+
+If `gazed` ever crashed, systemd may have saved core dumps. These can contain decrypted face templates from the daemon's memory, so remove them:
+
+```bash
+sudo find /var/lib/systemd/coredump \( -name 'core.gazed.*' -o -name 'core.gaze.*' -o -name 'core.gaze-gui.*' \) -delete
 ```
 
 ### SELinux policy (Fedora/RPM systems only)

@@ -52,11 +52,11 @@ Git hooks are local to each clone. `just setup-hooks` points Git at the tracked 
 
 ## Workspace layout
 
-- `gaze` - the `gazed` daemon, ML pipeline, and user database.
-- `gaze-cli` - the `gaze` CLI binary. Lives in its own crate so the client binary does not statically link ONNX Runtime (see warning below).
-- `gaze-core` - shared camera/config/DBus library. Face detection sits behind the `detection` cargo feature (on by default); client crates opt out with `default-features = false`.
-- `pam-gaze`, `pam-gaze-grosshack` - `cdylib` PAM modules; shared FFI/auth logic lives in `pam-gaze-core`.
-- `gaze-gui` - GTK4/libadwaita app. `gnome-shell-extension/` is packaged separately.
+- `gaze`: the `gazed` daemon, ML pipeline, and user database.
+- `gaze-cli`: the `gaze` CLI binary. It lives in its own crate so the client binary does not statically link ONNX Runtime (see warning below).
+- `gaze-core`: shared camera/config/DBus library. Face detection sits behind the `detection` cargo feature (on by default); client crates opt out with `default-features = false`.
+- `pam-gaze`, `pam-gaze-grosshack`: `cdylib` PAM modules; shared FFI/auth logic lives in `pam-gaze-core`.
+- `gaze-gui`: GTK4/libadwaita app. `gnome-shell-extension/` is packaged separately.
 
 ## Build and test rust components
 

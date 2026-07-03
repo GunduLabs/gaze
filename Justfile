@@ -1,4 +1,4 @@
-# Justfile for Gaze - https://gaze.gundulabs.com
+# Justfile for Gaze: https://gaze.gundulabs.com
 # Run `just` to see available targets.
 
 set lazy
@@ -147,7 +147,7 @@ _verify-arch format:
     if tar -xOf "$pkg" .INSTALL 2>/dev/null | grep -q 'post_upgrade *()'; then
         echo "verify: $(basename "$pkg") embeds post_upgrade() ✔"
     else
-        echo "verify: FAIL — $(basename "$pkg") is missing post_upgrade(); arch upgrades will skip postinst-arch.sh" >&2
+        echo "verify: FAIL: $(basename "$pkg") is missing post_upgrade(); arch upgrades will skip postinst-arch.sh" >&2
         exit 1
     fi
 

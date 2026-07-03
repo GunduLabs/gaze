@@ -30,7 +30,7 @@ just "$@" || rc=$?
 # aren't already owned by it. On native Docker the container writes as root, so
 # this re-homes them. On a uid-mapping backend (Colima's sshfs) the files already
 # belong to the host user; chowning them there pins them to the literal host uid,
-# after which the next run's container user can no longer write — so skip those.
+# after which the next run's container user can no longer write, so skip those.
 if [ -n "${HOST_UID:-}" ] && [ -n "${HOST_GID:-}" ]; then
     for d in dist .flatpak-cache vendor; do
         [ -e "$d" ] || continue

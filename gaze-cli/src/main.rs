@@ -929,15 +929,14 @@ fn remove_unmanaged_install_artifacts_cmd() -> String {
           /usr/share/polkit-1/actions/com.gundulabs.gaze.policy \
           /usr/share/gnome-shell/extensions/gaze@gundulabs.com/extension.js \
           /usr/share/gnome-shell/extensions/gaze@gundulabs.com/metadata.json \
-          /usr/share/gnome-shell/extensions/gaze@gundulabs.com/prefs.js \
-          /etc/systemd/system/gazed.service.d/zz-gaze-dev-checkout.conf \
-          /etc/systemd/system/gazed.service.d/dev-checkout.conf
+          /usr/share/gnome-shell/extensions/gaze@gundulabs.com/prefs.js
         do remove_if_unmanaged "$p"; done;
         for p in /lib/*/security/pam_gaze.so /lib/*/security/pam_gaze_grosshack.so /usr/lib/*/security/pam_gaze.so /usr/lib/*/security/pam_gaze_grosshack.so; do
           [ -e "$p" ] || [ -L "$p" ] || continue;
           remove_if_unmanaged "$p";
         done;
-        sudo rmdir /usr/share/gnome-shell/extensions/gaze@gundulabs.com /etc/systemd/system/gazed.service.d 2>/dev/null || true;
+        sudo rmdir /usr/share/gnome-shell/extensions/gaze@gundulabs.com 2>/dev/null || true;
+        sudo rm -rf /etc/systemd/system/gazed.service.d;
         sudo rm -rf /usr/local/share/gaze-dev;
         sudo systemctl daemon-reload >/dev/null 2>&1 || true;
         if command -v glib-compile-schemas >/dev/null 2>&1; then sudo glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true; fi"#,
@@ -959,19 +958,43 @@ fn remove_arch_pam_configuration_cmd() -> String {
     .join(" ")
 }
 
+fn remove_pacman_packages_cmd() -> String {
+    // AUR builds split off `-debug` packages; remove those first since they can
+    // depend on the base package.
+    "for base in gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-bin gaze-gui-bin \
+      gaze-gnome-extension-bin gaze-hyprlock-bin; do \
+      for pkg in \"$base-debug\" \"$base\"; do \
+      if pacman -Q \"$pkg\" >/dev/null 2>&1; then \
+      sudo pacman -Rns --noconfirm \"$pkg\" || true; \
+      fi; \
+      done; \
+      done"
+        .into()
+}
+
 fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     let mut plan: Vec<(&'static str, String)> = Vec::new();
 
     if which("gnome-extensions") {
         plan.push((
-            "Disable GNOME extension (best-effort)",
-            "gnome-extensions disable gaze@gundulabs.com 2>/dev/null || true".into(),
+            "Disable and uninstall GNOME extension (best-effort)",
+            "gnome-extensions disable gaze@gundulabs.com 2>/dev/null || true; \
+              gnome-extensions uninstall gaze@gundulabs.com 2>/dev/null || true"
+                .into(),
         ));
     }
 
     plan.push((
         "Reset GNOME lock/login settings",
         reset_gnome_user_settings_cmd(),
+    ));
+    plan.push((
+        "Remove per-user GNOME extension copies",
+        "for d in /home/*/.local/share/gnome-shell/extensions /root/.local/share/gnome-shell/extensions; do \
+          [ -d \"$d/gaze@gundulabs.com\" ] || continue; \
+          sudo rm -rf \"$d/gaze@gundulabs.com\"; \
+          done"
+            .into(),
     ));
     plan.push((
         "Remove GDM dconf overrides",
@@ -1034,16 +1057,7 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
             "sudo rm -f /etc/yum.repos.d/gundulabs.repo".into(),
         ));
     } else if which("pacman") {
-        plan.push((
-            "Remove pacman packages",
-            "for pkg in gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-bin gaze-gui-bin \
-              gaze-gnome-extension-bin gaze-hyprlock-bin; do \
-              if pacman -Q \"$pkg\" >/dev/null 2>&1; then \
-              sudo pacman -Rns --noconfirm \"$pkg\" || true; \
-              fi; \
-              done"
-                .into(),
-        ));
+        plan.push(("Remove pacman packages", remove_pacman_packages_cmd()));
         plan.push((
             "Remove old pacman repo entry",
             "sudo sed -i '/^\\[gaze\\]/,/^$/d' /etc/pacman.conf && \
@@ -1064,6 +1078,16 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
         remove_unmanaged_install_artifacts_cmd(),
     ));
 
+    plan.push((
+        // gazed holds decrypted face templates in memory, so its crash dumps
+        // are biometric data too.
+        "Remove gaze core dumps",
+        "[ -d /var/lib/systemd/coredump ] && \
+          sudo find /var/lib/systemd/coredump \\( -name 'core.gazed.*' \
+          -o -name 'core.gaze.*' -o -name 'core.gaze-gui.*' \\) -delete \
+          2>/dev/null || true"
+            .into(),
+    ));
     plan.push(("Remove model cache", "sudo rm -rf /var/cache/gaze".into()));
     plan.push(("Remove config", "sudo rm -rf /etc/gaze".into()));
     if !keep_data {
@@ -1161,6 +1185,11 @@ fn handle_uninstall(yes: bool, keep_data: bool, dry_run: bool) -> anyhow::Result
     term.write_line(&format!(
         "\n{} Gaze uninstalled. A reboot is recommended to clear any in-memory state.",
         style("✓").green().bold()
+    ))?;
+    term.write_line(&format!(
+        "  {} If a hyprlock.conf referenced Gaze, a backup was left next to it \
+          as hyprlock.conf.gaze-uninstall-bak.",
+        style("i").cyan().bold()
     ))?;
     Ok(())
 }
@@ -1373,12 +1402,51 @@ mod tests {
             "/usr/lib/security/pam_gaze.so",
             "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/extension.js",
             "/usr/share/polkit-1/actions/com.gundulabs.gaze.policy",
-            "/etc/systemd/system/gazed.service.d/zz-gaze-dev-checkout.conf",
             "/usr/local/share/gaze-dev",
         ] {
             assert!(command.contains(path), "missing cleanup for {path}");
         }
         assert!(command.contains("[ -L \"$p\" ] || ! owned_by_pkg \"$p\""));
+        assert!(command.contains("sudo rm -rf /etc/systemd/system/gazed.service.d"));
+    }
+
+    #[test]
+    fn uninstall_plan_removes_per_user_extensions_and_core_dumps() {
+        let plan = build_uninstall_plan(true);
+        assert!(plan_has(&plan, "Remove per-user GNOME extension copies"));
+        assert!(plan_has(&plan, "Remove gaze core dumps"));
+
+        let (_, cmd) = plan
+            .iter()
+            .find(|(desc, _)| *desc == "Remove per-user GNOME extension copies")
+            .unwrap();
+        assert!(cmd.contains("/home/*/.local/share/gnome-shell/extensions"));
+        assert!(cmd.contains("/root/.local/share/gnome-shell/extensions"));
+
+        let (_, cmd) = plan
+            .iter()
+            .find(|(desc, _)| *desc == "Remove gaze core dumps")
+            .unwrap();
+        assert!(cmd.contains("/var/lib/systemd/coredump"));
+    }
+
+    #[test]
+    fn pacman_removal_covers_debug_split_packages() {
+        let command = remove_pacman_packages_cmd();
+        assert!(command.contains("gaze-bin"));
+        assert!(command.contains("\"$base-debug\" \"$base\""));
+
+        let output = std::process::Command::new("sh")
+            .arg("-n")
+            .arg("-c")
+            .arg(&command)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "invalid pacman removal shell command: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]
