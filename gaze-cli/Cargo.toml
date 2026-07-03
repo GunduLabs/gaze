@@ -23,6 +23,7 @@ crossterm = "0.29"
 dialoguer = "0.12"
 futures = "0.3.32"
 gaze-core = { path = "../gaze-core", default-features = false }
+libc = "0.2.186"
 ratatui = "0.30.2"
 tokio = { version = "1.52.3", features = ["full", "rt-multi-thread"] }
 zbus = "5.16.0"

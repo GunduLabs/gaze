@@ -4,6 +4,14 @@ Gaze is configured with `/etc/gaze/config.toml`.
 
 Most users only need to change camera source or security level.
 
+::: tip Editing config requires admin authorization
+`gaze config` writes settings through the daemon, which is guarded by
+PolicyKit, so you are prompted for an administrator password when saving. Over
+SSH or on a plain TTY, `gaze` registers a terminal agent (`pkttyagent`) so the
+prompt appears in your shell; make sure the `polkit` package is installed. In a
+graphical session the desktop's password dialog is used instead.
+:::
+
 ## Default config
 
 ```toml

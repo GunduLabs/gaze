@@ -1,4 +1,5 @@
 mod doctor;
+mod polkit;
 mod tui;
 
 use clap::{Parser, Subcommand};
@@ -27,6 +28,21 @@ fn first_run_marker_path() -> Option<PathBuf> {
             std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
         })?;
     Some(base.join("gaze").join("first-run-complete"))
+}
+
+fn command_needs_polkit(command: &Commands) -> bool {
+    match command {
+        Commands::AddFace { .. }
+        | Commands::RefineFace { .. }
+        | Commands::RemoveFace { .. }
+        | Commands::RenameFace { .. }
+        | Commands::ClearUser { .. } => true,
+        Commands::Config { show } => !show,
+        Commands::Auth { .. }
+        | Commands::ListFaces { .. }
+        | Commands::Doctor { .. }
+        | Commands::Uninstall { .. } => false,
+    }
 }
 
 async fn maybe_run_first_run_doctor(command: &Commands) {
@@ -1257,6 +1273,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let proxy = connect_gaze().await?;
+
+    let _polkit_agent = command_needs_polkit(&cli.command).then(polkit::PolkitAgent::spawn);
 
     match cli.command {
         Commands::Auth { user, verbose } => {
