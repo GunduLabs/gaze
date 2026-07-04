@@ -83,6 +83,7 @@ export default defineVersionedConfig({
           { text: "Uninstallation", link: "/guide/uninstallation" },
           { text: "Troubleshooting", link: "/guide/troubleshooting" },
           { text: "How Gaze Works", link: "/guide/how-it-works" },
+          { text: "Comparison", link: "/guide/comparison" },
         ],
       },
     ],
