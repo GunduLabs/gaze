@@ -336,6 +336,9 @@ pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcom
                     last_status = Some(*args.status());
                 }
             }
+            // Both streams ended (bus connection lost): without this branch
+            // select! panics, which would abort the PAM host process.
+            else => break AuthOutcome::Unavailable,
         }
     };
 
