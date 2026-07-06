@@ -10,7 +10,7 @@ This page compares Gaze with the three most common alternatives,
 [Howdy](https://github.com/boltgolt/howdy),
 [Visage](https://github.com/sovren-software/visage), and
 [Biopass](https://github.com/TickLabVN/biopass), as fairly as we can. It is
-written by the maintainers of Gaze, so treat it as informed and neutral to the best of our abilities; however, make sure toverify anything that matters to you against each project's own docs.
+written by the maintainers of Gaze, so treat it as informed and neutral to the best of our abilities; however, make sure to verify anything that matters to you against each project's own docs.
 
 ## At a glance
 
@@ -59,7 +59,7 @@ recommended everywhere, *Gaze included*.
 ## A note on the alternatives
 
 All of these projects **are** worth your respect! They are OSS, maintained by
-people solving a real problem in the Linux desktop, and any of them can give you
+developers solving a real problem in the Linux desktop, and any of them can give you
 face authentication that works. Howdy defined the category and is the most widely
 packaged; Visage is a clean Rust daemon with strong IR handling; Biopass brings
 fingerprint and a polished GUI. This page highlights where Gaze differs, but the
