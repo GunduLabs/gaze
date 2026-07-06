@@ -12,6 +12,11 @@ package_release := env("PACKAGE_RELEASE", "1")
 # Required packaging tool; evaluated only by packaging recipes.
 nfpm := require("nfpm")
 
+# The opencv crate's build script only probes the `opencv4`/`opencv`
+# pkg-config names, so on distros that ship OpenCV 5 (e.g. Arch) point it at
+# `opencv5`. Empty (no override) when opencv4/opencv resolve or opencv5 doesn't.
+opencv_env := shell("pkg-config --exists opencv4 2>/dev/null || pkg-config --exists opencv 2>/dev/null || ! pkg-config --exists opencv5 2>/dev/null || echo OPENCV_PKGCONFIG_NAME=opencv5")
+
 # Derived vars
 multiarch := if arch == "aarch64" { "aarch64-linux-gnu" } else { "x86_64-linux-gnu" }
 deb_arch := if arch == "x86_64" { "amd64" } else if arch == "aarch64" { "arm64" } else { arch }
@@ -32,8 +37,8 @@ default:
 # CLI, GUI, and PAM modules must build without it.
 [group("build")]
 build-rust:
-    cargo build -p gaze --release
-    cargo build -p gaze-cli -p gaze-gui -p pam-gaze -p pam-gaze-grosshack --release
+    {{ opencv_env }} cargo build -p gaze --release
+    {{ opencv_env }} cargo build -p gaze-cli -p gaze-gui -p pam-gaze -p pam-gaze-grosshack --release
 
 # Compile the SELinux policy module
 [group("build")]
@@ -203,7 +208,7 @@ setup-hooks:
 # Run the full test suite
 [group("checks")]
 test:
-    cargo test --workspace --release
+    {{ opencv_env }} cargo test --workspace --release
 
 # Check dependencies for known security advisories
 [group("checks")]
@@ -213,7 +218,7 @@ audit:
 # Run clippy lints across the workspace
 [group("checks")]
 lint:
-    cargo clippy --workspace --all-targets -- -D warnings
+    {{ opencv_env }} cargo clippy --workspace --all-targets -- -D warnings
 
 # Check formatting (does not write)
 [group("checks")]

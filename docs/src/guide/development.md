@@ -39,6 +39,11 @@ sudo pacman -S base-devel pkgconf clang llvm \
 
 :::
 
+Both OpenCV 4 and 5 work. On distros that ship OpenCV 5 (such as Arch Linux),
+the `just` recipes automatically point the `opencv` crate at the `opencv5`
+pkg-config name; when running `cargo` directly, set
+`OPENCV_PKGCONFIG_NAME=opencv5` yourself.
+
 ## Setup
 
 ```bash
