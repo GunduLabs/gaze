@@ -54,6 +54,23 @@ sudo rm -rf /var/lib/gaze/tpm
 sudo systemctl restart gazed
 ```
 
+### Daemon fails with "error while loading shared libraries: libopencv_*" (Arch Linux)
+
+On Arch Linux and Arch-compatible distributions, a system update that bumps
+OpenCV to a new minor version (for example 4.13 to 5.0) removes the library
+version `gazed` was built against, and the daemon exits immediately with
+status 127. Update to a `gaze-bin` release built against the new OpenCV:
+
+```bash
+yay -Syu gaze-bin
+```
+
+Newer packages declare a version-bounded `opencv` dependency, so pacman
+refuses the OpenCV upgrade up front instead of breaking the installed daemon.
+If pacman reports that upgrading `opencv` would break the dependency and no
+updated `gaze-bin` exists yet, wait for the rebuilt release before upgrading,
+or build and install Gaze from source against the new OpenCV.
+
 ## 2. Camera is not detected
 
 Use the primary GStreamer camera source first:

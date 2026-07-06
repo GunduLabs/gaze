@@ -124,8 +124,18 @@ _nfpm config format:
     #!/usr/bin/env bash
     set -euo pipefail
     export ARCH="{{ if format == "deb" { deb_arch } else { arch } }}"
+    # Arch bumps the OpenCV soname on every minor release, so pin the package
+    # dependency to the soversion gazed actually linked; otherwise an opencv
+    # upgrade leaves the daemon crash-looping on a missing library instead of
+    # failing the pacman transaction.
+    if [ "{{ format }}" = "archlinux" ]; then
+        sover=$(objdump -p target/release/gazed | awk '/NEEDED/ && /libopencv_core\.so\./ { sub(/.*\.so\./, "", $2); print $2 }')
+        [[ "$sover" =~ ^[0-9]+$ ]] || { echo "_nfpm: cannot read libopencv_core soversion from target/release/gazed" >&2; exit 1; }
+        export OPENCV_MIN="$((sover / 100)).$((sover % 100))"
+        export OPENCV_NEXT="$((sover / 100)).$((sover % 100 + 1))"
+    fi
     tmp_config=$(mktemp)
-    envsubst '$MULTIARCH' < {{ quote(config) }} > "$tmp_config"
+    envsubst '$MULTIARCH $OPENCV_MIN $OPENCV_NEXT' < {{ quote(config) }} > "$tmp_config"
     {{ quote(nfpm) }} pkg -f "$tmp_config" --packager {{ format }} --target dist/packages
     rm -f "$tmp_config"
 
@@ -133,9 +143,12 @@ _nfpm config format:
 _dist-packages:
     mkdir -p dist/packages
 
-# Assert the arch package embeds a post_upgrade() scriptlet (no-op for deb/rpm).
-# Guards the nfpm archlinux postupgrade mapping: without it, upgrades skip the
-# daemon-reload / polkit-restart / PAM setup in postinst-arch.sh.
+# Assert the arch package embeds a post_upgrade() scriptlet (no-op for deb/rpm)
+# and a version-bounded opencv dependency. Guards the nfpm archlinux
+# postupgrade mapping (without it, upgrades skip the daemon-reload /
+# polkit-restart / PAM setup in postinst-arch.sh) and the opencv soversion pin
+# (without it, an Arch opencv bump crash-loops gazed instead of failing the
+# pacman transaction).
 [arg("format", pattern="deb|rpm|archlinux")]
 [private]
 _verify-arch format:
@@ -148,6 +161,14 @@ _verify-arch format:
         echo "verify: $(basename "$pkg") embeds post_upgrade() ✔"
     else
         echo "verify: FAIL: $(basename "$pkg") is missing post_upgrade(); arch upgrades will skip postinst-arch.sh" >&2
+        exit 1
+    fi
+    pkginfo=$(tar -xOf "$pkg" .PKGINFO 2>/dev/null)
+    if grep -Eq 'depend = opencv>=[0-9]+\.[0-9]+$' <<< "$pkginfo" \
+        && grep -Eq 'depend = opencv<[0-9]+\.[0-9]+$' <<< "$pkginfo"; then
+        echo "verify: $(basename "$pkg") pins opencv ($(grep -oE 'opencv[<>=]+[0-9.]+' <<< "$pkginfo" | tr '\n' ' ')) ✔"
+    else
+        echo "verify: FAIL: $(basename "$pkg") lacks a version-bounded opencv dependency; an opencv soname bump will crash-loop gazed" >&2
         exit 1
     fi
 

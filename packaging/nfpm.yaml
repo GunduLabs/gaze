@@ -102,6 +102,10 @@ overrides:
     scripts:
       postinstall: "packaging/postinst-arch.sh"
     depends:
-      - opencv
+      # Bounds computed by the Justfile `_nfpm` recipe from the libopencv_core
+      # soversion gazed linked against; Arch bumps the soname every opencv
+      # minor release, so an unbounded dep crash-loops after `pacman -Syu`.
+      - "opencv>=${OPENCV_MIN}"
+      - "opencv<${OPENCV_NEXT}"
       - pam
       - tpm2-tss
