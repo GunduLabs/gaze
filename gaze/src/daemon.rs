@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::ptr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info, warn};
@@ -38,6 +38,13 @@ const SSH_PROC_CHAIN_MAX_DEPTH: usize = 16;
 pub struct ClaimState {
     pub username: String,
     pub sender: String,
+    pub epoch: u64,
+}
+
+static CLAIM_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+fn claim_has_epoch(state: &Option<ClaimState>, epoch: u64) -> bool {
+    matches!(state, Some(claim) if claim.epoch == epoch)
 }
 
 pub struct FaceData {
@@ -456,8 +463,22 @@ impl AuthDaemon {
 
 #[cfg(test)]
 mod tests {
-    use super::{AuthDaemon, auth_streams, eyes_from_kpss, hybrid_auth_passed};
+    use super::{
+        AuthDaemon, ClaimState, auth_streams, claim_has_epoch, eyes_from_kpss, hybrid_auth_passed,
+    };
     use gaze_core::dbus::CaptureStatus;
+
+    #[test]
+    fn stale_claim_epoch_does_not_match_reclaimed_state() {
+        let state = Some(ClaimState {
+            username: "alice".to_string(),
+            sender: ":1.42".to_string(),
+            epoch: 2,
+        });
+
+        assert!(!claim_has_epoch(&state, 1));
+        assert!(claim_has_epoch(&state, 2));
+    }
 
     #[test]
     fn eyes_from_kpss_extracts_first_face_landmarks() {
@@ -1128,22 +1149,21 @@ impl AuthDaemon {
             "Claimed daemon"
         );
         set_pipewire_runtime_for_uid(camera_uid);
+        let epoch = CLAIM_EPOCH.fetch_add(1, Ordering::Relaxed);
         *state = Some(ClaimState {
             username,
             sender: sender.clone(),
+            epoch,
         });
         drop(state);
 
         let claim_state = self.claim_state.clone();
         let active_cancel = self.active_cancel.clone();
-        let sender_for_timeout = sender.clone();
 
         self.rt_handle.spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(CLAIM_TIMEOUT_SECS)).await;
             let mut state = claim_state.lock().await;
-            if let Some(claim) = &*state
-                && claim.sender == sender_for_timeout
-            {
+            if claim_has_epoch(&state, epoch) {
                 *state = None;
                 let mut cancel = active_cancel.lock().await;
                 if let Some(tx) = cancel.take() {
