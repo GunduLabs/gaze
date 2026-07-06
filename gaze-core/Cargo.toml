@@ -1,6 +1,6 @@
 [package]
 name = "gaze-core"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 description = "Shared camera, configuration, D-Bus, and face detection library for Gaze"
 categories.workspace = true
