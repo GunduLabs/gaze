@@ -1843,6 +1843,14 @@ impl AuthDaemon {
                             pose_stability.reset();
                         }
                     }
+
+                    if !stop_clone.load(std::sync::atomic::Ordering::Relaxed)
+                        && completed_steps_clone.load(std::sync::atomic::Ordering::Relaxed) < max_steps
+                    {
+                        let _ = tx.blocking_send(EnrollMsg::Error(
+                            "RGB camera stream stopped unexpectedly".into(),
+                        ));
+                    }
                 }));
             }
 
@@ -1938,6 +1946,14 @@ impl AuthDaemon {
                         } else {
                             pose_stability.reset();
                         }
+                    }
+
+                    if !stop_clone.load(std::sync::atomic::Ordering::Relaxed)
+                        && completed_steps_clone.load(std::sync::atomic::Ordering::Relaxed) < max_steps
+                    {
+                        let _ = tx.blocking_send(EnrollMsg::Error(
+                            "IR camera stream stopped unexpectedly".into(),
+                        ));
                     }
                 }));
             }

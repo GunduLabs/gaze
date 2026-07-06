@@ -267,6 +267,24 @@ impl Iterator for Camera {
                     return Some(mat);
                 }
             } else {
+                if self.appsink.is_eos() {
+                    info!("Camera stream ended (EOS)");
+                    return None;
+                }
+                if let Some(msg) = self.pipeline.bus().and_then(|bus| {
+                    bus.timed_pop_filtered(
+                        gstreamer::ClockTime::ZERO,
+                        &[gstreamer::MessageType::Error, gstreamer::MessageType::Eos],
+                    )
+                }) {
+                    match msg.view() {
+                        gstreamer::MessageView::Error(err) => {
+                            info!("Camera pipeline error: {}", err.error());
+                        }
+                        _ => info!("Camera stream ended (EOS)"),
+                    }
+                    return None;
+                }
                 let (_, current_state, _) = self.pipeline.state(Some(gstreamer::ClockTime::ZERO));
                 if current_state != gstreamer::State::Playing
                     && current_state != gstreamer::State::Paused
@@ -459,6 +477,25 @@ mod tests {
             (853..=854).contains(&cols),
             "expected aspect-preserving width, got {cols}"
         );
+    }
+
+    #[test]
+    fn iterator_ends_after_eos() {
+        let mut camera = Camera::open("videotestsrc num-buffers=2").expect("videotestsrc pipeline");
+        assert!(camera.next().is_some());
+        assert!(camera.next().is_some());
+        assert!(camera.next().is_none(), "iterator must end at EOS");
+    }
+
+    #[test]
+    fn iterator_ends_on_pipeline_error() {
+        let mut camera =
+            Camera::open("videotestsrc ! identity error-after=2").expect("identity pipeline");
+        let mut frames = 0;
+        while camera.next().is_some() {
+            frames += 1;
+            assert!(frames < 10, "iterator must end after the pipeline errors");
+        }
     }
 
     #[test]
