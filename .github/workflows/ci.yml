@@ -18,6 +18,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   JUST_VERSION: 1.55.1
+  # ort-sys extracts ONNX Runtime here and links it by absolute path, so it
+  # must be a path rust-cache persists (default ~/.cache is not).
+  ORT_CACHE_DIR: /home/runner/.ort-cache
 
 jobs:
   checks:
@@ -71,8 +74,11 @@ jobs:
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: build-deb-v1
+          # v2: v1 caches predate ORT_CACHE_DIR and can replay ort-sys link
+          # paths into a directory that no longer exists.
+          shared-key: build-deb-v2
           cache-on-failure: true
+          cache-directories: ${{ env.ORT_CACHE_DIR }}
 
       - name: Check formatting
         run: just fmt-check

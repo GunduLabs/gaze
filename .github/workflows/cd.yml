@@ -30,6 +30,9 @@ jobs:
     container: ${{ matrix.container }}
     env:
       DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
+      # ort-sys extracts ONNX Runtime here and links it by absolute path, so
+      # it must be a path rust-cache persists (default ~/.cache is not).
+      ORT_CACHE_DIR: /github/home/.ort-cache
     strategy:
       fail-fast: false
       matrix:
@@ -297,8 +300,11 @@ jobs:
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: cd-${{ matrix.id }}-v1
+          # v2: v1 caches predate ORT_CACHE_DIR and can replay ort-sys link
+          # paths into a directory that no longer exists.
+          shared-key: cd-${{ matrix.id }}-v2
           cache-on-failure: true
+          cache-directories: ${{ env.ORT_CACHE_DIR }}
 
       - name: Install nfpm
         run: |
