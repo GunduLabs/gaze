@@ -14,27 +14,27 @@ license: "MIT"
 contents:
   - src: "packaging/pam/hyprlock-gaze"
     dst: "/etc/pam.d/hyprlock-gaze"
-    type: "config"
+    type: "config|noreplace"
     packager: rpm
   - src: "packaging/pam/hyprlock-gaze-simultaneous"
     dst: "/etc/pam.d/hyprlock-gaze-simultaneous"
-    type: "config"
+    type: "config|noreplace"
     packager: rpm
   - src: "packaging/pam/hyprlock-gaze"
     dst: "/etc/pam.d/hyprlock-gaze"
-    type: "config"
+    type: "config|noreplace"
     packager: archlinux
   - src: "packaging/pam/hyprlock-gaze-simultaneous"
     dst: "/etc/pam.d/hyprlock-gaze-simultaneous"
-    type: "config"
+    type: "config|noreplace"
     packager: archlinux
   - src: "packaging/pam/hyprlock-gaze.deb"
     dst: "/etc/pam.d/hyprlock-gaze"
-    type: "config"
+    type: "config|noreplace"
     packager: deb
   - src: "packaging/pam/hyprlock-gaze-simultaneous.deb"
     dst: "/etc/pam.d/hyprlock-gaze-simultaneous"
-    type: "config"
+    type: "config|noreplace"
     packager: deb
 
 deb:

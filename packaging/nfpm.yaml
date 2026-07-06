@@ -22,7 +22,7 @@ contents:
       mode: 0755
   - src: "packaging/config/config.toml"
     dst: "/etc/gaze/config.toml"
-    type: "config"
+    type: "config|noreplace"
     file_info:
       mode: 0644
   - src: "packaging/config/com.gundulabs.Gaze.conf"

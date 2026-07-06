@@ -42,6 +42,15 @@ max_frames = 40
 encrypt_templates = false
 ```
 
+## Upgrades
+
+Package upgrades never overwrite an edited `/etc/gaze/config.toml`. If the
+packaged default changed, the new template is saved alongside it as
+`config.toml.rpmnew` (RPM) or `config.toml.pacnew` (Arch); on Debian/Ubuntu,
+dpkg keeps your file and asks before replacing it. Any option missing from
+your config uses its built-in default, so you don't need to merge new options
+after upgrading.
+
 ## Change security level
 
 `level` (under `[security]`) controls model choice and match strictness.
