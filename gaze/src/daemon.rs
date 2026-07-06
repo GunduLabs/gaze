@@ -2108,7 +2108,12 @@ impl AuthDaemon {
         db.list_faces(&username).map_err(Self::map_user_db_error)
     }
 
-    async fn has_enrolled_faces(&self, username: String) -> fdo::Result<bool> {
+    async fn has_enrolled_faces(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        username: String,
+    ) -> fdo::Result<bool> {
+        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let db = self.db.lock().await;
         db.has_enrolled_faces(&username)
             .map_err(Self::map_user_db_error)
