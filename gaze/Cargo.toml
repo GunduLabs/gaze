@@ -27,7 +27,7 @@ sha2 = "0.11"
 tokio = { version = "1.52.3", features = ["full", "rt-multi-thread"] }
 ureq = "3.3"
 uuid = { version = "1.23.4", features = ["v4"] }
-zbus = "5.16.0"
+zbus = "5.17.0"
 zip = "8.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
