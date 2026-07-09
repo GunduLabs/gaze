@@ -213,35 +213,23 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
                     PAM_AUTH_ERR
                 }
             } else {
-                let active_uid = rt
-                    .block_on(async { gaze_core::dbus::get_active_session_uid().await.ok() })
-                    .or_else(|| get_user_uid(&username));
+                let active_uid = rt.block_on(active_or_user_uid(&username));
 
                 let de = active_uid
                     .map(detect_desktop_environment)
                     .unwrap_or_else(|| "Other".to_string());
 
                 if de == "GNOME" {
-                    let is_ext_active = rt.block_on(async {
-                        if let Ok((_config, proxy)) = setup_auth_env().await {
-                            if let Some(uid) = active_uid {
-                                proxy.is_extension_active(uid).await.unwrap_or(false)
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    });
+                    let is_ext_active = rt.block_on(gnome_extension_active(active_uid));
 
                     if is_ext_active {
-                        unsafe { say(pamh, "GAZE_CONFIRMATION_REQUEST") };
+                        unsafe { say(pamh, CONFIRMATION_REQUEST) };
 
                         let response = wait_for_prompt_response(&state);
                         let _ = prompt_thread.join();
 
                         if let Some(resp) = response {
-                            if resp == "CONFIRM" {
+                            if resp == CONFIRMATION_ACK {
                                 PAM_SUCCESS
                             } else {
                                 stash_password_and_fallback(pamh, &resp)

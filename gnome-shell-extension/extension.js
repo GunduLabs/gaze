@@ -51,6 +51,9 @@ const GENERIC_ERROR_MAP = new Map([
   ],
 ]);
 
+const CONFIRMATION_REQUEST = "GAZE_CONFIRMATION_REQUEST";
+const CONFIRMATION_QUESTION = "Face Verified. Press Enter to confirm.";
+
 const FACE_STATUS_UPDATES = new Set([
   "Please look at the camera...",
   "Need more light...",
@@ -236,18 +239,14 @@ export default class GazeFaceAuthExtension extends Extension {
       },
     );
 
-    this._injectionManager.overrideMethod(
-      proto,
-      "begin",
-      (original) => {
-        return function (userName, hold) {
-          if (this._userName !== userName) {
-            this._faceAuthFailed = false;
-          }
-          original.call(this, userName, hold);
-        };
-      },
-    );
+    this._injectionManager.overrideMethod(proto, "begin", (original) => {
+      return function (userName, hold) {
+        if (this._userName !== userName) {
+          this._faceAuthFailed = false;
+        }
+        original.call(this, userName, hold);
+      };
+    });
 
     this._injectionManager.overrideMethod(
       proto,
@@ -369,6 +368,25 @@ export default class GazeFaceAuthExtension extends Extension {
         original.call(this, client, serviceName, info);
       };
     });
+
+    this._injectionManager.overrideMethod(
+      proto,
+      "_onSecretInfoQuery",
+      (original) => {
+        return function (client, serviceName, secretQuestion) {
+          if (
+            serviceName === FACE_SERVICE_NAME &&
+            secretQuestion?.trim() === CONFIRMATION_REQUEST
+          ) {
+            this._filterServiceMessages(serviceName, Util.MessageType.HINT);
+            this.emit("ask-question", serviceName, CONFIRMATION_QUESTION, true);
+            return;
+          }
+
+          original.call(this, client, serviceName, secretQuestion);
+        };
+      },
+    );
 
     this._injectionManager.overrideMethod(proto, "_onProblem", (original) => {
       return function (client, serviceName, problem) {

@@ -23,6 +23,8 @@ pub const PAM_IGNORE: c_int = 25;
 
 pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
 const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to cancel.";
+pub const CONFIRMATION_REQUEST: &str = "GAZE_CONFIRMATION_REQUEST";
+pub const CONFIRMATION_ACK: &str = "CONFIRM";
 
 pub type PamHandle = *mut c_void;
 
@@ -181,6 +183,27 @@ pub unsafe fn confirm_authentication(pamh: PamHandle) -> bool {
     unsafe { converse(pamh, PAM_PROMPT_ECHO_ON, CONFIRMATION_PROMPT) }
         .map(|resp| resp.is_empty())
         .unwrap_or(false)
+}
+
+pub fn confirmation_accepted(response: Option<&str>) -> bool {
+    matches!(response, Some("") | Some(CONFIRMATION_ACK))
+}
+
+pub async fn active_or_user_uid(username: &str) -> Option<u32> {
+    match gaze_core::dbus::get_active_session_uid().await {
+        Ok(uid) => Some(uid),
+        Err(_) => get_user_uid(username),
+    }
+}
+
+pub async fn gnome_extension_active(uid: Option<u32>) -> bool {
+    let Some(uid) = uid else {
+        return false;
+    };
+    match setup_auth_env().await {
+        Ok((_config, proxy)) => proxy.is_extension_active(uid).await.unwrap_or(false),
+        Err(_) => false,
+    }
 }
 
 pub unsafe fn say(pamh: PamHandle, text: &str) {
@@ -451,6 +474,15 @@ mod tests {
             enrollment_disposition::<&str>(Err("daemon unavailable")),
             EnrollmentDisposition::Unavailable
         );
+    }
+
+    #[test]
+    fn confirmation_accepts_only_empty_or_ack_responses() {
+        assert!(confirmation_accepted(Some("")));
+        assert!(confirmation_accepted(Some("CONFIRM")));
+        assert!(!confirmation_accepted(Some("hunter2")));
+        assert!(!confirmation_accepted(Some("confirm")));
+        assert!(!confirmation_accepted(None));
     }
 
     #[test]

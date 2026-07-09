@@ -161,9 +161,13 @@ resume_grace_ms = 0
 
 `abort_if_ssh` detects SSH sessions from the DBus caller process environment. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor.
 
-Setting `require_confirmation = true` adds a manual intent check step after a successful face match (applies **only** to the `pam-gaze-grosshack` module). 
+Setting `require_confirmation = true` adds a manual intent check step after a successful face match. Both PAM modules honor it.
 
-With `require_confirmation = true`:
+With the standard `pam-gaze` module (e.g. `sudo`, `gdm-face`):
+- In a text-based (TTY) environment such as `sudo` in a terminal, it asks for text confirmation after the face match ("Press Enter to confirm, Esc to cancel").
+- On the GNOME lock screen and GDM login screen (with the Gaze Extension active), it shows "Face Verified. Press Enter to confirm." below the password field; press Enter with the field empty to confirm. If the extension is inactive, it bypasses confirmation entirely because nothing can answer the prompt.
+
+With the `pam-gaze-grosshack` module:
 - The password prompt still comes up immediately so you are never blocked.
 - If face verification succeeds before you finish entering your password:
   - In a text-based (TTY) environment, it cancels the password prompt and asks for text confirmation ("Press Enter to confirm, Esc to cancel").

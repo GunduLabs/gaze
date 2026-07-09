@@ -7,11 +7,11 @@ This extension starts the `gdm-face` PAM service inside GNOME Shell authenticati
 You do not need to enable this extension for the CLI, the GUI, or normal PAM prompts such as `sudo`. Leave it disabled on non-GNOME desktops.
 
 > [!IMPORTANT]
-> If you enable `require_confirmation = true` in `/etc/gaze/config.toml`, this GNOME Shell Extension **must** be enabled for face-authorization confirmation to function inside GNOME's graphical PolKit prompts.
+> If you enable `require_confirmation = true` in `/etc/gaze/config.toml`, this GNOME Shell Extension **must** be enabled for face-authorization confirmation to function inside GNOME's graphical PolKit prompts and on the lock screen / GDM login screen.
 > 
-> **Why this is required:** Standard GNOME PolKit prompt windows do not natively allow clicking "Authenticate" with an empty or blank password field. The GNOME Shell Extension solves this by dynamically intercepting Gaze's confirmation signals, automatically hiding the password entry, displaying `"Face Verified. Click Authenticate to confirm."`, and enabling the native "Authenticate" button.
+> **Why this is required:** Standard GNOME PolKit prompt windows do not natively allow clicking "Authenticate" with an empty or blank password field. The GNOME Shell Extension solves this by dynamically intercepting Gaze's confirmation signals, automatically hiding the password entry, displaying `"Face Verified. Click Authenticate to confirm."`, and enabling the native "Authenticate" button. On the lock screen, GNOME Shell drops prompts from background PAM services such as `gdm-face`, so the extension routes Gaze's confirmation request to the unlock prompt as `"Face Verified. Press Enter to confirm."`; pressing Enter with an empty password field confirms.
 > 
-> If the extension is **inactive/disabled** under GNOME while `require_confirmation = true` is set, Gaze's PAM module will **safely bypass confirmation** (returning success instantly upon face match) to prevent empty input hangs and user lockouts.
+> If the extension is **inactive/disabled** under GNOME while `require_confirmation = true` is set, Gaze's PAM modules will **safely bypass confirmation** (returning success instantly upon face match) to prevent empty input hangs and user lockouts.
 
 ## Should I enable it?
 
