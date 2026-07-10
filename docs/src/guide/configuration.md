@@ -166,6 +166,7 @@ Setting `require_confirmation = true` adds a manual intent check step after a su
 With the standard `pam-gaze` module (e.g. `sudo`, `gdm-face`):
 - In a text-based (TTY) environment such as `sudo` in a terminal, it asks for text confirmation after the face match ("Press Enter to confirm, Esc to cancel").
 - On the GNOME lock screen and GDM login screen (with the Gaze Extension active), it shows "Face Verified. Press Enter to confirm." below the password field; press Enter with the field empty to confirm. If the extension is inactive, it bypasses confirmation entirely because nothing can answer the prompt.
+- In other graphical prompts without a TTY (e.g. `hyprlock`), confirmation is bypassed for the same reason.
 
 With the `pam-gaze-grosshack` module:
 - The password prompt still comes up immediately so you are never blocked.
