@@ -29,6 +29,15 @@ contents:
   - src: "packaging/pam/gdm-face"
     dst: "/etc/pam.d/gdm-face"
     type: "config|noreplace"
+    packager: rpm
+  - src: "packaging/pam/gdm-face.arch"
+    dst: "/etc/pam.d/gdm-face"
+    type: "config|noreplace"
+    packager: archlinux
+  - src: "packaging/pam/gdm-face.deb"
+    dst: "/etc/pam.d/gdm-face"
+    type: "config|noreplace"
+    packager: deb
   - src: "dist/selinux/gaze-gdm-camera.pp"
     dst: "/usr/share/gaze/gaze-gdm-camera.pp"
     packager: rpm

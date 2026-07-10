@@ -1,0 +1,16 @@
+#%PAM-1.0
+auth        required                                     pam_env.so
+auth        [success=done default=bad]                   pam_gaze.so
+auth        optional                                     pam_gnome_keyring.so only_if=login auto_start
+auth        required                                     pam_deny.so
+
+account     required                                     pam_nologin.so
+account     include                                      common-account
+
+password    required                                     pam_deny.so
+
+# common-session provides pam_systemd, which registers the logind
+# session; without it GDM cannot complete a face-authenticated login.
+session     required                                     pam_loginuid.so
+session     include                                      common-session
+session     optional                                     pam_gnome_keyring.so auto_start

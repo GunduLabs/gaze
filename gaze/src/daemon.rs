@@ -357,6 +357,33 @@ impl AuthDaemon {
         Self::ensure_authorized(header, action_id).await
     }
 
+    // The GDM greeter asks which login users have faces and cannot answer an
+    // interactive polkit challenge. `active` is (uid, is_greeter) for the seat.
+    fn user_query_allowed(caller_uid: u32, target_uid: u32, active: Option<(u32, bool)>) -> bool {
+        if caller_uid == 0 || caller_uid == target_uid {
+            return true;
+        }
+        matches!(active, Some((uid, true)) if uid == caller_uid)
+    }
+
+    async fn ensure_user_query_access(
+        header: &Header<'_>,
+        username: &str,
+        action_id: &str,
+    ) -> fdo::Result<()> {
+        let caller_uid = Self::caller_uid(header).await?;
+        let target_uid = Self::username_uid(username)?;
+        let active = match gaze_core::dbus::get_active_session_uid_and_class().await {
+            Ok((uid, class)) => Some((uid, class == "greeter")),
+            Err(_) => None,
+        };
+        if Self::user_query_allowed(caller_uid, target_uid, active) {
+            return Ok(());
+        }
+
+        Self::ensure_authorized(header, action_id).await
+    }
+
     fn signal_destination(sender: &str) -> fdo::Result<BusName<'static>> {
         BusName::try_from(sender.to_string())
             .map_err(|e| fdo::Error::Failed(format!("Invalid signal destination: {e}")))
@@ -690,6 +717,22 @@ mod tests {
             AuthDaemon::resolve_camera_uid(0, 1001, false, false, None),
             None
         );
+    }
+
+    #[test]
+    fn user_queries_allow_root_self_and_active_greeter_only() {
+        assert!(AuthDaemon::user_query_allowed(0, 1000, None));
+        assert!(AuthDaemon::user_query_allowed(1000, 1000, None));
+        // Active greeter may ask about any login user.
+        assert!(AuthDaemon::user_query_allowed(42, 1000, Some((42, true))));
+        // Non-greeter or inactive callers still need polkit.
+        assert!(!AuthDaemon::user_query_allowed(42, 1000, Some((42, false))));
+        assert!(!AuthDaemon::user_query_allowed(
+            42,
+            1000,
+            Some((1000, true))
+        ));
+        assert!(!AuthDaemon::user_query_allowed(42, 1000, None));
     }
 
     #[test]
@@ -2133,7 +2176,7 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         username: String,
     ) -> fdo::Result<bool> {
-        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        Self::ensure_user_query_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let db = self.db.lock().await;
         db.has_enrolled_faces(&username)
             .map_err(Self::map_user_db_error)
