@@ -66,8 +66,10 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         let uid = active_or_user_uid(&username).await;
         gnome_extension_active(uid).await
     });
+    // No confirmation channel (no TTY, no GNOME extension): fail closed rather
+    // than granting on the face match alone, or require_confirmation is a no-op.
     if !extension_active {
-        return PAM_SUCCESS;
+        return PAM_AUTH_ERR;
     }
 
     confirm_via_gnome_extension(pamh)
