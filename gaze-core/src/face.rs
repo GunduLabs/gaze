@@ -1,4 +1,3 @@
-use crate::camera::frame_to_bytes;
 use crate::config::Config;
 use crate::dbus::{CaptureStatus, EnrollPrompt};
 use crate::detect::{DetectError, FaceDetector};
@@ -21,7 +20,6 @@ pub enum Spectrum {
 }
 
 pub struct CaptureResult {
-    pub bytes: Vec<u8>,
     pub width: u32,
     pub height: u32,
     pub bbox: Option<(f32, f32, f32, f32)>,
@@ -231,7 +229,6 @@ impl FaceChecker {
     ) -> anyhow::Result<CaptureResult> {
         let sz = frame.size()?;
         Ok(CaptureResult {
-            bytes: frame_to_bytes(frame)?,
             width: sz.width as u32,
             height: sz.height as u32,
             bbox,
