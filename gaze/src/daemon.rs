@@ -118,6 +118,7 @@ pub struct AuthDaemon {
     pub ir_node: Arc<Mutex<String>>,
     pub emitter_enabled: Arc<Mutex<bool>>,
     pub liveness_config: Arc<Mutex<gaze_core::config::LivenessConfig>>,
+    pub hybrid_policy: Arc<Mutex<String>>,
     pub abort_if_ssh: Arc<Mutex<bool>>,
     pub abort_if_lid_closed: Arc<Mutex<bool>>,
     pub claim_state: Arc<Mutex<Option<ClaimState>>>,
@@ -271,13 +272,11 @@ impl AuthDaemon {
         false
     }
 
-    fn process_is_ssh_session(pid: u32) -> bool {
-        Self::process_chain_is_ssh_at(std::path::Path::new("/proc"), pid)
-    }
-
-    fn current_env_is_ssh_session() -> bool {
-        std::env::var_os("SSH_CONNECTION").is_some_and(|value| !value.as_os_str().is_empty())
-            || std::env::var_os("SSH_TTY").is_some_and(|value| !value.as_os_str().is_empty())
+    fn caller_is_ssh_session_at(base: &std::path::Path, caller_pid: Option<u32>) -> bool {
+        match caller_pid {
+            Some(pid) => Self::process_chain_is_ssh_at(base, pid),
+            None => true,
+        }
     }
 
     fn lid_state_is_closed(state: &str) -> bool {
@@ -325,10 +324,7 @@ impl AuthDaemon {
         let abort_if_ssh = *self.abort_if_ssh.lock().await;
         if abort_if_ssh {
             let caller_pid = Self::caller_pid(header).await.ok();
-            let is_ssh = match caller_pid {
-                Some(pid) => Self::process_is_ssh_session(pid),
-                None => Self::current_env_is_ssh_session(),
-            };
+            let is_ssh = Self::caller_is_ssh_session_at(std::path::Path::new("/proc"), caller_pid);
             if is_ssh {
                 warn!(caller_pid, "SSH session detected, aborting face auth");
                 return Err(fdo::Error::Failed("SSH session detected".into()));
@@ -493,8 +489,22 @@ impl AuthDaemon {
 mod tests {
     use super::{
         AuthDaemon, ClaimState, auth_streams, claim_has_epoch, eyes_from_kpss, hybrid_auth_passed,
+        pipewire_runtime_update,
     };
     use gaze_core::dbus::CaptureStatus;
+
+    #[test]
+    fn pipewire_runtime_update_only_changes_on_a_new_uid() {
+        assert_eq!(pipewire_runtime_update(Some("/run/user/1000"), 1000), None);
+        assert_eq!(
+            pipewire_runtime_update(Some("/run/user/1000"), 1001),
+            Some("/run/user/1001".to_string())
+        );
+        assert_eq!(
+            pipewire_runtime_update(None, 1000),
+            Some("/run/user/1000".to_string())
+        );
+    }
 
     #[test]
     fn stale_claim_epoch_does_not_match_reclaimed_state() {
@@ -686,6 +696,23 @@ mod tests {
         proc.add(3002, 3001, "sudo", b"USER=alice\0");
 
         assert!(!AuthDaemon::process_chain_is_ssh_at(proc.root(), 3002));
+    }
+
+    #[test]
+    fn unresolved_caller_pid_fails_closed_as_ssh() {
+        let proc = FakeProc::new("unresolved-pid");
+        assert!(AuthDaemon::caller_is_ssh_session_at(proc.root(), None));
+    }
+
+    #[test]
+    fn resolved_local_caller_is_not_flagged_as_ssh() {
+        let proc = FakeProc::new("resolved-local");
+        proc.add(6000, 1, "systemd", b"PATH=/usr/bin\0");
+        proc.add(6001, 6000, "sudo", b"USER=alice\0");
+        assert!(!AuthDaemon::caller_is_ssh_session_at(
+            proc.root(),
+            Some(6001)
+        ));
     }
 
     #[test]
@@ -898,9 +925,23 @@ mod tests {
 
 pub use gaze_core::dbus::get_active_session_uid;
 
+static PIPEWIRE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn pipewire_runtime_update(current: Option<&str>, uid: u32) -> Option<String> {
+    let target = format!("/run/user/{uid}");
+    match current {
+        Some(existing) if existing == target => None,
+        _ => Some(target),
+    }
+}
+
 pub fn set_pipewire_runtime_for_uid(uid: u32) {
-    unsafe {
-        std::env::set_var("XDG_RUNTIME_DIR", format!("/run/user/{uid}"));
+    let _guard = PIPEWIRE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let current = std::env::var("XDG_RUNTIME_DIR").ok();
+    if let Some(target) = pipewire_runtime_update(current.as_deref(), uid) {
+        unsafe {
+            std::env::set_var("XDG_RUNTIME_DIR", target);
+        }
     }
 }
 
@@ -1343,6 +1384,7 @@ impl AuthDaemon {
         let ir_node = self.ir_node.lock().await.clone();
         let emitter_enabled = *self.emitter_enabled.lock().await;
         let liveness_cfg = self.liveness_config.lock().await.clone();
+        let hybrid_policy = self.hybrid_policy.lock().await.clone();
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
 
@@ -1676,7 +1718,7 @@ impl AuthDaemon {
             macro_rules! finish_if_auth_passed {
                 () => {{
                     if hybrid_auth_passed(
-                        config.security.hybrid_policy(),
+                        &hybrid_policy,
                         run_rgb,
                         run_ir,
                         rgb_attempted,
@@ -2317,6 +2359,8 @@ impl AuthDaemon {
 
         let mut threshold = self.threshold.lock().await;
         *threshold = new_config.security.threshold();
+        drop(threshold);
+        *self.hybrid_policy.lock().await = new_config.security.hybrid_policy().to_string();
 
         let sources = resolve_configured_sources(&new_config.cameras);
         *self.rgb_device.lock().await = sources.rgb;

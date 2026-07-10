@@ -186,7 +186,7 @@ pub unsafe fn confirm_authentication(pamh: PamHandle) -> bool {
 }
 
 pub fn confirmation_accepted(response: Option<&str>) -> bool {
-    matches!(response, Some("") | Some(CONFIRMATION_ACK))
+    matches!(response, Some(CONFIRMATION_ACK))
 }
 
 pub async fn active_or_user_uid(username: &str) -> Option<u32> {
@@ -477,9 +477,9 @@ mod tests {
     }
 
     #[test]
-    fn confirmation_accepts_only_empty_or_ack_responses() {
-        assert!(confirmation_accepted(Some("")));
+    fn confirmation_accepts_only_the_ack_token() {
         assert!(confirmation_accepted(Some("CONFIRM")));
+        assert!(!confirmation_accepted(Some("")));
         assert!(!confirmation_accepted(Some("hunter2")));
         assert!(!confirmation_accepted(Some("confirm")));
         assert!(!confirmation_accepted(None));

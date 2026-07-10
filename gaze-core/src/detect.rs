@@ -273,7 +273,7 @@ impl FaceDetector {
 
 fn nms(boxes: &[[f32; 4]], scores: &[f32], iou_threshold: f32) -> Vec<usize> {
     let mut indices: Vec<usize> = (0..boxes.len()).collect();
-    indices.sort_by(|&a, &b| scores[b].partial_cmp(&scores[a]).unwrap());
+    indices.sort_by(|&a, &b| scores[b].total_cmp(&scores[a]));
 
     let mut keep = Vec::new();
     while !indices.is_empty() {
@@ -338,5 +338,19 @@ mod tests {
 
         let keep = nms(&boxes, &scores, 0.4);
         assert_eq!(keep, vec![2, 0]);
+    }
+
+    #[test]
+    fn nms_does_not_panic_on_nan_scores() {
+        let boxes = vec![
+            [10.0, 10.0, 20.0, 20.0],
+            [100.0, 100.0, 110.0, 110.0],
+            [200.0, 200.0, 210.0, 210.0],
+        ];
+        let scores = vec![f32::NAN, 0.9, f32::NAN];
+
+        let keep = nms(&boxes, &scores, 0.4);
+        assert_eq!(keep.len(), 3);
+        assert!(keep.contains(&1));
     }
 }
