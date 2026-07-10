@@ -117,6 +117,7 @@ pub struct AuthDaemon {
     pub ir_node: Arc<Mutex<String>>,
     pub emitter_enabled: Arc<Mutex<bool>>,
     pub liveness_config: Arc<Mutex<gaze_core::config::LivenessConfig>>,
+    pub hybrid_policy: Arc<Mutex<String>>,
     pub abort_if_ssh: Arc<Mutex<bool>>,
     pub abort_if_lid_closed: Arc<Mutex<bool>>,
     pub claim_state: Arc<Mutex<Option<ClaimState>>>,
@@ -1321,6 +1322,7 @@ impl AuthDaemon {
         let ir_node = self.ir_node.lock().await.clone();
         let emitter_enabled = *self.emitter_enabled.lock().await;
         let liveness_cfg = self.liveness_config.lock().await.clone();
+        let hybrid_policy = self.hybrid_policy.lock().await.clone();
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
 
@@ -1625,7 +1627,7 @@ impl AuthDaemon {
             macro_rules! finish_if_auth_passed {
                 () => {{
                     if hybrid_auth_passed(
-                        config.security.hybrid_policy(),
+                        &hybrid_policy,
                         run_rgb,
                         run_ir,
                         rgb_attempted,
@@ -2263,6 +2265,8 @@ impl AuthDaemon {
 
         let mut threshold = self.threshold.lock().await;
         *threshold = new_config.security.threshold();
+        drop(threshold);
+        *self.hybrid_policy.lock().await = new_config.security.hybrid_policy().to_string();
 
         let sources = resolve_configured_sources(&new_config.cameras);
         *self.rgb_device.lock().await = sources.rgb;

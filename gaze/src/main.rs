@@ -146,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
         ir_node: Arc::new(Mutex::new(sources.ir_node)),
         emitter_enabled: Arc::new(Mutex::new(config.cameras.emitter_enabled)),
         liveness_config: Arc::new(Mutex::new(config.liveness.clone())),
+        hybrid_policy: Arc::new(Mutex::new(security.hybrid_policy().to_string())),
         abort_if_ssh: Arc::new(Mutex::new(config.auth.abort_if_ssh)),
         abort_if_lid_closed: Arc::new(Mutex::new(config.auth.abort_if_lid_closed)),
         claim_state: Arc::new(Mutex::new(None)),
