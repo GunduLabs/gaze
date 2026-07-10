@@ -270,13 +270,11 @@ impl AuthDaemon {
         false
     }
 
-    fn process_is_ssh_session(pid: u32) -> bool {
-        Self::process_chain_is_ssh_at(std::path::Path::new("/proc"), pid)
-    }
-
-    fn current_env_is_ssh_session() -> bool {
-        std::env::var_os("SSH_CONNECTION").is_some_and(|value| !value.as_os_str().is_empty())
-            || std::env::var_os("SSH_TTY").is_some_and(|value| !value.as_os_str().is_empty())
+    fn caller_is_ssh_session_at(base: &std::path::Path, caller_pid: Option<u32>) -> bool {
+        match caller_pid {
+            Some(pid) => Self::process_chain_is_ssh_at(base, pid),
+            None => true,
+        }
     }
 
     fn lid_state_is_closed(state: &str) -> bool {
@@ -324,10 +322,7 @@ impl AuthDaemon {
         let abort_if_ssh = *self.abort_if_ssh.lock().await;
         if abort_if_ssh {
             let caller_pid = Self::caller_pid(header).await.ok();
-            let is_ssh = match caller_pid {
-                Some(pid) => Self::process_is_ssh_session(pid),
-                None => Self::current_env_is_ssh_session(),
-            };
+            let is_ssh = Self::caller_is_ssh_session_at(std::path::Path::new("/proc"), caller_pid);
             if is_ssh {
                 warn!(caller_pid, "SSH session detected, aborting face auth");
                 return Err(fdo::Error::Failed("SSH session detected".into()));
@@ -685,6 +680,23 @@ mod tests {
         proc.add(3002, 3001, "sudo", b"USER=alice\0");
 
         assert!(!AuthDaemon::process_chain_is_ssh_at(proc.root(), 3002));
+    }
+
+    #[test]
+    fn unresolved_caller_pid_fails_closed_as_ssh() {
+        let proc = FakeProc::new("unresolved-pid");
+        assert!(AuthDaemon::caller_is_ssh_session_at(proc.root(), None));
+    }
+
+    #[test]
+    fn resolved_local_caller_is_not_flagged_as_ssh() {
+        let proc = FakeProc::new("resolved-local");
+        proc.add(6000, 1, "systemd", b"PATH=/usr/bin\0");
+        proc.add(6001, 6000, "sudo", b"USER=alice\0");
+        assert!(!AuthDaemon::caller_is_ssh_session_at(
+            proc.root(),
+            Some(6001)
+        ));
     }
 
     #[test]
