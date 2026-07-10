@@ -84,11 +84,7 @@ pub fn resolve_node(source: &str) -> Option<String> {
         return Some(format!("/dev/video{}", &tail[..end_digits]));
     }
 
-    let target = if let Some(stripped) = source.strip_prefix("pipewiresrc target-object=") {
-        stripped.trim()
-    } else {
-        return None;
-    };
+    let target = source.strip_prefix("pipewiresrc target-object=")?.trim();
 
     let target = target.trim_matches(|c| c == '"' || c == '\'');
 
