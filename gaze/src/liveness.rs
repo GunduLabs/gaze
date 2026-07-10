@@ -169,6 +169,10 @@ pub fn eye_motion_is_live(landmarks: &[[(f32, f32); 5]], min_ratio: Option<f32>)
     }
 }
 
+pub fn confirmed_static(motion: &EyeMotion) -> bool {
+    motion.pairs >= 1 && !motion.live
+}
+
 pub fn liveness_passes(scores: &[f32], threshold: f32) -> bool {
     let mut finite_scores = scores
         .iter()
@@ -228,6 +232,25 @@ mod tests {
         let clamped = crop_face(&img, [0.0, 0.0, 20.0, 20.0]).unwrap();
         assert_eq!(clamped.width(), 55);
         assert_eq!(clamped.height(), 55);
+    }
+
+    #[test]
+    fn confirmed_static_requires_a_measured_still_pair() {
+        assert!(!confirmed_static(&EyeMotion {
+            live: true,
+            motion_ratio: 0.0,
+            pairs: 0
+        }));
+        assert!(!confirmed_static(&EyeMotion {
+            live: true,
+            motion_ratio: 0.1,
+            pairs: 2
+        }));
+        assert!(confirmed_static(&EyeMotion {
+            live: false,
+            motion_ratio: 0.0,
+            pairs: 2
+        }));
     }
 
     #[test]

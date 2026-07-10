@@ -1463,7 +1463,7 @@ impl AuthDaemon {
 
                                     let model_pass = crate::liveness::liveness_passes(&live_scores, liveness_threshold as f32);
                                     let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
-                                    let confirmed_static = motion.pairs >= 1 && !motion.live;
+                                    let confirmed_static = crate::liveness::confirmed_static(&motion);
                                     liveness_passed = model_pass && !confirmed_static;
 
                                     tracing::debug!(
@@ -1569,7 +1569,7 @@ impl AuthDaemon {
                                         landmark_seq.push(eyes);
                                     }
                                     let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
-                                    liveness_passed = motion.pairs >= 1 && motion.live;
+                                    liveness_passed = !crate::liveness::confirmed_static(&motion);
 
                                     tracing::debug!(
                                         "Liveness checked (IR): motion={:?}, overall={}",
