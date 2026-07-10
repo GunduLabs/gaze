@@ -492,8 +492,22 @@ impl AuthDaemon {
 mod tests {
     use super::{
         AuthDaemon, ClaimState, auth_streams, claim_has_epoch, eyes_from_kpss, hybrid_auth_passed,
+        pipewire_runtime_update,
     };
     use gaze_core::dbus::CaptureStatus;
+
+    #[test]
+    fn pipewire_runtime_update_only_changes_on_a_new_uid() {
+        assert_eq!(pipewire_runtime_update(Some("/run/user/1000"), 1000), None);
+        assert_eq!(
+            pipewire_runtime_update(Some("/run/user/1000"), 1001),
+            Some("/run/user/1001".to_string())
+        );
+        assert_eq!(
+            pipewire_runtime_update(None, 1000),
+            Some("/run/user/1000".to_string())
+        );
+    }
 
     #[test]
     fn stale_claim_epoch_does_not_match_reclaimed_state() {
@@ -897,9 +911,23 @@ mod tests {
 
 pub use gaze_core::dbus::get_active_session_uid;
 
+static PIPEWIRE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn pipewire_runtime_update(current: Option<&str>, uid: u32) -> Option<String> {
+    let target = format!("/run/user/{uid}");
+    match current {
+        Some(existing) if existing == target => None,
+        _ => Some(target),
+    }
+}
+
 pub fn set_pipewire_runtime_for_uid(uid: u32) {
-    unsafe {
-        std::env::set_var("XDG_RUNTIME_DIR", format!("/run/user/{uid}"));
+    let _guard = PIPEWIRE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let current = std::env::var("XDG_RUNTIME_DIR").ok();
+    if let Some(target) = pipewire_runtime_update(current.as_deref(), uid) {
+        unsafe {
+            std::env::set_var("XDG_RUNTIME_DIR", target);
+        }
     }
 }
 
