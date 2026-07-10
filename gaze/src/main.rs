@@ -100,6 +100,9 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
+    let ir_liveness_detector =
+        daemon::load_ir_liveness_detector(config.liveness.enabled && config.liveness.ir_model);
+
     let cipher = if config.storage.encrypt_templates {
         let dek = tpm::load_or_create_dek(std::path::Path::new(tpm::STATE_DIR)).map_err(|e| {
             anyhow::anyhow!(
@@ -139,6 +142,7 @@ async fn main() -> anyhow::Result<()> {
         recognizer_rgb: Arc::new(Mutex::new(recognizer_rgb)),
         recognizer_ir: Arc::new(Mutex::new(recognizer_ir)),
         liveness: Arc::new(Mutex::new(liveness_detector)),
+        ir_liveness: Arc::new(Mutex::new(ir_liveness_detector)),
         db: Arc::new(Mutex::new(db)),
         threshold: Arc::new(Mutex::new(security.threshold())),
         rgb_device: Arc::new(Mutex::new(sources.rgb)),

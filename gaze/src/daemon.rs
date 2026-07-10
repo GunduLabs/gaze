@@ -110,6 +110,7 @@ pub struct AuthDaemon {
     pub recognizer_rgb: Arc<Mutex<FaceRecognizer>>,
     pub recognizer_ir: Arc<Mutex<FaceRecognizer>>,
     pub liveness: Arc<Mutex<Option<LivenessDetector>>>,
+    pub ir_liveness: Arc<Mutex<Option<LivenessDetector>>>,
     pub db: Arc<Mutex<UserDatabase>>,
     pub threshold: Arc<Mutex<f32>>,
     pub rgb_device: Arc<Mutex<String>>,
@@ -903,6 +904,25 @@ pub fn set_pipewire_runtime_for_uid(uid: u32) {
     }
 }
 
+pub fn load_ir_liveness_detector(enabled: bool) -> Option<LivenessDetector> {
+    if !enabled {
+        return None;
+    }
+    match crate::models::ensure_ir_liveness_model(gaze_core::config::MODELS_DIR) {
+        Ok(path) => match LivenessDetector::new(path.to_str().unwrap()) {
+            Ok(detector) => Some(detector),
+            Err(e) => {
+                warn!("IR anti-spoof model failed to load, using passive IR liveness: {e}");
+                None
+            }
+        },
+        Err(e) => {
+            warn!("IR anti-spoof model unavailable, using passive IR liveness: {e}");
+            None
+        }
+    }
+}
+
 async fn prepare_for_sleep_stream(conn: &zbus::Connection) -> zbus::Result<zbus::MessageStream> {
     let rule = zbus::MatchRule::builder()
         .msg_type(zbus::message::Type::Signal)
@@ -1312,6 +1332,8 @@ impl AuthDaemon {
         let recognizer_rgb_arc = self.recognizer_rgb.clone();
         let recognizer_ir_arc = self.recognizer_ir.clone();
         let liveness_arc = self.liveness.clone();
+        let ir_liveness_arc = self.ir_liveness.clone();
+        let ir_model_enabled = ir_liveness_arc.lock().await.is_some();
         let db_arc = self.db.clone();
         let threshold_arc = self.threshold.clone();
 
@@ -1504,10 +1526,12 @@ impl AuthDaemon {
                 let detector_arc = detector_arc.clone();
                 let config_clone = config.clone();
                 let recognizer_ir_arc = recognizer_ir_arc.clone();
+                let ir_liveness_arc = ir_liveness_arc.clone();
                 let db_arc = db_arc.clone();
                 let username_clone = username.clone();
                 let threshold_arc = threshold_arc.clone();
                 let liveness_enabled = liveness_cfg.enabled;
+                let liveness_threshold = liveness_cfg.threshold;
                 let ir_device_clone = ir_device.clone();
                 let ir_node_clone = ir_node.clone();
                 let emitter_enabled = emitter_enabled;
@@ -1529,6 +1553,7 @@ impl AuthDaemon {
 
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, false);
                     let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
+                    let mut ir_live_scores: Vec<f32> = Vec::new();
 
                     for frame in &mut cam {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1537,7 +1562,7 @@ impl AuthDaemon {
 
                         let (status, embed_opt) = {
                             let mut recognizer = recognizer_ir_arc.blocking_lock();
-                            match process_frame_sync(&mut checker, &mut recognizer, &frame, false) {
+                            match process_frame_sync(&mut checker, &mut recognizer, &frame, ir_model_enabled) {
                                 Ok(res) => res,
                                 Err(_) => (CaptureStatus::NoFace, None),
                             }
@@ -1569,10 +1594,36 @@ impl AuthDaemon {
                                         landmark_seq.push(eyes);
                                     }
                                     let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
-                                    liveness_passed = !crate::liveness::confirmed_static(&motion);
+
+                                    if ir_model_enabled {
+                                        let liveness_face = match crop_liveness_face(&data) {
+                                            Ok(face) => face,
+                                            Err(e) => {
+                                                error!("IR liveness crop failed: {e}");
+                                                continue;
+                                            }
+                                        };
+                                        let mut live_guard = ir_liveness_arc.blocking_lock();
+                                        if let Some(detector) = live_guard.as_mut() {
+                                            match detector.live_score(&liveness_face) {
+                                                Ok(score) => ir_live_scores.push(score),
+                                                Err(e) => {
+                                                    error!("IR liveness inference failed: {e}");
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    liveness_passed = crate::liveness::ir_liveness_passed(
+                                        &ir_live_scores,
+                                        liveness_threshold as f32,
+                                        &motion,
+                                    );
 
                                     tracing::debug!(
-                                        "Liveness checked (IR): motion={:?}, overall={}",
+                                        "Liveness checked (IR): scores={:?}, motion={:?}, overall={}",
+                                        ir_live_scores,
                                         motion,
                                         liveness_passed
                                     );
@@ -2261,6 +2312,9 @@ impl AuthDaemon {
             None
         };
 
+        let new_ir_liveness_detector =
+            load_ir_liveness_detector(new_config.liveness.enabled && new_config.liveness.ir_model);
+
         let mut threshold = self.threshold.lock().await;
         *threshold = new_config.security.threshold();
 
@@ -2277,6 +2331,10 @@ impl AuthDaemon {
         let mut liveness_slot = self.liveness.lock().await;
         *liveness_slot = new_liveness_detector;
         drop(liveness_slot);
+
+        let mut ir_liveness_slot = self.ir_liveness.lock().await;
+        *ir_liveness_slot = new_ir_liveness_detector;
+        drop(ir_liveness_slot);
 
         let mut abort_if_ssh = self.abort_if_ssh.lock().await;
         *abort_if_ssh = new_config.auth.abort_if_ssh;

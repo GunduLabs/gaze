@@ -173,6 +173,16 @@ pub fn confirmed_static(motion: &EyeMotion) -> bool {
     motion.pairs >= 1 && !motion.live
 }
 
+pub fn ir_liveness_passed(model_scores: &[f32], threshold: f32, motion: &EyeMotion) -> bool {
+    if confirmed_static(motion) {
+        return false;
+    }
+    if model_scores.is_empty() {
+        return true;
+    }
+    liveness_passes(model_scores, threshold)
+}
+
 pub fn liveness_passes(scores: &[f32], threshold: f32) -> bool {
     let mut finite_scores = scores
         .iter()
@@ -251,6 +261,39 @@ mod tests {
             motion_ratio: 0.0,
             pairs: 2
         }));
+    }
+
+    #[test]
+    fn ir_liveness_without_model_falls_back_to_passive() {
+        let moving = EyeMotion {
+            live: true,
+            motion_ratio: 0.1,
+            pairs: 1,
+        };
+        let still = EyeMotion {
+            live: false,
+            motion_ratio: 0.0,
+            pairs: 2,
+        };
+        assert!(ir_liveness_passed(&[], 0.8, &moving));
+        assert!(!ir_liveness_passed(&[], 0.8, &still));
+    }
+
+    #[test]
+    fn ir_liveness_with_model_requires_model_pass() {
+        let moving = EyeMotion {
+            live: true,
+            motion_ratio: 0.1,
+            pairs: 1,
+        };
+        let still = EyeMotion {
+            live: false,
+            motion_ratio: 0.0,
+            pairs: 2,
+        };
+        assert!(ir_liveness_passed(&[0.9], 0.8, &moving));
+        assert!(!ir_liveness_passed(&[0.2], 0.8, &moving));
+        assert!(!ir_liveness_passed(&[0.9], 0.8, &still));
     }
 
     #[test]

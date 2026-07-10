@@ -270,6 +270,8 @@ pub struct LivenessConfig {
     pub threshold: f64,
     #[serde(default = "default_max_frames")]
     pub max_frames: u32,
+    #[serde(default = "default_false")]
+    pub ir_model: bool,
 }
 
 fn default_liveness_enabled() -> bool {
@@ -288,6 +290,7 @@ impl Default for LivenessConfig {
             enabled: default_liveness_enabled(),
             threshold: default_liveness_threshold(),
             max_frames: default_max_frames(),
+            ir_model: false,
         }
     }
 }
@@ -593,6 +596,7 @@ mod tests {
                 enabled: true,
                 threshold: 0.9,
                 max_frames: 25,
+                ir_model: true,
             },
             storage: StorageConfig {
                 encrypt_templates: true,
@@ -621,6 +625,7 @@ mod tests {
         assert!(loaded.liveness.enabled);
         assert_eq!(loaded.liveness.threshold, 0.9);
         assert_eq!(loaded.liveness.max_frames, 25);
+        assert!(loaded.liveness.ir_model);
         assert!(loaded.storage.encrypt_templates);
     }
 
@@ -651,6 +656,7 @@ mod tests {
         assert!(config.liveness.enabled);
         assert!((config.liveness.threshold - 0.8).abs() < f64::EPSILON);
         assert_eq!(config.liveness.max_frames, 40);
+        assert!(!config.liveness.ir_model);
     }
 
     #[test]
