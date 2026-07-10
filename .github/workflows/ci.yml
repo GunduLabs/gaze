@@ -17,7 +17,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  JUST_VERSION: 1.55.1
+  JUST_VERSION: 1.56.0
   # ort-sys extracts ONNX Runtime here and links it by absolute path, so it
   # must be a path rust-cache persists (default ~/.cache is not).
   ORT_CACHE_DIR: /home/runner/.ort-cache
