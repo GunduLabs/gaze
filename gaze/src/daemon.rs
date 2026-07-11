@@ -2347,16 +2347,17 @@ impl AuthDaemon {
         let recognizer_ir_arc = self.recognizer_ir.clone();
         let liveness_arc = self.liveness.clone();
 
-        tokio::task::spawn_blocking(move || {
-            run_inference_benchmark(
-                detector_arc,
-                recognizer_rgb_arc,
-                recognizer_ir_arc,
-                liveness_arc,
-            )
-        })
-        .await
-        .map_err(|e| fdo::Error::Failed(format!("benchmark task panicked: {e}")))?
+        self.rt_handle
+            .spawn_blocking(move || {
+                run_inference_benchmark(
+                    detector_arc,
+                    recognizer_rgb_arc,
+                    recognizer_ir_arc,
+                    liveness_arc,
+                )
+            })
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("benchmark task panicked: {e}")))?
     }
 
     async fn delete_face(

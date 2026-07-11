@@ -824,7 +824,16 @@ async fn check_daemon(
 }
 
 async fn check_benchmark(report: &mut Report, proxy: &GazeProxy<'_>) {
-    match tokio::time::timeout(BENCHMARK_TIMEOUT, proxy.benchmark()).await {
+    let term = Term::stdout();
+    let _ = term.write_line(&format!(
+        "{} Benchmarking model inference (this can take a few seconds)...",
+        style("i").cyan().bold()
+    ));
+
+    let outcome = tokio::time::timeout(BENCHMARK_TIMEOUT, proxy.benchmark()).await;
+    let _ = term.clear_last_lines(1);
+
+    match outcome {
         Ok(Ok(results)) => {
             for result in results {
                 report.pass(
