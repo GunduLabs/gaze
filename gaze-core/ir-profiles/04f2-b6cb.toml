@@ -1,0 +1,14 @@
+[device]
+vendor_id  = 0x04F2
+product_id = 0xB6CB
+name       = "Chicony Integrated Camera (Lenovo Yoga 14s 2021 family)"
+source     = "boltgolt/howdy#269: bobzhu418 posts the working unit/selector/data after iterating with EmixamPP; renyuneyun confirms \"the script by @EmixamPP works for me\" on a Lenovo Yoga 14s (2021) with camera 04f2:b6cb"
+
+[emitter]
+# Same Chicony Microsoft Face Authentication control family as 04f2:b6d9, mode 2 instead of 3.
+unit          = 14
+selector      = 6
+control_bytes = [1, 3, 2, 0, 0, 0, 0, 0, 0]
+# off_control_bytes not separately confirmed in the source thread; using the mode-1 "off" value
+# from the same control family (see 0bda-5517, 0c45-6739/6a21, 30c9-0057).
+off_control_bytes = [1, 3, 1, 0, 0, 0, 0, 0, 0]
