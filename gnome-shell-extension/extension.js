@@ -52,6 +52,7 @@ const GENERIC_ERROR_MAP = new Map([
 ]);
 
 const CONFIRMATION_REQUEST = "GAZE_CONFIRMATION_REQUEST";
+const CONFIRMATION_ACK = "CONFIRM";
 const CONFIRMATION_QUESTION = "Face Verified. Press Enter to confirm.";
 
 const FACE_STATUS_UPDATES = new Set([
@@ -379,6 +380,8 @@ export default class GazeFaceAuthExtension extends Extension {
             secretQuestion?.trim() === CONFIRMATION_REQUEST
           ) {
             this._filterServiceMessages(serviceName, Util.MessageType.HINT);
+            // Enter must send the ack token, not the empty typed answer.
+            this._faceConfirmPending = true;
             this.emit("ask-question", serviceName, CONFIRMATION_QUESTION, true);
             return;
           }
@@ -387,6 +390,17 @@ export default class GazeFaceAuthExtension extends Extension {
         };
       },
     );
+
+    this._injectionManager.overrideMethod(proto, "answerQuery", (original) => {
+      return function (serviceName, answer) {
+        if (this._faceConfirmPending && serviceName === FACE_SERVICE_NAME) {
+          this._faceConfirmPending = false;
+          original.call(this, serviceName, CONFIRMATION_ACK);
+          return;
+        }
+        original.call(this, serviceName, answer);
+      };
+    });
 
     this._injectionManager.overrideMethod(proto, "_onProblem", (original) => {
       return function (client, serviceName, problem) {
@@ -411,6 +425,7 @@ export default class GazeFaceAuthExtension extends Extension {
         return function (client, serviceName) {
           if (serviceName === FACE_SERVICE_NAME) {
             this._faceFailCounter = (this._faceFailCounter || 0) + 1;
+            this._faceConfirmPending = false;
           }
 
           original.call(this, client, serviceName);
@@ -435,6 +450,7 @@ export default class GazeFaceAuthExtension extends Extension {
     this._injectionManager.overrideMethod(proto, "_onReset", (original) => {
       return function () {
         this._faceFailCounter = 0;
+        this._faceConfirmPending = false;
         original.call(this);
       };
     });
