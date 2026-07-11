@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
 const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(25);
+const BENCHMARK_TIMEOUT: Duration = Duration::from_secs(30);
 const PAM_MODULES: [&str; 2] = ["pam_gaze.so", "pam_gaze_grosshack.so"];
 const GNOME_EXTENSION_ID: &str = "gaze@gundulabs.com";
 
@@ -104,7 +105,7 @@ impl Report {
     }
 }
 
-pub async fn run(username: &str) -> anyhow::Result<bool> {
+pub async fn run(username: &str, benchmark: bool) -> anyhow::Result<bool> {
     let mut report = Report::default();
 
     check_platform(&mut report);
@@ -113,7 +114,7 @@ pub async fn run(username: &str) -> anyhow::Result<bool> {
     check_pam(&mut report);
     check_desktop_integration(&mut report);
     check_tpm(&mut report, config.as_ref());
-    check_daemon(&mut report, username, config.as_ref()).await;
+    check_daemon(&mut report, username, config.as_ref(), benchmark).await;
 
     report.print()?;
     Ok(report.is_healthy())
@@ -659,7 +660,12 @@ async fn read_daemon_config(proxy: &GazeProxy<'_>, ready_wait: Duration) -> zbus
     }
 }
 
-async fn check_daemon(report: &mut Report, username: &str, config: Option<&Config>) {
+async fn check_daemon(
+    report: &mut Report,
+    username: &str,
+    config: Option<&Config>,
+    benchmark: bool,
+) {
     let daemon_starting = matches!(
         command_output("systemctl", &["is-active", "gazed"]),
         Ok((true, ref state)) if state == "active"
@@ -808,6 +814,39 @@ async fn check_daemon(report: &mut Report, username: &str, config: Option<&Confi
         Err(_) => report.error(
             "Enrollment",
             format!("timed out while checking faces for {username}"),
+            "Restart gazed and inspect its journal.",
+        ),
+    }
+
+    if benchmark {
+        check_benchmark(report, &proxy).await;
+    }
+}
+
+async fn check_benchmark(report: &mut Report, proxy: &GazeProxy<'_>) {
+    match tokio::time::timeout(BENCHMARK_TIMEOUT, proxy.benchmark()).await {
+        Ok(Ok(results)) => {
+            for result in results {
+                report.pass(
+                    "Benchmark",
+                    format!(
+                        "{}: {:.1}ms avg ({:.1} fps), {:.1}ms p95, {:.1}ms min",
+                        result.component, result.mean_ms, result.fps, result.p95_ms, result.min_ms
+                    ),
+                );
+            }
+        }
+        Ok(Err(err)) => report.warning(
+            "Benchmark",
+            format!(
+                "gazed could not run the benchmark: {}",
+                dbus_error_message(&err)
+            ),
+            "Restart gazed and inspect its journal.",
+        ),
+        Err(_) => report.warning(
+            "Benchmark",
+            "benchmark timed out",
             "Restart gazed and inspect its journal.",
         ),
     }

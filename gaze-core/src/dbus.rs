@@ -2,7 +2,7 @@
 use crate::config::Config;
 use serde::{Deserialize, Serialize};
 use zbus::proxy;
-use zbus::zvariant::Type;
+use zbus::zvariant::{OwnedValue, Type, Value};
 
 use strum_macros::{AsRefStr, Display, EnumString, VariantNames};
 
@@ -115,6 +115,15 @@ pub enum VerifyResult {
     VerifyNoMatch,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Value, OwnedValue, Type)]
+pub struct BenchmarkResult {
+    pub component: String,
+    pub mean_ms: f64,
+    pub p95_ms: f64,
+    pub min_ms: f64,
+    pub fps: f64,
+}
+
 pub fn dbus_error_message(err: &zbus::Error) -> String {
     let text = err.to_string();
     if let Some((_, inner)) = text.split_once(':') {
@@ -201,6 +210,7 @@ pub trait Gaze {
     async fn list_faces(&self, username: &str) -> zbus::Result<Vec<(String, u32, bool, bool)>>;
     async fn has_enrolled_faces(&self, username: &str) -> zbus::Result<bool>;
     async fn is_camera_available(&self) -> zbus::Result<bool>;
+    async fn benchmark(&self) -> zbus::Result<Vec<BenchmarkResult>>;
     async fn delete_face(&self, username: &str, face_name: &str) -> zbus::Result<bool>;
     async fn rename_face(
         &self,

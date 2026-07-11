@@ -65,7 +65,7 @@ async fn maybe_run_first_run_doctor(command: &Commands) {
         style("i").cyan().bold(),
         style("(this won't appear again)").dim()
     ));
-    let _ = doctor::run(&get_current_user()).await;
+    let _ = doctor::run(&get_current_user(), false).await;
     let _ = term.write_line("");
 
     if let Some(parent) = marker.parent() {
@@ -183,6 +183,12 @@ enum Commands {
     Doctor {
         #[arg(short, long, help = "Check enrollments for this user")]
         user: Option<String>,
+        #[arg(
+            short,
+            long,
+            help = "Benchmark detector, recognizer, and liveness model inference speed"
+        )]
+        benchmark: bool,
     },
     /// Completely uninstall Gaze: packages, PAM integration, config, models, and user data
     Uninstall {
@@ -1261,9 +1267,9 @@ async fn main() -> anyhow::Result<()> {
             keep_data,
             dry_run,
         } => return handle_uninstall(*yes, *keep_data, *dry_run),
-        Commands::Doctor { user } => {
+        Commands::Doctor { user, benchmark } => {
             let username = user.clone().unwrap_or_else(get_current_user);
-            let healthy = doctor::run(&username).await?;
+            let healthy = doctor::run(&username, *benchmark).await?;
             if !healthy {
                 std::process::exit(1);
             }
@@ -1432,8 +1438,18 @@ mod tests {
         assert!(matches!(
             cli.command,
             Commands::Doctor {
-                user: Some(ref user)
+                user: Some(ref user),
+                benchmark: false,
             } if user == "alice"
+        ));
+
+        let cli = Cli::try_parse_from(["gaze", "doctor", "--benchmark"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Doctor {
+                benchmark: true,
+                ..
+            }
         ));
     }
 

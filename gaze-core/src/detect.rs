@@ -269,6 +269,14 @@ impl FaceDetector {
 
         Ok((final_bboxes, final_kpss, mat_rgb))
     }
+
+    pub fn benchmark_infer(&mut self) -> Result<(), DetectError> {
+        let (w, h) = self.input_size;
+        let input_array = ndarray::Array4::<f32>::zeros((1, 3, h, w));
+        let inputs = ort::inputs![TensorRef::from_array_view(&input_array)?];
+        self.session.run(inputs)?;
+        Ok(())
+    }
 }
 
 fn nms(boxes: &[[f32; 4]], scores: &[f32], iou_threshold: f32) -> Vec<usize> {

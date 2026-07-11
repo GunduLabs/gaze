@@ -1150,6 +1150,116 @@ enum EnrollMsg {
     Error(String),
 }
 
+const BENCHMARK_WARMUP_ITERS: usize = 3;
+const BENCHMARK_TIMED_ITERS: usize = 15;
+
+fn benchmark_component(
+    component: &str,
+    mut run_once: impl FnMut() -> anyhow::Result<()>,
+) -> anyhow::Result<gaze_core::dbus::BenchmarkResult> {
+    for _ in 0..BENCHMARK_WARMUP_ITERS {
+        run_once()?;
+    }
+
+    let mut samples_ms = Vec::with_capacity(BENCHMARK_TIMED_ITERS);
+    for _ in 0..BENCHMARK_TIMED_ITERS {
+        let start = Instant::now();
+        run_once()?;
+        samples_ms.push(start.elapsed().as_secs_f64() * 1000.0);
+    }
+    samples_ms.sort_by(f64::total_cmp);
+
+    let mean_ms = samples_ms.iter().sum::<f64>() / samples_ms.len() as f64;
+    let min_ms = samples_ms[0];
+    let p95_idx = (((samples_ms.len() - 1) as f64) * 0.95).round() as usize;
+    let p95_ms = samples_ms[p95_idx];
+    let fps = if mean_ms > 0.0 { 1000.0 / mean_ms } else { 0.0 };
+
+    Ok(gaze_core::dbus::BenchmarkResult {
+        component: component.to_string(),
+        mean_ms,
+        p95_ms,
+        min_ms,
+        fps,
+    })
+}
+
+fn run_inference_benchmark(
+    detector: Arc<std::sync::Mutex<FaceDetector>>,
+    recognizer_rgb: Arc<Mutex<FaceRecognizer>>,
+    recognizer_ir: Arc<Mutex<FaceRecognizer>>,
+    liveness: Arc<Mutex<Option<LivenessDetector>>>,
+) -> fdo::Result<Vec<gaze_core::dbus::BenchmarkResult>> {
+    let mut results = Vec::new();
+
+    {
+        let mut detector = detector.lock().unwrap_or_else(|e| e.into_inner());
+        let result = benchmark_component("Face detector", || Ok(detector.benchmark_infer()?))
+            .map_err(|e| fdo::Error::Failed(format!("detector benchmark failed: {e}")))?;
+        results.push(result);
+    }
+
+    let synthetic_face = image::RgbImage::from_pixel(112, 112, image::Rgb([128, 128, 128]));
+
+    {
+        let mut recognizer = recognizer_rgb.blocking_lock();
+        let result = benchmark_component("Face recognizer (RGB)", || {
+            recognizer.get_embedding(&synthetic_face).map(|_| ())
+        })
+        .map_err(|e| fdo::Error::Failed(format!("RGB recognizer benchmark failed: {e}")))?;
+        results.push(result);
+    }
+
+    {
+        let mut recognizer = recognizer_ir.blocking_lock();
+        let result = benchmark_component("Face recognizer (IR)", || {
+            recognizer.get_embedding(&synthetic_face).map(|_| ())
+        })
+        .map_err(|e| fdo::Error::Failed(format!("IR recognizer benchmark failed: {e}")))?;
+        results.push(result);
+    }
+
+    {
+        let mut liveness_guard = liveness.blocking_lock();
+        if let Some(detector) = liveness_guard.as_mut() {
+            let result = benchmark_component("Liveness (MiniFASNet)", || {
+                detector.live_score(&synthetic_face).map(|_| ())
+            })
+            .map_err(|e| fdo::Error::Failed(format!("liveness benchmark failed: {e}")))?;
+            results.push(result);
+        }
+    }
+
+    Ok(results)
+}
+
+#[cfg(test)]
+mod benchmark_tests {
+    use super::{BENCHMARK_TIMED_ITERS, BENCHMARK_WARMUP_ITERS, benchmark_component};
+
+    #[test]
+    fn runs_warmup_then_timed_iterations_and_reports_ordered_stats() {
+        let calls = std::cell::Cell::new(0usize);
+        let result = benchmark_component("Test model", || {
+            calls.set(calls.get() + 1);
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(calls.get(), BENCHMARK_WARMUP_ITERS + BENCHMARK_TIMED_ITERS);
+        assert_eq!(result.component, "Test model");
+        assert!(result.min_ms <= result.mean_ms);
+        assert!(result.min_ms <= result.p95_ms);
+        assert!(result.fps >= 0.0);
+    }
+
+    #[test]
+    fn propagates_the_first_error_from_warmup() {
+        let err = benchmark_component("Failing model", || anyhow::bail!("boom")).unwrap_err();
+        assert!(err.to_string().contains("boom"));
+    }
+}
+
 #[interface(name = "com.gundulabs.Gaze")]
 impl AuthDaemon {
     async fn register_extension(
@@ -2229,6 +2339,24 @@ impl AuthDaemon {
         Ok(Self::camera_runtime_uid(caller_uid, caller_uid)
             .await
             .is_some())
+    }
+
+    async fn benchmark(&self) -> fdo::Result<Vec<gaze_core::dbus::BenchmarkResult>> {
+        let detector_arc = self.detector.clone();
+        let recognizer_rgb_arc = self.recognizer_rgb.clone();
+        let recognizer_ir_arc = self.recognizer_ir.clone();
+        let liveness_arc = self.liveness.clone();
+
+        tokio::task::spawn_blocking(move || {
+            run_inference_benchmark(
+                detector_arc,
+                recognizer_rgb_arc,
+                recognizer_ir_arc,
+                liveness_arc,
+            )
+        })
+        .await
+        .map_err(|e| fdo::Error::Failed(format!("benchmark task panicked: {e}")))?
     }
 
     async fn delete_face(
