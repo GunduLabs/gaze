@@ -10,8 +10,8 @@ const MAX_FACE_SIZE_RATIO: f32 = 0.78;
 const ENROLL_POSE_STABILITY_WINDOW: usize = 2;
 const ENROLL_STABLE_YAW_RANGE: f32 = 0.08;
 const ENROLL_STABLE_PITCH_RANGE: f32 = 0.06;
-const ENROLL_HORIZONTAL_POSE_DELTA: f32 = 0.10;
-const ENROLL_VERTICAL_POSE_DELTA: f32 = 0.04;
+const ENROLL_HORIZONTAL_POSE_DELTA: f32 = 0.16;
+const ENROLL_VERTICAL_POSE_DELTA: f32 = 0.07;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Spectrum {
@@ -614,26 +614,26 @@ mod tests {
         let baseline = Some((0.08, 0.62));
         assert!(enrollment_pose_matches(
             EnrollPrompt::LookLeft,
-            -0.03,
+            -0.10,
             0.62,
             baseline
         ));
         assert!(enrollment_pose_matches(
             EnrollPrompt::LookRight,
-            0.19,
+            0.26,
             0.62,
             baseline
         ));
         assert!(enrollment_pose_matches(
             EnrollPrompt::LookUp,
             0.08,
-            0.57,
+            0.52,
             baseline
         ));
         assert!(enrollment_pose_matches(
             EnrollPrompt::LookDown,
             0.08,
-            0.67,
+            0.72,
             baseline
         ));
         assert!(!enrollment_pose_matches(
@@ -644,7 +644,7 @@ mod tests {
         ));
         assert!(!enrollment_pose_matches(
             EnrollPrompt::LookRight,
-            0.15,
+            0.19,
             0.62,
             baseline
         ));
