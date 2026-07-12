@@ -20,7 +20,10 @@ use gaze_core::camera::{Camera, CameraKind, resolve_configured_sources};
 use gaze_core::config::Config;
 use gaze_core::dbus::{CaptureStatus, EnrollPrompt, VerifyResult};
 use gaze_core::detect::FaceDetector;
-use gaze_core::face::{EnrollmentPoseStability, FaceChecker, Spectrum, enrollment_pose_matches};
+use gaze_core::face::{
+    EnrollmentPoseStability, FaceChecker, IrDarkFrameGate, IrFrameKind, Spectrum,
+    enrollment_pose_matches,
+};
 use gaze_core::ir::led::IrLed;
 
 const CONFIG_PATH: &str = "/etc/gaze/config.toml";
@@ -1680,11 +1683,21 @@ impl AuthDaemon {
                     tracing::debug!("IR camera opened successfully at: {}", ir_device_clone);
 
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, false);
+                    let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
                     let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
 
                     for frame in &mut cam {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
                             break;
+                        }
+
+                        match dark_gate.classify(&frame) {
+                            IrFrameKind::Lit => {}
+                            IrFrameKind::StrobeDark => continue,
+                            IrFrameKind::EmitterDark => {
+                                let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, CaptureStatus::TooDark, None));
+                                continue;
+                            }
                         }
 
                         let (status, embed_opt) = {
@@ -2096,6 +2109,7 @@ impl AuthDaemon {
                     };
 
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, true);
+                    let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
                     let mut last_processed_step = 999;
                     let mut captured_for_step = false;
                     let mut pose_stability = EnrollmentPoseStability::default();
@@ -2119,6 +2133,15 @@ impl AuthDaemon {
                         if captured_for_step {
                             std::thread::sleep(Duration::from_millis(100));
                             continue;
+                        }
+
+                        match dark_gate.classify(&frame) {
+                            IrFrameKind::Lit => {}
+                            IrFrameKind::StrobeDark => continue,
+                            IrFrameKind::EmitterDark => {
+                                let _ = tx.try_send(EnrollMsg::Status(current_step, Spectrum::Ir, CaptureStatus::TooDark));
+                                continue;
+                            }
                         }
 
                         let prompt = prompts[current_step];
