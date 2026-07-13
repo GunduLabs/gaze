@@ -31,8 +31,10 @@ yay -S gaze-hyprlock-bin
 Add to `~/.config/hypr/hyprlock.conf`:
 
 ```ini
-general {
-    pam_module = hyprlock-gaze
+auth {
+    pam {
+        module = hyprlock-gaze
+    }
 }
 ```
 
@@ -43,8 +45,10 @@ Restart hyprlock or lock the session again. Face unlock runs first; if it fails 
 For password-and-face authentication in parallel (type your password while the camera matches your face; whichever succeeds first unlocks), use:
 
 ```ini
-general {
-    pam_module = hyprlock-gaze-simultaneous
+auth {
+    pam {
+        module = hyprlock-gaze-simultaneous
+    }
 }
 ```
 
@@ -70,7 +74,7 @@ No `gazed` configuration changes are required. The DBus policy already permits u
 
 ## Disable
 
-Remove the `pam_module` line from `hyprlock.conf` (or set it to hyprlock's default, `hyprlock`). Uninstall the package if you do not plan to use it again:
+Remove the `module` line from the `auth { pam { ... } }` block in `hyprlock.conf` (or set it to hyprlock's default, `hyprlock`). Uninstall the package if you do not plan to use it again:
 
 ::: code-group
 
