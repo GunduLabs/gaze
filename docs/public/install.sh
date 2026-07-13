@@ -411,7 +411,7 @@ is_arch() {
 }
 
 supported_deb_suite() {
-    case "$DISTRO_CODENAME" in
+    case "$1" in
     noble | questing | resolute | trixie) return 0 ;;
     esac
     return 1
@@ -430,7 +430,16 @@ if ! is_rpm && ! is_deb && ! is_arch; then
     exit 1
 fi
 
-if is_deb && ! supported_deb_suite; then
+if is_deb && ! supported_deb_suite "$DISTRO_CODENAME"; then
+    for candidate in "${UBUNTU_CODENAME:-}" "${DEBIAN_CODENAME:-}"; do
+        if [ -n "$candidate" ] && supported_deb_suite "$candidate"; then
+            DISTRO_CODENAME="$candidate"
+            break
+        fi
+    done
+fi
+
+if is_deb && ! supported_deb_suite "$DISTRO_CODENAME"; then
     fail "Unsupported Debian/Ubuntu release: ${DISTRO_CODENAME:-unknown}"
     say "Supported apt suites: noble, questing, resolute, trixie"
     exit 1
