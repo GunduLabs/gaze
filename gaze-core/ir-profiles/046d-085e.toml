@@ -1,3 +1,8 @@
+# NOTE: The BRIO is a single-function UVC device and cannot stream its RGB
+# (/dev/video0) and IR (/dev/video2) sensors simultaneously. Run IR-only
+# (leave [cameras] rgb empty) or parallel verification will drop the IR
+# stream. See docs/src/guide/troubleshooting.md.
+
 [device]
 vendor_id  = 0x046D
 product_id = 0x085E
