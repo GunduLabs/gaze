@@ -461,6 +461,34 @@ fn find_pam_references() -> Vec<PathBuf> {
         .collect()
 }
 
+const PAM_ORDERING_COMPETITORS: [&str; 2] = ["pam_unix.so", "pam_fprintd.so"];
+
+/// Returns competing auth modules (password, fingerprint) that appear earlier
+/// in the `auth` stack than Gaze, which stalls face auth behind their prompts.
+fn find_pam_ordering_conflicts(contents: &str) -> Vec<&'static str> {
+    let auth_lines: Vec<&str> = contents
+        .lines()
+        .map(|line| line.split('#').next().unwrap_or_default().trim())
+        .filter(|line| line.split_ascii_whitespace().next() == Some("auth"))
+        .collect();
+
+    let Some(gaze_idx) = auth_lines
+        .iter()
+        .position(|line| pam_line_has_reference(line))
+    else {
+        return Vec::new();
+    };
+
+    PAM_ORDERING_COMPETITORS
+        .into_iter()
+        .filter(|module| {
+            auth_lines[..gaze_idx]
+                .iter()
+                .any(|line| line.contains(module))
+        })
+        .collect()
+}
+
 fn check_pam(report: &mut Report) {
     let modules = find_pam_modules();
     let sequential = modules
@@ -527,6 +555,25 @@ fn check_pam(report: &mut Report) {
             .collect::<Vec<_>>()
             .join(", ");
         report.pass("PAM stack", format!("Gaze is referenced by: {names}"));
+
+        for path in &references {
+            let Ok(contents) = fs::read_to_string(path) else {
+                continue;
+            };
+            let conflicts = find_pam_ordering_conflicts(&contents);
+            if !conflicts.is_empty() {
+                report.warning(
+                    "PAM ordering",
+                    format!(
+                        "{} runs after {} in {}, so face auth won't be tried until those prompts resolve",
+                        PAM_MODULES.join("/"),
+                        conflicts.join(", "),
+                        path.display()
+                    ),
+                    "Re-run `sudo pam-auth-update --package` (Debian/Ubuntu) or move the Gaze line above pam_unix.so/pam_fprintd.so.",
+                );
+            }
+        }
     }
 }
 
@@ -1023,6 +1070,23 @@ mod tests {
         assert!(!pam_line_has_reference(
             "auth sufficient pam_gaze.so.disabled"
         ));
+    }
+
+    #[test]
+    fn pam_ordering_flags_modules_stacked_before_gaze() {
+        let stacked_behind = "auth [success=3 default=ignore] pam_fprintd.so\n\
+             auth [success=2 default=ignore] pam_unix.so\n\
+             auth [success=1 default=ignore] pam_gaze.so\n";
+        assert_eq!(
+            find_pam_ordering_conflicts(stacked_behind),
+            vec!["pam_unix.so", "pam_fprintd.so"]
+        );
+
+        let stacked_first = "auth sufficient pam_gaze.so\n\
+             auth sufficient pam_unix.so try_first_pass nullok\n";
+        assert!(find_pam_ordering_conflicts(stacked_first).is_empty());
+
+        assert!(find_pam_ordering_conflicts("auth include system-auth\n").is_empty());
     }
 
     #[test]
