@@ -1,6 +1,6 @@
 [package]
 name = "gaze"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2024"
 description = "Linux facial authentication daemon and machine-learning pipeline for Gaze"
 categories.workspace = true

@@ -13,6 +13,7 @@
   <developer_name>Gundu Labs</developer_name>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.4" date="2026-07-14"/>
     <release version="0.2.3" date="2026-07-11"/>
     <release version="0.2.2" date="2026-07-06"/>
     <release version="0.2.1" date="2026-07-03"/>
