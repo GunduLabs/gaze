@@ -1,0 +1,11 @@
+[device]
+vendor_id  = 0x046D
+product_id = 0x085E
+name       = "Logitech BRIO (BRIO 4K Pro) IR emitter"
+source     = "Empirically probed on Arch/CachyOS 2026-07-14: extension unit 12, selector 0x06, 9-byte control. Values follow the [1, iface, mode, 0..] Windows-Hello face-auth shape but with iface byte = 2 (not the more common 3) and inverted mode semantics: mode 1 = emitter ON (IR frame mean luma ~39/max 227), mode 2 = OFF (dark). Verified by toggling GET_CUR/SET_CUR while capturing /dev/video2."
+
+[emitter]
+unit              = 12
+selector          = 0x06
+control_bytes     = [0x01, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]  # ON
+off_control_bytes = [0x01, 0x02, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]  # OFF
