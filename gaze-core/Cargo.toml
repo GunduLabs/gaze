@@ -30,7 +30,7 @@ serde_plain = "1.0.2"
 tracing = "0.1.44"
 toml = "1.1.2"
 ureq = "3.3"
-uuid = { version = "1.23.4", features = ["v4"] }
+uuid = { version = "1.23.5", features = ["v4"] }
 zip = "8.6"
 gstreamer = "0.25.3"
 gstreamer-app = "0.25.2"
