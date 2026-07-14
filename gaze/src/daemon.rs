@@ -2004,6 +2004,100 @@ impl AuthDaemon {
                 let rgb_captured_for_step_clone = rgb_captured_for_step.clone();
 
                 rgb_thread = Some(std::thread::spawn(move || {
+                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, true);
+                    let mut pose_baseline = None;
+
+                    // Dual-spectrum mode holds one camera at a time: some cameras
+                    // (e.g. Logitech Brio 4K) cannot stream RGB and IR at once, so
+                    // the RGB camera is released as soon as a step is captured.
+                    if run_ir {
+                        let mut dead_streams = 0u32;
+
+                        'steps: loop {
+                            if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                                return;
+                            }
+                            let step = completed_steps_clone.load(std::sync::atomic::Ordering::Relaxed) as usize;
+                            if step >= max_steps as usize {
+                                return;
+                            }
+                            if rgb_captured_for_step_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                                std::thread::sleep(Duration::from_millis(50));
+                                continue;
+                            }
+
+                            let mut cam = match Camera::open(&rgb_device_clone) {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    dead_streams += 1;
+                                    if dead_streams >= 3 {
+                                        let _ = tx.blocking_send(EnrollMsg::Error(format!("RGB Camera open error: {e}")));
+                                        return;
+                                    }
+                                    std::thread::sleep(Duration::from_millis(200));
+                                    continue;
+                                }
+                            };
+                            let mut pose_stability = EnrollmentPoseStability::default();
+
+                            for frame in &mut cam {
+                                if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                                    return;
+                                }
+                                let current_step = completed_steps_clone.load(std::sync::atomic::Ordering::Relaxed) as usize;
+                                if current_step >= max_steps as usize {
+                                    return;
+                                }
+                                if current_step != step {
+                                    continue 'steps;
+                                }
+
+                                let prompt = prompts[current_step];
+
+                                let (status, result_opt) = {
+                                    let mut recognizer = recognizer_rgb_arc.blocking_lock();
+                                    match process_frame_sync(&mut checker, &mut recognizer, &frame, false) {
+                                        Ok(res) => res,
+                                        Err(_) => (CaptureStatus::NoFace, None),
+                                    }
+                                };
+
+                                let _ = tx.try_send(EnrollMsg::Status(current_step, Spectrum::Rgb, status));
+
+                                if status == CaptureStatus::Usable && let Some(data) = result_opt {
+                                    let is_stable = pose_stability.update(prompt, data.yaw, data.pitch);
+                                    let pose_matches = enrollment_pose_matches(
+                                        prompt,
+                                        data.yaw,
+                                        data.pitch,
+                                        pose_baseline,
+                                    );
+
+                                    if is_stable && pose_matches {
+                                        if prompt == EnrollPrompt::LookStraight {
+                                            pose_baseline = Some((data.yaw, data.pitch));
+                                        }
+                                        rgb_captured_for_step_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+                                        let _ = tx.blocking_send(EnrollMsg::Captured(current_step, Spectrum::Rgb, data.embedding));
+                                        dead_streams = 0;
+                                        continue 'steps;
+                                    }
+                                } else {
+                                    pose_stability.reset();
+                                }
+                            }
+
+                            dead_streams += 1;
+                            if dead_streams >= 3 {
+                                let _ = tx.blocking_send(EnrollMsg::Error(
+                                    "RGB camera stream stopped unexpectedly".into(),
+                                ));
+                                return;
+                            }
+                            std::thread::sleep(Duration::from_millis(200));
+                        }
+                    }
+
                     let mut cam = match Camera::open(&rgb_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
@@ -2012,11 +2106,9 @@ impl AuthDaemon {
                         }
                     };
 
-                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, true);
                     let mut last_processed_step = 999;
                     let mut captured_for_step = false;
                     let mut pose_stability = EnrollmentPoseStability::default();
-                    let mut pose_baseline = None;
 
                     for frame in &mut cam {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
@@ -2063,7 +2155,6 @@ impl AuthDaemon {
                                 if prompt == EnrollPrompt::LookStraight {
                                     pose_baseline = Some((data.yaw, data.pitch));
                                 }
-                                rgb_captured_for_step_clone.store(true, std::sync::atomic::Ordering::Relaxed);
                                 let _ = tx.blocking_send(EnrollMsg::Captured(current_step, Spectrum::Rgb, data.embedding));
                                 captured_for_step = true;
                             }
@@ -2095,6 +2186,98 @@ impl AuthDaemon {
                 let rgb_captured_for_step_clone = rgb_captured_for_step.clone();
 
                 ir_thread = Some(std::thread::spawn(move || {
+                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, true);
+                    let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
+
+                    // Dual-spectrum mode: wait for RGB to capture and release the
+                    // camera, then hold the IR camera just long enough to grab one
+                    // lit usable frame; the pose was already validated over RGB.
+                    if run_rgb {
+                        let mut captured_step = usize::MAX;
+                        let mut dead_streams = 0u32;
+
+                        'steps: loop {
+                            if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                                return;
+                            }
+                            let step = completed_steps_clone.load(std::sync::atomic::Ordering::Relaxed) as usize;
+                            if step >= max_steps as usize {
+                                return;
+                            }
+                            if step == captured_step
+                                || !rgb_captured_for_step_clone.load(std::sync::atomic::Ordering::Relaxed)
+                            {
+                                std::thread::sleep(Duration::from_millis(50));
+                                continue;
+                            }
+
+                            let _emitter = EmitterGuard::engage(
+                                &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
+                                emitter_enabled
+                            );
+                            let mut cam = match Camera::open_ir(&ir_device_clone) {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    dead_streams += 1;
+                                    if dead_streams >= 3 {
+                                        let _ = tx.blocking_send(EnrollMsg::Error(format!("IR Camera open error: {e}")));
+                                        return;
+                                    }
+                                    std::thread::sleep(Duration::from_millis(200));
+                                    continue;
+                                }
+                            };
+
+                            for frame in &mut cam {
+                                if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                                    return;
+                                }
+                                let current_step = completed_steps_clone.load(std::sync::atomic::Ordering::Relaxed) as usize;
+                                if current_step >= max_steps as usize {
+                                    return;
+                                }
+                                if current_step != step {
+                                    continue 'steps;
+                                }
+
+                                match dark_gate.classify(&frame) {
+                                    IrFrameKind::Lit => {}
+                                    IrFrameKind::StrobeDark => continue,
+                                    IrFrameKind::EmitterDark => {
+                                        let _ = tx.try_send(EnrollMsg::Status(current_step, Spectrum::Ir, CaptureStatus::TooDark));
+                                        continue;
+                                    }
+                                }
+
+                                let (status, result_opt) = {
+                                    let mut recognizer = recognizer_ir_arc.blocking_lock();
+                                    match process_frame_sync(&mut checker, &mut recognizer, &frame, false) {
+                                        Ok(res) => res,
+                                        Err(_) => (CaptureStatus::NoFace, None),
+                                    }
+                                };
+
+                                let _ = tx.try_send(EnrollMsg::Status(current_step, Spectrum::Ir, status));
+
+                                if status == CaptureStatus::Usable && let Some(data) = result_opt {
+                                    let _ = tx.blocking_send(EnrollMsg::Captured(current_step, Spectrum::Ir, data.embedding));
+                                    captured_step = step;
+                                    dead_streams = 0;
+                                    continue 'steps;
+                                }
+                            }
+
+                            dead_streams += 1;
+                            if dead_streams >= 3 {
+                                let _ = tx.blocking_send(EnrollMsg::Error(
+                                    "IR camera stream stopped unexpectedly".into(),
+                                ));
+                                return;
+                            }
+                            std::thread::sleep(Duration::from_millis(200));
+                        }
+                    }
+
                     let _emitter = EmitterGuard::engage(
                         &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                         emitter_enabled
@@ -2108,8 +2291,6 @@ impl AuthDaemon {
                         }
                     };
 
-                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, true);
-                    let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
                     let mut last_processed_step = 999;
                     let mut captured_for_step = false;
                     let mut pose_stability = EnrollmentPoseStability::default();
@@ -2157,25 +2338,16 @@ impl AuthDaemon {
                         let _ = tx.try_send(EnrollMsg::Status(current_step, Spectrum::Ir, status));
 
                         if status == CaptureStatus::Usable && let Some(data) = result_opt {
-                            let is_stable = if run_rgb {
-                                rgb_captured_for_step_clone.load(std::sync::atomic::Ordering::Relaxed)
-                            } else {
-                                pose_stability.update(prompt, data.yaw, data.pitch)
-                            };
-
-                            let pose_matches = if run_rgb {
-                                rgb_captured_for_step_clone.load(std::sync::atomic::Ordering::Relaxed)
-                            } else {
-                                enrollment_pose_matches(
-                                    prompt,
-                                    data.yaw,
-                                    data.pitch,
-                                    pose_baseline,
-                                )
-                            };
+                            let is_stable = pose_stability.update(prompt, data.yaw, data.pitch);
+                            let pose_matches = enrollment_pose_matches(
+                                prompt,
+                                data.yaw,
+                                data.pitch,
+                                pose_baseline,
+                            );
 
                             if is_stable && pose_matches {
-                                if !run_rgb && prompt == EnrollPrompt::LookStraight {
+                                if prompt == EnrollPrompt::LookStraight {
                                     pose_baseline = Some((data.yaw, data.pitch));
                                 }
                                 let _ = tx.blocking_send(EnrollMsg::Captured(current_step, Spectrum::Ir, data.embedding));
