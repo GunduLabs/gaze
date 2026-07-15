@@ -137,7 +137,7 @@ ir = "pipewiresrc target-object=<pipewire-target>"
 
 When `ir` is configured, Gaze captures from both the RGB and IR cameras. During enrollment, both cameras will capture templates, and during verification, they will authenticate in parallel, combining results according to the configured `hybrid_policy`.
 
-> **Single-function cameras (e.g. Logitech BRIO, `046d:085e`):** some Windows Hello webcams expose their RGB and IR sensors as one USB Video Class function that cannot stream both substreams at once. Enrollment (short bursts) succeeds, but parallel RGB+IR verification drops the IR stream mid-loop (`IR camera stream stopped unexpectedly`) and auth falls back to password. On these devices, run IR-only: leave `rgb` unset (`rgb = ""`) and configure `ir` alone.
+> **Single-function cameras (e.g. Logitech BRIO 4K, `046d:085e` — the original BRIO, not the newer Brio 300/500/100 which use different product IDs):** some Windows Hello webcams expose their RGB and IR sensors as one USB Video Class function that cannot stream both substreams at once. Enrollment (short bursts) succeeds, but parallel RGB+IR verification drops the IR stream mid-loop (`IR camera stream stopped unexpectedly`) and auth falls back to password. On these devices, run IR-only: leave `rgb` unset (`rgb = ""`) and configure `ir` alone.
 
 ### IR emitter blaster
 
