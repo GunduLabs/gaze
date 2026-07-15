@@ -408,8 +408,15 @@ DISTRO_VERSION_ID="${VERSION_ID:-}"
 DISTRO_CODENAME="${VERSION_CODENAME:-${UBUNTU_CODENAME:-}}"
 VARIANT_ID="${VARIANT_ID:-}"
 
-is_fedora() {
-    [ "$DISTRO_ID" = "fedora" ]
+is_fedora_compatible() {
+    case " $DISTRO_ID $DISTRO_LIKE " in
+    *" fedora "*) return 0 ;;
+    esac
+    return 1
+}
+
+is_ostree_system() {
+    [ -e /run/ostree-booted ]
 }
 
 is_rpm() {
@@ -440,7 +447,7 @@ supported_deb_suite() {
     return 1
 }
 
-supported_fedora_version() {
+supported_fedora_compatible_version() {
     case "$DISTRO_VERSION_ID" in
     42 | 43 | 44) return 0 ;;
     esac
@@ -449,7 +456,7 @@ supported_fedora_version() {
 
 if ! is_rpm && ! is_deb && ! is_arch; then
     fail "Unsupported distribution: $DISTRO_ID"
-    say "Supported: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Arch-compatible AUR distros"
+    say "Supported: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora-compatible 42/43/44 systems with standard DNF package installation, Arch Linux, and Arch-compatible AUR distros"
     exit 1
 fi
 
@@ -468,15 +475,22 @@ if is_deb && ! supported_deb_suite "$DISTRO_CODENAME"; then
     exit 1
 fi
 
-if is_rpm && ! is_fedora; then
-    fail "Unsupported RPM distribution: $DISTRO_ID"
-    say "Supported RPM distribution: Fedora"
+if is_rpm && ! is_fedora_compatible; then
+    fail "Unsupported RPM distribution: ${NAME:-$DISTRO_ID}"
+    say "This installer supports RPM distributions that identify as Fedora-compatible in /etc/os-release."
     exit 1
 fi
 
-if is_fedora && ! supported_fedora_version; then
-    fail "Unsupported Fedora version: ${DISTRO_VERSION_ID:-unknown}"
-    say "Supported Fedora versions: 42, 43, 44"
+if is_fedora_compatible && is_ostree_system; then
+    fail "Image-based Fedora-compatible system detected: ${NAME:-$DISTRO_ID}"
+    say "This installer currently supports systems that install packages directly with DNF (also called mutable or non-image-based systems)."
+    say "Systems that use rpm-ostree, such as Bazzite, Fedora Silverblue, and Fedora Kinoite, are not yet supported."
+    exit 1
+fi
+
+if is_fedora_compatible && ! supported_fedora_compatible_version; then
+    fail "Unsupported ${NAME:-Fedora-compatible distribution} version: ${DISTRO_VERSION_ID:-unknown}"
+    say "Fedora-compatible packages are currently available for versions 42, 43, and 44."
     exit 1
 fi
 
@@ -509,7 +523,7 @@ elif is_rpm; then
     else
         RPM_TOOL="yum"
     fi
-    say "Detected platform: ${BOLD}Fedora ${DISTRO_VERSION_ID}${RESET} (${PKG_ARCH}), package manager: ${RPM_TOOL}"
+    say "Detected platform: ${BOLD}${NAME:-Fedora} ${DISTRO_VERSION_ID}${RESET} (${PKG_ARCH}), package manager: ${RPM_TOOL}"
     STEP_TOTAL=6
     echo ""
     title "This will:"

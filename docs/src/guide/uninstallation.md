@@ -54,7 +54,7 @@ sudo dconf update
 sudo pam-auth-update --package --remove gaze
 ```
 
-```bash [Fedora]
+```bash [Fedora and compatible]
 if [ -f /etc/gaze/authselect.previous ]; then
   profile=$(sudo sed -n 's/^Profile ID:[[:space:]]*//p' /etc/gaze/authselect.previous)
   features=$(sudo sed -n 's/^- //p' /etc/gaze/authselect.previous | tr '\n' ' ')
@@ -92,7 +92,7 @@ sudo apt remove --purge gaze gaze-gui gaze-gnome-extension gaze-hyprlock
 sudo apt autoremove
 ```
 
-```bash [Fedora]
+```bash [Fedora and compatible]
 sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-hyprlock
 ```
 
@@ -118,7 +118,7 @@ sudo rm /usr/share/keyrings/gundulabs-archive-keyring.gpg
 sudo apt update
 ```
 
-```bash [Fedora]
+```bash [Fedora and compatible]
 sudo rm /etc/yum.repos.d/gundulabs.repo
 sudo rpm -e gpg-pubkey-$(rpm -qa gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n' | grep -i gundulabs | awk '{print $1}' | sed 's/gpg-pubkey-//')
 sudo dnf makecache
