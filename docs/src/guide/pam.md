@@ -32,11 +32,13 @@ sudo -v
 
 If camera opens and face auth runs, PAM wiring is active.
 
-## Fedora / RPM systems
+## Fedora and compatible RPM systems
 
 RPM packages install an authselect profile at:
 
 `/usr/share/authselect/vendor/gaze`
+
+The profile adds Gaze to both shared authentication stacks: `system-auth`, used by tools such as `sudo`, and `password-auth`, used by KDE's lock screen, SDDM, and Plasma Login Manager. RPM upgrades refresh these generated PAM files automatically when the Gaze profile is active.
 
 Enable it:
 
