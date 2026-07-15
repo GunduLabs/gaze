@@ -135,7 +135,7 @@ You can also use an IR PipeWire/GStreamer source:
 ir = "pipewiresrc target-object=<pipewire-target>"
 ```
 
-When `ir` is configured, Gaze captures from both the RGB and IR cameras. During enrollment, both cameras will capture templates, and during verification, they will authenticate in parallel, combining results according to the configured `hybrid_policy`.
+When `ir` is configured, Gaze captures from both the RGB and IR cameras. During enrollment, both cameras capture templates. During verification, Gaze captures from the two cameras one at a time (RGB, then IR) and combines the results according to the configured `hybrid_policy`. Capturing sequentially rather than concurrently lets single-function webcams that cannot stream their RGB and IR sensors at once (for example the Logitech BRIO 4K, `046d:085e`) still use hybrid authentication.
 
 ### IR emitter blaster
 
