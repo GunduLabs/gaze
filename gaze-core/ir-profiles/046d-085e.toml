@@ -1,0 +1,21 @@
+# Scope: matches USB 046d:085e only — the original Logitech BRIO 4K family
+# (BRIO Ultra HD Webcam / BRIO 4K Pro / BRIO 4K Stream Edition; identical
+# hardware). The newer Brio 300 / 500 / 100 report different product IDs and
+# are NOT covered by this profile; they would each need their own.
+#
+# NOTE: The BRIO 4K (046d:085e) is a single-function UVC device and cannot
+# stream its RGB (/dev/video0) and IR (/dev/video2) sensors simultaneously.
+# Run IR-only (leave [cameras] rgb empty) or parallel verification will drop
+# the IR stream. See docs/src/guide/troubleshooting.md.
+
+[device]
+vendor_id  = 0x046D
+product_id = 0x085E
+name       = "Logitech BRIO 4K (046d:085e) IR emitter"
+source     = "Empirically probed on Arch/CachyOS 2026-07-14: extension unit 12, selector 0x06, 9-byte control. Values follow the [1, iface, mode, 0..] Windows-Hello face-auth shape but with iface byte = 2 (not the more common 3) and inverted mode semantics: mode 1 = emitter ON (IR frame mean luma ~39/max 227), mode 2 = OFF (dark). Verified by toggling GET_CUR/SET_CUR while capturing /dev/video2."
+
+[emitter]
+unit              = 12
+selector          = 0x06
+control_bytes     = [0x01, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]  # ON
+off_control_bytes = [0x01, 0x02, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]  # OFF
