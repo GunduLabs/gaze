@@ -1,7 +1,7 @@
 Name: Gaze Face Authentication (Simultaneous)
 Default: no
 Conflicts: gaze
-Priority: 257
+Priority: 801
 Auth-Type: Primary
 Auth:
         [success=end default=ignore]    pam_gaze_grosshack.so

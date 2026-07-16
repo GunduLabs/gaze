@@ -1,0 +1,13 @@
+[device]
+vendor_id  = 0x13D3
+product_id = 0x56BA
+name       = "IMC Networks Integrated Camera (Lenovo Yoga S740 alternate camera variant)"
+source     = "boltgolt/howdy#269: igorgad posts lsusb + a Windows USB capture for this camera (Lenovo S740 with an IMC Networks camera instead of the usual Chicony one), then confirms \"I was able to enable the IR emitters\" using this payload"
+
+[emitter]
+# Captured as a standard UVC Processing Unit request (Power Line Frequency selector, PU unit ID 2)
+# rather than a vendor extension unit; on this camera it happens to enable the IR emitter (does not blink).
+unit              = 2
+selector          = 5
+control_bytes     = [1]
+off_control_bytes = [0]

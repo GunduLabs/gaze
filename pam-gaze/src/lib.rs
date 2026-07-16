@@ -13,6 +13,36 @@ fn confirm_via_gnome_extension(pamh: PamHandle) -> c_int {
     }
 }
 
+// Polkit dialogs ignore echo-off confirmation prompts, so keep a password
+// request pending for the agent to answer, then flip the dialog into
+// confirm mode via the info-message token.
+unsafe fn confirm_via_polkit_dialog(
+    pamh: PamHandle,
+    username: &str,
+    rt: &tokio::runtime::Runtime,
+) -> c_int {
+    let active_uid = rt.block_on(active_or_user_uid(username));
+    let de = active_uid
+        .map(detect_desktop_environment)
+        .unwrap_or_else(|| "Other".to_string());
+    let extension_active = de == "GNOME" && rt.block_on(gnome_extension_active(active_uid));
+
+    // No confirm channel without the extension; let the stack fall
+    // through to password auth.
+    if de == "GNOME" && !extension_active {
+        return PAM_AUTH_ERR;
+    }
+
+    let state = new_auth_state();
+    let prompt_thread = spawn_prompt_thread(pamh, &state, || {});
+    wait_for_prompt_started(&state);
+    // Let the pending request reach the dialog before the confirm token,
+    // or the dialog re-shows the password entry.
+    std::thread::sleep(Duration::from_millis(150));
+
+    unsafe { confirm_graphical_polkit(pamh, &de, extension_active, &state, prompt_thread) }
+}
+
 unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     let (username, rt) = match unsafe { username_and_runtime(pamh) } {
         Ok(ctx) => ctx,
@@ -60,6 +90,10 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         } else {
             PAM_AUTH_ERR
         };
+    }
+
+    if matches!(unsafe { get_pam_service(pamh) }, Some(ref s) if s == "polkit-1") {
+        return unsafe { confirm_via_polkit_dialog(pamh, &username, &rt) };
     }
 
     let extension_active = rt.block_on(async {

@@ -44,7 +44,7 @@ gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 sudo mkdir -p --mode=0755 /usr/share/keyrings
 curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.gpg \
   | sudo tee /usr/share/keyrings/gundulabs-archive-keyring.gpg >/dev/null
-echo "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb stable main" \
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb stable main" \
   | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 sudo apt update
 sudo apt install gaze gaze-gui
@@ -163,6 +163,7 @@ gaze clear-user              Remove all face data for current user
 gaze config                  Interactive configuration editor
 gaze config --show           Print current config and exit
 gaze doctor                  Check config, daemon, cameras, enrollments, PAM, and TPM
+gaze doctor --benchmark      Also measure detector/recognizer/liveness inference speed
 gaze uninstall               Completely remove Gaze (packages, PAM, config, models, data)
 gaze uninstall -y            Skip confirmation prompt
 ```

@@ -45,6 +45,14 @@ The camera checks enumerate devices but do not capture frames. Use `gaze auth` w
 
 The very first time you run any `gaze` command, this diagnostic runs automatically so problems surface right after install. It waits for the daemon to finish its one-time model download before checking it, and it will not run automatically again.
 
+To measure model inference speed on the current hardware:
+
+```bash
+gaze doctor --benchmark
+```
+
+This asks the running `gazed` daemon to run each loaded model (detector, RGB/IR recognizers, and liveness if enabled) a few times on synthetic input and reports average, p95, and minimum latency plus FPS for each. It does not need a face in frame and does not touch the camera.
+
 ## Authenticate
 
 ```bash

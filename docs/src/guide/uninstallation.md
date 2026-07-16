@@ -33,10 +33,10 @@ Repeat this for each desktop user who enabled lock screen face unlock. The last 
 
 ### Revert hyprlock face unlock
 
-If you enabled Gaze for hyprlock, remove the `pam_module = hyprlock-gaze` line from `~/.config/hypr/hyprlock.conf` (or restore `~/.config/hypr/hyprlock.conf.gaze-backup` if the installer created one). Repeat for every user that enabled it.
+If you enabled Gaze for hyprlock, remove the `module = hyprlock-gaze` line from the `auth { pam { ... } }` block in `~/.config/hypr/hyprlock.conf` (or restore `~/.config/hypr/hyprlock.conf.gaze-backup` if the installer created one). Repeat for every user that enabled it.
 
 ```bash
-sed -i.bak '/^\s*pam_module\s*=\s*hyprlock-gaze/d' "${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprlock.conf"
+sed -i.bak '/^\s*module\s*=\s*hyprlock-gaze/d' "${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprlock.conf"
 ```
 
 ### Remove GDM login defaults and overrides

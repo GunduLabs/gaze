@@ -6,10 +6,14 @@ For pull request workflow, testing expectations, and safety notes, see [Contribu
 
 ## Prerequisites
 
+Gaze targets Linux platform APIs (V4L2, PAM, TPM2/tss2, polkit, GTK4/libadwaita, Flatpak,
+SELinux) that do not exist on macOS or Windows, so none of this builds natively there. If
+you're not on Linux, skip straight to [Building without a Linux host (Docker)](#building-without-a-linux-host-docker).
+
 - Rust 1.85+ (or install current stable via `rustup`)
 - `just` 1.51+ (https://github.com/casey/just) for task automation
 - `nfpm` (https://nfpm.goreleaser.com) for packaging
-- `flatpak-builder` (https://github.com/flatpak/flatpak-builder) for flatpak
+- `flatpak` and `flatpak-builder` (https://github.com/flatpak/flatpak-builder) for the Flatpak build, plus the Flathub remote and GNOME/Rust/LLVM SDKs. See [Flatpak build](#flatpak-build) below.
 
 ::: code-group
 
@@ -19,7 +23,8 @@ sudo apt install build-essential pkg-config clang libclang-dev \
   libgtk-4-dev libadwaita-1-dev \
   libcairo2-dev libglib2.0-dev libgdk-pixbuf-2.0-dev \
   libpango1.0-dev libgraphene-1.0-dev \
-  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+  flatpak flatpak-builder elfutils
 ```
 
 ```bash [Fedora/RHEL]
@@ -27,14 +32,16 @@ sudo dnf install @development-tools pkg-config clang clang-devel \
   opencv-devel libv4l-devel pam-devel \
   gtk4-devel libadwaita-devel \
   gstreamer1-devel gstreamer1-plugins-base-devel \
-  checkpolicy policycoreutils
+  checkpolicy policycoreutils \
+  flatpak flatpak-builder elfutils
 ```
 
 ```bash [Arch Linux / Manjaro]
 sudo pacman -S base-devel pkgconf clang llvm \
   opencv v4l-utils pam \
   gtk4 libadwaita \
-  gstreamer gst-plugins-base
+  gstreamer gst-plugins-base \
+  flatpak flatpak-builder elfutils
 ```
 
 :::
@@ -75,7 +82,7 @@ just fmt          # apply formatting (fmt-check only checks)
 ```
 
 ::: warning Build with `just build-rust`, not `cargo build --workspace`
-`just build-rust` builds the daemon and the clients in separate cargo invocations so feature unification cannot link ONNX Runtime into the CLI, GUI, or PAM modules. ONNX Runtime's startup code requires AVX2, and a single workspace build would silently reintroduce crashes on older CPUs (issue #14).
+`just build-rust` builds the daemon and the clients in separate cargo invocations so feature unification cannot link ONNX Runtime into the CLI, GUI, or PAM modules. ONNX Runtime's startup code requires AVX2, and a single workspace build would silently reintroduce crashes on older CPUs.
 :::
 
 ## Run a locally-built daemon
@@ -195,13 +202,79 @@ Package output:
 
 ## Flatpak build
 
+The `flatpak`/`flatpak-builder` packages above are not enough on their own. The manifest
+(`packaging/flatpak/com.gundulabs.Gaze.yml`) also needs the Flathub remote and the exact
+GNOME runtime/SDK plus the Rust and LLVM SDK extensions it builds against. These versions
+must match `.github/workflows/cd.yml` and `packaging/docker/entrypoint.sh`, so bump all
+three together.
+
+```bash
+flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak install --user -y flathub \
+  org.gnome.Sdk//49 \
+  org.gnome.Platform//49 \
+  org.freedesktop.Sdk.Extension.rust-stable//25.08 \
+  org.freedesktop.Sdk.Extension.llvm20//25.08
+```
+
+Then build:
+
 ```bash
 just build-flatpak
 ```
 
+This runs two `[private]` prep recipes first (`prepare-flatpak-vendor`, `prepare-flatpak-ort`),
+so the first run needs network access even though the sandboxed build itself is `--offline`:
+
+- `cargo vendor --locked --versioned-dirs` populates `.flatpak-cache/cargo` from crates.io.
+- It downloads the pinned ONNX Runtime release tarball into `.flatpak-cache/ort`.
+
+Both are cached under `.flatpak-cache/` (removed by `just clean`), so only the first build
+per checkout pays the network/OpenCV-from-source cost; expect that first build to take a
+while, since OpenCV compiles from source inside the sandbox.
+
 Output bundle:
 
 - `dist/packages/com.gundulabs.Gaze-<arch>.flatpak` (e.g. `com.gundulabs.Gaze-x86_64.flatpak`)
+- `dist/packages/com.gundulabs.Gaze.flatpakref` and `.flatpakrepo` (only meaningful once published to a real repo; fine to ignore for local builds)
+
+Set `FLATPAK_GPG_SIGN=<key-id>` to sign the repo/bundle; leave it unset for local builds.
+
+## Building without a Linux host (Docker)
+
+macOS and Windows can't run any of the recipes above natively. `just docker <target>` runs
+the same `just` target inside a disposable Ubuntu container that mirrors the CI toolchain
+(`packaging/docker/Dockerfile.build`), so this works for `build-rust`, `build-flatpak`,
+`package <deb|rpm|archlinux>`, and so on, with no local Rust/OpenCV/Flatpak setup needed on
+the host:
+
+```bash
+just docker build-rust
+just docker build-flatpak
+just docker package deb
+```
+
+Requirements on the host:
+
+- Docker (or a Docker-compatible runtime; Colima works on macOS).
+- The container runs `--privileged`, which `flatpak-builder`'s ostree backend needs.
+
+Notes:
+
+- `just docker-image` builds (and caches) the build image; `just docker <target>` builds it
+  automatically on first use.
+- Cargo registry, build target, and Flatpak state persist in named Docker volumes across
+  runs, so repeat builds don't re-download crates or the GNOME SDK.
+- For `build-flatpak`, the entrypoint lazily adds the Flathub remote and installs the same
+  GNOME/Rust/LLVM SDKs listed above into a volume the first time a `flatpak` target runs.
+- If your checkout lives on a sshfs-backed mount (e.g. a Colima VM on an external/network
+  drive), Flatpak's ostree repo can't live on that mount. The wrapper already redirects
+  `flatpak-builder`'s state/build/repo dirs to an in-VM Docker volume, so this works out of
+  the box. Don't override `FLATPAK_STATE_DIR`/`FLATPAK_BUILD_DIR`/`FLATPAK_REPO_DIR` back
+  onto the bind mount.
+- Artifacts land in `dist/` on the host same as a native build, re-owned to your host
+  user/group when the container runs as root (native Docker); on uid-mapping backends like
+  Colima's sshfs, files already belong to you and are left alone.
 
 ## Cleaning build artifacts
 

@@ -182,7 +182,6 @@ pub fn ir_liveness_passed(model_scores: &[f32], threshold: f32, motion: &EyeMoti
     }
     liveness_passes(model_scores, threshold)
 }
-
 pub fn liveness_passes(scores: &[f32], threshold: f32) -> bool {
     let mut finite_scores = scores
         .iter()

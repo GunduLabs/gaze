@@ -10,8 +10,8 @@ const MAX_FACE_SIZE_RATIO: f32 = 0.78;
 const ENROLL_POSE_STABILITY_WINDOW: usize = 2;
 const ENROLL_STABLE_YAW_RANGE: f32 = 0.08;
 const ENROLL_STABLE_PITCH_RANGE: f32 = 0.06;
-const ENROLL_HORIZONTAL_POSE_DELTA: f32 = 0.10;
-const ENROLL_VERTICAL_POSE_DELTA: f32 = 0.04;
+const ENROLL_HORIZONTAL_POSE_DELTA: f32 = 0.16;
+const ENROLL_VERTICAL_POSE_DELTA: f32 = 0.07;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Spectrum {
@@ -163,6 +163,43 @@ impl EnrollmentPoseStability {
             EnrollPrompt::LookUp | EnrollPrompt::LookDown => stable_yaw,
             EnrollPrompt::LookLeft | EnrollPrompt::LookRight => stable_pitch,
             _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IrFrameKind {
+    Lit,
+    StrobeDark,
+    EmitterDark,
+}
+
+pub struct IrDarkFrameGate {
+    threshold: u8,
+    consecutive_dark: u32,
+}
+
+impl IrDarkFrameGate {
+    const EMITTER_DARK_STREAK: u32 = 8;
+
+    pub fn new(threshold: u8) -> Self {
+        Self {
+            threshold,
+            consecutive_dark: 0,
+        }
+    }
+
+    pub fn classify(&mut self, frame: &Mat) -> IrFrameKind {
+        let luma = frame_mean_luma(frame).unwrap_or(0);
+        if luma >= self.threshold {
+            self.consecutive_dark = 0;
+            return IrFrameKind::Lit;
+        }
+        self.consecutive_dark = self.consecutive_dark.saturating_add(1);
+        if self.consecutive_dark >= Self::EMITTER_DARK_STREAK {
+            IrFrameKind::EmitterDark
+        } else {
+            IrFrameKind::StrobeDark
         }
     }
 }
@@ -572,6 +609,38 @@ mod tests {
         assert!(estimate_head_pose(&malformed).is_none());
     }
 
+    fn gate_frame(luma: f64) -> Mat {
+        Mat::new_rows_cols_with_default(8, 8, core::CV_8UC1, Scalar::all(luma)).unwrap()
+    }
+
+    #[test]
+    fn dark_frame_gate_passes_lit_frames() {
+        let mut gate = IrDarkFrameGate::new(30);
+        assert_eq!(gate.classify(&gate_frame(120.0)), IrFrameKind::Lit);
+        assert_eq!(gate.classify(&gate_frame(30.0)), IrFrameKind::Lit);
+    }
+
+    #[test]
+    fn dark_frame_gate_skips_strobe_gaps_without_reporting_dark() {
+        let mut gate = IrDarkFrameGate::new(30);
+        for _ in 0..20 {
+            assert_eq!(gate.classify(&gate_frame(2.0)), IrFrameKind::StrobeDark);
+            assert_eq!(gate.classify(&gate_frame(120.0)), IrFrameKind::Lit);
+        }
+    }
+
+    #[test]
+    fn dark_frame_gate_reports_a_sustained_dark_stream() {
+        let mut gate = IrDarkFrameGate::new(30);
+        for _ in 0..7 {
+            assert_eq!(gate.classify(&gate_frame(2.0)), IrFrameKind::StrobeDark);
+        }
+        assert_eq!(gate.classify(&gate_frame(2.0)), IrFrameKind::EmitterDark);
+        assert_eq!(gate.classify(&gate_frame(2.0)), IrFrameKind::EmitterDark);
+        assert_eq!(gate.classify(&gate_frame(120.0)), IrFrameKind::Lit);
+        assert_eq!(gate.classify(&gate_frame(2.0)), IrFrameKind::StrobeDark);
+    }
+
     #[test]
     fn enrollment_pose_stability_accepts_a_held_pose() {
         let mut stability = EnrollmentPoseStability::default();
@@ -614,26 +683,26 @@ mod tests {
         let baseline = Some((0.08, 0.62));
         assert!(enrollment_pose_matches(
             EnrollPrompt::LookLeft,
-            -0.03,
+            -0.10,
             0.62,
             baseline
         ));
         assert!(enrollment_pose_matches(
             EnrollPrompt::LookRight,
-            0.19,
+            0.26,
             0.62,
             baseline
         ));
         assert!(enrollment_pose_matches(
             EnrollPrompt::LookUp,
             0.08,
-            0.57,
+            0.52,
             baseline
         ));
         assert!(enrollment_pose_matches(
             EnrollPrompt::LookDown,
             0.08,
-            0.67,
+            0.72,
             baseline
         ));
         assert!(!enrollment_pose_matches(
@@ -644,7 +713,7 @@ mod tests {
         ));
         assert!(!enrollment_pose_matches(
             EnrollPrompt::LookRight,
-            0.15,
+            0.19,
             0.62,
             baseline
         ));

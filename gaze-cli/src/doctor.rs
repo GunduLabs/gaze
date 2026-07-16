@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
 const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(25);
+const BENCHMARK_TIMEOUT: Duration = Duration::from_secs(30);
 const PAM_MODULES: [&str; 2] = ["pam_gaze.so", "pam_gaze_grosshack.so"];
 const GNOME_EXTENSION_ID: &str = "gaze@gundulabs.com";
 
@@ -104,7 +105,7 @@ impl Report {
     }
 }
 
-pub async fn run(username: &str) -> anyhow::Result<bool> {
+pub async fn run(username: &str, benchmark: bool) -> anyhow::Result<bool> {
     let mut report = Report::default();
 
     check_platform(&mut report);
@@ -113,7 +114,7 @@ pub async fn run(username: &str) -> anyhow::Result<bool> {
     check_pam(&mut report);
     check_desktop_integration(&mut report);
     check_tpm(&mut report, config.as_ref());
-    check_daemon(&mut report, username, config.as_ref()).await;
+    check_daemon(&mut report, username, config.as_ref(), benchmark).await;
 
     report.print()?;
     Ok(report.is_healthy())
@@ -460,6 +461,34 @@ fn find_pam_references() -> Vec<PathBuf> {
         .collect()
 }
 
+const PAM_ORDERING_COMPETITORS: [&str; 2] = ["pam_unix.so", "pam_fprintd.so"];
+
+/// Returns competing auth modules (password, fingerprint) that appear earlier
+/// in the `auth` stack than Gaze, which stalls face auth behind their prompts.
+fn find_pam_ordering_conflicts(contents: &str) -> Vec<&'static str> {
+    let auth_lines: Vec<&str> = contents
+        .lines()
+        .map(|line| line.split('#').next().unwrap_or_default().trim())
+        .filter(|line| line.split_ascii_whitespace().next() == Some("auth"))
+        .collect();
+
+    let Some(gaze_idx) = auth_lines
+        .iter()
+        .position(|line| pam_line_has_reference(line))
+    else {
+        return Vec::new();
+    };
+
+    PAM_ORDERING_COMPETITORS
+        .into_iter()
+        .filter(|module| {
+            auth_lines[..gaze_idx]
+                .iter()
+                .any(|line| line.contains(module))
+        })
+        .collect()
+}
+
 fn check_pam(report: &mut Report) {
     let modules = find_pam_modules();
     let sequential = modules
@@ -526,6 +555,25 @@ fn check_pam(report: &mut Report) {
             .collect::<Vec<_>>()
             .join(", ");
         report.pass("PAM stack", format!("Gaze is referenced by: {names}"));
+
+        for path in &references {
+            let Ok(contents) = fs::read_to_string(path) else {
+                continue;
+            };
+            let conflicts = find_pam_ordering_conflicts(&contents);
+            if !conflicts.is_empty() {
+                report.warning(
+                    "PAM ordering",
+                    format!(
+                        "{} runs after {} in {}, so face auth won't be tried until those prompts resolve",
+                        PAM_MODULES.join("/"),
+                        conflicts.join(", "),
+                        path.display()
+                    ),
+                    "Re-run `sudo pam-auth-update --package` (Debian/Ubuntu) or move the Gaze line above pam_unix.so/pam_fprintd.so.",
+                );
+            }
+        }
     }
 }
 
@@ -659,7 +707,12 @@ async fn read_daemon_config(proxy: &GazeProxy<'_>, ready_wait: Duration) -> zbus
     }
 }
 
-async fn check_daemon(report: &mut Report, username: &str, config: Option<&Config>) {
+async fn check_daemon(
+    report: &mut Report,
+    username: &str,
+    config: Option<&Config>,
+    benchmark: bool,
+) {
     let daemon_starting = matches!(
         command_output("systemctl", &["is-active", "gazed"]),
         Ok((true, ref state)) if state == "active"
@@ -808,6 +861,48 @@ async fn check_daemon(report: &mut Report, username: &str, config: Option<&Confi
         Err(_) => report.error(
             "Enrollment",
             format!("timed out while checking faces for {username}"),
+            "Restart gazed and inspect its journal.",
+        ),
+    }
+
+    if benchmark {
+        check_benchmark(report, &proxy).await;
+    }
+}
+
+async fn check_benchmark(report: &mut Report, proxy: &GazeProxy<'_>) {
+    let term = Term::stdout();
+    let _ = term.write_line(&format!(
+        "{} Benchmarking model inference (this can take a few seconds)...",
+        style("i").cyan().bold()
+    ));
+
+    let outcome = tokio::time::timeout(BENCHMARK_TIMEOUT, proxy.benchmark()).await;
+    let _ = term.clear_last_lines(1);
+
+    match outcome {
+        Ok(Ok(results)) => {
+            for result in results {
+                report.pass(
+                    "Benchmark",
+                    format!(
+                        "{}: {:.1}ms avg ({:.1} fps), {:.1}ms p95, {:.1}ms min",
+                        result.component, result.mean_ms, result.fps, result.p95_ms, result.min_ms
+                    ),
+                );
+            }
+        }
+        Ok(Err(err)) => report.warning(
+            "Benchmark",
+            format!(
+                "gazed could not run the benchmark: {}",
+                dbus_error_message(&err)
+            ),
+            "Restart gazed and inspect its journal.",
+        ),
+        Err(_) => report.warning(
+            "Benchmark",
+            "benchmark timed out",
             "Restart gazed and inspect its journal.",
         ),
     }
@@ -975,6 +1070,23 @@ mod tests {
         assert!(!pam_line_has_reference(
             "auth sufficient pam_gaze.so.disabled"
         ));
+    }
+
+    #[test]
+    fn pam_ordering_flags_modules_stacked_before_gaze() {
+        let stacked_behind = "auth [success=3 default=ignore] pam_fprintd.so\n\
+             auth [success=2 default=ignore] pam_unix.so\n\
+             auth [success=1 default=ignore] pam_gaze.so\n";
+        assert_eq!(
+            find_pam_ordering_conflicts(stacked_behind),
+            vec!["pam_unix.so", "pam_fprintd.so"]
+        );
+
+        let stacked_first = "auth sufficient pam_gaze.so\n\
+             auth sufficient pam_unix.so try_first_pass nullok\n";
+        assert!(find_pam_ordering_conflicts(stacked_first).is_empty());
+
+        assert!(find_pam_ordering_conflicts("auth include system-auth\n").is_empty());
     }
 
     #[test]

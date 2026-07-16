@@ -139,7 +139,11 @@ configure_hyprlock_conf() {
     if [ "$(id -u)" -eq 0 ]; then
         warn "Running as root; skipping per-user hyprlock.conf edit."
         say "As your desktop user, add to ~/.config/hypr/hyprlock.conf:"
-        cmd "general { pam_module = hyprlock-gaze }"
+        cmd "auth {"
+        cmd "    pam {"
+        cmd "        module = hyprlock-gaze"
+        cmd "    }"
+        cmd "}"
         link "$HYPRLAND_DOCS_URL"
         return 0
     fi
@@ -149,47 +153,66 @@ configure_hyprlock_conf() {
 
     if [ ! -f "$conf" ]; then
         cat >"$conf" <<'EOF'
-general {
-    pam_module = hyprlock-gaze
+auth {
+    pam {
+        module = hyprlock-gaze
+    }
 }
 EOF
-        ok "Created $conf with pam_module = hyprlock-gaze."
+        ok "Created $conf with auth.pam.module = hyprlock-gaze."
         return 0
     fi
 
-    if grep -qE '^\s*pam_module\s*=' "$conf"; then
-        current_pam="$(grep -E '^\s*pam_module\s*=' "$conf" | head -1 | sed 's/.*=\s*//;s/\s*$//')"
+    if grep -qE '^\s*module\s*=' "$conf"; then
+        current_pam="$(grep -E '^\s*module\s*=' "$conf" | head -1 | sed 's/.*=\s*//;s/\s*$//')"
         case "$current_pam" in
         hyprlock-gaze | hyprlock-gaze-simultaneous)
             ok "hyprlock.conf already uses $current_pam."
             return 0
             ;;
         *)
-            warn "hyprlock.conf already sets pam_module = $current_pam; leaving it."
-            say "To use Gaze, change it to: pam_module = hyprlock-gaze"
+            warn "hyprlock.conf already sets auth.pam.module = $current_pam; leaving it."
+            say "To use Gaze, change it to: module = hyprlock-gaze"
             return 0
             ;;
         esac
     fi
 
-    if grep -qE '^\s*general\s*\{' "$conf"; then
-        cp "$conf" "$conf.gaze-backup"
+    cp "$conf" "$conf.gaze-backup"
+
+    if grep -qE '^\s*pam\s*\{' "$conf"; then
         awk '
             BEGIN { done = 0 }
-            /^\s*general\s*\{/ && !done {
+            /^\s*pam\s*\{/ && !done {
                 print
-                print "    pam_module = hyprlock-gaze"
+                print "        module = hyprlock-gaze"
                 done = 1
                 next
             }
             { print }
         ' "$conf.gaze-backup" >"$conf"
-        ok "Added pam_module = hyprlock-gaze to existing general {} block in $conf."
-        say "${DIM}Backup: $conf.gaze-backup${RESET}"
+        ok "Added module = hyprlock-gaze to existing pam {} block in $conf."
+    elif grep -qE '^\s*auth\s*\{' "$conf"; then
+        awk '
+            BEGIN { done = 0 }
+            /^\s*auth\s*\{/ && !done {
+                print
+                print "    pam {"
+                print "        module = hyprlock-gaze"
+                print "    }"
+                done = 1
+                next
+            }
+            { print }
+        ' "$conf.gaze-backup" >"$conf"
+        ok "Added pam { module = hyprlock-gaze } to existing auth {} block in $conf."
     else
-        printf '\ngeneral {\n    pam_module = hyprlock-gaze\n}\n' >>"$conf"
-        ok "Appended general { pam_module = hyprlock-gaze } to $conf."
+        rm -f "$conf.gaze-backup"
+        printf '\nauth {\n    pam {\n        module = hyprlock-gaze\n    }\n}\n' >>"$conf"
+        ok "Appended auth { pam { module = hyprlock-gaze } } to $conf."
+        return 0
     fi
+    say "${DIM}Backup: $conf.gaze-backup${RESET}"
 }
 
 enable_hyprlock() {
@@ -411,7 +434,7 @@ is_arch() {
 }
 
 supported_deb_suite() {
-    case "$DISTRO_CODENAME" in
+    case "$1" in
     noble | questing | resolute | trixie) return 0 ;;
     esac
     return 1
@@ -430,7 +453,16 @@ if ! is_rpm && ! is_deb && ! is_arch; then
     exit 1
 fi
 
-if is_deb && ! supported_deb_suite; then
+if is_deb && ! supported_deb_suite "$DISTRO_CODENAME"; then
+    for candidate in "${UBUNTU_CODENAME:-}" "${DEBIAN_CODENAME:-}"; do
+        if [ -n "$candidate" ] && supported_deb_suite "$candidate"; then
+            DISTRO_CODENAME="$candidate"
+            break
+        fi
+    done
+fi
+
+if is_deb && ! supported_deb_suite "$DISTRO_CODENAME"; then
     fail "Unsupported Debian/Ubuntu release: ${DISTRO_CODENAME:-unknown}"
     say "Supported apt suites: noble, questing, resolute, trixie"
     exit 1
@@ -542,9 +574,11 @@ if is_deb; then
     sudo cp "$TMP/gundulabs-archive-keyring.gpg" /usr/share/keyrings/gundulabs-archive-keyring.gpg
     sudo chmod 0644 /usr/share/keyrings/gundulabs-archive-keyring.gpg
     # Pin to the detected release suite so each distro gets the package built
-    # against its own toolchain/glibc (see issue #125); supported_deb_suite
+    # against its own toolchain/glibc; supported_deb_suite
     # above already guaranteed DISTRO_CODENAME is one we publish.
-    printf '%s\n' "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] ${PKG_BASE_URL}/deb ${DISTRO_CODENAME} main" |
+    # Restrict to the host arch so apt skips foreign arches like i386.
+    DEB_ARCH="$(dpkg --print-architecture)"
+    printf '%s\n' "deb [arch=${DEB_ARCH} signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] ${PKG_BASE_URL}/deb ${DISTRO_CODENAME} main" |
         sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 
     step "Updating package index"
@@ -703,7 +737,7 @@ else
     link "$PAM_DOCS_URL"
 fi
 if want_hyprlock_setup; then
-    ok "hyprlock: configured (pam_module = hyprlock-gaze)"
+    ok "hyprlock: configured (auth.pam.module = hyprlock-gaze)"
 fi
 say ""
 say "Docs:   ${CYAN}https://gaze.gundulabs.com${RESET}"
