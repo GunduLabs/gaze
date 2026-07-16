@@ -782,7 +782,7 @@ mod tests {
 
     #[test]
     fn camera_prefers_active_greeter_over_target_leftover_runtime() {
-        // GDM login while the target's runtime lingers: the greeter owns the seat camera (issue #193).
+        // GDM login while the target's runtime lingers: the greeter owns the seat camera.
         let greeter_active = Some((42, true, true));
         assert_eq!(
             AuthDaemon::resolve_camera_uid(0, 1001, true, false, greeter_active),
