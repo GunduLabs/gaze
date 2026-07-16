@@ -75,7 +75,7 @@ just fmt          # apply formatting (fmt-check only checks)
 ```
 
 ::: warning Build with `just build-rust`, not `cargo build --workspace`
-`just build-rust` builds the daemon and the clients in separate cargo invocations so feature unification cannot link ONNX Runtime into the CLI, GUI, or PAM modules. ONNX Runtime's startup code requires AVX2, and a single workspace build would silently reintroduce crashes on older CPUs (issue #14).
+`just build-rust` builds the daemon and the clients in separate cargo invocations so feature unification cannot link ONNX Runtime into the CLI, GUI, or PAM modules. ONNX Runtime's startup code requires AVX2, and a single workspace build would silently reintroduce crashes on older CPUs.
 :::
 
 ## Run a locally-built daemon
