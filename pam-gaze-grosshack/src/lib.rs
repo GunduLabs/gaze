@@ -1,21 +1,11 @@
 #![allow(clippy::missing_safety_doc)]
 use pam_gaze_core::*;
-use parking_lot::{Condvar, Mutex};
-use std::ffi::CString;
 use std::os::fd::AsRawFd;
-use std::os::raw::c_void;
 use std::os::raw::{c_char, c_int};
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-
-struct AuthState {
-    password: Option<String>,
-    finished: bool,
-}
-
-type SharedAuthState = Arc<(Mutex<AuthState>, Condvar)>;
 
 async fn authenticate_biometric_with_timeout(username: &str) -> Option<c_int> {
     let auth_future = authenticate_biometric(username);
@@ -31,48 +21,6 @@ async fn authenticate_biometric_with_timeout(username: &str) -> Option<c_int> {
         }
         _ = tokio::time::sleep(timeout_duration) => None,
     }
-}
-
-fn stash_password_and_fallback(pamh: PamHandle, password: &str) -> c_int {
-    // Password contained a NUL byte, so fail rather than panic.
-    let Ok(pw_cstr) = CString::new(password) else {
-        return PAM_AUTH_ERR;
-    };
-    unsafe {
-        pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);
-    }
-    PAM_AUTHINFO_UNAVAIL
-}
-
-fn wait_for_prompt_finish(state: &SharedAuthState) {
-    let (lock, condvar) = &**state;
-    let mut shared_state = lock.lock();
-    while !shared_state.finished {
-        condvar.wait(&mut shared_state);
-    }
-}
-
-fn wait_for_password_and_fallback(pamh: PamHandle, state: &SharedAuthState) -> c_int {
-    let (lock, condvar) = &**state;
-    let mut shared_state = lock.lock();
-    loop {
-        if shared_state.finished {
-            if let Some(ref pw) = shared_state.password {
-                return stash_password_and_fallback(pamh, pw);
-            }
-            return PAM_AUTH_ERR;
-        }
-        condvar.wait(&mut shared_state);
-    }
-}
-
-fn wait_for_prompt_response(state: &SharedAuthState) -> Option<String> {
-    let (lock, condvar) = &**state;
-    let mut shared_state = lock.lock();
-    while !shared_state.finished {
-        condvar.wait(&mut shared_state);
-    }
-    shared_state.password.clone()
 }
 
 extern "C" fn interrupt_noop_handler(_sig: c_int) {}
@@ -147,28 +95,11 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
     let is_polkit = matches!(unsafe { get_pam_service(pamh) }, Some(ref s) if s == "polkit-1");
 
-    let state: SharedAuthState = Arc::new((
-        Mutex::new(AuthState {
-            password: None,
-            finished: false,
-        }),
-        Condvar::new(),
-    ));
+    let state = new_auth_state();
 
     let notify = Arc::new(tokio::sync::Notify::new());
-
-    let thread_state = Arc::clone(&state);
     let notify_clone = Arc::clone(&notify);
-    let pamh_worker = pamh as usize;
-    let prompt_thread = thread::spawn(move || {
-        let password = unsafe { prompt_password(pamh_worker as PamHandle) };
-        let (lock, condvar) = &*thread_state;
-        let mut shared_state = lock.lock();
-        if let Some(pw) = password {
-            shared_state.password = Some(pw);
-        }
-        shared_state.finished = true;
-        condvar.notify_all();
+    let prompt_thread = spawn_prompt_thread(pamh, &state, move || {
         notify_clone.notify_one();
     });
 
@@ -189,13 +120,13 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
     match select_res {
         SelectorResult::Password => {
-            let fallback = wait_for_password_and_fallback(pamh, &state);
+            let fallback = unsafe { wait_for_password_and_fallback(pamh, &state) };
             let _ = prompt_thread.join();
             fallback
         }
         SelectorResult::Biometric(bio_res) => {
             if bio_res != Some(PAM_SUCCESS) {
-                let fallback = wait_for_password_and_fallback(pamh, &state);
+                let fallback = unsafe { wait_for_password_and_fallback(pamh, &state) };
                 let _ = prompt_thread.join();
                 return fallback;
             }
@@ -219,50 +150,11 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
                     .map(detect_desktop_environment)
                     .unwrap_or_else(|| "Other".to_string());
 
-                if de == "GNOME" {
-                    let is_ext_active = rt.block_on(gnome_extension_active(active_uid));
+                let extension_active =
+                    de == "GNOME" && rt.block_on(gnome_extension_active(active_uid));
 
-                    if is_ext_active {
-                        unsafe { say(pamh, CONFIRMATION_REQUEST) };
-
-                        let response = wait_for_prompt_response(&state);
-                        let _ = prompt_thread.join();
-
-                        if let Some(resp) = response {
-                            if resp == CONFIRMATION_ACK {
-                                PAM_SUCCESS
-                            } else {
-                                stash_password_and_fallback(pamh, &resp)
-                            }
-                        } else {
-                            PAM_AUTH_ERR
-                        }
-                    } else {
-                        let fallback = wait_for_password_and_fallback(pamh, &state);
-                        let _ = prompt_thread.join();
-                        fallback
-                    }
-                } else {
-                    let prompt = match de.as_str() {
-                        "KDE" | "LXQt" => "Face Verified. Press OK to confirm.",
-                        "Hyprland" => "Face Verified. Press Authenticate to confirm.",
-                        _ => "Face Verified. Press Enter to confirm.",
-                    };
-
-                    unsafe { say(pamh, prompt) };
-
-                    let response = wait_for_prompt_response(&state);
-                    let _ = prompt_thread.join();
-
-                    if let Some(resp) = response {
-                        if resp.is_empty() {
-                            PAM_SUCCESS
-                        } else {
-                            stash_password_and_fallback(pamh, &resp)
-                        }
-                    } else {
-                        PAM_AUTH_ERR
-                    }
+                unsafe {
+                    confirm_graphical_polkit(pamh, &de, extension_active, &state, prompt_thread)
                 }
             }
         }
