@@ -125,12 +125,12 @@ undistorted frames as well as freshly enrolled ones.
 
 ### Auth aborts with "IR camera stream stopped unexpectedly"
 
-Some single-function Windows Hello webcams (for example the Logitech BRIO 4K,
-`046d:085e` — the original BRIO, distinct from the newer Brio 300/500/100 which
-use different product IDs) cannot stream their RGB and IR sensors simultaneously. Enrollment
-works, but parallel RGB+IR verification drops the IR substream and the attempt
-falls back to your password. Configure the IR camera on its own and leave `rgb`
-empty so Gaze runs IR-only:
+Some single-function Windows Hello webcams can't stream their RGB and IR sensors
+at the same time. The Logitech BRIO 4K (`046d:085e`, not the newer Brio
+300/500/100, which use different product IDs) is a known example. Enrollment
+works fine, but parallel RGB+IR verification drops the IR substream and the
+attempt falls back to your password. Configure the IR camera on its own and
+leave `rgb` empty so Gaze runs IR-only:
 
 ```toml
 [cameras]
