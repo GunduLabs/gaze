@@ -15,7 +15,7 @@ fn confirm_via_gnome_extension(pamh: PamHandle) -> c_int {
 
 // Polkit dialogs ignore echo-off confirmation prompts, so keep a password
 // request pending for the agent to answer, then flip the dialog into
-// confirm mode via the info-message token (#259).
+// confirm mode via the info-message token.
 unsafe fn confirm_via_polkit_dialog(
     pamh: PamHandle,
     username: &str,
