@@ -349,6 +349,11 @@ async fn run_config_wizard(
         .default(config.enrollment.max_templates)
         .interact_text()?;
 
+    config.enrollment.min_face_size_ratio = Input::with_theme(&theme)
+        .with_prompt("Minimum enrollment face size ratio (0.10 - 0.75; lower allows more distance)")
+        .default(config.enrollment.min_face_size_ratio)
+        .interact_text()?;
+
     config.liveness.enabled = Confirm::with_theme(&theme)
         .with_prompt("Enable liveness anti-spoofing")
         .default(config.liveness.enabled)
@@ -1370,6 +1375,11 @@ async fn main() -> anyhow::Result<()> {
                     "{} {}",
                     style("enrollment.max_templates:").bold(),
                     config.enrollment.max_templates
+                );
+                println!(
+                    "{} {:.2}",
+                    style("enrollment.min_face_size_ratio:").bold(),
+                    config.enrollment.min_face_size_ratio
                 );
                 println!(
                     "{} {}",

@@ -32,6 +32,7 @@ resume_grace_ms = 0
 
 [enrollment]
 max_templates = 2
+min_face_size_ratio = 0.25
 
 [liveness]
 enabled = true
@@ -244,9 +245,20 @@ sudo systemctl restart gazed
 ```toml
 [enrollment]
 max_templates = 2
+min_face_size_ratio = 0.25
 ```
 
-Increase this if auth is unreliable in varied lighting.
+Increase `max_templates` if auth is unreliable in varied lighting.
+
+`min_face_size_ratio` controls the smallest detected face accepted during enrollment,
+as a fraction of the frame's shorter side. The default `0.25` requires the face to
+occupy at least one quarter of that dimension. Lowering it permits enrollment from
+farther away; for example, `0.20` permits a face roughly 25% farther away than the
+default. Values from `0.10` through `0.75` are accepted.
+
+This is an enrollment-quality gate only; authentication does not impose the same
+centering and proximity threshold. Use the highest value that remains comfortable,
+because smaller face crops contain less detail for the enrolled template.
 
 ### Multi-Camera & Hybrid Enrollment
 

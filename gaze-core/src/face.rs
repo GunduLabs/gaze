@@ -5,7 +5,6 @@ use opencv::core::Mat;
 use opencv::prelude::*;
 use std::sync::{Mutex, MutexGuard};
 
-const MIN_FACE_SIZE_RATIO: f32 = 0.25;
 const MAX_FACE_SIZE_RATIO: f32 = 0.78;
 const ENROLL_POSE_STABILITY_WINDOW: usize = 2;
 const ENROLL_STABLE_YAW_RANGE: f32 = 0.08;
@@ -52,6 +51,7 @@ fn geometry_status(
     frame_w: f32,
     frame_h: f32,
     check_centering_and_proximity: bool,
+    min_face_size_ratio: f32,
 ) -> Option<CaptureStatus> {
     if bbox_is_clipped(bbox, frame_w, frame_h) {
         return Some(CaptureStatus::Clipped);
@@ -70,7 +70,7 @@ fn geometry_status(
 
     if (norm_cx - 0.5).abs() >= 0.2 || (norm_cy - 0.5).abs() >= 0.2 {
         Some(CaptureStatus::NotCentered)
-    } else if face_size_ratio < MIN_FACE_SIZE_RATIO {
+    } else if face_size_ratio < min_face_size_ratio {
         Some(CaptureStatus::TooFar)
     } else if face_size_ratio > MAX_FACE_SIZE_RATIO {
         Some(CaptureStatus::TooClose)
@@ -238,6 +238,7 @@ pub struct FaceChecker {
     pub rgb_luma_history: std::collections::VecDeque<u8>,
     pub spectrum: Spectrum,
     pub check_centering_and_proximity: bool,
+    pub min_face_size_ratio: f32,
 }
 
 impl FaceChecker {
@@ -253,6 +254,7 @@ impl FaceChecker {
             rgb_luma_history: std::collections::VecDeque::new(),
             spectrum,
             check_centering_and_proximity,
+            min_face_size_ratio: config.enrollment.effective_min_face_size_ratio(),
         }
     }
 
@@ -306,6 +308,7 @@ impl FaceChecker {
             frame.cols() as f32,
             frame.rows() as f32,
             self.check_centering_and_proximity,
+            self.min_face_size_ratio,
         ) {
             status
         } else if kps.is_none() {
@@ -506,31 +509,35 @@ mod tests {
     #[test]
     fn geometry_uses_square_detector_axes_for_centering() {
         assert_eq!(
-            geometry_status((240.0, 240.0, 400.0, 400.0), 640.0, 480.0, true),
+            geometry_status((240.0, 240.0, 400.0, 400.0), 640.0, 480.0, true, 0.25),
             None
         );
         assert_eq!(
-            geometry_status((240.0, 240.0, 400.0, 400.0), 480.0, 640.0, true),
+            geometry_status((240.0, 240.0, 400.0, 400.0), 480.0, 640.0, true, 0.25),
             None
         );
         assert_eq!(
-            geometry_status((400.0, 240.0, 560.0, 400.0), 640.0, 480.0, true),
+            geometry_status((400.0, 240.0, 560.0, 400.0), 640.0, 480.0, true, 0.25),
             Some(CaptureStatus::NotCentered)
         );
     }
 
     #[test]
-    fn geometry_keeps_the_lower_face_size_threshold() {
+    fn geometry_uses_the_configured_lower_face_size_threshold() {
         assert_eq!(
-            geometry_status((375.0, 375.0, 625.0, 625.0), 1000.0, 1000.0, true),
+            geometry_status((375.0, 375.0, 625.0, 625.0), 1000.0, 1000.0, true, 0.25),
             None
         );
         assert_eq!(
-            geometry_status((380.0, 380.0, 620.0, 620.0), 1000.0, 1000.0, true),
+            geometry_status((380.0, 380.0, 620.0, 620.0), 1000.0, 1000.0, true, 0.25),
             Some(CaptureStatus::TooFar)
         );
         assert_eq!(
-            geometry_status((105.0, 105.0, 895.0, 895.0), 1000.0, 1000.0, true),
+            geometry_status((380.0, 380.0, 620.0, 620.0), 1000.0, 1000.0, true, 0.20),
+            None
+        );
+        assert_eq!(
+            geometry_status((105.0, 105.0, 895.0, 895.0), 1000.0, 1000.0, true, 0.25),
             Some(CaptureStatus::TooClose)
         );
     }
@@ -538,11 +545,11 @@ mod tests {
     #[test]
     fn authentication_skips_centering_and_proximity_but_still_rejects_clipping() {
         assert_eq!(
-            geometry_status((400.0, 240.0, 560.0, 400.0), 640.0, 480.0, false),
+            geometry_status((400.0, 240.0, 560.0, 400.0), 640.0, 480.0, false, 0.25),
             None
         );
         assert_eq!(
-            geometry_status((300.0, 85.0, 380.0, 200.0), 640.0, 480.0, false),
+            geometry_status((300.0, 85.0, 380.0, 200.0), 640.0, 480.0, false, 0.25),
             Some(CaptureStatus::Clipped)
         );
     }
