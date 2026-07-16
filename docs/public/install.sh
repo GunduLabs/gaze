@@ -576,7 +576,9 @@ if is_deb; then
     # Pin to the detected release suite so each distro gets the package built
     # against its own toolchain/glibc (see issue #125); supported_deb_suite
     # above already guaranteed DISTRO_CODENAME is one we publish.
-    printf '%s\n' "deb [signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] ${PKG_BASE_URL}/deb ${DISTRO_CODENAME} main" |
+    # Restrict to the host arch so apt skips foreign arches like i386 (#258).
+    DEB_ARCH="$(dpkg --print-architecture)"
+    printf '%s\n' "deb [arch=${DEB_ARCH} signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] ${PKG_BASE_URL}/deb ${DISTRO_CODENAME} main" |
         sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 
     step "Updating package index"
