@@ -33,7 +33,7 @@ default:
 #
 # Split into two invocations so the daemon's `detection` feature on
 # gaze-core does not unify into the client binaries. ONNX Runtime's
-# constructors require AVX2 and crash on older CPUs (issue #14), so the
+# constructors require AVX2 and crash on older CPUs, so the
 # CLI, GUI, and PAM modules must build without it.
 [group("build")]
 build-rust:
