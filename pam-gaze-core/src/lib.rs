@@ -1,4 +1,5 @@
 #![allow(clippy::missing_safety_doc)]
+use parking_lot::{Condvar, Mutex};
 use std::ffi::{CStr, CString};
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
@@ -6,6 +7,8 @@ use std::mem::MaybeUninit;
 use std::os::fd::AsRawFd;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
+use std::sync::Arc;
+use std::thread;
 
 use gaze_core::config::Config;
 
@@ -187,6 +190,147 @@ pub unsafe fn confirm_authentication(pamh: PamHandle) -> bool {
 
 pub fn confirmation_accepted(response: Option<&str>) -> bool {
     matches!(response, Some(CONFIRMATION_ACK))
+}
+
+pub struct AuthState {
+    pub password: Option<String>,
+    pub started: bool,
+    pub finished: bool,
+}
+
+pub type SharedAuthState = Arc<(Mutex<AuthState>, Condvar)>;
+
+pub fn new_auth_state() -> SharedAuthState {
+    Arc::new((
+        Mutex::new(AuthState {
+            password: None,
+            started: false,
+            finished: false,
+        }),
+        Condvar::new(),
+    ))
+}
+
+pub fn spawn_prompt_thread(
+    pamh: PamHandle,
+    state: &SharedAuthState,
+    on_finished: impl FnOnce() + Send + 'static,
+) -> thread::JoinHandle<()> {
+    let thread_state = Arc::clone(state);
+    let pamh_worker = pamh as usize;
+    thread::spawn(move || {
+        {
+            let (lock, condvar) = &*thread_state;
+            let mut shared_state = lock.lock();
+            shared_state.started = true;
+            condvar.notify_all();
+        }
+        let password = unsafe { prompt_password(pamh_worker as PamHandle) };
+        {
+            let (lock, condvar) = &*thread_state;
+            let mut shared_state = lock.lock();
+            if let Some(pw) = password {
+                shared_state.password = Some(pw);
+            }
+            shared_state.finished = true;
+            condvar.notify_all();
+        }
+        on_finished();
+    })
+}
+
+pub fn wait_for_prompt_started(state: &SharedAuthState) {
+    let (lock, condvar) = &**state;
+    let mut shared_state = lock.lock();
+    while !shared_state.started {
+        condvar.wait(&mut shared_state);
+    }
+}
+
+pub fn wait_for_prompt_finish(state: &SharedAuthState) {
+    let (lock, condvar) = &**state;
+    let mut shared_state = lock.lock();
+    while !shared_state.finished {
+        condvar.wait(&mut shared_state);
+    }
+}
+
+pub fn wait_for_prompt_response(state: &SharedAuthState) -> Option<String> {
+    let (lock, condvar) = &**state;
+    let mut shared_state = lock.lock();
+    while !shared_state.finished {
+        condvar.wait(&mut shared_state);
+    }
+    shared_state.password.clone()
+}
+
+pub unsafe fn wait_for_password_and_fallback(pamh: PamHandle, state: &SharedAuthState) -> c_int {
+    let (lock, condvar) = &**state;
+    let mut shared_state = lock.lock();
+    loop {
+        if shared_state.finished {
+            if let Some(ref pw) = shared_state.password {
+                return unsafe { stash_password_and_fallback(pamh, pw) };
+            }
+            return PAM_AUTH_ERR;
+        }
+        condvar.wait(&mut shared_state);
+    }
+}
+
+pub unsafe fn stash_password_and_fallback(pamh: PamHandle, password: &str) -> c_int {
+    // Password contained a NUL byte, so fail rather than panic.
+    let Ok(pw_cstr) = CString::new(password) else {
+        return PAM_AUTH_ERR;
+    };
+    unsafe {
+        pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);
+    }
+    PAM_AUTHINFO_UNAVAIL
+}
+
+pub fn polkit_confirm_message(de: &str) -> &'static str {
+    match de {
+        "GNOME" => CONFIRMATION_REQUEST,
+        "KDE" | "LXQt" => "Face Verified. Press OK to confirm.",
+        "Hyprland" => "Face Verified. Press Authenticate to confirm.",
+        _ => "Face Verified. Press Enter to confirm.",
+    }
+}
+
+// Confirm a face match through a graphical polkit dialog; the caller must
+// already have a pending password prompt on `state` for the agent to answer.
+pub unsafe fn confirm_graphical_polkit(
+    pamh: PamHandle,
+    de: &str,
+    extension_active: bool,
+    state: &SharedAuthState,
+    prompt_thread: thread::JoinHandle<()>,
+) -> c_int {
+    if de == "GNOME" && !extension_active {
+        let fallback = unsafe { wait_for_password_and_fallback(pamh, state) };
+        let _ = prompt_thread.join();
+        return fallback;
+    }
+
+    unsafe { say(pamh, polkit_confirm_message(de)) };
+
+    let response = wait_for_prompt_response(state);
+    let _ = prompt_thread.join();
+
+    let Some(resp) = response else {
+        return PAM_AUTH_ERR;
+    };
+    let confirmed = if de == "GNOME" {
+        resp == CONFIRMATION_ACK
+    } else {
+        resp.is_empty()
+    };
+    if confirmed {
+        PAM_SUCCESS
+    } else {
+        unsafe { stash_password_and_fallback(pamh, &resp) }
+    }
 }
 
 pub async fn active_or_user_uid(username: &str) -> Option<u32> {
@@ -483,6 +627,23 @@ mod tests {
         assert!(!confirmation_accepted(Some("hunter2")));
         assert!(!confirmation_accepted(Some("confirm")));
         assert!(!confirmation_accepted(None));
+    }
+
+    #[test]
+    fn polkit_confirm_message_uses_extension_token_only_on_gnome() {
+        assert_eq!(polkit_confirm_message("GNOME"), CONFIRMATION_REQUEST);
+        assert_eq!(
+            polkit_confirm_message("KDE"),
+            "Face Verified. Press OK to confirm."
+        );
+        assert_eq!(
+            polkit_confirm_message("Hyprland"),
+            "Face Verified. Press Authenticate to confirm."
+        );
+        assert_eq!(
+            polkit_confirm_message("Other"),
+            "Face Verified. Press Enter to confirm."
+        );
     }
 
     #[test]
