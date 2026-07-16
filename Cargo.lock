@@ -2561,7 +2561,6 @@ dependencies = [
  "gaze-core",
  "libc",
  "pam-gaze-core",
- "parking_lot",
  "tokio",
  "zbus",
 ]
