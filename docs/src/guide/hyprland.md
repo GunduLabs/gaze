@@ -16,7 +16,7 @@ Manual install:
 sudo apt-get install gaze-hyprlock
 ```
 
-```bash [Fedora]
+```bash [Fedora and compatible]
 sudo dnf install gaze-hyprlock
 ```
 
@@ -82,7 +82,7 @@ Remove the `module` line from the `auth { pam { ... } }` block in `hyprlock.conf
 sudo apt-get remove gaze-hyprlock
 ```
 
-```bash [Fedora]
+```bash [Fedora and compatible]
 sudo dnf remove gaze-hyprlock
 ```
 

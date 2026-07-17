@@ -2,7 +2,7 @@
 
 Use one of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible, and skips GNOME-specific packages on KDE Plasma and other non-GNOME desktops. Manual GNOME package installs still need GNOME settings commands afterward.
 
-Supported installer targets: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS, on x86_64 and arm64.
+Supported installer targets on x86_64 and arm64: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44 and compatible distributions with standard DNF package installation, such as Nobara and Ultramarine, Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS.
 
 ## Path A: one-line installer (recommended)
 
@@ -33,7 +33,7 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
 
 ## Path B: manual package install
 
-Use this if you prefer to configure package sources yourself. Debian/Ubuntu and Fedora use Gundu Labs repositories. Arch Linux and Arch-compatible distributions such as Manjaro and CachyOS use the AUR packages.
+Use this if you prefer to configure package sources yourself. Debian/Ubuntu and Fedora-compatible systems with standard DNF package installation use Gundu Labs repositories. Arch Linux and Arch-compatible distributions such as Manjaro and CachyOS use the AUR packages.
 
 If you are replacing an existing manual repository configuration, remove the current repo files first:
 
@@ -42,7 +42,7 @@ If you are replacing an existing manual repository configuration, remove the cur
 sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
 ```
 
-**Fedora:**
+**Fedora and compatible DNF systems:**
 ```bash
 sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
 ```
@@ -59,7 +59,7 @@ sudo apt update
 sudo apt install gaze gaze-gui
 ```
 
-```bash [Fedora]
+```bash [Fedora and compatible]
 sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
 sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<'EOF'
 [gundulabs]
@@ -103,7 +103,7 @@ Only run this on GNOME desktops where you want face unlock from the lock screen.
 sudo apt install gaze-gnome-extension
 ```
 
-```bash [Fedora]
+```bash [Fedora and compatible]
 sudo dnf install gaze-gnome-extension
 ```
 

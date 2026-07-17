@@ -479,9 +479,9 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "cfg_aliases"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
 name = "cipher"
@@ -1199,7 +1199,7 @@ dependencies = [
 
 [[package]]
 name = "gaze"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1227,7 +1227,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-cli"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -1244,7 +1244,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-core"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "anyhow",
  "gstreamer",
@@ -1271,7 +1271,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-gui"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "anyhow",
  "enumflags2",
@@ -2529,7 +2529,7 @@ dependencies = [
 
 [[package]]
 name = "pam-gaze"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "futures",
  "gaze-core",
@@ -2541,7 +2541,7 @@ dependencies = [
 
 [[package]]
 name = "pam-gaze-core"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "anyhow",
  "futures",
@@ -2554,7 +2554,7 @@ dependencies = [
 
 [[package]]
 name = "pam-gaze-grosshack"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "anyhow",
  "futures",
@@ -3684,9 +3684,9 @@ checksum = "9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109"
 
 [[package]]
 name = "tokio"
-version = "1.52.3"
+version = "1.52.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fc7f01b389ac15039e4dc9531aa973a135d7a4135281b12d7c1bc79fd57fffe"
+checksum = "317fafbbe3f02fc663dad00ea6186197de963cd4190e86a26d8d0fae095539af"
 dependencies = [
  "bytes",
  "libc",

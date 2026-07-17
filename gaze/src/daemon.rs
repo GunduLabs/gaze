@@ -35,6 +35,11 @@ const GDM_DCONF_OVERRIDE_CONTENT: &str =
     "[org/gnome/shell/extensions/gaze]\nenable-face-authentication=true\n";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
 const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
+/// In hybrid (RGB+IR) verify the two spectra are captured one camera at a time so
+/// single-function UVC devices (e.g. Logitech Brio) that cannot stream both at once
+/// still work. This bounds the RGB phase so it yields the camera to IR even without a
+/// match. See `verify_start`.
+const VERIFY_SERIAL_RGB_BUDGET: Duration = Duration::from_secs(4);
 const SSH_PROC_CHAIN_MAX_DEPTH: usize = 16;
 
 #[derive(Clone)]
@@ -1526,6 +1531,10 @@ impl AuthDaemon {
 
             let (result_tx, mut result_rx) = tokio::sync::mpsc::channel::<VerifyMsg>(10);
             let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            // Signals that the RGB capture phase has finished and released its camera, so
+            // the IR thread can then hold the camera. Lets single-function UVC devices
+            // (e.g. Logitech Brio) that cannot stream RGB+IR at once run hybrid verify.
+            let rgb_phase_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
             let mut rgb_thread = None;
             if run_rgb {
@@ -1541,8 +1550,24 @@ impl AuthDaemon {
                 let liveness_enabled = liveness_cfg.enabled;
                 let liveness_threshold = liveness_cfg.threshold;
                 let rgb_device_clone = rgb_device.clone();
+                let rgb_phase_done_clone = rgb_phase_done.clone();
 
                 rgb_thread = Some(std::thread::spawn(move || {
+                    // Set once the RGB camera is released, on every exit path (incl. panic),
+                    // so the IR thread can then safely open its stream. Declared before `cam`
+                    // so `cam` drops first, guaranteeing release precedes the signal.
+                    struct RgbPhaseGuard(Arc<std::sync::atomic::AtomicBool>);
+                    impl Drop for RgbPhaseGuard {
+                        fn drop(&mut self) {
+                            self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
+                    }
+                    let _rgb_phase_guard = RgbPhaseGuard(rgb_phase_done_clone);
+                    // In serial mode (IR also runs) yield the camera after a budget even
+                    // without a match, so the IR spectrum can still be captured.
+                    let rgb_deadline = run_ir.then(|| Instant::now() + VERIFY_SERIAL_RGB_BUDGET);
+                    let mut yielded_to_ir = false;
+
                     let mut cam = match Camera::open(&rgb_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
@@ -1558,6 +1583,14 @@ impl AuthDaemon {
 
                     for frame in &mut cam {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                            break;
+                        }
+                        if let Some(deadline) = rgb_deadline
+                            && Instant::now() >= deadline
+                        {
+                            // Serial mode: hand the camera to the IR phase even without a
+                            // match so hybrid auth can still capture the IR spectrum.
+                            yielded_to_ir = true;
                             break;
                         }
 
@@ -1639,7 +1672,7 @@ impl AuthDaemon {
                         }
                     }
 
-                    if !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    if !yielded_to_ir && !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
                         let _ = tx.blocking_send(VerifyMsg::Error(
                             "RGB camera stream stopped unexpectedly".into(),
                         ));
@@ -1648,12 +1681,7 @@ impl AuthDaemon {
             }
 
             let mut ir_thread = None;
-                // If RGB is also running, introduce a short delay to ensure RGB gets the head start on PipeWire/USB resource access.
             if run_ir {
-                if run_rgb {
-                    std::thread::sleep(std::time::Duration::from_millis(2));
-                }
-
                 let stop_clone = stop_flag.clone();
                 let tx = result_tx.clone();
                 let detector_arc = detector_arc.clone();
@@ -1666,8 +1694,23 @@ impl AuthDaemon {
                 let ir_device_clone = ir_device.clone();
                 let ir_node_clone = ir_node.clone();
                 let emitter_enabled = emitter_enabled;
+                let rgb_phase_done_clone = rgb_phase_done.clone();
 
                 ir_thread = Some(std::thread::spawn(move || {
+                    // Serial mode: wait for the RGB phase to release its camera before
+                    // opening IR (and firing the emitter), so only one stream is live at a
+                    // time on single-function UVC devices. Bail if verify already passed.
+                    if run_rgb {
+                        while !rgb_phase_done_clone.load(std::sync::atomic::Ordering::Relaxed)
+                            && !stop_clone.load(std::sync::atomic::Ordering::Relaxed)
+                        {
+                            std::thread::sleep(std::time::Duration::from_millis(20));
+                        }
+                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                            return;
+                        }
+                    }
+
                     let _emitter = EmitterGuard::engage(
                         &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                         emitter_enabled

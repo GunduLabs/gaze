@@ -1,14 +1,14 @@
 Local users only (with Gaze Facial Authentication)
 ================
 
-Selecting this profile will enable local files as the source of identity
-and authentication providers. It includes Gaze facial authentication by default.
+Selecting this profile uses local files for identity and authentication and
+enables Gaze facial authentication by default.
 
 AVAILABLE OPTIONAL FEATURES
 ---------------------------
 
 with-face-simultaneous::
-    Attempts facial authentication simultaneously with password prompt
+    Attempts facial authentication simultaneously with the password prompt.
 
 with-faillock::
     Enable account locking in case of too many consecutive
