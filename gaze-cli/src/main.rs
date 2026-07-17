@@ -7,7 +7,8 @@ use console::{Term, style};
 use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 use futures::StreamExt;
 use gaze_core::config::{
-    Config, HYBRID_POLICY_OPTIONS, MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS, SecurityLevel,
+    Config, HYBRID_POLICY_OPTIONS, MAX_ENROLLMENT_FACE_SIZE_RATIO, MIN_ENROLLMENT_FACE_SIZE_RATIO,
+    MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS, SecurityLevel,
 };
 use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon, connect_gaze,
@@ -348,6 +349,19 @@ async fn run_config_wizard(
         .with_prompt("Max templates (sets of captures)")
         .default(config.enrollment.max_templates)
         .interact_text()?;
+
+    let min_face_size_ratio: f64 = Input::with_theme(&theme)
+        .with_prompt("Minimum enrollment face size ratio (0.10 - 0.75; lower allows more distance)")
+        .default(config.enrollment.min_face_size_ratio)
+        .interact_text()?;
+    config.enrollment.min_face_size_ratio = if min_face_size_ratio.is_finite() {
+        min_face_size_ratio.clamp(
+            MIN_ENROLLMENT_FACE_SIZE_RATIO,
+            MAX_ENROLLMENT_FACE_SIZE_RATIO,
+        )
+    } else {
+        config.enrollment.effective_min_face_size_ratio() as f64
+    };
 
     config.liveness.enabled = Confirm::with_theme(&theme)
         .with_prompt("Enable liveness anti-spoofing")
@@ -1370,6 +1384,11 @@ async fn main() -> anyhow::Result<()> {
                     "{} {}",
                     style("enrollment.max_templates:").bold(),
                     config.enrollment.max_templates
+                );
+                println!(
+                    "{} {:.2}",
+                    style("enrollment.min_face_size_ratio:").bold(),
+                    config.enrollment.min_face_size_ratio
                 );
                 println!(
                     "{} {}",

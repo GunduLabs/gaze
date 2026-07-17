@@ -141,6 +141,7 @@ abort_if_lid_closed = true
 
 [enrollment]
 max_templates = 2
+min_face_size_ratio = 0.25
 
 [liveness]
 enabled = true

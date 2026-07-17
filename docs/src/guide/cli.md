@@ -141,7 +141,7 @@ Show-only mode:
 gaze config --show
 ```
 
-Prints all current config values (security level, detector and recognizer model, threshold, camera sources, emitter state, dark-frame threshold, auth behavior, hybrid combining policy, enrollment limit, and liveness settings) without opening the editor.
+Prints all current config values (security level, detector and recognizer model, threshold, camera sources, emitter state, dark-frame threshold, auth behavior, hybrid combining policy, enrollment limit and minimum face-size ratio, and liveness settings) without opening the editor.
 
 ## Manage another user
 

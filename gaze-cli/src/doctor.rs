@@ -301,6 +301,12 @@ fn config_findings(config: &Config) -> Vec<Check> {
             "Choose a supported security level with `gaze config`.",
         );
     }
+    if let Err(err) = config.enrollment.validate() {
+        error(
+            err.to_string(),
+            "Set enrollment.min_face_size_ratio to a value from 0.10 through 0.75.",
+        );
+    }
 
     if config.security.level == "custom" {
         if !config.security.threshold.is_finite()
@@ -1024,6 +1030,7 @@ mod tests {
         config.security.threshold = 1.5;
         config.security.hybrid_policy = "sometimes".to_string();
         config.cameras.rgb = "/dev/video0".to_string();
+        config.enrollment.min_face_size_ratio = 0.05;
         config.liveness.threshold = f64::NAN;
         config.liveness.max_frames = 0;
 
@@ -1046,6 +1053,11 @@ mod tests {
             messages
                 .iter()
                 .any(|message| message.contains("direct RGB"))
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("enrollment.min_face_size_ratio"))
         );
         assert!(
             messages
