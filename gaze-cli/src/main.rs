@@ -2,7 +2,9 @@ mod doctor;
 mod polkit;
 mod tui;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::CompleteEnv;
+use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
 use console::{Term, style};
 use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 use futures::StreamExt;
@@ -19,6 +21,28 @@ use tui::{AuthScreen, BusyScreen, EnrollScreen, Tone, TuiAction, TuiTerminal};
 
 fn get_current_user() -> String {
     std::env::var("USER").unwrap_or_else(|_| "root".into())
+}
+
+fn face_completer(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
+    let Some(current) = current.to_str() else {
+        return Vec::new();
+    };
+    let Ok(rt) = tokio::runtime::Runtime::new() else {
+        return Vec::new();
+    };
+    rt.block_on(async {
+        let Ok(proxy) = connect_gaze().await else {
+            return Vec::new();
+        };
+        let Ok(faces) = proxy.list_faces(&get_current_user()).await else {
+            return Vec::new();
+        };
+        faces
+            .into_iter()
+            .filter(|(face, ..)| face.starts_with(current))
+            .map(|(face, ..)| CompletionCandidate::new(face))
+            .collect()
+    })
 }
 
 fn first_run_marker_path() -> Option<PathBuf> {
@@ -146,7 +170,7 @@ enum Commands {
     RefineFace {
         #[arg(short, long)]
         user: Option<String>,
-        #[arg(help = "The name of the face to refine")]
+        #[arg(help = "The name of the face to refine", add = ArgValueCompleter::new(face_completer))]
         face: String,
     },
     /// List all faces enrolled for a user
@@ -1276,8 +1300,16 @@ fn handle_uninstall(yes: bool, keep_data: bool, dry_run: bool) -> anyhow::Result
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    CompleteEnv::with_factory(Cli::command).complete();
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     maybe_run_first_run_doctor(&cli.command).await;
