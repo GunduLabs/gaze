@@ -27,11 +27,11 @@ sha2 = "0.11"
 tokio = { version = "1.53.0", features = ["full", "rt-multi-thread"] }
 ureq = "3.3"
 uuid = { version = "1.24.0", features = ["v4"] }
-zbus = "5.17.0"
+zbus = "5.18.0"
 zip = "8.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-futures = "0.3.32"
+futures = "0.3.33"
 zbus_polkit = "5.0.0"
 # Seals the face-template encryption key to the TPM. Only `gazed` links this;
 # the CLI/GUI/PAM clients must not (mirrors the `ort` isolation in AGENTS.md).
