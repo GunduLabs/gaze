@@ -85,6 +85,26 @@ sudo -v
 `/etc/pam.d/system-auth` is owned by the `pambase` package and gets overwritten on system upgrades. Gaze is added to `/etc/pam.d/sudo` directly to avoid this, but if you manually added `pam_gaze.so` to `system-auth` it will be lost on `pambase` updates.
 :::
 
+### Polkit (graphical "Authentication Required" prompts)
+
+Arch's `polkit` package ships no `/etc/pam.d/polkit-1`, so the `polkit-1` PAM service falls back to the vendor default at `/usr/lib/pam.d/polkit-1`, which just does `include system-auth`. Since Gaze avoids patching `system-auth` (see above), graphical polkit prompts (`pkexec`, GNOME Settings, package manager GUIs, etc.) don't get face auth unless a `/etc/pam.d/polkit-1` override is installed too. The installer and `dev-link-system.sh` now create one automatically:
+
+```text
+#%PAM-1.0
+auth       sufficient   pam_gaze.so
+auth       include      system-auth
+account    include      system-auth
+password   include      system-auth
+session    include      system-auth
+```
+
+Verify with:
+
+```bash
+sudo systemctl restart polkit
+pkexec true
+```
+
 ## Other distros (manual)
 
 Edit your shared auth stack (for example `/etc/pam.d/system-auth`) and place Gaze before `pam_unix.so`.

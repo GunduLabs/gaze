@@ -1028,7 +1028,14 @@ fn remove_arch_pam_configuration_cmd() -> String {
         r#"sudo sed -i '/pam_gaze/d' "$f" || true;"#,
         "done < \"$flag\";",
         "done;",
-        "sudo sed -i '/pam_gaze/d' /etc/pam.d/sudo 2>/dev/null || true",
+        "sudo sed -i '/pam_gaze/d' /etc/pam.d/sudo 2>/dev/null || true;",
+        "for flag in /etc/gaze/pam-arch.polkit-configured /etc/gaze/pam-arch.polkit-dev-configured; do",
+        r#"[ -f "$flag" ] || continue;"#,
+        r#"while IFS= read -r f; do"#,
+        r#"sudo rm -f "$f" || true;"#,
+        "done < \"$flag\";",
+        r#"sudo rm -f "$flag" || true;"#,
+        "done",
     ]
     .join(" ")
 }
@@ -1567,5 +1574,8 @@ mod tests {
         assert!(command.contains("/etc/gaze/pam-arch.dev-configured"));
         assert!(command.contains("sed -i '/pam_gaze/d'"));
         assert!(command.contains("/etc/pam.d/sudo"));
+        assert!(command.contains("/etc/gaze/pam-arch.polkit-configured"));
+        assert!(command.contains("/etc/gaze/pam-arch.polkit-dev-configured"));
+        assert!(command.contains("rm -f"));
     }
 }

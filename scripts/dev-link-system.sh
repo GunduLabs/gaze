@@ -256,6 +256,36 @@ restore_pam_config() {
     rm -f "$flag"
 }
 
+link_polkit_pam_config() {
+    pam_file=/etc/pam.d/polkit-1
+    [ -f "$pam_file" ] && { printf 'PAM already configured: %s\n' "$pam_file"; return 0; }
+
+    cat > "$pam_file" <<-EOF
+	#%PAM-1.0
+	auth       sufficient   pam_gaze.so
+	auth       include      system-auth
+	account    include      system-auth
+	password   include      system-auth
+	session    include      system-auth
+	EOF
+    chmod 644 "$pam_file"
+    printf 'configured PAM: %s\n' "$pam_file"
+
+    mkdir -p /etc/gaze
+    printf '%s\n' "$pam_file" > /etc/gaze/pam-arch.polkit-dev-configured
+}
+
+restore_polkit_pam_config() {
+    flag=/etc/gaze/pam-arch.polkit-dev-configured
+    [ -f "$flag" ] || return 0
+
+    while IFS= read -r pam_file; do
+        rm -f "$pam_file" && printf 'removed PAM: %s\n' "$pam_file"
+    done < "$flag"
+
+    rm -f "$flag"
+}
+
 restore_pam_modules() {
     multiarch=
     if command -v gcc >/dev/null 2>&1; then
@@ -465,6 +495,7 @@ case "$cmd" in
         link_binaries
         link_pam_modules
         link_pam_config
+        link_polkit_pam_config
         link_polkit_policy
         link_gnome_extension
         setup_tpm_encryption
@@ -477,6 +508,7 @@ case "$cmd" in
         restore_binaries
         restore_pam_modules
         restore_pam_config
+        restore_polkit_pam_config
         restore_polkit_policy
         restore_gnome_extension
         teardown_tpm_encryption
