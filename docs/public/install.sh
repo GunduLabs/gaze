@@ -596,7 +596,7 @@ if is_deb; then
         sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 
     step "Updating package index"
-    sudo apt-get update
+    sudo apt-get update </dev/null
 
     step "Installing packages"
     DEB_PKGS="gaze gaze-gui"
@@ -606,13 +606,13 @@ if is_deb; then
     if want_hyprlock_setup; then
         DEB_PKGS="$DEB_PKGS gaze-hyprlock"
     fi
-    sudo apt-get install -y $DEB_PKGS
+    sudo apt-get install -y $DEB_PKGS </dev/null
 
     step "Desktop integration"
     enable_desktop_integrations
 
     step "Enabling Gaze daemon"
-    sudo systemctl enable --now gazed 2>/dev/null || true
+    sudo systemctl enable --now gazed </dev/null 2>/dev/null || true
 
 elif is_rpm; then
     step "Configuring dnf repository"
@@ -626,11 +626,16 @@ repo_gpgcheck=1
 gpgkey=${PKG_BASE_URL}/keys/gundulabs-repo.asc
 EOF
 
+    # Import the fingerprint-verified key up front so repo_gpgcheck does not drop
+    # into an interactive "import key? [y/N]" prompt that reads the piped script.
+    KEY_PATH="$(fetch_repo_key)"
+    sudo rpm --import "$KEY_PATH"
+
     step "Refreshing repository metadata"
     if command -v dnf >/dev/null 2>&1; then
-        sudo dnf makecache
+        sudo dnf makecache </dev/null
     else
-        sudo yum makecache
+        sudo yum makecache </dev/null
     fi
 
     step "Installing packages"
@@ -642,9 +647,9 @@ EOF
         RPM_PKGS="$RPM_PKGS gaze-hyprlock"
     fi
     if command -v dnf >/dev/null 2>&1; then
-        sudo dnf install -y $RPM_PKGS
+        sudo dnf install -y $RPM_PKGS </dev/null
     else
-        sudo yum install -y $RPM_PKGS
+        sudo yum install -y $RPM_PKGS </dev/null
     fi
 
     step "Configuring PAM"
@@ -654,7 +659,7 @@ EOF
     enable_desktop_integrations
 
     step "Enabling Gaze daemon"
-    sudo systemctl enable --now gazed 2>/dev/null || true
+    sudo systemctl enable --now gazed </dev/null 2>/dev/null || true
 
 elif is_arch; then
     step "Checking for AUR helper"
@@ -699,7 +704,7 @@ elif is_arch; then
     enable_desktop_integrations
 
     step "Enabling Gaze daemon"
-    sudo systemctl enable --now gazed 2>/dev/null || true
+    sudo systemctl enable --now gazed </dev/null 2>/dev/null || true
 fi
 
 # ── done ─────────────────────────────────────────────────────────────────────
