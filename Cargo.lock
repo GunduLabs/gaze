@@ -451,9 +451,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.67"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e17dd265a7d0f31ef544e1b20e03add05d3b45b491b633b10d67145d2acc1a38"
+checksum = "c89588d05638b5b4594a3348a2d6c20277e43a7f5c5202b05cc56888475a47b8"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -1211,7 +1211,7 @@ dependencies = [
 
 [[package]]
 name = "gaze"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1239,7 +1239,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-cli"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -1257,7 +1257,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-core"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "gstreamer",
@@ -1284,7 +1284,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-gui"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "enumflags2",
@@ -1975,9 +1975,9 @@ dependencies = [
 
 [[package]]
 name = "kstring"
-version = "2.0.3"
+version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b5c39158205a1955370d20163dcd3957e155463717747464719462f6578e149"
+checksum = "b609e7ca5ea38f093c20a4a102335b247221c9643b7a6bc3510f196f99499a9e"
 dependencies = [
  "static_assertions",
 ]
@@ -2551,7 +2551,7 @@ dependencies = [
 
 [[package]]
 name = "pam-gaze"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "futures",
  "gaze-core",
@@ -2563,7 +2563,7 @@ dependencies = [
 
 [[package]]
 name = "pam-gaze-core"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "futures",
@@ -2576,7 +2576,7 @@ dependencies = [
 
 [[package]]
 name = "pam-gaze-grosshack"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "futures",
@@ -2838,9 +2838,9 @@ dependencies = [
 
 [[package]]
 name = "polyval"
-version = "0.7.2"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b20f20e954175de5f463f67781b35583397d916b1d148738923711b2ad16bee8"
+checksum = "f0fa31d631f2b2cb2a544d0aa321ce847a94764d701ca2becc411138b93d49cd"
 dependencies = [
  "cpubits",
  "cpufeatures 0.3.0",
@@ -2849,9 +2849,9 @@ dependencies = [
 
 [[package]]
 name = "portable-atomic"
-version = "1.13.1"
+version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
+checksum = "3d20d5497ef88037a52ff98267d066e7f11fcc5e99bbfbd58a42336193aacec3"
 
 [[package]]
 name = "portable-atomic-util"
@@ -3723,9 +3723,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-macros"
-version = "2.7.0"
+version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "385a6cb71ab9ab790c5fe8d67f1645e6c450a7ce006a33de03daa956cf70a496"
+checksum = "6328af13490e73a9b4694030fafd93f8c8c6a9dede33e821c3fc63eddf8042ba"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4104,18 +4104,18 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.8"
+version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d46a5a140e6f7afeccd8eae97eff335163939eac8b929834875168b29b3d267"
+checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
 dependencies = [
  "rustls-pki-types",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.8"
+version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf85cb06032201fa7c6f829d7db5a7e5aa45bcc0655327713065f6f0576731bf"
+checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
 dependencies = [
  "rustls-pki-types",
 ]
