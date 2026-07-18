@@ -21,7 +21,6 @@ struct FrameData {
 
 pub struct CameraFeed {
     pub picture: gtk4::Picture,
-    pub overlay: gtk4::Overlay,
     guide: gtk4::DrawingArea,
     rx: Rc<RefCell<Option<mpsc::Receiver<FrameData>>>>,
     latest_frame: Rc<RefCell<Option<opencv::core::Mat>>>,
@@ -203,7 +202,6 @@ impl CameraFeed {
 
         Self {
             picture,
-            overlay,
             guide,
             rx: Rc::new(RefCell::new(rx)),
             latest_frame: Rc::new(RefCell::new(None)),
