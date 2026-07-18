@@ -1,5 +1,8 @@
 use crate::capture_dialog;
-use gaze_core::config::{Config, DEFAULT_RGB_CAMERA, SecurityLevel};
+use gaze_core::config::{
+    Config, DEFAULT_RGB_CAMERA, MAX_ENROLLMENT_FACE_SIZE_RATIO, MIN_ENROLLMENT_FACE_SIZE_RATIO,
+    SecurityLevel,
+};
 use gaze_core::dbus::{
     GazeProxy, apply_config_to_daemon, connect_gaze, dbus_error_message, dbus_is_file_not_found,
     dbus_is_not_activatable, load_config_from_daemon,
@@ -97,6 +100,7 @@ struct ConfigRows<'a> {
     emitter: &'a gtk4::Switch,
     dark_luma_threshold: &'a libadwaita::SpinRow,
     templates: &'a libadwaita::SpinRow,
+    min_face_size_ratio: &'a libadwaita::SpinRow,
     liveness_enabled: &'a gtk4::Switch,
     liveness_threshold: &'a libadwaita::SpinRow,
     liveness_max_frames: &'a libadwaita::SpinRow,
@@ -150,6 +154,8 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
         .set_value(cfg.cameras.dark_luma_threshold as f64);
     rows.templates
         .set_value(cfg.enrollment.max_templates as f64);
+    rows.min_face_size_ratio
+        .set_value(cfg.enrollment.min_face_size_ratio);
     rows.liveness_enabled.set_active(cfg.liveness.enabled);
     rows.liveness_threshold.set_value(cfg.liveness.threshold);
     rows.liveness_max_frames
@@ -287,6 +293,17 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     templates_row.set_subtitle("Number of capture sets stored per face");
     enrollment_group.add(&templates_row);
 
+    let min_face_size_ratio_row = libadwaita::SpinRow::with_range(
+        MIN_ENROLLMENT_FACE_SIZE_RATIO,
+        MAX_ENROLLMENT_FACE_SIZE_RATIO,
+        0.01,
+    );
+    min_face_size_ratio_row.set_digits(2);
+    min_face_size_ratio_row.set_title("Minimum Face Size Ratio");
+    min_face_size_ratio_row
+        .set_subtitle("Smallest accepted face during enrollment; lower allows more distance");
+    enrollment_group.add(&min_face_size_ratio_row);
+
     let liveness_group = libadwaita::PreferencesGroup::new();
     liveness_group.set_title("Liveness Anti-Spoofing");
     page.add(&liveness_group);
@@ -420,6 +437,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         templates_row,
         #[weak]
+        min_face_size_ratio_row,
+        #[weak]
         liveness_enabled_switch,
         #[weak]
         liveness_threshold_row,
@@ -479,6 +498,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             cfg.cameras.emitter_enabled = emitter_switch.is_active();
             cfg.cameras.dark_luma_threshold = dark_luma_threshold_row.value() as u8;
             cfg.enrollment.max_templates = templates_row.value() as u32;
+            cfg.enrollment.min_face_size_ratio = min_face_size_ratio_row.value();
             cfg.liveness.enabled = liveness_enabled_switch.is_active();
             cfg.liveness.threshold = liveness_threshold_row.value();
             cfg.liveness.max_frames = liveness_max_frames_row.value() as u32;
@@ -530,6 +550,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         move |_| apply_changes()
     ));
     templates_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    min_face_size_ratio_row.connect_value_notify(glib::clone!(
         #[strong]
         apply_changes,
         move |_| apply_changes()
@@ -621,6 +646,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 emitter: &emitter_switch,
                 dark_luma_threshold: &dark_luma_threshold_row,
                 templates: &templates_row,
+                min_face_size_ratio: &min_face_size_ratio_row,
                 liveness_enabled: &liveness_enabled_switch,
                 liveness_threshold: &liveness_threshold_row,
                 liveness_max_frames: &liveness_max_frames_row,
@@ -769,6 +795,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         templates_row,
         #[weak]
+        min_face_size_ratio_row,
+        #[weak]
         liveness_enabled_switch,
         #[weak]
         liveness_threshold_row,
@@ -815,6 +843,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                         emitter: &emitter_switch,
                         dark_luma_threshold: &dark_luma_threshold_row,
                         templates: &templates_row,
+                        min_face_size_ratio: &min_face_size_ratio_row,
                         liveness_enabled: &liveness_enabled_switch,
                         liveness_threshold: &liveness_threshold_row,
                         liveness_max_frames: &liveness_max_frames_row,

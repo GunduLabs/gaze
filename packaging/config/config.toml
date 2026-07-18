@@ -41,6 +41,9 @@ resume_grace_ms = 0
 
 [enrollment]
 max_templates = 2
+# Smallest accepted face bbox as a fraction of the frame's shorter side.
+# Lower values allow enrollment from farther away; valid range: 0.10-0.75.
+min_face_size_ratio = 0.25
 
 # Liveness anti-spoofing runs a local MiniFASNet-V2 PAD model on the detected face crop.
 # The model is downloaded into /var/cache/gaze on first use if missing.

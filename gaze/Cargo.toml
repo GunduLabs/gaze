@@ -24,7 +24,7 @@ opencv = { version = "0.99.0", default-features = false, features = ["imgproc", 
 ort = "2.0.0-rc.12"
 rayon = "1.12"
 sha2 = "0.11"
-tokio = { version = "1.52.4", features = ["full", "rt-multi-thread"] }
+tokio = { version = "1.53.0", features = ["full", "rt-multi-thread"] }
 ureq = "3.3"
 uuid = { version = "1.24.0", features = ["v4"] }
 zbus = "5.17.0"

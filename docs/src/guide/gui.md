@@ -25,6 +25,7 @@ From there you can edit:
 - RGB camera source, IR camera device, and IR emitter
 - Dark-frame rejection cutoff
 - Maximum enrollment templates per face
+- Minimum enrollment face-size ratio (lower values allow enrollment from farther away)
 - Liveness anti-spoofing (enable, threshold, max frames)
 - Auth behavior (abort if SSH, abort if lid closed, require confirmation)
 

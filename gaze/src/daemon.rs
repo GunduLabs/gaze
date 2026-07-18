@@ -2655,6 +2655,10 @@ impl AuthDaemon {
             .security
             .validate()
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        new_config
+            .enrollment
+            .validate()
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
 
         self.cancel_active_tasks();
 

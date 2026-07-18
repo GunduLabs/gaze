@@ -19,6 +19,6 @@ pam-gaze-core = { path = "../pam-gaze-core" }
 gaze-core = { path = "../gaze-core", default-features = false }
 libc = "0.2.186"
 zbus = "5.17.0"
-tokio = { version = "1.52.4", features = ["full"] }
+tokio = { version = "1.53.0", features = ["full"] }
 futures = "0.3.32"
 anyhow = "1.0.103"
