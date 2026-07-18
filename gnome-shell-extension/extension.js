@@ -375,13 +375,13 @@ export default class GazeFaceAuthExtension extends Extension {
       "_onSecretInfoQuery",
       (original) => {
         return function (client, serviceName, secretQuestion) {
-          if (
-            serviceName === FACE_SERVICE_NAME &&
-            secretQuestion?.trim() === CONFIRMATION_REQUEST
-          ) {
+          // Distro PAM stacks (e.g. Fedora's password-auth) run pam_gaze on
+          // gdm-password too, so match the token on any service.
+          if (secretQuestion?.trim() === CONFIRMATION_REQUEST) {
             this._filterServiceMessages(serviceName, Util.MessageType.HINT);
             // Enter must send the ack token, not the empty typed answer.
             this._faceConfirmPending = true;
+            this._faceConfirmService = serviceName;
             this.emit("ask-question", serviceName, CONFIRMATION_QUESTION, true);
             return;
           }
@@ -393,8 +393,9 @@ export default class GazeFaceAuthExtension extends Extension {
 
     this._injectionManager.overrideMethod(proto, "answerQuery", (original) => {
       return function (serviceName, answer) {
-        if (this._faceConfirmPending && serviceName === FACE_SERVICE_NAME) {
+        if (this._faceConfirmPending && serviceName === this._faceConfirmService) {
           this._faceConfirmPending = false;
+          this._faceConfirmService = null;
           original.call(this, serviceName, CONFIRMATION_ACK);
           return;
         }
@@ -425,7 +426,10 @@ export default class GazeFaceAuthExtension extends Extension {
         return function (client, serviceName) {
           if (serviceName === FACE_SERVICE_NAME) {
             this._faceFailCounter = (this._faceFailCounter || 0) + 1;
+          }
+          if (serviceName === this._faceConfirmService) {
             this._faceConfirmPending = false;
+            this._faceConfirmService = null;
           }
 
           original.call(this, client, serviceName);
@@ -451,6 +455,7 @@ export default class GazeFaceAuthExtension extends Extension {
       return function () {
         this._faceFailCounter = 0;
         this._faceConfirmPending = false;
+        this._faceConfirmService = null;
         original.call(this);
       };
     });
