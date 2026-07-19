@@ -13,7 +13,7 @@ repository.workspace = true
 
 [dependencies]
 aes-gcm = "0.11.0"
-anyhow = "1.0.103"
+anyhow = "1.0.104"
 gaze-core = { path = "../gaze-core" }
 getrandom = "0.4.3"
 image = { version = "0.25.10", default-features = false }
