@@ -84,6 +84,28 @@ For GNOME lock screen face unlock after manual package installation, also instal
 
 </details>
 
+<details>
+<summary>Nix / NixOS (flake)</summary>
+
+The repo is a Nix flake with packages (`gaze`, `gaze-gui`, `gaze-gnome-extension`) and a NixOS module that configures the daemon, D-Bus/polkit, and PAM declaratively:
+
+```nix
+# flake.nix inputs
+inputs.gaze.url = "github:GunduLabs/gaze";
+
+# NixOS configuration
+imports = [ inputs.gaze.nixosModules.default ];
+services.gaze = {
+  enable = true;
+  gui.enable = true;
+  pam.services.sudo = { };
+};
+```
+
+See the [Nix & NixOS guide](https://gaze.gundulabs.com/guide/nixos) for module options, GNOME lock screen setup, hyprlock, and home-manager usage.
+
+</details>
+
 After installation (any method), reboot once to ensure all system-level changes are fully applied.
 
 ```bash

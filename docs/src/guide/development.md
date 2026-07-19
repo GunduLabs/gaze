@@ -74,6 +74,8 @@ just --list
 
 Git hooks are local to each clone. `just setup-hooks` points Git at the tracked hook scripts so pre-commit checks stay up to date when the repo changes. CI still runs the same required checks for pushes and pull requests.
 
+With Nix installed you can skip the distro prerequisites entirely: `nix develop` drops you into a shell with the Rust toolchain and every native build dependency (OpenCV, GStreamer, GTK4, ONNX Runtime, tpm2-tss) already configured. See the [Nix & NixOS guide](/guide/nixos).
+
 ## Workspace layout
 
 - `gaze`: the `gazed` daemon, ML pipeline, and user database.

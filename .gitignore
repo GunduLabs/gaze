@@ -22,3 +22,7 @@ dist/
 index.scip
 .wrangler/
 docs/archive/
+
+# nix build outputs
+result
+result-*
