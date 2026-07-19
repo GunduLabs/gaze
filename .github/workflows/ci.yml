@@ -98,16 +98,6 @@ jobs:
           RUSTFLAGS: -Cdebuginfo=0
         run: just build-rust
 
-  nix:
-    name: Nix flake eval
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          fetch-depth: 1
-
       - name: Install Nix
         uses: cachix/install-nix-action@v31
 
