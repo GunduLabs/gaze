@@ -2512,7 +2512,7 @@ impl AuthDaemon {
                             }
                             EnrollMsg::Error(e) => {
                                 error!("Enrollment error: {e}");
-                                let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::DbFailed, -1.0).await;
+                                let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::CameraFailed, -1.0).await;
                                 stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                                 return;
                             }

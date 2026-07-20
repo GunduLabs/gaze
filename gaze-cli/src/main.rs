@@ -496,7 +496,7 @@ async fn handle_enroll(
                         current_enroll_msg = raw_msg.to_string();
                         current_time_remaining = (time_remaining > 0.0).then_some(time_remaining);
 
-                        if matches!(raw_msg, EnrollPrompt::DbFailed | EnrollPrompt::Cancelled) {
+                        if matches!(raw_msg, EnrollPrompt::DbFailed | EnrollPrompt::CameraFailed | EnrollPrompt::Cancelled) {
                             is_failed = true;
                             break;
                         }
@@ -553,7 +553,11 @@ async fn handle_enroll(
             style(face).green()
         ))?;
     } else if is_failed {
-        term.write_line(&format!("{} Enrollment failed", style("✗").red().bold()))?;
+        term.write_line(&format!(
+            "{} Enrollment failed: {}",
+            style("✗").red().bold(),
+            current_enroll_msg
+        ))?;
     }
     Ok(())
 }

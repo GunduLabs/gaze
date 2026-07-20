@@ -1,7 +1,7 @@
 use gstreamer::prelude::*;
 use opencv::core::Mat;
 use opencv::prelude::*;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::config::{CameraConfig, DEFAULT_RGB_CAMERA};
 
@@ -176,7 +176,7 @@ impl Camera {
         };
 
         let pipeline_str = format!(
-            "{src_element} ! video/x-raw; image/jpeg ! decodebin ! videoconvert ! videoscale ! appsink name=gaze_sink"
+            "{src_element} ! video/x-raw,pixel-aspect-ratio=1/1; image/jpeg ! decodebin ! videoconvert ! videoscale ! appsink name=gaze_sink"
         );
         info!("Attempting to open GStreamer camera: {}", pipeline_str);
 
@@ -259,8 +259,9 @@ impl Iterator for Camera {
                 .appsink
                 .try_pull_sample(gstreamer::ClockTime::from_seconds(5))
             {
-                if let Ok(mat) = self.sample_to_mat(&sample) {
-                    return Some(mat);
+                match self.sample_to_mat(&sample) {
+                    Ok(mat) => return Some(mat),
+                    Err(err) => warn!("Dropping camera frame: {err:#}"),
                 }
             } else {
                 if self.appsink.is_eos() {
@@ -275,7 +276,20 @@ impl Iterator for Camera {
                 }) {
                     match msg.view() {
                         gstreamer::MessageView::Error(err) => {
-                            info!("Camera pipeline error: {}", err.error());
+                            if let Some(src) = err.src() {
+                                warn!(
+                                    source = %src.path_string(),
+                                    debug = ?err.debug(),
+                                    "Camera pipeline error: {}",
+                                    err.error()
+                                );
+                            } else {
+                                warn!(
+                                    debug = ?err.debug(),
+                                    "Camera pipeline error: {}",
+                                    err.error()
+                                );
+                            }
                         }
                         _ => info!("Camera stream ended (EOS)"),
                     }
