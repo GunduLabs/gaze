@@ -111,6 +111,12 @@ It also owns `com.gundulabs.Gaze` on the **system** DBus bus, which requires roo
 
 **Option A: link your build over the installed files** (easier for repeated iteration):
 
+This overlays your checkout onto an *existing* package install; it does not install the
+package itself. If you've never installed Gaze on this machine, build and install a package
+once first (`just package rpm` and `sudo <package manager> install dist/packages/gazed-*.rpm`,
+or the `deb`/`archlinux` equivalent); `dev-link-system` fails fast with a pointer back here if
+`gazed.service` isn't installed yet.
+
 ```bash
 just build-rust
 just dev-link-system    # runs scripts/dev-link-system.sh under sudo itself
