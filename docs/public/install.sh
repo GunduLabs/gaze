@@ -339,8 +339,9 @@ configure_authselect() {
         return 0
     fi
 
+    current_authselect="$(sudo authselect current 2>/dev/null || true)"
+
     if ! sudo test -f /etc/gaze/authselect.previous; then
-        current_authselect="$(sudo authselect current 2>/dev/null || true)"
         case "$current_authselect" in
         *"Profile ID: gaze"*) ;;
         "") ;;
@@ -354,8 +355,16 @@ configure_authselect() {
         esac
     fi
 
+    # authselect select resets the feature set, so carry over the features the
+    # user already had (e.g. with-fingerprint) instead of silently dropping them.
+    preserved_features="$(printf '%s\n' "$current_authselect" | awk '/^- /{print $2}')"
+
     if sudo authselect select gaze with-silent-lastlog --force >/dev/null 2>&1; then
         ok "Enabled the Gaze PAM authselect profile."
+        for feature in $preserved_features; do
+            [ "$feature" = "with-silent-lastlog" ] && continue
+            sudo authselect enable-feature "$feature" >/dev/null 2>&1 || true
+        done
     else
         warn "Could not enable the Gaze PAM authselect profile automatically."
         say "After installation, run:"
