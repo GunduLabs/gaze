@@ -1,6 +1,7 @@
 use gstreamer::prelude::*;
 use opencv::core::Mat;
 use opencv::prelude::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{info, warn};
 
 use crate::config::{CameraConfig, DEFAULT_RGB_CAMERA};
@@ -118,6 +119,13 @@ pub fn resolve_node(source: &str) -> Option<String> {
 
 const PRIMARY_CAMERA_DISPLAY_NAME: &str = "Primary Camera";
 const DEVICE_SETTLE_TIMEOUT_MS: u64 = 100;
+const INTERRUPTIBLE_POLL_TIMEOUT_MS: u64 = 100;
+
+enum FramePoll {
+    Frame(Mat),
+    Timeout,
+    Ended,
+}
 
 pub struct Camera {
     pipeline: gstreamer::Pipeline,
@@ -126,10 +134,27 @@ pub struct Camera {
 
 impl Drop for Camera {
     fn drop(&mut self) {
-        let _ = self.pipeline.set_state(gstreamer::State::Null);
-        let _ = self
+        if let Err(err) = self.pipeline.set_state(gstreamer::State::Null) {
+            warn!("Failed to stop camera pipeline: {err}");
+            return;
+        }
+
+        let (result, current, pending) = self
             .pipeline
             .state(Some(gstreamer::ClockTime::from_seconds(2)));
+        if let Err(err) = result {
+            warn!(
+                ?current,
+                ?pending,
+                "Camera pipeline did not stop cleanly: {err}"
+            );
+        } else if current != gstreamer::State::Null {
+            warn!(
+                ?current,
+                ?pending,
+                "Camera pipeline did not reach the Null state"
+            );
+        }
     }
 }
 
@@ -248,6 +273,72 @@ impl Camera {
         opencv::core::flip(&frame, &mut mirrored, 1)?;
         Ok(mirrored)
     }
+
+    fn poll_frame(&self, timeout: gstreamer::ClockTime) -> FramePoll {
+        if let Some(sample) = self.appsink.try_pull_sample(timeout) {
+            return match self.sample_to_mat(&sample) {
+                Ok(mat) => FramePoll::Frame(mat),
+                Err(err) => {
+                    warn!("Dropping camera frame: {err:#}");
+                    FramePoll::Timeout
+                }
+            };
+        }
+
+        if self.appsink.is_eos() {
+            info!("Camera stream ended (EOS)");
+            return FramePoll::Ended;
+        }
+        if let Some(msg) = self.pipeline.bus().and_then(|bus| {
+            bus.timed_pop_filtered(
+                gstreamer::ClockTime::ZERO,
+                &[gstreamer::MessageType::Error, gstreamer::MessageType::Eos],
+            )
+        }) {
+            match msg.view() {
+                gstreamer::MessageView::Error(err) => {
+                    if let Some(src) = err.src() {
+                        warn!(
+                            source = %src.path_string(),
+                            debug = ?err.debug(),
+                            "Camera pipeline error: {}",
+                            err.error()
+                        );
+                    } else {
+                        warn!(
+                            debug = ?err.debug(),
+                            "Camera pipeline error: {}",
+                            err.error()
+                        );
+                    }
+                }
+                _ => info!("Camera stream ended (EOS)"),
+            }
+            return FramePoll::Ended;
+        }
+        let (_, current_state, _) = self.pipeline.state(Some(gstreamer::ClockTime::ZERO));
+        if current_state != gstreamer::State::Playing && current_state != gstreamer::State::Paused {
+            info!("Camera pipeline stopped: {:?}", current_state);
+            return FramePoll::Ended;
+        }
+
+        FramePoll::Timeout
+    }
+
+    /// Wait for the next frame while checking `stop` between short polling intervals.
+    pub fn next_interruptible(&mut self, stop: &AtomicBool) -> Option<Mat> {
+        while !stop.load(Ordering::Acquire) {
+            match self.poll_frame(gstreamer::ClockTime::from_mseconds(
+                INTERRUPTIBLE_POLL_TIMEOUT_MS,
+            )) {
+                FramePoll::Frame(frame) => return Some(frame),
+                FramePoll::Timeout => {}
+                FramePoll::Ended => return None,
+            }
+        }
+
+        None
+    }
 }
 
 impl Iterator for Camera {
@@ -255,53 +346,10 @@ impl Iterator for Camera {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(sample) = self
-                .appsink
-                .try_pull_sample(gstreamer::ClockTime::from_seconds(5))
-            {
-                match self.sample_to_mat(&sample) {
-                    Ok(mat) => return Some(mat),
-                    Err(err) => warn!("Dropping camera frame: {err:#}"),
-                }
-            } else {
-                if self.appsink.is_eos() {
-                    info!("Camera stream ended (EOS)");
-                    return None;
-                }
-                if let Some(msg) = self.pipeline.bus().and_then(|bus| {
-                    bus.timed_pop_filtered(
-                        gstreamer::ClockTime::ZERO,
-                        &[gstreamer::MessageType::Error, gstreamer::MessageType::Eos],
-                    )
-                }) {
-                    match msg.view() {
-                        gstreamer::MessageView::Error(err) => {
-                            if let Some(src) = err.src() {
-                                warn!(
-                                    source = %src.path_string(),
-                                    debug = ?err.debug(),
-                                    "Camera pipeline error: {}",
-                                    err.error()
-                                );
-                            } else {
-                                warn!(
-                                    debug = ?err.debug(),
-                                    "Camera pipeline error: {}",
-                                    err.error()
-                                );
-                            }
-                        }
-                        _ => info!("Camera stream ended (EOS)"),
-                    }
-                    return None;
-                }
-                let (_, current_state, _) = self.pipeline.state(Some(gstreamer::ClockTime::ZERO));
-                if current_state != gstreamer::State::Playing
-                    && current_state != gstreamer::State::Paused
-                {
-                    info!("Camera pipeline stopped: {:?}", current_state);
-                    return None;
-                }
+            match self.poll_frame(gstreamer::ClockTime::from_seconds(5)) {
+                FramePoll::Frame(frame) => return Some(frame),
+                FramePoll::Timeout => {}
+                FramePoll::Ended => return None,
             }
         }
     }
@@ -506,6 +554,34 @@ mod tests {
             frames += 1;
             assert!(frames < 10, "iterator must end after the pipeline errors");
         }
+    }
+
+    #[test]
+    fn interruptible_read_stops_when_live_pipeline_has_no_frames() {
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let worker_stop = stop.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+        let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
+
+        let worker = std::thread::spawn(move || {
+            let mut camera = Camera::open("appsrc is-live=true format=time")
+                .expect("live pipeline without frames");
+            ready_tx.send(()).expect("signal camera readiness");
+            let stopped = camera.next_interruptible(&worker_stop).is_none();
+            done_tx.send(stopped).expect("signal camera shutdown");
+        });
+
+        ready_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("camera must become ready");
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        stop.store(true, Ordering::Release);
+        assert!(
+            done_rx
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .expect("camera read must observe cancellation")
+        );
+        worker.join().expect("camera worker must exit");
     }
 
     #[test]
