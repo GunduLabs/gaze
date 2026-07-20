@@ -85,6 +85,18 @@ require_artifacts() {
     [ "$missing" -eq 0 ] || die "Build first: cargo build --workspace --release"
 }
 
+require_installed_unit() {
+    systemctl cat gazed.service >/dev/null 2>&1 || die \
+        "gazed.service is not installed. dev-link-system only overlays your checkout onto an
+existing package install; it does not install the package itself.
+
+Build and install a package once first, e.g.:
+    just package rpm
+    sudo <your package manager> install dist/packages/gazed-*.rpm
+
+then re-run: just dev-link-system"
+}
+
 backup_name() {
     printf '%s' "$1" | tr '/ ' '__'
 }
@@ -492,6 +504,7 @@ case "$cmd" in
     enable)
         need_root
         require_artifacts
+        require_installed_unit
         link_binaries
         link_pam_modules
         link_pam_config
