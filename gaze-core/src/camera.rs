@@ -327,7 +327,7 @@ impl Camera {
 
     /// Wait for the next frame while checking `stop` between short polling intervals.
     pub fn next_interruptible(&mut self, stop: &AtomicBool) -> Option<Mat> {
-        while !stop.load(Ordering::Acquire) {
+        while !stop.load(Ordering::Relaxed) {
             match self.poll_frame(gstreamer::ClockTime::from_mseconds(
                 INTERRUPTIBLE_POLL_TIMEOUT_MS,
             )) {
