@@ -342,10 +342,17 @@ fn config_findings(config: &Config) -> Vec<Check> {
             "Set cameras.rgb to \"primary\" or configure an IR camera.",
         );
     }
-    if rgb.starts_with("/dev/video") {
+    if let Some(index) = rgb.strip_prefix("/dev/video") {
+        if index.is_empty() || !index.chars().all(|c| c.is_ascii_digit()) {
+            error(
+                format!("invalid RGB camera node {rgb:?}"),
+                "Use /dev/video<number>, usb:VVVV:PPPP, \"primary\", or a GStreamer source.",
+            );
+        }
+    } else if rgb.starts_with("usb:") && gaze_core::camera::parse_usb_spec(rgb).is_none() {
         error(
-            format!("direct RGB camera path {rgb:?} is unsupported"),
-            "Use `gaze config` to select a PipeWire camera; direct /dev/video* is supported only for cameras.ir.",
+            format!("invalid RGB USB spec {rgb:?}"),
+            "Use usb:VVVV:PPPP with hex VID:PID, for example usb:046d:085e.",
         );
     }
 
@@ -968,7 +975,28 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
                             "Run `gaze config` and select a currently detected camera.",
                         );
                     }
-                } else if !rgb.starts_with("/dev/video") {
+                } else if let Some((vid, pid)) = gaze_core::camera::parse_usb_spec(rgb) {
+                    report.pass(
+                        "RGB camera",
+                        format!("resolves the color node for USB {vid:04x}:{pid:04x} at runtime"),
+                    );
+                } else if rgb.starts_with("/dev/video") {
+                    match fs::metadata(rgb) {
+                        Ok(metadata) if metadata.file_type().is_char_device() => {
+                            report.pass("RGB camera", format!("{rgb} is a character device"));
+                        }
+                        Ok(_) => report.error(
+                            "RGB camera",
+                            format!("{rgb} is not a character device"),
+                            "Point cameras.rgb at a /dev/video* node.",
+                        ),
+                        Err(err) => report.error(
+                            "RGB camera",
+                            format!("{rgb} is not accessible: {err}"),
+                            "Check the device path and permissions.",
+                        ),
+                    }
+                } else {
                     report.warning(
                         "RGB camera",
                         "a custom GStreamer source is configured and was not opened by this read-only check",
@@ -1054,7 +1082,7 @@ mod tests {
         config.security.recognizer = "standard".to_string();
         config.security.threshold = 1.5;
         config.security.hybrid_policy = "sometimes".to_string();
-        config.cameras.rgb = "/dev/video0".to_string();
+        config.cameras.rgb = "/dev/videoX".to_string();
         config.enrollment.min_face_size_ratio = 0.05;
         config.liveness.threshold = f64::NAN;
         config.liveness.max_frames = 0;
@@ -1077,7 +1105,7 @@ mod tests {
         assert!(
             messages
                 .iter()
-                .any(|message| message.contains("direct RGB"))
+                .any(|message| message.contains("invalid RGB camera node"))
         );
         assert!(
             messages
