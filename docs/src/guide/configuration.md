@@ -106,7 +106,23 @@ rgb = "primary"
 rgb = "pipewiresrc target-object=<pipewire-target>"
 ```
 
-Direct `/dev/video*` paths are not supported.
+`pipewiresrc` needs a PipeWire session to attach to. GDM's greeter runs its own
+user session and provides one, but greeters like KDE's `plasmalogin`, SDDM,
+greetd, and a plain TTY do not, so `primary` cannot capture RGB there. For those
+setups, point `rgb` at the camera directly, which uses `v4l2src` and needs no
+session:
+
+```toml
+[cameras]
+rgb = "usb:046d:085e"   # resolve the color node for this USB VID:PID
+# rgb = "/dev/video0"    # or a fixed V4L2 node
+```
+
+`usb:VVVV:PPPP` (hex VID:PID) resolves to whatever `/dev/video*` node that
+camera exposes right now, picking the color node when a single-function webcam
+presents both a color and an IR node under the same id. Prefer it over a raw
+`/dev/video*` path, which silently points at the wrong device if the cameras
+get renumbered.
 
 ### Dark-frame rejection
 
@@ -129,11 +145,13 @@ ir = "/dev/video2"
 emitter_enabled = false
 ```
 
-You can also use an IR PipeWire/GStreamer source:
+You can also resolve the node by USB VID:PID (here it picks the mono/IR node),
+or use an IR PipeWire/GStreamer source:
 
 ```toml
 [cameras]
-ir = "pipewiresrc target-object=<pipewire-target>"
+ir = "usb:046d:085e"
+# ir = "pipewiresrc target-object=<pipewire-target>"
 ```
 
 When `ir` is configured, Gaze captures from both the RGB and IR cameras. During enrollment, both cameras capture templates. During verification, Gaze captures from the two cameras one at a time (RGB, then IR) and combines the results according to the configured `hybrid_policy`. Capturing sequentially rather than concurrently lets single-function webcams that cannot stream their RGB and IR sensors at once (for example the Logitech BRIO 4K, `046d:085e`) still use hybrid authentication.
