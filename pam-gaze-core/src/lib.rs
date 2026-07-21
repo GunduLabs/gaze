@@ -588,9 +588,53 @@ pub fn detect_desktop_environment(uid: u32) -> String {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum GraphicalConfirm {
+    GnomeExtension,
+    Bypass,
+    FailClosed,
+}
+
+// GNOME's extension is the expected channel, so an inactive one fails closed;
+// other desktops have no channel and bypass confirmation.
+pub fn graphical_confirm_decision(de: &str, extension_active: bool) -> GraphicalConfirm {
+    match de {
+        "GNOME" if extension_active => GraphicalConfirm::GnomeExtension,
+        "GNOME" => GraphicalConfirm::FailClosed,
+        _ => GraphicalConfirm::Bypass,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gnome_with_active_extension_confirms_through_it() {
+        assert_eq!(
+            graphical_confirm_decision("GNOME", true),
+            GraphicalConfirm::GnomeExtension
+        );
+    }
+
+    #[test]
+    fn gnome_without_extension_fails_closed() {
+        assert_eq!(
+            graphical_confirm_decision("GNOME", false),
+            GraphicalConfirm::FailClosed
+        );
+    }
+
+    #[test]
+    fn other_desktops_bypass_confirmation() {
+        for de in ["KDE", "Hyprland", "LXQt", "Other"] {
+            assert_eq!(
+                graphical_confirm_decision(de, false),
+                GraphicalConfirm::Bypass,
+                "{de} should bypass confirmation when it has no channel"
+            );
+        }
+    }
 
     #[test]
     fn retryable_errors_are_detected_from_error_text() {

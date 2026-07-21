@@ -15,9 +15,9 @@ repository.workspace = true
 
 [dependencies]
 gaze-core = { path = "../gaze-core", default-features = false }
-libc = "0.2.186"
+libc = "0.2.188"
 zbus = "5.18.0"
-tokio = { version = "1.53.0", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 parking_lot = "0.12.5"
 anyhow = "1.0.104"
 futures = "0.3.33"
