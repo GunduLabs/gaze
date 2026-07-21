@@ -1,0 +1,5 @@
+#%PAM-1.0
+auth        [success=done default=die]                   pam_gaze.so
+account     required                                     pam_permit.so
+password    required                                     pam_deny.so
+session     required                                     pam_permit.so

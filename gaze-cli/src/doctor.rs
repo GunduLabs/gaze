@@ -672,6 +672,24 @@ fn check_desktop_integration(report: &mut Report) {
             );
         }
     }
+
+    if desktop.contains("kde") || desktop.contains("plasma") {
+        let configured = fs::read_to_string("/etc/pam.d/kde-fingerprint")
+            .ok()
+            .is_some_and(|contents| contents.lines().any(pam_line_has_reference));
+        if configured {
+            report.pass(
+                "KDE lock screen",
+                "kde-fingerprint runs a Gaze PAM module for up-front face unlock",
+            );
+        } else {
+            report.warning(
+                "KDE lock screen",
+                "/etc/pam.d/kde-fingerprint does not run pam_gaze, so face auth only starts after you submit the password field",
+                "Install the gaze-kde package, or add `auth [success=done default=die] pam_gaze.so` to /etc/pam.d/kde-fingerprint.",
+            );
+        }
+    }
 }
 
 fn check_tpm(report: &mut Report, config: Option<&Config>) {
@@ -1014,6 +1032,13 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kde_fingerprint_line_counts_as_a_gaze_reference() {
+        assert!(pam_line_has_reference(
+            "auth        [success=done default=die]                   pam_gaze.so"
+        ));
+    }
 
     #[test]
     fn valid_default_config_has_no_errors() {

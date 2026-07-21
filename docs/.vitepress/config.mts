@@ -75,6 +75,7 @@ export default defineVersionedConfig({
               { text: "PAM", link: "/guide/pam" },
               { text: "GNOME Extension", link: "/guide/gnome" },
               { text: "Hyprland (hyprlock)", link: "/guide/hyprland" },
+              { text: "KDE Plasma (lock screen)", link: "/guide/kde" },
             ],
           },
           { text: "GUI Guide", link: "/guide/gui" },

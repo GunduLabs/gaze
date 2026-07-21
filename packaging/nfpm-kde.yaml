@@ -1,0 +1,50 @@
+name: "gaze-kde"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+release: "${PACKAGE_RELEASE}"
+section: "admin"
+priority: "optional"
+maintainer: "Gundu Labs <maintainers@gundulabs.com>"
+description: "KDE Plasma lock screen PAM integration for Gaze"
+vendor: "Gundu Labs"
+homepage: "https://gaze.gundulabs.com"
+license: "MIT"
+
+contents:
+  - src: "packaging/pam/kde-fingerprint"
+    dst: "/etc/pam.d/kde-fingerprint"
+    type: "config|noreplace"
+    packager: rpm
+  - src: "packaging/pam/kde-fingerprint"
+    dst: "/etc/pam.d/kde-fingerprint"
+    type: "config|noreplace"
+    packager: archlinux
+  - src: "packaging/pam/kde-fingerprint"
+    dst: "/etc/pam.d/kde-fingerprint"
+    type: "config|noreplace"
+    packager: deb
+
+deb:
+  signature:
+    method: debsign
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+rpm:
+  signature:
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+scripts:
+  postinstall: "packaging/postinst-kde.sh"
+  postremove: "packaging/postrm-kde.sh"
+
+overrides:
+  deb:
+    recommends:
+      - gaze
+  rpm:
+    recommends:
+      - gaze
+  archlinux:
+    recommends:
+      - gaze
