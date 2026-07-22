@@ -27,6 +27,7 @@ contents:
       mode: 0644
   - src: "packaging/config/com.gundulabs.Gaze.conf"
     dst: "/etc/dbus-1/system.d/com.gundulabs.Gaze.conf"
+    type: "config|noreplace"
   - src: "packaging/config/com.gundulabs.gaze.policy"
     dst: "/usr/share/polkit-1/actions/com.gundulabs.gaze.policy"
   - src: "packaging/config/gazed.service"

@@ -36,7 +36,7 @@ gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 > Running `gnome-extensions enable` before rebooting will return `Extension "gaze@gundulabs.com" does not exist`. Shell only rescans extension directories at session start.
 
 <details>
-<summary>Manual install (Debian/Ubuntu, Fedora, Arch/Manjaro/CachyOS)</summary>
+<summary>Manual install (Debian/Ubuntu, Fedora and compatible DNF systems, Arch/Manjaro/CachyOS)</summary>
 
 **Debian / Ubuntu**
 
@@ -50,7 +50,7 @@ sudo apt update
 sudo apt install gaze gaze-gui
 ```
 
-**Fedora**
+**Fedora and compatible DNF systems**
 
 ```bash
 sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
@@ -141,6 +141,7 @@ abort_if_lid_closed = true
 
 [enrollment]
 max_templates = 2
+min_face_size_ratio = 0.25
 
 [liveness]
 enabled = true

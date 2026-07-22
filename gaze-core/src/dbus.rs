@@ -86,6 +86,8 @@ pub enum EnrollPrompt {
     LookRight,
     #[strum(serialize = "Database error during enrollment")]
     DbFailed,
+    #[strum(serialize = "Camera error during enrollment")]
+    CameraFailed,
     #[strum(serialize = "Enrollment cancelled")]
     Cancelled,
     #[strum(serialize = "Captured")]

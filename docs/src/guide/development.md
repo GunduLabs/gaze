@@ -15,36 +15,48 @@ you're not on Linux, skip straight to [Building without a Linux host (Docker)](#
 - `nfpm` (https://nfpm.goreleaser.com) for packaging
 - `flatpak` and `flatpak-builder` (https://github.com/flatpak/flatpak-builder) for the Flatpak build, plus the Flathub remote and GNOME/Rust/LLVM SDKs. See [Flatpak build](#flatpak-build) below.
 
+The repo pins versions for `rust`, `just`, `nfpm`, plus `bun`/`node` (used by the docs site) and
+`rust-analyzer`, in `mise.toml`. If you use [mise](https://mise.jdx.dev), `mise trust && mise
+install` from the repo root installs all of the above at the pinned versions instead of doing it
+by hand. Either way you still need the distro system libraries below; mise doesn't manage those.
+
 ::: code-group
 
 ```bash [Debian/Ubuntu]
 sudo apt install build-essential pkg-config clang libclang-dev \
-  libopencv-dev libv4l-dev libpam0g-dev \
+  libopencv-dev libv4l-dev libpam0g-dev libtss2-dev libssl-dev \
   libgtk-4-dev libadwaita-1-dev \
   libcairo2-dev libglib2.0-dev libgdk-pixbuf-2.0-dev \
   libpango1.0-dev libgraphene-1.0-dev \
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+  gettext-base \
   flatpak flatpak-builder elfutils
 ```
 
 ```bash [Fedora/RHEL]
 sudo dnf install @development-tools pkg-config clang clang-devel \
-  opencv-devel libv4l-devel pam-devel \
+  opencv-devel libv4l-devel pam-devel tpm2-tss-devel openssl-devel \
   gtk4-devel libadwaita-devel \
   gstreamer1-devel gstreamer1-plugins-base-devel \
   checkpolicy policycoreutils \
+  gettext \
   flatpak flatpak-builder elfutils
 ```
 
 ```bash [Arch Linux / Manjaro]
 sudo pacman -S base-devel pkgconf clang llvm \
-  opencv v4l-utils pam \
+  opencv v4l-utils pam tpm2-tss openssl \
   gtk4 libadwaita \
   gstreamer gst-plugins-base \
+  gettext \
   flatpak flatpak-builder elfutils
 ```
 
 :::
+
+`libtss2-dev`/`tpm2-tss-devel`/`tpm2-tss` and `libssl-dev`/`openssl-devel`/`openssl` back the
+`tss-esapi` and `openssl-sys` crates (the daemon seals the face-template key to the TPM);
+`gettext-base`/`gettext` provides `envsubst`, which the `package` recipe below needs.
 
 Both OpenCV 4 and 5 work. On distros that ship OpenCV 5 (such as Arch Linux),
 the `just` recipes automatically point the `opencv` crate at the `opencv5`
@@ -97,12 +109,30 @@ It also owns `com.gundulabs.Gaze` on the **system** DBus bus, which requires roo
 
 **Option A: link your build over the installed files** (easier for repeated iteration):
 
+This overlays your checkout onto an *existing* package install; it does not install the
+package itself. If you've never installed Gaze on this machine, build and install a package
+once first (`just package rpm` and `sudo <package manager> install dist/packages/gazed-*.rpm`,
+or the `deb`/`archlinux` equivalent); `dev-link-system` fails fast with a pointer back here if
+`gazed.service` isn't installed yet.
+
 ```bash
 just build-rust
-just dev-link-system    # symlinks /usr/bin/gazed, /usr/bin/gaze, PAM modules, and extension over your build
+just dev-link-system    # runs scripts/dev-link-system.sh under sudo itself
 ```
 
-`just dev-unlink-system` restores the package-installed files from backup. `just dev-link-status` shows what is currently linked.
+`dev-link-system` (`scripts/dev-link-system.sh enable`) does more than swap binaries:
+
+- Links `/usr/bin/gazed`, `/usr/bin/gaze`, `/usr/bin/gaze-gui`, the PAM modules, the polkit
+  policy, and the GNOME extension (system-wide and current-user) over the package-installed files.
+- Adds a `pam_gaze.so` line to `/etc/pam.d/sudo` if one isn't already there.
+- Installs a systemd drop-in for `gazed` that clears `InaccessiblePaths=/home /root` so the
+  packaged unit can execute a binary linked from your checkout, then restarts `gazed`.
+- If a TPM is present, turns on `[storage] encrypt_templates` and seals a key to it (set
+  `GAZE_DEV_TPM=0` to skip this).
+
+`just dev-unlink-system` reverses all of the above from backup, including the PAM line and
+the encryption setting. `just dev-link-status` shows what is currently linked, the TPM/encryption
+state, and how many templates on disk are encrypted.
 
 **Option B: run the daemon in the foreground**:
 

@@ -2,12 +2,15 @@ mod doctor;
 mod polkit;
 mod tui;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::CompleteEnv;
+use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
 use console::{Term, style};
 use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 use futures::StreamExt;
 use gaze_core::config::{
-    Config, HYBRID_POLICY_OPTIONS, MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS, SecurityLevel,
+    Config, HYBRID_POLICY_OPTIONS, MAX_ENROLLMENT_FACE_SIZE_RATIO, MIN_ENROLLMENT_FACE_SIZE_RATIO,
+    MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS, SecurityLevel,
 };
 use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon, connect_gaze,
@@ -18,6 +21,28 @@ use tui::{AuthScreen, BusyScreen, EnrollScreen, Tone, TuiAction, TuiTerminal};
 
 fn get_current_user() -> String {
     std::env::var("USER").unwrap_or_else(|_| "root".into())
+}
+
+fn face_completer(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
+    let Some(current) = current.to_str() else {
+        return Vec::new();
+    };
+    let Ok(rt) = tokio::runtime::Runtime::new() else {
+        return Vec::new();
+    };
+    rt.block_on(async {
+        let Ok(proxy) = connect_gaze().await else {
+            return Vec::new();
+        };
+        let Ok(faces) = proxy.list_faces(&get_current_user()).await else {
+            return Vec::new();
+        };
+        faces
+            .into_iter()
+            .filter(|(face, ..)| face.starts_with(current))
+            .map(|(face, ..)| CompletionCandidate::new(face))
+            .collect()
+    })
 }
 
 fn first_run_marker_path() -> Option<PathBuf> {
@@ -145,7 +170,7 @@ enum Commands {
     RefineFace {
         #[arg(short, long)]
         user: Option<String>,
-        #[arg(help = "The name of the face to refine")]
+        #[arg(help = "The name of the face to refine", add = ArgValueCompleter::new(face_completer))]
         face: String,
     },
     /// List all faces enrolled for a user
@@ -349,6 +374,19 @@ async fn run_config_wizard(
         .default(config.enrollment.max_templates)
         .interact_text()?;
 
+    let min_face_size_ratio: f64 = Input::with_theme(&theme)
+        .with_prompt("Minimum enrollment face size ratio (0.10 - 0.75; lower allows more distance)")
+        .default(config.enrollment.min_face_size_ratio)
+        .interact_text()?;
+    config.enrollment.min_face_size_ratio = if min_face_size_ratio.is_finite() {
+        min_face_size_ratio.clamp(
+            MIN_ENROLLMENT_FACE_SIZE_RATIO,
+            MAX_ENROLLMENT_FACE_SIZE_RATIO,
+        )
+    } else {
+        config.enrollment.effective_min_face_size_ratio() as f64
+    };
+
     config.liveness.enabled = Confirm::with_theme(&theme)
         .with_prompt("Enable liveness anti-spoofing")
         .default(config.liveness.enabled)
@@ -458,7 +496,7 @@ async fn handle_enroll(
                         current_enroll_msg = raw_msg.to_string();
                         current_time_remaining = (time_remaining > 0.0).then_some(time_remaining);
 
-                        if matches!(raw_msg, EnrollPrompt::DbFailed | EnrollPrompt::Cancelled) {
+                        if matches!(raw_msg, EnrollPrompt::DbFailed | EnrollPrompt::CameraFailed | EnrollPrompt::Cancelled) {
                             is_failed = true;
                             break;
                         }
@@ -515,7 +553,11 @@ async fn handle_enroll(
             style(face).green()
         ))?;
     } else if is_failed {
-        term.write_line(&format!("{} Enrollment failed", style("✗").red().bold()))?;
+        term.write_line(&format!(
+            "{} Enrollment failed: {}",
+            style("✗").red().bold(),
+            current_enroll_msg
+        ))?;
     }
     Ok(())
 }
@@ -1014,7 +1056,14 @@ fn remove_arch_pam_configuration_cmd() -> String {
         r#"sudo sed -i '/pam_gaze/d' "$f" || true;"#,
         "done < \"$flag\";",
         "done;",
-        "sudo sed -i '/pam_gaze/d' /etc/pam.d/sudo 2>/dev/null || true",
+        "sudo sed -i '/pam_gaze/d' /etc/pam.d/sudo 2>/dev/null || true;",
+        "for flag in /etc/gaze/pam-arch.polkit-configured /etc/gaze/pam-arch.polkit-dev-configured; do",
+        r#"[ -f "$flag" ] || continue;"#,
+        r#"while IFS= read -r f; do"#,
+        r#"sudo rm -f "$f" || true;"#,
+        "done < \"$flag\";",
+        r#"sudo rm -f "$flag" || true;"#,
+        "done",
     ]
     .join(" ")
 }
@@ -1255,8 +1304,16 @@ fn handle_uninstall(yes: bool, keep_data: bool, dry_run: bool) -> anyhow::Result
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    CompleteEnv::with_factory(Cli::command).complete();
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     maybe_run_first_run_doctor(&cli.command).await;
@@ -1370,6 +1427,11 @@ async fn main() -> anyhow::Result<()> {
                     "{} {}",
                     style("enrollment.max_templates:").bold(),
                     config.enrollment.max_templates
+                );
+                println!(
+                    "{} {:.2}",
+                    style("enrollment.min_face_size_ratio:").bold(),
+                    config.enrollment.min_face_size_ratio
                 );
                 println!(
                     "{} {}",
@@ -1548,5 +1610,8 @@ mod tests {
         assert!(command.contains("/etc/gaze/pam-arch.dev-configured"));
         assert!(command.contains("sed -i '/pam_gaze/d'"));
         assert!(command.contains("/etc/pam.d/sudo"));
+        assert!(command.contains("/etc/gaze/pam-arch.polkit-configured"));
+        assert!(command.contains("/etc/gaze/pam-arch.polkit-dev-configured"));
+        assert!(command.contains("rm -f"));
     }
 }

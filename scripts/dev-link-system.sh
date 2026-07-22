@@ -85,6 +85,18 @@ require_artifacts() {
     [ "$missing" -eq 0 ] || die "Build first: cargo build --workspace --release"
 }
 
+require_installed_unit() {
+    systemctl cat gazed.service >/dev/null 2>&1 || die \
+        "gazed.service is not installed. dev-link-system only overlays your checkout onto an
+existing package install; it does not install the package itself.
+
+Build and install a package once first, e.g.:
+    just package rpm
+    sudo <your package manager> install dist/packages/gazed-*.rpm
+
+then re-run: just dev-link-system"
+}
+
 backup_name() {
     printf '%s' "$1" | tr '/ ' '__'
 }
@@ -251,6 +263,36 @@ restore_pam_config() {
     while IFS= read -r pam_file; do
         [ -f "$pam_file" ] || continue
         sed -i '/pam_gaze/d' "$pam_file" && printf 'restored PAM: %s\n' "$pam_file"
+    done < "$flag"
+
+    rm -f "$flag"
+}
+
+link_polkit_pam_config() {
+    pam_file=/etc/pam.d/polkit-1
+    [ -f "$pam_file" ] && { printf 'PAM already configured: %s\n' "$pam_file"; return 0; }
+
+    cat > "$pam_file" <<-EOF
+	#%PAM-1.0
+	auth       sufficient   pam_gaze.so
+	auth       include      system-auth
+	account    include      system-auth
+	password   include      system-auth
+	session    include      system-auth
+	EOF
+    chmod 644 "$pam_file"
+    printf 'configured PAM: %s\n' "$pam_file"
+
+    mkdir -p /etc/gaze
+    printf '%s\n' "$pam_file" > /etc/gaze/pam-arch.polkit-dev-configured
+}
+
+restore_polkit_pam_config() {
+    flag=/etc/gaze/pam-arch.polkit-dev-configured
+    [ -f "$flag" ] || return 0
+
+    while IFS= read -r pam_file; do
+        rm -f "$pam_file" && printf 'removed PAM: %s\n' "$pam_file"
     done < "$flag"
 
     rm -f "$flag"
@@ -462,9 +504,11 @@ case "$cmd" in
     enable)
         need_root
         require_artifacts
+        require_installed_unit
         link_binaries
         link_pam_modules
         link_pam_config
+        link_polkit_pam_config
         link_polkit_policy
         link_gnome_extension
         setup_tpm_encryption
@@ -477,6 +521,7 @@ case "$cmd" in
         restore_binaries
         restore_pam_modules
         restore_pam_config
+        restore_polkit_pam_config
         restore_polkit_policy
         restore_gnome_extension
         teardown_tpm_encryption

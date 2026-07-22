@@ -1,6 +1,6 @@
 [package]
 name = "pam-gaze"
-version = "0.2.4"
+version = "0.2.6"
 edition = "2024"
 description = "Sequential facial authentication PAM module for Gaze"
 categories.workspace = true
@@ -17,7 +17,7 @@ crate-type = ["cdylib"]
 [dependencies]
 pam-gaze-core = { path = "../pam-gaze-core" }
 gaze-core = { path = "../gaze-core", default-features = false }
-libc = "0.2.186"
-zbus = "5.17.0"
-tokio = { version = "1.52.3", features = ["full"] }
-futures = "0.3.32"
+libc = "0.2.189"
+zbus = "5.18.0"
+tokio = { version = "1.53.1", features = ["full"] }
+futures = "0.3.33"

@@ -12,6 +12,9 @@ pub const DEFAULT_RGB_CAMERA: &str = "primary";
 pub const SECURITY_LEVEL_OPTIONS: [&str; 5] = ["low", "medium", "high", "maximum", "custom"];
 pub const MODEL_QUALITY_OPTIONS: [&str; 2] = ["standard", "accurate"];
 pub const HYBRID_POLICY_OPTIONS: [&str; 4] = ["default", "or", "fallback_on_dark", "and"];
+pub const DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO: f64 = 0.25;
+pub const MIN_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.10;
+pub const MAX_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.75;
 
 fn default_level() -> String {
     "medium".to_string()
@@ -343,16 +346,48 @@ fn default_true() -> bool {
 pub struct EnrollmentConfig {
     #[serde(default = "default_max_templates")]
     pub max_templates: u32,
+    #[serde(default = "default_enrollment_min_face_size_ratio")]
+    pub min_face_size_ratio: f64,
 }
 
 fn default_max_templates() -> u32 {
     2
 }
 
+fn default_enrollment_min_face_size_ratio() -> f64 {
+    DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO
+}
+
+impl EnrollmentConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if !self.min_face_size_ratio.is_finite()
+            || !(MIN_ENROLLMENT_FACE_SIZE_RATIO..=MAX_ENROLLMENT_FACE_SIZE_RATIO)
+                .contains(&self.min_face_size_ratio)
+        {
+            anyhow::bail!(
+                "enrollment.min_face_size_ratio must be between {} and {}, got {}",
+                MIN_ENROLLMENT_FACE_SIZE_RATIO,
+                MAX_ENROLLMENT_FACE_SIZE_RATIO,
+                self.min_face_size_ratio
+            );
+        }
+        Ok(())
+    }
+
+    pub fn effective_min_face_size_ratio(&self) -> f32 {
+        if self.validate().is_ok() {
+            self.min_face_size_ratio as f32
+        } else {
+            DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO as f32
+        }
+    }
+}
+
 impl Default for EnrollmentConfig {
     fn default() -> Self {
         Self {
             max_templates: default_max_templates(),
+            min_face_size_ratio: default_enrollment_min_face_size_ratio(),
         }
     }
 }
@@ -392,6 +427,9 @@ impl Config {
             // fall back. Rejection is enforced at the set_config (admin input) boundary.
             if let Err(e) = config.security.validate() {
                 tracing::warn!("{e}; using safe fallbacks for invalid security fields");
+            }
+            if let Err(e) = config.enrollment.validate() {
+                tracing::warn!("{e}; using the default enrollment face-size ratio");
             }
             Ok(config)
         } else {
@@ -570,6 +608,10 @@ mod tests {
         assert!(config.auth.abort_if_ssh);
         assert!(config.auth.abort_if_lid_closed);
         assert_eq!(config.enrollment.max_templates, 2);
+        assert_eq!(
+            config.enrollment.min_face_size_ratio,
+            DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO
+        );
         assert!(!config.storage.encrypt_templates);
     }
 
@@ -591,7 +633,10 @@ mod tests {
                 require_confirmation: true,
                 resume_grace_ms: 3000,
             },
-            enrollment: EnrollmentConfig { max_templates: 8 },
+            enrollment: EnrollmentConfig {
+                max_templates: 8,
+                min_face_size_ratio: 0.20,
+            },
             liveness: LivenessConfig {
                 enabled: true,
                 threshold: 0.9,
@@ -622,6 +667,7 @@ mod tests {
         assert!(!loaded.auth.abort_if_lid_closed);
         assert!(loaded.auth.require_confirmation);
         assert_eq!(loaded.enrollment.max_templates, 8);
+        assert_eq!(loaded.enrollment.min_face_size_ratio, 0.20);
         assert!(loaded.liveness.enabled);
         assert_eq!(loaded.liveness.threshold, 0.9);
         assert_eq!(loaded.liveness.max_frames, 25);
@@ -679,7 +725,34 @@ mod tests {
         assert!(config.auth.abort_if_lid_closed);
         assert!(!config.auth.require_confirmation);
         assert_eq!(config.enrollment.max_templates, 2);
+        assert_eq!(
+            config.enrollment.min_face_size_ratio,
+            DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO
+        );
         assert!(!config.storage.encrypt_templates);
+    }
+
+    #[test]
+    fn enrollment_face_size_ratio_validates_and_falls_back_safely() {
+        let mut enrollment = EnrollmentConfig::default();
+        assert!(enrollment.validate().is_ok());
+        assert_eq!(
+            enrollment.effective_min_face_size_ratio(),
+            DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO as f32
+        );
+
+        enrollment.min_face_size_ratio = 0.20;
+        assert!(enrollment.validate().is_ok());
+        assert_eq!(enrollment.effective_min_face_size_ratio(), 0.20);
+
+        for invalid in [0.0, 0.09, 0.76, f64::NAN, f64::INFINITY] {
+            enrollment.min_face_size_ratio = invalid;
+            assert!(enrollment.validate().is_err());
+            assert_eq!(
+                enrollment.effective_min_face_size_ratio(),
+                DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO as f32
+            );
+        }
     }
 
     #[test]

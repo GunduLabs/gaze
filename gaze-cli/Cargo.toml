@@ -1,6 +1,6 @@
 [package]
 name = "gaze-cli"
-version = "0.2.4"
+version = "0.2.6"
 edition = "2024"
 description = "Command-line facial authentication client for Gaze"
 categories.workspace = true
@@ -16,14 +16,15 @@ name = "gaze"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1.0.103"
-clap = { version = "4.6.2", features = ["derive"] }
+anyhow = "1.0.104"
+clap = { version = "4.6.4", features = ["derive"] }
+clap_complete = { version = "4.6.7", features = ["unstable-dynamic"] }
 console = "0.16.4"
 crossterm = "0.29"
 dialoguer = "0.12"
-futures = "0.3.32"
+futures = "0.3.33"
 gaze-core = { path = "../gaze-core", default-features = false }
-libc = "0.2.186"
+libc = "0.2.189"
 ratatui = "0.30.2"
-tokio = { version = "1.52.3", features = ["full", "rt-multi-thread"] }
-zbus = "5.17.0"
+tokio = { version = "1.53.1", features = ["full", "rt-multi-thread"] }
+zbus = "5.18.0"

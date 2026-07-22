@@ -4,7 +4,7 @@ use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
 use opencv::prelude::MatTraitConst;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,7 +21,6 @@ struct FrameData {
 
 pub struct CameraFeed {
     pub picture: gtk4::Picture,
-    pub overlay: gtk4::Overlay,
     guide: gtk4::DrawingArea,
     rx: Rc<RefCell<Option<mpsc::Receiver<FrameData>>>>,
     latest_frame: Rc<RefCell<Option<opencv::core::Mat>>>,
@@ -29,6 +28,8 @@ pub struct CameraFeed {
     stop_flag: Arc<AtomicBool>,
     face_status: Rc<RefCell<CaptureStatus>>,
     is_active: Rc<RefCell<bool>>,
+    frame_aspect: Rc<Cell<f64>>,
+    aspect_frame: gtk4::AspectFrame,
 }
 
 impl CameraFeed {
@@ -99,16 +100,31 @@ impl CameraFeed {
 
         let face_status = Rc::new(RefCell::new(CaptureStatus::NoFace));
         let is_active = Rc::new(RefCell::new(false));
+        let frame_aspect = Rc::new(Cell::new(0.0f64));
         let draw_status = face_status.clone();
         let draw_active = is_active.clone();
+        let draw_aspect = frame_aspect.clone();
         let guide = gtk4::DrawingArea::new();
         guide.set_draw_func(move |_area, cr, width, height| {
             let status = *draw_status.borrow();
             let active = *draw_active.borrow();
 
-            let cx = width as f64 / 2.0;
-            let cy = height as f64 / 2.0;
-            let min_dim = width.min(height) as f64;
+            let w = width as f64;
+            let h = height as f64;
+            let aspect = draw_aspect.get();
+            let (view_w, view_h) = if aspect > 0.0 {
+                if w / h > aspect {
+                    (h * aspect, h)
+                } else {
+                    (w, w / aspect)
+                }
+            } else {
+                (w, h)
+            };
+
+            let cx = w / 2.0;
+            let cy = h / 2.0;
+            let min_dim = view_w.min(view_h);
             let rx = min_dim * 0.28;
             let ry = min_dim * 0.38;
 
@@ -181,9 +197,11 @@ impl CameraFeed {
         });
         overlay.add_overlay(&guide);
 
+        let aspect_frame = gtk4::AspectFrame::new(0.5, 0.5, 4.0 / 3.0, false);
+        aspect_frame.set_child(Some(&overlay));
+
         Self {
             picture,
-            overlay,
             guide,
             rx: Rc::new(RefCell::new(rx)),
             latest_frame: Rc::new(RefCell::new(None)),
@@ -191,6 +209,8 @@ impl CameraFeed {
             stop_flag,
             face_status,
             is_active,
+            frame_aspect,
+            aspect_frame,
         }
     }
 
@@ -226,6 +246,10 @@ impl CameraFeed {
                 self.picture,
                 #[strong(rename_to = latest_frame)]
                 self.latest_frame,
+                #[strong(rename_to = frame_aspect)]
+                self.frame_aspect,
+                #[strong(rename_to = aspect_frame)]
+                self.aspect_frame,
                 move || {
                     let mut newest = None;
                     while let Ok(frame) = rx.try_recv() {
@@ -240,6 +264,11 @@ impl CameraFeed {
                             &bytes,
                             (frame.width * 3) as usize,
                         );
+                        if frame.height > 0 {
+                            let aspect = frame.width as f64 / frame.height as f64;
+                            frame_aspect.set(aspect);
+                            aspect_frame.set_ratio(aspect as f32);
+                        }
                         picture.set_paintable(Some(&texture));
                         *latest_frame.borrow_mut() = Some(frame.mat);
                     }
@@ -250,9 +279,9 @@ impl CameraFeed {
     }
 }
 
-pub fn build_camera_widget(feed: &CameraFeed) -> gtk4::Overlay {
-    let overlay = feed.overlay.clone();
-    overlay.set_hexpand(true);
-    overlay.set_vexpand(true);
-    overlay
+pub fn build_camera_widget(feed: &CameraFeed) -> gtk4::AspectFrame {
+    let aspect_frame = feed.aspect_frame.clone();
+    aspect_frame.set_hexpand(true);
+    aspect_frame.set_vexpand(true);
+    aspect_frame
 }

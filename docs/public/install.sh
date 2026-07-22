@@ -339,8 +339,9 @@ configure_authselect() {
         return 0
     fi
 
+    current_authselect="$(sudo authselect current 2>/dev/null || true)"
+
     if ! sudo test -f /etc/gaze/authselect.previous; then
-        current_authselect="$(sudo authselect current 2>/dev/null || true)"
         case "$current_authselect" in
         *"Profile ID: gaze"*) ;;
         "") ;;
@@ -354,8 +355,16 @@ configure_authselect() {
         esac
     fi
 
+    # authselect select resets the feature set, so carry over the features the
+    # user already had (e.g. with-fingerprint) instead of silently dropping them.
+    preserved_features="$(printf '%s\n' "$current_authselect" | awk '/^- /{print $2}')"
+
     if sudo authselect select gaze with-silent-lastlog --force >/dev/null 2>&1; then
         ok "Enabled the Gaze PAM authselect profile."
+        for feature in $preserved_features; do
+            [ "$feature" = "with-silent-lastlog" ] && continue
+            sudo authselect enable-feature "$feature" >/dev/null 2>&1 || true
+        done
     else
         warn "Could not enable the Gaze PAM authselect profile automatically."
         say "After installation, run:"
@@ -408,8 +417,15 @@ DISTRO_VERSION_ID="${VERSION_ID:-}"
 DISTRO_CODENAME="${VERSION_CODENAME:-${UBUNTU_CODENAME:-}}"
 VARIANT_ID="${VARIANT_ID:-}"
 
-is_fedora() {
-    [ "$DISTRO_ID" = "fedora" ]
+is_fedora_compatible() {
+    case " $DISTRO_ID $DISTRO_LIKE " in
+    *" fedora "*) return 0 ;;
+    esac
+    return 1
+}
+
+is_ostree_system() {
+    [ -e /run/ostree-booted ]
 }
 
 is_rpm() {
@@ -440,7 +456,7 @@ supported_deb_suite() {
     return 1
 }
 
-supported_fedora_version() {
+supported_fedora_compatible_version() {
     case "$DISTRO_VERSION_ID" in
     42 | 43 | 44) return 0 ;;
     esac
@@ -449,7 +465,7 @@ supported_fedora_version() {
 
 if ! is_rpm && ! is_deb && ! is_arch; then
     fail "Unsupported distribution: $DISTRO_ID"
-    say "Supported: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44, Arch Linux, and Arch-compatible AUR distros"
+    say "Supported: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora-compatible 42/43/44 systems with standard DNF package installation, Arch Linux, and Arch-compatible AUR distros"
     exit 1
 fi
 
@@ -468,15 +484,22 @@ if is_deb && ! supported_deb_suite "$DISTRO_CODENAME"; then
     exit 1
 fi
 
-if is_rpm && ! is_fedora; then
-    fail "Unsupported RPM distribution: $DISTRO_ID"
-    say "Supported RPM distribution: Fedora"
+if is_rpm && ! is_fedora_compatible; then
+    fail "Unsupported RPM distribution: ${NAME:-$DISTRO_ID}"
+    say "This installer supports RPM distributions that identify as Fedora-compatible in /etc/os-release."
     exit 1
 fi
 
-if is_fedora && ! supported_fedora_version; then
-    fail "Unsupported Fedora version: ${DISTRO_VERSION_ID:-unknown}"
-    say "Supported Fedora versions: 42, 43, 44"
+if is_fedora_compatible && is_ostree_system; then
+    fail "Image-based Fedora-compatible system detected: ${NAME:-$DISTRO_ID}"
+    say "This installer currently supports systems that install packages directly with DNF (also called mutable or non-image-based systems)."
+    say "Systems that use rpm-ostree, such as Bazzite, Fedora Silverblue, and Fedora Kinoite, are not yet supported."
+    exit 1
+fi
+
+if is_fedora_compatible && ! supported_fedora_compatible_version; then
+    fail "Unsupported ${NAME:-Fedora-compatible distribution} version: ${DISTRO_VERSION_ID:-unknown}"
+    say "Fedora-compatible packages are currently available for versions 42, 43, and 44."
     exit 1
 fi
 
@@ -509,7 +532,7 @@ elif is_rpm; then
     else
         RPM_TOOL="yum"
     fi
-    say "Detected platform: ${BOLD}Fedora ${DISTRO_VERSION_ID}${RESET} (${PKG_ARCH}), package manager: ${RPM_TOOL}"
+    say "Detected platform: ${BOLD}${NAME:-Fedora} ${DISTRO_VERSION_ID}${RESET} (${PKG_ARCH}), package manager: ${RPM_TOOL}"
     STEP_TOTAL=6
     echo ""
     title "This will:"
@@ -582,7 +605,7 @@ if is_deb; then
         sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 
     step "Updating package index"
-    sudo apt-get update
+    sudo apt-get update </dev/null
 
     step "Installing packages"
     DEB_PKGS="gaze gaze-gui"
@@ -592,13 +615,13 @@ if is_deb; then
     if want_hyprlock_setup; then
         DEB_PKGS="$DEB_PKGS gaze-hyprlock"
     fi
-    sudo apt-get install -y $DEB_PKGS
+    sudo apt-get install -y $DEB_PKGS </dev/null
 
     step "Desktop integration"
     enable_desktop_integrations
 
     step "Enabling Gaze daemon"
-    sudo systemctl enable --now gazed 2>/dev/null || true
+    sudo systemctl enable --now gazed </dev/null 2>/dev/null || true
 
 elif is_rpm; then
     step "Configuring dnf repository"
@@ -612,11 +635,16 @@ repo_gpgcheck=1
 gpgkey=${PKG_BASE_URL}/keys/gundulabs-repo.asc
 EOF
 
+    # Import the fingerprint-verified key up front so repo_gpgcheck does not drop
+    # into an interactive "import key? [y/N]" prompt that reads the piped script.
+    KEY_PATH="$(fetch_repo_key)"
+    sudo rpm --import "$KEY_PATH"
+
     step "Refreshing repository metadata"
     if command -v dnf >/dev/null 2>&1; then
-        sudo dnf makecache
+        sudo dnf makecache </dev/null
     else
-        sudo yum makecache
+        sudo yum makecache </dev/null
     fi
 
     step "Installing packages"
@@ -628,9 +656,9 @@ EOF
         RPM_PKGS="$RPM_PKGS gaze-hyprlock"
     fi
     if command -v dnf >/dev/null 2>&1; then
-        sudo dnf install -y $RPM_PKGS
+        sudo dnf install -y $RPM_PKGS </dev/null
     else
-        sudo yum install -y $RPM_PKGS
+        sudo yum install -y $RPM_PKGS </dev/null
     fi
 
     step "Configuring PAM"
@@ -640,7 +668,7 @@ EOF
     enable_desktop_integrations
 
     step "Enabling Gaze daemon"
-    sudo systemctl enable --now gazed 2>/dev/null || true
+    sudo systemctl enable --now gazed </dev/null 2>/dev/null || true
 
 elif is_arch; then
     step "Checking for AUR helper"
@@ -685,7 +713,7 @@ elif is_arch; then
     enable_desktop_integrations
 
     step "Enabling Gaze daemon"
-    sudo systemctl enable --now gazed 2>/dev/null || true
+    sudo systemctl enable --now gazed </dev/null 2>/dev/null || true
 fi
 
 # ── done ─────────────────────────────────────────────────────────────────────

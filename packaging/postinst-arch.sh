@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-configure_pam() {
+configure_pam_sudo() {
 	pam_file=/etc/pam.d/sudo
 	[ -f "$pam_file" ] || return 0
 	grep -q "pam_gaze" "$pam_file" 2>/dev/null && return 0
@@ -20,7 +20,26 @@ configure_pam() {
 	printf '%s\n' "$pam_file" > /etc/gaze/pam-arch.configured
 }
 
-configure_pam
+configure_pam_polkit() {
+	pam_file=/etc/pam.d/polkit-1
+	[ -f "$pam_file" ] && return 0
+
+	cat > "$pam_file" <<-EOF
+	#%PAM-1.0
+	auth       sufficient   pam_gaze.so
+	auth       include      system-auth
+	account    include      system-auth
+	password   include      system-auth
+	session    include      system-auth
+	EOF
+	chmod 644 "$pam_file"
+
+	mkdir -p /etc/gaze
+	printf '%s\n' "$pam_file" > /etc/gaze/pam-arch.polkit-configured
+}
+
+configure_pam_sudo
+configure_pam_polkit
 
 if [ -d /run/systemd/system ]; then
 	systemctl daemon-reload >/dev/null 2>&1

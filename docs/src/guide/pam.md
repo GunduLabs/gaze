@@ -32,11 +32,17 @@ sudo -v
 
 If camera opens and face auth runs, PAM wiring is active.
 
-## Fedora / RPM systems
+## Fedora and compatible RPM systems
 
 RPM packages install an authselect profile at:
 
 `/usr/share/authselect/vendor/gaze`
+
+The profile adds Gaze to both shared authentication stacks: `system-auth`, used by tools such as `sudo`, and `password-auth`, used by KDE's lock screen, SDDM, and Plasma Login Manager. RPM upgrades refresh these generated PAM files automatically when the Gaze profile is active.
+
+::: warning KDE lock screen is not hands-free
+Being in `password-auth` means Gaze runs when KDE's lock screen authenticates, but it does not make face unlock automatic. KDE's screen locker only starts PAM authentication after you submit the password field, so the camera does not activate until you enter (or submit an empty) password. Hands-free face unlock on the KDE lock screen is not currently supported — unlike GNOME, which drives it through the Gaze Shell extension. Face auth still works for `sudo`, polkit, and other PAM prompts.
+:::
 
 Enable it:
 
@@ -82,6 +88,26 @@ sudo -v
 ::: warning pambase updates
 `/etc/pam.d/system-auth` is owned by the `pambase` package and gets overwritten on system upgrades. Gaze is added to `/etc/pam.d/sudo` directly to avoid this, but if you manually added `pam_gaze.so` to `system-auth` it will be lost on `pambase` updates.
 :::
+
+### Polkit (graphical "Authentication Required" prompts)
+
+Arch's `polkit` package ships no `/etc/pam.d/polkit-1`, so the `polkit-1` PAM service falls back to the vendor default at `/usr/lib/pam.d/polkit-1`, which just does `include system-auth`. Since Gaze avoids patching `system-auth` (see above), graphical polkit prompts (`pkexec`, GNOME Settings, package manager GUIs, etc.) don't get face auth unless a `/etc/pam.d/polkit-1` override is installed too. The installer and `dev-link-system.sh` now create one automatically:
+
+```text
+#%PAM-1.0
+auth       sufficient   pam_gaze.so
+auth       include      system-auth
+account    include      system-auth
+password   include      system-auth
+session    include      system-auth
+```
+
+Verify with:
+
+```bash
+sudo systemctl restart polkit
+pkexec true
+```
 
 ## Other distros (manual)
 

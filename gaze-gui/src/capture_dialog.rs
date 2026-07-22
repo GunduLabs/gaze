@@ -339,7 +339,7 @@ pub fn show_capture_dialog(
                                         progress_label.set_text(&format!("{}/{}", prog, max));
                                     }
 
-                                    if matches!(raw_msg, EnrollPrompt::DbFailed | EnrollPrompt::Cancelled) {
+                                    if matches!(raw_msg, EnrollPrompt::DbFailed | EnrollPrompt::CameraFailed | EnrollPrompt::Cancelled) {
                                         prompt_label.set_text(raw_msg.as_ref());
                                         stop_btn.set_visible(false);
                                         break;

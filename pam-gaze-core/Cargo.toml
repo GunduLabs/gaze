@@ -1,6 +1,6 @@
 [package]
 name = "pam-gaze-core"
-version = "0.2.4"
+version = "0.2.6"
 edition = "2024"
 description = "Shared PAM authentication and FFI implementation for Gaze"
 categories.workspace = true
@@ -15,9 +15,9 @@ repository.workspace = true
 
 [dependencies]
 gaze-core = { path = "../gaze-core", default-features = false }
-libc = "0.2.186"
-zbus = "5.17.0"
-tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread"] }
+libc = "0.2.189"
+zbus = "5.18.0"
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 parking_lot = "0.12.5"
-anyhow = "1.0.103"
-futures = "0.3.32"
+anyhow = "1.0.104"
+futures = "0.3.33"
