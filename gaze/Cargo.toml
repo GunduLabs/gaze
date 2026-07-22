@@ -17,7 +17,7 @@ anyhow = "1.0.104"
 gaze-core = { path = "../gaze-core" }
 getrandom = "0.4.3"
 image = { version = "0.25.10", default-features = false }
-libc = "0.2.188"
+libc = "0.2.189"
 nalgebra = "0.35.0"
 ndarray = "0.17.2"
 opencv = { version = "0.99.0", default-features = false, features = ["imgproc", "videoio"] }
