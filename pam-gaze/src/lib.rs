@@ -96,17 +96,17 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         return unsafe { confirm_via_polkit_dialog(pamh, &username, &rt) };
     }
 
-    let extension_active = rt.block_on(async {
-        let uid = active_or_user_uid(&username).await;
-        gnome_extension_active(uid).await
-    });
-    // No confirmation channel (no TTY, no GNOME extension): fail closed rather
-    // than granting on the face match alone, or require_confirmation is a no-op.
-    if !extension_active {
-        return PAM_AUTH_ERR;
-    }
+    let uid = rt.block_on(active_or_user_uid(&username));
+    let de = uid
+        .map(detect_desktop_environment)
+        .unwrap_or_else(|| "Other".to_string());
+    let extension_active = de == "GNOME" && rt.block_on(gnome_extension_active(uid));
 
-    confirm_via_gnome_extension(pamh)
+    match graphical_confirm_decision(&de, extension_active) {
+        GraphicalConfirm::GnomeExtension => confirm_via_gnome_extension(pamh),
+        GraphicalConfirm::Bypass => PAM_SUCCESS,
+        GraphicalConfirm::FailClosed => PAM_AUTH_ERR,
+    }
 }
 
 #[unsafe(no_mangle)]

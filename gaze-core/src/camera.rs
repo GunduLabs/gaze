@@ -1,9 +1,11 @@
 use gstreamer::prelude::*;
 use opencv::core::Mat;
 use opencv::prelude::*;
-use tracing::info;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tracing::{info, warn};
 
 use crate::config::{CameraConfig, DEFAULT_RGB_CAMERA};
+use crate::ir::devices::usb_ids_of;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CameraKind {
@@ -75,6 +77,10 @@ pub fn resolve_node(source: &str) -> Option<String> {
         return None;
     }
 
+    if let Some((vid, pid)) = parse_usb_spec(source) {
+        return resolve_usb_video_node(vid, pid, false);
+    }
+
     if let Some(pos) = source.find("/dev/video") {
         let prefix_len = "/dev/video".len();
         let tail = &source[pos + prefix_len..];
@@ -116,8 +122,150 @@ pub fn resolve_node(source: &str) -> Option<String> {
     None
 }
 
+/// A GStreamer source element, or a request to resolve a USB VID:PID to a
+/// concrete V4L2 node at open time.
+#[derive(Debug, PartialEq, Eq)]
+enum SourceElement {
+    Element(String),
+    ResolveUsb {
+        vid: u16,
+        pid: u16,
+        want_color: bool,
+    },
+}
+
+/// Turn a configured `rgb`/`ir` value into a GStreamer source element.
+///
+/// `primary` is PipeWire (needs a session); `/dev/video<n>` and `usb:VVVV:PPPP`
+/// go straight to `v4l2src`, which works in greeters that never hand out a
+/// PipeWire session. `want_color` picks the color node for RGB and the mono
+/// node for IR when a `usb:` spec resolves to more than one node.
+fn classify_source(source: &str, want_color: bool) -> anyhow::Result<SourceElement> {
+    let source = source.trim();
+    if source.is_empty() {
+        anyhow::bail!(
+            "camera source cannot be empty; use \"primary\", \"/dev/video<n>\", \"usb:VVVV:PPPP\", or a GStreamer source"
+        );
+    }
+    if source == DEFAULT_RGB_CAMERA {
+        return Ok(SourceElement::Element("pipewiresrc".to_string()));
+    }
+    if let Some((vid, pid)) = parse_usb_spec(source) {
+        return Ok(SourceElement::ResolveUsb {
+            vid,
+            pid,
+            want_color,
+        });
+    }
+    if source.starts_with("usb:") {
+        anyhow::bail!("invalid USB camera spec {source:?}; expected usb:VVVV:PPPP (hex VID:PID)");
+    }
+    if source.starts_with("/dev/video") {
+        let is_node = source
+            .strip_prefix("/dev/video")
+            .is_some_and(|index| !index.is_empty() && index.chars().all(|c| c.is_ascii_digit()));
+        if !is_node {
+            anyhow::bail!("invalid V4L2 camera node {source:?}; expected /dev/video<number>");
+        }
+        return Ok(SourceElement::Element(format!("v4l2src device={source}")));
+    }
+    Ok(SourceElement::Element(source.to_string()))
+}
+
+/// Parse a `usb:VVVV:PPPP` spec (hex VID:PID) into its numeric ids.
+pub fn parse_usb_spec(source: &str) -> Option<(u16, u16)> {
+    let (vid, pid) = source.trim().strip_prefix("usb:")?.split_once(':')?;
+    let vid = u16::from_str_radix(vid.trim(), 16).ok()?;
+    let pid = u16::from_str_radix(pid.trim(), 16).ok()?;
+    Some((vid, pid))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VideoNodeInfo {
+    node: String,
+    vid: u16,
+    pid: u16,
+    is_color: bool,
+}
+
+/// Pick the `/dev/video<n>` node matching `vid:pid` whose color-ness matches the
+/// caller (color for RGB, mono for IR), preferring the lowest-numbered node so
+/// the choice is stable across boots.
+fn select_usb_node(
+    nodes: &[VideoNodeInfo],
+    vid: u16,
+    pid: u16,
+    want_color: bool,
+) -> Option<String> {
+    nodes
+        .iter()
+        .filter(|n| n.vid == vid && n.pid == pid && n.is_color == want_color)
+        .min_by_key(|n| video_node_index(&n.node).unwrap_or(u32::MAX))
+        .map(|n| n.node.clone())
+}
+
+fn video_node_index(node: &str) -> Option<u32> {
+    node.strip_prefix("/dev/video")?.parse().ok()
+}
+
+/// Scan V4L2 nodes for one matching `vid:pid` with the requested color-ness.
+///
+/// Uses the GStreamer device monitor (which enumerates through the plain V4L2
+/// provider without a PipeWire session) and reads the USB ids from sysfs.
+fn resolve_usb_video_node(vid: u16, pid: u16, want_color: bool) -> Option<String> {
+    gstreamer::init().ok()?;
+    let monitor = gstreamer::DeviceMonitor::new();
+    let caps = gstreamer::Caps::builder("video/x-raw").build();
+    monitor.add_filter(Some("Video/Source"), Some(&caps));
+    monitor.start().ok()?;
+    wait_for_device_updates(&monitor);
+    let devices = monitor.devices();
+    monitor.stop();
+
+    let mut nodes = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for device in devices {
+        let Some(node) = device_video_node(&device) else {
+            continue;
+        };
+        if !seen.insert(node.clone()) {
+            continue;
+        }
+        let Some((dev_vid, dev_pid)) = usb_ids_of(&node) else {
+            continue;
+        };
+        let is_color = has_color_caps(&device);
+        nodes.push(VideoNodeInfo {
+            node,
+            vid: dev_vid,
+            pid: dev_pid,
+            is_color,
+        });
+    }
+
+    select_usb_node(&nodes, vid, pid, want_color)
+}
+
+fn device_video_node(device: &gstreamer::Device) -> Option<String> {
+    let props = device.properties()?;
+    if let Some(path) = string_property(&props, "api.v4l2.path")
+        && path.starts_with("/dev/video")
+    {
+        return Some(path);
+    }
+    let path = string_property(&props, "device.path")?;
+    path.starts_with("/dev/video").then_some(path)
+}
+
 const PRIMARY_CAMERA_DISPLAY_NAME: &str = "Primary Camera";
 const DEVICE_SETTLE_TIMEOUT_MS: u64 = 100;
+const INTERRUPTIBLE_POLL_TIMEOUT_MS: u64 = 100;
+
+enum FramePoll {
+    Frame(Mat),
+    Timeout,
+    Ended,
+}
 
 pub struct Camera {
     pipeline: gstreamer::Pipeline,
@@ -126,10 +274,27 @@ pub struct Camera {
 
 impl Drop for Camera {
     fn drop(&mut self) {
-        let _ = self.pipeline.set_state(gstreamer::State::Null);
-        let _ = self
+        if let Err(err) = self.pipeline.set_state(gstreamer::State::Null) {
+            warn!("Failed to stop camera pipeline: {err}");
+            return;
+        }
+
+        let (result, current, pending) = self
             .pipeline
             .state(Some(gstreamer::ClockTime::from_seconds(2)));
+        if let Err(err) = result {
+            warn!(
+                ?current,
+                ?pending,
+                "Camera pipeline did not stop cleanly: {err}"
+            );
+        } else if current != gstreamer::State::Null {
+            warn!(
+                ?current,
+                ?pending,
+                "Camera pipeline did not reach the Null state"
+            );
+        }
     }
 }
 
@@ -145,38 +310,34 @@ pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
 
 impl Camera {
     pub fn open(camera_source: &str) -> anyhow::Result<Self> {
-        Self::open_with_direct_v4l2(camera_source, false)
+        Self::open_kind(camera_source, true)
     }
 
     pub fn open_ir(camera_source: &str) -> anyhow::Result<Self> {
-        Self::open_with_direct_v4l2(camera_source, true)
+        Self::open_kind(camera_source, false)
     }
 
-    fn open_with_direct_v4l2(camera_source: &str, allow_direct_v4l2: bool) -> anyhow::Result<Self> {
+    fn open_kind(camera_source: &str, want_color: bool) -> anyhow::Result<Self> {
         gstreamer::init()?;
-        let source = camera_source.trim();
-        let src_element = if source.is_empty() {
-            anyhow::bail!("camera source cannot be empty; use \"primary\" or a GStreamer source");
-        } else if source == DEFAULT_RGB_CAMERA {
-            "pipewiresrc".to_string()
-        } else if source.starts_with("/dev/video") {
-            let index = source
-                .strip_prefix("/dev/video")
-                .filter(|index| !index.is_empty() && index.chars().all(|c| c.is_ascii_digit()));
-            if !allow_direct_v4l2 {
-                anyhow::bail!(
-                    "direct /dev/video* RGB camera paths are not supported; use \"primary\" or a GStreamer source"
-                );
-            } else if index.is_none() {
-                anyhow::bail!("invalid V4L2 camera node {source:?}; expected /dev/video<number>");
+        let src_element = match classify_source(camera_source, want_color)? {
+            SourceElement::Element(element) => element,
+            SourceElement::ResolveUsb {
+                vid,
+                pid,
+                want_color,
+            } => {
+                let node = resolve_usb_video_node(vid, pid, want_color).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "no {} camera found for USB {vid:04x}:{pid:04x}",
+                        if want_color { "color" } else { "IR" }
+                    )
+                })?;
+                format!("v4l2src device={node}")
             }
-            format!("v4l2src device={source}")
-        } else {
-            source.to_string()
         };
 
         let pipeline_str = format!(
-            "{src_element} ! video/x-raw; image/jpeg ! decodebin ! videoconvert ! videoscale ! appsink name=gaze_sink"
+            "{src_element} ! video/x-raw,pixel-aspect-ratio=1/1; image/jpeg ! decodebin ! videoconvert ! videoscale ! appsink name=gaze_sink"
         );
         info!("Attempting to open GStreamer camera: {}", pipeline_str);
 
@@ -248,6 +409,72 @@ impl Camera {
         opencv::core::flip(&frame, &mut mirrored, 1)?;
         Ok(mirrored)
     }
+
+    fn poll_frame(&self, timeout: gstreamer::ClockTime) -> FramePoll {
+        if let Some(sample) = self.appsink.try_pull_sample(timeout) {
+            return match self.sample_to_mat(&sample) {
+                Ok(mat) => FramePoll::Frame(mat),
+                Err(err) => {
+                    warn!("Dropping camera frame: {err:#}");
+                    FramePoll::Timeout
+                }
+            };
+        }
+
+        if self.appsink.is_eos() {
+            info!("Camera stream ended (EOS)");
+            return FramePoll::Ended;
+        }
+        if let Some(msg) = self.pipeline.bus().and_then(|bus| {
+            bus.timed_pop_filtered(
+                gstreamer::ClockTime::ZERO,
+                &[gstreamer::MessageType::Error, gstreamer::MessageType::Eos],
+            )
+        }) {
+            match msg.view() {
+                gstreamer::MessageView::Error(err) => {
+                    if let Some(src) = err.src() {
+                        warn!(
+                            source = %src.path_string(),
+                            debug = ?err.debug(),
+                            "Camera pipeline error: {}",
+                            err.error()
+                        );
+                    } else {
+                        warn!(
+                            debug = ?err.debug(),
+                            "Camera pipeline error: {}",
+                            err.error()
+                        );
+                    }
+                }
+                _ => info!("Camera stream ended (EOS)"),
+            }
+            return FramePoll::Ended;
+        }
+        let (_, current_state, _) = self.pipeline.state(Some(gstreamer::ClockTime::ZERO));
+        if current_state != gstreamer::State::Playing && current_state != gstreamer::State::Paused {
+            info!("Camera pipeline stopped: {:?}", current_state);
+            return FramePoll::Ended;
+        }
+
+        FramePoll::Timeout
+    }
+
+    /// Wait for the next frame while checking `stop` between short polling intervals.
+    pub fn next_interruptible(&mut self, stop: &AtomicBool) -> Option<Mat> {
+        while !stop.load(Ordering::Relaxed) {
+            match self.poll_frame(gstreamer::ClockTime::from_mseconds(
+                INTERRUPTIBLE_POLL_TIMEOUT_MS,
+            )) {
+                FramePoll::Frame(frame) => return Some(frame),
+                FramePoll::Timeout => {}
+                FramePoll::Ended => return None,
+            }
+        }
+
+        None
+    }
 }
 
 impl Iterator for Camera {
@@ -255,39 +482,10 @@ impl Iterator for Camera {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(sample) = self
-                .appsink
-                .try_pull_sample(gstreamer::ClockTime::from_seconds(5))
-            {
-                if let Ok(mat) = self.sample_to_mat(&sample) {
-                    return Some(mat);
-                }
-            } else {
-                if self.appsink.is_eos() {
-                    info!("Camera stream ended (EOS)");
-                    return None;
-                }
-                if let Some(msg) = self.pipeline.bus().and_then(|bus| {
-                    bus.timed_pop_filtered(
-                        gstreamer::ClockTime::ZERO,
-                        &[gstreamer::MessageType::Error, gstreamer::MessageType::Eos],
-                    )
-                }) {
-                    match msg.view() {
-                        gstreamer::MessageView::Error(err) => {
-                            info!("Camera pipeline error: {}", err.error());
-                        }
-                        _ => info!("Camera stream ended (EOS)"),
-                    }
-                    return None;
-                }
-                let (_, current_state, _) = self.pipeline.state(Some(gstreamer::ClockTime::ZERO));
-                if current_state != gstreamer::State::Playing
-                    && current_state != gstreamer::State::Paused
-                {
-                    info!("Camera pipeline stopped: {:?}", current_state);
-                    return None;
-                }
+            match self.poll_frame(gstreamer::ClockTime::from_seconds(5)) {
+                FramePoll::Frame(frame) => return Some(frame),
+                FramePoll::Timeout => {}
+                FramePoll::Ended => return None,
             }
         }
     }
@@ -495,10 +693,152 @@ mod tests {
     }
 
     #[test]
-    fn direct_v4l2_open_is_restricted_to_valid_ir_nodes() {
-        assert!(Camera::open("/dev/video2").is_err());
-        assert!(Camera::open_ir("/dev/video").is_err());
+    fn interruptible_read_stops_when_live_pipeline_has_no_frames() {
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let worker_stop = stop.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+        let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
+
+        let worker = std::thread::spawn(move || {
+            let mut camera = Camera::open("appsrc is-live=true format=time")
+                .expect("live pipeline without frames");
+            ready_tx.send(()).expect("signal camera readiness");
+            let stopped = camera.next_interruptible(&worker_stop).is_none();
+            done_tx.send(stopped).expect("signal camera shutdown");
+        });
+
+        ready_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("camera must become ready");
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        stop.store(true, Ordering::Release);
+        assert!(
+            done_rx
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .expect("camera read must observe cancellation")
+        );
+        worker.join().expect("camera worker must exit");
+    }
+
+    #[test]
+    fn classify_source_maps_every_supported_form() {
+        assert_eq!(
+            classify_source("primary", true).unwrap(),
+            SourceElement::Element("pipewiresrc".to_string())
+        );
+        assert_eq!(
+            classify_source("/dev/video0", true).unwrap(),
+            SourceElement::Element("v4l2src device=/dev/video0".to_string())
+        );
+        assert_eq!(
+            classify_source("/dev/video2", false).unwrap(),
+            SourceElement::Element("v4l2src device=/dev/video2".to_string())
+        );
+        assert_eq!(
+            classify_source("usb:046d:085e", true).unwrap(),
+            SourceElement::ResolveUsb {
+                vid: 0x046d,
+                pid: 0x085e,
+                want_color: true,
+            }
+        );
+        assert_eq!(
+            classify_source("usb:046d:085e", false).unwrap(),
+            SourceElement::ResolveUsb {
+                vid: 0x046d,
+                pid: 0x085e,
+                want_color: false,
+            }
+        );
+        assert_eq!(
+            classify_source("v4l2src device=/dev/video0", true).unwrap(),
+            SourceElement::Element("v4l2src device=/dev/video0".to_string())
+        );
+    }
+
+    #[test]
+    fn classify_source_rejects_malformed_values() {
+        assert!(classify_source("", true).is_err());
+        assert!(classify_source("/dev/video", true).is_err());
+        assert!(classify_source("/dev/video2 ! fakesink", true).is_err());
+        assert!(classify_source("usb:046d", true).is_err());
+        assert!(classify_source("usb:zzzz:085e", true).is_err());
+    }
+
+    #[test]
+    fn open_surfaces_malformed_sources() {
+        assert!(Camera::open("/dev/video").is_err());
         assert!(Camera::open_ir("/dev/video2 ! fakesink").is_err());
+        assert!(Camera::open("usb:046d").is_err());
+    }
+
+    #[test]
+    fn parse_usb_spec_reads_hex_vid_pid() {
+        assert_eq!(parse_usb_spec("usb:046d:085e"), Some((0x046d, 0x085e)));
+        assert_eq!(parse_usb_spec("usb:04F2:B67C"), Some((0x04f2, 0xb67c)));
+        assert_eq!(parse_usb_spec("pci:046d:085e"), None);
+        assert_eq!(parse_usb_spec("usb:046d"), None);
+        assert_eq!(parse_usb_spec("usb:zzzz:085e"), None);
+        assert_eq!(parse_usb_spec("primary"), None);
+    }
+
+    #[test]
+    fn select_usb_node_disambiguates_color_and_mono() {
+        // Brio-style single-function UVC: one VID:PID exposes a color node and a
+        // mono IR node. Also a second, color-only device.
+        let nodes = vec![
+            VideoNodeInfo {
+                node: "/dev/video0".to_string(),
+                vid: 0x046d,
+                pid: 0x085e,
+                is_color: true,
+            },
+            VideoNodeInfo {
+                node: "/dev/video2".to_string(),
+                vid: 0x046d,
+                pid: 0x085e,
+                is_color: false,
+            },
+            VideoNodeInfo {
+                node: "/dev/video4".to_string(),
+                vid: 0x1234,
+                pid: 0x5678,
+                is_color: true,
+            },
+        ];
+        assert_eq!(
+            select_usb_node(&nodes, 0x046d, 0x085e, true),
+            Some("/dev/video0".to_string())
+        );
+        assert_eq!(
+            select_usb_node(&nodes, 0x046d, 0x085e, false),
+            Some("/dev/video2".to_string())
+        );
+        // No mono node on a color-only device, and unknown ids resolve to nothing.
+        assert_eq!(select_usb_node(&nodes, 0x1234, 0x5678, false), None);
+        assert_eq!(select_usb_node(&nodes, 0xdead, 0xbeef, true), None);
+    }
+
+    #[test]
+    fn select_usb_node_prefers_lowest_numbered_node() {
+        let nodes = vec![
+            VideoNodeInfo {
+                node: "/dev/video10".to_string(),
+                vid: 0x046d,
+                pid: 0x085e,
+                is_color: true,
+            },
+            VideoNodeInfo {
+                node: "/dev/video2".to_string(),
+                vid: 0x046d,
+                pid: 0x085e,
+                is_color: true,
+            },
+        ];
+        assert_eq!(
+            select_usb_node(&nodes, 0x046d, 0x085e, true),
+            Some("/dev/video2".to_string())
+        );
     }
 
     #[test]

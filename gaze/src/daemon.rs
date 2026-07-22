@@ -483,10 +483,9 @@ impl AuthDaemon {
         )
     }
 
-    fn cancel_active_tasks(&self) {
-        if let Ok(mut cancel) = self.active_cancel.try_lock()
-            && let Some(sender) = cancel.take()
-        {
+    async fn cancel_active_tasks(&self) {
+        let mut cancel = self.active_cancel.lock().await;
+        if let Some(sender) = cancel.take() {
             let _ = sender.send(());
         }
     }
@@ -1329,7 +1328,7 @@ impl AuthDaemon {
                 return Ok(());
             }
             if caller_uid == 0 {
-                self.cancel_active_tasks();
+                self.cancel_active_tasks().await;
                 info!(
                     sender = %sender,
                     previous_sender = %existing.sender,
@@ -1427,7 +1426,7 @@ impl AuthDaemon {
                 return Err(fdo::Error::Failed("Sender does not own the claim".into()));
             }
 
-            self.cancel_active_tasks();
+            self.cancel_active_tasks().await;
             *state = None;
             info!(sender = %sender, "Released daemon");
             Ok(())
@@ -1462,7 +1461,7 @@ impl AuthDaemon {
 
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
-        self.cancel_active_tasks();
+        self.cancel_active_tasks().await;
 
         let (tx, mut rx) = oneshot::channel();
         *self.active_cancel.lock().await = Some(tx);
@@ -1581,7 +1580,7 @@ impl AuthDaemon {
                     let mut live_scores: Vec<f32> = Vec::new();
                     let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
 
-                    for frame in &mut cam {
+                    while let Some(frame) = cam.next_interruptible(&stop_clone) {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
                             break;
                         }
@@ -1729,7 +1728,7 @@ impl AuthDaemon {
                     let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
                     let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
 
-                    for frame in &mut cam {
+                    while let Some(frame) = cam.next_interruptible(&stop_clone) {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
                             break;
                         }
@@ -1959,7 +1958,7 @@ impl AuthDaemon {
 
     async fn verify_stop(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
         self.check_claim(&header).await?;
-        self.cancel_active_tasks();
+        self.cancel_active_tasks().await;
         Ok(())
     }
 
@@ -1972,7 +1971,7 @@ impl AuthDaemon {
         let claim = self.check_claim(&header).await?;
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
-        self.cancel_active_tasks();
+        self.cancel_active_tasks().await;
 
         UserDatabase::validate_face_name(&face_name).map_err(Self::map_user_db_error)?;
 
@@ -2083,7 +2082,7 @@ impl AuthDaemon {
                             };
                             let mut pose_stability = EnrollmentPoseStability::default();
 
-                            for frame in &mut cam {
+                            while let Some(frame) = cam.next_interruptible(&stop_clone) {
                                 if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
                                     return;
                                 }
@@ -2153,7 +2152,7 @@ impl AuthDaemon {
                     let mut captured_for_step = false;
                     let mut pose_stability = EnrollmentPoseStability::default();
 
-                    for frame in &mut cam {
+                    while let Some(frame) = cam.next_interruptible(&stop_clone) {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
                             break;
                         }
@@ -2271,7 +2270,7 @@ impl AuthDaemon {
                                 }
                             };
 
-                            for frame in &mut cam {
+                            while let Some(frame) = cam.next_interruptible(&stop_clone) {
                                 if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
                                     return;
                                 }
@@ -2339,7 +2338,7 @@ impl AuthDaemon {
                     let mut pose_stability = EnrollmentPoseStability::default();
                     let mut pose_baseline = None;
 
-                    for frame in &mut cam {
+                    while let Some(frame) = cam.next_interruptible(&stop_clone) {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
                             break;
                         }
@@ -2512,7 +2511,7 @@ impl AuthDaemon {
                             }
                             EnrollMsg::Error(e) => {
                                 error!("Enrollment error: {e}");
-                                let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::DbFailed, -1.0).await;
+                                let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::CameraFailed, -1.0).await;
                                 stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                                 return;
                             }
@@ -2547,7 +2546,7 @@ impl AuthDaemon {
 
     async fn enroll_stop(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
         self.check_claim(&header).await?;
-        self.cancel_active_tasks();
+        self.cancel_active_tasks().await;
         Ok(())
     }
 
@@ -2660,7 +2659,7 @@ impl AuthDaemon {
             .validate()
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
 
-        self.cancel_active_tasks();
+        self.cancel_active_tasks().await;
 
         let new_liveness_detector = if new_config.liveness.enabled {
             let path = crate::models::ensure_liveness_model(gaze_core::config::MODELS_DIR)

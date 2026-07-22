@@ -17,14 +17,14 @@ anyhow = "1.0.104"
 gaze-core = { path = "../gaze-core" }
 getrandom = "0.4.3"
 image = { version = "0.25.10", default-features = false }
-libc = "0.2.186"
+libc = "0.2.189"
 nalgebra = "0.35.0"
 ndarray = "0.17.2"
 opencv = { version = "0.99.0", default-features = false, features = ["imgproc", "videoio"] }
 ort = "2.0.0-rc.12"
 rayon = "1.12"
 sha2 = "0.11"
-tokio = { version = "1.53.0", features = ["full", "rt-multi-thread"] }
+tokio = { version = "1.53.1", features = ["full", "rt-multi-thread"] }
 ureq = "3.3"
 uuid = { version = "1.24.0", features = ["v4"] }
 zbus = "5.18.0"
