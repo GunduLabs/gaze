@@ -4,6 +4,7 @@
   rustPlatform,
   pkg-config,
   wrapGAppsHook4,
+  clang,
   glib,
   gst_all_1,
   gtk4,
@@ -54,6 +55,7 @@ rustPlatform.buildRustPackage {
     wrapGAppsHook4
     # The opencv crate generates its bindings with libclang at build time.
     rustPlatform.bindgenHook
+    clang
   ];
 
   buildInputs = [

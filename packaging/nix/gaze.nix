@@ -4,6 +4,7 @@
   rustPlatform,
   pkg-config,
   makeWrapper,
+  clang,
   glib,
   gst_all_1,
   onnxruntime,
@@ -49,6 +50,7 @@ rustPlatform.buildRustPackage {
     makeWrapper
     # The opencv crate generates its bindings with libclang at build time.
     rustPlatform.bindgenHook
+    clang
   ];
 
   buildInputs = [
