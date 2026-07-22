@@ -444,8 +444,7 @@ mod tests {
 
     #[test]
     fn blackout_frames_read_as_too_dark_while_lit_ones_do_not() {
-        let black =
-            Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(0.0)).unwrap();
+        let black = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(0.0)).unwrap();
         let lit = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(120.0)).unwrap();
 
         assert!(frame_is_too_dark(&black, 30));
