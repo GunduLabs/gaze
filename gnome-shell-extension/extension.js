@@ -265,12 +265,18 @@ export default class GazeFaceAuthExtension extends Extension {
             !this._userName ||
             !this._faceEnabled ||
             this._faceAuthFailed ||
+            this._faceStartPending ||
+            this._activeServices.has(FACE_SERVICE_NAME) ||
             this.serviceIsForeground(FACE_SERVICE_NAME)
           )
             return;
 
           const self = this;
           const userName = this._userName;
+          this._faceStartPending = true;
+          const clearFaceStartPending = () => {
+            self._faceStartPending = false;
+          };
           if (dbusProxy) {
             dbusProxy.HasEnrolledFacesRemote(userName, (result, err) => {
               if (!err && result[0]) {
@@ -279,12 +285,18 @@ export default class GazeFaceAuthExtension extends Extension {
                     !camErr &&
                     camResult[0] &&
                     !self._faceAuthFailed &&
+                    !self._activeServices.has(FACE_SERVICE_NAME) &&
                     !self.serviceIsForeground(FACE_SERVICE_NAME)
                   )
                     self._startService(FACE_SERVICE_NAME);
+                  clearFaceStartPending();
                 });
+              } else {
+                clearFaceStartPending();
               }
             });
+          } else {
+            clearFaceStartPending();
           }
         };
       },
@@ -454,6 +466,7 @@ export default class GazeFaceAuthExtension extends Extension {
     this._injectionManager.overrideMethod(proto, "_onReset", (original) => {
       return function () {
         this._faceFailCounter = 0;
+        this._faceStartPending = false;
         this._faceConfirmPending = false;
         this._faceConfirmService = null;
         original.call(this);
