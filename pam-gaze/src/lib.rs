@@ -96,13 +96,17 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         return unsafe { confirm_via_polkit_dialog(pamh, &username, &rt) };
     }
 
-    let uid = rt.block_on(active_or_user_uid(&username));
+    let (uid, is_greeter) = rt.block_on(active_confirm_target(&username));
     let de = uid
         .map(detect_desktop_environment)
         .unwrap_or_else(|| "Other".to_string());
-    let extension_active = de == "GNOME" && rt.block_on(gnome_extension_active(uid));
+    // The greeter always runs GNOME + the gaze extension, so query the
+    // extension directly rather than trusting DE detection on its transient
+    // processes; otherwise GDM silently bypasses Require Confirmation.
+    let extension_active =
+        (is_greeter || de == "GNOME") && rt.block_on(gnome_extension_active(uid));
 
-    match graphical_confirm_decision(&de, extension_active) {
+    match graphical_confirm_decision(&de, extension_active, is_greeter) {
         GraphicalConfirm::GnomeExtension => confirm_via_gnome_extension(pamh),
         GraphicalConfirm::Bypass => PAM_SUCCESS,
         GraphicalConfirm::FailClosed => PAM_AUTH_ERR,
