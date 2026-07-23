@@ -38,7 +38,9 @@ auth {
 }
 ```
 
-Restart hyprlock or lock the session again. Face unlock runs first; if it fails or times out, hyprlock falls back to the password prompt.
+Restart hyprlock or lock the session again. Face unlock runs first; if it fails or times out, hyprlock falls back to the password prompt. While the camera runs, gaze streams live hints ("Need more light…", "Hold still…") as PAM messages that hyprlock shows.
+
+For a more GNOME-like feel, prefer [simultaneous mode](#simultaneous-mode) below: type your password *while* the camera matches, instead of waiting for face to finish first.
 
 ## Simultaneous mode
 
@@ -52,7 +54,7 @@ auth {
 }
 ```
 
-This uses `pam_gaze_grosshack.so`, a PAM shim that lets Gaze run alongside the password prompt instead of blocking it.
+This uses `pam_gaze_grosshack.so`, a PAM shim that lets Gaze run alongside the password prompt instead of blocking it. In this mode the camera runs silently; the live "look at the camera" hints are shown only by the default `hyprlock-gaze` (sequential) service, because the password prompt owns the PAM conversation here.
 
 ## How it works
 

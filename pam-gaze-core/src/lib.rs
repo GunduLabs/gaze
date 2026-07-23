@@ -464,6 +464,13 @@ fn auth_outcome(
 }
 
 pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcome> {
+    authenticate_biometric_with_status(username, |_| {}).await
+}
+
+pub async fn authenticate_biometric_with_status(
+    username: &str,
+    mut on_status: impl FnMut(gaze_core::dbus::CaptureStatus),
+) -> anyhow::Result<AuthOutcome> {
     let (_config, proxy) = setup_auth_env()
         .await
         .map_err(|e| anyhow::anyhow!("PAM error: {}", e))?;
@@ -493,6 +500,7 @@ pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcom
 
     use futures::StreamExt;
     let mut last_status: Option<gaze_core::dbus::CaptureStatus> = None;
+    let mut last_emitted: Option<gaze_core::dbus::CaptureStatus> = None;
     let outcome = loop {
         tokio::select! {
             Some(signal) = verify_stream.next() => {
@@ -502,7 +510,15 @@ pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcom
             }
             Some(signal) = face_stream.next() => {
                 if let Ok(args) = signal.args() {
-                    last_status = Some(*args.status());
+                    let status = *args.status();
+                    last_status = Some(status);
+                    // "Unused" is the idle placeholder, not a hint worth showing.
+                    if status != gaze_core::dbus::CaptureStatus::Unused
+                        && last_emitted != Some(status)
+                    {
+                        last_emitted = Some(status);
+                        on_status(status);
+                    }
                 }
             }
             // Both streams ended (bus connection lost): without this branch
@@ -514,6 +530,10 @@ pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcom
     guard.active = false;
     let _ = proxy.release().await;
     Ok(outcome)
+}
+
+pub fn service_wants_live_status(service: Option<&str>) -> bool {
+    matches!(service, Some("kde-fingerprint" | "hyprlock-gaze"))
 }
 
 pub fn get_user_uid(username: &str) -> Option<u32> {
@@ -690,6 +710,20 @@ mod tests {
             polkit_confirm_message("Other"),
             "Face Verified. Press Enter to confirm."
         );
+    }
+
+    #[test]
+    fn live_status_only_on_interactive_lock_services() {
+        assert!(service_wants_live_status(Some("kde-fingerprint")));
+        assert!(service_wants_live_status(Some("hyprlock-gaze")));
+        // GNOME/terminal/dialog paths must stay quiet.
+        assert!(!service_wants_live_status(Some("gdm-face")));
+        assert!(!service_wants_live_status(Some("sudo")));
+        assert!(!service_wants_live_status(Some("polkit-1")));
+        assert!(!service_wants_live_status(Some(
+            "hyprlock-gaze-simultaneous"
+        )));
+        assert!(!service_wants_live_status(None));
     }
 
     #[test]

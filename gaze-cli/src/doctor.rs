@@ -461,6 +461,24 @@ fn pam_line_has_reference(line: &str) -> bool {
     })
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum KdeLockStatus {
+    Current,
+    Stale,
+    Missing,
+}
+
+fn kde_lock_status(kde_fingerprint: Option<&str>) -> KdeLockStatus {
+    match kde_fingerprint.and_then(|c| c.lines().find(|&l| pam_line_has_reference(l))) {
+        // Either form makes PAM_AUTHINFO_UNAVAIL reach KScreenLocker.
+        Some(line) if line.contains("authinfo_unavail=die") || line.contains("default=die") => {
+            KdeLockStatus::Current
+        }
+        Some(_) => KdeLockStatus::Stale,
+        None => KdeLockStatus::Missing,
+    }
+}
+
 fn find_pam_references() -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir("/etc/pam.d") else {
         return Vec::new();
@@ -695,20 +713,22 @@ fn check_desktop_integration(report: &mut Report) {
     }
 
     if desktop.contains("kde") || desktop.contains("plasma") {
-        let configured = fs::read_to_string("/etc/pam.d/kde-fingerprint")
-            .ok()
-            .is_some_and(|contents| contents.lines().any(pam_line_has_reference));
-        if configured {
-            report.pass(
+        let contents = fs::read_to_string("/etc/pam.d/kde-fingerprint").ok();
+        match kde_lock_status(contents.as_deref()) {
+            KdeLockStatus::Current => report.pass(
                 "KDE lock screen",
                 "kde-fingerprint runs a Gaze PAM module for up-front face unlock",
-            );
-        } else {
-            report.warning(
+            ),
+            KdeLockStatus::Stale => report.warning(
+                "KDE lock screen",
+                "kde-fingerprint runs pam_gaze with an older control string, so a give-up (covered camera / darkness) can loop instead of stopping the camera",
+                "Reinstall gaze-kde or re-run `just dev-link-system` to migrate the line to `auth [success=done authinfo_unavail=die ignore=ignore default=ignore] pam_gaze.so`.",
+            ),
+            KdeLockStatus::Missing => report.warning(
                 "KDE lock screen",
                 "/etc/pam.d/kde-fingerprint does not run pam_gaze, so face auth only starts after you submit the password field",
-                "Install the gaze-kde package, or add `auth [success=done default=die] pam_gaze.so` to /etc/pam.d/kde-fingerprint.",
-            );
+                "Install the gaze-kde package, or add `auth [success=done authinfo_unavail=die ignore=ignore default=ignore] pam_gaze.so` to /etc/pam.d/kde-fingerprint.",
+            ),
         }
     }
 }
@@ -1080,6 +1100,35 @@ mod tests {
         assert!(pam_line_has_reference(
             "auth        [success=done default=die]                   pam_gaze.so"
         ));
+    }
+
+    #[test]
+    fn kde_lock_status_flags_control_strings() {
+        // Current: give-up propagates so the camera stops.
+        assert_eq!(
+            kde_lock_status(Some(
+                "auth [success=done authinfo_unavail=die ignore=ignore default=ignore] pam_gaze.so"
+            )),
+            KdeLockStatus::Current
+        );
+        // Standalone gaze-only reference (die propagates unavail too).
+        assert_eq!(
+            kde_lock_status(Some("auth [success=done default=die] pam_gaze.so")),
+            KdeLockStatus::Current
+        );
+        // Stale: the old default=ignore swallowed the give-up -> camera loops.
+        assert_eq!(
+            kde_lock_status(Some("auth [success=done default=ignore] pam_gaze.so")),
+            KdeLockStatus::Stale
+        );
+        // Missing: no gaze line at all.
+        assert_eq!(
+            kde_lock_status(Some(
+                "auth required pam_fprintd.so\nauth required pam_deny.so"
+            )),
+            KdeLockStatus::Missing
+        );
+        assert_eq!(kde_lock_status(None), KdeLockStatus::Missing);
     }
 
     #[test]

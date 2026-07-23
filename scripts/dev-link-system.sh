@@ -66,7 +66,7 @@ POLKIT_POLICY_DST=/usr/share/polkit-1/actions/com.gundulabs.gaze.policy
 KDE_PAM_DST=/etc/pam.d/kde-fingerprint
 KDE_PAM_REF="$REPO/packaging/pam/kde-fingerprint"
 KDE_PAM_FLAG=/etc/gaze/pam-arch.kde-dev-configured
-KDE_PAM_LINE='auth        [success=done default=ignore]                pam_gaze.so'
+KDE_PAM_LINE='auth        [success=done authinfo_unavail=die ignore=ignore default=ignore]    pam_gaze.so'
 
 artifact() {
     printf '%s/%s' "$TARGET" "$1"
@@ -336,8 +336,22 @@ restore_polkit_policy() {
 link_kde_pam() {
     mkdir -p /etc/gaze
     if [ -f "$KDE_PAM_DST" ]; then
-        if grep -Eq '^[[:space:]]*auth[[:space:]].*pam_gaze\.so([[:space:]]|$)' "$KDE_PAM_DST"; then
+        if grep -Fqx "$KDE_PAM_LINE" "$KDE_PAM_DST"; then
             printf 'KDE PAM already configured: %s\n' "$KDE_PAM_DST"
+            return 0
+        fi
+        if grep -Eq '^[[:space:]]*auth[[:space:]].*pam_gaze\.so([[:space:]]|$)' "$KDE_PAM_DST"; then
+            # Migrate a stale gaze line (e.g. an older default=ignore) in place.
+            tmp=$(mktemp)
+            awk -v line="$KDE_PAM_LINE" '
+                !done && $0 ~ /^[[:space:]]*auth[[:space:]].*pam_gaze\.so([[:space:]]|$)/ { print line; done = 1; next }
+                { print }
+            ' "$KDE_PAM_DST" >"$tmp"
+            cat "$tmp" >"$KDE_PAM_DST"
+            rm -f "$tmp"
+            # Preserve an existing flag (e.g. 'created') so restore still does the right thing.
+            [ -f "$KDE_PAM_FLAG" ] || printf 'edited\n' >"$KDE_PAM_FLAG"
+            printf 'migrated KDE PAM: %s\n' "$KDE_PAM_DST"
             return 0
         fi
         tmp=$(mktemp)

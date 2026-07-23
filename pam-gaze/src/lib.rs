@@ -49,6 +49,8 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         Err(code) => return code,
     };
 
+    let live_status = service_wants_live_status(unsafe { get_pam_service(pamh) }.as_deref());
+
     let matched = rt.block_on(async {
         match enrollment_disposition(has_enrolled_faces(&username).await) {
             EnrollmentDisposition::Ignore => return Err(PAM_IGNORE),
@@ -58,12 +60,13 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
         unsafe { say(pamh, "Please look at the camera") };
 
-        match timeout(
-            Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS),
-            authenticate_biometric(&username),
-        )
-        .await
-        {
+        let biometric = authenticate_biometric_with_status(&username, |status| {
+            if live_status {
+                unsafe { say(pamh, &status.to_string()) };
+            }
+        });
+
+        match timeout(Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS), biometric).await {
             Ok(Ok(AuthOutcome::Match)) => Ok(()),
             Ok(Ok(AuthOutcome::NoMatch)) => Err(PAM_AUTH_ERR),
             Ok(Ok(AuthOutcome::Unavailable)) => Err(PAM_AUTHINFO_UNAVAIL),
