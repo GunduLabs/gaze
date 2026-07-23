@@ -12,6 +12,9 @@ with the password field (the same slot the fingerprint reader uses).
 face auth, and face unlock begins the moment the lock screen appears, no key
 press needed.
 
+The one-line installer auto-installs `gaze-kde` when it detects a KDE Plasma
+session, so these steps are only needed for a manual install.
+
 ## Install
 
 ::: code-group
@@ -73,8 +76,8 @@ auth        [success=done default=ignore]                pam_gaze.so
 ```
 
 as the first `auth` line and leaving the rest of the stack (a fingerprint
-reader, `pam_deny`, includes) intact as fallback. It is idempotent — a second
-install does not add the line twice — and removing `gaze-kde` strips the line
+reader, `pam_deny`, includes) intact as fallback. It is idempotent: a second
+install does not add the line twice, and removing `gaze-kde` strips the line
 back out. If you prefer to wire it up by hand, add that line yourself.
 
 ## Disable

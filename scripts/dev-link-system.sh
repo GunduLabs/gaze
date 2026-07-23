@@ -15,6 +15,7 @@ Run as root after building release artifacts as your normal user:
 This links:
   - /usr/bin/gazed, /usr/bin/gaze, /usr/bin/gaze-gui
   - installed PAM modules
+  - the KDE lock screen PAM stack (pam_gaze in /etc/pam.d/kde-fingerprint)
   - system and current-user GNOME extension files
   - the installed GNOME settings schema
 
@@ -62,6 +63,10 @@ SCHEMA_SRC="$REPO/packaging/config/org.gnome.shell.extensions.gaze.gschema.xml"
 SCHEMA_DST=/usr/share/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml
 POLKIT_POLICY_SRC="$REPO/packaging/config/com.gundulabs.gaze.policy"
 POLKIT_POLICY_DST=/usr/share/polkit-1/actions/com.gundulabs.gaze.policy
+KDE_PAM_DST=/etc/pam.d/kde-fingerprint
+KDE_PAM_REF="$REPO/packaging/pam/kde-fingerprint"
+KDE_PAM_FLAG=/etc/gaze/pam-arch.kde-dev-configured
+KDE_PAM_LINE='auth        [success=done default=ignore]                pam_gaze.so'
 
 artifact() {
     printf '%s/%s' "$TARGET" "$1"
@@ -328,6 +333,45 @@ restore_polkit_policy() {
     systemctl reload polkit >/dev/null 2>&1 || true
 }
 
+link_kde_pam() {
+    mkdir -p /etc/gaze
+    if [ -f "$KDE_PAM_DST" ]; then
+        if grep -Eq '^[[:space:]]*auth[[:space:]].*pam_gaze\.so([[:space:]]|$)' "$KDE_PAM_DST"; then
+            printf 'KDE PAM already configured: %s\n' "$KDE_PAM_DST"
+            return 0
+        fi
+        tmp=$(mktemp)
+        awk -v line="$KDE_PAM_LINE" '
+            !inserted && $0 ~ /^[[:space:]]*auth[[:space:]]/ { print line; inserted = 1 }
+            { print }
+            END { if (!inserted) print line }
+        ' "$KDE_PAM_DST" >"$tmp"
+        cat "$tmp" >"$KDE_PAM_DST"
+        rm -f "$tmp"
+        printf 'edited\n' >"$KDE_PAM_FLAG"
+        printf 'configured KDE PAM: %s\n' "$KDE_PAM_DST"
+    else
+        install -m 644 "$KDE_PAM_REF" "$KDE_PAM_DST"
+        printf 'created\n' >"$KDE_PAM_FLAG"
+        printf 'installed KDE PAM: %s\n' "$KDE_PAM_DST"
+    fi
+}
+
+restore_kde_pam() {
+    [ -f "$KDE_PAM_FLAG" ] || return 0
+    mode=$(cat "$KDE_PAM_FLAG" 2>/dev/null || printf 'edited')
+    if [ "$mode" = created ]; then
+        restore_or_remove "$KDE_PAM_DST"
+    elif [ -f "$KDE_PAM_DST" ]; then
+        tmp=$(mktemp)
+        grep -Ev '^[[:space:]]*auth[[:space:]].*pam_gaze\.so([[:space:]]|$)' "$KDE_PAM_DST" >"$tmp" || true
+        cat "$tmp" >"$KDE_PAM_DST"
+        rm -f "$tmp"
+        printf 'restored KDE PAM: %s\n' "$KDE_PAM_DST"
+    fi
+    rm -f "$KDE_PAM_FLAG"
+}
+
 link_extension_files() {
     dir=$1
     install -d "$dir"
@@ -429,6 +473,12 @@ show_status() {
     done
     systemctl show gazed -p DropInPaths -p ExecStart -p InaccessiblePaths 2>/dev/null || true
 
+    if [ -f "$KDE_PAM_DST" ] && grep -Eq '^[[:space:]]*auth[[:space:]].*pam_gaze\.so([[:space:]]|$)' "$KDE_PAM_DST"; then
+        printf '%s: pam_gaze active\n' "$KDE_PAM_DST"
+    else
+        printf '%s: pam_gaze not configured\n' "$KDE_PAM_DST"
+    fi
+
     if tpm_present; then tpm=$([ -e /dev/tpmrm0 ] && echo /dev/tpmrm0 || echo /dev/tpm0); else tpm=none; fi
     printf 'tpm device: %s\n' "$tpm"
     flag=$(awk '/^[[:space:]]*encrypt_templates[[:space:]]*=/ {print $3; f=1} END{if(!f) print "unset"}' "$CONFIG_FILE" 2>/dev/null || echo unknown)
@@ -511,6 +561,7 @@ case "$cmd" in
         link_polkit_pam_config
         link_polkit_policy
         link_gnome_extension
+        link_kde_pam
         setup_tpm_encryption
         install_systemd_dropin
         printf '\nGaze is linked to this checkout. Rebuild after switching branches, then restart gazed.\n'
@@ -524,6 +575,7 @@ case "$cmd" in
         restore_polkit_pam_config
         restore_polkit_policy
         restore_gnome_extension
+        restore_kde_pam
         teardown_tpm_encryption
         remove_systemd_dropin
         ;;

@@ -40,8 +40,8 @@ RPM packages install an authselect profile at:
 
 The profile adds Gaze to both shared authentication stacks: `system-auth`, used by tools such as `sudo`, and `password-auth`, used by KDE's lock screen, SDDM, and Plasma Login Manager. RPM upgrades refresh these generated PAM files automatically when the Gaze profile is active.
 
-::: warning KDE lock screen is not hands-free
-Being in `password-auth` means Gaze runs when KDE's lock screen authenticates, but it does not make face unlock automatic. KDE's screen locker only starts PAM authentication after you submit the password field, so the camera does not activate until you enter (or submit an empty) password. Hands-free face unlock on the KDE lock screen is not currently supported — unlike GNOME, which drives it through the Gaze Shell extension. Face auth still works for `sudo`, polkit, and other PAM prompts.
+::: warning KDE lock screen: install gaze-kde for hands-free unlock
+Being in `password-auth` means Gaze runs when KDE's lock screen authenticates, but on its own it does not make face unlock automatic: KDE's screen locker only starts this stack after you submit the password field, so the camera does not activate until you enter (or submit an empty) password. Install the `gaze-kde` package for hands-free unlock; it runs face auth through KScreenLocker's noninteractive `kde-fingerprint` service, which starts up front. See the [KDE guide](/guide/kde). Face auth still works for `sudo`, polkit, and other PAM prompts regardless.
 :::
 
 Enable it:

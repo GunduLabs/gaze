@@ -122,9 +122,9 @@ Log out and back in once after installing or updating the extension if the lock 
 
 ### KDE Plasma and other PAM-based desktops
 
-The one-line installer detects KDE Plasma and intentionally skips `gaze-gnome-extension`, because that package depends on GNOME Shell. Use the base `gaze` package's PAM modules for login or lock-screen integration. See the [PAM guide](/guide/pam) and keep password fallback enabled while testing.
+On KDE Plasma the one-line installer skips `gaze-gnome-extension` (it depends on GNOME Shell) and instead installs `gaze-kde`, which adds `pam_gaze` to the noninteractive `kde-fingerprint` PAM service KScreenLocker runs up front. Face unlock then begins as soon as the lock screen or SDDM greeter appears, with no key press needed. For a manual install, add `gaze-kde` (`gaze-kde-bin` on Arch) yourself. See the [KDE guide](/guide/kde).
 
-Note that the KDE **lock screen** does not support hands-free face unlock: its screen locker only starts PAM authentication after you submit the password field, so the camera will not activate on its own. This is a KDE limitation — see the [PAM guide](/guide/pam#fedora-and-compatible-rpm-systems) for details.
+For sudo, other login managers, or desktops without a dedicated package, use the base `gaze` package's PAM modules; see the [PAM guide](/guide/pam) and keep password fallback enabled while testing.
 
 ### Enable face unlock for hyprlock
 

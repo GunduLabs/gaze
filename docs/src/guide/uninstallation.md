@@ -39,6 +39,14 @@ If you enabled Gaze for hyprlock, remove the `module = hyprlock-gaze` line from 
 sed -i.bak '/^\s*module\s*=\s*hyprlock-gaze/d' "${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprlock.conf"
 ```
 
+### Revert KDE lock screen face unlock
+
+If you installed `gaze-kde`, removing the package (Step 2) strips `pam_gaze` from `/etc/pam.d/kde-fingerprint` automatically. If you added the line by hand, remove it:
+
+```bash
+sudo sed -i.bak '/pam_gaze\.so/d' /etc/pam.d/kde-fingerprint
+```
+
 ### Remove GDM login defaults and overrides
 
 ```bash
@@ -88,16 +96,16 @@ sudo systemctl disable gazed
 ::: code-group
 
 ```bash [Debian/Ubuntu]
-sudo apt remove --purge gaze gaze-gui gaze-gnome-extension gaze-hyprlock
+sudo apt remove --purge gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde
 sudo apt autoremove
 ```
 
 ```bash [Fedora and compatible]
-sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-hyprlock
+sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde
 ```
 
 ```bash [Arch Linux / Manjaro]
-sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin gaze-hyprlock-bin
+sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin gaze-hyprlock-bin gaze-kde-bin
 # AUR builds may also have installed -debug split packages:
 pacman -Q | awk '/^gaze.*-debug /{print $1}' | xargs -r sudo pacman -Rns --noconfirm
 ```

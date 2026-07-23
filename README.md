@@ -80,7 +80,7 @@ yay -S --needed gaze-bin gaze-gui-bin
 flatpak install --from https://packages.gundulabs.com/flatpak/com.gundulabs.Gaze.flatpakref
 ```
 
-For GNOME lock screen face unlock after manual package installation, also install `gaze-gnome-extension` (`gaze-gnome-extension-bin` on Arch), reboot, then from your GNOME session run `gnome-extensions enable gaze@gundulabs.com` and `gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true`. On KDE Plasma, use the base packages and follow the PAM guide for login/lock integration.
+For GNOME lock screen face unlock after manual package installation, also install `gaze-gnome-extension` (`gaze-gnome-extension-bin` on Arch), reboot, then from your GNOME session run `gnome-extensions enable gaze@gundulabs.com` and `gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true`. On KDE Plasma, also install `gaze-kde` (`gaze-kde-bin` on Arch) for hands-free lock screen face unlock; the one-line installer does this automatically when it detects a KDE session.
 
 </details>
 
@@ -123,6 +123,7 @@ Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Matc
 | `pam-gaze` | PAM module for login/lock screen integration |
 | `gaze-gnome-extension` | GNOME Shell extension for lock screen auth |
 | `gaze-hyprlock` | PAM service for hyprlock face unlock on Hyprland |
+| `gaze-kde` | KDE Plasma lock screen face unlock (kde-fingerprint PAM) |
 
 ## Configuration
 

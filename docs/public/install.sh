@@ -7,6 +7,7 @@ set -e
 PKG_BASE_URL="https://packages.gundulabs.com"
 GNOME_DOCS_URL="https://gaze.gundulabs.com/guide/gnome"
 HYPRLAND_DOCS_URL="https://gaze.gundulabs.com/guide/hyprland"
+KDE_DOCS_URL="https://gaze.gundulabs.com/guide/kde"
 PAM_DOCS_URL="https://gaze.gundulabs.com/guide/pam"
 REPO_KEY_FPR="505AC1C71AFEDBD5555235F6CB4FA24E5C1C7C98"
 AUTO_YES=0
@@ -281,19 +282,24 @@ explain_gnome_extension_skipped() {
         return 0
     fi
 
-    if is_kde_session; then
-        say "KDE Plasma desktop detected; skipping the GNOME Shell extension package."
-    else
-        say "GNOME desktop session not detected; skipping the GNOME Shell extension package."
-    fi
+    say "GNOME desktop session not detected; skipping the GNOME Shell extension package."
     say "CLI, GUI, and PAM modules are still installed."
     say "For non-GNOME desktop/login integration, see:"
     link "$PAM_DOCS_URL"
 }
 
+enable_kde() {
+    ok "KDE Plasma detected; installed gaze-kde for lock screen and greeter face unlock."
+    say "  Face auth runs in parallel with the password field, so it unlocks without a key press."
+    say "  Lock your screen and look at the camera to test it."
+    link "$KDE_DOCS_URL"
+}
+
 enable_desktop_integrations() {
     if want_gnome_extension_package; then
         enable_gnome_extension
+    elif is_kde_session; then
+        enable_kde
     else
         explain_gnome_extension_skipped
     fi
@@ -517,7 +523,7 @@ if is_deb; then
         plan "Install gaze, gaze-gui, and gaze-gnome-extension"
         plan "Enable GNOME lock screen auth for this user when possible"
     elif is_kde_session; then
-        plan "Install gaze and gaze-gui (KDE Plasma detected; skip GNOME Shell extension)"
+        plan "Install gaze, gaze-gui, and gaze-kde (KDE Plasma lock screen face unlock)"
     else
         plan "Install gaze and gaze-gui (skip GNOME Shell extension; GNOME not detected)"
     fi
@@ -541,7 +547,7 @@ elif is_rpm; then
         plan "Install gaze, gaze-gui, and gaze-gnome-extension"
         plan "Enable GNOME lock screen auth for this user when possible"
     elif is_kde_session; then
-        plan "Install gaze and gaze-gui (KDE Plasma detected; skip GNOME Shell extension)"
+        plan "Install gaze, gaze-gui, and gaze-kde (KDE Plasma lock screen face unlock)"
     else
         plan "Install gaze and gaze-gui (skip GNOME Shell extension; GNOME not detected)"
     fi
@@ -559,7 +565,7 @@ elif is_arch; then
         plan "Install gaze-bin, gaze-gui-bin, and gaze-gnome-extension-bin from the AUR"
         plan "Enable GNOME lock screen auth for this user when possible"
     elif is_kde_session; then
-        plan "Install gaze-bin and gaze-gui-bin from the AUR (KDE Plasma detected; skip GNOME Shell extension)"
+        plan "Install gaze-bin, gaze-gui-bin, and gaze-kde-bin from the AUR (KDE Plasma lock screen face unlock)"
     else
         plan "Install gaze-bin and gaze-gui-bin from the AUR (skip GNOME Shell extension; GNOME not detected)"
     fi
@@ -615,6 +621,9 @@ if is_deb; then
     if want_hyprlock_setup; then
         DEB_PKGS="$DEB_PKGS gaze-hyprlock"
     fi
+    if is_kde_session; then
+        DEB_PKGS="$DEB_PKGS gaze-kde"
+    fi
     sudo apt-get install -y $DEB_PKGS </dev/null
 
     step "Desktop integration"
@@ -654,6 +663,9 @@ EOF
     fi
     if want_hyprlock_setup; then
         RPM_PKGS="$RPM_PKGS gaze-hyprlock"
+    fi
+    if is_kde_session; then
+        RPM_PKGS="$RPM_PKGS gaze-kde"
     fi
     if command -v dnf >/dev/null 2>&1; then
         sudo dnf install -y $RPM_PKGS </dev/null
@@ -703,6 +715,9 @@ elif is_arch; then
     fi
     if want_hyprlock_setup; then
         AUR_PKGS="$AUR_PKGS gaze-hyprlock-bin"
+    fi
+    if is_kde_session; then
+        AUR_PKGS="$AUR_PKGS gaze-kde-bin"
     fi
     "$AUR_HELPER" -S --noconfirm $AUR_PKGS
 
@@ -758,8 +773,8 @@ if want_gnome_extension_package; then
     say "  ${DIM}GDM login face auth stays off until you enable it:${RESET}"
     link "${GNOME_DOCS_URL}#optional-enable-face-at-gdm-login"
 elif is_kde_session; then
-    say "  KDE Plasma: GNOME extension skipped; see the PAM guide for lock/login integration:"
-    link "$PAM_DOCS_URL"
+    ok "KDE Plasma lock screen face unlock: gaze-kde installed"
+    link "$KDE_DOCS_URL"
 else
     say "  GNOME extension skipped (GNOME desktop not detected); see the PAM guide:"
     link "$PAM_DOCS_URL"
