@@ -289,10 +289,15 @@ impl FaceChecker {
         let (bboxes, kps, mat_rgb) = match detection {
             Ok(result) => result,
             Err(DetectError::NoFacesDetected) => {
-                if let Spectrum::Rgb = self.spectrum
-                    && frame_is_too_dark(frame, self.dark_luma_threshold)
-                {
-                    return Ok((CaptureStatus::TooDark, None));
+                if let Spectrum::Rgb = self.spectrum {
+                    tracing::debug!(
+                        "no face detected: luma={} threshold={}",
+                        frame_mean_luma(frame).unwrap_or(0),
+                        self.dark_luma_threshold
+                    );
+                    if frame_is_too_dark(frame, self.dark_luma_threshold) {
+                        return Ok((CaptureStatus::TooDark, None));
+                    }
                 }
                 return Ok((CaptureStatus::NoFace, None));
             }
