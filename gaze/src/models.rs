@@ -17,6 +17,9 @@ const LIVENESS_MODEL_SHA256: &str =
     "d7b3cd9ba8a7ceb13baa8c4720902e27ca3112eff52f926c08804af6b6eecc7b";
 const LIVENESS_MODEL_URL: &str = "https://huggingface.co/garciafido/minifasnet-v2-anti-spoofing-onnx/resolve/main/minifasnet_v2.onnx";
 
+pub const IR_LIVENESS_MODEL_NAME: &str = "minifasnet_ir_v1.onnx";
+const IR_LIVENESS_MODEL: Option<(&str, &str)> = None;
+
 fn zip_url(pack_name: &str) -> String {
     format!("{}/{}.zip", RELEASE_BASE, pack_name)
 }
@@ -59,6 +62,7 @@ fn expected_model_sha256(model_name: &str) -> Option<&'static str> {
         "det_10g.onnx" => Some(DET_10G_SHA256),
         "w600k_r50.onnx" => Some(W600K_R50_SHA256),
         LIVENESS_MODEL_NAME => Some(LIVENESS_MODEL_SHA256),
+        IR_LIVENESS_MODEL_NAME => IR_LIVENESS_MODEL.map(|(_, sha)| sha),
         _ => None,
     }
 }
@@ -262,6 +266,24 @@ pub fn ensure_liveness_model(models_dir: &str) -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
+pub fn ensure_ir_liveness_model(models_dir: &str) -> anyhow::Result<PathBuf> {
+    let Some((url, sha)) = IR_LIVENESS_MODEL else {
+        anyhow::bail!("IR anti-spoof model is not configured");
+    };
+
+    let dir = Path::new(models_dir);
+    ensure_private_dir(dir)?;
+
+    let path = dir.join(IR_LIVENESS_MODEL_NAME);
+    if path.exists() {
+        verify_known_model(&path, IR_LIVENESS_MODEL_NAME)?;
+        return Ok(path);
+    }
+
+    download_file(url, &path, sha)?;
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,6 +355,13 @@ mod tests {
                 "{name:?} should be invalid"
             );
         }
+    }
+
+    #[test]
+    fn ir_liveness_model_is_unconfigured_by_default() {
+        let temp = TempDir::new("ir-liveness-unconfigured");
+        assert!(ensure_ir_liveness_model(temp.path().to_str().unwrap()).is_err());
+        assert_eq!(expected_model_sha256(IR_LIVENESS_MODEL_NAME), None);
     }
 
     #[test]
