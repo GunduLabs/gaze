@@ -56,6 +56,15 @@ fn claim_has_epoch(state: &Option<ClaimState>, epoch: u64) -> bool {
     matches!(state, Some(claim) if claim.epoch == epoch)
 }
 
+// Root, or the same user reclaiming their own device, may take over a claim.
+fn claim_is_preemptible(
+    caller_uid: u32,
+    existing_username: &str,
+    requested_username: &str,
+) -> bool {
+    caller_uid == 0 || existing_username == requested_username
+}
+
 pub struct FaceData {
     pub embedding: Array1<f32>,
     pub liveness_frame: Option<Mat>,
@@ -495,10 +504,20 @@ impl AuthDaemon {
 #[cfg(test)]
 mod tests {
     use super::{
-        AuthDaemon, ClaimState, auth_streams, claim_has_epoch, eyes_from_kpss, hybrid_auth_passed,
-        pipewire_runtime_update,
+        AuthDaemon, ClaimState, auth_streams, claim_has_epoch, claim_is_preemptible,
+        eyes_from_kpss, hybrid_auth_passed, pipewire_runtime_update,
     };
     use gaze_core::dbus::CaptureStatus;
+
+    #[test]
+    fn claim_preemption_allows_root_and_same_user() {
+        // Root can take over any claim.
+        assert!(claim_is_preemptible(0, "alice", "bob"));
+        // Same user reclaiming their own device (e.g. a rapid re-lock).
+        assert!(claim_is_preemptible(1000, "alice", "alice"));
+        // A different unprivileged user must wait.
+        assert!(!claim_is_preemptible(1000, "alice", "bob"));
+    }
 
     #[test]
     fn pipewire_runtime_update_only_changes_on_a_new_uid() {
@@ -1328,12 +1347,12 @@ impl AuthDaemon {
             if existing.sender == sender {
                 return Ok(());
             }
-            if caller_uid == 0 {
+            if claim_is_preemptible(caller_uid, &existing.username, &username) {
                 self.cancel_active_tasks().await;
                 info!(
                     sender = %sender,
                     previous_sender = %existing.sender,
-                    "Root caller preempting existing daemon claim"
+                    "Preempting existing daemon claim"
                 );
             } else {
                 return Err(fdo::Error::Failed(
