@@ -15,6 +15,7 @@ Run as root after building release artifacts as your normal user:
 This links:
   - /usr/bin/gazed, /usr/bin/gaze, /usr/bin/gaze-gui
   - installed PAM modules
+  - the hyprlock-gaze / hyprlock-gaze-simultaneous PAM services (for hyprlock)
   - system and current-user GNOME extension files
   - the installed GNOME settings schema
 
@@ -62,6 +63,11 @@ SCHEMA_SRC="$REPO/packaging/config/org.gnome.shell.extensions.gaze.gschema.xml"
 SCHEMA_DST=/usr/share/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml
 POLKIT_POLICY_SRC="$REPO/packaging/config/com.gundulabs.gaze.policy"
 POLKIT_POLICY_DST=/usr/share/polkit-1/actions/com.gundulabs.gaze.policy
+# system-auth variants, matching the polkit PAM config this script writes.
+HYPRLOCK_PAM_SRC="$REPO/packaging/pam/hyprlock-gaze"
+HYPRLOCK_PAM_DST=/etc/pam.d/hyprlock-gaze
+HYPRLOCK_SIMUL_PAM_SRC="$REPO/packaging/pam/hyprlock-gaze-simultaneous"
+HYPRLOCK_SIMUL_PAM_DST=/etc/pam.d/hyprlock-gaze-simultaneous
 
 artifact() {
     printf '%s/%s' "$TARGET" "$1"
@@ -328,6 +334,16 @@ restore_polkit_policy() {
     systemctl reload polkit >/dev/null 2>&1 || true
 }
 
+link_hyprlock_pam() {
+    backup_and_install "$HYPRLOCK_PAM_SRC" "$HYPRLOCK_PAM_DST" 0644
+    backup_and_install "$HYPRLOCK_SIMUL_PAM_SRC" "$HYPRLOCK_SIMUL_PAM_DST" 0644
+}
+
+restore_hyprlock_pam() {
+    restore_or_remove "$HYPRLOCK_PAM_DST"
+    restore_or_remove "$HYPRLOCK_SIMUL_PAM_DST"
+}
+
 link_extension_files() {
     dir=$1
     install -d "$dir"
@@ -347,6 +363,22 @@ sudo_user_home() {
     [ -n "${SUDO_USER:-}" ] || return 1
     [ "$SUDO_USER" != root ] || return 1
     getent passwd "$SUDO_USER" | cut -d: -f6
+}
+
+# Best-effort desktop of the user invoking sudo, from their running processes.
+# Echoes: gnome | hyprland | kde | other. Used only to tailor closing hints.
+detect_session_desktop() {
+    user=${SUDO_USER:-}
+    [ -n "$user" ] && [ "$user" != root ] || { printf 'other'; return; }
+    if pgrep -u "$user" -x gnome-shell >/dev/null 2>&1; then
+        printf 'gnome'
+    elif pgrep -u "$user" -x Hyprland >/dev/null 2>&1 || pgrep -u "$user" -x hyprland >/dev/null 2>&1; then
+        printf 'hyprland'
+    elif pgrep -u "$user" -x plasmashell >/dev/null 2>&1; then
+        printf 'kde'
+    else
+        printf 'other'
+    fi
 }
 
 link_gnome_extension() {
@@ -420,7 +452,9 @@ show_status() {
         "$SYSTEM_EXTENSION_DIR/extension.js" \
         "$SYSTEM_EXTENSION_DIR/prefs.js" \
         "$SCHEMA_DST" \
-        "$POLKIT_POLICY_DST"
+        "$POLKIT_POLICY_DST" \
+        "$HYPRLOCK_PAM_DST" \
+        "$HYPRLOCK_SIMUL_PAM_DST"
     do
         if [ -L "$path" ]; then
             printf '%s -> %s\n' "$path" "$(readlink "$path")"
@@ -514,10 +548,18 @@ case "$cmd" in
         link_polkit_pam_config
         link_polkit_policy
         link_gnome_extension
+        link_hyprlock_pam
         setup_tpm_encryption
         install_systemd_dropin
         printf '\nGaze is linked to this checkout. Rebuild after switching branches, then restart gazed.\n'
-        printf 'Restart GNOME Shell or log out/in for extension.js changes. Reopen preferences for prefs.js changes.\n'
+        case "$(detect_session_desktop)" in
+            gnome)
+                printf 'Restart GNOME Shell or log out/in for extension.js changes. Reopen preferences for prefs.js changes.\n'
+                ;;
+            hyprland)
+                printf 'Set `pam_module = hyprlock-gaze` in ~/.config/hypr/hyprlock.conf to test hyprlock face unlock.\n'
+                ;;
+        esac
         ;;
     disable)
         need_root
@@ -527,6 +569,7 @@ case "$cmd" in
         restore_polkit_pam_config
         restore_polkit_policy
         restore_gnome_extension
+        restore_hyprlock_pam
         teardown_tpm_encryption
         remove_systemd_dropin
         ;;
