@@ -288,7 +288,14 @@ impl FaceChecker {
         };
         let (bboxes, kps, mat_rgb) = match detection {
             Ok(result) => result,
-            Err(DetectError::NoFacesDetected) => return Ok((CaptureStatus::NoFace, None)),
+            Err(DetectError::NoFacesDetected) => {
+                if let Spectrum::Rgb = self.spectrum
+                    && frame_is_too_dark(frame, self.dark_luma_threshold)
+                {
+                    return Ok((CaptureStatus::TooDark, None));
+                }
+                return Ok((CaptureStatus::NoFace, None));
+            }
             Err(err) => return Err(err.into()),
         };
 
@@ -374,6 +381,10 @@ impl FaceChecker {
     }
 }
 
+fn frame_is_too_dark(frame: &Mat, threshold: u8) -> bool {
+    frame_mean_luma(frame).unwrap_or(0) < threshold
+}
+
 pub fn frame_mean_luma(frame: &Mat) -> anyhow::Result<u8> {
     let size = frame.size()?;
     let pixel_count = (size.width.max(0) * size.height.max(0)) as usize;
@@ -429,6 +440,15 @@ mod tests {
             Mat::new_rows_cols_with_default(12, 12, core::CV_8UC3, Scalar::all(0.0)).unwrap();
 
         assert!(frame_mean_luma(&frame).unwrap() < 30);
+    }
+
+    #[test]
+    fn blackout_frames_read_as_too_dark_while_lit_ones_do_not() {
+        let black = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(0.0)).unwrap();
+        let lit = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(120.0)).unwrap();
+
+        assert!(frame_is_too_dark(&black, 30));
+        assert!(!frame_is_too_dark(&lit, 30));
     }
 
     #[test]
