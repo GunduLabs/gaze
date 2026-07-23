@@ -84,12 +84,10 @@ RUN set -eux; \
     rm /tmp/nfpm.tar.gz; \
     nfpm --version
 
-# bindgen/clang-sys (pulled in by opencv and tss-esapi) locate libclang at runtime
-# via llvm-config, which isn't on PATH here. Point it at the multiarch dir where
-# libclang-dev ships libclang-*.so so discovery doesn't fail (matches cd.yml's Arch
-# step). Both triples are listed so this stays arch- and llvm-version-agnostic; only
-# the one matching the image's arch exists.
-ENV LIBCLANG_PATH=/usr/lib/aarch64-linux-gnu:/usr/lib/x86_64-linux-gnu
+# Leave LIBCLANG_PATH unset. clang-sys (pulled in by opencv and tss-esapi) only
+# treats it as a single directory, so a colon-separated list becomes one bogus
+# path and discovery fails; unset, clang-sys globs /usr/lib*/*/* and finds the
+# libclang shipped by libclang-dev, arch- and llvm-version-agnostically.
 
 COPY entrypoint.sh /usr/local/bin/gaze-build-entry
 RUN chmod +x /usr/local/bin/gaze-build-entry

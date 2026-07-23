@@ -1477,8 +1477,15 @@ impl AuthDaemon {
         let config = Config::load_from(CONFIG_PATH).unwrap_or_default();
         let rgb_device = self.rgb_device.lock().await.clone();
         let ir_device = self.ir_device.lock().await.clone();
-        let ir_node = self.ir_node.lock().await.clone();
         let emitter_enabled = *self.emitter_enabled.lock().await;
+        let mut ir_node = self.ir_node.lock().await.clone();
+        if emitter_enabled
+            && ir_node.is_empty()
+            && let Some(resolved) = gaze_core::camera::resolve_node(&ir_device)
+        {
+            *self.ir_node.lock().await = resolved.clone();
+            ir_node = resolved;
+        }
         let liveness_cfg = self.liveness_config.lock().await.clone();
         let hybrid_policy = self.hybrid_policy.lock().await.clone();
         let conn = ctxt.connection().clone();
