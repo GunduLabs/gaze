@@ -85,11 +85,16 @@ RUN set -eux; \
     nfpm --version
 
 # bindgen/clang-sys (pulled in by opencv and tss-esapi) locate libclang at runtime
-# via llvm-config, which isn't on PATH here. Point it at the multiarch dir where
-# libclang-dev ships libclang-*.so so discovery doesn't fail (matches cd.yml's Arch
-# step). Both triples are listed so this stays arch- and llvm-version-agnostic; only
-# the one matching the image's arch exists.
-ENV LIBCLANG_PATH=/usr/lib/aarch64-linux-gnu:/usr/lib/x86_64-linux-gnu
+# via llvm-config, which isn't on PATH here. clang-sys reads LIBCLANG_PATH as a
+# single directory (it does not split on ':'), and the versioned libdir varies by
+# arch and llvm release, so resolve libclang.so once here and symlink it into a
+# fixed directory that LIBCLANG_PATH can name literally.
+RUN set -eux; \
+    src="$(ls /usr/lib/llvm-*/lib/libclang.so | head -n1)"; \
+    mkdir -p /usr/local/lib/libclang; \
+    ln -s "$src" /usr/local/lib/libclang/libclang.so; \
+    test -e /usr/local/lib/libclang/libclang.so
+ENV LIBCLANG_PATH=/usr/local/lib/libclang
 
 COPY entrypoint.sh /usr/local/bin/gaze-build-entry
 RUN chmod +x /usr/local/bin/gaze-build-entry
