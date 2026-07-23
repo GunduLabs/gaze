@@ -8,8 +8,9 @@ you have to press Enter (even with an empty field) to trigger it.
 The `gaze-kde` package fixes the flow. KScreenLocker also runs a separate
 `kde-fingerprint` PAM service **noninteractively and up front**, in parallel
 with the password field (the same slot the fingerprint reader uses).
-`gaze-kde` installs `/etc/pam.d/kde-fingerprint` so that slot runs `pam_gaze`,
-and face unlock begins the moment the lock screen appears, no key press needed.
+`gaze-kde` adds `pam_gaze` to `/etc/pam.d/kde-fingerprint` so that slot runs
+face auth, and face unlock begins the moment the lock screen appears, no key
+press needed.
 
 ## Install
 
@@ -36,13 +37,13 @@ unlock runs while the password field waits; whichever succeeds first wins.
 
 KScreenLocker's greeter starts every PAM authenticator at once: the interactive
 `kde` service for the password, plus the noninteractive `kde-fingerprint` and
-`kde-smartcard` services. `gaze-kde` supplies a `kde-fingerprint` service that
-runs `pam_gaze.so`:
+`kde-smartcard` services. `gaze-kde` inserts `pam_gaze.so` as the first `auth`
+line of the `kde-fingerprint` service:
 
 1. The greeter calls PAM with service name `kde-fingerprint` as soon as it opens
 2. `pam_gaze.so` claims the camera through the `gazed` DBus service and runs face verification
 3. On match → `PAM_SUCCESS`, the screen unlocks
-4. On no match → `PAM_AUTH_ERR`, the greeter keeps waiting on the password field
+4. On no match → the rest of the `kde-fingerprint` stack runs (e.g. a fingerprint reader), and the greeter keeps waiting on the password field
 5. On no enrolled faces or an unavailable camera → `PAM_AUTHINFO_UNAVAIL`, the greeter drops the face option and shows the password field alone
 
 The password path is never blocked; it runs in its own `kde` stack the whole
@@ -63,15 +64,18 @@ present it on this path.
 
 ## Existing kde-fingerprint
 
-If `/etc/pam.d/kde-fingerprint` already exists (for example from a fingerprint
-reader setup), the package manager keeps your file and drops the packaged one
-beside it as `.rpmnew` / `.pacnew` (or prompts, on Debian/Ubuntu). Add this line
-to the top of the `auth` stack in your file to enable face unlock alongside the
-reader:
+On KDE, `/etc/pam.d/kde-fingerprint` is provided by `plasma-workspace`, so
+`gaze-kde` does not own that file. Its postinstall script edits the file in
+place, prepending
 
 ```
-auth        sufficient    pam_gaze.so
+auth        [success=done default=ignore]                pam_gaze.so
 ```
+
+as the first `auth` line and leaving the rest of the stack (a fingerprint
+reader, `pam_deny`, includes) intact as fallback. It is idempotent — a second
+install does not add the line twice — and removing `gaze-kde` strips the line
+back out. If you prefer to wire it up by hand, add that line yourself.
 
 ## Disable
 

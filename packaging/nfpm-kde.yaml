@@ -11,19 +11,14 @@ vendor: "Gundu Labs"
 homepage: "https://gaze.gundulabs.com"
 license: "MIT"
 
+# /etc/pam.d/kde-fingerprint is owned by plasma-workspace on KDE, so this
+# package must not ship that path (RPM rejects the file conflict). The
+# postinstall script edits the existing service in place instead; this reference
+# copy is the standalone stack it falls back to when the file is absent.
 contents:
   - src: "packaging/pam/kde-fingerprint"
-    dst: "/etc/pam.d/kde-fingerprint"
-    type: "config|noreplace"
-    packager: rpm
-  - src: "packaging/pam/kde-fingerprint"
-    dst: "/etc/pam.d/kde-fingerprint"
-    type: "config|noreplace"
-    packager: archlinux
-  - src: "packaging/pam/kde-fingerprint"
-    dst: "/etc/pam.d/kde-fingerprint"
-    type: "config|noreplace"
-    packager: deb
+    dst: "/usr/share/gaze/pam/kde-fingerprint"
+    type: "file"
 
 deb:
   signature:
