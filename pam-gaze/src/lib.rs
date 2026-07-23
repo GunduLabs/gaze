@@ -62,7 +62,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
         let biometric = authenticate_biometric_with_status(&username, |status| {
             if live_status {
-                unsafe { say(pamh, &status.to_string()) };
+                unsafe { say(pamh, status.as_ref()) };
             }
         });
 
