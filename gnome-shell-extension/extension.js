@@ -145,6 +145,11 @@ export default class GazeFaceAuthExtension extends Extension {
             return;
           }
 
+          if (dialog._passwordEntry) {
+            dialog._passwordEntry.show();
+            dialog._passwordEntry.reactive = true;
+          }
+
           const klass = dialog.constructor;
 
           if (dialog._session) {

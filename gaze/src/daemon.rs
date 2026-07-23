@@ -35,6 +35,7 @@ const GDM_DCONF_OVERRIDE_CONTENT: &str =
     "[org/gnome/shell/extensions/gaze]\nenable-face-authentication=true\n";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
 const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
+const VERIFY_NO_FACE_TIMEOUT: Duration = Duration::from_secs(5);
 /// In hybrid (RGB+IR) verify the two spectra are captured one camera at a time so
 /// single-function UVC devices (e.g. Logitech Brio) that cannot stream both at once
 /// still work. This bounds the RGB phase so it yields the camera to IR even without a
@@ -1806,6 +1807,7 @@ impl AuthDaemon {
             let mut ir_status = CaptureStatus::Unused;
             let mut rgb_attempted = false;
             let mut dark_since: Option<Instant> = None;
+            let mut last_face_at = Instant::now();
             let mut frames_seen: u32 = 0;
 
             let mut rgb_success_embed = None;
@@ -1879,6 +1881,7 @@ impl AuthDaemon {
                                 }
 
                                 if has_face {
+                                    last_face_at = Instant::now();
                                     frames_seen += 1;
                                     if frames_seen >= liveness_cfg.max_frames {
                                         info!("VerifyStart: liveness gate timed out");
@@ -1915,6 +1918,16 @@ impl AuthDaemon {
                                     }
                                 } else {
                                     dark_since = None;
+                                }
+
+                                if last_face_at.elapsed() >= VERIFY_NO_FACE_TIMEOUT {
+                                    info!(
+                                        "VerifyStart: giving up after {}s without a detected face",
+                                        VERIFY_NO_FACE_TIMEOUT.as_secs()
+                                    );
+                                    stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                    break;
                                 }
 
                                 if finish_if_auth_passed!() {
