@@ -340,6 +340,17 @@ pub async fn active_or_user_uid(username: &str) -> Option<u32> {
     }
 }
 
+// Like `active_or_user_uid`, but also reports whether the active seat session
+// is a login greeter (e.g. GDM). A greeter always runs GNOME with the gaze
+// extension loaded, yet its short-lived processes make `/proc`-based DE
+// detection unreliable, so callers gate confirmation on this flag instead.
+pub async fn active_confirm_target(username: &str) -> (Option<u32>, bool) {
+    match gaze_core::dbus::get_active_session_uid_and_class().await {
+        Ok((uid, class)) => (Some(uid), class == "greeter"),
+        Err(_) => (get_user_uid(username), false),
+    }
+}
+
 pub async fn gnome_extension_active(uid: Option<u32>) -> bool {
     let Some(uid) = uid else {
         return false;
@@ -598,8 +609,21 @@ pub enum GraphicalConfirm {
 }
 
 // GNOME's extension is the expected channel, so an inactive one fails closed;
-// other desktops have no channel and bypass confirmation.
-pub fn graphical_confirm_decision(de: &str, extension_active: bool) -> GraphicalConfirm {
+// other desktops have no channel and bypass confirmation. A login greeter is
+// always GNOME with the gaze extension, so it must confirm through the
+// extension or fail closed -- never bypass, or GDM would ignore the setting.
+pub fn graphical_confirm_decision(
+    de: &str,
+    extension_active: bool,
+    is_greeter: bool,
+) -> GraphicalConfirm {
+    if is_greeter {
+        return if extension_active {
+            GraphicalConfirm::GnomeExtension
+        } else {
+            GraphicalConfirm::FailClosed
+        };
+    }
     match de {
         "GNOME" if extension_active => GraphicalConfirm::GnomeExtension,
         "GNOME" => GraphicalConfirm::FailClosed,
@@ -614,7 +638,7 @@ mod tests {
     #[test]
     fn gnome_with_active_extension_confirms_through_it() {
         assert_eq!(
-            graphical_confirm_decision("GNOME", true),
+            graphical_confirm_decision("GNOME", true, false),
             GraphicalConfirm::GnomeExtension
         );
     }
@@ -622,7 +646,7 @@ mod tests {
     #[test]
     fn gnome_without_extension_fails_closed() {
         assert_eq!(
-            graphical_confirm_decision("GNOME", false),
+            graphical_confirm_decision("GNOME", false, false),
             GraphicalConfirm::FailClosed
         );
     }
@@ -631,9 +655,30 @@ mod tests {
     fn other_desktops_bypass_confirmation() {
         for de in ["KDE", "Hyprland", "LXQt", "Other"] {
             assert_eq!(
-                graphical_confirm_decision(de, false),
+                graphical_confirm_decision(de, false, false),
                 GraphicalConfirm::Bypass,
                 "{de} should bypass confirmation when it has no channel"
+            );
+        }
+    }
+
+    #[test]
+    fn greeter_confirms_through_extension_when_active() {
+        // A greeter's DE detection is unreliable, so the flag decides -- even
+        // if `/proc` scanning reported a non-GNOME desktop.
+        assert_eq!(
+            graphical_confirm_decision("Other", true, true),
+            GraphicalConfirm::GnomeExtension
+        );
+    }
+
+    #[test]
+    fn greeter_never_bypasses_and_fails_closed_without_extension() {
+        for de in ["GNOME", "KDE", "Hyprland", "Other"] {
+            assert_eq!(
+                graphical_confirm_decision(de, false, true),
+                GraphicalConfirm::FailClosed,
+                "a greeter ({de}) must fail closed, never bypass, without a confirm channel"
             );
         }
     }
