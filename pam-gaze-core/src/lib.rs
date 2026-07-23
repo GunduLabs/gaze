@@ -455,7 +455,9 @@ fn auth_outcome(
     match result {
         gaze_core::dbus::VerifyResult::VerifyMatch => AuthOutcome::Match,
         gaze_core::dbus::VerifyResult::VerifyNoMatch => match last_status {
-            Some(gaze_core::dbus::CaptureStatus::TooDark) => AuthOutcome::Unavailable,
+            Some(
+                gaze_core::dbus::CaptureStatus::TooDark | gaze_core::dbus::CaptureStatus::NoFace,
+            ) => AuthOutcome::Unavailable,
             _ => AuthOutcome::NoMatch,
         },
     }
@@ -700,6 +702,10 @@ mod tests {
         );
         assert_eq!(
             auth_outcome(VerifyResult::VerifyNoMatch, Some(CaptureStatus::NoFace)),
+            AuthOutcome::Unavailable
+        );
+        assert_eq!(
+            auth_outcome(VerifyResult::VerifyNoMatch, Some(CaptureStatus::Usable)),
             AuthOutcome::NoMatch
         );
         assert_eq!(

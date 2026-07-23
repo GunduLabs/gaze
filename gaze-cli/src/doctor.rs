@@ -15,6 +15,7 @@ const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(25);
 const BENCHMARK_TIMEOUT: Duration = Duration::from_secs(30);
 const PAM_MODULES: [&str; 2] = ["pam_gaze.so", "pam_gaze_grosshack.so"];
 const GNOME_EXTENSION_ID: &str = "gaze@gundulabs.com";
+const GDM_FACE_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Level {
@@ -633,23 +634,36 @@ fn check_desktop_integration(report: &mut Report) {
             ],
         ) {
             Ok((true, value)) if value == "true" => {
-                report.pass("GNOME face auth", "enabled for the current user");
+                report.pass(
+                    "GNOME lock-screen face auth",
+                    "enabled for the current user",
+                );
             }
-            Ok((true, _)) => report.warning(
-                "GNOME face auth",
-                "disabled for the current user",
-                "Run `gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true`.",
+            Ok((true, _)) => report.pass(
+                "GNOME lock-screen face auth",
+                "disabled for the current user; enable it in the Gaze extension preferences if you want lock-screen face auth",
             ),
             Ok((false, message)) => report.warning(
-                "GNOME face auth",
+                "GNOME lock-screen face auth",
                 format!("could not read the extension setting: {message}"),
                 "Reinstall the Gaze GNOME extension package.",
             ),
             Err(err) => report.warning(
-                "GNOME face auth",
+                "GNOME lock-screen face auth",
                 format!("could not read the extension setting: {err}"),
                 "Reinstall the Gaze GNOME extension package.",
             ),
+        }
+
+        if Path::new(GDM_FACE_OVERRIDE_PATH).exists() {
+            report.pass(
+                "GDM login face auth",
+                format!(
+                    "enabled system-wide via {GDM_FACE_OVERRIDE_PATH}; toggle it from the extension preferences \"GDM login screen\" section"
+                ),
+            );
+        } else {
+            report.pass("GDM login face auth", "disabled");
         }
     }
 
