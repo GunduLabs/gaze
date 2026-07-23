@@ -34,7 +34,7 @@ const GDM_DCONF_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
 const GDM_DCONF_OVERRIDE_CONTENT: &str =
     "[org/gnome/shell/extensions/gaze]\nenable-face-authentication=true\n";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
-const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
+const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_millis(250);
 const VERIFY_NO_FACE_TIMEOUT: Duration = Duration::from_secs(5);
 /// In hybrid (RGB+IR) verify the two spectra are captured one camera at a time so
 /// single-function UVC devices (e.g. Logitech Brio) that cannot stream both at once
@@ -1916,8 +1916,8 @@ impl AuthDaemon {
                                     let started = *dark_since.get_or_insert_with(Instant::now);
                                     if started.elapsed() >= VERIFY_TOO_DARK_TIMEOUT {
                                         info!(
-                                            "VerifyStart: giving up after {}s of dark frames",
-                                            VERIFY_TOO_DARK_TIMEOUT.as_secs()
+                                            "VerifyStart: giving up after {}ms of dark frames",
+                                            VERIFY_TOO_DARK_TIMEOUT.as_millis()
                                         );
                                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                                         let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
