@@ -452,6 +452,10 @@ export default class GazeFaceAuthExtension extends Extension {
           original.call(this, client, serviceName);
 
           if (this.serviceIsBiometric(serviceName)) {
+            // Face has stopped, so drop its stale "look at the camera" hint;
+            // otherwise it lingers once face errors out on the lock screen.
+            this._filterServiceMessages(serviceName, Util.MessageType.HINT);
+
             const hint = this._getHint();
             if (hint) {
               const bgSvc = [...this._activeServices].find((s) =>
