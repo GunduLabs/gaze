@@ -392,6 +392,9 @@ ExecStart=/usr/bin/gazed
 
 # The packaged unit hides /home, but dev symlink targets live in the checkout.
 InaccessiblePaths=
+
+# Dev builds default to verbose logging.
+Environment=RUST_LOG=debug
 EOF
     rm -f "$LEGACY_SYSTEMD_DROPIN"
     systemctl daemon-reload
