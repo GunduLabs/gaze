@@ -98,7 +98,7 @@ existing package install; it does not install the package itself.
 
 Build and install a package once first, e.g.:
     just package rpm
-    sudo <your package manager> install dist/packages/gazed-*.rpm
+    sudo <your package manager> install dist/packages/gaze-*.rpm
 
 then re-run: just dev-link-system"
 }
