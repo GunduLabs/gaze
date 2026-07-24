@@ -274,8 +274,23 @@ restore_pam_config() {
     rm -f "$flag"
 }
 
+is_arch() {
+    [ -r /etc/os-release ] || return 1
+    (
+        . /etc/os-release
+        case " ${ID:-} ${ID_LIKE:-} " in
+            *" arch "*) exit 0 ;;
+            *) exit 1 ;;
+        esac
+    )
+}
+
 link_polkit_pam_config() {
     pam_file=/etc/pam.d/polkit-1
+    if ! is_arch; then
+        printf 'skipping %s: Arch-only override, this distro ships its own polkit PAM stack\n' "$pam_file"
+        return 0
+    fi
     [ -f "$pam_file" ] && { printf 'PAM already configured: %s\n' "$pam_file"; return 0; }
 
     cat > "$pam_file" <<-EOF

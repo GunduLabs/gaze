@@ -22,7 +22,7 @@ level = "medium"
 rgb = "primary"
 # ir = "/dev/video2"        # optional infrared camera (direct /dev/video* node or usb:VVVV:PPPP)
 # emitter_enabled = false   # drive the IR emitter (requires ir)
-dark_luma_threshold = 30
+dark_luma_threshold = 25
 
 [auth]
 abort_if_ssh = true
@@ -130,10 +130,10 @@ Gaze rejects frames that are too dark before running face detection:
 
 ```toml
 [cameras]
-dark_luma_threshold = 30
+dark_luma_threshold = 25
 ```
 
-With the default, a frame is skipped when its mean luminance (0-255, BT.601 weighted) falls below 30. Raise it to reject dimmer scenes, lower it to be more permissive.
+With the default, a frame is skipped when its mean luminance (0-255, BT.601 weighted) falls below 25. Raise it to reject dimmer scenes, lower it to be more permissive.
 
 ## Infrared (IR) camera
 

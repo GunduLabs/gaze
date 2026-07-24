@@ -91,7 +91,7 @@ sudo -v
 
 ### Polkit (graphical "Authentication Required" prompts)
 
-Arch's `polkit` package ships no `/etc/pam.d/polkit-1`, so the `polkit-1` PAM service falls back to the vendor default at `/usr/lib/pam.d/polkit-1`, which just does `include system-auth`. Since Gaze avoids patching `system-auth` (see above), graphical polkit prompts (`pkexec`, GNOME Settings, package manager GUIs, etc.) don't get face auth unless a `/etc/pam.d/polkit-1` override is installed too. The installer and `dev-link-system.sh` now create one automatically:
+Arch's `polkit` package ships no `/etc/pam.d/polkit-1`, so the `polkit-1` PAM service falls back to the vendor default at `/usr/lib/pam.d/polkit-1`, which just does `include system-auth`. Since Gaze avoids patching `system-auth` (see above), graphical polkit prompts (`pkexec`, GNOME Settings, package manager GUIs, etc.) don't get face auth unless a `/etc/pam.d/polkit-1` override is installed too. The Arch package and `dev-link-system.sh` create one automatically, and only on Arch:
 
 ```text
 #%PAM-1.0
@@ -108,6 +108,8 @@ Verify with:
 sudo systemctl restart polkit
 pkexec true
 ```
+
+Debian/Ubuntu, Fedora and other distributions ship their own `/etc/pam.d/polkit-1` and do not use `system-auth` the way Arch does, so Gaze never writes this file there. On those systems polkit picks up face auth through the shared auth stack (`pam-auth-update` on Debian/Ubuntu, the `gaze` authselect feature on Fedora).
 
 ## Other distros (manual)
 
