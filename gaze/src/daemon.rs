@@ -878,7 +878,7 @@ mod tests {
             false,
             true
         ));
-        assert!(hybrid_auth_passed(
+        assert!(!hybrid_auth_passed(
             "fallback",
             true,
             true,
@@ -1001,7 +1001,7 @@ fn hybrid_auth_passed(
             _ => {
                 if !rgb_attempted {
                     rgb_success && ir_success
-                } else if matches!(rgb_status, CaptureStatus::TooDark | CaptureStatus::NoFace) {
+                } else if matches!(rgb_status, CaptureStatus::TooDark) {
                     ir_success
                 } else {
                     rgb_success && ir_success
