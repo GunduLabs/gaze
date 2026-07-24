@@ -49,6 +49,8 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         Err(code) => return code,
     };
 
+    let is_polkit = matches!(unsafe { get_pam_service(pamh) }, Some(ref s) if s == "polkit-1");
+
     let matched = rt.block_on(async {
         match enrollment_disposition(has_enrolled_faces(&username).await) {
             EnrollmentDisposition::Ignore => return Err(PAM_IGNORE),
@@ -56,7 +58,12 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
             EnrollmentDisposition::Continue => {}
         }
 
-        unsafe { say(pamh, "Please look at the camera") };
+        let prompt = if is_polkit {
+            LOOK_OR_PASSWORD_PROMPT
+        } else {
+            LOOK_PROMPT
+        };
+        unsafe { say(pamh, prompt) };
 
         match timeout(
             Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS),
@@ -65,14 +72,22 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         .await
         {
             Ok(Ok((AuthOutcome::Match, _))) => Ok(()),
-            Ok(Ok((AuthOutcome::NoMatch, _))) => Err(PAM_AUTH_ERR),
+            Ok(Ok((AuthOutcome::NoMatch, _))) => {
+                unsafe { say(pamh, FACE_NOT_RECOGNIZED) };
+                Err(PAM_AUTH_ERR)
+            }
             Ok(Ok((AuthOutcome::Unavailable, status))) => {
-                if let Some(status) = status {
-                    unsafe { say(pamh, status.as_ref()) };
-                }
+                unsafe { say(pamh, give_up_message(status)) };
                 Err(PAM_AUTHINFO_UNAVAIL)
             }
-            _ => Err(PAM_AUTHINFO_UNAVAIL),
+            Ok(Err(_)) => {
+                unsafe { say(pamh, FACE_UNAVAILABLE) };
+                Err(PAM_AUTHINFO_UNAVAIL)
+            }
+            Err(_) => {
+                unsafe { say(pamh, FACE_TIMED_OUT) };
+                Err(PAM_AUTHINFO_UNAVAIL)
+            }
         }
     });
     if let Err(code) = matched {
@@ -97,7 +112,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         };
     }
 
-    if matches!(unsafe { get_pam_service(pamh) }, Some(ref s) if s == "polkit-1") {
+    if is_polkit {
         return unsafe { confirm_via_polkit_dialog(pamh, &username, &rt) };
     }
 

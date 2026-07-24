@@ -29,6 +29,14 @@ const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to
 pub const CONFIRMATION_REQUEST: &str = "GAZE_CONFIRMATION_REQUEST";
 pub const CONFIRMATION_ACK: &str = "CONFIRM";
 
+pub const LOOK_PROMPT: &str = "Please look at the camera";
+pub const LOOK_OR_PASSWORD_PROMPT: &str = "Please look at the camera or enter password";
+pub const FACE_NOT_RECOGNIZED: &str = "Face not recognized. Enter your password.";
+pub const FACE_NOT_DETECTED: &str = "Face not detected. Enter your password.";
+pub const FACE_TOO_DARK: &str = "Too dark for face authentication. Enter your password.";
+pub const FACE_TIMED_OUT: &str = "Face authentication timed out. Enter your password.";
+pub const FACE_UNAVAILABLE: &str = "Face authentication unavailable. Enter your password.";
+
 pub type PamHandle = *mut c_void;
 
 #[macro_export]
@@ -287,6 +295,14 @@ pub unsafe fn stash_password_and_fallback(pamh: PamHandle, password: &str) -> c_
         pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);
     }
     PAM_AUTHINFO_UNAVAIL
+}
+
+pub fn give_up_message(status: Option<gaze_core::dbus::CaptureStatus>) -> &'static str {
+    match status {
+        Some(gaze_core::dbus::CaptureStatus::TooDark) => FACE_TOO_DARK,
+        Some(gaze_core::dbus::CaptureStatus::NoFace) | None => FACE_NOT_DETECTED,
+        _ => FACE_NOT_RECOGNIZED,
+    }
 }
 
 pub fn polkit_confirm_message(de: &str) -> &'static str {
@@ -734,6 +750,42 @@ mod tests {
         assert_eq!(
             polkit_confirm_message("Other"),
             "Face Verified. Press Enter to confirm."
+        );
+    }
+
+    #[test]
+    fn give_up_messages_never_repeat_the_opening_prompt() {
+        use gaze_core::dbus::CaptureStatus;
+
+        for status in [
+            Some(CaptureStatus::NoFace),
+            Some(CaptureStatus::TooDark),
+            Some(CaptureStatus::Usable),
+            Some(CaptureStatus::Unused),
+            None,
+        ] {
+            let message = give_up_message(status);
+            assert!(
+                !message.starts_with("Please look at the camera"),
+                "{status:?}"
+            );
+            assert!(message.contains("password"), "{status:?}");
+        }
+    }
+
+    #[test]
+    fn give_up_message_keeps_the_actionable_cause() {
+        use gaze_core::dbus::CaptureStatus;
+
+        assert_eq!(give_up_message(Some(CaptureStatus::TooDark)), FACE_TOO_DARK);
+        assert_eq!(
+            give_up_message(Some(CaptureStatus::NoFace)),
+            FACE_NOT_DETECTED
+        );
+        assert_eq!(give_up_message(None), FACE_NOT_DETECTED);
+        assert_eq!(
+            give_up_message(Some(CaptureStatus::Usable)),
+            FACE_NOT_RECOGNIZED
         );
     }
 
