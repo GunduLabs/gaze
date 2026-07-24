@@ -878,7 +878,7 @@ mod tests {
             false,
             true
         ));
-        assert!(hybrid_auth_passed(
+        assert!(!hybrid_auth_passed(
             "fallback",
             true,
             true,
@@ -1001,7 +1001,7 @@ fn hybrid_auth_passed(
             _ => {
                 if !rgb_attempted {
                     rgb_success && ir_success
-                } else if matches!(rgb_status, CaptureStatus::TooDark | CaptureStatus::NoFace) {
+                } else if matches!(rgb_status, CaptureStatus::TooDark) {
                     ir_success
                 } else {
                     rgb_success && ir_success
@@ -1784,7 +1784,10 @@ impl AuthDaemon {
                                         landmark_seq.push(eyes);
                                     }
                                     let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
-                                    liveness_passed = !crate::liveness::confirmed_static(&motion);
+                                    liveness_passed = crate::liveness::motion_confirms_live(
+                                        &motion,
+                                        crate::liveness::MIN_MOTION_PAIRS,
+                                    );
 
                                     tracing::debug!(
                                         "Liveness checked (IR): motion={:?}, overall={}",
