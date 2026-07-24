@@ -20,7 +20,7 @@ level = "medium"
 
 [cameras]
 rgb = "primary"
-# ir = "/dev/video2"        # optional infrared camera; direct nodes are allowed only for IR
+# ir = "/dev/video2"        # optional infrared camera (direct /dev/video* node or usb:VVVV:PPPP)
 # emitter_enabled = false   # drive the IR emitter (requires ir)
 dark_luma_threshold = 30
 
@@ -137,7 +137,7 @@ With the default, a frame is skipped when its mean luminance (0-255, BT.601 weig
 
 ## Infrared (IR) camera
 
-Gaze supports Windows Hello-style infrared (IR) cameras to enable multi-camera hybrid authentication. Unlike the RGB setting, `ir` may point directly to the IR camera's `/dev/video*` node:
+Gaze supports Windows Hello-style infrared (IR) cameras to enable multi-camera hybrid authentication. The `ir` setting may point directly to the IR camera's `/dev/video*` node:
 
 ```toml
 [cameras]

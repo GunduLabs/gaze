@@ -99,8 +99,10 @@ impl Report {
         let warnings = self.count(Level::Warning);
         let errors = self.count(Level::Error);
         term.write_line(&format!(
-            "\n{} {passed} passed, {warnings} warnings, {errors} errors\n",
-            style("Summary:").bold()
+            "\n{} {passed} passed, {warnings} warning{}, {errors} error{}\n",
+            style("Summary:").bold(),
+            if warnings == 1 { "" } else { "s" },
+            if errors == 1 { "" } else { "s" }
         ))?;
         Ok(())
     }

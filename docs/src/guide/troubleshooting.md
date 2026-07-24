@@ -87,7 +87,7 @@ If you need a specific camera, run `gaze config` and select one of the detected 
 rgb = "pipewiresrc target-object=<pipewire-target>"
 ```
 
-Direct `/dev/video*` paths are not supported.
+You can also point `rgb` at a camera directly with a `/dev/video*` node or a `usb:VVVV:PPPP` id, which use `v4l2src` and need no PipeWire session.
 
 Then restart daemon:
 

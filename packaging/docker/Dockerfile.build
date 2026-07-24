@@ -11,7 +11,7 @@ FROM ubuntu:26.04@sha256:53958ec7b67c2c9355df922dd08dbf0360611f8c3cdb656875e8187
 # amd64 | arm64. Auto-populated by buildkit; on the legacy builder it is empty,
 # so the RUN steps below fall back to `dpkg --print-architecture`.
 ARG TARGETARCH
-ARG JUST_VERSION=1.53.0
+ARG JUST_VERSION=1.57.0
 ARG NFPM_VERSION=2.47.0
 
 ENV DEBIAN_FRONTEND=noninteractive
