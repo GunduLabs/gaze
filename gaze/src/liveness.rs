@@ -173,6 +173,12 @@ pub fn confirmed_static(motion: &EyeMotion) -> bool {
     motion.pairs >= 1 && !motion.live
 }
 
+pub const MIN_MOTION_PAIRS: usize = 2;
+
+pub fn motion_confirms_live(motion: &EyeMotion, min_pairs: usize) -> bool {
+    motion.pairs >= min_pairs && motion.live
+}
+
 pub fn liveness_passes(scores: &[f32], threshold: f32) -> bool {
     let mut finite_scores = scores
         .iter()
@@ -251,6 +257,29 @@ mod tests {
             motion_ratio: 0.0,
             pairs: 2
         }));
+    }
+
+    #[test]
+    fn motion_confirms_live_needs_accumulated_moving_pairs() {
+        let neutral = eye_motion_is_live(&[eyes((100.0, 50.0), (140.0, 50.0))], None);
+        assert_eq!(neutral.pairs, 0);
+        assert!(!motion_confirms_live(&neutral, MIN_MOTION_PAIRS));
+
+        let frame = eyes((100.0, 50.0), (140.0, 50.0));
+        let still = eye_motion_is_live(&[frame, frame, frame], None);
+        assert!(still.pairs >= MIN_MOTION_PAIRS);
+        assert!(!motion_confirms_live(&still, MIN_MOTION_PAIRS));
+
+        let moving = eye_motion_is_live(
+            &[
+                eyes((100.0, 50.0), (140.0, 50.0)),
+                eyes((101.2, 50.8), (141.0, 50.6)),
+                eyes((100.5, 49.5), (140.3, 49.8)),
+            ],
+            None,
+        );
+        assert!(moving.pairs >= MIN_MOTION_PAIRS);
+        assert!(motion_confirms_live(&moving, MIN_MOTION_PAIRS));
     }
 
     #[test]
