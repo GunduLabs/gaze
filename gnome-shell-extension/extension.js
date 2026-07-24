@@ -36,6 +36,11 @@ const FACE_AUTHENTICATION_KEY = "enable-face-authentication";
 const MAX_TRIES_KEY = "max-face-tries";
 const RETRY_MODE_KEY = "face-retry-mode";
 
+const gazeTiming = (tag, extra) =>
+  console.log(
+    `GAZE_TIMING ${tag} t=${GLib.get_monotonic_time()}us${extra ? " " + extra : ""}`,
+  );
+
 const GENERIC_ERROR_MAP = new Map([
   [
     "Sorry, that did not work. Please try again.",
@@ -155,6 +160,7 @@ export default class GazeFaceAuthExtension extends Extension {
           if (dialog._session) {
             dialog._session.connect("show-info", (session, text) => {
               if (text && text.trim() === "GAZE_CONFIRMATION_REQUEST") {
+                gazeTiming("CONFIRM_SHOWN", "path=showInfo");
                 if (dialog._passwordEntry) dialog._passwordEntry.hide();
 
                 if (dialog._infoMessageLabel) {
@@ -189,6 +195,7 @@ export default class GazeFaceAuthExtension extends Extension {
             const originalShowInfo = klass.prototype._onSessionShowInfo;
             klass.prototype._onSessionShowInfo = function (session, text) {
               if (text && text.trim() === "GAZE_CONFIRMATION_REQUEST") {
+                gazeTiming("CONFIRM_SHOWN", "path=onSessionShowInfo");
                 if (this._passwordEntry) {
                   this._passwordEntry.hide();
                 }
@@ -307,6 +314,19 @@ export default class GazeFaceAuthExtension extends Extension {
       },
     );
 
+    this._injectionManager.overrideMethod(
+      proto,
+      "_filterServiceMessages",
+      (original) => {
+        return function (serviceName, messageType) {
+          if (messageType === Util.MessageType.HINT) {
+            gazeTiming("HINT_FILTER", `svc=${serviceName}`);
+          }
+          return original.call(this, serviceName, messageType);
+        };
+      },
+    );
+
     proto.serviceIsFace = function (serviceName) {
       return this._faceEnabled && serviceName === FACE_SERVICE_NAME;
     };
@@ -395,6 +415,16 @@ export default class GazeFaceAuthExtension extends Extension {
           // Distro PAM stacks (e.g. Fedora's password-auth) run pam_gaze on
           // gdm-password too, so match the token on any service.
           if (secretQuestion?.trim() === CONFIRMATION_REQUEST) {
+            gazeTiming("CONFIRM_SHOWN", `svc=${serviceName} path=secretInfoQuery`);
+            // _filterServiceMessages only force-clears the display when another
+            // message is queued behind the current one; a lone standing hint
+            // rides out its full display interval (~1s). Clear it outright.
+            if (typeof this._clearMessageQueue === "function") {
+              this._clearMessageQueue();
+              gazeTiming("CLEAR_QUEUE_CALLED");
+            } else {
+              gazeTiming("CLEAR_QUEUE_MISSING");
+            }
             this._filterServiceMessages(serviceName, Util.MessageType.HINT);
             // Enter must send the ack token, not the empty typed answer.
             this._faceConfirmPending = true;
@@ -442,6 +472,7 @@ export default class GazeFaceAuthExtension extends Extension {
       (original) => {
         return function (client, serviceName) {
           if (serviceName === FACE_SERVICE_NAME) {
+            gazeTiming("FACE_CONV_STOPPED", `svc=${serviceName}`);
             this._faceFailCounter = (this._faceFailCounter || 0) + 1;
           }
           if (serviceName === this._faceConfirmService) {
