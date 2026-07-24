@@ -312,7 +312,7 @@ fn default_rgb_device() -> String {
 }
 
 fn default_dark_luma_threshold() -> u8 {
-    25
+    20
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
@@ -601,7 +601,7 @@ mod tests {
             SecurityLevel::medium().detector()
         );
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
-        assert_eq!(config.cameras.dark_luma_threshold, 25);
+        assert_eq!(config.cameras.dark_luma_threshold, 20);
         assert!(config.auth.abort_if_ssh);
         assert!(config.auth.abort_if_lid_closed);
         assert_eq!(config.enrollment.max_templates, 2);
@@ -714,7 +714,7 @@ mod tests {
             SecurityLevel::maximum().detector()
         );
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
-        assert_eq!(config.cameras.dark_luma_threshold, 25);
+        assert_eq!(config.cameras.dark_luma_threshold, 20);
         assert!(config.auth.abort_if_ssh);
         assert!(config.auth.abort_if_lid_closed);
         assert!(!config.auth.require_confirmation);
