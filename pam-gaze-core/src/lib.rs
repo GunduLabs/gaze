@@ -475,6 +475,12 @@ fn auth_outcome(
 }
 
 pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcome> {
+    Ok(authenticate_biometric_with_status(username).await?.0)
+}
+
+pub async fn authenticate_biometric_with_status(
+    username: &str,
+) -> anyhow::Result<(AuthOutcome, Option<gaze_core::dbus::CaptureStatus>)> {
     let (_config, proxy) = setup_auth_env()
         .await
         .map_err(|e| anyhow::anyhow!("PAM error: {}", e))?;
@@ -524,7 +530,7 @@ pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcom
 
     guard.active = false;
     let _ = proxy.release().await;
-    Ok(outcome)
+    Ok((outcome, last_status))
 }
 
 pub fn get_user_uid(username: &str) -> Option<u32> {

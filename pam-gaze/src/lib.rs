@@ -60,13 +60,18 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
         match timeout(
             Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS),
-            authenticate_biometric(&username),
+            authenticate_biometric_with_status(&username),
         )
         .await
         {
-            Ok(Ok(AuthOutcome::Match)) => Ok(()),
-            Ok(Ok(AuthOutcome::NoMatch)) => Err(PAM_AUTH_ERR),
-            Ok(Ok(AuthOutcome::Unavailable)) => Err(PAM_AUTHINFO_UNAVAIL),
+            Ok(Ok((AuthOutcome::Match, _))) => Ok(()),
+            Ok(Ok((AuthOutcome::NoMatch, _))) => Err(PAM_AUTH_ERR),
+            Ok(Ok((AuthOutcome::Unavailable, status))) => {
+                if let Some(status) = status {
+                    unsafe { say(pamh, status.as_ref()) };
+                }
+                Err(PAM_AUTHINFO_UNAVAIL)
+            }
             _ => Err(PAM_AUTHINFO_UNAVAIL),
         }
     });
