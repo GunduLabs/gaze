@@ -4,6 +4,7 @@ import {
   Extension,
   InjectionManager,
 } from "resource:///org/gnome/shell/extensions/extension.js";
+import * as Batch from "resource:///org/gnome/shell/gdm/batch.js";
 import * as Util from "resource:///org/gnome/shell/gdm/util.js";
 import * as PolkitAgent from "resource:///org/gnome/shell/ui/components/polkitAgent.js";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
@@ -94,6 +95,52 @@ export default class GazeFaceAuthExtension extends Extension {
       schema_id: EXTENSION_SCHEMA_ID,
     });
 
+    const ext = this;
+    const faceCache = { enrolled: new Map(), camera: null };
+
+    const cacheCamera = () => {
+      const proxy = ext._dbusProxy;
+      if (!proxy) return;
+      try {
+        proxy.IsCameraAvailableRemote((result, err) => {
+          if (!err && result[0] === true) faceCache.camera = true;
+        });
+      } catch (e) {}
+    };
+
+    const cacheEnrolled = (userName) => {
+      const proxy = ext._dbusProxy;
+      if (!proxy || !userName) return;
+      try {
+        proxy.HasEnrolledFacesRemote(userName, (result, err) => {
+          if (!err && result[0] === true) faceCache.enrolled.set(userName, true);
+        });
+      } catch (e) {}
+    };
+
+    const primeFaceCache = (userName) => {
+      cacheEnrolled(userName);
+      cacheCamera();
+    };
+
+    const startFace = (verifier) => {
+      if (
+        !verifier._userVerifier ||
+        verifier._faceAuthFailed ||
+        verifier._activeServices.has(FACE_SERVICE_NAME) ||
+        verifier.serviceIsForeground(FACE_SERVICE_NAME)
+      )
+        return;
+
+      if (!verifier._hold?.isAcquired?.()) verifier._hold = new Batch.Hold();
+
+      try {
+        verifier._startService(FACE_SERVICE_NAME)?.catch?.((e) => logError(e));
+      } catch (e) {
+        logError(e);
+      }
+    };
+
     try {
       this._dbusProxy = new GazeProxy(
         Gio.DBus.system,
@@ -106,6 +153,7 @@ export default class GazeFaceAuthExtension extends Extension {
           try {
             proxy.RegisterExtensionRemote(true);
           } catch (e) {}
+          cacheCamera();
         },
       );
 
@@ -114,6 +162,7 @@ export default class GazeFaceAuthExtension extends Extension {
           try {
             this._dbusProxy.RegisterExtensionRemote(true);
           } catch (e) {}
+          cacheCamera();
         }
       });
     } catch (e) {}
@@ -273,6 +322,7 @@ export default class GazeFaceAuthExtension extends Extension {
         if (this._userName !== userName) {
           this._faceAuthFailed = false;
         }
+        primeFaceCache(userName);
         original.call(this, userName, hold);
       };
     });
@@ -301,22 +351,30 @@ export default class GazeFaceAuthExtension extends Extension {
 
           const self = this;
           const userName = this._userName;
+
+          if (
+            faceCache.enrolled.get(userName) === true &&
+            faceCache.camera === true
+          ) {
+            gazeTiming("FACE_START", "path=cached");
+            startFace(self);
+            return;
+          }
+
           this._faceStartPending = true;
           const clearFaceStartPending = () => {
             self._faceStartPending = false;
           };
           if (dbusProxy) {
             dbusProxy.HasEnrolledFacesRemote(userName, (result, err) => {
-              if (!err && result[0]) {
+              if (!err && result[0] === true) {
+                faceCache.enrolled.set(userName, true);
                 dbusProxy.IsCameraAvailableRemote((camResult, camErr) => {
-                  if (
-                    !camErr &&
-                    camResult[0] &&
-                    !self._faceAuthFailed &&
-                    !self._activeServices.has(FACE_SERVICE_NAME) &&
-                    !self.serviceIsForeground(FACE_SERVICE_NAME)
-                  )
-                    self._startService(FACE_SERVICE_NAME);
+                  if (!camErr && camResult[0] === true) {
+                    faceCache.camera = true;
+                    gazeTiming("FACE_START", "path=probe");
+                    startFace(self);
+                  }
                   clearFaceStartPending();
                 });
               } else {
