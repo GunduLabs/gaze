@@ -1784,7 +1784,10 @@ impl AuthDaemon {
                                         landmark_seq.push(eyes);
                                     }
                                     let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
-                                    liveness_passed = !crate::liveness::confirmed_static(&motion);
+                                    liveness_passed = crate::liveness::motion_confirms_live(
+                                        &motion,
+                                        crate::liveness::MIN_MOTION_PAIRS,
+                                    );
 
                                     tracing::debug!(
                                         "Liveness checked (IR): motion={:?}, overall={}",
