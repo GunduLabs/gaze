@@ -246,6 +246,29 @@ fn resolve_usb_video_node(vid: u16, pid: u16, want_color: bool) -> Option<String
     select_usb_node(&nodes, vid, pid, want_color)
 }
 
+fn first_v4l2_node(want_color: bool) -> Option<String> {
+    gstreamer::init().ok()?;
+    let monitor = gstreamer::DeviceMonitor::new();
+    let caps = gstreamer::Caps::builder("video/x-raw").build();
+    monitor.add_filter(Some("Video/Source"), Some(&caps));
+    monitor.start().ok()?;
+    wait_for_device_updates(&monitor);
+    let devices = monitor.devices();
+    monitor.stop();
+
+    let mut seen = std::collections::HashSet::new();
+    devices
+        .iter()
+        .filter_map(|device| {
+            let node = device_video_node(device)?;
+            if !seen.insert(node.clone()) {
+                return None;
+            }
+            (has_color_caps(device) == want_color).then_some(node)
+        })
+        .min_by_key(|node| video_node_index(node).unwrap_or(u32::MAX))
+}
+
 fn device_video_node(device: &gstreamer::Device) -> Option<String> {
     let props = device.properties()?;
     if let Some(path) = string_property(&props, "api.v4l2.path")
@@ -336,6 +359,23 @@ impl Camera {
             }
         };
 
+        match Self::open_source_element(&src_element, camera_source) {
+            Ok(camera) => Ok(camera),
+            Err(err) if src_element == "pipewiresrc" => {
+                warn!("Opening the PipeWire camera failed ({err:#}); trying a direct V4L2 device");
+                let node = first_v4l2_node(want_color).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "PipeWire camera failed and no V4L2 fallback device was found: {err}"
+                    )
+                })?;
+                info!("Falling back to V4L2 camera node {node}");
+                Self::open_source_element(&format!("v4l2src device={node}"), camera_source)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn open_source_element(src_element: &str, camera_source: &str) -> anyhow::Result<Self> {
         let pipeline_str = format!(
             "{src_element} ! video/x-raw,pixel-aspect-ratio=1/1; image/jpeg ! decodebin ! videoconvert ! videoscale ! appsink name=gaze_sink"
         );
