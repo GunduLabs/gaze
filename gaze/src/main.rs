@@ -115,15 +115,18 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let encrypt_templates = config.storage.encrypt_templates;
-    let db =
+    let mut db =
         UserDatabase::new_with_cipher(USERS_DIR, config.enrollment.max_templates as usize, cipher)?;
-    if encrypt_templates {
+    if encrypt_templates && !db.has_encrypted_templates()? {
         match db.migrate_plaintext_to_encrypted() {
             Ok(0) => {}
-            Ok(n) => info!(
-                migrated = n,
-                "Encrypted existing plaintext templates at rest"
-            ),
+            Ok(n) => {
+                info!(
+                    migrated = n,
+                    "Encrypted existing plaintext templates at rest"
+                );
+                db.load_all()?;
+            }
             Err(e) => warn!("Could not migrate some plaintext templates to encrypted: {e}"),
         }
     }
