@@ -108,7 +108,6 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
     match graphical_confirm_decision(&de, extension_active, is_greeter) {
         GraphicalConfirm::GnomeExtension => confirm_via_gnome_extension(pamh),
-        GraphicalConfirm::Bypass => PAM_SUCCESS,
         GraphicalConfirm::FailClosed => PAM_AUTH_ERR,
     }
 }

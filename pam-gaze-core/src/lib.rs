@@ -604,14 +604,9 @@ pub fn detect_desktop_environment(uid: u32) -> String {
 #[derive(Debug, PartialEq, Eq)]
 pub enum GraphicalConfirm {
     GnomeExtension,
-    Bypass,
     FailClosed,
 }
 
-// GNOME's extension is the expected channel, so an inactive one fails closed;
-// other desktops have no channel and bypass confirmation. A login greeter is
-// always GNOME with the gaze extension, so it must confirm through the
-// extension or fail closed -- never bypass, or GDM would ignore the setting.
 pub fn graphical_confirm_decision(
     de: &str,
     extension_active: bool,
@@ -626,8 +621,7 @@ pub fn graphical_confirm_decision(
     }
     match de {
         "GNOME" if extension_active => GraphicalConfirm::GnomeExtension,
-        "GNOME" => GraphicalConfirm::FailClosed,
-        _ => GraphicalConfirm::Bypass,
+        _ => GraphicalConfirm::FailClosed,
     }
 }
 
@@ -652,12 +646,12 @@ mod tests {
     }
 
     #[test]
-    fn other_desktops_bypass_confirmation() {
+    fn other_desktops_fail_closed_without_a_channel() {
         for de in ["KDE", "Hyprland", "LXQt", "Other"] {
             assert_eq!(
                 graphical_confirm_decision(de, false, false),
-                GraphicalConfirm::Bypass,
-                "{de} should bypass confirmation when it has no channel"
+                GraphicalConfirm::FailClosed,
+                "{de} has no confirm channel and must fail closed, not bypass"
             );
         }
     }
