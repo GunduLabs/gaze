@@ -91,7 +91,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     };
     let require_confirmation = config.auth.require_confirmation;
 
-    unsafe { say(pamh, "Please look at the camera or enter password") };
+    unsafe { say(pamh, LOOK_OR_PASSWORD_PROMPT) };
 
     let is_polkit = matches!(unsafe { get_pam_service(pamh) }, Some(ref s) if s == "polkit-1");
 

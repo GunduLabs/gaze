@@ -11,7 +11,7 @@ FROM ubuntu:26.04@sha256:53958ec7b67c2c9355df922dd08dbf0360611f8c3cdb656875e8187
 # amd64 | arm64. Auto-populated by buildkit; on the legacy builder it is empty,
 # so the RUN steps below fall back to `dpkg --print-architecture`.
 ARG TARGETARCH
-ARG JUST_VERSION=1.53.0
+ARG JUST_VERSION=1.57.0
 ARG NFPM_VERSION=2.47.0
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -84,12 +84,10 @@ RUN set -eux; \
     rm /tmp/nfpm.tar.gz; \
     nfpm --version
 
-# bindgen/clang-sys (pulled in by opencv and tss-esapi) locate libclang at runtime
-# via llvm-config, which isn't on PATH here. Point it at the multiarch dir where
-# libclang-dev ships libclang-*.so so discovery doesn't fail (matches cd.yml's Arch
-# step). Both triples are listed so this stays arch- and llvm-version-agnostic; only
-# the one matching the image's arch exists.
-ENV LIBCLANG_PATH=/usr/lib/aarch64-linux-gnu:/usr/lib/x86_64-linux-gnu
+# Leave LIBCLANG_PATH unset. clang-sys (pulled in by opencv and tss-esapi) only
+# treats it as a single directory, so a colon-separated list becomes one bogus
+# path and discovery fails; unset, clang-sys globs /usr/lib*/*/* and finds the
+# libclang shipped by libclang-dev, arch- and llvm-version-agnostically.
 
 COPY entrypoint.sh /usr/local/bin/gaze-build-entry
 RUN chmod +x /usr/local/bin/gaze-build-entry

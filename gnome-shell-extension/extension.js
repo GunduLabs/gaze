@@ -4,6 +4,7 @@ import {
   Extension,
   InjectionManager,
 } from "resource:///org/gnome/shell/extensions/extension.js";
+import * as Batch from "resource:///org/gnome/shell/gdm/batch.js";
 import * as Util from "resource:///org/gnome/shell/gdm/util.js";
 import * as PolkitAgent from "resource:///org/gnome/shell/ui/components/polkitAgent.js";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
@@ -31,10 +32,31 @@ const GAZE_DBUS_INTERFACE = `
 const GazeProxy = Gio.DBusProxy.makeProxyWrapper(GAZE_DBUS_INTERFACE);
 
 const FACE_SERVICE_NAME = "gdm-face";
-const EXTENSION_SCHEMA_ID = "org.gnome.shell.extensions.gaze";
 const FACE_AUTHENTICATION_KEY = "enable-face-authentication";
 const MAX_TRIES_KEY = "max-face-tries";
 const RETRY_MODE_KEY = "face-retry-mode";
+
+const gazeTiming = (tag, extra) =>
+  console.log(
+    `GAZE_TIMING ${tag} t=${GLib.get_monotonic_time()}us${extra ? " " + extra : ""}`,
+  );
+
+const recreatePolkitAgent = () => {
+  const manager = Main.componentManager;
+  if (!manager || Main.sessionMode.isLocked) return;
+
+  const existing = manager._allComponents?.["polkitAgent"];
+  if (existing?._currentDialog) {
+    try {
+      existing._currentDialog.close();
+    } catch (e) {}
+    existing._currentDialog = null;
+  }
+
+  manager._disableComponent("polkitAgent");
+  delete manager._allComponents["polkitAgent"];
+  manager._enableComponent("polkitAgent").catch(() => {});
+};
 
 const GENERIC_ERROR_MAP = new Map([
   [
@@ -54,6 +76,54 @@ const GENERIC_ERROR_MAP = new Map([
 const CONFIRMATION_REQUEST = "GAZE_CONFIRMATION_REQUEST";
 const CONFIRMATION_ACK = "CONFIRM";
 const CONFIRMATION_QUESTION = "Face Verified. Press Enter to confirm.";
+const CONFIRMATION_DIALOG_LABEL =
+  "Face verified. Press Enter to confirm, or type your password.";
+
+const cancelDelayedReset = (dialog) => {
+  if (!dialog._sessionRequestTimeoutId) return;
+  GLib.source_remove(dialog._sessionRequestTimeoutId);
+  dialog._sessionRequestTimeoutId = 0;
+};
+
+const keepPasswordEntryVisible = (dialog) => {
+  const entry = dialog._passwordEntry;
+  if (!entry || !dialog._session) return;
+  if (!entry.hint_text) entry.hint_text = "Password";
+  entry.show();
+  entry.reactive = true;
+  cancelDelayedReset(dialog);
+};
+
+const enterConfirmMode = (dialog, path) => {
+  gazeTiming("CONFIRM_SHOWN", `path=${path}`);
+  keepPasswordEntryVisible(dialog);
+  dialog._passwordEntry?.set_text("");
+
+  if (dialog._infoMessageLabel) {
+    dialog._infoMessageLabel.text = CONFIRMATION_DIALOG_LABEL;
+    dialog._infoMessageLabel.show();
+  }
+  dialog._errorMessageLabel?.hide();
+  dialog._nullMessageLabel?.hide();
+
+  if (dialog._okButton) {
+    dialog._okButton.reactive = true;
+    dialog._okButton.track_hover = true;
+  }
+
+  dialog._confirmMode = true;
+  dialog._passwordEntry?.grab_key_focus();
+  dialog._ensureOpen();
+};
+
+const respondToConfirm = (dialog) => {
+  const typed = dialog._passwordEntry?.get_text() ?? "";
+  dialog._confirmMode = false;
+  dialog._session.response(typed.length > 0 ? typed : CONFIRMATION_ACK);
+  dialog._passwordEntry?.set_text("");
+  if (dialog._passwordEntry) dialog._passwordEntry.reactive = false;
+  if (dialog._okButton) dialog._okButton.reactive = false;
+};
 
 const FACE_STATUS_UPDATES = new Set([
   "Please look at the camera...",
@@ -68,9 +138,53 @@ const FACE_STATUS_UPDATES = new Set([
 export default class GazeFaceAuthExtension extends Extension {
   enable() {
     this._injectionManager = new InjectionManager();
-    this._extensionSettings = new Gio.Settings({
-      schema_id: EXTENSION_SCHEMA_ID,
-    });
+    this._extensionSettings = this.getSettings();
+
+    const ext = this;
+    const faceCache = { enrolled: new Map(), camera: null };
+
+    const cacheCamera = () => {
+      const proxy = ext._dbusProxy;
+      if (!proxy) return;
+      try {
+        proxy.IsCameraAvailableRemote((result, err) => {
+          if (!err && result[0] === true) faceCache.camera = true;
+        });
+      } catch (e) {}
+    };
+
+    const cacheEnrolled = (userName) => {
+      const proxy = ext._dbusProxy;
+      if (!proxy || !userName) return;
+      try {
+        proxy.HasEnrolledFacesRemote(userName, (result, err) => {
+          if (!err && result[0] === true) faceCache.enrolled.set(userName, true);
+        });
+      } catch (e) {}
+    };
+
+    const primeFaceCache = (userName) => {
+      cacheEnrolled(userName);
+      cacheCamera();
+    };
+
+    const startFace = (verifier) => {
+      if (
+        !verifier._userVerifier ||
+        verifier._faceAuthFailed ||
+        verifier._activeServices.has(FACE_SERVICE_NAME) ||
+        verifier.serviceIsForeground(FACE_SERVICE_NAME)
+      )
+        return;
+
+      if (!verifier._hold?.isAcquired?.()) verifier._hold = new Batch.Hold();
+
+      try {
+        verifier._startService(FACE_SERVICE_NAME)?.catch?.((e) => logError(e));
+      } catch (e) {
+        logError(e);
+      }
+    };
 
     try {
       this._dbusProxy = new GazeProxy(
@@ -84,6 +198,7 @@ export default class GazeFaceAuthExtension extends Extension {
           try {
             proxy.RegisterExtensionRemote(true);
           } catch (e) {}
+          cacheCamera();
         },
       );
 
@@ -92,12 +207,14 @@ export default class GazeFaceAuthExtension extends Extension {
           try {
             this._dbusProxy.RegisterExtensionRemote(true);
           } catch (e) {}
+          cacheCamera();
         }
       });
     } catch (e) {}
 
     const proto = Util.ShellUserVerifier.prototype;
     const extensionSettings = this._extensionSettings;
+    const extension = this;
 
     const getFaceEnabled = () =>
       extensionSettings.get_boolean(FACE_AUTHENTICATION_KEY);
@@ -145,34 +262,26 @@ export default class GazeFaceAuthExtension extends Extension {
             return;
           }
 
+          keepPasswordEntryVisible(dialog);
+
+          dialog._passwordEntry?.clutter_text.connect("text-changed", () => {
+            if (dialog._confirmMode && dialog._okButton)
+              dialog._okButton.reactive = true;
+          });
+
           const klass = dialog.constructor;
 
           if (dialog._session) {
             dialog._session.connect("show-info", (session, text) => {
-              if (text && text.trim() === "GAZE_CONFIRMATION_REQUEST") {
-                if (dialog._passwordEntry) dialog._passwordEntry.hide();
-
-                if (dialog._infoMessageLabel) {
-                  dialog._infoMessageLabel.text =
-                    "Face Verified. Press Authenticate to confirm.";
-                  dialog._infoMessageLabel.show();
-                }
-
-                if (dialog._okButton) {
-                  dialog._okButton.reactive = true;
-                  dialog._okButton.track_hover = true;
-                }
-
-                dialog._confirmMode = true;
-                dialog._ensureOpen();
-              }
+              if (text && text.trim() === CONFIRMATION_REQUEST)
+                enterConfirmMode(dialog, "showInfo");
             });
           }
 
           const originalOnEntryActivate = dialog._onEntryActivate;
           dialog._onEntryActivate = function () {
             if (this._confirmMode) {
-              this._session.response("CONFIRM");
+              respondToConfirm(this);
             } else {
               originalOnEntryActivate.call(this);
             }
@@ -180,27 +289,13 @@ export default class GazeFaceAuthExtension extends Extension {
 
           if (klass && !klass._gazeOverridden) {
             klass._gazeOverridden = true;
+            extension._patchedDialogClass = klass;
 
             const originalShowInfo = klass.prototype._onSessionShowInfo;
+            extension._originalDialogShowInfo = originalShowInfo;
             klass.prototype._onSessionShowInfo = function (session, text) {
-              if (text && text.trim() === "GAZE_CONFIRMATION_REQUEST") {
-                if (this._passwordEntry) {
-                  this._passwordEntry.hide();
-                }
-
-                if (this._infoMessageLabel) {
-                  this._infoMessageLabel.text =
-                    "Face Verified. Press Authenticate to confirm.";
-                  this._infoMessageLabel.show();
-                }
-
-                if (this._okButton) {
-                  this._okButton.reactive = true;
-                  this._okButton.track_hover = true;
-                }
-
-                this._confirmMode = true;
-                this._ensureOpen();
+              if (text && text.trim() === CONFIRMATION_REQUEST) {
+                enterConfirmMode(this, "onSessionShowInfo");
               } else {
                 originalShowInfo.call(this, session, text);
               }
@@ -208,24 +303,34 @@ export default class GazeFaceAuthExtension extends Extension {
 
             const originalProtoOnEntryActivate =
               klass.prototype._onEntryActivate;
+            extension._originalDialogEntryActivate = originalProtoOnEntryActivate;
             klass.prototype._onEntryActivate = function () {
               if (this._confirmMode) {
-                this._session.response("CONFIRM");
+                respondToConfirm(this);
               } else {
                 originalProtoOnEntryActivate.call(this);
               }
             };
+
+            const originalDestroySession = klass.prototype._destroySession;
+            if (typeof originalDestroySession === "function") {
+              extension._originalDialogDestroySession = originalDestroySession;
+              klass.prototype._destroySession = function (delay) {
+                originalDestroySession.call(this, delay);
+                if (!delay) return;
+                cancelDelayedReset(this);
+                if (this._passwordEntry) {
+                  this._passwordEntry.show();
+                  this._passwordEntry.reactive = true;
+                }
+              };
+            }
           }
         };
       },
     );
 
-    const manager = Main.componentManager;
-    if (manager) {
-      manager._disableComponent("polkitAgent");
-      delete manager._allComponents["polkitAgent"];
-      manager._enableComponent("polkitAgent").catch((e) => {});
-    }
+    recreatePolkitAgent();
 
     this._injectionManager.overrideMethod(
       proto,
@@ -245,6 +350,7 @@ export default class GazeFaceAuthExtension extends Extension {
         if (this._userName !== userName) {
           this._faceAuthFailed = false;
         }
+        primeFaceCache(userName);
         original.call(this, userName, hold);
       };
     });
@@ -273,22 +379,30 @@ export default class GazeFaceAuthExtension extends Extension {
 
           const self = this;
           const userName = this._userName;
+
+          if (
+            faceCache.enrolled.get(userName) === true &&
+            faceCache.camera === true
+          ) {
+            gazeTiming("FACE_START", "path=cached");
+            startFace(self);
+            return;
+          }
+
           this._faceStartPending = true;
           const clearFaceStartPending = () => {
             self._faceStartPending = false;
           };
           if (dbusProxy) {
             dbusProxy.HasEnrolledFacesRemote(userName, (result, err) => {
-              if (!err && result[0]) {
+              if (!err && result[0] === true) {
+                faceCache.enrolled.set(userName, true);
                 dbusProxy.IsCameraAvailableRemote((camResult, camErr) => {
-                  if (
-                    !camErr &&
-                    camResult[0] &&
-                    !self._faceAuthFailed &&
-                    !self._activeServices.has(FACE_SERVICE_NAME) &&
-                    !self.serviceIsForeground(FACE_SERVICE_NAME)
-                  )
-                    self._startService(FACE_SERVICE_NAME);
+                  if (!camErr && camResult[0] === true) {
+                    faceCache.camera = true;
+                    gazeTiming("FACE_START", "path=probe");
+                    startFace(self);
+                  }
                   clearFaceStartPending();
                 });
               } else {
@@ -298,6 +412,19 @@ export default class GazeFaceAuthExtension extends Extension {
           } else {
             clearFaceStartPending();
           }
+        };
+      },
+    );
+
+    this._injectionManager.overrideMethod(
+      proto,
+      "_filterServiceMessages",
+      (original) => {
+        return function (serviceName, messageType) {
+          if (messageType === Util.MessageType.HINT) {
+            gazeTiming("HINT_FILTER", `svc=${serviceName}`);
+          }
+          return original.call(this, serviceName, messageType);
         };
       },
     );
@@ -390,6 +517,16 @@ export default class GazeFaceAuthExtension extends Extension {
           // Distro PAM stacks (e.g. Fedora's password-auth) run pam_gaze on
           // gdm-password too, so match the token on any service.
           if (secretQuestion?.trim() === CONFIRMATION_REQUEST) {
+            gazeTiming("CONFIRM_SHOWN", `svc=${serviceName} path=secretInfoQuery`);
+            // _filterServiceMessages only force-clears the display when another
+            // message is queued behind the current one; a lone standing hint
+            // rides out its full display interval (~1s). Clear it outright.
+            if (typeof this._clearMessageQueue === "function") {
+              this._clearMessageQueue();
+              gazeTiming("CLEAR_QUEUE_CALLED");
+            } else {
+              gazeTiming("CLEAR_QUEUE_MISSING");
+            }
             this._filterServiceMessages(serviceName, Util.MessageType.HINT);
             // Enter must send the ack token, not the empty typed answer.
             this._faceConfirmPending = true;
@@ -437,6 +574,7 @@ export default class GazeFaceAuthExtension extends Extension {
       (original) => {
         return function (client, serviceName) {
           if (serviceName === FACE_SERVICE_NAME) {
+            gazeTiming("FACE_CONV_STOPPED", `svc=${serviceName}`);
             this._faceFailCounter = (this._faceFailCounter || 0) + 1;
           }
           if (serviceName === this._faceConfirmService) {
@@ -447,6 +585,10 @@ export default class GazeFaceAuthExtension extends Extension {
           original.call(this, client, serviceName);
 
           if (this.serviceIsBiometric(serviceName)) {
+            // Face has stopped, so drop its stale "look at the camera" hint;
+            // otherwise it lingers once face errors out on the lock screen.
+            this._filterServiceMessages(serviceName, Util.MessageType.HINT);
+
             const hint = this._getHint();
             if (hint) {
               const bgSvc = [...this._activeServices].find((s) =>
@@ -511,11 +653,21 @@ export default class GazeFaceAuthExtension extends Extension {
     this._injectionManager = null;
     this._extensionSettings = null;
 
-    const manager = Main.componentManager;
-    if (manager) {
-      manager._disableComponent("polkitAgent");
-      delete manager._allComponents["polkitAgent"];
-      manager._enableComponent("polkitAgent").catch((e) => {});
+    if (this._patchedDialogClass) {
+      const klass = this._patchedDialogClass;
+      if (this._originalDialogShowInfo)
+        klass.prototype._onSessionShowInfo = this._originalDialogShowInfo;
+      if (this._originalDialogEntryActivate)
+        klass.prototype._onEntryActivate = this._originalDialogEntryActivate;
+      if (this._originalDialogDestroySession)
+        klass.prototype._destroySession = this._originalDialogDestroySession;
+      delete klass._gazeOverridden;
+      this._patchedDialogClass = null;
+      this._originalDialogShowInfo = null;
+      this._originalDialogEntryActivate = null;
+      this._originalDialogDestroySession = null;
     }
+
+    recreatePolkitAgent();
   }
 }

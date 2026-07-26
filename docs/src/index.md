@@ -25,7 +25,7 @@ features:
     link: /guide/getting-started
     linkText: Start setup
   - title: Desktop login
-    details: Use Gaze with GNOME login, lock screen, GDM, or Hyprland's hyprlock.
+    details: Face unlock at login and the lock screen — the GNOME extension, Hyprland's hyprlock, or any PAM-based login manager such as SDDM.
     link: /guide/gnome
     linkText: Configure desktop auth
   - title: PAM integration

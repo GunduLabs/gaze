@@ -770,8 +770,9 @@ async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
                 ))?;
             } else {
                 term.write_line(&format!(
-                    "\n{} faces for {}:\n",
+                    "\n{} face{} for {}:\n",
                     style(faces.len()).green().bold(),
+                    if faces.len() == 1 { "" } else { "s" },
                     style(user).bold()
                 ))?;
                 for (face, count, has_rgb, has_ir) in faces {
@@ -786,12 +787,13 @@ async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
                         style("[IR]").red().bold().to_string()
                     };
                     term.write_line(&format!(
-                        "  {} {} {} {} ({} captures)",
+                        "  {} {} {} {} ({} capture{})",
                         style("•").cyan(),
                         style(face).bold(),
                         rgb_badge,
                         ir_badge,
-                        count
+                        count,
+                        if count == 1 { "" } else { "s" }
                     ))?;
                 }
                 term.write_line("")?;

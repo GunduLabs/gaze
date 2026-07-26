@@ -49,6 +49,8 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         Err(code) => return code,
     };
 
+    let is_polkit = matches!(unsafe { get_pam_service(pamh) }, Some(ref s) if s == "polkit-1");
+
     let matched = rt.block_on(async {
         match enrollment_disposition(has_enrolled_faces(&username).await) {
             EnrollmentDisposition::Ignore => return Err(PAM_IGNORE),
@@ -56,18 +58,36 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
             EnrollmentDisposition::Continue => {}
         }
 
-        unsafe { say(pamh, "Please look at the camera") };
+        let prompt = if is_polkit {
+            LOOK_OR_PASSWORD_PROMPT
+        } else {
+            LOOK_PROMPT
+        };
+        unsafe { say(pamh, prompt) };
 
         match timeout(
             Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS),
-            authenticate_biometric(&username),
+            authenticate_biometric_with_status(&username),
         )
         .await
         {
-            Ok(Ok(AuthOutcome::Match)) => Ok(()),
-            Ok(Ok(AuthOutcome::NoMatch)) => Err(PAM_AUTH_ERR),
-            Ok(Ok(AuthOutcome::Unavailable)) => Err(PAM_AUTHINFO_UNAVAIL),
-            _ => Err(PAM_AUTHINFO_UNAVAIL),
+            Ok(Ok((AuthOutcome::Match, _))) => Ok(()),
+            Ok(Ok((AuthOutcome::NoMatch, _))) => {
+                unsafe { say(pamh, FACE_NOT_RECOGNIZED) };
+                Err(PAM_AUTH_ERR)
+            }
+            Ok(Ok((AuthOutcome::Unavailable, status))) => {
+                unsafe { say(pamh, give_up_message(status)) };
+                Err(PAM_AUTHINFO_UNAVAIL)
+            }
+            Ok(Err(_)) => {
+                unsafe { say(pamh, FACE_UNAVAILABLE) };
+                Err(PAM_AUTHINFO_UNAVAIL)
+            }
+            Err(_) => {
+                unsafe { say(pamh, FACE_TIMED_OUT) };
+                Err(PAM_AUTHINFO_UNAVAIL)
+            }
         }
     });
     if let Err(code) = matched {
@@ -92,19 +112,22 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         };
     }
 
-    if matches!(unsafe { get_pam_service(pamh) }, Some(ref s) if s == "polkit-1") {
+    if is_polkit {
         return unsafe { confirm_via_polkit_dialog(pamh, &username, &rt) };
     }
 
-    let uid = rt.block_on(active_or_user_uid(&username));
+    let (uid, is_greeter) = rt.block_on(active_confirm_target(&username));
     let de = uid
         .map(detect_desktop_environment)
         .unwrap_or_else(|| "Other".to_string());
-    let extension_active = de == "GNOME" && rt.block_on(gnome_extension_active(uid));
+    // The greeter always runs GNOME + the gaze extension, so query the
+    // extension directly rather than trusting DE detection on its transient
+    // processes; otherwise GDM silently bypasses Require Confirmation.
+    let extension_active =
+        (is_greeter || de == "GNOME") && rt.block_on(gnome_extension_active(uid));
 
-    match graphical_confirm_decision(&de, extension_active) {
+    match graphical_confirm_decision(&de, extension_active, is_greeter) {
         GraphicalConfirm::GnomeExtension => confirm_via_gnome_extension(pamh),
-        GraphicalConfirm::Bypass => PAM_SUCCESS,
         GraphicalConfirm::FailClosed => PAM_AUTH_ERR,
     }
 }

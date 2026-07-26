@@ -29,6 +29,14 @@ const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to
 pub const CONFIRMATION_REQUEST: &str = "GAZE_CONFIRMATION_REQUEST";
 pub const CONFIRMATION_ACK: &str = "CONFIRM";
 
+pub const LOOK_PROMPT: &str = "Please look at the camera";
+pub const LOOK_OR_PASSWORD_PROMPT: &str = "Please look at the camera or enter password";
+pub const FACE_NOT_RECOGNIZED: &str = "Face not recognized. Enter your password.";
+pub const FACE_NOT_DETECTED: &str = "Face not detected. Enter your password.";
+pub const FACE_TOO_DARK: &str = "Too dark for face authentication. Enter your password.";
+pub const FACE_TIMED_OUT: &str = "Face authentication timed out. Enter your password.";
+pub const FACE_UNAVAILABLE: &str = "Face authentication unavailable. Enter your password.";
+
 pub type PamHandle = *mut c_void;
 
 #[macro_export]
@@ -289,6 +297,14 @@ pub unsafe fn stash_password_and_fallback(pamh: PamHandle, password: &str) -> c_
     PAM_AUTHINFO_UNAVAIL
 }
 
+pub fn give_up_message(status: Option<gaze_core::dbus::CaptureStatus>) -> &'static str {
+    match status {
+        Some(gaze_core::dbus::CaptureStatus::TooDark) => FACE_TOO_DARK,
+        Some(gaze_core::dbus::CaptureStatus::NoFace) | None => FACE_NOT_DETECTED,
+        _ => FACE_NOT_RECOGNIZED,
+    }
+}
+
 pub fn polkit_confirm_message(de: &str) -> &'static str {
     match de {
         "GNOME" => CONFIRMATION_REQUEST,
@@ -337,6 +353,17 @@ pub async fn active_or_user_uid(username: &str) -> Option<u32> {
     match gaze_core::dbus::get_active_session_uid().await {
         Ok(uid) => Some(uid),
         Err(_) => get_user_uid(username),
+    }
+}
+
+// Like `active_or_user_uid`, but also reports whether the active seat session
+// is a login greeter (e.g. GDM). A greeter always runs GNOME with the gaze
+// extension loaded, yet its short-lived processes make `/proc`-based DE
+// detection unreliable, so callers gate confirmation on this flag instead.
+pub async fn active_confirm_target(username: &str) -> (Option<u32>, bool) {
+    match gaze_core::dbus::get_active_session_uid_and_class().await {
+        Ok((uid, class)) => (Some(uid), class == "greeter"),
+        Err(_) => (get_user_uid(username), false),
     }
 }
 
@@ -455,13 +482,21 @@ fn auth_outcome(
     match result {
         gaze_core::dbus::VerifyResult::VerifyMatch => AuthOutcome::Match,
         gaze_core::dbus::VerifyResult::VerifyNoMatch => match last_status {
-            Some(gaze_core::dbus::CaptureStatus::TooDark) => AuthOutcome::Unavailable,
+            Some(
+                gaze_core::dbus::CaptureStatus::TooDark | gaze_core::dbus::CaptureStatus::NoFace,
+            ) => AuthOutcome::Unavailable,
             _ => AuthOutcome::NoMatch,
         },
     }
 }
 
 pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcome> {
+    Ok(authenticate_biometric_with_status(username).await?.0)
+}
+
+pub async fn authenticate_biometric_with_status(
+    username: &str,
+) -> anyhow::Result<(AuthOutcome, Option<gaze_core::dbus::CaptureStatus>)> {
     let (_config, proxy) = setup_auth_env()
         .await
         .map_err(|e| anyhow::anyhow!("PAM error: {}", e))?;
@@ -511,7 +546,7 @@ pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcom
 
     guard.active = false;
     let _ = proxy.release().await;
-    Ok(outcome)
+    Ok((outcome, last_status))
 }
 
 pub fn get_user_uid(username: &str) -> Option<u32> {
@@ -591,17 +626,24 @@ pub fn detect_desktop_environment(uid: u32) -> String {
 #[derive(Debug, PartialEq, Eq)]
 pub enum GraphicalConfirm {
     GnomeExtension,
-    Bypass,
     FailClosed,
 }
 
-// GNOME's extension is the expected channel, so an inactive one fails closed;
-// other desktops have no channel and bypass confirmation.
-pub fn graphical_confirm_decision(de: &str, extension_active: bool) -> GraphicalConfirm {
+pub fn graphical_confirm_decision(
+    de: &str,
+    extension_active: bool,
+    is_greeter: bool,
+) -> GraphicalConfirm {
+    if is_greeter {
+        return if extension_active {
+            GraphicalConfirm::GnomeExtension
+        } else {
+            GraphicalConfirm::FailClosed
+        };
+    }
     match de {
         "GNOME" if extension_active => GraphicalConfirm::GnomeExtension,
-        "GNOME" => GraphicalConfirm::FailClosed,
-        _ => GraphicalConfirm::Bypass,
+        _ => GraphicalConfirm::FailClosed,
     }
 }
 
@@ -612,7 +654,7 @@ mod tests {
     #[test]
     fn gnome_with_active_extension_confirms_through_it() {
         assert_eq!(
-            graphical_confirm_decision("GNOME", true),
+            graphical_confirm_decision("GNOME", true, false),
             GraphicalConfirm::GnomeExtension
         );
     }
@@ -620,18 +662,39 @@ mod tests {
     #[test]
     fn gnome_without_extension_fails_closed() {
         assert_eq!(
-            graphical_confirm_decision("GNOME", false),
+            graphical_confirm_decision("GNOME", false, false),
             GraphicalConfirm::FailClosed
         );
     }
 
     #[test]
-    fn other_desktops_bypass_confirmation() {
+    fn other_desktops_fail_closed_without_a_channel() {
         for de in ["KDE", "Hyprland", "LXQt", "Other"] {
             assert_eq!(
-                graphical_confirm_decision(de, false),
-                GraphicalConfirm::Bypass,
-                "{de} should bypass confirmation when it has no channel"
+                graphical_confirm_decision(de, false, false),
+                GraphicalConfirm::FailClosed,
+                "{de} has no confirm channel and must fail closed, not bypass"
+            );
+        }
+    }
+
+    #[test]
+    fn greeter_confirms_through_extension_when_active() {
+        // A greeter's DE detection is unreliable, so the flag decides -- even
+        // if `/proc` scanning reported a non-GNOME desktop.
+        assert_eq!(
+            graphical_confirm_decision("Other", true, true),
+            GraphicalConfirm::GnomeExtension
+        );
+    }
+
+    #[test]
+    fn greeter_never_bypasses_and_fails_closed_without_extension() {
+        for de in ["GNOME", "KDE", "Hyprland", "Other"] {
+            assert_eq!(
+                graphical_confirm_decision(de, false, true),
+                GraphicalConfirm::FailClosed,
+                "a greeter ({de}) must fail closed, never bypass, without a confirm channel"
             );
         }
     }
@@ -691,6 +754,42 @@ mod tests {
     }
 
     #[test]
+    fn give_up_messages_never_repeat_the_opening_prompt() {
+        use gaze_core::dbus::CaptureStatus;
+
+        for status in [
+            Some(CaptureStatus::NoFace),
+            Some(CaptureStatus::TooDark),
+            Some(CaptureStatus::Usable),
+            Some(CaptureStatus::Unused),
+            None,
+        ] {
+            let message = give_up_message(status);
+            assert!(
+                !message.starts_with("Please look at the camera"),
+                "{status:?}"
+            );
+            assert!(message.contains("password"), "{status:?}");
+        }
+    }
+
+    #[test]
+    fn give_up_message_keeps_the_actionable_cause() {
+        use gaze_core::dbus::CaptureStatus;
+
+        assert_eq!(give_up_message(Some(CaptureStatus::TooDark)), FACE_TOO_DARK);
+        assert_eq!(
+            give_up_message(Some(CaptureStatus::NoFace)),
+            FACE_NOT_DETECTED
+        );
+        assert_eq!(give_up_message(None), FACE_NOT_DETECTED);
+        assert_eq!(
+            give_up_message(Some(CaptureStatus::Usable)),
+            FACE_NOT_RECOGNIZED
+        );
+    }
+
+    #[test]
     fn too_dark_no_match_is_reported_as_unavailable() {
         use gaze_core::dbus::{CaptureStatus, VerifyResult};
 
@@ -700,6 +799,10 @@ mod tests {
         );
         assert_eq!(
             auth_outcome(VerifyResult::VerifyNoMatch, Some(CaptureStatus::NoFace)),
+            AuthOutcome::Unavailable
+        );
+        assert_eq!(
+            auth_outcome(VerifyResult::VerifyNoMatch, Some(CaptureStatus::Usable)),
             AuthOutcome::NoMatch
         );
         assert_eq!(

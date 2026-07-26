@@ -5,7 +5,6 @@ import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
-const EXTENSION_SCHEMA_ID = 'org.gnome.shell.extensions.gaze';
 const GAZE_BUS_NAME = 'com.gundulabs.Gaze';
 const GAZE_OBJECT_PATH = '/com/gundulabs/Gaze';
 
@@ -33,7 +32,7 @@ function callGaze(method, params) {
 }
 export default class GazePreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
-        const extensionSettings = new Gio.Settings({schema_id: EXTENSION_SCHEMA_ID});
+        const extensionSettings = this.getSettings();
 
         const behaviorPage = new Adw.PreferencesPage({
             title: 'Behavior',
@@ -42,11 +41,14 @@ export default class GazePreferences extends ExtensionPreferences {
 
         const behaviorGroup = new Adw.PreferencesGroup({
             title: 'Face authentication',
-            description: 'Settings are stored in your current dconf profile.',
+            description:
+                'Face authentication for unlocking this session. ' +
+                'This does not affect the GDM login screen (see below). ' +
+                'Settings are stored in your current dconf profile.',
         });
 
         const faceRow = new Adw.SwitchRow({
-            title: 'Enable face authentication',
+            title: 'Enable face authentication (lock screen)',
             active: extensionSettings.get_boolean(FACE_AUTH_KEY),
         });
 
@@ -179,6 +181,12 @@ export default class GazePreferences extends ExtensionPreferences {
                 .then(() => {
                     gdmRequestInFlight = false;
                     gdmRow.set_sensitive(true);
+                    if (typeof window.add_toast === 'function') {
+                        const message = desired
+                            ? 'Face auth enabled at the GDM login screen. Restart GDM (or reboot) for it to take effect.'
+                            : 'Face auth disabled at the GDM login screen. Restart GDM (or reboot) for it to take effect.';
+                        window.add_toast(new Adw.Toast({title: message}));
+                    }
                 })
                 .catch(error => {
                     logError(error, '[gaze] Failed to update GDM face auth');

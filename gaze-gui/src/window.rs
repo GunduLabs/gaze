@@ -1229,7 +1229,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                     let row = libadwaita::ActionRow::new();
                                     row.set_title(&face_name);
                                     row.set_subtitle(&format!(
-                                        "{} template{}",
+                                        "{} capture{}",
                                         count,
                                         if count == 1 { "" } else { "s" }
                                     ));

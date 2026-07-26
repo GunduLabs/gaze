@@ -150,7 +150,6 @@ impl UserDatabase {
             anyhow::bail!("embedding path is not a regular file: {}", path.display());
         }
         let raw = fs::read(path)?;
-        // Also read legacy plaintext files, so the store can be migrated in place.
         let bytes = if crypto::is_encrypted(&raw) {
             let cipher = self.cipher.as_ref().ok_or_else(|| {
                 anyhow::anyhow!(
@@ -159,6 +158,11 @@ impl UserDatabase {
                 )
             })?;
             cipher.decrypt(&raw)?
+        } else if self.cipher.is_some() {
+            anyhow::bail!(
+                "{} is not encrypted but template encryption is enabled",
+                path.display()
+            );
         } else {
             raw
         };
@@ -290,6 +294,15 @@ impl UserDatabase {
             }
         }
         Ok(files)
+    }
+
+    pub fn has_encrypted_templates(&self) -> anyhow::Result<bool> {
+        for path in self.collect_bin_files()? {
+            if crypto::is_encrypted(&fs::read(&path)?) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn replace_file_bytes(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
@@ -1016,16 +1029,54 @@ mod tests {
             .unwrap();
         assert!(!all_bins_encrypted(&plain), "files start as plaintext");
 
-        let enc = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
-        assert_eq!(enc.get_user_embeddings("alice").unwrap().len(), 1);
+        let mut enc = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
+        assert_eq!(
+            enc.get_user_embeddings("alice").map(|v| v.len()),
+            Some(0),
+            "plaintext templates are not trusted once encryption is enabled"
+        );
 
         let expected = enc.collect_bin_files().unwrap().len();
         assert_eq!(enc.migrate_plaintext_to_encrypted().unwrap(), expected);
         assert!(all_bins_encrypted(&enc));
         assert_eq!(enc.migrate_plaintext_to_encrypted().unwrap(), 0);
 
+        enc.load_all().unwrap();
+        assert_eq!(enc.get_user_embeddings("alice").unwrap().len(), 1);
+
         let reopened = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
         assert_eq!(reopened.get_user_embeddings("alice").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn planted_plaintext_is_rejected_in_an_encrypted_store() {
+        let temp = TempDir::new("enc-planted");
+        let base = temp.path().to_str().unwrap();
+
+        let mut db = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
+        db.add_template(
+            "alice",
+            "work",
+            "1",
+            rgb_embeds(vec![embedding(&[1.0, 0.0])]),
+        )
+        .unwrap();
+        assert!(all_bins_encrypted(&db));
+
+        let planted = db.face_dir("alice", "work").join("planted_rgb.bin");
+        let bytes: Vec<u8> = [9.0f32, 9.0f32]
+            .iter()
+            .flat_map(|f| f.to_ne_bytes())
+            .collect();
+        fs::write(&planted, &bytes).unwrap();
+
+        db.load_all().unwrap();
+        assert_eq!(
+            db.get_user_embeddings("alice").unwrap().len(),
+            1,
+            "a planted plaintext template must not load once encryption is enabled"
+        );
+        assert!(db.has_encrypted_templates().unwrap());
     }
 
     #[test]

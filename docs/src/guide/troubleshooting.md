@@ -87,7 +87,9 @@ If you need a specific camera, run `gaze config` and select one of the detected 
 rgb = "pipewiresrc target-object=<pipewire-target>"
 ```
 
-Direct `/dev/video*` paths are not supported.
+You can also point `rgb` at a camera directly with a `/dev/video*` node or a `usb:VVVV:PPPP` id, which use `v4l2src` and need no PipeWire session.
+
+When `rgb = "primary"` and the daemon cannot reach a PipeWire session (common when authenticating from the GDM login screen, where `gazed` runs without the user's session), Gaze automatically falls back to the first color `/dev/video*` node so face auth still works. Set `rgb` to a specific `/dev/video*` node or `usb:VVVV:PPPP` id if the fallback picks the wrong camera.
 
 Then restart daemon:
 

@@ -35,6 +35,7 @@ const GDM_DCONF_OVERRIDE_CONTENT: &str =
     "[org/gnome/shell/extensions/gaze]\nenable-face-authentication=true\n";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
 const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
+const VERIFY_NO_FACE_TIMEOUT: Duration = Duration::from_secs(5);
 /// In hybrid (RGB+IR) verify the two spectra are captured one camera at a time so
 /// single-function UVC devices (e.g. Logitech Brio) that cannot stream both at once
 /// still work. This bounds the RGB phase so it yields the camera to IR even without a
@@ -877,7 +878,7 @@ mod tests {
             false,
             true
         ));
-        assert!(hybrid_auth_passed(
+        assert!(!hybrid_auth_passed(
             "fallback",
             true,
             true,
@@ -1000,7 +1001,7 @@ fn hybrid_auth_passed(
             _ => {
                 if !rgb_attempted {
                     rgb_success && ir_success
-                } else if matches!(rgb_status, CaptureStatus::TooDark | CaptureStatus::NoFace) {
+                } else if matches!(rgb_status, CaptureStatus::TooDark) {
                     ir_success
                 } else {
                     rgb_success && ir_success
@@ -1476,8 +1477,15 @@ impl AuthDaemon {
         let config = Config::load_from(CONFIG_PATH).unwrap_or_default();
         let rgb_device = self.rgb_device.lock().await.clone();
         let ir_device = self.ir_device.lock().await.clone();
-        let ir_node = self.ir_node.lock().await.clone();
         let emitter_enabled = *self.emitter_enabled.lock().await;
+        let mut ir_node = self.ir_node.lock().await.clone();
+        if emitter_enabled
+            && ir_node.is_empty()
+            && let Some(resolved) = gaze_core::camera::resolve_node(&ir_device)
+        {
+            *self.ir_node.lock().await = resolved.clone();
+            ir_node = resolved;
+        }
         let liveness_cfg = self.liveness_config.lock().await.clone();
         let hybrid_policy = self.hybrid_policy.lock().await.clone();
         let conn = ctxt.connection().clone();
@@ -1776,7 +1784,10 @@ impl AuthDaemon {
                                         landmark_seq.push(eyes);
                                     }
                                     let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
-                                    liveness_passed = !crate::liveness::confirmed_static(&motion);
+                                    liveness_passed = crate::liveness::motion_confirms_live(
+                                        &motion,
+                                        crate::liveness::MIN_MOTION_PAIRS,
+                                    );
 
                                     tracing::debug!(
                                         "Liveness checked (IR): motion={:?}, overall={}",
@@ -1806,6 +1817,7 @@ impl AuthDaemon {
             let mut ir_status = CaptureStatus::Unused;
             let mut rgb_attempted = false;
             let mut dark_since: Option<Instant> = None;
+            let mut last_face_at = Instant::now();
             let mut frames_seen: u32 = 0;
 
             let mut rgb_success_embed = None;
@@ -1879,6 +1891,7 @@ impl AuthDaemon {
                                 }
 
                                 if has_face {
+                                    last_face_at = Instant::now();
                                     frames_seen += 1;
                                     if frames_seen >= liveness_cfg.max_frames {
                                         info!("VerifyStart: liveness gate timed out");
@@ -1906,8 +1919,8 @@ impl AuthDaemon {
                                     let started = *dark_since.get_or_insert_with(Instant::now);
                                     if started.elapsed() >= VERIFY_TOO_DARK_TIMEOUT {
                                         info!(
-                                            "VerifyStart: giving up after {}s of dark frames",
-                                            VERIFY_TOO_DARK_TIMEOUT.as_secs()
+                                            "VerifyStart: giving up after {}ms of dark frames",
+                                            VERIFY_TOO_DARK_TIMEOUT.as_millis()
                                         );
                                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                                         let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
@@ -1915,6 +1928,16 @@ impl AuthDaemon {
                                     }
                                 } else {
                                     dark_since = None;
+                                }
+
+                                if last_face_at.elapsed() >= VERIFY_NO_FACE_TIMEOUT {
+                                    info!(
+                                        "VerifyStart: giving up after {}s without a detected face",
+                                        VERIFY_NO_FACE_TIMEOUT.as_secs()
+                                    );
+                                    stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                    break;
                                 }
 
                                 if finish_if_auth_passed!() {

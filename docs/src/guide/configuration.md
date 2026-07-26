@@ -20,9 +20,9 @@ level = "medium"
 
 [cameras]
 rgb = "primary"
-# ir = "/dev/video2"        # optional infrared camera; direct nodes are allowed only for IR
+# ir = "/dev/video2"        # optional infrared camera (direct /dev/video* node or usb:VVVV:PPPP)
 # emitter_enabled = false   # drive the IR emitter (requires ir)
-dark_luma_threshold = 30
+dark_luma_threshold = 20
 
 [auth]
 abort_if_ssh = true
@@ -130,14 +130,14 @@ Gaze rejects frames that are too dark before running face detection:
 
 ```toml
 [cameras]
-dark_luma_threshold = 30
+dark_luma_threshold = 20
 ```
 
-With the default, a frame is skipped when its mean luminance (0-255, BT.601 weighted) falls below 30. Raise it to reject dimmer scenes, lower it to be more permissive.
+With the default, a frame is skipped when its mean luminance (0-255, BT.601 weighted) falls below 20. Raise it to reject dimmer scenes, lower it to be more permissive.
 
 ## Infrared (IR) camera
 
-Gaze supports Windows Hello-style infrared (IR) cameras to enable multi-camera hybrid authentication. Unlike the RGB setting, `ir` may point directly to the IR camera's `/dev/video*` node:
+Gaze supports Windows Hello-style infrared (IR) cameras to enable multi-camera hybrid authentication. The `ir` setting may point directly to the IR camera's `/dev/video*` node:
 
 ```toml
 [cameras]
@@ -189,7 +189,7 @@ Setting `require_confirmation = true` adds a manual intent check step after a su
 With the standard `pam-gaze` module (e.g. `sudo`, `gdm-face`):
 - In a text-based (TTY) environment such as `sudo` in a terminal, it asks for text confirmation after the face match ("Press Enter to confirm, Esc to cancel").
 - On the GNOME lock screen and GDM login screen (with the Gaze Extension active), it shows "Face Verified. Press Enter to confirm." below the password field; press Enter with the field empty to confirm. If the extension is inactive, the login is denied, because the extension is the expected confirmation channel on GNOME and Gaze will not silently skip the confirmation you asked for.
-- In other graphical prompts without a TTY (e.g. the KDE lock screen, `hyprlock`), there is no channel to answer the prompt, so confirmation is bypassed and the face match alone unlocks. If you need the confirmation step enforced there, use the `pam-gaze-grosshack` module, which drives a graphical confirm dialog.
+- In other graphical prompts without a TTY (e.g. the KDE lock screen, `hyprlock`), there is no channel to answer the prompt, so the face match is denied and the stack falls back to password rather than silently skipping the confirmation you asked for. If you need the confirmation step enforced there, use the `pam-gaze-grosshack` module, which drives a graphical confirm dialog.
 
 With the `pam-gaze-grosshack` module:
 - The password prompt still comes up immediately so you are never blocked.

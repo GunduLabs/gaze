@@ -71,7 +71,7 @@ Result meanings:
 - `✓ Authenticated as: <face> (XX.X%, XXXms)`: pass: matched face name, score percentage, and elapsed time
 - `✗ Authentication failed (XXXms)`: no face passed the current threshold or liveness check
 
-With `--verbose`, a per-face table is printed before the result showing similarity score, match percentage, passed/failed, and template count for each enrolled face.
+With `--verbose`, a per-face table is printed before the result showing the per-spectrum (RGB and IR) similarity score, match percentage, and pass/fail for each enrolled face.
 
 ## Enroll a new face profile
 
