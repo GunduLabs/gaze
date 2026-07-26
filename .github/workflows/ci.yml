@@ -127,8 +127,11 @@ jobs:
                       enable = true;
                       gui.enable = true;
                       gnome.enable = true;
-                      pam.services.sudo = { };
                     };
+                    # Exercises the default pam.services, the gaze-before-fprintd
+                    # rule ordering, and the TPM supplementary group.
+                    services.fprintd.enable = true;
+                    security.tpm2.enable = true;
                   }
                 ];
               };

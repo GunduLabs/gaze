@@ -15,6 +15,7 @@ const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(25);
 const BENCHMARK_TIMEOUT: Duration = Duration::from_secs(30);
 const PAM_MODULES: [&str; 2] = ["pam_gaze.so", "pam_gaze_grosshack.so"];
 const GNOME_EXTENSION_ID: &str = "gaze@gundulabs.com";
+const GNOME_EXTENSION_SCHEMA: &str = "org.gnome.shell.extensions.gaze";
 const GDM_FACE_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,13 +158,73 @@ fn check_platform(report: &mut Report) {
 }
 
 fn command_output(program: &str, args: &[&str]) -> std::io::Result<(bool, String)> {
-    let output = Command::new(program).args(args).output()?;
+    command_output_env(program, args, &[])
+}
+
+fn command_output_env(
+    program: &str,
+    args: &[&str],
+    env: &[(&str, &Path)],
+) -> std::io::Result<(bool, String)> {
+    let mut command = Command::new(program);
+    command.args(args);
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    let output = command.output()?;
     let text = if output.stdout.is_empty() {
         String::from_utf8_lossy(&output.stderr)
     } else {
         String::from_utf8_lossy(&output.stdout)
     };
     Ok((output.status.success(), text.trim().to_string()))
+}
+
+fn xdg_data_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    match std::env::var_os("XDG_DATA_HOME").filter(|value| !value.is_empty()) {
+        Some(home) => dirs.push(PathBuf::from(home)),
+        None => {
+            if let Some(home) = std::env::var_os("HOME") {
+                dirs.push(PathBuf::from(home).join(".local/share"));
+            }
+        }
+    }
+    match std::env::var_os("XDG_DATA_DIRS").filter(|value| !value.is_empty()) {
+        Some(value) => dirs.extend(std::env::split_paths(&value)),
+        None => dirs.extend([
+            PathBuf::from("/usr/local/share"),
+            PathBuf::from("/usr/share"),
+        ]),
+    }
+    dirs
+}
+
+// Nix installs the extension's schema inside the extension directory rather
+// than into the system schema path, so `gsettings` cannot see it unaided.
+fn extension_schema_dir() -> Option<PathBuf> {
+    extension_schema_dir_in(&xdg_data_dirs())
+}
+
+fn extension_schema_dir_in(data_dirs: &[PathBuf]) -> Option<PathBuf> {
+    data_dirs
+        .iter()
+        .map(|dir| {
+            dir.join("gnome-shell")
+                .join("extensions")
+                .join(GNOME_EXTENSION_ID)
+                .join("schemas")
+        })
+        .find(|dir| dir.join("gschemas.compiled").exists())
+}
+
+fn extension_setting(key: &str) -> std::io::Result<(bool, String)> {
+    let schema_dir = extension_schema_dir();
+    let env: Vec<(&str, &Path)> = schema_dir
+        .as_deref()
+        .map(|dir| vec![("GSETTINGS_SCHEMA_DIR", dir)])
+        .unwrap_or_default();
+    command_output_env("gsettings", &["get", GNOME_EXTENSION_SCHEMA, key], &env)
 }
 
 fn check_systemd(report: &mut Report) {
@@ -627,14 +688,7 @@ fn check_desktop_integration(report: &mut Report) {
             ),
         }
 
-        match command_output(
-            "gsettings",
-            &[
-                "get",
-                "org.gnome.shell.extensions.gaze",
-                "enable-face-authentication",
-            ],
-        ) {
+        match extension_setting("enable-face-authentication") {
             Ok((true, value)) if value == "true" => {
                 report.pass(
                     "GNOME lock-screen face auth",
@@ -937,6 +991,41 @@ async fn check_benchmark(report: &mut Report, proxy: &GazeProxy<'_>) {
     }
 }
 
+fn detected_source_remedy(
+    cameras: &[(String, String)],
+    key: &str,
+    automatic: Option<&str>,
+) -> String {
+    let detected: Vec<&str> = cameras
+        .iter()
+        .filter(|(_, target)| target != gaze_core::config::DEFAULT_RGB_CAMERA)
+        .map(|(_, target)| target.as_str())
+        .collect();
+
+    if detected.is_empty() {
+        return match automatic {
+            Some(automatic) => format!(
+                "No PipeWire source is currently advertised. Reconnect the camera, then set \
+                 {key} to a detected source, or to \"{automatic}\" to resolve it at runtime."
+            ),
+            None => format!(
+                "No PipeWire source is currently advertised. Reconnect the camera, then set \
+                 {key} to a detected source."
+            ),
+        };
+    }
+
+    format!(
+        "Run `gaze config` to pick one interactively, or set {key} to one of the detected \
+         sources: {}",
+        detected
+            .iter()
+            .map(|target| format!("\"{target}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
 fn check_cameras(report: &mut Report, config: Option<&Config>) {
     let Some(config) = config else {
         return;
@@ -970,7 +1059,11 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
                         report.error(
                             "RGB camera",
                             format!("configured source is not visible: {rgb}"),
-                            "Run `gaze config` and select a currently detected camera.",
+                            detected_source_remedy(
+                                &cameras,
+                                "cameras.rgb",
+                                Some(gaze_core::config::DEFAULT_RGB_CAMERA),
+                            ),
                         );
                     }
                 } else if let Some((vid, pid)) = gaze_core::camera::parse_usb_spec(rgb) {
@@ -1035,10 +1128,10 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
             Ok(cameras) if cameras.iter().any(|(_, target)| target == ir) => {
                 report.pass("IR camera", "the configured PipeWire source is visible");
             }
-            Ok(_) => report.error(
+            Ok(cameras) => report.error(
                 "IR camera",
                 format!("configured source is not visible: {ir}"),
-                "Run `gaze config` and select a currently detected IR camera.",
+                detected_source_remedy(&cameras, "cameras.ir", None),
             ),
             Err(err) => report.error(
                 "IR camera",
@@ -1058,6 +1151,88 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extension_schema_dir_finds_a_compiled_schema_in_the_extension() {
+        let root = std::env::temp_dir().join(format!("gaze-doctor-schema-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+
+        let fhs = root.join("usr/share");
+        let nix = root.join("nix/share");
+        let extension = nix
+            .join("gnome-shell")
+            .join("extensions")
+            .join(GNOME_EXTENSION_ID);
+        fs::create_dir_all(fhs.join("gnome-shell/extensions").join(GNOME_EXTENSION_ID)).unwrap();
+        fs::create_dir_all(extension.join("schemas")).unwrap();
+
+        let dirs = vec![fhs.clone(), nix.clone()];
+        assert_eq!(
+            extension_schema_dir_in(&dirs),
+            None,
+            "an extension directory without a compiled schema must not be used"
+        );
+
+        fs::write(extension.join("schemas/gschemas.compiled"), b"").unwrap();
+        assert_eq!(
+            extension_schema_dir_in(&dirs),
+            Some(extension.join("schemas"))
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn camera_remedy_lists_detected_sources() {
+        let cameras = vec![
+            (
+                "Primary camera".to_string(),
+                gaze_core::config::DEFAULT_RGB_CAMERA.to_string(),
+            ),
+            (
+                "Integrated Camera".to_string(),
+                "pipewiresrc target-object=v4l2_input.pci-0000_00_14_0".to_string(),
+            ),
+        ];
+
+        let remedy = detected_source_remedy(
+            &cameras,
+            "cameras.rgb",
+            Some(gaze_core::config::DEFAULT_RGB_CAMERA),
+        );
+        assert!(remedy.contains("cameras.rgb"), "{remedy}");
+        assert!(
+            remedy.contains("\"pipewiresrc target-object=v4l2_input.pci-0000_00_14_0\""),
+            "the detected source must be quoted verbatim for copy-paste: {remedy}"
+        );
+        assert!(
+            !remedy.contains("\"primary\""),
+            "the primary pseudo-source is not a selectable node: {remedy}"
+        );
+    }
+
+    #[test]
+    fn camera_remedy_only_offers_primary_where_it_is_valid() {
+        let none_detected = vec![(
+            "Primary camera".to_string(),
+            gaze_core::config::DEFAULT_RGB_CAMERA.to_string(),
+        )];
+
+        let rgb = detected_source_remedy(
+            &none_detected,
+            "cameras.rgb",
+            Some(gaze_core::config::DEFAULT_RGB_CAMERA),
+        );
+        assert!(rgb.contains("cameras.rgb"), "{rgb}");
+        assert!(rgb.contains("\"primary\""), "{rgb}");
+
+        let ir = detected_source_remedy(&[], "cameras.ir", None);
+        assert!(ir.contains("cameras.ir"), "{ir}");
+        assert!(
+            !ir.contains("primary"),
+            "cameras.ir has no primary fallback: {ir}"
+        );
+    }
 
     #[test]
     fn valid_default_config_has_no_errors() {

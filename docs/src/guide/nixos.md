@@ -34,7 +34,9 @@ Add the flake input and import the module:
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     gaze = {
       url = "github:GunduLabs/gaze";
-      # Optional, saves a second nixpkgs evaluation:
+      # Optional, saves a second nixpkgs evaluation. Only do this if your
+      # nixpkgs is unstable; a stable channel's Rust toolchain can be too
+      # old to build Gaze's dependency tree.
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -48,8 +50,9 @@ Add the flake input and import the module:
             enable = true;
             gui.enable = true;
 
-            # Attempt face auth (password stays as fallback) for these
-            # PAM services:
+            # Attempt face auth (password stays as fallback) for these PAM
+            # services. This is also the default; add entries such as
+            # `hyprlock = { };` to cover more.
             pam.services = {
               sudo = { };
               polkit-1 = { };
@@ -90,17 +93,47 @@ compatible `onnxruntime` instead of overriding `follows`.
 | `services.gaze.package` | flake's `gaze` | Daemon/CLI/PAM package |
 | `services.gaze.settings` | `{ }` | Options merged over the upstream defaults into `/etc/gaze/config.toml` (see [Configuration](/guide/configuration)) |
 | `services.gaze.mutableConfig` | `true` | Seed `/etc/gaze/config.toml` once and leave it editable (the GUI writes to it). Set to `false` for a fully declarative, read-only config |
-| `services.gaze.pam.services` | `{ }` | PAM services to insert face auth into, e.g. `{ sudo = { }; hyprlock.simultaneous = true; }` |
+| `services.gaze.pam.services` | `{ sudo = { }; "polkit-1" = { }; }` | PAM services to insert face auth into, e.g. `{ sudo = { }; hyprlock.simultaneous = true; }` |
 | `services.gaze.pam.services.<name>.control` | `"sufficient"` | PAM control field for the rule |
 | `services.gaze.pam.services.<name>.simultaneous` | `false` | Use `pam_gaze_grosshack.so` (face and password prompt at the same time) instead of sequential `pam_gaze.so` |
+| `services.gaze.pam.services.<name>.order` | `null` | Explicit rule `order`; `null` places gaze ahead of `pam_fprintd` and `pam_unix` |
 | `services.gaze.gui.enable` | `false` | Install `gaze-gui` |
 | `services.gaze.gnome.enable` | `false` | Install the GNOME Shell extension and the `gdm-face` PAM service |
 | `services.gaze.gnome.gdmFaceLogin` | `false` | Also enable face auth at the GDM login screen (read the [GNOME guide](/guide/gnome) first) |
 
-The gaze PAM rule is inserted just before `pam_unix`, so your password always
-remains a fallback. For anything the options don't cover, use
+The gaze PAM rule is inserted ahead of both `pam_fprintd` and `pam_unix`, so
+face auth is tried first and the fingerprint reader and password both remain
+fallbacks. To put gaze somewhere else in the stack, set `order`, offsetting
+from the neighbouring rule rather than from a constant (nixpkgs assigns those
+numbers automatically and they change between releases):
+
+```nix
+# Try the fingerprint reader first, then gaze, then the password.
+services.gaze.pam.services.login.order =
+  config.security.pam.services.login.rules.auth.fprintd.order + 5;
+```
+
+For anything the options don't cover, use
 `security.pam.services.<name>.rules` directly with
 `${config.services.gaze.package}/lib/security/pam_gaze.so`.
+
+::: warning `settings` is applied once
+With the default `mutableConfig = true`, `/etc/gaze/config.toml` is seeded on
+first activation and never overwritten again, so later changes to
+`services.gaze.settings` have no effect on a machine that already has the
+file. Either edit `/etc/gaze/config.toml` (or use the GUI), delete it and
+rebuild to re-seed it, or set `mutableConfig = false` for a fully declarative
+config.
+:::
+
+### Cameras
+
+Leave `settings.cameras.rgb` unset unless you have a specific reason to pin a
+camera: the default, `"primary"`, resolves the primary color camera at
+runtime. A pinned value must be a PipeWire node identity, not a device path;
+`pipewiresrc target-object=/dev/video0` does not match anything. Run
+`gaze doctor` to see the sources PipeWire currently advertises, and copy one
+of those strings verbatim.
 
 ### GNOME lock screen
 
@@ -108,11 +141,22 @@ remains a fallback. For anything the options don't cover, use
 services.gaze.gnome.enable = true;
 ```
 
-Then, from your GNOME session, enable the extension for your user:
+Then, from your GNOME session, enable the extension for your user and turn on
+lock screen face auth in its preferences:
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
-gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
+gnome-extensions prefs gaze@gundulabs.com
+```
+
+The extension's settings schema is installed inside the extension directory
+rather than into the system schema path, so a bare
+`gsettings set org.gnome.shell.extensions.gaze …` cannot find it. If you want
+to set the key from a script, write it through dconf instead, which does not
+need the schema:
+
+```bash
+dconf write /org/gnome/shell/extensions/gaze/enable-face-authentication true
 ```
 
 Log out and back in once if the lock screen does not pick it up immediately.

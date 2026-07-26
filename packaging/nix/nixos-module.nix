@@ -77,10 +77,28 @@ in
                   sequential pam_gaze.so.
                 '';
               };
+              order = lib.mkOption {
+                type = lib.types.nullOr lib.types.int;
+                default = null;
+                example = lib.literalExpression ''
+                  config.security.pam.services.login.rules.auth.unix.order + 10
+                '';
+                description = ''
+                  Explicit `order` for the gaze auth rule. When null, the rule
+                  is placed ahead of both `pam_fprintd` and `pam_unix`, so face
+                  authentication is tried first and the fingerprint reader and
+                  password both remain fallbacks. Set this to reorder gaze
+                  relative to another rule, offsetting from that rule's `order`
+                  rather than from a constant.
+                '';
+              };
             };
           }
         );
-        default = { };
+        default = {
+          sudo = { };
+          polkit-1 = { };
+        };
         example = lib.literalExpression ''
           {
             sudo = { };
@@ -90,8 +108,9 @@ in
         '';
         description = ''
           PAM services to enable face authentication for. The gaze rule is
-          inserted just before `pam_unix`, so face auth is attempted before
-          the password prompt and the password remains a fallback.
+          inserted ahead of `pam_fprintd` and `pam_unix`, so face auth is
+          attempted first and the password remains a fallback. The default
+          matches what the deb, rpm, and Arch packages configure on install.
         '';
       };
     };
@@ -166,21 +185,38 @@ in
             LockPersonality = true;
             SystemCallArchitectures = "native";
             CapabilityBoundingSet = [ "CAP_DAC_READ_SEARCH" ];
-            # The GUI's settings page rewrites config.toml through the daemon.
-            ReadWritePaths = [ "-/etc/gaze" ];
-            # IR cameras need read/write access to their /dev/video* node.
-            SupplementaryGroups = [ "video" ];
+            # The GUI's settings page rewrites config.toml through the daemon,
+            # and the GDM face-login toggle writes a dconf database.
+            ReadWritePaths = [
+              "-/etc/gaze"
+              "-/etc/dconf/db"
+            ];
+            # IR cameras need read/write access to their /dev/video* node, and
+            # sealing template keys needs the TPM resource manager.
+            SupplementaryGroups =
+              [ "video" ]
+              ++ lib.optional config.security.tpm2.enable config.security.tpm2.tssGroup;
           };
         };
 
-        security.pam.services = lib.mapAttrs (name: svc: {
-          rules.auth.gaze = {
-            control = svc.control;
-            modulePath = pamModuleFor svc;
-            # Just before pam_unix: face auth first, password as fallback.
-            order = config.security.pam.services.${name}.rules.auth.unix.order - 10;
-          };
-        }) cfg.pam.services;
+        security.pam.services = lib.mapAttrs (
+          name: svc:
+          let
+            authRules = config.security.pam.services.${name}.rules.auth;
+            # Ahead of both fingerprint and password: nixpkgs auto-assigns
+            # these orders, so offset from them instead of hardcoding a value.
+            fallbackOrder = lib.min authRules.unix.order (
+              authRules.fprintd.order or authRules.unix.order
+            );
+          in
+          {
+            rules.auth.gaze = {
+              control = svc.control;
+              modulePath = pamModuleFor svc;
+              order = if svc.order != null then svc.order else fallbackOrder - 10;
+            };
+          }
+        ) cfg.pam.services;
       }
 
       {
