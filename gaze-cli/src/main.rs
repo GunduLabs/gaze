@@ -1026,7 +1026,7 @@ fn remove_unmanaged_install_artifacts_cmd() -> String {
           fi;
         };
         for p in \
-          /usr/bin/gaze /usr/bin/gazed /usr/bin/gaze-gui \
+          /usr/bin/gaze /usr/bin/gazed /usr/bin/gaze-gui /usr/bin/gaze-cosmic-pam \
           /usr/local/bin/gaze /usr/local/bin/gazed /usr/local/bin/gaze-gui \
           /usr/lib/security/pam_gaze.so /usr/lib/security/pam_gaze_grosshack.so \
           /usr/lib64/security/pam_gaze.so /usr/lib64/security/pam_gaze_grosshack.so \
@@ -1070,11 +1070,31 @@ fn remove_arch_pam_configuration_cmd() -> String {
     .join(" ")
 }
 
+fn remove_cosmic_pam_configuration_cmd() -> String {
+    [
+        "if command -v gaze-cosmic-pam >/dev/null 2>&1; then",
+        "sudo gaze-cosmic-pam disable || true;",
+        "fi;",
+        r#"sudo sh -c 'f=/etc/pam.d/cosmic-greeter;"#,
+        r#"[ -f "$f" ] || exit 0;"#,
+        r#"grep -q "^# BEGIN gaze" "$f" || exit 0;"#,
+        r#"grep -q "^# END gaze" "$f" || exit 0;"#,
+        r#"t=$(mktemp);"#,
+        r#"awk "/^# BEGIN gaze/{skip=1;next} skip&&/^# END gaze/{skip=0;next} !skip" "$f" > "$t";"#,
+        r#"s="$f.gaze-staged.$$";"#,
+        r#"cp -a "$f" "$s";"#,
+        r#"cat "$t" > "$s";"#,
+        r#"mv -f "$s" "$f";"#,
+        r#"rm -f "$t"' || true"#,
+    ]
+    .join(" ")
+}
+
 fn remove_pacman_packages_cmd() -> String {
     // AUR builds split off `-debug` packages; remove those first since they can
     // depend on the base package.
-    "for base in gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-bin gaze-gui-bin \
-      gaze-gnome-extension-bin gaze-hyprlock-bin; do \
+    "for base in gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-cosmic gaze-bin gaze-gui-bin \
+      gaze-gnome-extension-bin gaze-hyprlock-bin gaze-cosmic-bin; do \
       for pkg in \"$base-debug\" \"$base\"; do \
       if pacman -Q \"$pkg\" >/dev/null 2>&1; then \
       sudo pacman -Rns --noconfirm \"$pkg\" || true; \
@@ -1142,6 +1162,11 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     ));
 
     plan.push((
+        "Remove COSMIC PAM integration",
+        remove_cosmic_pam_configuration_cmd(),
+    ));
+
+    plan.push((
         "Stop and disable daemon",
         "sudo systemctl disable --now gazed 2>/dev/null || true".into(),
     ));
@@ -1149,7 +1174,7 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     if which("apt-get") {
         plan.push((
             "Remove apt packages",
-            "sudo apt-get remove --purge -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock 2>/dev/null || true"
+            "sudo apt-get remove --purge -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-cosmic 2>/dev/null || true"
                 .into(),
         ));
         plan.push((
@@ -1162,7 +1187,7 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     } else if which("dnf") {
         plan.push((
             "Remove dnf packages",
-            "sudo dnf remove -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock 2>/dev/null || true".into(),
+            "sudo dnf remove -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-cosmic 2>/dev/null || true".into(),
         ));
         plan.push((
             "Remove dnf repo",

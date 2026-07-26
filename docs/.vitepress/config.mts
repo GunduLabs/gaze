@@ -75,6 +75,7 @@ export default defineVersionedConfig({
               { text: "PAM", link: "/guide/pam" },
               { text: "GNOME Extension", link: "/guide/gnome" },
               { text: "Hyprland (hyprlock)", link: "/guide/hyprland" },
+              { text: "COSMIC (lock + login)", link: "/guide/cosmic" },
             ],
           },
           { text: "GUI Guide", link: "/guide/gui" },

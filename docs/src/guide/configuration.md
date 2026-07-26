@@ -189,7 +189,7 @@ Setting `require_confirmation = true` adds a manual intent check step after a su
 With the standard `pam-gaze` module (e.g. `sudo`, `gdm-face`):
 - In a text-based (TTY) environment such as `sudo` in a terminal, it asks for text confirmation after the face match ("Press Enter to confirm, Esc to cancel").
 - On the GNOME lock screen and GDM login screen (with the Gaze Extension active), it shows "Face Verified. Press Enter to confirm." below the password field; press Enter with the field empty to confirm. If the extension is inactive, the login is denied, because the extension is the expected confirmation channel on GNOME and Gaze will not silently skip the confirmation you asked for.
-- In other graphical prompts without a TTY (e.g. the KDE lock screen, `hyprlock`), there is no channel to answer the prompt, so the face match is denied and the stack falls back to password rather than silently skipping the confirmation you asked for. If you need the confirmation step enforced there, use the `pam-gaze-grosshack` module, which drives a graphical confirm dialog.
+- In other graphical prompts without a TTY (e.g. the KDE lock screen, `hyprlock`, the COSMIC lock and login screens), there is no channel to answer the prompt, so the face match is denied and the stack falls back to password rather than silently skipping the confirmation you asked for. If you need the confirmation step enforced there, use the `pam-gaze-grosshack` module, which drives a graphical confirm dialog.
 
 With the `pam-gaze-grosshack` module:
 - The password prompt still comes up immediately so you are never blocked.
@@ -199,6 +199,7 @@ With the `pam-gaze-grosshack` module:
     - On **GNOME** (with the Gaze Extension active), it hides the password field, activates the "Authenticate" button, and lets you confirm with a single click. If the extension is inactive, it bypasses confirmation entirely to avoid locking you out.
     - On **KDE Plasma & LXQt**, it prompts you to press "OK" to confirm.
     - On **Hyprland**, it prompts you to press "Authenticate" to confirm.
+    - On **COSMIC**, the polkit dialog (`cosmic-osd`) does not display PAM info messages, so the confirmation request would be invisible; the dialog falls back to the password field instead of assuming a confirmation you never saw. The same applies to the COSMIC lock and login screens, so leave `require_confirmation` off there. See the [COSMIC guide](/guide/cosmic).
     - On other graphical environments, it prompts you to press "Enter" to confirm.
 
 `resume_grace_ms` delays face verification on system resume by the specified number of milliseconds (e.g. `3000` ms) to allow slower displays/GPUs to initialize and repaint, preventing verification from occurring behind a blank screen. Set to `0` to disable the delay.

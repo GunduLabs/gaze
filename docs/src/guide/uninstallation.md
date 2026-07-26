@@ -39,6 +39,16 @@ If you enabled Gaze for hyprlock, remove the `module = hyprlock-gaze` line from 
 sed -i.bak '/^\s*module\s*=\s*hyprlock-gaze/d' "${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprlock.conf"
 ```
 
+### Revert COSMIC face unlock
+
+Removing the `gaze-cosmic` package already strips the Gaze block from `/etc/pam.d/cosmic-greeter`. If the package is gone but the block is still there, remove it by hand:
+
+```bash
+sudo gaze-cosmic-pam disable 2>/dev/null ||
+    sudo sed -i '/^# BEGIN gaze/,/^# END gaze/d' /etc/pam.d/cosmic-greeter
+sudo rm -f /etc/gaze/cosmic-greeter.pam.orig
+```
+
 ### Remove GDM login defaults and overrides
 
 ```bash
@@ -88,16 +98,16 @@ sudo systemctl disable gazed
 ::: code-group
 
 ```bash [Debian/Ubuntu]
-sudo apt remove --purge gaze gaze-gui gaze-gnome-extension gaze-hyprlock
+sudo apt remove --purge gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-cosmic
 sudo apt autoremove
 ```
 
 ```bash [Fedora and compatible]
-sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-hyprlock
+sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-cosmic
 ```
 
 ```bash [Arch Linux / Manjaro]
-sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin gaze-hyprlock-bin
+sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin gaze-hyprlock-bin gaze-cosmic-bin
 # AUR builds may also have installed -debug split packages:
 pacman -Q | awk '/^gaze.*-debug /{print $1}' | xargs -r sudo pacman -Rns --noconfirm
 ```

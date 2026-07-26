@@ -29,8 +29,12 @@ const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to
 pub const CONFIRMATION_REQUEST: &str = "GAZE_CONFIRMATION_REQUEST";
 pub const CONFIRMATION_ACK: &str = "CONFIRM";
 
+pub const COSMIC_GREETER_SERVICE: &str = "cosmic-greeter";
+
 pub const LOOK_PROMPT: &str = "Please look at the camera";
 pub const LOOK_OR_PASSWORD_PROMPT: &str = "Please look at the camera or enter password";
+pub const LOOK_THEN_PASSWORD_PROMPT: &str =
+    "Please look at the camera. The password field returns if face authentication fails.";
 pub const FACE_NOT_RECOGNIZED: &str = "Face not recognized. Enter your password.";
 pub const FACE_NOT_DETECTED: &str = "Face not detected. Enter your password.";
 pub const FACE_TOO_DARK: &str = "Too dark for face authentication. Enter your password.";
@@ -323,7 +327,7 @@ pub unsafe fn confirm_graphical_polkit(
     state: &SharedAuthState,
     prompt_thread: thread::JoinHandle<()>,
 ) -> c_int {
-    if de == "GNOME" && !extension_active {
+    if (de == "GNOME" && !extension_active) || de == "COSMIC" {
         let fallback = unsafe { wait_for_password_and_fallback(pamh, state) };
         let _ = prompt_thread.join();
         return fallback;
@@ -579,6 +583,7 @@ pub fn detect_desktop_environment(uid: u32) -> String {
     let mut is_kde = false;
     let mut is_hyprland = false;
     let mut is_gnome = false;
+    let mut is_cosmic = false;
 
     if let Ok(entries) = std::fs::read_dir("/proc") {
         for entry in entries.flatten() {
@@ -605,6 +610,8 @@ pub fn detect_desktop_environment(uid: u32) -> String {
                             is_hyprland = true;
                         } else if comm_trim == "gnome-shell" {
                             is_gnome = true;
+                        } else if is_cosmic_comm(comm_trim) {
+                            is_cosmic = true;
                         }
                     }
                 }
@@ -618,9 +625,18 @@ pub fn detect_desktop_environment(uid: u32) -> String {
         "Hyprland".to_string()
     } else if is_gnome {
         "GNOME".to_string()
+    } else if is_cosmic {
+        "COSMIC".to_string()
     } else {
         "Other".to_string()
     }
+}
+
+fn is_cosmic_comm(comm: &str) -> bool {
+    matches!(
+        comm,
+        "cosmic-comp" | "cosmic-panel" | "cosmic-osd" | "cosmic-greeter" | "cosmic-session"
+    )
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -669,7 +685,7 @@ mod tests {
 
     #[test]
     fn other_desktops_fail_closed_without_a_channel() {
-        for de in ["KDE", "Hyprland", "LXQt", "Other"] {
+        for de in ["KDE", "Hyprland", "LXQt", "COSMIC", "Other"] {
             assert_eq!(
                 graphical_confirm_decision(de, false, false),
                 GraphicalConfirm::FailClosed,
@@ -690,7 +706,7 @@ mod tests {
 
     #[test]
     fn greeter_never_bypasses_and_fails_closed_without_extension() {
-        for de in ["GNOME", "KDE", "Hyprland", "Other"] {
+        for de in ["GNOME", "KDE", "Hyprland", "COSMIC", "Other"] {
             assert_eq!(
                 graphical_confirm_decision(de, false, true),
                 GraphicalConfirm::FailClosed,
@@ -734,6 +750,24 @@ mod tests {
         assert!(!confirmation_accepted(Some("hunter2")));
         assert!(!confirmation_accepted(Some("confirm")));
         assert!(!confirmation_accepted(None));
+    }
+
+    #[test]
+    fn cosmic_processes_are_recognised_after_comm_truncation() {
+        for comm in [
+            "cosmic-comp",
+            "cosmic-panel",
+            "cosmic-osd",
+            "cosmic-greeter",
+        ] {
+            assert!(is_cosmic_comm(comm), "{comm} should mark a COSMIC session");
+        }
+        for comm in ["gnome-shell", "plasmashell", "cosmic-files", "Hyprland"] {
+            assert!(
+                !is_cosmic_comm(comm),
+                "{comm} is not a COSMIC shell process"
+            );
+        }
     }
 
     #[test]

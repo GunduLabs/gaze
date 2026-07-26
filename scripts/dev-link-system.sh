@@ -16,6 +16,7 @@ This links:
   - /usr/bin/gazed, /usr/bin/gaze, /usr/bin/gaze-gui
   - installed PAM modules
   - the hyprlock-gaze / hyprlock-gaze-simultaneous PAM services (for hyprlock)
+  - the gaze-cosmic-pam helper, and COSMIC's cosmic-greeter PAM service when present
   - system and current-user GNOME extension files
   - the installed GNOME settings schema
 
@@ -68,6 +69,9 @@ HYPRLOCK_PAM_SRC="$REPO/packaging/pam/hyprlock-gaze"
 HYPRLOCK_PAM_DST=/etc/pam.d/hyprlock-gaze
 HYPRLOCK_SIMUL_PAM_SRC="$REPO/packaging/pam/hyprlock-gaze-simultaneous"
 HYPRLOCK_SIMUL_PAM_DST=/etc/pam.d/hyprlock-gaze-simultaneous
+COSMIC_PAM_HELPER_SRC="$REPO/packaging/cosmic/gaze-cosmic-pam"
+COSMIC_PAM_HELPER_DST=/usr/bin/gaze-cosmic-pam
+COSMIC_PAM_DST=/etc/pam.d/cosmic-greeter
 
 artifact() {
     printf '%s/%s' "$TARGET" "$1"
@@ -359,6 +363,28 @@ restore_hyprlock_pam() {
     restore_or_remove "$HYPRLOCK_SIMUL_PAM_DST"
 }
 
+link_cosmic_pam() {
+    backup_and_install "$COSMIC_PAM_HELPER_SRC" "$COSMIC_PAM_HELPER_DST" 0755
+    if [ ! -f "$COSMIC_PAM_DST" ]; then
+        printf 'skipping %s: cosmic-greeter is not installed\n' "$COSMIC_PAM_DST"
+        return 0
+    fi
+    "$COSMIC_PAM_HELPER_DST" enable || true
+}
+
+restore_cosmic_pam() {
+    if [ -x "$COSMIC_PAM_HELPER_DST" ]; then
+        "$COSMIC_PAM_HELPER_DST" disable || true
+    fi
+    restore_or_remove "$COSMIC_PAM_HELPER_DST"
+    backup="$BACKUP_DIR/$(backup_name "$COSMIC_PAM_HELPER_DST")"
+    if [ ! -e "$backup" ] && [ -f "$COSMIC_PAM_HELPER_DST" ] &&
+        cmp -s "$COSMIC_PAM_HELPER_SRC" "$COSMIC_PAM_HELPER_DST"; then
+        rm -f "$COSMIC_PAM_HELPER_DST"
+        printf 'removed %s\n' "$COSMIC_PAM_HELPER_DST"
+    fi
+}
+
 link_extension_files() {
     dir=$1
     install -d "$dir"
@@ -391,6 +417,8 @@ detect_session_desktop() {
         printf 'hyprland'
     elif pgrep -u "$user" -x plasmashell >/dev/null 2>&1; then
         printf 'kde'
+    elif pgrep -u "$user" -x cosmic-comp >/dev/null 2>&1; then
+        printf 'cosmic'
     else
         printf 'other'
     fi
@@ -469,7 +497,8 @@ show_status() {
         "$SCHEMA_DST" \
         "$POLKIT_POLICY_DST" \
         "$HYPRLOCK_PAM_DST" \
-        "$HYPRLOCK_SIMUL_PAM_DST"
+        "$HYPRLOCK_SIMUL_PAM_DST" \
+        "$COSMIC_PAM_HELPER_DST"
     do
         if [ -L "$path" ]; then
             printf '%s -> %s\n' "$path" "$(readlink "$path")"
@@ -479,6 +508,9 @@ show_status() {
             printf '%s is missing\n' "$path"
         fi
     done
+    if [ -x "$COSMIC_PAM_HELPER_DST" ]; then
+        printf 'cosmic-greeter PAM: %s\n' "$("$COSMIC_PAM_HELPER_DST" status 2>&1 || true)"
+    fi
     systemctl show gazed -p DropInPaths -p ExecStart -p InaccessiblePaths 2>/dev/null || true
 
     if tpm_present; then tpm=$([ -e /dev/tpmrm0 ] && echo /dev/tpmrm0 || echo /dev/tpm0); else tpm=none; fi
@@ -564,6 +596,7 @@ case "$cmd" in
         link_polkit_policy
         link_gnome_extension
         link_hyprlock_pam
+        link_cosmic_pam
         setup_tpm_encryption
         install_systemd_dropin
         printf '\nGaze is linked to this checkout. Rebuild after switching branches, then restart gazed.\n'
@@ -573,6 +606,9 @@ case "$cmd" in
                 ;;
             hyprland)
                 printf 'Set `pam_module = hyprlock-gaze` in ~/.config/hypr/hyprlock.conf to test hyprlock face unlock.\n'
+                ;;
+            cosmic)
+                printf 'Lock the session (Super+Escape) to test COSMIC face unlock; `gaze-cosmic-pam status` shows the wiring.\n'
                 ;;
         esac
         ;;
@@ -585,6 +621,7 @@ case "$cmd" in
         restore_polkit_policy
         restore_gnome_extension
         restore_hyprlock_pam
+        restore_cosmic_pam
         teardown_tpm_encryption
         remove_systemd_dropin
         ;;

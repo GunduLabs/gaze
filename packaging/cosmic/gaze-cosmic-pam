@@ -1,0 +1,205 @@
+#!/bin/sh
+set -eu
+
+PAM_FILE=${GAZE_COSMIC_PAM_FILE:-/etc/pam.d/cosmic-greeter}
+BACKUP_FILE=${GAZE_COSMIC_PAM_BACKUP:-/etc/gaze/cosmic-greeter.pam.orig}
+BEGIN_MARKER='# BEGIN gaze (managed by gaze-cosmic; remove with `gaze-cosmic-pam disable`)'
+END_MARKER='# END gaze'
+AUTH_LINE='auth       [success=done default=ignore]                pam_gaze.so'
+
+usage() {
+	cat <<'EOF'
+Usage: gaze-cosmic-pam enable|disable|status
+
+enable   Insert the Gaze auth line into /etc/pam.d/cosmic-greeter
+disable  Remove the Gaze block from /etc/pam.d/cosmic-greeter
+status   Report whether the Gaze block is present
+
+Set GAZE_COSMIC_PAM_FILE to operate on a different file (used by tests).
+EOF
+}
+
+require_root() {
+	[ -z "${GAZE_COSMIC_PAM_FILE:-}" ] || return 0
+	if [ "$(id -u)" -ne 0 ]; then
+		printf 'This must run as root: sudo gaze-cosmic-pam %s\n' "$1" >&2
+		return 1
+	fi
+}
+
+require_file() {
+	if [ ! -f "$PAM_FILE" ]; then
+		printf '%s does not exist; is cosmic-greeter installed?\n' "$PAM_FILE" >&2
+		return 1
+	fi
+}
+
+has_gaze() {
+	awk '
+		{ line = $0; sub(/#.*/, "", line) }
+		line ~ /pam_gaze/ { found = 1 }
+		END { exit !found }
+	' "$PAM_FILE" 2>/dev/null
+}
+
+pam_module_installed() {
+	for dir in /lib/security /lib64/security /usr/lib/security /usr/lib64/security \
+		/lib/*/security /usr/lib/*/security; do
+		[ -e "$dir/pam_gaze.so" ] && return 0
+	done
+	return 1
+}
+
+write_back() {
+	replacement=$1
+	staged="$PAM_FILE.gaze-staged.$$"
+
+	cp -a "$PAM_FILE" "$staged"
+	cat "$replacement" >"$staged" || {
+		rm -f "$staged"
+		return 1
+	}
+	sync "$staged" 2>/dev/null || true
+	mv -f "$staged" "$PAM_FILE" || {
+		rm -f "$staged"
+		return 1
+	}
+	if command -v restorecon >/dev/null 2>&1; then
+		restorecon "$PAM_FILE" >/dev/null 2>&1 || true
+	fi
+}
+
+insert_position() {
+	awk '
+		BEGIN { first = 0; last = 0 }
+		{
+			line = $0
+			sub(/#.*/, "", line)
+			if (line ~ /^[[:space:]]*-?auth[[:space:]]/ || line ~ /^[[:space:]]*@include[[:space:]]+[^[:space:]]*auth/) {
+				last = NR
+				if (first == 0 &&
+					line !~ /pam_nologin\.so|pam_succeed_if\.so|pam_env\.so|pam_faillock\.so|pam_faildelay\.so|pam_keyinit\.so|pam_selinux\.so|pam_tally2\.so/) {
+					first = NR
+				}
+			}
+		}
+		END {
+			if (first > 0) print first
+			else if (last > 0) print last + 1
+			else print 0
+		}
+	' "$PAM_FILE"
+}
+
+enable() {
+	require_root enable || return 1
+	require_file || return 1
+
+	if has_gaze; then
+		printf 'Gaze is already referenced by %s.\n' "$PAM_FILE"
+		return 0
+	fi
+
+	if ! pam_module_installed; then
+		printf 'Warning: pam_gaze.so is not installed yet; install the gaze package so face unlock works.\n' >&2
+	fi
+
+	position=$(insert_position)
+	if [ "$position" -eq 0 ]; then
+		printf '%s has no auth stack to extend; not modified.\n' "$PAM_FILE" >&2
+		return 1
+	fi
+
+	tmp=$(mktemp)
+	trap 'rm -f "$tmp"' EXIT
+
+	awk -v position="$position" -v begin="$BEGIN_MARKER" -v module="$AUTH_LINE" -v end="$END_MARKER" '
+		BEGIN { inserted = 0 }
+		NR == position && !inserted {
+			print begin
+			print module
+			print end
+			inserted = 1
+		}
+		{ print }
+		END { if (!inserted) { print begin; print module; print end } }
+	' "$PAM_FILE" >"$tmp"
+
+	if [ ! -e "$BACKUP_FILE" ]; then
+		mkdir -p "$(dirname "$BACKUP_FILE")" 2>/dev/null || true
+		cp -a "$PAM_FILE" "$BACKUP_FILE" 2>/dev/null || true
+	fi
+	write_back "$tmp"
+	rm -f "$tmp"
+	trap - EXIT
+
+	printf 'Enabled Gaze face authentication in %s.\n' "$PAM_FILE"
+}
+
+disable() {
+	require_root disable || return 1
+	[ -f "$PAM_FILE" ] || return 0
+
+	if ! grep -qF "$BEGIN_MARKER" "$PAM_FILE" 2>/dev/null; then
+		if has_gaze; then
+			printf '%s references pam_gaze outside the managed block; leaving it alone.\n' "$PAM_FILE"
+		fi
+		return 0
+	fi
+
+	tmp=$(mktemp)
+	trap 'rm -f "$tmp"' EXIT
+
+	awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
+		$0 == begin && !holding { holding = 1; held = ""; next }
+		holding && $0 == end { holding = 0; next }
+		holding { held = held $0 "\n"; next }
+		{ print }
+		END { if (holding) printf "%s\n%s", begin, held }
+	' "$PAM_FILE" >"$tmp"
+
+	if cmp -s "$PAM_FILE" "$tmp"; then
+		rm -f "$tmp"
+		trap - EXIT
+		printf '%s has no complete Gaze block (missing %s); not modified.\n' "$PAM_FILE" "$END_MARKER" >&2
+		return 1
+	fi
+
+	write_back "$tmp"
+	rm -f "$tmp"
+	trap - EXIT
+
+	printf 'Removed Gaze face authentication from %s.\n' "$PAM_FILE"
+}
+
+status() {
+	if [ ! -f "$PAM_FILE" ]; then
+		printf 'not installed: %s does not exist\n' "$PAM_FILE"
+		return 1
+	fi
+	if [ ! -r "$PAM_FILE" ]; then
+		printf 'unknown: %s is not readable; re-run with sudo\n' "$PAM_FILE" >&2
+		return 2
+	fi
+	if grep -qF "$BEGIN_MARKER" "$PAM_FILE" 2>/dev/null; then
+		printf 'enabled: %s contains the Gaze block\n' "$PAM_FILE"
+		return 0
+	fi
+	if has_gaze; then
+		printf 'enabled: %s references pam_gaze outside the managed block\n' "$PAM_FILE"
+		return 0
+	fi
+	printf 'disabled: %s does not reference pam_gaze\n' "$PAM_FILE"
+	return 1
+}
+
+case "${1:-}" in
+enable) enable ;;
+disable) disable ;;
+status) status ;;
+-h | --help | help) usage ;;
+*)
+	usage >&2
+	exit 2
+	;;
+esac

@@ -143,7 +143,16 @@ emitter_enabled = true
 
 ## 4. Lock screen does not trigger face auth
 
-Enable or re-enable the extension from your GNOME session:
+On COSMIC, the lock and login screens read `/etc/pam.d/cosmic-greeter`. Check and repair the wiring:
+
+```bash
+gaze-cosmic-pam status
+sudo gaze-cosmic-pam enable
+```
+
+If `gaze-cosmic-pam` is not installed, install `gaze-cosmic` (see the [COSMIC guide](/guide/cosmic)). A distro upgrade that replaces the PAM file also drops the wiring, so re-run `enable` after one.
+
+On GNOME, enable or re-enable the extension from your GNOME session:
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com

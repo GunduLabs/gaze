@@ -186,7 +186,7 @@ package format: build-rust build-selinux && (package-prebuilt format)
 # Package already-built artifacts for a given packager
 [arg("format", pattern="deb|rpm|archlinux")]
 [group("package")]
-package-prebuilt format: _dist-packages (_nfpm "packaging/nfpm.yaml" format) (_nfpm "packaging/nfpm-gui.yaml" format) (_nfpm "packaging/nfpm-gnome-extension.yaml" format) (_nfpm "packaging/nfpm-hyprlock.yaml" format) && (_verify-arch format)
+package-prebuilt format: _dist-packages (_nfpm "packaging/nfpm.yaml" format) (_nfpm "packaging/nfpm-gui.yaml" format) (_nfpm "packaging/nfpm-gnome-extension.yaml" format) (_nfpm "packaging/nfpm-hyprlock.yaml" format) (_nfpm "packaging/nfpm-cosmic.yaml" format) && (_verify-arch format)
     @echo "Packages written to dist/packages/"
 
 # Remove all generated artifacts

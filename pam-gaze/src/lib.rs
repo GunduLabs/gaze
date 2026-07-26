@@ -29,7 +29,7 @@ unsafe fn confirm_via_polkit_dialog(
 
     // No confirm channel without the extension; let the stack fall
     // through to password auth.
-    if de == "GNOME" && !extension_active {
+    if (de == "GNOME" && !extension_active) || de == "COSMIC" {
         return PAM_AUTH_ERR;
     }
 
@@ -49,7 +49,8 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         Err(code) => return code,
     };
 
-    let is_polkit = matches!(unsafe { get_pam_service(pamh) }, Some(ref s) if s == "polkit-1");
+    let service = unsafe { get_pam_service(pamh) };
+    let is_polkit = matches!(service, Some(ref s) if s == "polkit-1");
 
     let matched = rt.block_on(async {
         match enrollment_disposition(has_enrolled_faces(&username).await) {
@@ -60,6 +61,8 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
         let prompt = if is_polkit {
             LOOK_OR_PASSWORD_PROMPT
+        } else if service.as_deref() == Some(COSMIC_GREETER_SERVICE) {
+            LOOK_THEN_PASSWORD_PROMPT
         } else {
             LOOK_PROMPT
         };
@@ -124,7 +127,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     // extension directly rather than trusting DE detection on its transient
     // processes; otherwise GDM silently bypasses Require Confirmation.
     let extension_active =
-        (is_greeter || de == "GNOME") && rt.block_on(gnome_extension_active(uid));
+        (is_greeter || de == "GNOME") && de != "COSMIC" && rt.block_on(gnome_extension_active(uid));
 
     match graphical_confirm_decision(&de, extension_active, is_greeter) {
         GraphicalConfirm::GnomeExtension => confirm_via_gnome_extension(pamh),

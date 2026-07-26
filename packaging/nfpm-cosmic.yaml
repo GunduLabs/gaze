@@ -1,0 +1,49 @@
+name: "gaze-cosmic"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+release: "${PACKAGE_RELEASE}"
+section: "admin"
+priority: "optional"
+maintainer: "Gundu Labs <maintainers@gundulabs.com>"
+description: "COSMIC lock screen and login PAM integration for Gaze"
+vendor: "Gundu Labs"
+homepage: "https://gaze.gundulabs.com"
+license: "MIT"
+
+contents:
+  - src: "packaging/cosmic/gaze-cosmic-pam"
+    dst: "/usr/bin/gaze-cosmic-pam"
+    file_info:
+      mode: 0755
+
+deb:
+  signature:
+    method: debsign
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+rpm:
+  signature:
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+archlinux:
+  scripts:
+    postupgrade: "packaging/postinst-cosmic.sh"
+
+scripts:
+  postinstall: "packaging/postinst-cosmic.sh"
+  postremove: "packaging/postrm-cosmic.sh"
+
+overrides:
+  deb:
+    recommends:
+      - gaze
+      - cosmic-greeter
+  rpm:
+    recommends:
+      - gaze
+      - cosmic-greeter
+  archlinux:
+    recommends:
+      - gaze
+      - cosmic-greeter

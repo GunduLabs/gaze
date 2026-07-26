@@ -4,7 +4,7 @@ This page is about normal PAM integration (`sudo`, polkit, shared auth stacks).
 
 `gaze auth` is useful, but it is only a daemon/camera test. It does not run through PAM.
 
-If you specifically want GNOME lock screen or GDM login behavior, use the [GNOME Extension guide](/guide/gnome).
+If you specifically want GNOME lock screen or GDM login behavior, use the [GNOME Extension guide](/guide/gnome). For lock screens that are driven entirely by PAM, see [Hyprland (hyprlock)](/guide/hyprland) and [COSMIC](/guide/cosmic); both have dedicated packages so you do not have to edit their PAM stacks yourself.
 
 ## What Gaze installs
 
@@ -41,7 +41,7 @@ RPM packages install an authselect profile at:
 The profile adds Gaze to both shared authentication stacks: `system-auth`, used by tools such as `sudo`, and `password-auth`, used by KDE's lock screen, SDDM, and Plasma Login Manager. RPM upgrades refresh these generated PAM files automatically when the Gaze profile is active.
 
 ::: warning KDE lock screen is not hands-free
-Being in `password-auth` means Gaze runs when KDE's lock screen authenticates, but it does not make face unlock automatic. KDE's screen locker only starts PAM authentication after you submit the password field, so the camera does not activate until you enter (or submit an empty) password. Hands-free face unlock on the KDE lock screen is not currently supported — unlike GNOME, which drives it through the Gaze Shell extension. Face auth still works for `sudo`, polkit, and other PAM prompts.
+Being in `password-auth` means Gaze runs when KDE's lock screen authenticates, but it does not make face unlock automatic. KDE's screen locker only starts PAM authentication after you submit the password field, so the camera does not activate until you enter (or submit an empty) password. Hands-free face unlock on the KDE lock screen is not currently supported, unlike GNOME, which drives it through the Gaze Shell extension. Face auth still works for `sudo`, polkit, and other PAM prompts.
 :::
 
 Enable it:

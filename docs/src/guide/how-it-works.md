@@ -56,6 +56,6 @@ Default locations:
 - `gazed`: daemon that performs detection and recognition (crate: `gaze`)
 - `gaze`: CLI client (crate: `gaze-cli`, kept separate so the client binary does not link ONNX Runtime)
 - `gaze-gui`: GTK app
-- PAM integration and GNOME extension for login/lock screen flow
+- PAM integration for login/lock screen flow, plus the GNOME extension on GNOME and PAM service wiring for hyprlock and COSMIC
 
 The CLI and GUI communicate with daemon over DBus (`com.gundulabs.Gaze`).

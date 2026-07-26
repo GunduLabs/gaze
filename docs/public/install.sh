@@ -7,6 +7,7 @@ set -e
 PKG_BASE_URL="https://packages.gundulabs.com"
 GNOME_DOCS_URL="https://gaze.gundulabs.com/guide/gnome"
 HYPRLAND_DOCS_URL="https://gaze.gundulabs.com/guide/hyprland"
+COSMIC_DOCS_URL="https://gaze.gundulabs.com/guide/cosmic"
 PAM_DOCS_URL="https://gaze.gundulabs.com/guide/pam"
 REPO_KEY_FPR="505AC1C71AFEDBD5555235F6CB4FA24E5C1C7C98"
 AUTO_YES=0
@@ -50,11 +51,15 @@ Options:
   -h, --help                 Show this help
 
 The GNOME extension package is installed only when a GNOME desktop session is
-detected. On KDE Plasma and other desktops, the installer skips GNOME-specific
-packages so it does not pull in GNOME Shell. When run from GNOME as your normal
-user, it also enables lock screen face unlock for that user. GDM loads the
-extension by default, but GDM login face auth is not enabled unless you
-explicitly run the docs command for it.
+detected. On KDE Plasma, COSMIC, and other desktops, the installer skips
+GNOME-specific packages so it does not pull in GNOME Shell. When run from GNOME
+as your normal user, it also enables lock screen face unlock for that user. GDM
+loads the extension by default, but GDM login face auth is not enabled unless
+you explicitly run the docs command for it.
+
+On COSMIC it installs gaze-cosmic, which adds face unlock to the COSMIC lock
+screen and the cosmic-greeter login screen. On Hyprland it installs
+gaze-hyprlock and points hyprlock.conf at the Gaze PAM service.
 EOF
 }
 
@@ -113,6 +118,21 @@ is_kde_session() {
 
 want_gnome_extension_package() {
     is_gnome_session
+}
+
+is_cosmic_session() {
+    case "${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}" in
+    *COSMIC* | *cosmic*) return 0 ;;
+    esac
+    return 1
+}
+
+has_cosmic_greeter() {
+    command -v cosmic-greeter >/dev/null 2>&1 || [ -f /etc/pam.d/cosmic-greeter ]
+}
+
+want_cosmic_setup() {
+    is_cosmic_session || has_cosmic_greeter
 }
 
 is_hyprland_session() {
@@ -223,6 +243,37 @@ enable_hyprlock() {
     configure_hyprlock_conf
 }
 
+warn_cosmic_package_missing() {
+    warn "Could not install the Gaze COSMIC package; the rest of Gaze is unaffected."
+    say "Retry it later, then run:"
+    cmd "sudo gaze-cosmic-pam enable"
+    link "$COSMIC_DOCS_URL"
+}
+
+enable_cosmic() {
+    if ! want_cosmic_setup; then
+        return 0
+    fi
+
+    say "COSMIC detected; enabling face unlock for the lock and login screens..."
+
+    if ! command -v gaze-cosmic-pam >/dev/null 2>&1; then
+        warn "gaze-cosmic-pam was not installed; skipping COSMIC PAM setup."
+        link "$COSMIC_DOCS_URL"
+        return 0
+    fi
+
+    if gaze-cosmic-pam status >/dev/null 2>&1 || sudo gaze-cosmic-pam enable >/dev/null; then
+        ok "COSMIC lock screen and login screen use Gaze face unlock."
+        say "${DIM}Turn it off again with: sudo gaze-cosmic-pam disable${RESET}"
+    else
+        warn "Could not wire /etc/pam.d/cosmic-greeter automatically."
+        say "After installing cosmic-greeter, run:"
+        cmd "sudo gaze-cosmic-pam enable"
+        link "$COSMIC_DOCS_URL"
+    fi
+}
+
 _gsettings_add_extension() {
     ext_id="$1"
     if ! command -v gsettings >/dev/null 2>&1; then
@@ -283,12 +334,19 @@ explain_gnome_extension_skipped() {
 
     if is_kde_session; then
         say "KDE Plasma desktop detected; skipping the GNOME Shell extension package."
+    elif is_cosmic_session; then
+        say "COSMIC desktop detected; skipping the GNOME Shell extension package."
     else
         say "GNOME desktop session not detected; skipping the GNOME Shell extension package."
     fi
     say "CLI, GUI, and PAM modules are still installed."
-    say "For non-GNOME desktop/login integration, see:"
-    link "$PAM_DOCS_URL"
+    if is_cosmic_session; then
+        say "For COSMIC lock screen and login face unlock, see:"
+        link "$COSMIC_DOCS_URL"
+    else
+        say "For non-GNOME desktop/login integration, see:"
+        link "$PAM_DOCS_URL"
+    fi
 }
 
 enable_desktop_integrations() {
@@ -298,6 +356,7 @@ enable_desktop_integrations() {
         explain_gnome_extension_skipped
     fi
     enable_hyprlock
+    enable_cosmic
 }
 
 configure_pam_arch() {
@@ -518,11 +577,16 @@ if is_deb; then
         plan "Enable GNOME lock screen auth for this user when possible"
     elif is_kde_session; then
         plan "Install gaze and gaze-gui (KDE Plasma detected; skip GNOME Shell extension)"
+    elif is_cosmic_session; then
+        plan "Install gaze and gaze-gui (COSMIC detected; skip GNOME Shell extension)"
     else
         plan "Install gaze and gaze-gui (skip GNOME Shell extension; GNOME not detected)"
     fi
     if want_hyprlock_setup; then
         plan "Install gaze-hyprlock and configure hyprlock"
+    fi
+    if want_cosmic_setup; then
+        plan "Install gaze-cosmic and enable face unlock for the COSMIC lock and login screens"
     fi
     plan "Set up the PAM modules through pam-auth-update if available"
     plan "Enable the Gaze daemon"
@@ -542,11 +606,16 @@ elif is_rpm; then
         plan "Enable GNOME lock screen auth for this user when possible"
     elif is_kde_session; then
         plan "Install gaze and gaze-gui (KDE Plasma detected; skip GNOME Shell extension)"
+    elif is_cosmic_session; then
+        plan "Install gaze and gaze-gui (COSMIC detected; skip GNOME Shell extension)"
     else
         plan "Install gaze and gaze-gui (skip GNOME Shell extension; GNOME not detected)"
     fi
     if want_hyprlock_setup; then
         plan "Install gaze-hyprlock and configure hyprlock"
+    fi
+    if want_cosmic_setup; then
+        plan "Install gaze-cosmic and enable face unlock for the COSMIC lock and login screens"
     fi
     plan "Enable the Gaze PAM profile through authselect if available"
     plan "Enable the Gaze daemon"
@@ -560,11 +629,16 @@ elif is_arch; then
         plan "Enable GNOME lock screen auth for this user when possible"
     elif is_kde_session; then
         plan "Install gaze-bin and gaze-gui-bin from the AUR (KDE Plasma detected; skip GNOME Shell extension)"
+    elif is_cosmic_session; then
+        plan "Install gaze-bin and gaze-gui-bin from the AUR (COSMIC detected; skip GNOME Shell extension)"
     else
         plan "Install gaze-bin and gaze-gui-bin from the AUR (skip GNOME Shell extension; GNOME not detected)"
     fi
     if want_hyprlock_setup; then
         plan "Install gaze-hyprlock-bin and configure hyprlock"
+    fi
+    if want_cosmic_setup; then
+        plan "Install gaze-cosmic-bin and enable face unlock for the COSMIC lock and login screens"
     fi
     plan "Configure PAM for sudo"
     plan "Enable the Gaze daemon"
@@ -616,6 +690,9 @@ if is_deb; then
         DEB_PKGS="$DEB_PKGS gaze-hyprlock"
     fi
     sudo apt-get install -y $DEB_PKGS </dev/null
+    if want_cosmic_setup; then
+        sudo apt-get install -y gaze-cosmic </dev/null || warn_cosmic_package_missing
+    fi
 
     step "Desktop integration"
     enable_desktop_integrations
@@ -659,6 +736,13 @@ EOF
         sudo dnf install -y $RPM_PKGS </dev/null
     else
         sudo yum install -y $RPM_PKGS </dev/null
+    fi
+    if want_cosmic_setup; then
+        if command -v dnf >/dev/null 2>&1; then
+            sudo dnf install -y gaze-cosmic </dev/null || warn_cosmic_package_missing
+        else
+            sudo yum install -y gaze-cosmic </dev/null || warn_cosmic_package_missing
+        fi
     fi
 
     step "Configuring PAM"
@@ -705,6 +789,9 @@ elif is_arch; then
         AUR_PKGS="$AUR_PKGS gaze-hyprlock-bin"
     fi
     "$AUR_HELPER" -S --noconfirm $AUR_PKGS
+    if want_cosmic_setup; then
+        "$AUR_HELPER" -S --noconfirm gaze-cosmic-bin || warn_cosmic_package_missing
+    fi
 
     step "Configuring PAM"
     configure_pam_arch
@@ -760,12 +847,22 @@ if want_gnome_extension_package; then
 elif is_kde_session; then
     say "  KDE Plasma: GNOME extension skipped; see the PAM guide for lock/login integration:"
     link "$PAM_DOCS_URL"
+elif is_cosmic_session; then
+    say "  COSMIC: GNOME extension skipped; the lock and login screens use the cosmic-greeter PAM service:"
+    link "$COSMIC_DOCS_URL"
 else
     say "  GNOME extension skipped (GNOME desktop not detected); see the PAM guide:"
     link "$PAM_DOCS_URL"
 fi
 if want_hyprlock_setup; then
     ok "hyprlock: configured (auth.pam.module = hyprlock-gaze)"
+fi
+if want_cosmic_setup; then
+    if command -v gaze-cosmic-pam >/dev/null 2>&1 && gaze-cosmic-pam status >/dev/null 2>&1; then
+        ok "COSMIC: face unlock enabled for the lock screen and login screen"
+    else
+        warn "COSMIC: /etc/pam.d/cosmic-greeter is not wired; run 'sudo gaze-cosmic-pam enable'"
+    fi
 fi
 say ""
 say "Docs:   ${CYAN}https://gaze.gundulabs.com${RESET}"

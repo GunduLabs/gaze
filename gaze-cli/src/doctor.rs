@@ -16,6 +16,7 @@ const BENCHMARK_TIMEOUT: Duration = Duration::from_secs(30);
 const PAM_MODULES: [&str; 2] = ["pam_gaze.so", "pam_gaze_grosshack.so"];
 const GNOME_EXTENSION_ID: &str = "gaze@gundulabs.com";
 const GDM_FACE_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
+const COSMIC_PAM_PATH: &str = "/etc/pam.d/cosmic-greeter";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Level {
@@ -669,6 +670,10 @@ fn check_desktop_integration(report: &mut Report) {
         }
     }
 
+    if desktop.contains("cosmic") {
+        check_cosmic_integration(report);
+    }
+
     if desktop.contains("hyprland") {
         let config_home = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
@@ -695,6 +700,117 @@ fn check_desktop_integration(report: &mut Report) {
             );
         }
     }
+}
+
+fn cosmic_pam_finding(contents: std::io::Result<String>, helper_installed: bool) -> Check {
+    let wired = match &contents {
+        Ok(contents) => contents.lines().any(pam_line_has_reference),
+        Err(_) => false,
+    };
+
+    let (level, message, fix) = match contents {
+        Ok(_) if wired => (
+            Level::Pass,
+            format!("{COSMIC_PAM_PATH} authenticates through Gaze (lock screen and login screen)"),
+            None,
+        ),
+        Ok(_) if helper_installed => (
+            Level::Warning,
+            format!("{COSMIC_PAM_PATH} does not reference a Gaze module"),
+            Some("Run `sudo gaze-cosmic-pam enable` to add face unlock to the COSMIC lock and login screens.".to_string()),
+        ),
+        Ok(_) => (
+            Level::Warning,
+            "the gaze-cosmic package is not installed, so the lock and login screens use passwords only".to_string(),
+            Some("Install gaze-cosmic (`sudo apt install gaze-cosmic`, `sudo dnf install gaze-cosmic`, or `yay -S gaze-cosmic-bin`).".to_string()),
+        ),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => (
+            Level::Warning,
+            format!("{COSMIC_PAM_PATH} is missing, so the lock and login screens cannot use Gaze"),
+            Some("Install cosmic-greeter, then run `sudo gaze-cosmic-pam enable`.".to_string()),
+        ),
+        Err(err) => (
+            Level::Warning,
+            format!("could not read {COSMIC_PAM_PATH}: {err}"),
+            Some(format!(
+                "Run `sudo gaze-cosmic-pam status`, or inspect the file with `sudo cat {COSMIC_PAM_PATH}`."
+            )),
+        ),
+    };
+
+    Check {
+        level,
+        name: "COSMIC lock screen",
+        message,
+        fix,
+    }
+}
+
+fn check_cosmic_integration(report: &mut Report) {
+    let helper_installed = ["/usr/bin/gaze-cosmic-pam", "/usr/local/bin/gaze-cosmic-pam"]
+        .iter()
+        .any(|path| Path::new(path).exists());
+
+    report.checks.push(cosmic_pam_finding(
+        fs::read_to_string(COSMIC_PAM_PATH),
+        helper_installed,
+    ));
+
+    if let Some(path) = cosmic_simultaneous_source(COSMIC_PAM_PATH, |path| fs::read_to_string(path))
+    {
+        report.warning(
+            "COSMIC simultaneous mode",
+            format!(
+                "{path} puts {} in COSMIC's auth stack, which cosmic-greeter cannot drive",
+                PAM_MODULES[1]
+            ),
+            "Select the sequential Gaze profile: `sudo pam-auth-update` (Debian/Ubuntu) or `sudo authselect select gaze with-silent-lastlog --force` (Fedora).",
+        );
+    }
+}
+
+fn cosmic_simultaneous_source(
+    service_path: &str,
+    read: impl Fn(&Path) -> std::io::Result<String>,
+) -> Option<String> {
+    const MAX_DEPTH: usize = 1;
+
+    let dir = Path::new(service_path).parent()?;
+    let mut queue = vec![(PathBuf::from(service_path), 0_usize)];
+    let mut seen = BTreeSet::new();
+
+    while let Some((path, depth)) = queue.pop() {
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        let Ok(contents) = read(&path) else {
+            continue;
+        };
+        for line in contents.lines() {
+            let line = line.split('#').next().unwrap_or_default().trim();
+            if line.split_ascii_whitespace().any(|token| {
+                token == PAM_MODULES[1] || token.ends_with(&format!("/{}", PAM_MODULES[1]))
+            }) {
+                return Some(path.display().to_string());
+            }
+            if depth == MAX_DEPTH {
+                continue;
+            }
+            let mut tokens = line.split_ascii_whitespace();
+            let included = match tokens.next() {
+                Some("@include") => tokens.next(),
+                Some("auth") => match tokens.next() {
+                    Some("include") | Some("substack") => tokens.next(),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(included) = included {
+                queue.push((dir.join(included), depth + 1));
+            }
+        }
+    }
+    None
 }
 
 fn check_tpm(report: &mut Report, config: Option<&Config>) {
@@ -1143,6 +1259,84 @@ mod tests {
         assert!(find_pam_ordering_conflicts(stacked_first).is_empty());
 
         assert!(find_pam_ordering_conflicts("auth include system-auth\n").is_empty());
+    }
+
+    #[test]
+    fn cosmic_pam_finding_reports_each_wiring_state() {
+        let wired = cosmic_pam_finding(
+            Ok("auth [success=done default=ignore] pam_gaze.so\n@include common-auth\n".into()),
+            true,
+        );
+        assert_eq!(wired.level, Level::Pass);
+
+        let unwired = cosmic_pam_finding(Ok("@include common-auth\n".into()), true);
+        assert_eq!(unwired.level, Level::Warning);
+        assert!(unwired.fix.unwrap().contains("gaze-cosmic-pam enable"));
+
+        let no_package = cosmic_pam_finding(Ok("@include common-auth\n".into()), false);
+        assert!(no_package.message.contains("not installed"));
+
+        let missing = cosmic_pam_finding(
+            Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
+            false,
+        );
+        assert!(missing.message.contains("is missing"));
+    }
+
+    #[test]
+    fn cosmic_pam_finding_separates_unreadable_from_missing() {
+        let denied = cosmic_pam_finding(
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            true,
+        );
+        assert_eq!(denied.level, Level::Warning);
+        assert!(denied.message.contains("could not read"));
+        assert!(!denied.message.contains("is missing"));
+    }
+
+    #[test]
+    fn cosmic_simultaneous_mode_is_found_through_one_include_level() {
+        let files = |path: &Path| -> std::io::Result<String> {
+            match path.to_str().unwrap() {
+                "/etc/pam.d/cosmic-greeter" => Ok("auth requisite pam_nologin.so\n\
+                     auth [success=done default=ignore] pam_gaze.so\n\
+                     @include common-auth\n"
+                    .into()),
+                "/etc/pam.d/common-auth" => {
+                    Ok("auth [success=end default=ignore] pam_gaze_grosshack.so\n\
+                     auth [success=1 default=ignore] pam_unix.so nullok\n"
+                        .into())
+                }
+                _ => Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
+            }
+        };
+        assert_eq!(
+            cosmic_simultaneous_source("/etc/pam.d/cosmic-greeter", files),
+            Some("/etc/pam.d/common-auth".to_string())
+        );
+    }
+
+    #[test]
+    fn cosmic_simultaneous_check_ignores_unused_services_and_comments() {
+        let files = |path: &Path| -> std::io::Result<String> {
+            match path.to_str().unwrap() {
+                "/etc/pam.d/cosmic-greeter" => Ok("# auth optional pam_gaze_grosshack.so\n\
+                     auth [success=done default=ignore] pam_gaze.so\n\
+                     @include common-auth\n"
+                    .into()),
+                "/etc/pam.d/common-auth" => {
+                    Ok("auth [success=1 default=ignore] pam_unix.so\n".into())
+                }
+                "/etc/pam.d/hyprlock-gaze-simultaneous" => {
+                    Ok("auth [success=done default=ignore] pam_gaze_grosshack.so\n".into())
+                }
+                _ => Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
+            }
+        };
+        assert_eq!(
+            cosmic_simultaneous_source("/etc/pam.d/cosmic-greeter", files),
+            None
+        );
     }
 
     #[test]

@@ -26,7 +26,7 @@ Facial authentication for Linux with on-device face recognition, PAM integration
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 ```
 
-The installer installs the Gaze daemon, CLI, and GUI. It installs the GNOME Shell extension only when it detects a GNOME desktop session; on KDE Plasma and other non-GNOME desktops it skips GNOME-specific packages so it does not pull in GNOME Shell. If you installed the GNOME extension manually or automatic enablement was not possible, reboot (so GNOME Shell scans the new extension) and then run from GNOME:
+The installer installs the Gaze daemon, CLI, and GUI. It installs the GNOME Shell extension only when it detects a GNOME desktop session; on KDE Plasma, COSMIC, and other non-GNOME desktops it skips GNOME-specific packages so it does not pull in GNOME Shell. On COSMIC it installs `gaze-cosmic`, which adds face unlock to the COSMIC lock screen and the cosmic-greeter login screen; on Hyprland it installs `gaze-hyprlock`. If you installed the GNOME extension manually or automatic enablement was not possible, reboot (so GNOME Shell scans the new extension) and then run from GNOME:
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
@@ -123,6 +123,7 @@ Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Matc
 | `pam-gaze` | PAM module for login/lock screen integration |
 | `gaze-gnome-extension` | GNOME Shell extension for lock screen auth |
 | `gaze-hyprlock` | PAM service for hyprlock face unlock on Hyprland |
+| `gaze-cosmic` | PAM wiring for the COSMIC lock screen and cosmic-greeter login |
 
 ## Configuration
 
