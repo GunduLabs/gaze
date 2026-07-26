@@ -5,7 +5,6 @@ import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
-const EXTENSION_SCHEMA_ID = 'org.gnome.shell.extensions.gaze';
 const GAZE_BUS_NAME = 'com.gundulabs.Gaze';
 const GAZE_OBJECT_PATH = '/com/gundulabs/Gaze';
 
@@ -33,7 +32,7 @@ function callGaze(method, params) {
 }
 export default class GazePreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
-        const extensionSettings = new Gio.Settings({schema_id: EXTENSION_SCHEMA_ID});
+        const extensionSettings = this.getSettings();
 
         const behaviorPage = new Adw.PreferencesPage({
             title: 'Behavior',

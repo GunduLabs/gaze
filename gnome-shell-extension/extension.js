@@ -32,7 +32,6 @@ const GAZE_DBUS_INTERFACE = `
 const GazeProxy = Gio.DBusProxy.makeProxyWrapper(GAZE_DBUS_INTERFACE);
 
 const FACE_SERVICE_NAME = "gdm-face";
-const EXTENSION_SCHEMA_ID = "org.gnome.shell.extensions.gaze";
 const FACE_AUTHENTICATION_KEY = "enable-face-authentication";
 const MAX_TRIES_KEY = "max-face-tries";
 const RETRY_MODE_KEY = "face-retry-mode";
@@ -139,9 +138,7 @@ const FACE_STATUS_UPDATES = new Set([
 export default class GazeFaceAuthExtension extends Extension {
   enable() {
     this._injectionManager = new InjectionManager();
-    this._extensionSettings = new Gio.Settings({
-      schema_id: EXTENSION_SCHEMA_ID,
-    });
+    this._extensionSettings = this.getSettings();
 
     const ext = this;
     const faceCache = { enrolled: new Map(), camera: null };

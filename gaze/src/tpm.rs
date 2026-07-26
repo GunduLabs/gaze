@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use anyhow::{Context as _, anyhow};
 use tss_esapi::attributes::ObjectAttributesBuilder;
@@ -11,6 +12,7 @@ use tss_esapi::structures::{
     PublicBuilder, PublicEccParametersBuilder, PublicKeyedHashParameters, SensitiveData,
     SymmetricDefinitionObject,
 };
+use tss_esapi::tcti_ldr::DeviceConfig;
 use tss_esapi::traits::{Marshall, UnMarshall};
 use tss_esapi::{Context, TctiNameConf};
 
@@ -21,10 +23,14 @@ pub const STATE_DIR: &str = "/var/lib/gaze/tpm";
 const PUB_FILE: &str = "dek.pub";
 const PRIV_FILE: &str = "dek.priv";
 
+const TPM_RM_DEVICE: &str = "/dev/tpmrm0";
+const TPM_RAW_DEVICE: &str = "/dev/tpm0";
+const TPM_DEVICES: [&str; 2] = [TPM_RM_DEVICE, TPM_RAW_DEVICE];
+
 pub fn load_or_create_dek(state_dir: &Path) -> anyhow::Result<[u8; KEY_LEN]> {
-    if !tpm_device_present() && !tcti_override_present() {
+    if tpm_device().is_none() && !tcti_override_present() {
         return Err(anyhow!(
-            "no TPM device found (looked for /dev/tpmrm0 and /dev/tpm0)"
+            "no TPM device found (looked for {TPM_RM_DEVICE} and {TPM_RAW_DEVICE})"
         ));
     }
 
@@ -62,8 +68,10 @@ pub fn load_or_create_dek(state_dir: &Path) -> anyhow::Result<[u8; KEY_LEN]> {
     Ok(dek)
 }
 
-fn tpm_device_present() -> bool {
-    Path::new("/dev/tpmrm0").exists() || Path::new("/dev/tpm0").exists()
+fn tpm_device() -> Option<&'static str> {
+    TPM_DEVICES
+        .into_iter()
+        .find(|device| Path::new(device).exists())
 }
 
 fn tcti_override_present() -> bool {
@@ -73,9 +81,14 @@ fn tcti_override_present() -> bool {
 }
 
 fn build_context() -> anyhow::Result<Context> {
-    let tcti = TctiNameConf::from_environment_variable()
-        .unwrap_or_else(|_| TctiNameConf::Device(Default::default()));
-    Ok(Context::new(tcti)?)
+    if let Ok(tcti) = TctiNameConf::from_environment_variable() {
+        return Ok(Context::new(tcti)?);
+    }
+
+    let device = tpm_device().unwrap_or(TPM_RAW_DEVICE);
+    let config = DeviceConfig::from_str(device)
+        .map_err(|e| anyhow!("invalid TPM device path {device}: {e}"))?;
+    Ok(Context::new(TctiNameConf::Device(config))?)
 }
 
 fn create_primary(context: &mut Context) -> anyhow::Result<tss_esapi::handles::KeyHandle> {
@@ -235,8 +248,15 @@ mod tests {
     static TPM_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn device_probe_does_not_panic() {
-        let _ = tpm_device_present();
+    fn device_probe_prefers_the_resource_manager() {
+        assert_eq!(TPM_DEVICES, [TPM_RM_DEVICE, TPM_RAW_DEVICE]);
+
+        if let Some(device) = tpm_device() {
+            assert!(Path::new(device).exists());
+            if Path::new(TPM_RM_DEVICE).exists() {
+                assert_eq!(device, TPM_RM_DEVICE);
+            }
+        }
     }
 
     #[test]
