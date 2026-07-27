@@ -25,6 +25,18 @@ pub const PAM_AUTHINFO_UNAVAIL: c_int = 9;
 pub const PAM_IGNORE: c_int = 25;
 
 pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
+
+/// Total time PAM will wait on the daemon, camera time plus any configured
+/// pre-auth delay.
+///
+/// The daemon sleeps for `start_delay_ms` (or `resume_grace_ms` on resume)
+/// inside `VerifyStart`, before it ever opens the camera. That sleep happens
+/// while PAM is blocked in this call, so the delay has to be added on top of
+/// the camera budget or it eats into it and the scan times out early.
+pub fn camera_auth_timeout(auth: &gaze_core::config::AuthConfig) -> std::time::Duration {
+    std::time::Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS)
+        + std::time::Duration::from_millis(auth.start_delay_ms.max(auth.resume_grace_ms))
+}
 const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to cancel.";
 pub const CONFIRMATION_REQUEST: &str = "GAZE_CONFIRMATION_REQUEST";
 pub const CONFIRMATION_ACK: &str = "CONFIRM";
@@ -650,6 +662,33 @@ pub fn graphical_confirm_decision(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pre_auth_delay_extends_the_camera_budget_instead_of_consuming_it() {
+        let mut auth = gaze_core::config::AuthConfig::default();
+        let base = std::time::Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS);
+
+        assert_eq!(camera_auth_timeout(&auth), base);
+
+        auth.start_delay_ms = 5000;
+        assert_eq!(
+            camera_auth_timeout(&auth),
+            base + std::time::Duration::from_millis(5000)
+        );
+
+        // The daemon waits for whichever delay is longer, so budget for that.
+        auth.resume_grace_ms = 9000;
+        assert_eq!(
+            camera_auth_timeout(&auth),
+            base + std::time::Duration::from_millis(9000)
+        );
+
+        auth.start_delay_ms = 0;
+        assert_eq!(
+            camera_auth_timeout(&auth),
+            base + std::time::Duration::from_millis(9000)
+        );
+    }
 
     #[test]
     fn gnome_with_active_extension_confirms_through_it() {

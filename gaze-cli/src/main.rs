@@ -386,6 +386,11 @@ async fn run_config_wizard(
         .default(config.auth.resume_grace_ms)
         .interact_text()?;
 
+    config.auth.start_delay_ms = Input::with_theme(&theme)
+        .with_prompt("Start delay in milliseconds (delays every auth, including sudo)")
+        .default(config.auth.start_delay_ms)
+        .interact_text()?;
+
     config.enrollment.max_templates = Input::with_theme(&theme)
         .with_prompt("Max templates (sets of captures)")
         .default(config.enrollment.max_templates)
@@ -1444,6 +1449,11 @@ async fn run() -> anyhow::Result<()> {
                     "{} {}",
                     style("auth.resume_grace_ms:").bold(),
                     config.auth.resume_grace_ms
+                );
+                println!(
+                    "{} {}",
+                    style("auth.start_delay_ms:").bold(),
+                    config.auth.start_delay_ms
                 );
 
                 println!(

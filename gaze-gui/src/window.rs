@@ -109,6 +109,7 @@ struct ConfigRows<'a> {
     abort_ssh: &'a gtk4::Switch,
     abort_lid: &'a gtk4::Switch,
     resume_grace: &'a libadwaita::SpinRow,
+    start_delay: &'a libadwaita::SpinRow,
     encrypt_templates: &'a gtk4::Switch,
 }
 
@@ -169,6 +170,7 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
     rows.abort_ssh.set_active(cfg.auth.abort_if_ssh);
     rows.abort_lid.set_active(cfg.auth.abort_if_lid_closed);
     rows.resume_grace.set_value(cfg.auth.resume_grace_ms as f64);
+    rows.start_delay.set_value(cfg.auth.start_delay_ms as f64);
     rows.encrypt_templates
         .set_active(cfg.storage.encrypt_templates);
 
@@ -363,6 +365,12 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     resume_grace_row.set_subtitle("Delay face authentication on wake from suspend");
     auth_group.add(&resume_grace_row);
 
+    let start_delay_row = libadwaita::SpinRow::with_range(0.0, 10000.0, 500.0);
+    start_delay_row.set_digits(0);
+    start_delay_row.set_title("Start Delay (ms)");
+    start_delay_row.set_subtitle("Delay before every face authentication, including sudo");
+    auth_group.add(&start_delay_row);
+
     let hybrid_names = ["Default", "Or", "Fallback on Dark", "And"];
     let hybrid_row = libadwaita::ComboRow::new();
     hybrid_row.set_title("Hybrid combining policy");
@@ -455,6 +463,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         resume_grace_row,
         #[weak]
+        start_delay_row,
+        #[weak]
         encrypt_templates_switch,
         #[strong]
         cameras,
@@ -506,6 +516,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             cfg.auth.abort_if_ssh = abort_ssh_switch.is_active();
             cfg.auth.abort_if_lid_closed = abort_lid_switch.is_active();
             cfg.auth.resume_grace_ms = resume_grace_row.value() as u64;
+            cfg.auth.start_delay_ms = start_delay_row.value() as u64;
             cfg.storage.encrypt_templates = encrypt_templates_switch.is_active();
 
             let cfg_to_apply = cfg.clone();
@@ -595,6 +606,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         apply_changes,
         move |_| apply_changes()
     ));
+    start_delay_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
     encrypt_templates_switch.connect_active_notify(glib::clone!(
         #[strong]
         apply_changes,
@@ -655,6 +671,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 abort_ssh: &abort_ssh_switch,
                 abort_lid: &abort_lid_switch,
                 resume_grace: &resume_grace_row,
+                start_delay: &start_delay_row,
                 encrypt_templates: &encrypt_templates_switch,
             },
             CameraChoices {
@@ -813,6 +830,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         resume_grace_row,
         #[weak]
+        start_delay_row,
+        #[weak]
         encrypt_templates_switch,
         #[strong]
         cameras,
@@ -852,6 +871,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                         abort_ssh: &abort_ssh_switch,
                         abort_lid: &abort_lid_switch,
                         resume_grace: &resume_grace_row,
+                        start_delay: &start_delay_row,
                         encrypt_templates: &encrypt_templates_switch,
                     },
                     CameraChoices {

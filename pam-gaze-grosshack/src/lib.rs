@@ -7,9 +7,11 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-async fn authenticate_biometric_with_timeout(username: &str) -> Option<c_int> {
+async fn authenticate_biometric_with_timeout(
+    username: &str,
+    timeout_duration: Duration,
+) -> Option<c_int> {
     let auth_future = authenticate_biometric(username);
-    let timeout_duration = Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS);
 
     tokio::select! {
         res = auth_future => {
@@ -103,7 +105,8 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         notify_clone.notify_one();
     });
 
-    let biometric_fut = authenticate_biometric_with_timeout(&username);
+    let biometric_fut =
+        authenticate_biometric_with_timeout(&username, camera_auth_timeout(&config.auth));
     let password_fut = notify.notified();
 
     enum SelectorResult {

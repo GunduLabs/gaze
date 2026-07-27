@@ -1470,19 +1470,16 @@ impl AuthDaemon {
         let claim = self.check_claim(&header).await?;
         self.ensure_auth_not_aborted(&header).await?;
 
-        if self.resume_pending.swap(false, Ordering::SeqCst) {
-            let grace = Duration::from_millis(
-                Config::load_from(CONFIG_PATH)
-                    .map(|c| c.auth.resume_grace_ms)
-                    .unwrap_or(0),
-            );
-            if !grace.is_zero() {
-                info!(
-                    ?grace,
-                    "Resumed from suspend, delaying face auth for display"
-                );
-                tokio::time::sleep(grace).await;
-            }
+        let resumed = self.resume_pending.swap(false, Ordering::SeqCst);
+        let delay = Duration::from_millis(
+            Config::load_from(CONFIG_PATH)
+                .map(|c| c.auth.effective_start_delay_ms(resumed))
+                .unwrap_or(0),
+        );
+        if !delay.is_zero() {
+            info!(?delay, resumed, "Delaying face auth before capture");
+            tokio::time::sleep(delay).await;
+            self.ensure_auth_not_aborted(&header).await?;
         }
 
         let username = claim.username.clone();
