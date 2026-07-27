@@ -35,17 +35,17 @@ rpm:
 overrides:
   deb:
     depends:
-      - libgtk-4-1
-      - libadwaita-1-0
+${DEB_LIB_DEPENDS}
     recommends:
       - gaze
   rpm:
     depends:
-      - gtk4
-      - libadwaita
+${RPM_LIB_DEPENDS}
     recommends:
       - gaze
   archlinux:
     depends:
+      - "opencv>=${OPENCV_MIN}"
+      - "opencv<${OPENCV_NEXT}"
       - gtk4
       - libadwaita

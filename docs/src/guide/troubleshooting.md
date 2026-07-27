@@ -71,6 +71,38 @@ If pacman reports that upgrading `opencv` would break the dependency and no
 updated `gaze-bin` exists yet, wait for the rebuilt release before upgrading,
 or build and install Gaze from source against the new OpenCV.
 
+### Daemon fails with "error while loading shared libraries: libopencv_*" (Debian/Ubuntu)
+
+```
+gazed: error while loading shared libraries: libopencv_core.so.406:
+cannot open shared object file: No such file or directory
+```
+
+Each Debian/Ubuntu release ships a different OpenCV soversion (24.04 has 4.6,
+26.04 has 4.10), so this means the installed package was built for another
+release. Check which one you have and which suite apt is pointed at:
+
+```bash
+dpkg-query -W -f='${Version}\n' gaze
+grep gundulabs /etc/apt/sources.list.d/gundulabs.list
+```
+
+The version suffix (`1~ubuntu24.04`, `1~ubuntu26.04`, `1~debian13`) has to match
+your release. Point apt at the suite for your release and reinstall:
+
+```bash
+suite="$(. /etc/os-release && echo "${VERSION_CODENAME:-$UBUNTU_CODENAME}")"
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb $suite main" \
+  | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
+sudo apt update
+sudo apt install --reinstall gaze gaze-gui
+sudo systemctl restart gazed
+```
+
+Do not symlink the newer OpenCV libraries to the missing soversions. The soname
+changes because the C++ ABI changed, so the daemon may start but can crash or
+corrupt data later.
+
 ## 2. Camera is not detected
 
 Use the primary GStreamer camera source first:

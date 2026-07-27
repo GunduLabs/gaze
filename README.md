@@ -40,11 +40,14 @@ gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 
 **Debian / Ubuntu**
 
+Each apt suite carries only the builds for that release: `noble` (Ubuntu 24.04), `questing` (Ubuntu 25.10), `resolute` (Ubuntu 26.04), `trixie` (Debian 13).
+
 ```bash
 sudo mkdir -p --mode=0755 /usr/share/keyrings
 curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.gpg \
   | sudo tee /usr/share/keyrings/gundulabs-archive-keyring.gpg >/dev/null
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb stable main" \
+suite="$(. /etc/os-release && echo "${VERSION_CODENAME:-$UBUNTU_CODENAME}")"
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb $suite main" \
   | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 sudo apt update
 sudo apt install gaze gaze-gui

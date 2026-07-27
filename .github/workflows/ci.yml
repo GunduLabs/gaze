@@ -18,6 +18,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   JUST_VERSION: 1.57.0
+  NFPM_VERSION: v2.47.0
   # ort-sys extracts ONNX Runtime here and links it by absolute path, so it
   # must be a path rust-cache persists (default ~/.cache is not).
   ORT_CACHE_DIR: /home/runner/.ort-cache
@@ -53,6 +54,8 @@ jobs:
             libtss2-dev \
             libgtk-4-dev \
             libadwaita-1-dev \
+            dpkg-dev \
+            gettext-base \
             pkg-config
 
       - name: Install Rust toolchain
@@ -97,3 +100,14 @@ jobs:
           CARGO_BUILD_JOBS: 2
           RUSTFLAGS: -Cdebuginfo=0
         run: just build-rust
+
+      - name: Install nfpm
+        run: |
+          nfpm_version="${NFPM_VERSION#v}"
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/${NFPM_VERSION}/nfpm_${nfpm_version}_Linux_x86_64.tar.gz" \
+            -o /tmp/nfpm.tar.gz
+          sudo tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm
+          nfpm --version
+
+      - name: Build and verify deb packages
+        run: VERSION=0.0.0 just package-prebuilt deb

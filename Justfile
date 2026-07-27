@@ -129,18 +129,86 @@ _nfpm config format:
     #!/usr/bin/env bash
     set -euo pipefail
     export ARCH="{{ if format == "deb" { deb_arch } else { arch } }}"
-    # Arch bumps the OpenCV soname on every minor release, so pin the package
-    # dependency to the soversion gazed actually linked; otherwise an opencv
-    # upgrade leaves the daemon crash-looping on a missing library instead of
-    # failing the pacman transaction.
-    if [ "{{ format }}" = "archlinux" ]; then
-        sover=$(objdump -p target/release/gazed | awk '/NEEDED/ && /libopencv_core\.so\./ { sub(/.*\.so\./, "", $2); print $2 }')
-        [[ "$sover" =~ ^[0-9]+$ ]] || { echo "_nfpm: cannot read libopencv_core soversion from target/release/gazed" >&2; exit 1; }
-        export OPENCV_MIN="$((sover / 100)).$((sover % 100))"
-        export OPENCV_NEXT="$((sover / 100)).$((sover % 100 + 1))"
+
+    binaries=()
+    while read -r src; do
+        [ -n "$src" ] || continue
+        [ -f "$src" ] || { echo "_nfpm: {{ config }} ships $src, which has not been built" >&2; exit 1; }
+        binaries+=("$src")
+    done < <(grep -oE 'target/release/[A-Za-z0-9_.+-]+' {{ quote(config) }} | sort -u)
+
+    needed() { objdump -p "${binaries[@]}" | awk '/NEEDED/ { print $2 }' | sort -u; }
+    yaml_list() { sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' -e 's/^/      - /'; }
+
+    lib_depends=""
+    if [ "${#binaries[@]}" -gt 0 ]; then
+        case "{{ format }}" in
+        deb)
+            command -v dpkg-shlibdeps >/dev/null 2>&1 || {
+                echo "_nfpm: dpkg-shlibdeps (dpkg-dev) is required to build deb packages; run inside a Debian/Ubuntu environment, e.g. 'just docker package-prebuilt deb'" >&2
+                exit 1
+            }
+            scaffold=$(mktemp -d)
+            mkdir -p "$scaffold/debian"
+            printf 'Source: gaze\n\nPackage: gaze\nArchitecture: any\nDescription: dpkg-shlibdeps scaffolding\n' \
+                > "$scaffold/debian/control"
+            absolute=()
+            for binary in "${binaries[@]}"; do absolute+=("$PWD/$binary"); done
+            field=$(cd "$scaffold" && dpkg-shlibdeps -O --warnings=0 "${absolute[@]}")
+            rm -rf "$scaffold"
+            lib_depends=$(printf '%s\n' "${field#*shlibs:Depends=}" | tr ',' '\n' | yaml_list)
+            ;;
+        rpm)
+            isa=""
+            objdump -f "${binaries[0]}" | grep -q 'file format elf64' && isa="()(64bit)"
+            requires=""
+            while read -r soname; do
+                if rpm -q --whatprovides "${soname}${isa}" >/dev/null 2>&1; then
+                    requires+="${soname}${isa}"$'\n'
+                else
+                    echo "_nfpm: no installed package provides ${soname}${isa}; leaving it out of Requires" >&2
+                fi
+            done < <(needed)
+            lib_depends=$(printf '%s' "$requires" | yaml_list)
+            ;;
+        archlinux)
+            # Arch bumps the OpenCV soname on every minor release, so pin the
+            # package dependency to the soversion the shipped binaries actually
+            # linked; otherwise an opencv upgrade leaves the daemon crash-looping
+            # on a missing library instead of failing the pacman transaction.
+            opencv_soname=$(needed | grep '^libopencv_core\.so\.' || true)
+            if [ -n "$opencv_soname" ]; then
+                sover=${opencv_soname##*.so.}
+                [[ "$sover" =~ ^[0-9]+$ ]] || { echo "_nfpm: cannot read libopencv_core soversion from {{ config }}" >&2; exit 1; }
+                export OPENCV_MIN="$((sover / 100)).$((sover % 100))"
+                export OPENCV_NEXT="$((sover / 100)).$((sover % 100 + 1))"
+            fi
+            ;;
+        esac
+
+        if [ "{{ format }}" != "archlinux" ]; then
+            [ -n "$lib_depends" ] || {
+                echo "_nfpm: resolved no library dependencies for {{ config }} ({{ format }})" >&2
+                exit 1
+            }
+            if needed | grep -q '^libopencv_core\.so\.'; then
+                opencv_pattern='libopencv-core[0-9]'
+                [ "{{ format }}" = "rpm" ] && opencv_pattern='libopencv_core\.so\.[0-9]'
+                grep -Eq "$opencv_pattern" <<< "$lib_depends" || {
+                    echo "_nfpm: generated {{ format }} dependencies for {{ config }} do not pin the OpenCV soversion" >&2
+                    exit 1
+                }
+            fi
+        fi
     fi
+
+    case "{{ format }}" in
+    deb) export DEB_LIB_DEPENDS="$lib_depends" ;;
+    rpm) export RPM_LIB_DEPENDS="$lib_depends" ;;
+    esac
+
     tmp_config=$(mktemp)
-    envsubst '$MULTIARCH $OPENCV_MIN $OPENCV_NEXT' < {{ quote(config) }} > "$tmp_config"
+    envsubst '$MULTIARCH $OPENCV_MIN $OPENCV_NEXT $DEB_LIB_DEPENDS $RPM_LIB_DEPENDS' < {{ quote(config) }} > "$tmp_config"
     {{ quote(nfpm) }} pkg -f "$tmp_config" --packager {{ format }} --target dist/packages
     rm -f "$tmp_config"
 
@@ -148,34 +216,75 @@ _nfpm config format:
 _dist-packages:
     mkdir -p dist/packages
 
-# Assert the arch package embeds a post_upgrade() scriptlet (no-op for deb/rpm)
-# and a version-bounded opencv dependency. Guards the nfpm archlinux
-# postupgrade mapping (without it, upgrades skip the daemon-reload /
-# polkit-restart / PAM setup in postinst-arch.sh) and the opencv soversion pin
-# (without it, an Arch opencv bump crash-loops gazed instead of failing the
-# pacman transaction).
+# Assert every packaged format pins the opencv soversion gazed linked against
+# (without it, an opencv bump or a package installed on the wrong distro release
+# crash-loops gazed instead of failing the package transaction), and that the
+# arch package embeds a post_upgrade() scriptlet (without it, upgrades skip the
+# daemon-reload / polkit-restart / PAM setup in postinst-arch.sh).
 [arg("format", pattern="deb|rpm|archlinux")]
 [private]
-_verify-arch format:
+_verify-package format:
     #!/usr/bin/env bash
     set -euo pipefail
-    [ "{{ format }}" = "archlinux" ] || exit 0
-    pkg=$(ls -t dist/packages/gaze-[0-9]*.pkg.tar.* 2>/dev/null | head -n1 || true)
-    [ -n "$pkg" ] || { echo "verify: no arch gaze package in dist/packages" >&2; exit 1; }
-    if tar -xOf "$pkg" .INSTALL 2>/dev/null | grep -q 'post_upgrade *()'; then
-        echo "verify: $(basename "$pkg") embeds post_upgrade() ✔"
-    else
-        echo "verify: FAIL: $(basename "$pkg") is missing post_upgrade(); arch upgrades will skip postinst-arch.sh" >&2
-        exit 1
-    fi
-    pkginfo=$(tar -xOf "$pkg" .PKGINFO 2>/dev/null)
-    if grep -Eq 'depend = opencv>=[0-9]+\.[0-9]+$' <<< "$pkginfo" \
-        && grep -Eq 'depend = opencv<[0-9]+\.[0-9]+$' <<< "$pkginfo"; then
-        echo "verify: $(basename "$pkg") pins opencv ($(grep -oE 'opencv[<>=]+[0-9.]+' <<< "$pkginfo" | tr '\n' ' ')) ✔"
-    else
-        echo "verify: FAIL: $(basename "$pkg") lacks a version-bounded opencv dependency; an opencv soname bump will crash-loop gazed" >&2
-        exit 1
-    fi
+
+    newest() { ls -t $1 2>/dev/null | head -n1 || true; }
+
+    case "{{ format }}" in
+    deb)
+        for name in gaze gaze-gui; do
+            pkg=$(newest "dist/packages/${name}_[0-9]*.deb")
+            [ -n "$pkg" ] || { echo "verify: no $name deb in dist/packages" >&2; exit 1; }
+            depends=$(dpkg-deb -f "$pkg" Depends)
+            case ",${depends}," in
+            *-dev[,\ ]*)
+                echo "verify: FAIL: $(basename "$pkg") depends on a -dev package: $depends" >&2
+                exit 1
+                ;;
+            esac
+            if grep -Eq 'libopencv-core[0-9]' <<< "$depends"; then
+                echo "verify: $(basename "$pkg") pins opencv ($(grep -oE 'libopencv-[a-z]+[0-9]+[a-z0-9]*' <<< "$depends" | tr '\n' ' ')) ✔"
+            elif [ "$name" = "gaze" ]; then
+                echo "verify: FAIL: $(basename "$pkg") lacks a soversioned opencv dependency: $depends" >&2
+                exit 1
+            else
+                echo "verify: $(basename "$pkg") declares library dependencies ✔"
+            fi
+        done
+        ;;
+    rpm)
+        pkg=$(newest "dist/packages/gaze-[0-9]*.rpm")
+        [ -n "$pkg" ] || { echo "verify: no gaze rpm in dist/packages" >&2; exit 1; }
+        requires=$(rpm -qp --requires "$pkg" 2>/dev/null)
+        if grep -Eq 'libopencv_core\.so\.[0-9]+' <<< "$requires"; then
+            echo "verify: $(basename "$pkg") pins opencv ($(grep -oE 'libopencv_[a-z0-9]+\.so\.[0-9]+' <<< "$requires" | tr '\n' ' ')) ✔"
+        else
+            echo "verify: FAIL: $(basename "$pkg") lacks a soname opencv requirement" >&2
+            exit 1
+        fi
+        ;;
+    archlinux)
+        pkg=$(newest "dist/packages/gaze-[0-9]*.pkg.tar.*")
+        [ -n "$pkg" ] || { echo "verify: no arch gaze package in dist/packages" >&2; exit 1; }
+        if tar -xOf "$pkg" .INSTALL 2>/dev/null | grep -q 'post_upgrade *()'; then
+            echo "verify: $(basename "$pkg") embeds post_upgrade() ✔"
+        else
+            echo "verify: FAIL: $(basename "$pkg") is missing post_upgrade(); arch upgrades will skip postinst-arch.sh" >&2
+            exit 1
+        fi
+        for name in gaze gaze-gui; do
+            pkg=$(newest "dist/packages/${name}-[0-9]*.pkg.tar.*")
+            [ -n "$pkg" ] || { echo "verify: no arch $name package in dist/packages" >&2; exit 1; }
+            pkginfo=$(tar -xOf "$pkg" .PKGINFO 2>/dev/null)
+            if grep -Eq 'depend = opencv>=[0-9]+\.[0-9]+$' <<< "$pkginfo" \
+                && grep -Eq 'depend = opencv<[0-9]+\.[0-9]+$' <<< "$pkginfo"; then
+                echo "verify: $(basename "$pkg") pins opencv ($(grep -oE 'opencv[<>=]+[0-9.]+' <<< "$pkginfo" | tr '\n' ' ')) ✔"
+            else
+                echo "verify: FAIL: $(basename "$pkg") lacks a version-bounded opencv dependency; an opencv soname bump will crash-loop it" >&2
+                exit 1
+            fi
+        done
+        ;;
+    esac
 
 # Build nfpm packages for a given packager
 [arg("format", pattern="deb|rpm|archlinux")]
@@ -186,7 +295,7 @@ package format: build-rust build-selinux && (package-prebuilt format)
 # Package already-built artifacts for a given packager
 [arg("format", pattern="deb|rpm|archlinux")]
 [group("package")]
-package-prebuilt format: _dist-packages (_nfpm "packaging/nfpm.yaml" format) (_nfpm "packaging/nfpm-gui.yaml" format) (_nfpm "packaging/nfpm-gnome-extension.yaml" format) (_nfpm "packaging/nfpm-hyprlock.yaml" format) && (_verify-arch format)
+package-prebuilt format: _dist-packages (_nfpm "packaging/nfpm.yaml" format) (_nfpm "packaging/nfpm-gui.yaml" format) (_nfpm "packaging/nfpm-gnome-extension.yaml" format) (_nfpm "packaging/nfpm-hyprlock.yaml" format) && (_verify-package format)
     @echo "Packages written to dist/packages/"
 
 # Remove all generated artifacts
