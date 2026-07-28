@@ -25,6 +25,7 @@ pub const PAM_AUTHINFO_UNAVAIL: c_int = 9;
 pub const PAM_IGNORE: c_int = 25;
 
 pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
+pub const FACE_PAM_SERVICE: &str = "gdm-face";
 const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to cancel.";
 pub const CONFIRMATION_REQUEST: &str = "GAZE_CONFIRMATION_REQUEST";
 pub const CONFIRMATION_ACK: &str = "CONFIRM";
@@ -575,6 +576,13 @@ pub unsafe fn get_pam_service(pamh: PamHandle) -> Option<String> {
     }
 }
 
+pub fn service_defers_to_face_service(service: Option<&str>) -> bool {
+    match service {
+        Some(name) => name.starts_with("gdm-") && name != FACE_PAM_SERVICE,
+        None => false,
+    }
+}
+
 pub fn detect_desktop_environment(uid: u32) -> String {
     let mut is_kde = false;
     let mut is_hyprland = false;
@@ -650,6 +658,35 @@ pub fn graphical_confirm_decision(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gdm_services_other_than_face_defer() {
+        for service in ["gdm-password", "gdm-fingerprint", "gdm-launch-environment"] {
+            assert!(
+                service_defers_to_face_service(Some(service)),
+                "{service} must defer to gdm-face"
+            );
+        }
+    }
+
+    #[test]
+    fn face_service_and_non_gdm_services_run() {
+        for service in [
+            "gdm-face",
+            "polkit-1",
+            "sudo",
+            "login",
+            "su",
+            "hyprlock-gaze",
+            "sddm",
+        ] {
+            assert!(
+                !service_defers_to_face_service(Some(service)),
+                "{service} must still run face auth"
+            );
+        }
+        assert!(!service_defers_to_face_service(None));
+    }
 
     #[test]
     fn gnome_with_active_extension_confirms_through_it() {

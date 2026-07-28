@@ -514,8 +514,8 @@ export default class GazeFaceAuthExtension extends Extension {
       "_onSecretInfoQuery",
       (original) => {
         return function (client, serviceName, secretQuestion) {
-          // Distro PAM stacks (e.g. Fedora's password-auth) run pam_gaze on
-          // gdm-password too, so match the token on any service.
+          // pam_gaze defers to gdm-face on every other GDM service, but other
+          // stacks can still route the token here, so match it on any service.
           if (secretQuestion?.trim() === CONFIRMATION_REQUEST) {
             gazeTiming("CONFIRM_SHOWN", `svc=${serviceName} path=secretInfoQuery`);
             // _filterServiceMessages only force-clears the display when another

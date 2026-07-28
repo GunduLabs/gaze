@@ -74,6 +74,11 @@ fn retire_prompt(state: &SharedAuthState, prompt_thread: thread::JoinHandle<()>)
 }
 
 unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
+    let service = unsafe { get_pam_service(pamh) };
+    if service_defers_to_face_service(service.as_deref()) {
+        return PAM_IGNORE;
+    }
+
     let (username, rt) = match unsafe { username_and_runtime(pamh) } {
         Ok(ctx) => ctx,
         Err(code) => return code,
@@ -93,7 +98,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
     unsafe { say(pamh, LOOK_OR_PASSWORD_PROMPT) };
 
-    let is_polkit = matches!(unsafe { get_pam_service(pamh) }, Some(ref s) if s == "polkit-1");
+    let is_polkit = matches!(service, Some(ref s) if s == "polkit-1");
 
     let state = new_auth_state();
 
