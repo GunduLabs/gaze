@@ -29,13 +29,15 @@ pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
 /// Total time PAM will wait on the daemon, camera time plus any configured
 /// pre-auth delay.
 ///
-/// The daemon sleeps for `start_delay_ms` (or `resume_grace_ms` on resume)
-/// inside `VerifyStart`, before it ever opens the camera. That sleep happens
-/// while PAM is blocked in this call, so the delay has to be added on top of
-/// the camera budget or it eats into it and the scan times out early.
+/// The daemon waits for `start_delay_ms` (or `resume_grace_ms` on resume)
+/// after `VerifyStart` returns and before it opens the camera. PAM is blocked
+/// waiting on the verification signal for that whole wait, so the delay has to
+/// be added on top of the camera budget or it eats into it and the scan times
+/// out early. The resumed value is used because PAM cannot tell whether the
+/// daemon is about to treat this authentication as a resume.
 pub fn camera_auth_timeout(auth: &gaze_core::config::AuthConfig) -> std::time::Duration {
     std::time::Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS)
-        + std::time::Duration::from_millis(auth.start_delay_ms.max(auth.resume_grace_ms))
+        + std::time::Duration::from_millis(auth.effective_start_delay_ms(true))
 }
 const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to cancel.";
 pub const CONFIRMATION_REQUEST: &str = "GAZE_CONFIRMATION_REQUEST";
