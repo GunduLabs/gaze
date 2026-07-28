@@ -1471,16 +1471,6 @@ impl AuthDaemon {
         self.ensure_auth_not_aborted(&header).await?;
 
         let resumed = self.resume_pending.swap(false, Ordering::SeqCst);
-        let delay = Duration::from_millis(
-            Config::load_from(CONFIG_PATH)
-                .map(|c| c.auth.effective_start_delay_ms(resumed))
-                .unwrap_or(0),
-        );
-        if !delay.is_zero() {
-            info!(?delay, resumed, "Delaying face auth before capture");
-            tokio::time::sleep(delay).await;
-            self.ensure_auth_not_aborted(&header).await?;
-        }
 
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
@@ -1497,6 +1487,8 @@ impl AuthDaemon {
         let threshold_arc = self.threshold.clone();
 
         let config = Config::load_from(CONFIG_PATH).unwrap_or_default();
+        let delay = Duration::from_millis(config.auth.effective_start_delay_ms(resumed));
+        let abort_if_lid_closed = *self.abort_if_lid_closed.lock().await;
         let rgb_device = self.rgb_device.lock().await.clone();
         let ir_device = self.ir_device.lock().await.clone();
         let emitter_enabled = *self.emitter_enabled.lock().await;
@@ -1547,6 +1539,20 @@ impl AuthDaemon {
                 error!("No matching templates or cameras configured for auth");
                 let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
                 return;
+            }
+
+            if !delay.is_zero() {
+                info!(?delay, resumed, "Delaying face auth before capture");
+                if tokio::time::timeout(delay, &mut rx).await.is_ok() {
+                    info!("VerifyStart: cancelled during start delay");
+                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                    return;
+                }
+                if abort_if_lid_closed && Self::is_lid_closed().await {
+                    warn!("Laptop lid is closed, aborting face auth");
+                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                    return;
+                }
             }
 
             info!(
