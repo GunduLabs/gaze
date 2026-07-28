@@ -115,6 +115,19 @@ in
       };
     };
 
+    tpm.tcti = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "device:/dev/tpm0";
+      description = ''
+        TCTI connection string for sealing template keys, exported to the
+        daemon as `TPM2TOOLS_TCTI`. When null, the daemon uses
+        {file}`/dev/tpmrm0` if it exists and {file}`/dev/tpm0` otherwise. Set
+        this only if neither node is the one you want, for example to reach a
+        TPM through `tabrmd`.
+      '';
+    };
+
     gui = {
       enable = lib.mkEnableOption "the Gaze GTK4/Adwaita configuration GUI";
 
@@ -163,6 +176,9 @@ in
           after = [ "dbus.service" ];
           requires = [ "dbus.service" ];
           wantedBy = [ "multi-user.target" ];
+          environment = lib.optionalAttrs (cfg.tpm.tcti != null) {
+            TPM2TOOLS_TCTI = cfg.tpm.tcti;
+          };
           serviceConfig = {
             ExecStart = "${cfg.package}/bin/gazed";
             Restart = "on-failure";
@@ -236,6 +252,8 @@ in
 
       (lib.mkIf cfg.gnome.enable {
         environment.systemPackages = [ cfg.gnome.extensionPackage ];
+        # The daemon reads the GDM face-login state out of the gdm dconf profile.
+        systemd.services.gazed.path = [ pkgs.dconf ];
         # Expose the extension to GNOME Shell (and to the GDM greeter).
         environment.pathsToLink = [ "/share/gnome-shell" ];
 

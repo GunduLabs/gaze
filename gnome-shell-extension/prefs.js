@@ -166,6 +166,7 @@ export default class GazePreferences extends ExtensionPreferences {
                 Gio.DBusError.strip_remote_error(error);
                 message = `Could not update GDM login face auth: ${error.message}`;
             }
+            gdmRow.set_subtitle(message);
             if (typeof window.add_toast === 'function')
                 window.add_toast(new Adw.Toast({title: message}));
         };

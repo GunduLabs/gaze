@@ -15,8 +15,8 @@
 }:
 
 let
-  # Runtime GStreamer plugins (v4l2src, pipewiresrc).
-  gstPluginPath = lib.makeSearchPath "lib/gstreamer-1.0" [
+  # Runtime plugins from the `out` output; gstreamer's default output is `bin`, which has none.
+  gstPluginPath = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
     gst_all_1.gstreamer
     gst_all_1.gst-plugins-base
     gst_all_1.gst-plugins-good

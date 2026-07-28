@@ -15,7 +15,8 @@
 }:
 
 let
-  gstPluginPath = lib.makeSearchPath "lib/gstreamer-1.0" [
+  # `out`, not the default output; see packaging/nix/gaze.nix.
+  gstPluginPath = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
     gst_all_1.gstreamer
     gst_all_1.gst-plugins-base
     gst_all_1.gst-plugins-good

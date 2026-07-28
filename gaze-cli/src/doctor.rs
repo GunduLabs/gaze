@@ -4,6 +4,7 @@ use gaze_core::dbus::{
     GazeProxy, dbus_error_message, dbus_is_file_not_found, dbus_is_not_activatable,
 };
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
@@ -17,6 +18,9 @@ const PAM_MODULES: [&str; 2] = ["pam_gaze.so", "pam_gaze_grosshack.so"];
 const GNOME_EXTENSION_ID: &str = "gaze@gundulabs.com";
 const GNOME_EXTENSION_SCHEMA: &str = "org.gnome.shell.extensions.gaze";
 const GDM_FACE_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
+const GDM_DCONF_PROFILE: &str = "gdm";
+const GDM_DCONF_PROFILE_PATH: &str = "/etc/dconf/profile/gdm";
+const GDM_DCONF_FACE_AUTH_KEY: &str = "/org/gnome/shell/extensions/gaze/enable-face-authentication";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Level {
@@ -164,7 +168,7 @@ fn command_output(program: &str, args: &[&str]) -> std::io::Result<(bool, String
 fn command_output_env(
     program: &str,
     args: &[&str],
-    env: &[(&str, &Path)],
+    env: &[(&str, &OsStr)],
 ) -> std::io::Result<(bool, String)> {
     let mut command = Command::new(program);
     command.args(args);
@@ -220,11 +224,27 @@ fn extension_schema_dir_in(data_dirs: &[PathBuf]) -> Option<PathBuf> {
 
 fn extension_setting(key: &str) -> std::io::Result<(bool, String)> {
     let schema_dir = extension_schema_dir();
-    let env: Vec<(&str, &Path)> = schema_dir
+    let env: Vec<(&str, &OsStr)> = schema_dir
         .as_deref()
-        .map(|dir| vec![("GSETTINGS_SCHEMA_DIR", dir)])
+        .map(|dir| vec![("GSETTINGS_SCHEMA_DIR", dir.as_os_str())])
         .unwrap_or_default();
     command_output_env("gsettings", &["get", GNOME_EXTENSION_SCHEMA, key], &env)
+}
+
+/// The value GDM itself sees, which a NixOS configuration sets without `GDM_FACE_OVERRIDE_PATH`.
+fn gdm_face_auth_from_dconf() -> Option<bool> {
+    if !Path::new(GDM_DCONF_PROFILE_PATH).exists() {
+        return None;
+    }
+    let env = [("DCONF_PROFILE", OsStr::new(GDM_DCONF_PROFILE))];
+    match command_output_env("dconf", &["read", GDM_DCONF_FACE_AUTH_KEY], &env) {
+        Ok((true, value)) => match value.trim() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn check_systemd(report: &mut Report) {
@@ -711,15 +731,26 @@ fn check_desktop_integration(report: &mut Report) {
             ),
         }
 
-        if Path::new(GDM_FACE_OVERRIDE_PATH).exists() {
-            report.pass(
+        let override_exists = Path::new(GDM_FACE_OVERRIDE_PATH).exists();
+        match (gdm_face_auth_from_dconf(), override_exists) {
+            (Some(false), true) => report.warning(
+                "GDM login face auth",
+                format!(
+                    "{GDM_FACE_OVERRIDE_PATH} enables it, but the compiled GDM dconf database still reports it disabled"
+                ),
+                "Run `sudo dconf update`, then restart GDM (or reboot).",
+            ),
+            (Some(true), false) => report.pass(
+                "GDM login face auth",
+                "enabled in the GDM dconf profile by your system configuration, not by Gaze (on NixOS, `services.gaze.gnome.gdmFaceLogin`)",
+            ),
+            (_, true) => report.pass(
                 "GDM login face auth",
                 format!(
                     "enabled system-wide via {GDM_FACE_OVERRIDE_PATH}; toggle it from the extension preferences \"GDM login screen\" section"
                 ),
-            );
-        } else {
-            report.pass("GDM login face auth", "disabled");
+            ),
+            (_, false) => report.pass("GDM login face auth", "disabled"),
         }
     }
 

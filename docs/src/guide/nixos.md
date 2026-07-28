@@ -35,8 +35,9 @@ Add the flake input and import the module:
     gaze = {
       url = "github:GunduLabs/gaze";
       # Optional, saves a second nixpkgs evaluation. Only do this if your
-      # nixpkgs is unstable; a stable channel's Rust toolchain can be too
-      # old to build Gaze's dependency tree.
+      # nixpkgs is unstable: Gaze is edition 2024, and a stable channel's
+      # older rustc fails partway through the dependency tree (`kstring`,
+      # pulled in by the gstreamer crate, is usually the first to break).
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -100,6 +101,7 @@ compatible `onnxruntime` instead of overriding `follows`.
 | `services.gaze.gui.enable` | `false` | Install `gaze-gui` |
 | `services.gaze.gnome.enable` | `false` | Install the GNOME Shell extension and the `gdm-face` PAM service |
 | `services.gaze.gnome.gdmFaceLogin` | `false` | Also enable face auth at the GDM login screen (read the [GNOME guide](/guide/gnome) first) |
+| `services.gaze.tpm.tcti` | `null` | `TPM2TOOLS_TCTI` for the daemon, e.g. `"device:/dev/tpm0"`. Only needed when neither `/dev/tpmrm0` nor `/dev/tpm0` is the right node |
 
 The gaze PAM rule is inserted ahead of both `pam_fprintd` and `pam_unix`, so
 face auth is tried first and the fingerprint reader and password both remain
@@ -161,9 +163,10 @@ dconf write /org/gnome/shell/extensions/gaze/enable-face-authentication true
 
 Log out and back in once if the lock screen does not pick it up immediately.
 GDM *login* face auth stays disabled unless you set
-`services.gaze.gnome.gdmFaceLogin = true;`. The GUI's GDM toggle cannot work
-on NixOS, because the GDM dconf database is managed by your NixOS
-configuration.
+`services.gaze.gnome.gdmFaceLogin = true;`. The extension preferences and
+`gaze doctor` both report whatever that option compiled into the GDM dconf
+profile, but the toggle itself cannot change it: the profile belongs to your
+NixOS configuration, so switching it there is the only way.
 
 ### hyprlock
 

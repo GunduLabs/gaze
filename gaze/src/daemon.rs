@@ -33,6 +33,9 @@ const POLKIT_ACTION_MANAGE_GDM_PROFILE: &str = "com.gundulabs.gaze.manage-gdm-pr
 const GDM_DCONF_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
 const GDM_DCONF_OVERRIDE_CONTENT: &str =
     "[org/gnome/shell/extensions/gaze]\nenable-face-authentication=true\n";
+const GDM_DCONF_PROFILE: &str = "gdm";
+const GDM_DCONF_PROFILE_PATH: &str = "/etc/dconf/profile/gdm";
+const GDM_DCONF_FACE_AUTH_KEY: &str = "/org/gnome/shell/extensions/gaze/enable-face-authentication";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
 const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
 const VERIFY_NO_FACE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -931,6 +934,42 @@ mod tests {
 }
 
 pub use gaze_core::dbus::get_active_session_uid;
+
+/// The effective value in the GDM profile, which a NixOS configuration sets without our override file.
+fn gdm_face_auth_from_dconf() -> Option<bool> {
+    if !std::path::Path::new(GDM_DCONF_PROFILE_PATH).exists() {
+        return None;
+    }
+    let output = std::process::Command::new("dconf")
+        .arg("read")
+        .arg(GDM_DCONF_FACE_AUTH_KEY)
+        .env("DCONF_PROFILE", GDM_DCONF_PROFILE)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    match String::from_utf8_lossy(&output.stdout).trim() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+fn gdm_override_error(action: &str, path: &std::path::Path, err: std::io::Error) -> fdo::Error {
+    if matches!(
+        err.kind(),
+        std::io::ErrorKind::ReadOnlyFilesystem | std::io::ErrorKind::PermissionDenied
+    ) {
+        return fdo::Error::Failed(format!(
+            "Failed to {action} {}: {err}. The GDM dconf database is read-only, \
+             so it is managed by your system configuration rather than by Gaze; \
+             on NixOS set `services.gaze.gnome.gdmFaceLogin` instead.",
+            path.display()
+        ));
+    }
+    fdo::Error::Failed(format!("Failed to {action} {}: {err}", path.display()))
+}
 
 static PIPEWIRE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -2828,6 +2867,9 @@ impl AuthDaemon {
     }
 
     async fn get_gdm_face_auth(&self) -> fdo::Result<bool> {
+        if let Some(enabled) = gdm_face_auth_from_dconf() {
+            return Ok(enabled);
+        }
         Ok(std::path::Path::new(GDM_DCONF_OVERRIDE_PATH).exists())
     }
 
@@ -2839,19 +2881,21 @@ impl AuthDaemon {
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_GDM_PROFILE).await?;
 
         let path = std::path::Path::new(GDM_DCONF_OVERRIDE_PATH);
+        // Already in the requested state elsewhere, so don't write a read-only /etc.
+        if !path.exists() && gdm_face_auth_from_dconf() == Some(enabled) {
+            info!(enabled, "GDM face authentication already set outside Gaze");
+            return Ok(enabled);
+        }
+
         if enabled {
             if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    fdo::Error::Failed(format!("Failed to create {}: {e}", parent.display()))
-                })?;
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| gdm_override_error("create", parent, e))?;
             }
-            std::fs::write(path, GDM_DCONF_OVERRIDE_CONTENT).map_err(|e| {
-                fdo::Error::Failed(format!("Failed to write {GDM_DCONF_OVERRIDE_PATH}: {e}"))
-            })?;
+            std::fs::write(path, GDM_DCONF_OVERRIDE_CONTENT)
+                .map_err(|e| gdm_override_error("write", path, e))?;
         } else if path.exists() {
-            std::fs::remove_file(path).map_err(|e| {
-                fdo::Error::Failed(format!("Failed to remove {GDM_DCONF_OVERRIDE_PATH}: {e}"))
-            })?;
+            std::fs::remove_file(path).map_err(|e| gdm_override_error("remove", path, e))?;
         }
 
         let status = std::process::Command::new("dconf")
