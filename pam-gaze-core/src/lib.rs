@@ -25,6 +25,7 @@ pub const PAM_AUTHINFO_UNAVAIL: c_int = 9;
 pub const PAM_IGNORE: c_int = 25;
 
 pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
+pub const FACE_PAM_SERVICE: &str = "gdm-face";
 
 /// Total time PAM will wait on the daemon, camera time plus any configured
 /// pre-auth delay.
@@ -589,6 +590,13 @@ pub unsafe fn get_pam_service(pamh: PamHandle) -> Option<String> {
     }
 }
 
+pub fn service_defers_to_face_service(service: Option<&str>) -> bool {
+    match service {
+        Some(name) => name.starts_with("gdm-") && name != FACE_PAM_SERVICE,
+        None => false,
+    }
+}
+
 pub fn detect_desktop_environment(uid: u32) -> String {
     let mut is_kde = false;
     let mut is_hyprland = false;
@@ -690,6 +698,35 @@ mod tests {
             camera_auth_timeout(&auth),
             base + std::time::Duration::from_millis(9000)
         );
+    }
+
+    #[test]
+    fn gdm_services_other_than_face_defer() {
+        for service in ["gdm-password", "gdm-fingerprint", "gdm-launch-environment"] {
+            assert!(
+                service_defers_to_face_service(Some(service)),
+                "{service} must defer to gdm-face"
+            );
+        }
+    }
+
+    #[test]
+    fn face_service_and_non_gdm_services_run() {
+        for service in [
+            "gdm-face",
+            "polkit-1",
+            "sudo",
+            "login",
+            "su",
+            "hyprlock-gaze",
+            "sddm",
+        ] {
+            assert!(
+                !service_defers_to_face_service(Some(service)),
+                "{service} must still run face auth"
+            );
+        }
+        assert!(!service_defers_to_face_service(None));
     }
 
     #[test]

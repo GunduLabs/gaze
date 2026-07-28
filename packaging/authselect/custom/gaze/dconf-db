@@ -2,6 +2,3 @@
 enable-smartcard-authentication=false
 enable-fingerprint-authentication={if "with-fingerprint":true|false}
 enable-switchable-authentication=false
-
-[org/gnome/login-screen/gaze]
-enable-face-authentication=true
