@@ -101,7 +101,7 @@ jobs:
           RUSTFLAGS: -Cdebuginfo=0
         run: just build-rust
 
-- name: Install nfpm
+      - name: Install nfpm
         run: |
           nfpm_version="${NFPM_VERSION#v}"
           curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/${NFPM_VERSION}/nfpm_${nfpm_version}_Linux_x86_64.tar.gz" \
@@ -120,7 +120,7 @@ jobs:
         run: |
           nix flake check --no-build
           for a in gaze gaze-gui gaze-gnome-extension; do
-            nix eval --raw ".#packages.x86_64-linux.
+            nix eval --raw ".#packages.x86_64-linux.$a.drvPath"
             echo
           done
 
@@ -128,7 +128,7 @@ jobs:
         run: |
           nix eval --raw --impure --expr '
             let
-              flake = builtins.getFlake (toString ./
+              flake = builtins.getFlake (toString ./.);
               sys = flake.inputs.nixpkgs.lib.nixosSystem {
                 system = "x86_64-linux";
                 modules = [
@@ -142,11 +142,11 @@ jobs:
                       gui.enable = true;
                       gnome.enable = true;
                     };
-                    # Exercises pam.defaultServices,
+                    # Exercises pam.defaultServices, an explicitly enabled
                     # service on the nixpkgs PAM submodule, the
-                    # gaze-before-fprintd rule order
+                    # gaze-before-fprintd rule ordering, and the TPM
                     # supplementary group.
-                    security.pam.services.login.gaze
+                    security.pam.services.login.gaze = {
                       enable = true;
                       simultaneous = true;
                     };
