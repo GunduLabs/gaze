@@ -89,16 +89,14 @@ overrides:
       postinstall: "packaging/postinst-deb.sh"
       preremove: "packaging/prerm-deb.sh"
     depends:
-      - libopencv-dev
       - libpam0g
-      - libtss2-dev
+${DEB_LIB_DEPENDS}
   rpm:
     scripts:
       postinstall: "packaging/postinst-rpm.sh"
     depends:
-      - opencv
       - pam
-      - tpm2-tss
+${RPM_LIB_DEPENDS}
   archlinux:
     scripts:
       postinstall: "packaging/postinst-arch.sh"

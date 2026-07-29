@@ -4,12 +4,12 @@ Gaze is configured with `/etc/gaze/config.toml`.
 
 Most users only need to change camera source or security level.
 
-::: tip Editing config requires admin authorization
-`gaze config` writes settings through the daemon, which is guarded by
-PolicyKit, so you are prompted for an administrator password when saving. Over
-SSH or on a plain TTY, `gaze` registers a terminal agent (`pkttyagent`) so the
-prompt appears in your shell; make sure the `polkit` package is installed. In a
-graphical session the desktop's password dialog is used instead.
+::: tip Editing config requires admin privileges
+Settings are written through the daemon, which refuses unauthorized writes.
+`gaze config` re-runs itself through `sudo` and prompts for your password;
+`gaze config --show` is read-only and needs no privileges. The GUI settings
+window instead authorizes through PolicyKit and uses the desktop's password
+dialog, so make sure the `polkit` package is installed.
 :::
 
 ## Default config
@@ -29,6 +29,7 @@ abort_if_ssh = true
 abort_if_lid_closed = true
 require_confirmation = false
 resume_grace_ms = 0
+start_delay_ms = 0
 
 [enrollment]
 max_templates = 2
@@ -180,6 +181,7 @@ abort_if_ssh = true
 abort_if_lid_closed = true
 require_confirmation = false
 resume_grace_ms = 0
+start_delay_ms = 0
 ```
 
 `abort_if_ssh` detects SSH sessions from the DBus caller process environment. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor.
@@ -202,6 +204,17 @@ With the `pam-gaze-grosshack` module:
     - On other graphical environments, it prompts you to press "Enter" to confirm.
 
 `resume_grace_ms` delays face verification on system resume by the specified number of milliseconds (e.g. `3000` ms) to allow slower displays/GPUs to initialize and repaint, preventing verification from occurring behind a blank screen. Set to `0` to disable the delay.
+
+`start_delay_ms` delays face verification by the specified number of milliseconds, not only after suspend. Set to `0` to disable the delay.
+
+The daemon cannot tell which kind of prompt asked it to verify, so this delay applies to *every* face authentication, `sudo` and polkit prompts included, not just lock screens. Keep the value small if you use face authentication for `sudo`.
+
+Use it when your lock screen unlocks itself the moment you lock it manually. Lockers differ in when they start authenticating: hyprlock starts its PAM stack as soon as it launches, so if you are still sitting in front of the camera when you lock, Gaze matches your face and unlocks again immediately. A delay of `3000`-`5000` ms gives you time to step away. The GNOME lock screen does not need this, because face authentication there only begins once you dismiss the lock shield.
+
+Two things to keep in mind:
+
+- On resume from suspend, Gaze waits for whichever of `start_delay_ms` and `resume_grace_ms` is longer. The two do not stack.
+- With a sequential PAM stack (`hyprlock-gaze`, the default), `pam_gaze.so` runs before the password module, so the delay also postpones the point at which a typed password is accepted. You can type during the delay, but your first Enter may be consumed while PAM is still inside Gaze, requiring a second press. This is the same behavior as the existing wait while a face scan is in progress. The simultaneous stack (`hyprlock-gaze-simultaneous`) prompts for the password in parallel and avoids it.
 
 After changing config:
 

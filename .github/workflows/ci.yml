@@ -18,6 +18,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   JUST_VERSION: 1.57.0
+  NFPM_VERSION: v2.47.0
   # ort-sys extracts ONNX Runtime here and links it by absolute path, so it
   # must be a path rust-cache persists (default ~/.cache is not).
   ORT_CACHE_DIR: /home/runner/.ort-cache
@@ -53,6 +54,8 @@ jobs:
             libtss2-dev \
             libgtk-4-dev \
             libadwaita-1-dev \
+            dpkg-dev \
+            gettext-base \
             pkg-config
 
       - name: Install Rust toolchain
@@ -98,6 +101,17 @@ jobs:
           RUSTFLAGS: -Cdebuginfo=0
         run: just build-rust
 
+- name: Install nfpm
+        run: |
+          nfpm_version="${NFPM_VERSION#v}"
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/${NFPM_VERSION}/nfpm_${nfpm_version}_Linux_x86_64.tar.gz" \
+            -o /tmp/nfpm.tar.gz
+          sudo tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm
+          nfpm --version
+
+      - name: Build and verify deb packages
+        run: VERSION=0.0.0 just package-prebuilt deb
+
       - name: Install Nix
         uses: cachix/install-nix-action@v31
 
@@ -106,7 +120,7 @@ jobs:
         run: |
           nix flake check --no-build
           for a in gaze gaze-gui gaze-gnome-extension; do
-            nix eval --raw ".#packages.x86_64-linux.$a.drvPath"
+            nix eval --raw ".#packages.x86_64-linux.
             echo
           done
 
@@ -114,7 +128,7 @@ jobs:
         run: |
           nix eval --raw --impure --expr '
             let
-              flake = builtins.getFlake (toString ./.);
+              flake = builtins.getFlake (toString ./
               sys = flake.inputs.nixpkgs.lib.nixosSystem {
                 system = "x86_64-linux";
                 modules = [
@@ -128,11 +142,11 @@ jobs:
                       gui.enable = true;
                       gnome.enable = true;
                     };
-                    # Exercises pam.defaultServices, an explicitly enabled
+                    # Exercises pam.defaultServices,
                     # service on the nixpkgs PAM submodule, the
-                    # gaze-before-fprintd rule ordering, and the TPM
+                    # gaze-before-fprintd rule order
                     # supplementary group.
-                    security.pam.services.login.gaze = {
+                    security.pam.services.login.gaze
                       enable = true;
                       simultaneous = true;
                     };

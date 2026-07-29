@@ -141,12 +141,14 @@ pub struct AuthDaemon {
 
 impl AuthDaemon {
     fn map_user_db_error(err: UserDbError) -> fdo::Error {
+        let message = err.to_string();
         match err {
-            UserDbError::UserNotFound(msg) => fdo::Error::FileNotFound(msg),
-            UserDbError::FaceNotFound(msg) => fdo::Error::FileNotFound(msg),
-            UserDbError::FaceExists(msg) => fdo::Error::FileExists(msg),
-            UserDbError::InvalidName(msg) => fdo::Error::InvalidArgs(msg),
-            UserDbError::Io(io_err) => fdo::Error::Failed(io_err.to_string()),
+            UserDbError::UserNotFound(_) | UserDbError::FaceNotFound(_) => {
+                fdo::Error::FileNotFound(message)
+            }
+            UserDbError::FaceExists(_) => fdo::Error::FileExists(message),
+            UserDbError::InvalidName(_) => fdo::Error::InvalidArgs(message),
+            UserDbError::Io(_) => fdo::Error::Failed(message),
         }
     }
 
@@ -359,6 +361,23 @@ impl AuthDaemon {
         let caller_uid = Self::caller_uid(header).await?;
         let target_uid = Self::username_uid(username)?;
         if caller_uid == 0 || caller_uid == target_uid {
+            return Ok(());
+        }
+
+        Self::ensure_authorized(header, action_id).await
+    }
+
+    fn face_write_needs_authorization(caller_uid: u32) -> bool {
+        caller_uid != 0
+    }
+
+    async fn ensure_face_write_access(
+        header: &Header<'_>,
+        username: &str,
+        action_id: &str,
+    ) -> fdo::Result<()> {
+        Self::username_uid(username)?;
+        if !Self::face_write_needs_authorization(Self::caller_uid(header).await?) {
             return Ok(());
         }
 
@@ -771,6 +790,12 @@ mod tests {
             Some((1000, true))
         ));
         assert!(!AuthDaemon::user_query_allowed(42, 1000, None));
+    }
+
+    #[test]
+    fn face_writes_need_authorization_even_for_the_owning_user() {
+        assert!(AuthDaemon::face_write_needs_authorization(1000));
+        assert!(!AuthDaemon::face_write_needs_authorization(0));
     }
 
     #[test]
@@ -1484,20 +1509,7 @@ impl AuthDaemon {
         let claim = self.check_claim(&header).await?;
         self.ensure_auth_not_aborted(&header).await?;
 
-        if self.resume_pending.swap(false, Ordering::SeqCst) {
-            let grace = Duration::from_millis(
-                Config::load_from(CONFIG_PATH)
-                    .map(|c| c.auth.resume_grace_ms)
-                    .unwrap_or(0),
-            );
-            if !grace.is_zero() {
-                info!(
-                    ?grace,
-                    "Resumed from suspend, delaying face auth for display"
-                );
-                tokio::time::sleep(grace).await;
-            }
-        }
+        let resumed = self.resume_pending.swap(false, Ordering::SeqCst);
 
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
@@ -1514,6 +1526,8 @@ impl AuthDaemon {
         let threshold_arc = self.threshold.clone();
 
         let config = Config::load_from(CONFIG_PATH).unwrap_or_default();
+        let delay = Duration::from_millis(config.auth.effective_start_delay_ms(resumed));
+        let abort_if_lid_closed = *self.abort_if_lid_closed.lock().await;
         let rgb_device = self.rgb_device.lock().await.clone();
         let ir_device = self.ir_device.lock().await.clone();
         let emitter_enabled = *self.emitter_enabled.lock().await;
@@ -1564,6 +1578,20 @@ impl AuthDaemon {
                 error!("No matching templates or cameras configured for auth");
                 let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
                 return;
+            }
+
+            if !delay.is_zero() {
+                info!(?delay, resumed, "Delaying face auth before capture");
+                if tokio::time::timeout(delay, &mut rx).await.is_ok() {
+                    info!("VerifyStart: cancelled during start delay");
+                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                    return;
+                }
+                if abort_if_lid_closed && Self::is_lid_closed().await {
+                    warn!("Laptop lid is closed, aborting face auth");
+                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                    return;
+                }
             }
 
             info!(
@@ -2032,6 +2060,7 @@ impl AuthDaemon {
     ) -> fdo::Result<()> {
         let claim = self.check_claim(&header).await?;
         let username = claim.username.clone();
+        Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let signal_destination = Self::signal_destination(&claim.sender)?;
         self.cancel_active_tasks().await;
 
@@ -2665,7 +2694,7 @@ impl AuthDaemon {
         username: String,
         face_name: String,
     ) -> fdo::Result<bool> {
-        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let mut db = self.db.lock().await;
         db.remove_face(&username, &face_name)
             .map_err(Self::map_user_db_error)?;
@@ -2679,7 +2708,7 @@ impl AuthDaemon {
         old_face_name: String,
         new_face_name: String,
     ) -> fdo::Result<bool> {
-        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let mut db = self.db.lock().await;
         db.rename_face(&username, &old_face_name, &new_face_name)
             .map_err(Self::map_user_db_error)?;
@@ -2691,7 +2720,7 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         username: String,
     ) -> fdo::Result<bool> {
-        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let mut db = self.db.lock().await;
         db.clear_user(&username).map_err(Self::map_user_db_error)?;
         Ok(true)

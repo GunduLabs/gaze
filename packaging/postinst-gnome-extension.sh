@@ -1,6 +1,44 @@
 #!/bin/sh
 set -e
 
+profile=/etc/dconf/profile/gdm
+
+insert_profile_db() {
+    db="system-db:$1"
+    after="$2"
+
+    grep -qxF "$db" "$profile" && return 0
+    grep -qxF "$after" "$profile" || return 0
+
+    tmp="${profile}.gaze-tmp"
+    if awk -v db="$db" -v after="$after" '
+        { print }
+        $0 == after && !inserted { print db; inserted = 1 }
+    ' "$profile" >"$tmp"; then
+        cat "$tmp" >"$profile"
+    fi
+    rm -f "$tmp"
+}
+
+ensure_gdm_dconf_profile() {
+    template=/usr/share/gaze/dconf-profile-gdm
+
+    [ -f "$template" ] || return 0
+
+    if [ ! -f "$profile" ]; then
+        mkdir -p /etc/dconf/profile
+        cp "$template" "$profile"
+        return 0
+    fi
+
+    insert_profile_db gdm user-db:user
+    [ -d /etc/dconf/db/distro.d ] && insert_profile_db distro system-db:gdm
+
+    return 0
+}
+
+ensure_gdm_dconf_profile || true
+
 if [ -d /run/systemd/system ]; then
     dconf update >/dev/null 2>&1 || true
     glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true

@@ -218,6 +218,7 @@ jobs:
             ca-certificates \
             curl \
             build-essential \
+            dpkg-dev \
             clang \
             libclang-dev \
             libcairo2-dev \

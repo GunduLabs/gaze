@@ -44,12 +44,17 @@ unsafe fn confirm_via_polkit_dialog(
 }
 
 unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
+    let service = unsafe { get_pam_service(pamh) };
+    if service_defers_to_face_service(service.as_deref()) {
+        return PAM_IGNORE;
+    }
+
     let (username, rt) = match unsafe { username_and_runtime(pamh) } {
         Ok(ctx) => ctx,
         Err(code) => return code,
     };
 
-    let is_polkit = matches!(unsafe { get_pam_service(pamh) }, Some(ref s) if s == "polkit-1");
+    let is_polkit = matches!(service, Some(ref s) if s == "polkit-1");
 
     let matched = rt.block_on(async {
         match enrollment_disposition(has_enrolled_faces(&username).await) {
@@ -65,12 +70,12 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         };
         unsafe { say(pamh, prompt) };
 
-        match timeout(
-            Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS),
-            authenticate_biometric_with_status(&username),
-        )
-        .await
-        {
+        let budget = match setup_auth_env().await {
+            Ok((config, _)) => camera_auth_timeout(&config.auth),
+            Err(_) => Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS),
+        };
+
+        match timeout(budget, authenticate_biometric_with_status(&username)).await {
             Ok(Ok((AuthOutcome::Match, _))) => Ok(()),
             Ok(Ok((AuthOutcome::NoMatch, _))) => {
                 unsafe { say(pamh, FACE_NOT_RECOGNIZED) };

@@ -16,11 +16,24 @@ use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon, connect_gaze,
     dbus_error_message, dbus_is_file_not_found, load_config_from_daemon,
 };
-use std::{future::Future, path::PathBuf, time::Duration};
+use std::{future::Future, time::Duration};
 use tui::{AuthScreen, BusyScreen, EnrollScreen, Tone, TuiAction, TuiTerminal};
 
+fn is_root() -> bool {
+    (unsafe { libc::geteuid() }) == 0
+}
+
+fn resolve_current_user(sudo_user: Option<String>, user: Option<String>) -> String {
+    [sudo_user, user]
+        .into_iter()
+        .flatten()
+        .find(|value| !value.is_empty())
+        .unwrap_or_else(|| "root".into())
+}
+
 fn get_current_user() -> String {
-    std::env::var("USER").unwrap_or_else(|_| "root".into())
+    let sudo_user = is_root().then(|| std::env::var("SUDO_USER").ok()).flatten();
+    resolve_current_user(sudo_user, std::env::var("USER").ok())
 }
 
 fn face_completer(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
@@ -45,58 +58,62 @@ fn face_completer(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
     })
 }
 
-fn first_run_marker_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
-        })?;
-    Some(base.join("gaze").join("first-run-complete"))
-}
-
-fn command_needs_polkit(command: &Commands) -> bool {
+fn command_requires_root(command: &Commands) -> Option<&'static str> {
     match command {
-        Commands::AddFace { .. }
-        | Commands::RefineFace { .. }
-        | Commands::RemoveFace { .. }
-        | Commands::RenameFace { .. }
-        | Commands::ClearUser { .. } => true,
-        Commands::Config { show } => !show,
+        Commands::AddFace { .. } => Some("add-face"),
+        Commands::RefineFace { .. } => Some("refine-face"),
+        Commands::RemoveFace { .. } => Some("remove-face"),
+        Commands::RenameFace { .. } => Some("rename-face"),
+        Commands::ClearUser { .. } => Some("clear-user"),
+        Commands::Config { show } => (!show).then_some("config"),
         Commands::Auth { .. }
         | Commands::ListFaces { .. }
         | Commands::Doctor { .. }
-        | Commands::Uninstall { .. } => false,
+        | Commands::Uninstall { .. } => None,
     }
 }
 
-async fn maybe_run_first_run_doctor(command: &Commands) {
-    if matches!(
-        command,
-        Commands::Doctor { .. } | Commands::Uninstall { .. }
-    ) {
-        return;
+fn command_target_user(command: &Commands) -> Option<&str> {
+    match command {
+        Commands::Auth { user, .. }
+        | Commands::ListFaces { user }
+        | Commands::Doctor { user, .. } => user.as_deref(),
+        _ => None,
     }
-    let Some(marker) = first_run_marker_path() else {
-        return;
-    };
-    if marker.exists() {
-        return;
+}
+
+fn command_may_be_challenged(command: &Commands) -> bool {
+    !is_root() && matches!(command_target_user(command), Some(user) if user != get_current_user())
+}
+
+const ESCALATION_MARKER: &str = "GAZE_ESCALATED";
+const ESCALATION_PRESERVED_ENV: [&str; 1] = ["XDG_RUNTIME_DIR"];
+
+fn reexec_as_root(name: &str) -> anyhow::Result<()> {
+    if std::env::var_os(ESCALATION_MARKER).is_some() {
+        anyhow::bail!("gaze {name} re-ran itself but did not gain root privileges");
+    }
+    if !which("sudo") {
+        anyhow::bail!("gaze {name} needs root privileges, but sudo was not found");
     }
 
-    let term = Term::stdout();
-    let _ = term.write_line(&format!(
-        "{} First run: checking your Gaze installation {}\n",
-        style("i").cyan().bold(),
-        style("(this won't appear again)").dim()
-    ));
-    let _ = doctor::run(&get_current_user(), false).await;
-    let _ = term.write_line("");
-
-    if let Some(parent) = marker.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    let mut cmd = std::process::Command::new("sudo");
+    cmd.arg("--")
+        .arg("env")
+        .arg(format!("{ESCALATION_MARKER}=1"));
+    for key in ESCALATION_PRESERVED_ENV {
+        if let Some(value) = std::env::var_os(key) {
+            let mut pair = std::ffi::OsString::from(key);
+            pair.push("=");
+            pair.push(value);
+            cmd.arg(pair);
+        }
     }
-    let _ = std::fs::write(&marker, b"");
+    cmd.arg(std::env::current_exe()?)
+        .args(std::env::args_os().skip(1));
+
+    let status = cmd.status()?;
+    std::process::exit(status.code().unwrap_or(1));
 }
 
 fn capture_tone(status: CaptureStatus) -> Tone {
@@ -367,6 +384,11 @@ async fn run_config_wizard(
     config.auth.resume_grace_ms = Input::with_theme(&theme)
         .with_prompt("Resume grace period in milliseconds (delay auth after suspend)")
         .default(config.auth.resume_grace_ms)
+        .interact_text()?;
+
+    config.auth.start_delay_ms = Input::with_theme(&theme)
+        .with_prompt("Start delay in milliseconds (delays every auth, including sudo)")
+        .default(config.auth.start_delay_ms)
         .interact_text()?;
 
     config.enrollment.max_templates = Input::with_theme(&theme)
@@ -1318,7 +1340,13 @@ fn main() -> anyhow::Result<()> {
 async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    maybe_run_first_run_doctor(&cli.command).await;
+    if let Some(name) = command_requires_root(&cli.command)
+        && !is_root()
+    {
+        reexec_as_root(name)?;
+    }
+
+    let _polkit_agent = command_may_be_challenged(&cli.command).then(polkit::PolkitAgent::spawn);
 
     match &cli.command {
         Commands::Uninstall {
@@ -1338,8 +1366,6 @@ async fn run() -> anyhow::Result<()> {
     }
 
     let proxy = connect_gaze().await?;
-
-    let _polkit_agent = command_needs_polkit(&cli.command).then(polkit::PolkitAgent::spawn);
 
     match cli.command {
         Commands::Auth { user, verbose } => {
@@ -1423,6 +1449,11 @@ async fn run() -> anyhow::Result<()> {
                     "{} {}",
                     style("auth.resume_grace_ms:").bold(),
                     config.auth.resume_grace_ms
+                );
+                println!(
+                    "{} {}",
+                    style("auth.start_delay_ms:").bold(),
+                    config.auth.start_delay_ms
                 );
 
                 println!(
@@ -1515,6 +1546,71 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn face_and_config_writes_require_root() {
+        for (args, expected) in [
+            (vec!["gaze", "add-face", "default"], "add-face"),
+            (vec!["gaze", "refine-face", "default"], "refine-face"),
+            (vec!["gaze", "remove-face", "default"], "remove-face"),
+            (vec!["gaze", "rename-face", "old", "new"], "rename-face"),
+            (vec!["gaze", "clear-user"], "clear-user"),
+            (vec!["gaze", "config"], "config"),
+        ] {
+            let cli = Cli::try_parse_from(&args).unwrap();
+            assert_eq!(
+                command_requires_root(&cli.command),
+                Some(expected),
+                "{args:?} must require root"
+            );
+        }
+    }
+
+    #[test]
+    fn read_only_commands_stay_unprivileged() {
+        for args in [
+            vec!["gaze", "auth"],
+            vec!["gaze", "list-faces"],
+            vec!["gaze", "doctor"],
+            vec!["gaze", "config", "--show"],
+        ] {
+            let cli = Cli::try_parse_from(&args).unwrap();
+            assert_eq!(
+                command_requires_root(&cli.command),
+                None,
+                "{args:?} must stay unprivileged"
+            );
+        }
+    }
+
+    #[test]
+    fn only_cross_user_reads_need_a_tty_polkit_agent() {
+        let cli = Cli::try_parse_from(["gaze", "list-faces", "--user", "alice"]).unwrap();
+        assert_eq!(command_target_user(&cli.command), Some("alice"));
+
+        let cli = Cli::try_parse_from(["gaze", "doctor", "--user", "alice"]).unwrap();
+        assert_eq!(command_target_user(&cli.command), Some("alice"));
+
+        let cli = Cli::try_parse_from(["gaze", "auth"]).unwrap();
+        assert_eq!(command_target_user(&cli.command), None);
+
+        let cli = Cli::try_parse_from(["gaze", "add-face", "default"]).unwrap();
+        assert_eq!(command_target_user(&cli.command), None);
+    }
+
+    #[test]
+    fn resolve_current_user_prefers_the_account_behind_sudo() {
+        assert_eq!(
+            resolve_current_user(Some("alice".into()), Some("root".into())),
+            "alice"
+        );
+        assert_eq!(resolve_current_user(None, Some("alice".into())), "alice");
+        assert_eq!(
+            resolve_current_user(Some(String::new()), Some("alice".into())),
+            "alice"
+        );
+        assert_eq!(resolve_current_user(None, None), "root");
     }
 
     #[test]

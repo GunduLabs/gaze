@@ -325,6 +325,8 @@ pub struct AuthConfig {
     pub require_confirmation: bool,
     #[serde(default = "default_resume_grace_ms")]
     pub resume_grace_ms: u64,
+    #[serde(default = "default_start_delay_ms")]
+    pub start_delay_ms: u64,
 }
 
 fn default_false() -> bool {
@@ -333,6 +335,25 @@ fn default_false() -> bool {
 
 fn default_resume_grace_ms() -> u64 {
     0
+}
+
+fn default_start_delay_ms() -> u64 {
+    0
+}
+
+impl AuthConfig {
+    /// Milliseconds to wait before face verification begins.
+    ///
+    /// `start_delay_ms` applies to every verification; `resume_grace_ms` adds
+    /// nothing on top of it, so a resume waits for whichever is longer rather
+    /// than the sum of the two.
+    pub fn effective_start_delay_ms(&self, resumed: bool) -> u64 {
+        if resumed {
+            self.start_delay_ms.max(self.resume_grace_ms)
+        } else {
+            self.start_delay_ms
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -396,6 +417,7 @@ impl Default for AuthConfig {
             abort_if_lid_closed: true,
             require_confirmation: false,
             resume_grace_ms: default_resume_grace_ms(),
+            start_delay_ms: default_start_delay_ms(),
         }
     }
 }
@@ -629,6 +651,7 @@ mod tests {
                 abort_if_lid_closed: false,
                 require_confirmation: true,
                 resume_grace_ms: 3000,
+                start_delay_ms: 1500,
             },
             enrollment: EnrollmentConfig {
                 max_templates: 8,
@@ -662,6 +685,8 @@ mod tests {
         assert!(loaded.auth.abort_if_ssh);
         assert!(!loaded.auth.abort_if_lid_closed);
         assert!(loaded.auth.require_confirmation);
+        assert_eq!(loaded.auth.resume_grace_ms, 3000);
+        assert_eq!(loaded.auth.start_delay_ms, 1500);
         assert_eq!(loaded.enrollment.max_templates, 8);
         assert_eq!(loaded.enrollment.min_face_size_ratio, 0.20);
         assert!(loaded.liveness.enabled);
@@ -718,12 +743,50 @@ mod tests {
         assert!(config.auth.abort_if_ssh);
         assert!(config.auth.abort_if_lid_closed);
         assert!(!config.auth.require_confirmation);
+        assert_eq!(config.auth.start_delay_ms, 0);
         assert_eq!(config.enrollment.max_templates, 2);
         assert_eq!(
             config.enrollment.min_face_size_ratio,
             DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO
         );
         assert!(!config.storage.encrypt_templates);
+    }
+
+    #[test]
+    fn config_round_trips_through_the_dbus_value_used_by_the_config_property() {
+        let mut cfg = Config::default();
+        cfg.auth.start_delay_ms = 4500;
+        cfg.auth.resume_grace_ms = 1500;
+
+        let value = zvariant::OwnedValue::try_from(cfg).unwrap();
+        let back = Config::try_from(value).unwrap();
+
+        assert_eq!(back.auth.start_delay_ms, 4500);
+        assert_eq!(back.auth.resume_grace_ms, 1500);
+    }
+
+    #[test]
+    fn start_delay_applies_on_every_auth_and_does_not_stack_with_resume_grace() {
+        let mut auth = AuthConfig::default();
+
+        assert_eq!(auth.effective_start_delay_ms(false), 0);
+        assert_eq!(auth.effective_start_delay_ms(true), 0);
+
+        auth.start_delay_ms = 5000;
+        assert_eq!(auth.effective_start_delay_ms(false), 5000);
+        assert_eq!(auth.effective_start_delay_ms(true), 5000);
+
+        auth.resume_grace_ms = 3000;
+        assert_eq!(auth.effective_start_delay_ms(false), 5000);
+        assert_eq!(auth.effective_start_delay_ms(true), 5000);
+
+        auth.resume_grace_ms = 8000;
+        assert_eq!(auth.effective_start_delay_ms(false), 5000);
+        assert_eq!(auth.effective_start_delay_ms(true), 8000);
+
+        auth.start_delay_ms = 0;
+        assert_eq!(auth.effective_start_delay_ms(false), 0);
+        assert_eq!(auth.effective_start_delay_ms(true), 8000);
     }
 
     #[test]

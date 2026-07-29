@@ -4,6 +4,14 @@ Use the `gaze` command for enrollment, testing, and managing face profiles.
 
 All commands talk to the running `gazed` daemon over DBus.
 
+## Commands that need privileges
+
+An enrolled face is a login credential, so creating, changing, or deleting one requires root, even on your own account. You never type `sudo` yourself: `gaze add-face`, `gaze refine-face`, `gaze remove-face`, `gaze rename-face`, `gaze clear-user`, and `gaze config` re-run themselves through `sudo` and prompt for your password. They still act on the account that invoked them, not on `root`, so `gaze add-face default` enrolls a face for you; pass `-u root` if you really want root's own enrollment.
+
+`gaze auth`, `gaze list-faces`, `gaze doctor`, and `gaze config --show` are read-only and stay unprivileged.
+
+The `gazed` daemon enforces this independently of the CLI: a non-root DBus caller must pass a polkit check for `com.gundulabs.gaze.manage-faces` or `com.gundulabs.gaze.manage-config`. That is how the [GUI](/guide/gui) authorizes the same operations, and it means calling the DBus methods directly does not bypass the requirement.
+
 ## Most common workflow
 
 ```bash
@@ -42,8 +50,6 @@ gaze doctor --user alice
 ```
 
 The camera checks enumerate devices but do not capture frames. Use `gaze auth` when you need an end-to-end camera and recognition test.
-
-The very first time you run any `gaze` command, this diagnostic runs automatically so problems surface right after install. It waits for the daemon to finish its one-time model download before checking it, and it will not run automatically again.
 
 To measure model inference speed on the current hardware:
 

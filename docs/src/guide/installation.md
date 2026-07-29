@@ -35,6 +35,8 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
 
 Use this if you prefer to configure package sources yourself. Debian/Ubuntu and Fedora-compatible systems with standard DNF package installation use Gundu Labs repositories. Arch Linux and Arch-compatible distributions such as Manjaro and CachyOS use the AUR packages.
 
+Debian/Ubuntu packages are built per release, and each apt suite carries only the builds for that release: `noble` (Ubuntu 24.04), `questing` (Ubuntu 25.10), `resolute` (Ubuntu 26.04), and `trixie` (Debian 13). The snippet below picks the suite matching your system; installing another release's package leaves `gazed` unable to load its OpenCV libraries.
+
 If you are replacing an existing manual repository configuration, remove the current repo files first:
 
 **Debian / Ubuntu:**
@@ -53,7 +55,8 @@ sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulab
 sudo mkdir -p --mode=0755 /usr/share/keyrings
 curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.gpg \
   | sudo tee /usr/share/keyrings/gundulabs-archive-keyring.gpg >/dev/null
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb stable main" \
+suite="$(. /etc/os-release && echo "${VERSION_CODENAME:-$UBUNTU_CODENAME}")"
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb $suite main" \
   | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 sudo apt update
 sudo apt install gaze gaze-gui

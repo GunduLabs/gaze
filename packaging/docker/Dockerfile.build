@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         build-essential \
+        dpkg-dev \
         clang \
         libclang-dev \
         libcairo2-dev \

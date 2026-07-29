@@ -25,6 +25,21 @@ pub const PAM_AUTHINFO_UNAVAIL: c_int = 9;
 pub const PAM_IGNORE: c_int = 25;
 
 pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
+pub const FACE_PAM_SERVICE: &str = "gdm-face";
+
+/// Total time PAM will wait on the daemon, camera time plus any configured
+/// pre-auth delay.
+///
+/// The daemon waits for `start_delay_ms` (or `resume_grace_ms` on resume)
+/// after `VerifyStart` returns and before it opens the camera. PAM is blocked
+/// waiting on the verification signal for that whole wait, so the delay has to
+/// be added on top of the camera budget or it eats into it and the scan times
+/// out early. The resumed value is used because PAM cannot tell whether the
+/// daemon is about to treat this authentication as a resume.
+pub fn camera_auth_timeout(auth: &gaze_core::config::AuthConfig) -> std::time::Duration {
+    std::time::Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS)
+        + std::time::Duration::from_millis(auth.effective_start_delay_ms(true))
+}
 const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to cancel.";
 pub const CONFIRMATION_REQUEST: &str = "GAZE_CONFIRMATION_REQUEST";
 pub const CONFIRMATION_ACK: &str = "CONFIRM";
@@ -575,6 +590,13 @@ pub unsafe fn get_pam_service(pamh: PamHandle) -> Option<String> {
     }
 }
 
+pub fn service_defers_to_face_service(service: Option<&str>) -> bool {
+    match service {
+        Some(name) => name.starts_with("gdm-") && name != FACE_PAM_SERVICE,
+        None => false,
+    }
+}
+
 pub fn detect_desktop_environment(uid: u32) -> String {
     let mut is_kde = false;
     let mut is_hyprland = false;
@@ -650,6 +672,62 @@ pub fn graphical_confirm_decision(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pre_auth_delay_extends_the_camera_budget_instead_of_consuming_it() {
+        let mut auth = gaze_core::config::AuthConfig::default();
+        let base = std::time::Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS);
+
+        assert_eq!(camera_auth_timeout(&auth), base);
+
+        auth.start_delay_ms = 5000;
+        assert_eq!(
+            camera_auth_timeout(&auth),
+            base + std::time::Duration::from_millis(5000)
+        );
+
+        // The daemon waits for whichever delay is longer, so budget for that.
+        auth.resume_grace_ms = 9000;
+        assert_eq!(
+            camera_auth_timeout(&auth),
+            base + std::time::Duration::from_millis(9000)
+        );
+
+        auth.start_delay_ms = 0;
+        assert_eq!(
+            camera_auth_timeout(&auth),
+            base + std::time::Duration::from_millis(9000)
+        );
+    }
+
+    #[test]
+    fn gdm_services_other_than_face_defer() {
+        for service in ["gdm-password", "gdm-fingerprint", "gdm-launch-environment"] {
+            assert!(
+                service_defers_to_face_service(Some(service)),
+                "{service} must defer to gdm-face"
+            );
+        }
+    }
+
+    #[test]
+    fn face_service_and_non_gdm_services_run() {
+        for service in [
+            "gdm-face",
+            "polkit-1",
+            "sudo",
+            "login",
+            "su",
+            "hyprlock-gaze",
+            "sddm",
+        ] {
+            assert!(
+                !service_defers_to_face_service(Some(service)),
+                "{service} must still run face auth"
+            );
+        }
+        assert!(!service_defers_to_face_service(None));
+    }
 
     #[test]
     fn gnome_with_active_extension_confirms_through_it() {
