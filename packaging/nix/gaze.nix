@@ -93,11 +93,13 @@ rustPlatform.buildRustPackage {
     runHook postInstall
   '';
 
+  # `--set`, not `--prefix`: a second GStreamer build inherited from the session
+  # registers the same plugin types again and the scanner rejects the duplicates.
   postFixup = ''
     wrapProgram $out/bin/gazed \
-      --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${gstPluginPath}"
+      --set GST_PLUGIN_SYSTEM_PATH_1_0 "${gstPluginPath}"
     wrapProgram $out/bin/gaze \
-      --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${gstPluginPath}"
+      --set GST_PLUGIN_SYSTEM_PATH_1_0 "${gstPluginPath}"
   '';
 
   meta = {

@@ -78,8 +78,9 @@ rustPlatform.buildRustPackage {
     install -Dm644 packaging/gui/com.gundulabs.Gaze.metainfo.xml $out/share/metainfo/com.gundulabs.Gaze.metainfo.xml
   '';
 
+  # `--set`, not `--prefix`; see packaging/nix/gaze.nix.
   preFixup = ''
-    gappsWrapperArgs+=(--prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${gstPluginPath}")
+    gappsWrapperArgs+=(--set GST_PLUGIN_SYSTEM_PATH_1_0 "${gstPluginPath}")
   '';
 
   meta = {

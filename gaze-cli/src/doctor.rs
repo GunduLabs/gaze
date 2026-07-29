@@ -524,10 +524,18 @@ fn pam_search_dirs() -> BTreeSet<PathBuf> {
     dirs
 }
 
-fn find_pam_modules() -> Vec<PathBuf> {
+/// Distributions that load the modules from an absolute path, such as NixOS
+/// pointing at the store, never populate a system module directory.
+fn find_pam_modules() -> BTreeSet<PathBuf> {
     pam_search_dirs()
         .into_iter()
         .flat_map(|dir| PAM_MODULES.map(|module| dir.join(module)))
+        .chain(pam_files().iter().flat_map(|(_, contents)| {
+            contents
+                .lines()
+                .flat_map(pam_line_module_paths)
+                .collect::<Vec<_>>()
+        }))
         .filter(|path| path.exists())
         .collect()
 }
@@ -544,7 +552,22 @@ fn pam_line_has_reference(line: &str) -> bool {
     })
 }
 
-fn find_pam_references() -> Vec<PathBuf> {
+fn pam_line_module_paths(line: &str) -> Vec<PathBuf> {
+    line.split('#')
+        .next()
+        .unwrap_or_default()
+        .split_ascii_whitespace()
+        .filter(|token| {
+            token.starts_with('/')
+                && PAM_MODULES
+                    .iter()
+                    .any(|module| token.ends_with(&format!("/{module}")))
+        })
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn pam_files() -> Vec<(PathBuf, String)> {
     let Ok(entries) = fs::read_dir("/etc/pam.d") else {
         return Vec::new();
     };
@@ -553,8 +576,15 @@ fn find_pam_references() -> Vec<PathBuf> {
         .filter_map(|entry| {
             let path = entry.path();
             let contents = fs::read_to_string(&path).ok()?;
-            contents.lines().any(pam_line_has_reference).then_some(path)
+            Some((path, contents))
         })
+        .collect()
+}
+
+fn find_pam_references() -> Vec<PathBuf> {
+    pam_files()
+        .into_iter()
+        .filter_map(|(path, contents)| contents.lines().any(pam_line_has_reference).then_some(path))
         .collect()
 }
 
@@ -600,7 +630,7 @@ fn check_pam(report: &mut Report) {
     } else if !sequential {
         report.error(
             "PAM modules",
-            "pam_gaze.so is not installed in a standard PAM module directory",
+            "pam_gaze.so is not installed where PAM can load it",
             "Reinstall the base Gaze package before enabling PAM authentication.",
         );
     } else {
@@ -1211,6 +1241,39 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pam_line_module_paths_collects_absolute_module_paths() {
+        assert_eq!(
+            pam_line_module_paths(
+                "auth       [success=done default=bad]   /nix/store/abc-gaze-0.2.7/lib/security/pam_gaze.so"
+            ),
+            vec![PathBuf::from(
+                "/nix/store/abc-gaze-0.2.7/lib/security/pam_gaze.so"
+            )]
+        );
+        assert_eq!(
+            pam_line_module_paths(
+                "auth sufficient /nix/store/abc-gaze/lib/security/pam_gaze_grosshack.so"
+            ),
+            vec![PathBuf::from(
+                "/nix/store/abc-gaze/lib/security/pam_gaze_grosshack.so"
+            )]
+        );
+
+        assert!(
+            pam_line_module_paths("auth sufficient pam_gaze.so").is_empty(),
+            "a bare module name resolves through the search directories instead"
+        );
+        assert!(
+            pam_line_module_paths("# auth sufficient /nix/store/abc/lib/security/pam_gaze.so")
+                .is_empty(),
+            "commented lines are not part of the stack"
+        );
+        assert!(
+            pam_line_module_paths("auth sufficient /usr/lib64/security/pam_fprintd.so").is_empty()
+        );
     }
 
     #[test]
