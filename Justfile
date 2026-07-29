@@ -11,6 +11,10 @@ version := if env("VERSION", "") != "" { env("VERSION") } else { trim_start_matc
 package_release := env("PACKAGE_RELEASE", "1")
 # Required packaging tool; evaluated only by packaging recipes.
 nfpm := require("nfpm")
+# Required by the `srpm` recipe only.
+rpmbuild := require("rpmbuild")
+# ONNX Runtime release bundled into the offline builds (flatpak and srpm).
+ort_version := env("ORT_VERSION", "1.22.0")
 
 # The opencv crate's build script only probes the `opencv4`/`opencv`
 # pkg-config names, so on distros that ship OpenCV 5 (e.g. Arch) point it at
@@ -69,9 +73,8 @@ prepare-flatpak-ort:
         aarch64) ort_arch="aarch64" ;; \
         *) echo "Unsupported Flatpak arch for ORT bootstrap: $arch" >&2; exit 1 ;; \
     esac; \
-    ort_version="1.22.0"; \
-    ort_file="onnxruntime-linux-${ort_arch}-${ort_version}.tgz"; \
-    ort_url="https://github.com/microsoft/onnxruntime/releases/download/v${ort_version}/${ort_file}"; \
+    ort_file="onnxruntime-linux-${ort_arch}-{{ ort_version }}.tgz"; \
+    ort_url="https://github.com/microsoft/onnxruntime/releases/download/v{{ ort_version }}/${ort_file}"; \
     if [ ! -s .flatpak-cache/ort/onnxruntime.tgz ]; then \
         curl -fsSL "$ort_url" -o .flatpak-cache/ort/onnxruntime.tgz; \
     fi
@@ -297,6 +300,78 @@ package format: build-rust build-selinux && (package-prebuilt format)
 [group("package")]
 package-prebuilt format: _dist-packages (_nfpm "packaging/nfpm.yaml" format) (_nfpm "packaging/nfpm-gui.yaml" format) (_nfpm "packaging/nfpm-gnome-extension.yaml" format) (_nfpm "packaging/nfpm-hyprlock.yaml" format) && (_verify-package format)
     @echo "Packages written to dist/packages/"
+
+# ── srpm ──────────────────────────────────────────────────────────────────────
+
+srpm_topdir := env("SRPM_TOPDIR", "dist/srpm")
+
+# Collect everything the spec needs as a Source, so Copr (and any other mock
+# builder) can build with the network disabled.
+[private]
+_srpm-sources:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    sources="{{ srpm_topdir }}/SOURCES"
+    mkdir -p "$sources"
+
+    git archive --format=tar.gz --prefix="gaze-{{ version }}/" \
+        -o "$sources/gaze-{{ version }}.tar.gz" HEAD
+
+    cargo vendor --locked --versioned-dirs > "$sources/cargo-vendor-config.toml"
+    tar --zstd -cf "$sources/vendor.tar.zst" vendor
+
+    for ort_arch in x64 aarch64; do
+        ort_file="onnxruntime-linux-${ort_arch}-{{ ort_version }}.tgz"
+        [ -s "$sources/$ort_file" ] && continue
+        curl -fsSL \
+            "https://github.com/microsoft/onnxruntime/releases/download/v{{ ort_version }}/${ort_file}" \
+            -o "$sources/$ort_file"
+    done
+
+# Build a source RPM (Copr input). Set RPM_SIGN_KEY to a gpg key id to sign it.
+[group("package")]
+srpm: _dist-packages _srpm-sources
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    export VERSION="{{ version }}"
+    export PACKAGE_RELEASE="{{ package_release }}"
+    export ORT_VERSION="{{ ort_version }}"
+    export CHANGELOG_DATE="$(date -u '+%a %b %d %Y')"
+    export SCRIPTLET_MAIN_POST="$(cat packaging/postinst-rpm.sh)"
+    export SCRIPTLET_EXTENSION_POST="$(cat packaging/postinst-gnome-extension.sh)"
+    export SCRIPTLET_EXTENSION_POSTUN="$(cat packaging/postrm-gnome-extension.sh)"
+    export SCRIPTLET_HYPRLOCK_POST="$(cat packaging/postinst-hyprlock.sh)"
+    export SCRIPTLET_HYPRLOCK_POSTUN="$(cat packaging/postrm-hyprlock.sh)"
+
+    mkdir -p "{{ srpm_topdir }}/SPECS"
+    spec="{{ srpm_topdir }}/SPECS/gaze.spec"
+    envsubst '$VERSION $PACKAGE_RELEASE $ORT_VERSION $CHANGELOG_DATE $SCRIPTLET_MAIN_POST $SCRIPTLET_EXTENSION_POST $SCRIPTLET_EXTENSION_POSTUN $SCRIPTLET_HYPRLOCK_POST $SCRIPTLET_HYPRLOCK_POSTUN' \
+        < packaging/rpm/gaze.spec.in > "$spec"
+
+    {{ quote(rpmbuild) }} -bs "$spec" --define "_topdir $PWD/{{ srpm_topdir }}"
+
+    srpm=$(ls -t "{{ srpm_topdir }}"/SRPMS/gaze-*.src.rpm 2>/dev/null | head -n1 || true)
+    [ -n "$srpm" ] || { echo "srpm: rpmbuild produced no source package" >&2; exit 1; }
+
+    if [ -n "${RPM_SIGN_KEY:-}" ]; then
+        rpmsign --define "_gpg_name ${RPM_SIGN_KEY}" --addsign "$srpm"
+        rpm -Kv "$srpm" 2>/dev/null | grep -qi 'signature' \
+            || { echo "srpm: FAIL: signing did not attach a signature to $srpm" >&2; exit 1; }
+        echo "verify: $(basename "$srpm") signed by ${RPM_SIGN_KEY} ✔"
+    fi
+
+    contents=$(rpm -qpl "$srpm")
+    for required in vendor.tar.zst "onnxruntime-linux-x64-{{ ort_version }}.tgz" "onnxruntime-linux-aarch64-{{ ort_version }}.tgz"; do
+        grep -qxF "$required" <<< "$contents" \
+            || { echo "srpm: FAIL: $(basename "$srpm") is missing $required; mock builds have no network" >&2; exit 1; }
+    done
+    echo "verify: $(basename "$srpm") bundles vendored crates and ONNX Runtime {{ ort_version }} ✔"
+
+    cp -f "$srpm" dist/packages/
+    cp -f packaging/rpm/copr-target.env dist/packages/copr-target.env
+    echo "Source RPM written to dist/packages/$(basename "$srpm")"
 
 # Remove all generated artifacts
 [group("dev")]

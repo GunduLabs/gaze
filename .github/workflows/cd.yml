@@ -454,13 +454,77 @@ jobs:
             dist/packages/*.flatpakref
             dist/packages/*.flatpakrepo
 
+  build-srpm:
+    name: Build source RPM for Copr
+    runs-on: ubuntu-latest
+    container: fedora:43
+    env:
+      DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install srpm tooling
+        run: |
+          dnf install -y \
+            git \
+            ca-certificates \
+            curl \
+            tar \
+            gzip \
+            zstd \
+            gettext \
+            gnupg2 \
+            rpm-build \
+            rpm-sign
+
+      # `just srpm` runs `git archive HEAD` to produce Source0.
+      - name: Trust workspace for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+
+      - name: Import signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+        run: |
+          if [ -n "$GPG_PRIVATE_KEY" ]; then
+            printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+            fingerprint="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/ { print $10; exit }')"
+            echo "RPM_SIGN_KEY=$fingerprint" >> "$GITHUB_ENV"
+          fi
+
+      # PACKAGE_RELEASE stays at the default 1: Copr appends %{?dist} per chroot.
+      - name: Build source RPM
+        run: |
+          VERSION="${DEPLOY_REF_NAME#v}" just srpm
+          ls -lh dist/packages/
+
+      - name: Upload source RPM artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-srpm
+          path: |
+            dist/packages/*.src.rpm
+            dist/packages/copr-target.env
+
   dispatch-packages:
     name: Dispatch packages to self-hosted repo
     runs-on: ubuntu-latest
-    # Must wait for build-flatpak too: the packages repo downloads ALL of this
-    # run's artifacts by run_id when the dispatch lands, so every artifact
-    # (deb/rpm/arch AND the flatpak bundles) has to be uploaded first.
-    needs: [build-packages, build-flatpak]
+    # Must wait for build-flatpak and build-srpm too: the packages repo downloads
+    # ALL of this run's artifacts by run_id when the dispatch lands, so every
+    # artifact (deb/rpm/arch, the flatpak bundles, and the Copr srpm) has to be
+    # uploaded first.
+    needs: [build-packages, build-flatpak, build-srpm]
 
     steps:
       # No checkout or artifact download needed: GunduLabs/packages pulls the
@@ -476,7 +540,7 @@ jobs:
   release-github:
     name: Upload packages to GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-packages, build-flatpak]
+    needs: [build-packages, build-flatpak, build-srpm]
     env:
       DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
 
@@ -494,6 +558,7 @@ jobs:
           files: |
             dist/packages/**/*.deb
             dist/packages/**/*.rpm
+            dist/packages/**/*.src.rpm
             dist/packages/**/*.pkg.tar.*
             dist/packages/**/*.flatpak
             dist/packages/**/*.flatpakref

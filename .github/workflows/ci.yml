@@ -112,6 +112,12 @@ jobs:
       - name: Build and verify deb packages
         run: VERSION=0.0.0 just package-prebuilt deb
 
+      # Catches spec and vendoring breakage here rather than in a Copr build.
+      - name: Build and verify source RPM
+        run: |
+          sudo apt-get install -y --no-install-recommends rpm zstd gettext-base
+          VERSION=0.0.0 just srpm
+
       - name: Install Nix
         uses: cachix/install-nix-action@v31
 

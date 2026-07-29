@@ -124,6 +124,11 @@ sudo rpm -e gpg-pubkey-$(rpm -qa gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\
 sudo dnf makecache
 ```
 
+```bash [Fedora via Copr]
+sudo dnf copr disable @gundulabs/gaze
+sudo dnf makecache
+```
+
 ```bash [Arch Linux / Manjaro]
 # AUR installs do not add a Gundu Labs pacman repo.
 # Only run this if you previously configured the old pacman repo.
