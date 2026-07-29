@@ -58,61 +58,25 @@ in
       '';
     };
 
-    pam = {
-      services = lib.mkOption {
-        type = lib.types.attrsOf (
-          lib.types.submodule {
-            options = {
-              control = lib.mkOption {
-                type = lib.types.str;
-                default = "sufficient";
-                description = "PAM control field for the gaze auth rule.";
-              };
-              simultaneous = lib.mkOption {
-                type = lib.types.bool;
-                default = false;
-                description = ''
-                  Use pam_gaze_grosshack.so, which runs face authentication
-                  and the password prompt simultaneously, instead of the
-                  sequential pam_gaze.so.
-                '';
-              };
-              order = lib.mkOption {
-                type = lib.types.nullOr lib.types.int;
-                default = null;
-                example = lib.literalExpression ''
-                  config.security.pam.services.login.rules.auth.unix.order + 10
-                '';
-                description = ''
-                  Explicit `order` for the gaze auth rule. When null, the rule
-                  is placed ahead of both `pam_fprintd` and `pam_unix`, so face
-                  authentication is tried first and the fingerprint reader and
-                  password both remain fallbacks. Set this to reorder gaze
-                  relative to another rule, offsetting from that rule's `order`
-                  rather than from a constant.
-                '';
-              };
-            };
-          }
-        );
-        default = {
-          sudo = { };
-          polkit-1 = { };
-        };
-        example = lib.literalExpression ''
-          {
-            sudo = { };
-            polkit-1 = { };
-            hyprlock.simultaneous = true;
-          }
-        '';
-        description = ''
-          PAM services to enable face authentication for. The gaze rule is
-          inserted ahead of `pam_fprintd` and `pam_unix`, so face auth is
-          attempted first and the password remains a fallback. The default
-          matches what the deb, rpm, and Arch packages configure on install.
-        '';
-      };
+    pam.defaultServices = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [
+        "sudo"
+        "polkit-1"
+      ];
+      example = [
+        "sudo"
+        "polkit-1"
+        "login"
+      ];
+      description = ''
+        PAM services that get face authentication without any further
+        configuration, matching what the deb, rpm, and Arch packages set up on
+        install. Each entry only defaults
+        {option}`security.pam.services.<name>.gaze.enable` to true, so an
+        individual service can still be turned off with
+        `security.pam.services.sudo.gaze.enable = false`.
+      '';
     };
 
     tpm.tcti = lib.mkOption {
@@ -157,6 +121,83 @@ in
         <https://gaze.gundulabs.com/guide/gnome> before enabling
       '';
     };
+  };
+
+  # Per-service knobs live on the nixpkgs PAM submodule, the way `fprintAuth`
+  # and `howdy` do. Only the type may be declared a second time: a `default`,
+  # `example`, or `description` here would collide with nixpkgs'.
+  options.security.pam.services = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule (
+        { name, config, ... }:
+        {
+          options.gaze = {
+            enable = lib.mkOption {
+              type = lib.types.bool;
+              default = cfg.enable && lib.elem name cfg.pam.defaultServices;
+              defaultText = lib.literalExpression ''
+                config.services.gaze.enable
+                && lib.elem name config.services.gaze.pam.defaultServices
+              '';
+              description = ''
+                Whether to attempt face authentication for this PAM service.
+                The rule is inserted ahead of `pam_fprintd` and `pam_unix`, so
+                face auth runs first and the fingerprint reader and password
+                both remain fallbacks.
+              '';
+            };
+
+            control = lib.mkOption {
+              type = lib.types.str;
+              default = "sufficient";
+              description = "PAM control field for the gaze auth rule.";
+            };
+
+            simultaneous = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = ''
+                Use pam_gaze_grosshack.so, which runs face authentication and
+                the password prompt simultaneously, instead of the sequential
+                pam_gaze.so.
+              '';
+            };
+
+            order = lib.mkOption {
+              type = lib.types.nullOr lib.types.int;
+              default = null;
+              example = lib.literalExpression ''
+                config.security.pam.services.login.rules.auth.unix.order + 10
+              '';
+              description = ''
+                Explicit `order` for the gaze auth rule. When null, the rule is
+                placed ahead of both `pam_fprintd` and `pam_unix`. Set this to
+                reorder gaze relative to another rule, offsetting from that
+                rule's `order` rather than from a constant. Note that `rules`
+                is an experimental nixpkgs option whose numbering can change
+                between releases.
+              '';
+            };
+          };
+
+          config.rules.auth.gaze = lib.mkIf config.gaze.enable (
+            let
+              authRules = config.rules.auth;
+              # Ahead of both fingerprint and password: nixpkgs auto-assigns
+              # these orders, so offset from them instead of hardcoding a value.
+              fallbackOrder = lib.min authRules.unix.order (
+                authRules.fprintd.order or authRules.unix.order
+              );
+            in
+            {
+              control = config.gaze.control;
+              modulePath = pamModuleFor config.gaze;
+              order = if config.gaze.order != null then config.gaze.order else fallbackOrder - 10;
+            }
+          );
+        }
+      )
+    );
   };
 
   config = lib.mkIf cfg.enable (
@@ -214,25 +255,6 @@ in
               ++ lib.optional config.security.tpm2.enable config.security.tpm2.tssGroup;
           };
         };
-
-        security.pam.services = lib.mapAttrs (
-          name: svc:
-          let
-            authRules = config.security.pam.services.${name}.rules.auth;
-            # Ahead of both fingerprint and password: nixpkgs auto-assigns
-            # these orders, so offset from them instead of hardcoding a value.
-            fallbackOrder = lib.min authRules.unix.order (
-              authRules.fprintd.order or authRules.unix.order
-            );
-          in
-          {
-            rules.auth.gaze = {
-              control = svc.control;
-              modulePath = pamModuleFor svc;
-              order = if svc.order != null then svc.order else fallbackOrder - 10;
-            };
-          }
-        ) cfg.pam.services;
       }
 
       {

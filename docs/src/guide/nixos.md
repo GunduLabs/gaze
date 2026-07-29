@@ -50,15 +50,12 @@ Add the flake input and import the module:
           services.gaze = {
             enable = true;
             gui.enable = true;
-
-            # Attempt face auth (password stays as fallback) for these PAM
-            # services. This is also the default; add entries such as
-            # `hyprlock = { };` to cover more.
-            pam.services = {
-              sudo = { };
-              polkit-1 = { };
-            };
           };
+
+          # `sudo` and `polkit-1` attempt face auth out of the box, with the
+          # password still available as a fallback. Other PAM services opt in
+          # one at a time, e.g.:
+          # security.pam.services.hyprlock.gaze.enable = true;
         }
         # ... the rest of your configuration
       ];
@@ -94,10 +91,11 @@ compatible `onnxruntime` instead of overriding `follows`.
 | `services.gaze.package` | flake's `gaze` | Daemon/CLI/PAM package |
 | `services.gaze.settings` | `{ }` | Options merged over the upstream defaults into `/etc/gaze/config.toml` (see [Configuration](/guide/configuration)) |
 | `services.gaze.mutableConfig` | `true` | Seed `/etc/gaze/config.toml` once and leave it editable (the GUI writes to it). Set to `false` for a fully declarative, read-only config |
-| `services.gaze.pam.services` | `{ sudo = { }; "polkit-1" = { }; }` | PAM services to insert face auth into, e.g. `{ sudo = { }; hyprlock.simultaneous = true; }` |
-| `services.gaze.pam.services.<name>.control` | `"sufficient"` | PAM control field for the rule |
-| `services.gaze.pam.services.<name>.simultaneous` | `false` | Use `pam_gaze_grosshack.so` (face and password prompt at the same time) instead of sequential `pam_gaze.so` |
-| `services.gaze.pam.services.<name>.order` | `null` | Explicit rule `order`; `null` places gaze ahead of `pam_fprintd` and `pam_unix` |
+| `services.gaze.pam.defaultServices` | `[ "sudo" "polkit-1" ]` | PAM services that get face auth without further configuration |
+| `security.pam.services.<name>.gaze.enable` | true for `pam.defaultServices` | Attempt face auth for this PAM service |
+| `security.pam.services.<name>.gaze.control` | `"sufficient"` | PAM control field for the rule |
+| `security.pam.services.<name>.gaze.simultaneous` | `false` | Use `pam_gaze_grosshack.so` (face and password prompt at the same time) instead of sequential `pam_gaze.so` |
+| `security.pam.services.<name>.gaze.order` | `null` | Explicit rule `order`; `null` places gaze ahead of `pam_fprintd` and `pam_unix` |
 | `services.gaze.gui.enable` | `false` | Install `gaze-gui` |
 | `services.gaze.gnome.enable` | `false` | Install the GNOME Shell extension and the `gdm-face` PAM service |
 | `services.gaze.gnome.gdmFaceLogin` | `false` | Also enable face auth at the GDM login screen (read the [GNOME guide](/guide/gnome) first) |
@@ -111,9 +109,18 @@ numbers automatically and they change between releases):
 
 ```nix
 # Try the fingerprint reader first, then gaze, then the password.
-services.gaze.pam.services.login.order =
-  config.security.pam.services.login.rules.auth.fprintd.order + 5;
+security.pam.services.login.gaze = {
+  enable = true;
+  order = config.security.pam.services.login.rules.auth.fprintd.order + 5;
+};
 ```
+
+::: warning `rules` is experimental
+`security.pam.services.<name>.rules` is an experimental nixpkgs option that
+can change without notice, and the `order` numbers of the built-in rules move
+between releases. Always offset from a neighbouring rule as above instead of
+assigning a constant, or a nixpkgs update can silently reorder your stack.
+:::
 
 For anything the options don't cover, use
 `security.pam.services.<name>.rules` directly with
@@ -172,9 +179,9 @@ NixOS configuration, so switching it there is the only way.
 
 ```nix
 programs.hyprlock.enable = true;
-services.gaze.pam.services.hyprlock = { };
+security.pam.services.hyprlock.gaze.enable = true;
 # or, for simultaneous face + password:
-# services.gaze.pam.services.hyprlock.simultaneous = true;
+# security.pam.services.hyprlock.gaze = { enable = true; simultaneous = true; };
 ```
 
 This modifies the `hyprlock` PAM service in place, so no `auth_pam_module`
@@ -186,9 +193,9 @@ for behavior details.
 Add the relevant PAM service names, e.g.:
 
 ```nix
-services.gaze.pam.services = {
-  kde = { };          # Plasma lock screen
-  login = { };        # console/display-manager login
+security.pam.services = {
+  kde.gaze.enable = true; # Plasma lock screen
+  login.gaze.enable = true; # console/display-manager login
 };
 ```
 

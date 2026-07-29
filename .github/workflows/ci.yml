@@ -128,8 +128,14 @@ jobs:
                       gui.enable = true;
                       gnome.enable = true;
                     };
-                    # Exercises the default pam.services, the gaze-before-fprintd
-                    # rule ordering, and the TPM supplementary group.
+                    # Exercises pam.defaultServices, an explicitly enabled
+                    # service on the nixpkgs PAM submodule, the
+                    # gaze-before-fprintd rule ordering, and the TPM
+                    # supplementary group.
+                    security.pam.services.login.gaze = {
+                      enable = true;
+                      simultaneous = true;
+                    };
                     services.fprintd.enable = true;
                     security.tpm2.enable = true;
                   }
