@@ -179,7 +179,8 @@ threshold = 0.8
 OpenVINO selects its device at run time. An OpenVINO-enabled installation
 should use `execution_provider = "openvino"` and `device = "npu"` to select the
 Intel NPU. The same binary can select the Intel GPU by changing `device` to
-`"gpu"`.
+`"gpu"`. The released packages are CPU-only; OpenVINO requires building from
+source with `just build-rust-openvino`.
 
 See the [configuration guide](https://gaze.gundulabs.com/guide/configuration) for all options.
 
