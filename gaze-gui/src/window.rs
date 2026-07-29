@@ -102,7 +102,9 @@ fn set_inference_device_row_visible(
     execution_provider_row: &libadwaita::ComboRow,
     device_row: &libadwaita::ComboRow,
 ) {
-    device_row.set_visible(execution_provider_row.selected() == 1);
+    let provider =
+        InferenceConfig::execution_provider_from_index(execution_provider_row.selected() as usize);
+    device_row.set_visible(provider == "openvino");
 }
 
 struct ConfigRows<'a> {
@@ -141,6 +143,15 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
         .set_selected(cfg.inference.execution_provider_index());
     rows.inference_device
         .set_selected(cfg.inference.device_index());
+    if cfg.inference.is_representable() {
+        rows.inference_execution_provider
+            .set_subtitle("Use ONNX Runtime directly or through OpenVINO");
+    } else {
+        rows.inference_execution_provider.set_subtitle(&format!(
+            "Configured as {}/{}, which this build cannot show",
+            cfg.inference.execution_provider, cfg.inference.device
+        ));
+    }
     set_inference_device_row_visible(rows.inference_execution_provider, rows.inference_device);
 
     rows.level.set_selected(cfg.security.level_index());
@@ -454,6 +465,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     ));
 
     let is_loading = Rc::new(std::cell::Cell::new(true));
+    let inference_touched = Rc::new(std::cell::Cell::new(false));
 
     level_row.connect_selected_notify(glib::clone!(
         #[weak]
@@ -484,6 +496,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     ));
 
     let apply_changes = glib::clone!(
+        #[strong]
+        inference_touched,
         #[weak]
         overlay,
         #[weak]
@@ -546,16 +560,18 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             }
 
             let mut cfg = config.borrow_mut();
-            cfg.inference.execution_provider = InferenceConfig::execution_provider_from_index(
-                inference_execution_provider_row.selected() as usize,
-            )
-            .to_string();
-            cfg.inference.device = if cfg.inference.execution_provider == "openvino" {
-                InferenceConfig::device_from_index(inference_device_row.selected() as usize)
-                    .to_string()
-            } else {
-                "cpu".to_string()
-            };
+            if inference_touched.get() || cfg.inference.is_representable() {
+                cfg.inference.execution_provider = InferenceConfig::execution_provider_from_index(
+                    inference_execution_provider_row.selected() as usize,
+                )
+                .to_string();
+                cfg.inference.device = if cfg.inference.execution_provider == "openvino" {
+                    InferenceConfig::device_from_index(inference_device_row.selected() as usize)
+                        .to_string()
+                } else {
+                    "cpu".to_string()
+                };
+            }
             let hybrid_idx = hybrid_row.selected() as usize;
             let hybrid_policy = SecurityLevel::hybrid_policy_from_index(hybrid_idx);
 
@@ -626,12 +642,30 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     inference_execution_provider_row.connect_selected_notify(glib::clone!(
         #[strong]
         apply_changes,
-        move |_| apply_changes()
+        #[strong]
+        inference_touched,
+        #[strong]
+        is_loading,
+        move |_| {
+            if !is_loading.get() {
+                inference_touched.set(true);
+            }
+            apply_changes()
+        }
     ));
     inference_device_row.connect_selected_notify(glib::clone!(
         #[strong]
         apply_changes,
-        move |_| apply_changes()
+        #[strong]
+        inference_touched,
+        #[strong]
+        is_loading,
+        move |_| {
+            if !is_loading.get() {
+                inference_touched.set(true);
+            }
+            apply_changes()
+        }
     ));
     level_row.connect_selected_notify(glib::clone!(
         #[strong]

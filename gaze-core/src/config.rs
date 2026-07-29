@@ -324,6 +324,11 @@ impl InferenceConfig {
         Ok(())
     }
 
+    pub fn is_representable(&self) -> bool {
+        INFERENCE_EXECUTION_PROVIDER_OPTIONS.contains(&self.execution_provider.as_str())
+            && INFERENCE_DEVICE_OPTIONS.contains(&self.device.as_str())
+    }
+
     pub fn execution_provider_index(&self) -> u32 {
         INFERENCE_EXECUTION_PROVIDER_OPTIONS
             .iter()
@@ -819,6 +824,25 @@ mod tests {
             };
             assert!(inference.validate().is_err());
         }
+    }
+
+    #[test]
+    fn a_value_this_build_cannot_show_is_not_representable() {
+        let unknown = InferenceConfig {
+            execution_provider: "webgpu".to_string(),
+            device: "cuda".to_string(),
+        };
+        assert!(!unknown.is_representable());
+        assert!(InferenceConfig::default().is_representable());
+
+        let openvino = InferenceConfig {
+            execution_provider: "openvino".to_string(),
+            device: "npu".to_string(),
+        };
+        assert_eq!(
+            openvino.is_representable(),
+            cfg!(feature = "openvino-config")
+        );
     }
 
     #[test]

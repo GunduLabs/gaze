@@ -313,27 +313,36 @@ async fn run_config_wizard(
         config.security = SecurityLevel::custom(detector, recognizer, threshold, hybrid_policy);
     };
 
-    let selected_execution_provider = Select::with_theme(&theme)
-        .with_prompt("Inference execution provider")
-        .items(INFERENCE_EXECUTION_PROVIDER_OPTIONS)
-        .default(config.inference.execution_provider_index() as usize)
-        .interact()?;
-    config.inference.execution_provider =
-        gaze_core::config::InferenceConfig::execution_provider_from_index(
-            selected_execution_provider,
-        )
-        .to_string();
-
-    if config.inference.execution_provider == "openvino" {
-        let selected_device = Select::with_theme(&theme)
-            .with_prompt("OpenVINO inference device")
-            .items(INFERENCE_DEVICE_OPTIONS)
-            .default(config.inference.device_index() as usize)
+    if config.inference.is_representable() {
+        let selected_execution_provider = Select::with_theme(&theme)
+            .with_prompt("Inference execution provider")
+            .items(INFERENCE_EXECUTION_PROVIDER_OPTIONS)
+            .default(config.inference.execution_provider_index() as usize)
             .interact()?;
-        config.inference.device =
-            gaze_core::config::InferenceConfig::device_from_index(selected_device).to_string();
+        config.inference.execution_provider =
+            gaze_core::config::InferenceConfig::execution_provider_from_index(
+                selected_execution_provider,
+            )
+            .to_string();
+
+        if config.inference.execution_provider == "openvino" {
+            let selected_device = Select::with_theme(&theme)
+                .with_prompt("OpenVINO inference device")
+                .items(INFERENCE_DEVICE_OPTIONS)
+                .default(config.inference.device_index() as usize)
+                .interact()?;
+            config.inference.device =
+                gaze_core::config::InferenceConfig::device_from_index(selected_device).to_string();
+        } else {
+            config.inference.device = "cpu".to_string();
+        }
     } else {
-        config.inference.device = "cpu".to_string();
+        term.write_line(&format!(
+            "{} Keeping inference {}/{}: this build cannot change it",
+            style("!").yellow().bold(),
+            config.inference.execution_provider,
+            config.inference.device
+        ))?;
     }
 
     let cameras = gaze_core::camera::enumerate_cameras().unwrap_or_default();
