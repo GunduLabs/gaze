@@ -122,10 +122,21 @@ pub struct BenchmarkResult {
     pub component: String,
     pub execution_provider: String,
     pub device: String,
+    pub requested_execution_provider: String,
+    pub requested_device: String,
+    pub fallback_reason: String,
     pub mean_ms: f64,
     pub p95_ms: f64,
     pub min_ms: f64,
     pub fps: f64,
+}
+
+impl BenchmarkResult {
+    pub fn ran_as_configured(&self) -> bool {
+        self.fallback_reason.is_empty()
+            && self.execution_provider == self.requested_execution_provider
+            && self.device == self.requested_device
+    }
 }
 
 pub fn dbus_error_message(err: &zbus::Error) -> String {
@@ -148,6 +159,34 @@ pub fn dbus_is_not_activatable(err: &zbus::Error) -> bool {
 pub async fn connect_gaze() -> zbus::Result<GazeProxy<'static>> {
     let connection = zbus::Connection::system().await?;
     GazeProxy::new(&connection).await
+}
+
+pub async fn try_benchmark_from_daemon(
+    proxy: &GazeProxy<'_>,
+) -> anyhow::Result<Option<Vec<BenchmarkResult>>> {
+    let raw: OwnedValue = proxy
+        .inner()
+        .call("Benchmark", &())
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", dbus_error_message(&e)))?;
+    benchmark_from_reply(raw)
+}
+
+pub fn benchmark_from_reply(raw: OwnedValue) -> anyhow::Result<Option<Vec<BenchmarkResult>>> {
+    let expected = <Vec<BenchmarkResult> as Type>::SIGNATURE;
+    let actual = raw.value_signature();
+    if actual != expected {
+        tracing::warn!(
+            %actual,
+            %expected,
+            "daemon benchmark layout does not match this build; restart gazed"
+        );
+        return Ok(None);
+    }
+
+    Vec::<BenchmarkResult>::try_from(raw)
+        .map(Some)
+        .map_err(|e| anyhow::anyhow!("Failed to decode benchmark results: {}", e))
 }
 
 pub async fn try_load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Option<Config>> {
@@ -290,6 +329,65 @@ pub trait Gaze {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Clone, Debug, Value, OwnedValue, Type)]
+    struct OldBenchmarkResult {
+        component: String,
+        mean_ms: f64,
+        p95_ms: f64,
+        min_ms: f64,
+        fps: f64,
+    }
+
+    fn benchmark_result(requested_device: &str, fallback_reason: &str) -> BenchmarkResult {
+        BenchmarkResult {
+            component: "Face detector".to_string(),
+            execution_provider: "cpu".to_string(),
+            device: "cpu".to_string(),
+            requested_execution_provider: "cpu".to_string(),
+            requested_device: requested_device.to_string(),
+            fallback_reason: fallback_reason.to_string(),
+            mean_ms: 1.0,
+            p95_ms: 2.0,
+            min_ms: 0.5,
+            fps: 1000.0,
+        }
+    }
+
+    #[test]
+    fn current_benchmark_layout_decodes() {
+        let raw = OwnedValue::try_from(Value::from(vec![benchmark_result("cpu", "")])).unwrap();
+        let decoded = benchmark_from_reply(raw)
+            .expect("no error")
+            .expect("current layout is readable");
+
+        assert_eq!(decoded.len(), 1);
+        assert!(decoded[0].ran_as_configured());
+    }
+
+    #[test]
+    fn older_daemon_benchmark_layout_is_reported_not_decoded() {
+        let old = vec![OldBenchmarkResult {
+            component: "Face detector".to_string(),
+            mean_ms: 1.0,
+            p95_ms: 2.0,
+            min_ms: 0.5,
+            fps: 1000.0,
+        }];
+        let raw = OwnedValue::try_from(Value::from(old)).expect("old results convert to a value");
+
+        assert!(
+            benchmark_from_reply(raw)
+                .expect("a layout mismatch is not an error")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_device_fallback_is_not_reported_as_configured() {
+        assert!(!benchmark_result("npu", "no npu driver").ran_as_configured());
+        assert!(!benchmark_result("npu", "").ran_as_configured());
+    }
 
     #[test]
     fn enum_display_strings_are_user_facing_messages() {

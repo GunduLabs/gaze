@@ -1252,6 +1252,9 @@ fn benchmark_component(
         component: component.to_string(),
         execution_provider: runtime.active_execution_provider.clone(),
         device: runtime.active_device.clone(),
+        requested_execution_provider: runtime.requested_execution_provider.clone(),
+        requested_device: runtime.requested_device.clone(),
+        fallback_reason: runtime.fallback_reason.clone().unwrap_or_default(),
         mean_ms,
         p95_ms,
         min_ms,
@@ -1322,16 +1325,20 @@ mod benchmark_tests {
     use super::{BENCHMARK_TIMED_ITERS, BENCHMARK_WARMUP_ITERS, benchmark_component};
     use gaze_core::inference::InferenceRuntime;
 
-    #[test]
-    fn runs_warmup_then_timed_iterations_and_reports_ordered_stats() {
-        let calls = std::cell::Cell::new(0usize);
-        let runtime = InferenceRuntime {
+    fn cpu_runtime() -> InferenceRuntime {
+        InferenceRuntime {
             requested_execution_provider: "cpu".to_string(),
             requested_device: "cpu".to_string(),
             active_execution_provider: "cpu".to_string(),
             active_device: "cpu".to_string(),
             fallback_reason: None,
-        };
+        }
+    }
+
+    #[test]
+    fn runs_warmup_then_timed_iterations_and_reports_ordered_stats() {
+        let calls = std::cell::Cell::new(0usize);
+        let runtime = cpu_runtime();
         let result = benchmark_component("Test model", &runtime, || {
             calls.set(calls.get() + 1);
             Ok(())
@@ -1340,6 +1347,7 @@ mod benchmark_tests {
 
         assert_eq!(calls.get(), BENCHMARK_WARMUP_ITERS + BENCHMARK_TIMED_ITERS);
         assert_eq!(result.component, "Test model");
+        assert!(result.ran_as_configured());
         assert!(result.min_ms <= result.mean_ms);
         assert!(result.min_ms <= result.p95_ms);
         assert!(result.fps >= 0.0);
@@ -1347,16 +1355,27 @@ mod benchmark_tests {
 
     #[test]
     fn propagates_the_first_error_from_warmup() {
-        let runtime = InferenceRuntime {
-            requested_execution_provider: "cpu".to_string(),
-            requested_device: "cpu".to_string(),
-            active_execution_provider: "cpu".to_string(),
-            active_device: "cpu".to_string(),
-            fallback_reason: None,
-        };
+        let runtime = cpu_runtime();
         let err =
             benchmark_component("Failing model", &runtime, || anyhow::bail!("boom")).unwrap_err();
         assert!(err.to_string().contains("boom"));
+    }
+
+    #[test]
+    fn reports_the_fallback_when_the_requested_device_is_not_in_use() {
+        let runtime = InferenceRuntime {
+            requested_execution_provider: "openvino".to_string(),
+            requested_device: "npu".to_string(),
+            active_execution_provider: "cpu".to_string(),
+            active_device: "cpu".to_string(),
+            fallback_reason: Some("no npu driver".to_string()),
+        };
+        let result = benchmark_component("Test model", &runtime, || Ok(())).unwrap();
+
+        assert!(!result.ran_as_configured());
+        assert_eq!(result.execution_provider, "cpu");
+        assert_eq!(result.requested_device, "npu");
+        assert_eq!(result.fallback_reason, "no npu driver");
     }
 }
 
