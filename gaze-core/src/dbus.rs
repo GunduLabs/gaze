@@ -148,11 +148,39 @@ pub async fn connect_gaze() -> zbus::Result<GazeProxy<'static>> {
     GazeProxy::new(&connection).await
 }
 
-pub async fn load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Config> {
-    proxy
-        .config()
+pub async fn try_load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Option<Config>> {
+    let raw: OwnedValue = proxy
+        .inner()
+        .get_property("Config")
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to read config property: {}", e))
+        .map_err(|e| anyhow::anyhow!("Failed to read config property: {}", e))?;
+    config_from_property(raw)
+}
+
+pub fn config_from_property(raw: OwnedValue) -> anyhow::Result<Option<Config>> {
+    let expected = <Config as Type>::SIGNATURE;
+    let actual = raw.value_signature();
+    if actual != expected {
+        tracing::warn!(
+            %actual,
+            %expected,
+            "daemon config layout does not match this build; restart gazed"
+        );
+        return Ok(None);
+    }
+
+    Config::try_from(raw)
+        .map(Some)
+        .map_err(|e| anyhow::anyhow!("Failed to decode config property: {}", e))
+}
+
+pub async fn load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Config> {
+    try_load_config_from_daemon(proxy).await?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "The running daemon predates this build and sends a config layout it \
+             cannot read. Restart it with `systemctl restart gazed`."
+        )
+    })
 }
 
 pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> anyhow::Result<()> {
@@ -204,6 +232,7 @@ pub trait Gaze {
     async fn is_extension_active(&self, uid: u32) -> zbus::Result<bool>;
 
     async fn verify_start(&self, face_name: &str) -> zbus::Result<()>;
+    async fn verify_start_for(&self, face_name: &str, pam_service: &str) -> zbus::Result<()>;
     async fn verify_stop(&self) -> zbus::Result<()>;
 
     async fn enroll_start(&self, face_name: &str) -> zbus::Result<()>;
@@ -274,6 +303,76 @@ mod tests {
             "Turn your face slightly left"
         );
         assert_eq!(VerifyResult::VerifyNoMatch.as_ref(), "VerifyNoMatch");
+    }
+
+    #[derive(Clone, Debug, Value, OwnedValue, Type)]
+    struct OldAuthConfig {
+        abort_if_ssh: bool,
+        abort_if_lid_closed: bool,
+        require_confirmation: bool,
+        resume_grace_ms: u64,
+        start_delay_ms: u64,
+    }
+
+    #[derive(Clone, Debug, Value, OwnedValue, Type)]
+    struct OldConfig {
+        security: crate::config::SecurityLevel,
+        cameras: crate::config::CameraConfig,
+        auth: OldAuthConfig,
+        enrollment: crate::config::EnrollmentConfig,
+        liveness: crate::config::LivenessConfig,
+        storage: crate::config::StorageConfig,
+    }
+
+    fn old_daemon_property() -> OwnedValue {
+        let old = OldConfig {
+            security: Default::default(),
+            cameras: Default::default(),
+            auth: OldAuthConfig {
+                abort_if_ssh: true,
+                abort_if_lid_closed: true,
+                require_confirmation: false,
+                resume_grace_ms: 0,
+                start_delay_ms: 3000,
+            },
+            enrollment: Default::default(),
+            liveness: Default::default(),
+            storage: Default::default(),
+        };
+        OwnedValue::try_from(Value::from(old)).expect("old config converts to a value")
+    }
+
+    #[test]
+    fn current_layout_decodes() {
+        let raw = OwnedValue::try_from(Value::from(Config::default())).unwrap();
+        let decoded = config_from_property(raw)
+            .expect("no error")
+            .expect("current layout is readable");
+        assert_eq!(decoded.auth.start_delay_scope(), "all");
+    }
+
+    #[test]
+    fn older_daemon_layout_is_reported_not_decoded() {
+        assert!(
+            config_from_property(old_daemon_property())
+                .expect("a layout mismatch is not an error")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn decoding_an_older_layout_directly_would_panic() {
+        let raw = old_daemon_property();
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Config::try_from(raw).is_ok()
+        }));
+        std::panic::set_hook(previous);
+        assert!(
+            !matches!(attempt, Ok(true)),
+            "expected the raw conversion to fail loudly on a short structure"
+        );
     }
 
     #[test]

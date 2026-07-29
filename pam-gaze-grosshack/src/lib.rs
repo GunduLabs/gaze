@@ -9,9 +9,10 @@ use std::time::Duration;
 
 async fn authenticate_biometric_with_timeout(
     username: &str,
+    service: Option<&str>,
     timeout_duration: Duration,
 ) -> Option<c_int> {
-    let auth_future = authenticate_biometric(username);
+    let auth_future = authenticate_biometric(username, service);
 
     tokio::select! {
         res = auth_future => {
@@ -110,8 +111,11 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         notify_clone.notify_one();
     });
 
-    let biometric_fut =
-        authenticate_biometric_with_timeout(&username, camera_auth_timeout(&config.auth));
+    let biometric_fut = authenticate_biometric_with_timeout(
+        &username,
+        service.as_deref(),
+        camera_auth_timeout(&config.auth, service.as_deref()),
+    );
     let password_fut = notify.notified();
 
     enum SelectorResult {

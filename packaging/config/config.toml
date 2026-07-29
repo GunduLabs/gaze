@@ -43,11 +43,15 @@ resume_grace_ms = 0
 # you again immediately after you lock manually and are still in front of the
 # camera. 0 disables it.
 #
-# The daemon cannot tell a lock screen from a sudo prompt, so this delays every
-# face authentication, sudo and polkit included. Keep it small if you use face
-# auth for sudo. When resuming from suspend, whichever of this and
-# resume_grace_ms is longer applies; they do not stack.
+# When resuming from suspend, whichever of this and resume_grace_ms is longer
+# applies; they do not stack.
 start_delay_ms = 0
+# Which prompts wait for start_delay_ms.
+#   "all"         every face authentication, sudo and polkit included
+#   "screen_lock" screen lockers only; sudo, polkit, su and greeters skip it
+# Gaze reads the PAM service name to tell these apart. A service it does not
+# recognize counts as a screen lock, so an unusual locker still gets the delay.
+start_delay_scope = "all"
 
 [enrollment]
 max_templates = 2

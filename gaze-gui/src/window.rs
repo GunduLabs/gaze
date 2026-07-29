@@ -1,7 +1,7 @@
 use crate::capture_dialog;
 use gaze_core::config::{
-    Config, DEFAULT_RGB_CAMERA, MAX_ENROLLMENT_FACE_SIZE_RATIO, MIN_ENROLLMENT_FACE_SIZE_RATIO,
-    SecurityLevel,
+    AuthConfig, Config, DEFAULT_RGB_CAMERA, MAX_ENROLLMENT_FACE_SIZE_RATIO,
+    MIN_ENROLLMENT_FACE_SIZE_RATIO, SecurityLevel,
 };
 use gaze_core::dbus::{
     GazeProxy, apply_config_to_daemon, connect_gaze, dbus_error_message, dbus_is_file_not_found,
@@ -80,6 +80,13 @@ fn set_custom_config_rows_visible(
     hybrid_row.set_visible(is_custom);
 }
 
+fn set_start_delay_scope_row_visible(
+    start_delay_row: &libadwaita::SpinRow,
+    scope_row: &libadwaita::ComboRow,
+) {
+    scope_row.set_visible(start_delay_row.value() > 0.0);
+}
+
 fn set_liveness_config_rows_visible(
     enabled_switch: &gtk4::Switch,
     threshold_row: &libadwaita::SpinRow,
@@ -110,6 +117,7 @@ struct ConfigRows<'a> {
     abort_lid: &'a gtk4::Switch,
     resume_grace: &'a libadwaita::SpinRow,
     start_delay: &'a libadwaita::SpinRow,
+    start_delay_scope: &'a libadwaita::ComboRow,
     encrypt_templates: &'a gtk4::Switch,
 }
 
@@ -171,6 +179,11 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
     rows.abort_lid.set_active(cfg.auth.abort_if_lid_closed);
     rows.resume_grace.set_value(cfg.auth.resume_grace_ms as f64);
     rows.start_delay.set_value(cfg.auth.start_delay_ms as f64);
+    rows.start_delay_scope
+        .set_selected(AuthConfig::start_delay_scope_index_for_value(
+            cfg.auth.start_delay_scope(),
+        ));
+    set_start_delay_scope_row_visible(rows.start_delay, rows.start_delay_scope);
     rows.encrypt_templates
         .set_active(cfg.storage.encrypt_templates);
 
@@ -368,8 +381,16 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     let start_delay_row = libadwaita::SpinRow::with_range(0.0, 10000.0, 500.0);
     start_delay_row.set_digits(0);
     start_delay_row.set_title("Start Delay (ms)");
-    start_delay_row.set_subtitle("Delay before every face authentication, including sudo");
+    start_delay_row.set_subtitle("Delay before face authentication starts");
     auth_group.add(&start_delay_row);
+
+    let start_delay_scope_names = ["Every face auth (including sudo)", "Screen lockers only"];
+    let start_delay_scope_row = libadwaita::ComboRow::new();
+    start_delay_scope_row.set_title("Start Delay Applies To");
+    start_delay_scope_row.set_subtitle("Which prompts wait for the start delay");
+    let start_delay_scope_model = gtk4::StringList::new(&start_delay_scope_names);
+    start_delay_scope_row.set_model(Some(&start_delay_scope_model));
+    auth_group.add(&start_delay_scope_row);
 
     let hybrid_names = ["Default", "Or", "Fallback on Dark", "And"];
     let hybrid_row = libadwaita::ComboRow::new();
@@ -465,6 +486,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         start_delay_row,
         #[weak]
+        start_delay_scope_row,
+        #[weak]
         encrypt_templates_switch,
         #[strong]
         cameras,
@@ -517,6 +540,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             cfg.auth.abort_if_lid_closed = abort_lid_switch.is_active();
             cfg.auth.resume_grace_ms = resume_grace_row.value() as u64;
             cfg.auth.start_delay_ms = start_delay_row.value() as u64;
+            cfg.auth.start_delay_scope =
+                AuthConfig::start_delay_scope_from_index(start_delay_scope_row.selected() as usize);
             cfg.storage.encrypt_templates = encrypt_templates_switch.is_active();
 
             let cfg_to_apply = cfg.clone();
@@ -607,6 +632,16 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         move |_| apply_changes()
     ));
     start_delay_row.connect_value_notify(glib::clone!(
+        #[weak]
+        start_delay_scope_row,
+        #[strong]
+        apply_changes,
+        move |row| {
+            set_start_delay_scope_row_visible(row, &start_delay_scope_row);
+            apply_changes();
+        }
+    ));
+    start_delay_scope_row.connect_selected_notify(glib::clone!(
         #[strong]
         apply_changes,
         move |_| apply_changes()
@@ -672,6 +707,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 abort_lid: &abort_lid_switch,
                 resume_grace: &resume_grace_row,
                 start_delay: &start_delay_row,
+                start_delay_scope: &start_delay_scope_row,
                 encrypt_templates: &encrypt_templates_switch,
             },
             CameraChoices {
@@ -832,6 +868,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         start_delay_row,
         #[weak]
+        start_delay_scope_row,
+        #[weak]
         encrypt_templates_switch,
         #[strong]
         cameras,
@@ -872,6 +910,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                         abort_lid: &abort_lid_switch,
                         resume_grace: &resume_grace_row,
                         start_delay: &start_delay_row,
+                        start_delay_scope: &start_delay_scope_row,
                         encrypt_templates: &encrypt_templates_switch,
                     },
                     CameraChoices {

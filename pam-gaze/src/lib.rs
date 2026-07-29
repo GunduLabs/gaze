@@ -71,11 +71,16 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         unsafe { say(pamh, prompt) };
 
         let budget = match setup_auth_env().await {
-            Ok((config, _)) => camera_auth_timeout(&config.auth),
+            Ok((config, _)) => camera_auth_timeout(&config.auth, service.as_deref()),
             Err(_) => Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS),
         };
 
-        match timeout(budget, authenticate_biometric_with_status(&username)).await {
+        match timeout(
+            budget,
+            authenticate_biometric_with_status(&username, service.as_deref()),
+        )
+        .await
+        {
             Ok(Ok((AuthOutcome::Match, _))) => Ok(()),
             Ok(Ok((AuthOutcome::NoMatch, _))) => {
                 unsafe { say(pamh, FACE_NOT_RECOGNIZED) };

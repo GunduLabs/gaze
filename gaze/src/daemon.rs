@@ -1506,544 +1506,18 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         _face_name: String,
     ) -> fdo::Result<()> {
-        let claim = self.check_claim(&header).await?;
-        self.ensure_auth_not_aborted(&header).await?;
+        self.start_verification(ctxt, header, None).await
+    }
 
-        let resumed = self.resume_pending.swap(false, Ordering::SeqCst);
-
-        let username = claim.username.clone();
-        let signal_destination = Self::signal_destination(&claim.sender)?;
-        self.cancel_active_tasks().await;
-
-        let (tx, mut rx) = oneshot::channel();
-        *self.active_cancel.lock().await = Some(tx);
-
-        let detector_arc = self.detector.clone();
-        let recognizer_rgb_arc = self.recognizer_rgb.clone();
-        let recognizer_ir_arc = self.recognizer_ir.clone();
-        let liveness_arc = self.liveness.clone();
-        let db_arc = self.db.clone();
-        let threshold_arc = self.threshold.clone();
-
-        let config = Config::load_from(CONFIG_PATH).unwrap_or_default();
-        let delay = Duration::from_millis(config.auth.effective_start_delay_ms(resumed));
-        let abort_if_lid_closed = *self.abort_if_lid_closed.lock().await;
-        let rgb_device = self.rgb_device.lock().await.clone();
-        let ir_device = self.ir_device.lock().await.clone();
-        let emitter_enabled = *self.emitter_enabled.lock().await;
-        let mut ir_node = self.ir_node.lock().await.clone();
-        if emitter_enabled
-            && ir_node.is_empty()
-            && let Some(resolved) = gaze_core::camera::resolve_node(&ir_device)
-        {
-            *self.ir_node.lock().await = resolved.clone();
-            ir_node = resolved;
-        }
-        let liveness_cfg = self.liveness_config.lock().await.clone();
-        let hybrid_policy = self.hybrid_policy.lock().await.clone();
-        let conn = ctxt.connection().clone();
-        let path = ctxt.path().to_owned();
-
-        self.rt_handle.spawn(async move {
-            let ctxt = match SignalEmitter::new(&conn, path) {
-                Ok(emitter) => emitter.set_destination(signal_destination),
-                Err(e) => {
-                    error!("Failed to create signal emitter: {e}");
-                    return;
-                }
-            };
-
-            let db = db_arc.lock().await;
-            let faces_list = db.list_faces(&username).unwrap_or_default();
-            let mut has_rgb_templates = false;
-            let mut has_ir_templates = false;
-            for (_, _, has_rgb, has_ir) in &faces_list {
-                if *has_rgb {
-                    has_rgb_templates = true;
-                }
-                if *has_ir {
-                    has_ir_templates = true;
-                }
-            }
-            drop(db);
-
-            let (run_rgb, run_ir) = auth_streams(
-                &rgb_device,
-                &ir_device,
-                has_rgb_templates,
-                has_ir_templates,
-            );
-
-            if !run_rgb && !run_ir {
-                error!("No matching templates or cameras configured for auth");
-                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
-                return;
-            }
-
-            if !delay.is_zero() {
-                info!(?delay, resumed, "Delaying face auth before capture");
-                if tokio::time::timeout(delay, &mut rx).await.is_ok() {
-                    info!("VerifyStart: cancelled during start delay");
-                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
-                    return;
-                }
-                if abort_if_lid_closed && Self::is_lid_closed().await {
-                    warn!("Laptop lid is closed, aborting face auth");
-                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
-                    return;
-                }
-            }
-
-            info!(
-                liveness_enabled = liveness_cfg.enabled,
-                liveness_threshold = liveness_cfg.threshold,
-                run_rgb = run_rgb,
-                run_ir = run_ir,
-                "VerifyStart: sensing faces for user {}",
-                username
-            );
-
-            let (result_tx, mut result_rx) = tokio::sync::mpsc::channel::<VerifyMsg>(10);
-            let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            // Signals that the RGB capture phase has finished and released its camera, so
-            // the IR thread can then hold the camera. Lets single-function UVC devices
-            // (e.g. Logitech Brio) that cannot stream RGB+IR at once run hybrid verify.
-            let rgb_phase_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
-
-            let mut rgb_thread = None;
-            if run_rgb {
-                let stop_clone = stop_flag.clone();
-                let tx = result_tx.clone();
-                let detector_arc = detector_arc.clone();
-                let config_clone = config.clone();
-                let recognizer_rgb_arc = recognizer_rgb_arc.clone();
-                let liveness_arc = liveness_arc.clone();
-                let db_arc = db_arc.clone();
-                let username_clone = username.clone();
-                let threshold_arc = threshold_arc.clone();
-                let liveness_enabled = liveness_cfg.enabled;
-                let liveness_threshold = liveness_cfg.threshold;
-                let rgb_device_clone = rgb_device.clone();
-                let rgb_phase_done_clone = rgb_phase_done.clone();
-
-                rgb_thread = Some(std::thread::spawn(move || {
-                    // Set once the RGB camera is released, on every exit path (incl. panic),
-                    // so the IR thread can then safely open its stream. Declared before `cam`
-                    // so `cam` drops first, guaranteeing release precedes the signal.
-                    struct RgbPhaseGuard(Arc<std::sync::atomic::AtomicBool>);
-                    impl Drop for RgbPhaseGuard {
-                        fn drop(&mut self) {
-                            self.0.store(true, std::sync::atomic::Ordering::Relaxed);
-                        }
-                    }
-                    let _rgb_phase_guard = RgbPhaseGuard(rgb_phase_done_clone);
-                    // In serial mode (IR also runs) yield the camera after a budget even
-                    // without a match, so the IR spectrum can still be captured.
-                    let rgb_deadline = run_ir.then(|| Instant::now() + VERIFY_SERIAL_RGB_BUDGET);
-                    let mut yielded_to_ir = false;
-
-                    let mut cam = match Camera::open(&rgb_device_clone) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            let _ = tx.blocking_send(VerifyMsg::Error(format!("RGB Camera open error: {e}")));
-                            return;
-                        }
-                    };
-                    tracing::debug!("RGB camera opened successfully at: {}", rgb_device_clone);
-
-                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, false);
-                    let mut live_scores: Vec<f32> = Vec::new();
-                    let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
-
-                    while let Some(frame) = cam.next_interruptible(&stop_clone) {
-                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                            break;
-                        }
-                        if let Some(deadline) = rgb_deadline
-                            && Instant::now() >= deadline
-                        {
-                            // Serial mode: hand the camera to the IR phase even without a
-                            // match so hybrid auth can still capture the IR spectrum.
-                            yielded_to_ir = true;
-                            break;
-                        }
-
-                        let (status, embed_opt) = {
-                            let mut recognizer = recognizer_rgb_arc.blocking_lock();
-                            match process_frame_sync(&mut checker, &mut recognizer, &frame, liveness_enabled) {
-                                Ok(res) => res,
-                                Err(_) => (CaptureStatus::NoFace, None),
-                            }
-                        };
-                        tracing::debug!("Processed RGB frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
-
-                        let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
-                        let _ = tx.try_send(VerifyMsg::Status(Spectrum::Rgb, status, latest_embed));
-
-                        if status == CaptureStatus::Usable && let Some(data) = embed_opt {
-                            let threshold = *threshold_arc.blocking_lock();
-                            let db = db_arc.blocking_lock();
-                            let scores = match db.match_faces(&username_clone, &data.embedding, threshold, Spectrum::Rgb) {
-                                Ok(s) => s,
-                                Err(e) => {
-                                    let _ = tx.blocking_send(VerifyMsg::Error(format!("DB error: {e}")));
-                                    return;
-                                }
-                            };
-                            drop(db);
-
-                            tracing::debug!("RGB match scores: {:?}", scores);
-
-                            let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
-                            if matched {
-                                let mut liveness_passed = true;
-                                if liveness_enabled {
-                                    if let Some(eyes) = eyes_from_kpss(&data.kpss) {
-                                        landmark_seq.push(eyes);
-                                    }
-                                    let liveness_face = match crop_liveness_face(&data) {
-                                        Ok(face) => face,
-                                        Err(e) => {
-                                            error!("Liveness crop failed: {e}");
-                                            continue;
-                                        }
-                                    };
-                                    let mut live_guard = liveness_arc.blocking_lock();
-                                    let Some(detector) = live_guard.as_mut() else {
-                                        error!("Liveness is enabled but detector is unavailable");
-                                        return;
-                                    };
-                                    let live_score = match detector.live_score(&liveness_face) {
-                                        Ok(score) => score,
-                                        Err(e) => {
-                                            error!("Liveness inference failed: {e}");
-                                            return;
-                                        }
-                                    };
-                                    drop(live_guard);
-                                    live_scores.push(live_score);
-
-                                    let model_pass = crate::liveness::liveness_passes(&live_scores, liveness_threshold as f32);
-                                    let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
-                                    let confirmed_static = crate::liveness::confirmed_static(&motion);
-                                    liveness_passed = model_pass && !confirmed_static;
-
-                                    tracing::debug!(
-                                        "Liveness checked: score={:?}, pass={}, motion={:?}, confirmed_static={}, overall={}",
-                                        live_scores,
-                                        model_pass,
-                                        motion,
-                                        confirmed_static,
-                                        liveness_passed
-                                    );
-                                }
-
-                                if liveness_passed {
-                                    let _ = tx.blocking_send(VerifyMsg::Success(Spectrum::Rgb, data.embedding));
-                                    return;
-                                }
-                            }
-                        }
-                    }
-
-                    if !yielded_to_ir && !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                        let _ = tx.blocking_send(VerifyMsg::Error(
-                            "RGB camera stream stopped unexpectedly".into(),
-                        ));
-                    }
-                }));
-            }
-
-            let mut ir_thread = None;
-            if run_ir {
-                let stop_clone = stop_flag.clone();
-                let tx = result_tx.clone();
-                let detector_arc = detector_arc.clone();
-                let config_clone = config.clone();
-                let recognizer_ir_arc = recognizer_ir_arc.clone();
-                let db_arc = db_arc.clone();
-                let username_clone = username.clone();
-                let threshold_arc = threshold_arc.clone();
-                let liveness_enabled = liveness_cfg.enabled;
-                let ir_device_clone = ir_device.clone();
-                let ir_node_clone = ir_node.clone();
-                let emitter_enabled = emitter_enabled;
-                let rgb_phase_done_clone = rgb_phase_done.clone();
-
-                ir_thread = Some(std::thread::spawn(move || {
-                    // Serial mode: wait for the RGB phase to release its camera before
-                    // opening IR (and firing the emitter), so only one stream is live at a
-                    // time on single-function UVC devices. Bail if verify already passed.
-                    if run_rgb {
-                        while !rgb_phase_done_clone.load(std::sync::atomic::Ordering::Relaxed)
-                            && !stop_clone.load(std::sync::atomic::Ordering::Relaxed)
-                        {
-                            std::thread::sleep(std::time::Duration::from_millis(20));
-                        }
-                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                            return;
-                        }
-                    }
-
-                    let _emitter = EmitterGuard::engage(
-                        &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
-                        emitter_enabled
-                    );
-
-                    let mut cam = match Camera::open_ir(&ir_device_clone) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            let _ = tx.blocking_send(VerifyMsg::Error(format!("IR Camera open error: {e}")));
-                            return;
-                        }
-                    };
-                    tracing::debug!("IR camera opened successfully at: {}", ir_device_clone);
-
-                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, false);
-                    let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
-                    let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
-
-                    while let Some(frame) = cam.next_interruptible(&stop_clone) {
-                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                            break;
-                        }
-
-                        match dark_gate.classify(&frame) {
-                            IrFrameKind::Lit => {}
-                            IrFrameKind::StrobeDark => continue,
-                            IrFrameKind::EmitterDark => {
-                                let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, CaptureStatus::TooDark, None));
-                                continue;
-                            }
-                        }
-
-                        let (status, embed_opt) = {
-                            let mut recognizer = recognizer_ir_arc.blocking_lock();
-                            match process_frame_sync(&mut checker, &mut recognizer, &frame, false) {
-                                Ok(res) => res,
-                                Err(_) => (CaptureStatus::NoFace, None),
-                            }
-                        };
-                        tracing::debug!("Processed IR frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
-
-                        let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
-                        let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, status, latest_embed));
-
-                        if status == CaptureStatus::Usable && let Some(data) = embed_opt {
-                            let threshold = *threshold_arc.blocking_lock();
-                            let db = db_arc.blocking_lock();
-                            let scores = match db.match_faces(&username_clone, &data.embedding, threshold, Spectrum::Ir) {
-                                Ok(s) => s,
-                                Err(e) => {
-                                    let _ = tx.blocking_send(VerifyMsg::Error(format!("DB error: {e}")));
-                                    return;
-                                }
-                            };
-                            drop(db);
-
-                            tracing::debug!("IR match scores: {:?}", scores);
-
-                            let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
-                            if matched {
-                                let mut liveness_passed = true;
-                                if liveness_enabled {
-                                    if let Some(eyes) = eyes_from_kpss(&data.kpss) {
-                                        landmark_seq.push(eyes);
-                                    }
-                                    let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
-                                    liveness_passed = crate::liveness::motion_confirms_live(
-                                        &motion,
-                                        crate::liveness::MIN_MOTION_PAIRS,
-                                    );
-
-                                    tracing::debug!(
-                                        "Liveness checked (IR): motion={:?}, overall={}",
-                                        motion,
-                                        liveness_passed
-                                    );
-                                }
-
-                                if liveness_passed {
-                                    let _ = tx.blocking_send(VerifyMsg::Success(Spectrum::Ir, data.embedding));
-                                    return;
-                                }
-                            }
-                        }
-                    }
-
-                    if !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                        let _ = tx.blocking_send(VerifyMsg::Error(
-                            "IR camera stream stopped unexpectedly".into(),
-                        ));
-                    }
-                }));
-            }
-
-            let mut last_emitted_status: Option<CaptureStatus> = None;
-            let mut rgb_status = CaptureStatus::Unused;
-            let mut ir_status = CaptureStatus::Unused;
-            let mut rgb_attempted = false;
-            let mut dark_since: Option<Instant> = None;
-            let mut last_face_at = Instant::now();
-            let mut frames_seen: u32 = 0;
-
-            let mut rgb_success_embed = None;
-            let mut ir_success_embed = None;
-            let mut rgb_latest_embed = None;
-            let mut ir_latest_embed = None;
-
-            macro_rules! emit_verify_with_scores {
-                ($result:expr) => {{
-                    let threshold = *threshold_arc.lock().await;
-                    let db = db_arc.lock().await;
-                    let final_scores = build_hybrid_scores(
-                        &db,
-                        &username,
-                        threshold,
-                        rgb_success_embed.as_ref().or(rgb_latest_embed.as_ref()),
-                        ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
-                    );
-                    drop(db);
-                    let _ = Self::verify_status(&ctxt, $result, final_scores, rgb_status, ir_status).await;
-                }};
-            }
-
-            macro_rules! finish_if_auth_passed {
-                () => {{
-                    if hybrid_auth_passed(
-                        &hybrid_policy,
-                        run_rgb,
-                        run_ir,
-                        rgb_attempted,
-                        rgb_status,
-                        rgb_success_embed.is_some(),
-                        ir_success_embed.is_some(),
-                    ) {
-                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                        emit_verify_with_scores!(VerifyResult::VerifyMatch);
-                        true
-                    } else {
-                        false
-                    }
-                }};
-            }
-
-            loop {
-                tokio::select! {
-                    _ = &mut rx => {
-                        info!("VerifyStart: cancelled");
-                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
-                        break;
-                    }
-                    msg_opt = result_rx.recv() => {
-                        let Some(msg) = msg_opt else { break };
-                        match msg {
-                            VerifyMsg::Status(spectrum, status, embed_opt) => {
-                                let has_face = embed_opt.is_some();
-                                match spectrum {
-                                    Spectrum::Rgb => {
-                                        rgb_status = status;
-                                        rgb_attempted = true;
-                                        if let Some(embed) = embed_opt {
-                                            rgb_latest_embed = Some(embed);
-                                        }
-                                    }
-                                    Spectrum::Ir => {
-                                        ir_status = status;
-                                        if let Some(embed) = embed_opt {
-                                            ir_latest_embed = Some(embed);
-                                        }
-                                    }
-                                }
-
-                                if has_face {
-                                    last_face_at = Instant::now();
-                                    frames_seen += 1;
-                                    if frames_seen >= liveness_cfg.max_frames {
-                                        info!("VerifyStart: liveness gate timed out");
-                                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                        emit_verify_with_scores!(VerifyResult::VerifyNoMatch);
-                                        break;
-                                    }
-                                }
-
-                                Self::emit_effective_face_status(
-                                    &ctxt,
-                                    &mut last_emitted_status,
-                                    rgb_status,
-                                    ir_status,
-                                ).await;
-
-                                let both_dark = match (run_rgb, run_ir) {
-                                    (true, true) => rgb_status == CaptureStatus::TooDark && ir_status == CaptureStatus::TooDark,
-                                    (true, false) => rgb_status == CaptureStatus::TooDark,
-                                    (false, true) => ir_status == CaptureStatus::TooDark,
-                                    (false, false) => false,
-                                };
-
-                                if both_dark {
-                                    let started = *dark_since.get_or_insert_with(Instant::now);
-                                    if started.elapsed() >= VERIFY_TOO_DARK_TIMEOUT {
-                                        info!(
-                                            "VerifyStart: giving up after {}ms of dark frames",
-                                            VERIFY_TOO_DARK_TIMEOUT.as_millis()
-                                        );
-                                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
-                                        break;
-                                    }
-                                } else {
-                                    dark_since = None;
-                                }
-
-                                if last_face_at.elapsed() >= VERIFY_NO_FACE_TIMEOUT {
-                                    info!(
-                                        "VerifyStart: giving up after {}s without a detected face",
-                                        VERIFY_NO_FACE_TIMEOUT.as_secs()
-                                    );
-                                    stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
-                                    break;
-                                }
-
-                                if finish_if_auth_passed!() {
-                                    break;
-                                }
-                            }
-                            VerifyMsg::Success(spectrum, embedding) => {
-                                match spectrum {
-                                    Spectrum::Rgb => {
-                                        rgb_success_embed = Some(embedding);
-                                        rgb_attempted = true;
-                                    }
-                                    Spectrum::Ir => ir_success_embed = Some(embedding),
-                                }
-
-                                if finish_if_auth_passed!() {
-                                    break;
-                                }
-                            }
-                            VerifyMsg::Error(e) => {
-                                error!("VerifyStart loop error: {e}");
-                                stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            if let Some(t) = rgb_thread {
-                let _ = t.join();
-            }
-            if let Some(t) = ir_thread {
-                let _ = t.join();
-            }
-        });
-
-        Ok(())
+    async fn verify_start_for(
+        &self,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        _face_name: String,
+        pam_service: String,
+    ) -> fdo::Result<()> {
+        self.start_verification(ctxt, header, Some(pam_service))
+            .await
     }
 
     async fn verify_stop(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
@@ -2964,4 +2438,558 @@ impl AuthDaemon {
         msg: EnrollPrompt,
         time_remaining: f64,
     ) -> zbus::Result<()>;
+}
+
+impl AuthDaemon {
+    async fn start_verification(
+        &self,
+        ctxt: SignalEmitter<'_>,
+        header: Header<'_>,
+        pam_service: Option<String>,
+    ) -> fdo::Result<()> {
+        let claim = self.check_claim(&header).await?;
+        self.ensure_auth_not_aborted(&header).await?;
+
+        let resumed = self.resume_pending.swap(false, Ordering::SeqCst);
+
+        let username = claim.username.clone();
+        let signal_destination = Self::signal_destination(&claim.sender)?;
+        self.cancel_active_tasks().await;
+
+        let (tx, mut rx) = oneshot::channel();
+        *self.active_cancel.lock().await = Some(tx);
+
+        let detector_arc = self.detector.clone();
+        let recognizer_rgb_arc = self.recognizer_rgb.clone();
+        let recognizer_ir_arc = self.recognizer_ir.clone();
+        let liveness_arc = self.liveness.clone();
+        let db_arc = self.db.clone();
+        let threshold_arc = self.threshold.clone();
+
+        let config = Config::load_from(CONFIG_PATH).unwrap_or_default();
+        let surface = gaze_core::config::classify_pam_service(pam_service.as_deref());
+        let delay = Duration::from_millis(config.auth.effective_start_delay_ms(resumed, surface));
+        info!(
+            service = pam_service.as_deref().unwrap_or("<unknown>"),
+            ?surface,
+            "Face auth requested"
+        );
+        let abort_if_lid_closed = *self.abort_if_lid_closed.lock().await;
+        let rgb_device = self.rgb_device.lock().await.clone();
+        let ir_device = self.ir_device.lock().await.clone();
+        let emitter_enabled = *self.emitter_enabled.lock().await;
+        let mut ir_node = self.ir_node.lock().await.clone();
+        if emitter_enabled
+            && ir_node.is_empty()
+            && let Some(resolved) = gaze_core::camera::resolve_node(&ir_device)
+        {
+            *self.ir_node.lock().await = resolved.clone();
+            ir_node = resolved;
+        }
+        let liveness_cfg = self.liveness_config.lock().await.clone();
+        let hybrid_policy = self.hybrid_policy.lock().await.clone();
+        let conn = ctxt.connection().clone();
+        let path = ctxt.path().to_owned();
+
+        self.rt_handle.spawn(async move {
+            let ctxt = match SignalEmitter::new(&conn, path) {
+                Ok(emitter) => emitter.set_destination(signal_destination),
+                Err(e) => {
+                    error!("Failed to create signal emitter: {e}");
+                    return;
+                }
+            };
+
+            let db = db_arc.lock().await;
+            let faces_list = db.list_faces(&username).unwrap_or_default();
+            let mut has_rgb_templates = false;
+            let mut has_ir_templates = false;
+            for (_, _, has_rgb, has_ir) in &faces_list {
+                if *has_rgb {
+                    has_rgb_templates = true;
+                }
+                if *has_ir {
+                    has_ir_templates = true;
+                }
+            }
+            drop(db);
+
+            let (run_rgb, run_ir) = auth_streams(
+                &rgb_device,
+                &ir_device,
+                has_rgb_templates,
+                has_ir_templates,
+            );
+
+            if !run_rgb && !run_ir {
+                error!("No matching templates or cameras configured for auth");
+                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                return;
+            }
+
+            if !delay.is_zero() {
+                info!(?delay, resumed, ?surface, "Delaying face auth before capture");
+                if tokio::time::timeout(delay, &mut rx).await.is_ok() {
+                    info!("VerifyStart: cancelled during start delay");
+                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                    return;
+                }
+                if abort_if_lid_closed && Self::is_lid_closed().await {
+                    warn!("Laptop lid is closed, aborting face auth");
+                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                    return;
+                }
+            }
+
+            info!(
+                liveness_enabled = liveness_cfg.enabled,
+                liveness_threshold = liveness_cfg.threshold,
+                run_rgb = run_rgb,
+                run_ir = run_ir,
+                "VerifyStart: sensing faces for user {}",
+                username
+            );
+
+            let (result_tx, mut result_rx) = tokio::sync::mpsc::channel::<VerifyMsg>(10);
+            let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            // Signals that the RGB capture phase has finished and released its camera, so
+            // the IR thread can then hold the camera. Lets single-function UVC devices
+            // (e.g. Logitech Brio) that cannot stream RGB+IR at once run hybrid verify.
+            let rgb_phase_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+            let mut rgb_thread = None;
+            if run_rgb {
+                let stop_clone = stop_flag.clone();
+                let tx = result_tx.clone();
+                let detector_arc = detector_arc.clone();
+                let config_clone = config.clone();
+                let recognizer_rgb_arc = recognizer_rgb_arc.clone();
+                let liveness_arc = liveness_arc.clone();
+                let db_arc = db_arc.clone();
+                let username_clone = username.clone();
+                let threshold_arc = threshold_arc.clone();
+                let liveness_enabled = liveness_cfg.enabled;
+                let liveness_threshold = liveness_cfg.threshold;
+                let rgb_device_clone = rgb_device.clone();
+                let rgb_phase_done_clone = rgb_phase_done.clone();
+
+                rgb_thread = Some(std::thread::spawn(move || {
+                    // Set once the RGB camera is released, on every exit path (incl. panic),
+                    // so the IR thread can then safely open its stream. Declared before `cam`
+                    // so `cam` drops first, guaranteeing release precedes the signal.
+                    struct RgbPhaseGuard(Arc<std::sync::atomic::AtomicBool>);
+                    impl Drop for RgbPhaseGuard {
+                        fn drop(&mut self) {
+                            self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
+                    }
+                    let _rgb_phase_guard = RgbPhaseGuard(rgb_phase_done_clone);
+                    // In serial mode (IR also runs) yield the camera after a budget even
+                    // without a match, so the IR spectrum can still be captured.
+                    let rgb_deadline = run_ir.then(|| Instant::now() + VERIFY_SERIAL_RGB_BUDGET);
+                    let mut yielded_to_ir = false;
+
+                    let mut cam = match Camera::open(&rgb_device_clone) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            let _ = tx.blocking_send(VerifyMsg::Error(format!("RGB Camera open error: {e}")));
+                            return;
+                        }
+                    };
+                    tracing::debug!("RGB camera opened successfully at: {}", rgb_device_clone);
+
+                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, false);
+                    let mut live_scores: Vec<f32> = Vec::new();
+                    let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
+
+                    while let Some(frame) = cam.next_interruptible(&stop_clone) {
+                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                            break;
+                        }
+                        if let Some(deadline) = rgb_deadline
+                            && Instant::now() >= deadline
+                        {
+                            // Serial mode: hand the camera to the IR phase even without a
+                            // match so hybrid auth can still capture the IR spectrum.
+                            yielded_to_ir = true;
+                            break;
+                        }
+
+                        let (status, embed_opt) = {
+                            let mut recognizer = recognizer_rgb_arc.blocking_lock();
+                            match process_frame_sync(&mut checker, &mut recognizer, &frame, liveness_enabled) {
+                                Ok(res) => res,
+                                Err(_) => (CaptureStatus::NoFace, None),
+                            }
+                        };
+                        tracing::debug!("Processed RGB frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
+
+                        let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
+                        let _ = tx.try_send(VerifyMsg::Status(Spectrum::Rgb, status, latest_embed));
+
+                        if status == CaptureStatus::Usable && let Some(data) = embed_opt {
+                            let threshold = *threshold_arc.blocking_lock();
+                            let db = db_arc.blocking_lock();
+                            let scores = match db.match_faces(&username_clone, &data.embedding, threshold, Spectrum::Rgb) {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    let _ = tx.blocking_send(VerifyMsg::Error(format!("DB error: {e}")));
+                                    return;
+                                }
+                            };
+                            drop(db);
+
+                            tracing::debug!("RGB match scores: {:?}", scores);
+
+                            let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
+                            if matched {
+                                let mut liveness_passed = true;
+                                if liveness_enabled {
+                                    if let Some(eyes) = eyes_from_kpss(&data.kpss) {
+                                        landmark_seq.push(eyes);
+                                    }
+                                    let liveness_face = match crop_liveness_face(&data) {
+                                        Ok(face) => face,
+                                        Err(e) => {
+                                            error!("Liveness crop failed: {e}");
+                                            continue;
+                                        }
+                                    };
+                                    let mut live_guard = liveness_arc.blocking_lock();
+                                    let Some(detector) = live_guard.as_mut() else {
+                                        error!("Liveness is enabled but detector is unavailable");
+                                        return;
+                                    };
+                                    let live_score = match detector.live_score(&liveness_face) {
+                                        Ok(score) => score,
+                                        Err(e) => {
+                                            error!("Liveness inference failed: {e}");
+                                            return;
+                                        }
+                                    };
+                                    drop(live_guard);
+                                    live_scores.push(live_score);
+
+                                    let model_pass = crate::liveness::liveness_passes(&live_scores, liveness_threshold as f32);
+                                    let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
+                                    let confirmed_static = crate::liveness::confirmed_static(&motion);
+                                    liveness_passed = model_pass && !confirmed_static;
+
+                                    tracing::debug!(
+                                        "Liveness checked: score={:?}, pass={}, motion={:?}, confirmed_static={}, overall={}",
+                                        live_scores,
+                                        model_pass,
+                                        motion,
+                                        confirmed_static,
+                                        liveness_passed
+                                    );
+                                }
+
+                                if liveness_passed {
+                                    let _ = tx.blocking_send(VerifyMsg::Success(Spectrum::Rgb, data.embedding));
+                                    return;
+                                }
+                            }
+                        }
+                    }
+
+                    if !yielded_to_ir && !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = tx.blocking_send(VerifyMsg::Error(
+                            "RGB camera stream stopped unexpectedly".into(),
+                        ));
+                    }
+                }));
+            }
+
+            let mut ir_thread = None;
+            if run_ir {
+                let stop_clone = stop_flag.clone();
+                let tx = result_tx.clone();
+                let detector_arc = detector_arc.clone();
+                let config_clone = config.clone();
+                let recognizer_ir_arc = recognizer_ir_arc.clone();
+                let db_arc = db_arc.clone();
+                let username_clone = username.clone();
+                let threshold_arc = threshold_arc.clone();
+                let liveness_enabled = liveness_cfg.enabled;
+                let ir_device_clone = ir_device.clone();
+                let ir_node_clone = ir_node.clone();
+                let emitter_enabled = emitter_enabled;
+                let rgb_phase_done_clone = rgb_phase_done.clone();
+
+                ir_thread = Some(std::thread::spawn(move || {
+                    // Serial mode: wait for the RGB phase to release its camera before
+                    // opening IR (and firing the emitter), so only one stream is live at a
+                    // time on single-function UVC devices. Bail if verify already passed.
+                    if run_rgb {
+                        while !rgb_phase_done_clone.load(std::sync::atomic::Ordering::Relaxed)
+                            && !stop_clone.load(std::sync::atomic::Ordering::Relaxed)
+                        {
+                            std::thread::sleep(std::time::Duration::from_millis(20));
+                        }
+                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                            return;
+                        }
+                    }
+
+                    let _emitter = EmitterGuard::engage(
+                        &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
+                        emitter_enabled
+                    );
+
+                    let mut cam = match Camera::open_ir(&ir_device_clone) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            let _ = tx.blocking_send(VerifyMsg::Error(format!("IR Camera open error: {e}")));
+                            return;
+                        }
+                    };
+                    tracing::debug!("IR camera opened successfully at: {}", ir_device_clone);
+
+                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, false);
+                    let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
+                    let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
+
+                    while let Some(frame) = cam.next_interruptible(&stop_clone) {
+                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                            break;
+                        }
+
+                        match dark_gate.classify(&frame) {
+                            IrFrameKind::Lit => {}
+                            IrFrameKind::StrobeDark => continue,
+                            IrFrameKind::EmitterDark => {
+                                let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, CaptureStatus::TooDark, None));
+                                continue;
+                            }
+                        }
+
+                        let (status, embed_opt) = {
+                            let mut recognizer = recognizer_ir_arc.blocking_lock();
+                            match process_frame_sync(&mut checker, &mut recognizer, &frame, false) {
+                                Ok(res) => res,
+                                Err(_) => (CaptureStatus::NoFace, None),
+                            }
+                        };
+                        tracing::debug!("Processed IR frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
+
+                        let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
+                        let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, status, latest_embed));
+
+                        if status == CaptureStatus::Usable && let Some(data) = embed_opt {
+                            let threshold = *threshold_arc.blocking_lock();
+                            let db = db_arc.blocking_lock();
+                            let scores = match db.match_faces(&username_clone, &data.embedding, threshold, Spectrum::Ir) {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    let _ = tx.blocking_send(VerifyMsg::Error(format!("DB error: {e}")));
+                                    return;
+                                }
+                            };
+                            drop(db);
+
+                            tracing::debug!("IR match scores: {:?}", scores);
+
+                            let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
+                            if matched {
+                                let mut liveness_passed = true;
+                                if liveness_enabled {
+                                    if let Some(eyes) = eyes_from_kpss(&data.kpss) {
+                                        landmark_seq.push(eyes);
+                                    }
+                                    let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
+                                    liveness_passed = crate::liveness::motion_confirms_live(
+                                        &motion,
+                                        crate::liveness::MIN_MOTION_PAIRS,
+                                    );
+
+                                    tracing::debug!(
+                                        "Liveness checked (IR): motion={:?}, overall={}",
+                                        motion,
+                                        liveness_passed
+                                    );
+                                }
+
+                                if liveness_passed {
+                                    let _ = tx.blocking_send(VerifyMsg::Success(Spectrum::Ir, data.embedding));
+                                    return;
+                                }
+                            }
+                        }
+                    }
+
+                    if !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = tx.blocking_send(VerifyMsg::Error(
+                            "IR camera stream stopped unexpectedly".into(),
+                        ));
+                    }
+                }));
+            }
+
+            let mut last_emitted_status: Option<CaptureStatus> = None;
+            let mut rgb_status = CaptureStatus::Unused;
+            let mut ir_status = CaptureStatus::Unused;
+            let mut rgb_attempted = false;
+            let mut dark_since: Option<Instant> = None;
+            let mut last_face_at = Instant::now();
+            let mut frames_seen: u32 = 0;
+
+            let mut rgb_success_embed = None;
+            let mut ir_success_embed = None;
+            let mut rgb_latest_embed = None;
+            let mut ir_latest_embed = None;
+
+            macro_rules! emit_verify_with_scores {
+                ($result:expr) => {{
+                    let threshold = *threshold_arc.lock().await;
+                    let db = db_arc.lock().await;
+                    let final_scores = build_hybrid_scores(
+                        &db,
+                        &username,
+                        threshold,
+                        rgb_success_embed.as_ref().or(rgb_latest_embed.as_ref()),
+                        ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
+                    );
+                    drop(db);
+                    let _ = Self::verify_status(&ctxt, $result, final_scores, rgb_status, ir_status).await;
+                }};
+            }
+
+            macro_rules! finish_if_auth_passed {
+                () => {{
+                    if hybrid_auth_passed(
+                        &hybrid_policy,
+                        run_rgb,
+                        run_ir,
+                        rgb_attempted,
+                        rgb_status,
+                        rgb_success_embed.is_some(),
+                        ir_success_embed.is_some(),
+                    ) {
+                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        emit_verify_with_scores!(VerifyResult::VerifyMatch);
+                        true
+                    } else {
+                        false
+                    }
+                }};
+            }
+
+            loop {
+                tokio::select! {
+                    _ = &mut rx => {
+                        info!("VerifyStart: cancelled");
+                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                        break;
+                    }
+                    msg_opt = result_rx.recv() => {
+                        let Some(msg) = msg_opt else { break };
+                        match msg {
+                            VerifyMsg::Status(spectrum, status, embed_opt) => {
+                                let has_face = embed_opt.is_some();
+                                match spectrum {
+                                    Spectrum::Rgb => {
+                                        rgb_status = status;
+                                        rgb_attempted = true;
+                                        if let Some(embed) = embed_opt {
+                                            rgb_latest_embed = Some(embed);
+                                        }
+                                    }
+                                    Spectrum::Ir => {
+                                        ir_status = status;
+                                        if let Some(embed) = embed_opt {
+                                            ir_latest_embed = Some(embed);
+                                        }
+                                    }
+                                }
+
+                                if has_face {
+                                    last_face_at = Instant::now();
+                                    frames_seen += 1;
+                                    if frames_seen >= liveness_cfg.max_frames {
+                                        info!("VerifyStart: liveness gate timed out");
+                                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                        emit_verify_with_scores!(VerifyResult::VerifyNoMatch);
+                                        break;
+                                    }
+                                }
+
+                                Self::emit_effective_face_status(
+                                    &ctxt,
+                                    &mut last_emitted_status,
+                                    rgb_status,
+                                    ir_status,
+                                ).await;
+
+                                let both_dark = match (run_rgb, run_ir) {
+                                    (true, true) => rgb_status == CaptureStatus::TooDark && ir_status == CaptureStatus::TooDark,
+                                    (true, false) => rgb_status == CaptureStatus::TooDark,
+                                    (false, true) => ir_status == CaptureStatus::TooDark,
+                                    (false, false) => false,
+                                };
+
+                                if both_dark {
+                                    let started = *dark_since.get_or_insert_with(Instant::now);
+                                    if started.elapsed() >= VERIFY_TOO_DARK_TIMEOUT {
+                                        info!(
+                                            "VerifyStart: giving up after {}ms of dark frames",
+                                            VERIFY_TOO_DARK_TIMEOUT.as_millis()
+                                        );
+                                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                        break;
+                                    }
+                                } else {
+                                    dark_since = None;
+                                }
+
+                                if last_face_at.elapsed() >= VERIFY_NO_FACE_TIMEOUT {
+                                    info!(
+                                        "VerifyStart: giving up after {}s without a detected face",
+                                        VERIFY_NO_FACE_TIMEOUT.as_secs()
+                                    );
+                                    stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                    break;
+                                }
+
+                                if finish_if_auth_passed!() {
+                                    break;
+                                }
+                            }
+                            VerifyMsg::Success(spectrum, embedding) => {
+                                match spectrum {
+                                    Spectrum::Rgb => {
+                                        rgb_success_embed = Some(embedding);
+                                        rgb_attempted = true;
+                                    }
+                                    Spectrum::Ir => ir_success_embed = Some(embedding),
+                                }
+
+                                if finish_if_auth_passed!() {
+                                    break;
+                                }
+                            }
+                            VerifyMsg::Error(e) => {
+                                error!("VerifyStart loop error: {e}");
+                                stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(t) = rgb_thread {
+                let _ = t.join();
+            }
+            if let Some(t) = ir_thread {
+                let _ = t.join();
+            }
+        });
+
+        Ok(())
+    }
 }

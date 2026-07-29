@@ -9,8 +9,8 @@ use console::{Term, style};
 use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 use futures::StreamExt;
 use gaze_core::config::{
-    Config, HYBRID_POLICY_OPTIONS, MAX_ENROLLMENT_FACE_SIZE_RATIO, MIN_ENROLLMENT_FACE_SIZE_RATIO,
-    MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS, SecurityLevel,
+    AuthConfig, Config, HYBRID_POLICY_OPTIONS, MAX_ENROLLMENT_FACE_SIZE_RATIO,
+    MIN_ENROLLMENT_FACE_SIZE_RATIO, MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS, SecurityLevel,
 };
 use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon, connect_gaze,
@@ -387,9 +387,22 @@ async fn run_config_wizard(
         .interact_text()?;
 
     config.auth.start_delay_ms = Input::with_theme(&theme)
-        .with_prompt("Start delay in milliseconds (delays every auth, including sudo)")
+        .with_prompt("Start delay in milliseconds (0 disables)")
         .default(config.auth.start_delay_ms)
         .interact_text()?;
+
+    if config.auth.start_delay_ms > 0 {
+        let scope_labels = ["Every face auth (including sudo)", "Screen lockers only"];
+        let scope_index = Select::with_theme(&theme)
+            .with_prompt("Apply the start delay to")
+            .items(scope_labels)
+            .default(
+                AuthConfig::start_delay_scope_index_for_value(config.auth.start_delay_scope())
+                    as usize,
+            )
+            .interact()?;
+        config.auth.start_delay_scope = AuthConfig::start_delay_scope_from_index(scope_index);
+    }
 
     config.enrollment.max_templates = Input::with_theme(&theme)
         .with_prompt("Max templates (sets of captures)")
@@ -1454,6 +1467,11 @@ async fn run() -> anyhow::Result<()> {
                     "{} {}",
                     style("auth.start_delay_ms:").bold(),
                     config.auth.start_delay_ms
+                );
+                println!(
+                    "{} {}",
+                    style("auth.start_delay_scope:").bold(),
+                    config.auth.start_delay_scope()
                 );
 
                 println!(

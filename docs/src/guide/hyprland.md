@@ -95,6 +95,6 @@ yay -R gaze-hyprlock-bin
 ## Troubleshooting
 
 - **Falls back to password every time**: daemon may not be running, or no faces enrolled for the current user. Check `systemctl status gazed` and `gaze list-faces`.
-- **Unlocks itself right after you lock manually**: hyprlock starts its PAM stack as soon as it launches, so face authentication runs while you are still in front of the camera. Set [`auth.start_delay_ms`](/guide/configuration) to give yourself time to step away. Note that hyprlock's own `general:grace` / `--grace` option will not help here; it unlocks on any keypress or cursor movement within the window rather than delaying authentication.
+- **Unlocks itself right after you lock manually**: hyprlock starts its PAM stack as soon as it launches, so face authentication runs while you are still in front of the camera. Set [`auth.start_delay_ms`](/guide/configuration) to give yourself time to step away, and `auth.start_delay_scope = "screen_lock"` so the delay does not also slow down `sudo` and polkit prompts. Note that hyprlock's own `general:grace` / `--grace` option will not help here; it unlocks on any keypress or cursor movement within the window rather than delaying authentication.
 - **Camera busy**: another Gaze client (GUI, GNOME extension) may hold the camera. Close it and retry.
 - **PAM error in logs**: check `journalctl -u gazed` and `journalctl --user -t hyprlock`.

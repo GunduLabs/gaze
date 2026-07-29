@@ -12,6 +12,7 @@ pub const DEFAULT_RGB_CAMERA: &str = "primary";
 pub const SECURITY_LEVEL_OPTIONS: [&str; 5] = ["low", "medium", "high", "maximum", "custom"];
 pub const MODEL_QUALITY_OPTIONS: [&str; 2] = ["standard", "accurate"];
 pub const HYBRID_POLICY_OPTIONS: [&str; 4] = ["default", "or", "fallback_on_dark", "and"];
+pub const START_DELAY_SCOPE_OPTIONS: [&str; 2] = ["all", "screen_lock"];
 pub const DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO: f64 = 0.25;
 pub const MIN_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.10;
 pub const MAX_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.75;
@@ -315,6 +316,46 @@ fn default_dark_luma_threshold() -> u8 {
     20
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AuthSurface {
+    ScreenLock,
+    Elevation,
+    Login,
+}
+
+const ELEVATION_SERVICES: [&str; 9] = [
+    "sudo",
+    "sudo-i",
+    "su",
+    "su-l",
+    "doas",
+    "run0",
+    "systemd-run0",
+    "polkit-1",
+    "pkexec",
+];
+
+const LOGIN_SERVICES: [&str; 6] = [
+    "login",
+    "sddm",
+    "lightdm",
+    "greetd",
+    "gdm-password",
+    "gdm-launch-environment",
+];
+
+pub fn classify_pam_service(service: Option<&str>) -> AuthSurface {
+    match service {
+        Some(name) if ELEVATION_SERVICES.contains(&name) => AuthSurface::Elevation,
+        Some(name) if LOGIN_SERVICES.contains(&name) => AuthSurface::Login,
+        _ => AuthSurface::ScreenLock,
+    }
+}
+
+fn default_start_delay_scope() -> String {
+    "all".to_string()
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
 pub struct AuthConfig {
     #[serde(default = "default_true")]
@@ -327,6 +368,8 @@ pub struct AuthConfig {
     pub resume_grace_ms: u64,
     #[serde(default = "default_start_delay_ms")]
     pub start_delay_ms: u64,
+    #[serde(default = "default_start_delay_scope")]
+    pub start_delay_scope: String,
 }
 
 fn default_false() -> bool {
@@ -342,17 +385,52 @@ fn default_start_delay_ms() -> u64 {
 }
 
 impl AuthConfig {
-    /// Milliseconds to wait before face verification begins.
-    ///
-    /// `start_delay_ms` applies to every verification; `resume_grace_ms` adds
-    /// nothing on top of it, so a resume waits for whichever is longer rather
-    /// than the sum of the two.
-    pub fn effective_start_delay_ms(&self, resumed: bool) -> u64 {
-        if resumed {
-            self.start_delay_ms.max(self.resume_grace_ms)
-        } else {
-            self.start_delay_ms
+    pub fn start_delay_scope(&self) -> &str {
+        match self.start_delay_scope.as_str() {
+            "screen_lock" => "screen_lock",
+            "" | "all" => "all",
+            other => {
+                tracing::warn!("invalid start delay scope {other:?}; delaying every auth");
+                "all"
+            }
         }
+    }
+
+    fn start_delay_applies_to(&self, surface: AuthSurface) -> bool {
+        match self.start_delay_scope() {
+            "screen_lock" => surface == AuthSurface::ScreenLock,
+            _ => true,
+        }
+    }
+
+    /// Milliseconds to wait before face verification begins.
+    pub fn effective_start_delay_ms(&self, resumed: bool, surface: AuthSurface) -> u64 {
+        let start = if self.start_delay_applies_to(surface) {
+            self.start_delay_ms
+        } else {
+            0
+        };
+        if resumed {
+            start.max(self.resume_grace_ms)
+        } else {
+            start
+        }
+    }
+
+    pub fn start_delay_scope_index_for_value(value: &str) -> u32 {
+        START_DELAY_SCOPE_OPTIONS
+            .iter()
+            .position(|scope| *scope == value)
+            .map(|idx| idx as u32)
+            .unwrap_or(0)
+    }
+
+    pub fn start_delay_scope_from_index(index: usize) -> String {
+        START_DELAY_SCOPE_OPTIONS
+            .get(index)
+            .copied()
+            .unwrap_or("all")
+            .to_string()
     }
 }
 
@@ -418,6 +496,7 @@ impl Default for AuthConfig {
             require_confirmation: false,
             resume_grace_ms: default_resume_grace_ms(),
             start_delay_ms: default_start_delay_ms(),
+            start_delay_scope: default_start_delay_scope(),
         }
     }
 }
@@ -652,6 +731,7 @@ mod tests {
                 require_confirmation: true,
                 resume_grace_ms: 3000,
                 start_delay_ms: 1500,
+                start_delay_scope: "screen_lock".to_string(),
             },
             enrollment: EnrollmentConfig {
                 max_templates: 8,
@@ -687,6 +767,7 @@ mod tests {
         assert!(loaded.auth.require_confirmation);
         assert_eq!(loaded.auth.resume_grace_ms, 3000);
         assert_eq!(loaded.auth.start_delay_ms, 1500);
+        assert_eq!(loaded.auth.start_delay_scope(), "screen_lock");
         assert_eq!(loaded.enrollment.max_templates, 8);
         assert_eq!(loaded.enrollment.min_face_size_ratio, 0.20);
         assert!(loaded.liveness.enabled);
@@ -768,25 +849,134 @@ mod tests {
     #[test]
     fn start_delay_applies_on_every_auth_and_does_not_stack_with_resume_grace() {
         let mut auth = AuthConfig::default();
+        let lock = AuthSurface::ScreenLock;
 
-        assert_eq!(auth.effective_start_delay_ms(false), 0);
-        assert_eq!(auth.effective_start_delay_ms(true), 0);
+        assert_eq!(auth.effective_start_delay_ms(false, lock), 0);
+        assert_eq!(auth.effective_start_delay_ms(true, lock), 0);
 
         auth.start_delay_ms = 5000;
-        assert_eq!(auth.effective_start_delay_ms(false), 5000);
-        assert_eq!(auth.effective_start_delay_ms(true), 5000);
+        assert_eq!(auth.effective_start_delay_ms(false, lock), 5000);
+        assert_eq!(auth.effective_start_delay_ms(true, lock), 5000);
 
         auth.resume_grace_ms = 3000;
-        assert_eq!(auth.effective_start_delay_ms(false), 5000);
-        assert_eq!(auth.effective_start_delay_ms(true), 5000);
+        assert_eq!(auth.effective_start_delay_ms(false, lock), 5000);
+        assert_eq!(auth.effective_start_delay_ms(true, lock), 5000);
 
         auth.resume_grace_ms = 8000;
-        assert_eq!(auth.effective_start_delay_ms(false), 5000);
-        assert_eq!(auth.effective_start_delay_ms(true), 8000);
+        assert_eq!(auth.effective_start_delay_ms(false, lock), 5000);
+        assert_eq!(auth.effective_start_delay_ms(true, lock), 8000);
 
         auth.start_delay_ms = 0;
-        assert_eq!(auth.effective_start_delay_ms(false), 0);
-        assert_eq!(auth.effective_start_delay_ms(true), 8000);
+        assert_eq!(auth.effective_start_delay_ms(false, lock), 0);
+        assert_eq!(auth.effective_start_delay_ms(true, lock), 8000);
+    }
+
+    #[test]
+    fn default_scope_delays_every_surface() {
+        let auth = AuthConfig {
+            start_delay_ms: 3000,
+            ..Default::default()
+        };
+
+        assert_eq!(auth.start_delay_scope(), "all");
+        for surface in [
+            AuthSurface::ScreenLock,
+            AuthSurface::Elevation,
+            AuthSurface::Login,
+        ] {
+            assert_eq!(auth.effective_start_delay_ms(false, surface), 3000);
+        }
+    }
+
+    #[test]
+    fn screen_lock_scope_exempts_elevation_and_login() {
+        let auth = AuthConfig {
+            start_delay_ms: 3000,
+            start_delay_scope: "screen_lock".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            auth.effective_start_delay_ms(false, AuthSurface::ScreenLock),
+            3000
+        );
+        assert_eq!(
+            auth.effective_start_delay_ms(false, AuthSurface::Elevation),
+            0
+        );
+        assert_eq!(auth.effective_start_delay_ms(false, AuthSurface::Login), 0);
+    }
+
+    #[test]
+    fn resume_grace_is_not_scoped_away_by_screen_lock() {
+        let auth = AuthConfig {
+            start_delay_ms: 3000,
+            resume_grace_ms: 5000,
+            start_delay_scope: "screen_lock".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            auth.effective_start_delay_ms(true, AuthSurface::Elevation),
+            5000
+        );
+        assert_eq!(
+            auth.effective_start_delay_ms(false, AuthSurface::Elevation),
+            0
+        );
+    }
+
+    #[test]
+    fn invalid_scope_falls_back_to_delaying_everything() {
+        let auth = AuthConfig {
+            start_delay_ms: 3000,
+            start_delay_scope: "lockscreen".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(auth.start_delay_scope(), "all");
+        assert_eq!(
+            auth.effective_start_delay_ms(false, AuthSurface::Elevation),
+            3000
+        );
+    }
+
+    #[test]
+    fn elevation_and_login_services_are_classified() {
+        for service in ["sudo", "sudo-i", "su", "su-l", "doas", "polkit-1", "pkexec"] {
+            assert_eq!(
+                classify_pam_service(Some(service)),
+                AuthSurface::Elevation,
+                "{service}"
+            );
+        }
+        for service in ["login", "sddm", "lightdm", "greetd", "gdm-password"] {
+            assert_eq!(
+                classify_pam_service(Some(service)),
+                AuthSurface::Login,
+                "{service}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_and_ambiguous_services_are_treated_as_screen_locks() {
+        for service in [
+            "hyprlock-gaze",
+            "hyprlock-gaze-simultaneous",
+            "gaze",
+            "swaylock",
+            "some-locker-nobody-has-heard-of",
+            "gdm-face",
+        ] {
+            assert_eq!(
+                classify_pam_service(Some(service)),
+                AuthSurface::ScreenLock,
+                "{service}"
+            );
+        }
+
+        assert_eq!(classify_pam_service(None), AuthSurface::ScreenLock);
     }
 
     #[test]
