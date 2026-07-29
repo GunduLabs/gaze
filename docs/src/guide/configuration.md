@@ -85,16 +85,18 @@ device = "npu"
 Change `device` to `"gpu"` to use the Intel GPU. This does not require
 recompiling Gaze.
 
-The Gaze daemon must also be compiled with the `openvino` Cargo feature.
-CPU-only builds reject `execution_provider = "openvino"` with an error instead
-of silently accepting it.
+The Gaze daemon must also be compiled with the `openvino` Cargo feature. On a
+CPU-only build, `gaze config` and the GUI refuse to set
+`execution_provider = "openvino"`. A config file that already contains it does
+not stop the daemon: it logs a warning and runs on the CPU, the same way every
+other unusable value in `/etc/gaze/config.toml` is handled.
 
 The values stay lowercase in the config. Gaze converts the device name only
 when it calls OpenVINO. ONNX Runtime keeps its CPU execution provider after
 OpenVINO. It runs unsupported model operations on the CPU. If Gaze cannot
 create an OpenVINO session, it logs the error and creates a CPU session.
-`gaze doctor --benchmark` reports the execution provider and device used by
-each loaded model.
+`gaze doctor --benchmark` reports the execution provider and device each model
+actually uses, and warns when that is not the configured one.
 
 ## Change security level
 

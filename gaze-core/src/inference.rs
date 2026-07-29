@@ -73,22 +73,26 @@ fn build_openvino_session(model_path: &str, device: &str) -> anyhow::Result<Sess
         .with_context(|| format!("failed to load ONNX model {model_path} on {device}"))
 }
 
+fn unusable_reason(config: &InferenceConfig) -> Option<String> {
+    #[cfg(not(feature = "openvino"))]
+    if config.execution_provider == "openvino" {
+        return Some(
+            "this Gaze build does not include OpenVINO support; rebuild with the \"openvino\" Cargo feature"
+                .to_string(),
+        );
+    }
+
+    config.validate().err().map(|error| error.to_string())
+}
+
 pub fn create_session(
     model_path: &str,
     config: &InferenceConfig,
 ) -> anyhow::Result<(Session, InferenceRuntime)> {
-    #[cfg(not(feature = "openvino"))]
-    if config.execution_provider == "openvino" {
-        anyhow::bail!(
-            "this Gaze build does not include OpenVINO support; rebuild with the \"openvino\" Cargo feature"
-        );
-    }
-
-    if let Err(error) = config.validate() {
-        let reason = error.to_string();
+    if let Some(reason) = unusable_reason(config) {
         tracing::warn!(
             reason,
-            "Invalid inference configuration; falling back to the ONNX Runtime CPU execution provider"
+            "Unusable inference configuration; falling back to the ONNX Runtime CPU execution provider"
         );
         let session = build_cpu_session(model_path)?;
         return Ok((session, InferenceRuntime::cpu(config, Some(reason))));
@@ -153,16 +157,27 @@ mod tests {
 
     #[test]
     #[cfg(not(feature = "openvino"))]
-    fn cpu_only_build_rejects_openvino_before_loading_a_model() {
+    fn cpu_only_build_falls_back_for_openvino_instead_of_refusing_to_start() {
         let config = InferenceConfig {
             execution_provider: "openvino".to_string(),
             device: "gpu".to_string(),
         };
-        let error = create_session("/model-does-not-exist.onnx", &config).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("does not include OpenVINO support")
-        );
+        let reason = unusable_reason(&config).expect("a cpu-only build cannot honour openvino");
+        assert!(reason.contains("does not include OpenVINO support"));
+    }
+
+    #[test]
+    fn a_usable_cpu_configuration_has_no_fallback_reason() {
+        assert_eq!(unusable_reason(&InferenceConfig::default()), None);
+    }
+
+    #[test]
+    fn an_invalid_device_falls_back_rather_than_failing() {
+        let config = InferenceConfig {
+            execution_provider: "cpu".to_string(),
+            device: "npu".to_string(),
+        };
+        let reason = unusable_reason(&config).expect("cpu cannot drive an npu");
+        assert!(reason.contains("inference.device"));
     }
 }
