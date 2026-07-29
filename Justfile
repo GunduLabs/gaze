@@ -324,6 +324,7 @@ setup-hooks:
 [group("checks")]
 test:
     {{ opencv_env }} cargo test --workspace --release
+    {{ opencv_env }} cargo test -p gaze-core --release --no-default-features --features gaze-core/openvino-config config::
 
 # Run inference tests with an OpenVINO-enabled system ONNX Runtime.
 [group("checks")]
@@ -340,6 +341,12 @@ audit:
 [group("checks")]
 lint:
     {{ opencv_env }} cargo clippy --workspace --all-targets -- -D warnings
+
+# Run clippy lints with an OpenVINO-enabled system ONNX Runtime.
+[group("checks")]
+lint-openvino:
+    {{ opencv_env }} cargo clippy -p gaze -p gaze-core --all-targets --features gaze/openvino,gaze-core/openvino -- -D warnings
+    {{ opencv_env }} cargo clippy -p gaze-cli -p gaze-gui --all-targets --features gaze-cli/openvino,gaze-gui/openvino -- -D warnings
 
 # Check formatting (does not write)
 [group("checks")]
