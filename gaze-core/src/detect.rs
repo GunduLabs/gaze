@@ -62,10 +62,6 @@ pub struct FaceDetector {
 }
 
 impl FaceDetector {
-    pub fn new(model_path: &str) -> Result<Self, DetectError> {
-        Self::new_with_inference(model_path, &InferenceConfig::default())
-    }
-
     pub fn new_with_inference(
         model_path: &str,
         inference: &InferenceConfig,
