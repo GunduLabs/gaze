@@ -133,6 +133,30 @@ Note that the KDE **lock screen** does not support hands-free face unlock: its s
 
 On Hyprland, install the `gaze-hyprlock` package (auto-installed by the one-line installer when Hyprland is detected) and point hyprlock at the Gaze PAM service. See the [Hyprland guide](/guide/hyprland).
 
+## Path D: Nix and NixOS
+
+Gaze ships a Nix flake with packages and a NixOS module that sets up the
+daemon, D-Bus/polkit policies, and PAM declaratively:
+
+```nix
+# flake.nix inputs
+inputs.gaze.url = "github:GunduLabs/gaze";
+```
+
+```nix
+# NixOS configuration
+imports = [ inputs.gaze.nixosModules.default ];
+services.gaze = {
+  enable = true;
+  gui.enable = true;
+};
+```
+
+On non-NixOS systems with Nix or home-manager you can install the CLI and GUI
+from the flake, but the daemon and PAM integration still need a system package
+(Path A or B). See the [Nix & NixOS guide](/guide/nixos) for module options,
+GNOME/hyprlock integration, and home-manager usage.
+
 ## Restart after install
 
 After installation (any method), reboot once to ensure all system-level changes are fully applied.

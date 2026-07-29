@@ -4,6 +4,7 @@ use gaze_core::dbus::{
     GazeProxy, dbus_error_message, dbus_is_file_not_found, dbus_is_not_activatable,
 };
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
@@ -15,7 +16,11 @@ const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(25);
 const BENCHMARK_TIMEOUT: Duration = Duration::from_secs(30);
 const PAM_MODULES: [&str; 2] = ["pam_gaze.so", "pam_gaze_grosshack.so"];
 const GNOME_EXTENSION_ID: &str = "gaze@gundulabs.com";
+const GNOME_EXTENSION_SCHEMA: &str = "org.gnome.shell.extensions.gaze";
 const GDM_FACE_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
+const GDM_DCONF_PROFILE: &str = "gdm";
+const GDM_DCONF_PROFILE_PATH: &str = "/etc/dconf/profile/gdm";
+const GDM_DCONF_FACE_AUTH_KEY: &str = "/org/gnome/shell/extensions/gaze/enable-face-authentication";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Level {
@@ -157,13 +162,89 @@ fn check_platform(report: &mut Report) {
 }
 
 fn command_output(program: &str, args: &[&str]) -> std::io::Result<(bool, String)> {
-    let output = Command::new(program).args(args).output()?;
+    command_output_env(program, args, &[])
+}
+
+fn command_output_env(
+    program: &str,
+    args: &[&str],
+    env: &[(&str, &OsStr)],
+) -> std::io::Result<(bool, String)> {
+    let mut command = Command::new(program);
+    command.args(args);
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    let output = command.output()?;
     let text = if output.stdout.is_empty() {
         String::from_utf8_lossy(&output.stderr)
     } else {
         String::from_utf8_lossy(&output.stdout)
     };
     Ok((output.status.success(), text.trim().to_string()))
+}
+
+fn xdg_data_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    match std::env::var_os("XDG_DATA_HOME").filter(|value| !value.is_empty()) {
+        Some(home) => dirs.push(PathBuf::from(home)),
+        None => {
+            if let Some(home) = std::env::var_os("HOME") {
+                dirs.push(PathBuf::from(home).join(".local/share"));
+            }
+        }
+    }
+    match std::env::var_os("XDG_DATA_DIRS").filter(|value| !value.is_empty()) {
+        Some(value) => dirs.extend(std::env::split_paths(&value)),
+        None => dirs.extend([
+            PathBuf::from("/usr/local/share"),
+            PathBuf::from("/usr/share"),
+        ]),
+    }
+    dirs
+}
+
+// Nix installs the extension's schema inside the extension directory rather
+// than into the system schema path, so `gsettings` cannot see it unaided.
+fn extension_schema_dir() -> Option<PathBuf> {
+    extension_schema_dir_in(&xdg_data_dirs())
+}
+
+fn extension_schema_dir_in(data_dirs: &[PathBuf]) -> Option<PathBuf> {
+    data_dirs
+        .iter()
+        .map(|dir| {
+            dir.join("gnome-shell")
+                .join("extensions")
+                .join(GNOME_EXTENSION_ID)
+                .join("schemas")
+        })
+        .find(|dir| dir.join("gschemas.compiled").exists())
+}
+
+fn extension_setting(key: &str) -> std::io::Result<(bool, String)> {
+    let schema_dir = extension_schema_dir();
+    let env: Vec<(&str, &OsStr)> = schema_dir
+        .as_deref()
+        .map(|dir| vec![("GSETTINGS_SCHEMA_DIR", dir.as_os_str())])
+        .unwrap_or_default();
+    command_output_env("gsettings", &["get", GNOME_EXTENSION_SCHEMA, key], &env)
+}
+
+/// The value GDM itself sees, which a NixOS configuration sets without `GDM_FACE_OVERRIDE_PATH`.
+fn gdm_face_auth_from_dconf() -> Option<bool> {
+    if !Path::new(GDM_DCONF_PROFILE_PATH).exists() {
+        return None;
+    }
+    let env = [("DCONF_PROFILE", OsStr::new(GDM_DCONF_PROFILE))];
+    match command_output_env("dconf", &["read", GDM_DCONF_FACE_AUTH_KEY], &env) {
+        Ok((true, value)) => match value.trim() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn check_systemd(report: &mut Report) {
@@ -443,10 +524,18 @@ fn pam_search_dirs() -> BTreeSet<PathBuf> {
     dirs
 }
 
-fn find_pam_modules() -> Vec<PathBuf> {
+/// Distributions that load the modules from an absolute path, such as NixOS
+/// pointing at the store, never populate a system module directory.
+fn find_pam_modules() -> BTreeSet<PathBuf> {
     pam_search_dirs()
         .into_iter()
         .flat_map(|dir| PAM_MODULES.map(|module| dir.join(module)))
+        .chain(pam_files().iter().flat_map(|(_, contents)| {
+            contents
+                .lines()
+                .flat_map(pam_line_module_paths)
+                .collect::<Vec<_>>()
+        }))
         .filter(|path| path.exists())
         .collect()
 }
@@ -463,7 +552,22 @@ fn pam_line_has_reference(line: &str) -> bool {
     })
 }
 
-fn find_pam_references() -> Vec<PathBuf> {
+fn pam_line_module_paths(line: &str) -> Vec<PathBuf> {
+    line.split('#')
+        .next()
+        .unwrap_or_default()
+        .split_ascii_whitespace()
+        .filter(|token| {
+            token.starts_with('/')
+                && PAM_MODULES
+                    .iter()
+                    .any(|module| token.ends_with(&format!("/{module}")))
+        })
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn pam_files() -> Vec<(PathBuf, String)> {
     let Ok(entries) = fs::read_dir("/etc/pam.d") else {
         return Vec::new();
     };
@@ -472,8 +576,15 @@ fn find_pam_references() -> Vec<PathBuf> {
         .filter_map(|entry| {
             let path = entry.path();
             let contents = fs::read_to_string(&path).ok()?;
-            contents.lines().any(pam_line_has_reference).then_some(path)
+            Some((path, contents))
         })
+        .collect()
+}
+
+fn find_pam_references() -> Vec<PathBuf> {
+    pam_files()
+        .into_iter()
+        .filter_map(|(path, contents)| contents.lines().any(pam_line_has_reference).then_some(path))
         .collect()
 }
 
@@ -519,7 +630,7 @@ fn check_pam(report: &mut Report) {
     } else if !sequential {
         report.error(
             "PAM modules",
-            "pam_gaze.so is not installed in a standard PAM module directory",
+            "pam_gaze.so is not installed where PAM can load it",
             "Reinstall the base Gaze package before enabling PAM authentication.",
         );
     } else {
@@ -627,14 +738,7 @@ fn check_desktop_integration(report: &mut Report) {
             ),
         }
 
-        match command_output(
-            "gsettings",
-            &[
-                "get",
-                "org.gnome.shell.extensions.gaze",
-                "enable-face-authentication",
-            ],
-        ) {
+        match extension_setting("enable-face-authentication") {
             Ok((true, value)) if value == "true" => {
                 report.pass(
                     "GNOME lock-screen face auth",
@@ -657,15 +761,26 @@ fn check_desktop_integration(report: &mut Report) {
             ),
         }
 
-        if Path::new(GDM_FACE_OVERRIDE_PATH).exists() {
-            report.pass(
+        let override_exists = Path::new(GDM_FACE_OVERRIDE_PATH).exists();
+        match (gdm_face_auth_from_dconf(), override_exists) {
+            (Some(false), true) => report.warning(
+                "GDM login face auth",
+                format!(
+                    "{GDM_FACE_OVERRIDE_PATH} enables it, but the compiled GDM dconf database still reports it disabled"
+                ),
+                "Run `sudo dconf update`, then restart GDM (or reboot).",
+            ),
+            (Some(true), false) => report.pass(
+                "GDM login face auth",
+                "enabled in the GDM dconf profile by your system configuration, not by Gaze (on NixOS, `services.gaze.gnome.gdmFaceLogin`)",
+            ),
+            (_, true) => report.pass(
                 "GDM login face auth",
                 format!(
                     "enabled system-wide via {GDM_FACE_OVERRIDE_PATH}; toggle it from the extension preferences \"GDM login screen\" section"
                 ),
-            );
-        } else {
-            report.pass("GDM login face auth", "disabled");
+            ),
+            (_, false) => report.pass("GDM login face auth", "disabled"),
         }
     }
 
@@ -937,6 +1052,41 @@ async fn check_benchmark(report: &mut Report, proxy: &GazeProxy<'_>) {
     }
 }
 
+fn detected_source_remedy(
+    cameras: &[(String, String)],
+    key: &str,
+    automatic: Option<&str>,
+) -> String {
+    let detected: Vec<&str> = cameras
+        .iter()
+        .filter(|(_, target)| target != gaze_core::config::DEFAULT_RGB_CAMERA)
+        .map(|(_, target)| target.as_str())
+        .collect();
+
+    if detected.is_empty() {
+        return match automatic {
+            Some(automatic) => format!(
+                "No PipeWire source is currently advertised. Reconnect the camera, then set \
+                 {key} to a detected source, or to \"{automatic}\" to resolve it at runtime."
+            ),
+            None => format!(
+                "No PipeWire source is currently advertised. Reconnect the camera, then set \
+                 {key} to a detected source."
+            ),
+        };
+    }
+
+    format!(
+        "Run `gaze config` to pick one interactively, or set {key} to one of the detected \
+         sources: {}",
+        detected
+            .iter()
+            .map(|target| format!("\"{target}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
 fn check_cameras(report: &mut Report, config: Option<&Config>) {
     let Some(config) = config else {
         return;
@@ -970,7 +1120,11 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
                         report.error(
                             "RGB camera",
                             format!("configured source is not visible: {rgb}"),
-                            "Run `gaze config` and select a currently detected camera.",
+                            detected_source_remedy(
+                                &cameras,
+                                "cameras.rgb",
+                                Some(gaze_core::config::DEFAULT_RGB_CAMERA),
+                            ),
                         );
                     }
                 } else if let Some((vid, pid)) = gaze_core::camera::parse_usb_spec(rgb) {
@@ -1035,10 +1189,10 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
             Ok(cameras) if cameras.iter().any(|(_, target)| target == ir) => {
                 report.pass("IR camera", "the configured PipeWire source is visible");
             }
-            Ok(_) => report.error(
+            Ok(cameras) => report.error(
                 "IR camera",
                 format!("configured source is not visible: {ir}"),
-                "Run `gaze config` and select a currently detected IR camera.",
+                detected_source_remedy(&cameras, "cameras.ir", None),
             ),
             Err(err) => report.error(
                 "IR camera",
@@ -1058,6 +1212,121 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extension_schema_dir_finds_a_compiled_schema_in_the_extension() {
+        let root = std::env::temp_dir().join(format!("gaze-doctor-schema-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+
+        let fhs = root.join("usr/share");
+        let nix = root.join("nix/share");
+        let extension = nix
+            .join("gnome-shell")
+            .join("extensions")
+            .join(GNOME_EXTENSION_ID);
+        fs::create_dir_all(fhs.join("gnome-shell/extensions").join(GNOME_EXTENSION_ID)).unwrap();
+        fs::create_dir_all(extension.join("schemas")).unwrap();
+
+        let dirs = vec![fhs.clone(), nix.clone()];
+        assert_eq!(
+            extension_schema_dir_in(&dirs),
+            None,
+            "an extension directory without a compiled schema must not be used"
+        );
+
+        fs::write(extension.join("schemas/gschemas.compiled"), b"").unwrap();
+        assert_eq!(
+            extension_schema_dir_in(&dirs),
+            Some(extension.join("schemas"))
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pam_line_module_paths_collects_absolute_module_paths() {
+        assert_eq!(
+            pam_line_module_paths(
+                "auth       [success=done default=bad]   /nix/store/abc-gaze-0.2.7/lib/security/pam_gaze.so"
+            ),
+            vec![PathBuf::from(
+                "/nix/store/abc-gaze-0.2.7/lib/security/pam_gaze.so"
+            )]
+        );
+        assert_eq!(
+            pam_line_module_paths(
+                "auth sufficient /nix/store/abc-gaze/lib/security/pam_gaze_grosshack.so"
+            ),
+            vec![PathBuf::from(
+                "/nix/store/abc-gaze/lib/security/pam_gaze_grosshack.so"
+            )]
+        );
+
+        assert!(
+            pam_line_module_paths("auth sufficient pam_gaze.so").is_empty(),
+            "a bare module name resolves through the search directories instead"
+        );
+        assert!(
+            pam_line_module_paths("# auth sufficient /nix/store/abc/lib/security/pam_gaze.so")
+                .is_empty(),
+            "commented lines are not part of the stack"
+        );
+        assert!(
+            pam_line_module_paths("auth sufficient /usr/lib64/security/pam_fprintd.so").is_empty()
+        );
+    }
+
+    #[test]
+    fn camera_remedy_lists_detected_sources() {
+        let cameras = vec![
+            (
+                "Primary camera".to_string(),
+                gaze_core::config::DEFAULT_RGB_CAMERA.to_string(),
+            ),
+            (
+                "Integrated Camera".to_string(),
+                "pipewiresrc target-object=v4l2_input.pci-0000_00_14_0".to_string(),
+            ),
+        ];
+
+        let remedy = detected_source_remedy(
+            &cameras,
+            "cameras.rgb",
+            Some(gaze_core::config::DEFAULT_RGB_CAMERA),
+        );
+        assert!(remedy.contains("cameras.rgb"), "{remedy}");
+        assert!(
+            remedy.contains("\"pipewiresrc target-object=v4l2_input.pci-0000_00_14_0\""),
+            "the detected source must be quoted verbatim for copy-paste: {remedy}"
+        );
+        assert!(
+            !remedy.contains("\"primary\""),
+            "the primary pseudo-source is not a selectable node: {remedy}"
+        );
+    }
+
+    #[test]
+    fn camera_remedy_only_offers_primary_where_it_is_valid() {
+        let none_detected = vec![(
+            "Primary camera".to_string(),
+            gaze_core::config::DEFAULT_RGB_CAMERA.to_string(),
+        )];
+
+        let rgb = detected_source_remedy(
+            &none_detected,
+            "cameras.rgb",
+            Some(gaze_core::config::DEFAULT_RGB_CAMERA),
+        );
+        assert!(rgb.contains("cameras.rgb"), "{rgb}");
+        assert!(rgb.contains("\"primary\""), "{rgb}");
+
+        let ir = detected_source_remedy(&[], "cameras.ir", None);
+        assert!(ir.contains("cameras.ir"), "{ir}");
+        assert!(
+            !ir.contains("primary"),
+            "cameras.ir has no primary fallback: {ir}"
+        );
+    }
 
     #[test]
     fn valid_default_config_has_no_errors() {

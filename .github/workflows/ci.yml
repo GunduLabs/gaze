@@ -111,3 +111,49 @@ jobs:
 
       - name: Build and verify deb packages
         run: VERSION=0.0.0 just package-prebuilt deb
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      # Evaluation-only; catches flake and module errors without a full build.
+      - name: Evaluate flake packages
+        run: |
+          nix flake check --no-build
+          for a in gaze gaze-gui gaze-gnome-extension; do
+            nix eval --raw ".#packages.x86_64-linux.$a.drvPath"
+            echo
+          done
+
+      - name: Evaluate NixOS module
+        run: |
+          nix eval --raw --impure --expr '
+            let
+              flake = builtins.getFlake (toString ./.);
+              sys = flake.inputs.nixpkgs.lib.nixosSystem {
+                system = "x86_64-linux";
+                modules = [
+                  flake.nixosModules.default
+                  {
+                    boot.loader.grub.enable = false;
+                    fileSystems."/" = { device = "none"; fsType = "tmpfs"; };
+                    system.stateVersion = "25.11";
+                    services.gaze = {
+                      enable = true;
+                      gui.enable = true;
+                      gnome.enable = true;
+                    };
+                    # Exercises pam.defaultServices, an explicitly enabled
+                    # service on the nixpkgs PAM submodule, the
+                    # gaze-before-fprintd rule ordering, and the TPM
+                    # supplementary group.
+                    security.pam.services.login.gaze = {
+                      enable = true;
+                      simultaneous = true;
+                    };
+                    services.fprintd.enable = true;
+                    security.tpm2.enable = true;
+                  }
+                ];
+              };
+            in sys.config.system.build.toplevel.drvPath
+          '

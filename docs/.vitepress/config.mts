@@ -67,6 +67,7 @@ export default defineVersionedConfig({
         items: [
           { text: "Getting Started", link: "/guide/getting-started" },
           { text: "Installation", link: "/guide/installation" },
+          { text: "Nix & NixOS", link: "/guide/nixos" },
           { text: "Development", link: "/guide/development" },
           { text: "Contributing", link: "/guide/contributing" },
           {
