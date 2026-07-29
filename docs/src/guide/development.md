@@ -109,6 +109,13 @@ just build-rust-openvino
 The `openvino` Cargo feature is explicit. The build fails when that feature is
 enabled without a matching ONNX Runtime library.
 
+The OpenVINO-enabled binary supports Intel CPU, GPU, and NPU devices. The
+`device` value in `/etc/gaze/config.toml` selects the device at run time; GPU
+and NPU do not require separate builds. An installation with OpenVINO support
+should set `execution_provider = "openvino"` and `device = "npu"` in its
+installed configuration. If OpenVINO setup fails at run time, Gaze still falls
+back to the ONNX Runtime CPU provider.
+
 ::: warning Build with `just build-rust`, not `cargo build --workspace`
 `just build-rust` builds the daemon and the clients in separate cargo invocations so feature unification cannot link ONNX Runtime into the CLI, GUI, or PAM modules. ONNX Runtime's startup code requires AVX2, and a single workspace build would silently reintroduce crashes on older CPUs.
 :::

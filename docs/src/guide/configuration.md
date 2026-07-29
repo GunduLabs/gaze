@@ -70,14 +70,20 @@ execution_provider = "cpu"
 device = "cpu"
 ```
 
-An ONNX Runtime build with the OpenVINO Execution Provider can use an Intel
-GPU or NPU:
+OpenVINO does not select a fixed device at build time. The same
+OpenVINO-enabled Gaze binary can use an Intel CPU, GPU, or NPU. Select the
+device in `/etc/gaze/config.toml`.
+
+An installation with OpenVINO support should select the Intel NPU by default:
 
 ```toml
 [inference]
 execution_provider = "openvino"
-device = "gpu" # or "npu"
+device = "npu"
 ```
+
+Change `device` to `"gpu"` to use the Intel GPU. This does not require
+recompiling Gaze.
 
 The Gaze daemon must also be compiled with the `openvino` Cargo feature.
 CPU-only builds reject `execution_provider = "openvino"` with an error instead
