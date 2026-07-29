@@ -9,7 +9,8 @@ use console::{Term, style};
 use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 use futures::StreamExt;
 use gaze_core::config::{
-    AuthConfig, Config, HYBRID_POLICY_OPTIONS, MAX_ENROLLMENT_FACE_SIZE_RATIO,
+    AuthConfig, Config, HYBRID_POLICY_OPTIONS, INFERENCE_DEVICE_OPTIONS,
+    INFERENCE_EXECUTION_PROVIDER_OPTIONS, MAX_ENROLLMENT_FACE_SIZE_RATIO,
     MIN_ENROLLMENT_FACE_SIZE_RATIO, MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS, SecurityLevel,
 };
 use gaze_core::dbus::{
@@ -311,6 +312,29 @@ async fn run_config_wizard(
 
         config.security = SecurityLevel::custom(detector, recognizer, threshold, hybrid_policy);
     };
+
+    let selected_execution_provider = Select::with_theme(&theme)
+        .with_prompt("Inference execution provider")
+        .items(INFERENCE_EXECUTION_PROVIDER_OPTIONS)
+        .default(config.inference.execution_provider_index() as usize)
+        .interact()?;
+    config.inference.execution_provider =
+        gaze_core::config::InferenceConfig::execution_provider_from_index(
+            selected_execution_provider,
+        )
+        .to_string();
+
+    if config.inference.execution_provider == "openvino" {
+        let selected_device = Select::with_theme(&theme)
+            .with_prompt("OpenVINO inference device")
+            .items(INFERENCE_DEVICE_OPTIONS)
+            .default(config.inference.device_index() as usize)
+            .interact()?;
+        config.inference.device =
+            gaze_core::config::InferenceConfig::device_from_index(selected_device).to_string();
+    } else {
+        config.inference.device = "cpu".to_string();
+    }
 
     let cameras = gaze_core::camera::enumerate_cameras().unwrap_or_default();
     if cameras.is_empty() {
@@ -1405,6 +1429,16 @@ async fn run() -> anyhow::Result<()> {
         Commands::Config { show } => {
             let config = load_config_from_daemon(&proxy).await?;
             if show {
+                println!(
+                    "{} {}",
+                    style("inference.execution_provider:").bold(),
+                    config.inference.execution_provider
+                );
+                println!(
+                    "{} {}",
+                    style("inference.device:").bold(),
+                    config.inference.device
+                );
                 let level_name = config.security.level.as_str();
                 println!("{} {}", style("security.level:").bold(), level_name);
                 println!(

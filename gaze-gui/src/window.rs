@@ -1,6 +1,7 @@
 use crate::capture_dialog;
 use gaze_core::config::{
-    AuthConfig, Config, DEFAULT_RGB_CAMERA, MAX_ENROLLMENT_FACE_SIZE_RATIO,
+    AuthConfig, Config, DEFAULT_RGB_CAMERA, INFERENCE_DEVICE_OPTIONS,
+    INFERENCE_EXECUTION_PROVIDER_OPTIONS, InferenceConfig, MAX_ENROLLMENT_FACE_SIZE_RATIO,
     MIN_ENROLLMENT_FACE_SIZE_RATIO, SecurityLevel,
 };
 use gaze_core::dbus::{
@@ -97,7 +98,16 @@ fn set_liveness_config_rows_visible(
     max_frames_row.set_visible(active);
 }
 
+fn set_inference_device_row_visible(
+    execution_provider_row: &libadwaita::ComboRow,
+    device_row: &libadwaita::ComboRow,
+) {
+    device_row.set_visible(execution_provider_row.selected() == 1);
+}
+
 struct ConfigRows<'a> {
+    inference_execution_provider: &'a libadwaita::ComboRow,
+    inference_device: &'a libadwaita::ComboRow,
     level: &'a libadwaita::ComboRow,
     detector: &'a libadwaita::ComboRow,
     recognizer: &'a libadwaita::ComboRow,
@@ -127,6 +137,12 @@ struct CameraChoices<'a> {
 }
 
 fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoices<'_>) {
+    rows.inference_execution_provider
+        .set_selected(cfg.inference.execution_provider_index());
+    rows.inference_device
+        .set_selected(cfg.inference.device_index());
+    set_inference_device_row_visible(rows.inference_execution_provider, rows.inference_device);
+
     rows.level.set_selected(cfg.security.level_index());
     set_custom_config_rows_visible(
         rows.level,
@@ -258,6 +274,21 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     let hardware_group = libadwaita::PreferencesGroup::new();
     hardware_group.set_title("Hardware");
     page.add(&hardware_group);
+
+    let inference_execution_provider_row = libadwaita::ComboRow::new();
+    inference_execution_provider_row.set_title("Inference execution provider");
+    inference_execution_provider_row.set_subtitle("Use ONNX Runtime directly or through OpenVINO");
+    let inference_execution_provider_model =
+        gtk4::StringList::new(&INFERENCE_EXECUTION_PROVIDER_OPTIONS);
+    inference_execution_provider_row.set_model(Some(&inference_execution_provider_model));
+    hardware_group.add(&inference_execution_provider_row);
+
+    let inference_device_row = libadwaita::ComboRow::new();
+    inference_device_row.set_title("OpenVINO inference device");
+    inference_device_row.set_subtitle("The Intel device used for all ONNX models");
+    let inference_device_model = gtk4::StringList::new(&INFERENCE_DEVICE_OPTIONS);
+    inference_device_row.set_model(Some(&inference_device_model));
+    hardware_group.add(&inference_device_row);
 
     let cameras = gaze_core::camera::enumerate_cameras()
         .unwrap_or_else(|_| vec![("Primary Camera".to_string(), DEFAULT_RGB_CAMERA.to_string())]);
@@ -444,9 +475,21 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         }
     ));
 
+    inference_execution_provider_row.connect_selected_notify(glib::clone!(
+        #[weak]
+        inference_device_row,
+        move |row| {
+            set_inference_device_row_visible(row, &inference_device_row);
+        }
+    ));
+
     let apply_changes = glib::clone!(
         #[weak]
         overlay,
+        #[weak]
+        inference_execution_provider_row,
+        #[weak]
+        inference_device_row,
         #[weak]
         level_row,
         #[weak]
@@ -503,6 +546,16 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             }
 
             let mut cfg = config.borrow_mut();
+            cfg.inference.execution_provider = InferenceConfig::execution_provider_from_index(
+                inference_execution_provider_row.selected() as usize,
+            )
+            .to_string();
+            cfg.inference.device = if cfg.inference.execution_provider == "openvino" {
+                InferenceConfig::device_from_index(inference_device_row.selected() as usize)
+                    .to_string()
+            } else {
+                "cpu".to_string()
+            };
             let hybrid_idx = hybrid_row.selected() as usize;
             let hybrid_policy = SecurityLevel::hybrid_policy_from_index(hybrid_idx);
 
@@ -570,6 +623,16 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         }
     );
 
+    inference_execution_provider_row.connect_selected_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    inference_device_row.connect_selected_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
     level_row.connect_selected_notify(glib::clone!(
         #[strong]
         apply_changes,
@@ -688,6 +751,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         populate_config_rows(
             &cfg,
             ConfigRows {
+                inference_execution_provider: &inference_execution_provider_row,
+                inference_device: &inference_device_row,
                 level: &level_row,
                 detector: &detector_row,
                 recognizer: &recognizer_row,
@@ -830,6 +895,10 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
     glib::MainContext::default().spawn_local(glib::clone!(
         #[weak]
+        inference_execution_provider_row,
+        #[weak]
+        inference_device_row,
+        #[weak]
         level_row,
         #[weak]
         detector_row,
@@ -891,6 +960,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 populate_config_rows(
                     &cfg,
                     ConfigRows {
+                        inference_execution_provider: &inference_execution_provider_row,
+                        inference_device: &inference_device_row,
                         level: &level_row,
                         detector: &detector_row,
                         recognizer: &recognizer_row,

@@ -14,6 +14,8 @@ repository.workspace = true
 [features]
 default = ["detection"]
 detection = ["dep:ort"]
+openvino-config = []
+openvino = ["detection", "openvino-config", "ort/openvino"]
 
 [dependencies]
 anyhow = "1.0.104"

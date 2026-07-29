@@ -40,6 +40,12 @@ build-rust:
     {{ opencv_env }} cargo build -p gaze --release
     {{ opencv_env }} cargo build -p gaze-cli -p gaze-gui -p pam-gaze -p pam-gaze-grosshack --release
 
+# Build all Rust workspace binaries with OpenVINO configuration and runtime support.
+[group("build")]
+build-rust-openvino:
+    {{ opencv_env }} cargo build -p gaze --release --features gaze/openvino
+    {{ opencv_env }} cargo build -p gaze-cli -p gaze-gui -p pam-gaze -p pam-gaze-grosshack --release --features gaze-cli/openvino,gaze-gui/openvino
+
 # Compile the SELinux policy module
 [group("build")]
 build-selinux:
@@ -318,6 +324,12 @@ setup-hooks:
 [group("checks")]
 test:
     {{ opencv_env }} cargo test --workspace --release
+
+# Run inference tests with an OpenVINO-enabled system ONNX Runtime.
+[group("checks")]
+test-openvino:
+    {{ opencv_env }} cargo test -p gaze -p gaze-core --release --features gaze/openvino,gaze-core/openvino
+    {{ opencv_env }} cargo test -p gaze-cli -p gaze-gui --release --features gaze-cli/openvino,gaze-gui/openvino
 
 # Check dependencies for known security advisories
 [group("checks")]

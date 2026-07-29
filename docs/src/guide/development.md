@@ -95,6 +95,20 @@ just audit        # check dependencies for known CVEs
 just fmt          # apply formatting (fmt-check only checks)
 ```
 
+The default build supports CPU inference only. To build the daemon and
+configuration tools with OpenVINO support, provide an OpenVINO-enabled system
+ONNX Runtime and run:
+
+```bash
+ORT_STRATEGY=system \
+ORT_LIB_LOCATION=/path/to/onnxruntime/lib \
+ORT_PREFER_DYNAMIC_LINK=1 \
+just build-rust-openvino
+```
+
+The `openvino` Cargo feature is explicit. The build fails when that feature is
+enabled without a matching ONNX Runtime library.
+
 ::: warning Build with `just build-rust`, not `cargo build --workspace`
 `just build-rust` builds the daemon and the clients in separate cargo invocations so feature unification cannot link ONNX Runtime into the CLI, GUI, or PAM modules. ONNX Runtime's startup code requires AVX2, and a single workspace build would silently reintroduce crashes on older CPUs.
 :::

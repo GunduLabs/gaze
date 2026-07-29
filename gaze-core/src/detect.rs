@@ -1,7 +1,12 @@
 use opencv::core::Mat;
 use opencv::prelude::*;
-use ort::{session::Session, session::builder::GraphOptimizationLevel, value::TensorRef};
+use ort::{session::Session, value::TensorRef};
 use std::fmt;
+
+use crate::{
+    config::InferenceConfig,
+    inference::{InferenceRuntime, create_session},
+};
 
 #[derive(Debug)]
 pub enum DetectError {
@@ -50,6 +55,7 @@ pub type DetectResult = (ndarray::Array2<f32>, Option<ndarray::Array3<f32>>, Mat
 
 pub struct FaceDetector {
     session: Session,
+    inference_runtime: InferenceRuntime,
     input_size: (usize, usize), // (width, height)
     conf_threshold: f32,
     iou_threshold: f32,
@@ -57,18 +63,27 @@ pub struct FaceDetector {
 
 impl FaceDetector {
     pub fn new(model_path: &str) -> Result<Self, DetectError> {
-        let session = Session::builder()
-            .map_err(|e| DetectError::InitFailed(e.to_string()))?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| DetectError::InitFailed(e.to_string()))?
-            .commit_from_file(model_path)?;
+        Self::new_with_inference(model_path, &InferenceConfig::default())
+    }
+
+    pub fn new_with_inference(
+        model_path: &str,
+        inference: &InferenceConfig,
+    ) -> Result<Self, DetectError> {
+        let (session, inference_runtime) = create_session(model_path, inference)
+            .map_err(|error| DetectError::InitFailed(error.to_string()))?;
 
         Ok(Self {
             session,
+            inference_runtime,
             input_size: (320, 320),
             conf_threshold: 0.1,
             iou_threshold: 0.4,
         })
+    }
+
+    pub fn inference_runtime(&self) -> &InferenceRuntime {
+        &self.inference_runtime
     }
 
     pub fn pad_to_square(img: &Mat) -> Result<Mat, DetectError> {

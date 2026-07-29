@@ -81,21 +81,38 @@ async fn main() -> anyhow::Result<()> {
         threshold = security.threshold(),
         "Loaded security config"
     );
+    info!(
+        execution_provider = config.inference.execution_provider,
+        device = config.inference.device,
+        "Loaded inference config"
+    );
 
     let (det_path, rec_path) =
         models::ensure_models(MODELS_DIR, security.detector(), security.recognizer())?;
 
-    let detector = gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap())
-        .expect("Failed to load detection model");
+    let detector = gaze_core::detect::FaceDetector::new_with_inference(
+        det_path.to_str().unwrap(),
+        &config.inference,
+    )
+    .expect("Failed to load detection model");
 
-    let recognizer_rgb = recognize::FaceRecognizer::new(rec_path.to_str().unwrap())
-        .expect("Failed to load recognition model");
-    let recognizer_ir = recognize::FaceRecognizer::new(rec_path.to_str().unwrap())
-        .expect("Failed to load recognition model");
+    let recognizer_rgb = recognize::FaceRecognizer::new_with_inference(
+        rec_path.to_str().unwrap(),
+        &config.inference,
+    )
+    .expect("Failed to load recognition model");
+    let recognizer_ir = recognize::FaceRecognizer::new_with_inference(
+        rec_path.to_str().unwrap(),
+        &config.inference,
+    )
+    .expect("Failed to load recognition model");
 
     let liveness_detector = if config.liveness.enabled {
         let path = models::ensure_liveness_model(MODELS_DIR)?;
-        Some(liveness::LivenessDetector::new(path.to_str().unwrap())?)
+        Some(liveness::LivenessDetector::new_with_inference(
+            path.to_str().unwrap(),
+            &config.inference,
+        )?)
     } else {
         None
     };

@@ -1,9 +1,15 @@
 use image::RgbImage;
 use ndarray::{Array1, Array4};
-use ort::{session::Session, session::builder::GraphOptimizationLevel, value::TensorRef};
+use ort::{session::Session, value::TensorRef};
+
+use gaze_core::{
+    config::InferenceConfig,
+    inference::{InferenceRuntime, create_session},
+};
 
 pub struct FaceRecognizer {
     session: Session,
+    inference_runtime: InferenceRuntime,
 }
 
 fn normalize_embedding(row: Array1<f32>) -> anyhow::Result<Array1<f32>> {
@@ -16,13 +22,19 @@ fn normalize_embedding(row: Array1<f32>) -> anyhow::Result<Array1<f32>> {
 }
 
 impl FaceRecognizer {
-    pub fn new(model_path: &str) -> anyhow::Result<Self> {
-        let session = Session::builder()
-            .map_err(|e| anyhow::anyhow!("{e}"))?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| anyhow::anyhow!("{e}"))?
-            .commit_from_file(model_path)?;
-        Ok(Self { session })
+    pub fn new_with_inference(
+        model_path: &str,
+        inference: &InferenceConfig,
+    ) -> anyhow::Result<Self> {
+        let (session, inference_runtime) = create_session(model_path, inference)?;
+        Ok(Self {
+            session,
+            inference_runtime,
+        })
+    }
+
+    pub fn inference_runtime(&self) -> &InferenceRuntime {
+        &self.inference_runtime
     }
 
     fn pre_process(img: &RgbImage) -> Array4<f32> {

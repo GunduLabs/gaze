@@ -11,6 +11,10 @@ publish.workspace = true
 readme.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+openvino = ["gaze-core/openvino", "ort/openvino"]
+
 [dependencies]
 aes-gcm = "0.11.0"
 anyhow = "1.0.104"

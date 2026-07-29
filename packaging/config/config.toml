@@ -9,6 +9,14 @@
 # Models are automatically downloaded from the official InsightFace GitHub
 # releases if not already present in the models directory.
 
+[inference]
+# "cpu" uses the normal ONNX Runtime CPU execution provider.
+# "openvino" requires a Gaze build compiled with the openvino Cargo feature
+# and keeps the ONNX models while sending supported work through OpenVINO.
+execution_provider = "cpu"
+# Valid values: "cpu", "gpu", "npu". Use "cpu" with execution_provider = "cpu".
+device = "cpu"
+
 [security]
 level = "medium"
 

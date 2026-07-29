@@ -391,6 +391,14 @@ fn config_findings(config: &Config) -> Vec<Check> {
             "Set enrollment.min_face_size_ratio to a value from 0.10 through 0.75.",
         );
     }
+    if let Err(err) = config.inference.validate() {
+        let fix = if cfg!(feature = "openvino") {
+            "Use cpu/cpu, openvino/cpu, openvino/gpu, or openvino/npu in the [inference] table."
+        } else {
+            "Use cpu/cpu, or install a Gaze build compiled with the openvino Cargo feature."
+        };
+        error(err.to_string(), fix);
+    }
 
     if config.security.level == "custom" {
         if !config.security.threshold.is_finite()
@@ -464,7 +472,8 @@ fn config_findings(config: &Config) -> Vec<Check> {
         findings.push(Check {
             level: Level::Pass,
             name: "Config values",
-            message: "camera, security, enrollment, and liveness values are valid".to_string(),
+            message: "camera, security, enrollment, inference, and liveness values are valid"
+                .to_string(),
             fix: None,
         });
     }
@@ -1030,8 +1039,14 @@ async fn check_benchmark(report: &mut Report, proxy: &GazeProxy<'_>) {
                 report.pass(
                     "Benchmark",
                     format!(
-                        "{}: {:.1}ms avg ({:.1} fps), {:.1}ms p95, {:.1}ms min",
-                        result.component, result.mean_ms, result.fps, result.p95_ms, result.min_ms
+                        "{} [{} / {}]: {:.1}ms avg ({:.1} fps), {:.1}ms p95, {:.1}ms min",
+                        result.component,
+                        result.execution_provider,
+                        result.device,
+                        result.mean_ms,
+                        result.fps,
+                        result.p95_ms,
+                        result.min_ms
                     ),
                 );
             }

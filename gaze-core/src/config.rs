@@ -13,6 +13,14 @@ pub const SECURITY_LEVEL_OPTIONS: [&str; 5] = ["low", "medium", "high", "maximum
 pub const MODEL_QUALITY_OPTIONS: [&str; 2] = ["standard", "accurate"];
 pub const HYBRID_POLICY_OPTIONS: [&str; 4] = ["default", "or", "fallback_on_dark", "and"];
 pub const START_DELAY_SCOPE_OPTIONS: [&str; 2] = ["all", "screen_lock"];
+#[cfg(not(feature = "openvino-config"))]
+pub const INFERENCE_EXECUTION_PROVIDER_OPTIONS: [&str; 1] = ["cpu"];
+#[cfg(feature = "openvino-config")]
+pub const INFERENCE_EXECUTION_PROVIDER_OPTIONS: [&str; 2] = ["cpu", "openvino"];
+#[cfg(not(feature = "openvino-config"))]
+pub const INFERENCE_DEVICE_OPTIONS: [&str; 1] = ["cpu"];
+#[cfg(feature = "openvino-config")]
+pub const INFERENCE_DEVICE_OPTIONS: [&str; 3] = ["cpu", "gpu", "npu"];
 pub const DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO: f64 = 0.25;
 pub const MIN_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.10;
 pub const MAX_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.75;
@@ -246,6 +254,8 @@ impl SecurityLevel {
 #[derive(Deserialize, Serialize, Clone, Debug, Default, Value, OwnedValue, Type)]
 pub struct Config {
     #[serde(default)]
+    pub inference: InferenceConfig,
+    #[serde(default)]
     pub security: SecurityLevel,
     #[serde(default)]
     pub cameras: CameraConfig,
@@ -257,6 +267,92 @@ pub struct Config {
     pub liveness: LivenessConfig,
     #[serde(default)]
     pub storage: StorageConfig,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
+pub struct InferenceConfig {
+    #[serde(default = "default_execution_provider")]
+    pub execution_provider: String,
+    #[serde(default = "default_inference_device")]
+    pub device: String,
+}
+
+fn default_execution_provider() -> String {
+    "cpu".to_string()
+}
+
+fn default_inference_device() -> String {
+    "cpu".to_string()
+}
+
+impl Default for InferenceConfig {
+    fn default() -> Self {
+        Self {
+            execution_provider: default_execution_provider(),
+            device: default_inference_device(),
+        }
+    }
+}
+
+impl InferenceConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        #[cfg(not(feature = "openvino-config"))]
+        if self.execution_provider == "openvino" {
+            anyhow::bail!(
+                "this Gaze build does not include OpenVINO support; rebuild with the \"openvino\" Cargo feature"
+            );
+        }
+        if !INFERENCE_EXECUTION_PROVIDER_OPTIONS.contains(&self.execution_provider.as_str()) {
+            anyhow::bail!(
+                "invalid inference.execution_provider {:?}: expected one of {:?}",
+                self.execution_provider,
+                INFERENCE_EXECUTION_PROVIDER_OPTIONS
+            );
+        }
+        if !INFERENCE_DEVICE_OPTIONS.contains(&self.device.as_str()) {
+            anyhow::bail!(
+                "invalid inference.device {:?}: expected one of {:?}",
+                self.device,
+                INFERENCE_DEVICE_OPTIONS
+            );
+        }
+        if self.execution_provider == "cpu" && self.device != "cpu" {
+            anyhow::bail!(
+                "inference.device must be \"cpu\" when inference.execution_provider is \"cpu\""
+            );
+        }
+        Ok(())
+    }
+
+    pub fn execution_provider_index(&self) -> u32 {
+        INFERENCE_EXECUTION_PROVIDER_OPTIONS
+            .iter()
+            .position(|value| *value == self.execution_provider)
+            .map(|index| index as u32)
+            .unwrap_or(0)
+    }
+
+    pub fn device_index(&self) -> u32 {
+        INFERENCE_DEVICE_OPTIONS
+            .iter()
+            .position(|value| *value == self.device)
+            .map(|index| index as u32)
+            .unwrap_or(0)
+    }
+
+    pub fn execution_provider_from_index(index: usize) -> &'static str {
+        INFERENCE_EXECUTION_PROVIDER_OPTIONS
+            .get(index)
+            .copied()
+            .unwrap_or("cpu")
+    }
+
+    pub fn device_from_index(index: usize) -> &'static str {
+        INFERENCE_DEVICE_OPTIONS
+            .get(index)
+            .copied()
+            .unwrap_or("cpu")
+    }
 }
 
 // Its own table: a security preset replaces `[security]` wholesale, resetting it.
@@ -529,6 +625,9 @@ impl Config {
             if let Err(e) = config.enrollment.validate() {
                 tracing::warn!("{e}; using the default enrollment face-size ratio");
             }
+            if let Err(e) = config.inference.validate() {
+                tracing::warn!("{e}; inference configuration will be checked when models load");
+            }
             Ok(config)
         } else {
             Ok(Config::default())
@@ -673,6 +772,56 @@ mod tests {
     }
 
     #[test]
+    fn inference_config_accepts_supported_provider_device_pairs() {
+        #[cfg(feature = "openvino-config")]
+        let supported = [
+            ("cpu", "cpu"),
+            ("openvino", "cpu"),
+            ("openvino", "gpu"),
+            ("openvino", "npu"),
+        ];
+        #[cfg(not(feature = "openvino-config"))]
+        let supported = [("cpu", "cpu")];
+
+        for (execution_provider, device) in supported {
+            let inference = InferenceConfig {
+                execution_provider: execution_provider.to_string(),
+                device: device.to_string(),
+            };
+            inference.validate().unwrap();
+        }
+    }
+
+    #[test]
+    fn inference_config_rejects_invalid_pairs() {
+        #[cfg(feature = "openvino-config")]
+        let invalid = [
+            ("cpu", "gpu"),
+            ("cpu", "npu"),
+            ("openvino", "cuda"),
+            ("webgpu", "gpu"),
+        ];
+        #[cfg(not(feature = "openvino-config"))]
+        let invalid = [
+            ("cpu", "gpu"),
+            ("cpu", "npu"),
+            ("openvino", "cuda"),
+            ("webgpu", "gpu"),
+            ("openvino", "cpu"),
+            ("openvino", "gpu"),
+            ("openvino", "npu"),
+        ];
+
+        for (execution_provider, device) in invalid {
+            let inference = InferenceConfig {
+                execution_provider: execution_provider.to_string(),
+                device: device.to_string(),
+            };
+            assert!(inference.validate().is_err());
+        }
+    }
+
+    #[test]
     fn unknown_level_falls_back_to_medium_without_panicking() {
         let mut level = SecurityLevel::medium();
         level.level = "bogus".to_string();
@@ -701,6 +850,8 @@ mod tests {
             config.security.detector(),
             SecurityLevel::medium().detector()
         );
+        assert_eq!(config.inference.execution_provider, "cpu");
+        assert_eq!(config.inference.device, "cpu");
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
         assert_eq!(config.cameras.dark_luma_threshold, 20);
         assert!(config.auth.abort_if_ssh);
@@ -718,6 +869,10 @@ mod tests {
         let temp = TempDir::new("round-trip");
         let path = temp.path().join("config.toml");
         let config = Config {
+            inference: InferenceConfig {
+                execution_provider: "openvino".to_string(),
+                device: "gpu".to_string(),
+            },
             security: SecurityLevel::high(),
             cameras: CameraConfig {
                 rgb: "primary".to_string(),
@@ -751,6 +906,8 @@ mod tests {
         let loaded = Config::load_from(path.to_str().unwrap()).unwrap();
 
         assert_eq!(loaded.security.detector(), SecurityLevel::high().detector());
+        assert_eq!(loaded.inference.execution_provider, "openvino");
+        assert_eq!(loaded.inference.device, "gpu");
         assert_eq!(
             loaded.security.recognizer(),
             SecurityLevel::high().recognizer()

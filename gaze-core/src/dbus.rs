@@ -120,6 +120,8 @@ pub enum VerifyResult {
 #[derive(Clone, Debug, Serialize, Deserialize, Value, OwnedValue, Type)]
 pub struct BenchmarkResult {
     pub component: String,
+    pub execution_provider: String,
+    pub device: String,
     pub mean_ms: f64,
     pub p95_ms: f64,
     pub min_ms: f64,

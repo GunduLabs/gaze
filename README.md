@@ -152,6 +152,10 @@ Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Matc
 
 ```toml
 # /etc/gaze/config.toml
+[inference]
+execution_provider = "cpu" # cpu | openvino (requires an OpenVINO build)
+device = "cpu"             # cpu | gpu | npu
+
 [security]
 level = "medium"    # low | medium | high | maximum | custom
 
@@ -210,6 +214,9 @@ sudo apt install build-essential pkg-config clang libclang-dev \
 
 # Build
 just build-rust
+
+# Build with OpenVINO support (requires an OpenVINO-enabled system ONNX Runtime)
+just build-rust-openvino
 
 # Package
 just package <deb | rpm | archlinux>
