@@ -406,19 +406,10 @@ mod tests {
     }
 
     #[derive(Clone, Debug, Value, OwnedValue, Type)]
-    struct OldAuthConfig {
-        abort_if_ssh: bool,
-        abort_if_lid_closed: bool,
-        require_confirmation: bool,
-        resume_grace_ms: u64,
-        start_delay_ms: u64,
-    }
-
-    #[derive(Clone, Debug, Value, OwnedValue, Type)]
     struct OldConfig {
         security: crate::config::SecurityLevel,
         cameras: crate::config::CameraConfig,
-        auth: OldAuthConfig,
+        auth: crate::config::AuthConfig,
         enrollment: crate::config::EnrollmentConfig,
         liveness: crate::config::LivenessConfig,
         storage: crate::config::StorageConfig,
@@ -428,13 +419,7 @@ mod tests {
         let old = OldConfig {
             security: Default::default(),
             cameras: Default::default(),
-            auth: OldAuthConfig {
-                abort_if_ssh: true,
-                abort_if_lid_closed: true,
-                require_confirmation: false,
-                resume_grace_ms: 0,
-                start_delay_ms: 3000,
-            },
+            auth: Default::default(),
             enrollment: Default::default(),
             liveness: Default::default(),
             storage: Default::default(),
