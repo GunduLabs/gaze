@@ -139,7 +139,24 @@ pub struct AuthDaemon {
     pub active_cancel: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     pub active_extensions: Arc<Mutex<std::collections::HashMap<u32, bool>>>,
     pub resume_pending: Arc<AtomicBool>,
+    pub benchmark_running: Arc<AtomicBool>,
     pub rt_handle: tokio::runtime::Handle,
+}
+
+struct BenchmarkSlot(Arc<AtomicBool>);
+
+impl BenchmarkSlot {
+    fn acquire(flag: &Arc<AtomicBool>) -> Option<Self> {
+        flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| Self(flag.clone()))
+    }
+}
+
+impl Drop for BenchmarkSlot {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
 
 impl AuthDaemon {
@@ -371,6 +388,10 @@ impl AuthDaemon {
     }
 
     fn face_write_needs_authorization(caller_uid: u32) -> bool {
+        caller_uid != 0
+    }
+
+    fn benchmark_needs_authorization(caller_uid: u32) -> bool {
         caller_uid != 0
     }
 
@@ -799,6 +820,46 @@ mod tests {
     fn face_writes_need_authorization_even_for_the_owning_user() {
         assert!(AuthDaemon::face_write_needs_authorization(1000));
         assert!(!AuthDaemon::face_write_needs_authorization(0));
+    }
+
+    #[test]
+    fn benchmarks_need_authorization_for_every_non_root_caller() {
+        assert!(AuthDaemon::benchmark_needs_authorization(1000));
+        assert!(AuthDaemon::benchmark_needs_authorization(42));
+        assert!(!AuthDaemon::benchmark_needs_authorization(0));
+    }
+
+    #[test]
+    fn only_one_benchmark_slot_is_available_at_a_time() {
+        use super::BenchmarkSlot;
+        use std::sync::atomic::AtomicBool;
+
+        let flag = std::sync::Arc::new(AtomicBool::new(false));
+        let first = BenchmarkSlot::acquire(&flag).expect("first caller acquires");
+        assert!(BenchmarkSlot::acquire(&flag).is_none());
+
+        drop(first);
+        let second = BenchmarkSlot::acquire(&flag).expect("slot is released");
+        drop(second);
+        assert!(!flag.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn benchmark_slot_is_released_when_the_holder_panics() {
+        use super::BenchmarkSlot;
+        use std::sync::atomic::AtomicBool;
+
+        let flag = std::sync::Arc::new(AtomicBool::new(false));
+        let inner = flag.clone();
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let _ = std::panic::catch_unwind(move || {
+            let _slot = BenchmarkSlot::acquire(&inner).expect("acquired");
+            panic!("benchmark blew up");
+        });
+        std::panic::set_hook(previous);
+
+        assert!(BenchmarkSlot::acquire(&flag).is_some());
     }
 
     #[test]
@@ -2193,7 +2254,20 @@ impl AuthDaemon {
             .is_some())
     }
 
-    async fn benchmark(&self) -> fdo::Result<Vec<gaze_core::dbus::BenchmarkResult>> {
+    async fn benchmark(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+    ) -> fdo::Result<Vec<gaze_core::dbus::BenchmarkResult>> {
+        if Self::benchmark_needs_authorization(Self::caller_uid(&header).await?) {
+            Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
+        }
+
+        let Some(_slot) = BenchmarkSlot::acquire(&self.benchmark_running) else {
+            return Err(fdo::Error::Failed(
+                "RETRYABLE: a benchmark is already running".into(),
+            ));
+        };
+
         let detector_arc = self.detector.clone();
         let recognizer_rgb_arc = self.recognizer_rgb.clone();
         let recognizer_ir_arc = self.recognizer_ir.clone();
