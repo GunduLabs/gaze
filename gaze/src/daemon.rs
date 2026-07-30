@@ -47,6 +47,7 @@ const VERIFY_NO_FACE_TIMEOUT: Duration = Duration::from_secs(5);
 /// still work. This bounds the RGB phase so it yields the camera to IR even without a
 /// match. See `verify_start`.
 const VERIFY_SERIAL_RGB_BUDGET: Duration = Duration::from_secs(4);
+const VERIFY_WATCHDOG_POLL: Duration = Duration::from_millis(250);
 const SSH_PROC_CHAIN_MAX_DEPTH: usize = 16;
 
 #[derive(Clone)]
@@ -524,6 +525,47 @@ mod tests {
         pipewire_runtime_update,
     };
     use gaze_core::dbus::CaptureStatus;
+
+    #[test]
+    fn watchdog_polls_faster_than_the_timeouts_it_guards() {
+        use super::{VERIFY_NO_FACE_TIMEOUT, VERIFY_TOO_DARK_TIMEOUT, VERIFY_WATCHDOG_POLL};
+
+        assert!(VERIFY_WATCHDOG_POLL < VERIFY_NO_FACE_TIMEOUT);
+        assert!(VERIFY_WATCHDOG_POLL < VERIFY_TOO_DARK_TIMEOUT);
+        assert!(!VERIFY_WATCHDOG_POLL.is_zero());
+    }
+
+    #[test]
+    fn a_stalled_capture_stream_still_reaches_the_no_face_deadline() {
+        use super::VERIFY_WATCHDOG_POLL;
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (_retained_tx, mut rx) = tokio::sync::mpsc::channel::<u32>(10);
+            let deadline = std::time::Duration::from_millis(500);
+            let started = std::time::Instant::now();
+            let mut gave_up = false;
+
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(VERIFY_WATCHDOG_POLL) => {
+                        if started.elapsed() >= deadline {
+                            gave_up = true;
+                            break;
+                        }
+                    }
+                    msg = rx.recv() => {
+                        if msg.is_none() {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            assert!(gave_up);
+            assert!(started.elapsed() < deadline * 4);
+        });
+    }
 
     #[test]
     fn pipewire_runtime_update_only_changes_on_a_new_uid() {
@@ -2025,6 +2067,8 @@ impl AuthDaemon {
                 }));
             }
 
+            drop(enroll_tx);
+
             let mut completed_steps = 0;
             let mut has_rgb_for_step = false;
             let mut has_ir_for_step = false;
@@ -2053,7 +2097,12 @@ impl AuthDaemon {
                         return;
                     }
                     msg_opt = enroll_rx.recv() => {
-                        let Some(msg) = msg_opt else { break };
+                        let Some(msg) = msg_opt else {
+                            warn!("EnrollStart: all capture threads exited before enrollment finished");
+                            let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::CameraFailed, -1.0).await;
+                            stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            return;
+                        };
                         match msg {
                             EnrollMsg::Status(step, spectrum, status) => {
                                 if step != completed_steps {
@@ -2891,6 +2940,8 @@ impl AuthDaemon {
                 }));
             }
 
+            drop(result_tx);
+
             let mut last_emitted_status: Option<CaptureStatus> = None;
             let mut rgb_status = CaptureStatus::Unused;
             let mut ir_status = CaptureStatus::Unused;
@@ -2948,8 +2999,24 @@ impl AuthDaemon {
                         let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
                         break;
                     }
+                    _ = tokio::time::sleep(VERIFY_WATCHDOG_POLL) => {
+                        if last_face_at.elapsed() >= VERIFY_NO_FACE_TIMEOUT {
+                            info!(
+                                "VerifyStart: giving up after {}s without a detected face",
+                                VERIFY_NO_FACE_TIMEOUT.as_secs()
+                            );
+                            stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                            break;
+                        }
+                    }
                     msg_opt = result_rx.recv() => {
-                        let Some(msg) = msg_opt else { break };
+                        let Some(msg) = msg_opt else {
+                            warn!("VerifyStart: all capture threads exited without a result");
+                            stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                            break;
+                        };
                         match msg {
                             VerifyMsg::Status(spectrum, status, embed_opt) => {
                                 let has_face = embed_opt.is_some();
