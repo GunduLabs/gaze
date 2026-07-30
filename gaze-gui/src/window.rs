@@ -279,7 +279,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     recognizer_row.set_model(Some(&recognizer_model));
     security_group.add(&recognizer_row);
 
-    let threshold_row = libadwaita::SpinRow::with_range(0.0, 1.0, 0.01);
+    let threshold_row = libadwaita::SpinRow::with_range(
+        gaze_core::config::MIN_SECURITY_THRESHOLD,
+        gaze_core::config::MAX_SECURITY_THRESHOLD,
+        0.01,
+    );
     threshold_row.set_digits(3);
     threshold_row.set_title("Recognizer Threshold");
     threshold_row.set_subtitle("Minimum similarity for a match");
@@ -376,7 +380,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     liveness_enabled_row.add_suffix(&liveness_enabled_switch);
     liveness_group.add(&liveness_enabled_row);
 
-    let liveness_threshold_row = libadwaita::SpinRow::with_range(0.0, 1.0, 0.01);
+    let liveness_threshold_row = libadwaita::SpinRow::with_range(
+        gaze_core::config::MIN_LIVENESS_THRESHOLD,
+        gaze_core::config::MAX_LIVENESS_THRESHOLD,
+        0.01,
+    );
     liveness_threshold_row.set_digits(3);
     liveness_threshold_row.set_title("Liveness Threshold");
     liveness_threshold_row.set_subtitle("Minimum spoof prevention confidence");
