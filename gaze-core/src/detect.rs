@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use opencv::core::Mat;
 use opencv::prelude::*;
 use ort::{session::Session, value::TensorRef};

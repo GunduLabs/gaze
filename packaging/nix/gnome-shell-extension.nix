@@ -48,7 +48,7 @@ stdenvNoCC.mkDerivation {
   meta = {
     description = "GNOME Shell extension for Gaze facial authentication";
     homepage = "https://gaze.gundulabs.com";
-    license = lib.licenses.mit;
+    license = lib.licenses.gpl3Plus;
     platforms = lib.platforms.linux;
   };
 }

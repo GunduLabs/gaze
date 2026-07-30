@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use gstreamer::prelude::*;
 use opencv::core::Mat;
 use opencv::prelude::*;

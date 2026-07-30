@@ -9,7 +9,7 @@ maintainer: "Gundu Labs <maintainers@gundulabs.com>"
 description: "GTK4/Adwaita GUI for Gaze"
 vendor: "Gundu Labs"
 homepage: "https://gaze.gundulabs.com"
-license: "MIT"
+license: "GPL-3.0-or-later"
 
 contents:
   - src: "target/release/gaze-gui"

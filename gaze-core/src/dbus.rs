@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #![allow(unreachable_patterns)]
 use crate::config::Config;
 use serde::{Deserialize, Serialize};

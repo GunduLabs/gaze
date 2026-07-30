@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Gaze installer: https://gaze.gundulabs.com/install.sh
 # Usage: curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 #        curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes

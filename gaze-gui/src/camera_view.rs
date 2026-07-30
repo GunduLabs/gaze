@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use gaze_core::camera::{Camera, frame_to_bytes};
 use gaze_core::dbus::CaptureStatus;
 use gtk4::gdk;

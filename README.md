@@ -7,7 +7,7 @@
 **Facial authentication for Linux**
 
 [![CI](https://github.com/gundulabs/gaze/actions/workflows/ci.yml/badge.svg)](https://github.com/gundulabs/gaze/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 [Documentation](https://gaze.gundulabs.com) · [Install](https://gaze.gundulabs.com/guide/installation) · [Development](https://gaze.gundulabs.com/guide/development)
 
@@ -233,4 +233,23 @@ See the [development guide](https://gaze.gundulabs.com/guide/development) for mo
 
 ## License
 
-[MIT](LICENSE)
+Gaze is free software licensed under the [GNU General Public License, version 3 or later](LICENSE) (`GPL-3.0-or-later`).
+
+```
+Gaze - Facial authentication for Linux
+Copyright (C) 2026 Gundu Labs <maintainers@gundulabs.com>
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program. If not, see <https://www.gnu.org/licenses/>.
+```
+
+Contributions are accepted under the same license.
