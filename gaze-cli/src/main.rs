@@ -174,12 +174,17 @@ enum Commands {
     Auth {
         #[arg(short, long)]
         user: Option<String>,
-        #[arg(short, long, help = "Show detailed authentication metrics")]
+        #[arg(
+            short,
+            long,
+            conflicts_with = "silent",
+            help = "Show detailed authentication metrics"
+        )]
         verbose: bool,
         #[arg(
             short,
             long,
-            help = "Run authentication silently without terminal UI or output"
+            help = "Suppress the terminal UI and all output; report the result via exit code"
         )]
         silent: bool,
     },
@@ -689,9 +694,7 @@ async fn handle_auth(
     };
 
     if let Err(e) = proxy.verify_start("any").await {
-        if let Some(t) = terminal {
-            drop(t);
-        }
+        drop(terminal);
         if !silent {
             term.write_line(&format!("{} Daemon error: {}", style("✗").red().bold(), e))?;
         }
@@ -723,17 +726,15 @@ async fn handle_auth(
 
         tokio::select! {
             signal = status_stream.next() => {
-                if let Some(signal) = signal
-                    && let Ok(args) = signal.args()
-                {
+                let Some(signal) = signal else { break };
+                if let Ok(args) = signal.args() {
                     verify_result = Some((*args.result(), args.faces().clone(), *args.rgb_status(), *args.ir_status()));
                     break;
                 }
             }
             signal = capture_stream.next() => {
-                if let Some(signal) = signal
-                    && let Ok(args) = signal.args()
-                {
+                let Some(signal) = signal else { break };
+                if let Ok(args) = signal.args() {
                     let status = *args.status();
                     status_tone = capture_tone(status);
                     status_msg = match status {
@@ -748,9 +749,7 @@ async fn handle_auth(
         }
     }
 
-    if let Some(t) = terminal {
-        drop(t);
-    }
+    drop(terminal);
 
     if cancelled {
         let _ = proxy.verify_stop().await;
@@ -760,7 +759,7 @@ async fn handle_auth(
 
     let mut authenticated = false;
     if let Some((result, faces, rgb_status, ir_status)) = verify_result {
-        if verbose && !silent {
+        if verbose {
             println!(
                 "\n{:<20} {:>10} {:>8} {:>8} {:>10} {:>8} {:>8}",
                 style("Face").bold(),
@@ -838,20 +837,17 @@ async fn handle_auth(
                     ))?;
                 }
             }
-        } else if !silent {
-            term.write_line(&format!(
-                "{} Authentication failed ({}ms)",
-                style("✗").red().bold(),
-                start.elapsed().as_millis()
-            ))?;
         }
-    } else if !silent {
+    }
+
+    if !authenticated && !silent {
         term.write_line(&format!(
             "{} Authentication failed ({}ms)",
             style("✗").red().bold(),
             start.elapsed().as_millis()
         ))?;
     }
+
     let _ = proxy.release().await;
     if !authenticated {
         std::process::exit(1);
@@ -1433,7 +1429,10 @@ async fn run() -> anyhow::Result<()> {
         reexec_as_root(name)?;
     }
 
-    let _polkit_agent = command_may_be_challenged(&cli.command).then(polkit::PolkitAgent::spawn);
+    let silent_auth = matches!(cli.command, Commands::Auth { silent: true, .. });
+
+    let _polkit_agent = (command_may_be_challenged(&cli.command) && !silent_auth)
+        .then(polkit::PolkitAgent::spawn);
 
     match &cli.command {
         Commands::Uninstall {
@@ -1452,7 +1451,11 @@ async fn run() -> anyhow::Result<()> {
         _ => {}
     }
 
-    let proxy = connect_gaze().await?;
+    let proxy = match connect_gaze().await {
+        Ok(proxy) => proxy,
+        Err(_) if silent_auth => std::process::exit(1),
+        Err(e) => return Err(e.into()),
+    };
 
     match cli.command {
         Commands::Auth {
@@ -1460,13 +1463,17 @@ async fn run() -> anyhow::Result<()> {
             verbose,
             silent,
         } => {
-            handle_auth(
+            let result = handle_auth(
                 &proxy,
                 &user.unwrap_or_else(get_current_user),
                 verbose,
                 silent,
             )
-            .await?;
+            .await;
+            if silent && result.is_err() {
+                std::process::exit(1);
+            }
+            result?;
         }
         Commands::AddFace { user, face } => {
             handle_enroll(&proxy, &user.unwrap_or_else(get_current_user), &face, false).await?;
@@ -1640,6 +1647,18 @@ mod tests {
                 silent: true,
             } if user == "bob"
         ));
+
+        let cli = Cli::try_parse_from(["gaze", "auth", "--silent"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Auth {
+                user: None,
+                verbose: false,
+                silent: true,
+            }
+        ));
+
+        assert!(Cli::try_parse_from(["gaze", "auth", "--verbose", "--silent"]).is_err());
 
         let cli = Cli::try_parse_from(["gaze", "uninstall", "--yes", "--keep-data", "--dry-run"])
             .unwrap();

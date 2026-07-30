@@ -70,9 +70,11 @@ Useful options:
 ```bash
 gaze auth -v          # show detailed authentication metrics (short form)
 gaze auth --verbose   # same
-gaze auth -s          # run silently without TUI or stdout output (short form)
+gaze auth -s          # run silently and report the result via exit code (short form)
 gaze auth --silent    # same
 ```
+
+`--verbose` and `--silent` are mutually exclusive.
 
 Result meanings:
 
@@ -80,6 +82,34 @@ Result meanings:
 - `✗ Authentication failed (XXXms)`: no face passed the current threshold or liveness check
 
 With `--verbose`, a per-face table is printed before the result showing the per-spectrum (RGB and IR) similarity score, match percentage, and pass/fail for each enrolled face.
+
+### Exit codes
+
+`gaze auth` reports its outcome through the exit status, so it can be used directly in scripts and `if` conditions:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | A face matched and the user was authenticated |
+| `1` | Authentication failed, no faces are enrolled, or the daemon could not be reached |
+| `130` | Cancelled from the terminal UI |
+
+This applies with and without `--silent`. Earlier releases exited `0` on a failed authentication, so scripts that only checked the exit status need to be re-checked.
+
+### Silent mode
+
+`gaze auth --silent` skips the terminal UI entirely and writes nothing to stdout or stderr; the exit code is the only result. Use it in PAM helpers, scripts, and other headless contexts where no TTY is attached:
+
+```bash
+if gaze auth --silent; then
+  echo "welcome back"
+fi
+```
+
+Because silent mode is non-interactive, it cannot be cancelled from the terminal UI and it does not start a polkit agent, so authenticating another user with `--user` fails instead of prompting. Silent mode has no timeout of its own — wrap it in `timeout(1)` if the caller needs a deadline:
+
+```bash
+timeout 15 gaze auth --silent
+```
 
 ## Enroll a new face profile
 
