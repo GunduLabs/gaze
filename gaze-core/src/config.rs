@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::io::Write;

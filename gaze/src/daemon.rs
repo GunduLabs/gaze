@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use futures::StreamExt;
 use ndarray::Array1;
 use opencv::core::Mat;

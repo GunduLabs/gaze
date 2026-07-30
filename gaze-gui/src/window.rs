@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use crate::capture_dialog;
 use gaze_core::config::{
     AuthConfig, Config, DEFAULT_RGB_CAMERA, INFERENCE_DEVICE_OPTIONS,

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use image::RgbImage;
 use image::imageops::{FilterType, crop_imm, resize};
 use ndarray::Array4;

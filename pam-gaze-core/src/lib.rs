@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #![allow(clippy::missing_safety_doc)]
 use parking_lot::{Condvar, Mutex};
 use std::ffi::{CStr, CString};

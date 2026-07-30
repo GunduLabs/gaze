@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use console::{Term, style};
 use gaze_core::config::{CONFIG_PATH, Config};
 use gaze_core::dbus::{

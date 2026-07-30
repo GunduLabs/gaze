@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #![allow(clippy::missing_safety_doc)]
 use pam_gaze_core::*;
 use std::os::raw::{c_char, c_int};

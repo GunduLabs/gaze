@@ -9,7 +9,7 @@ maintainer: "Gundu Labs <maintainers@gundulabs.com>"
 description: "GNOME Shell extension for Gaze"
 vendor: "Gundu Labs"
 homepage: "https://gaze.gundulabs.com"
-license: "MIT"
+license: "GPL-3.0-or-later"
 
 contents:
   - src: "gnome-shell-extension/metadata.json"

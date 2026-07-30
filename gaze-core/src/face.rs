@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use crate::config::Config;
 use crate::dbus::{CaptureStatus, EnrollPrompt};
 use crate::detect::{DetectError, FaceDetector};
