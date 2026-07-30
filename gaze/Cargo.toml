@@ -24,7 +24,7 @@ image = { version = "0.25.10", default-features = false }
 libc = "0.2.189"
 nalgebra = "0.35.0"
 ndarray = "0.17.2"
-opencv = { version = "0.99.1", default-features = false, features = ["imgproc", "videoio"] }
+opencv = { version = "0.100.0", default-features = false, features = ["imgproc", "videoio"] }
 ort = "2.0.0-rc.13"
 rayon = "1.12"
 sha2 = "0.11"
