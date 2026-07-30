@@ -176,6 +176,12 @@ enum Commands {
         user: Option<String>,
         #[arg(short, long, help = "Show detailed authentication metrics")]
         verbose: bool,
+        #[arg(
+            short,
+            long,
+            help = "Run authentication silently without terminal UI or output"
+        )]
+        silent: bool,
     },
     /// Capture a new face with guided multi-angle template
     AddFace {
@@ -630,7 +636,12 @@ async fn handle_enroll(
     Ok(())
 }
 
-async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow::Result<()> {
+async fn handle_auth(
+    proxy: &GazeProxy<'_>,
+    user: &str,
+    verbose: bool,
+    silent: bool,
+) -> anyhow::Result<()> {
     let term = Term::stdout();
 
     let has_faces = match proxy.list_faces(user).await {
@@ -639,40 +650,53 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
         Err(e) => return Err(e.into()),
     };
     if !has_faces {
-        term.write_line(&format!(
-            "{} No faces enrolled for {}. Run {} to enroll a face.",
-            style("i").cyan().bold(),
-            style(user).bold(),
-            style("gaze add-face <name>").bold()
-        ))?;
-        return Ok(());
+        if !silent {
+            term.write_line(&format!(
+                "{} No faces enrolled for {}. Run {} to enroll a face.",
+                style("i").cyan().bold(),
+                style(user).bold(),
+                style("gaze add-face <name>").bold()
+            ))?;
+        }
+        std::process::exit(1);
     }
 
     let start = std::time::Instant::now();
 
     if let Err(err) = proxy.claim(user).await {
-        term.write_line(&format!(
-            "{} Failed to claim device: {}",
-            style("✗").red().bold(),
-            dbus_error_message(&err)
-        ))?;
-        return Ok(());
+        if !silent {
+            term.write_line(&format!(
+                "{} Failed to claim device: {}",
+                style("✗").red().bold(),
+                dbus_error_message(&err)
+            ))?;
+        }
+        std::process::exit(1);
     }
 
     let mut status_stream = proxy.receive_verify_status().await?;
     let mut capture_stream = proxy.receive_face_status().await?;
-    let mut terminal = match TuiTerminal::new() {
-        Ok(terminal) => terminal,
-        Err(err) => {
-            let _ = proxy.release().await;
-            return Err(err);
+    let mut terminal = if !silent {
+        match TuiTerminal::new() {
+            Ok(terminal) => Some(terminal),
+            Err(err) => {
+                let _ = proxy.release().await;
+                return Err(err);
+            }
         }
+    } else {
+        None
     };
+
     if let Err(e) = proxy.verify_start("any").await {
-        drop(terminal);
-        term.write_line(&format!("{} Daemon error: {}", style("✗").red().bold(), e))?;
+        if let Some(t) = terminal {
+            drop(t);
+        }
+        if !silent {
+            term.write_line(&format!("{} Daemon error: {}", style("✗").red().bold(), e))?;
+        }
         let _ = proxy.release().await;
-        return Ok(());
+        std::process::exit(1);
     }
 
     let mut status_msg = format!("Scanning face for {user}...");
@@ -682,17 +706,19 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
     let mut verify_result = None;
 
     loop {
-        terminal.draw_auth(&AuthScreen {
-            user,
-            status: &status_msg,
-            status_tone,
-            elapsed: start.elapsed(),
-            tick,
-        })?;
+        if let Some(ref mut terminal) = terminal {
+            terminal.draw_auth(&AuthScreen {
+                user,
+                status: &status_msg,
+                status_tone,
+                elapsed: start.elapsed(),
+                tick,
+            })?;
 
-        if let Some(TuiAction::Cancel) = tui::poll_action()? {
-            cancelled = true;
-            break;
+            if let Some(TuiAction::Cancel) = tui::poll_action()? {
+                cancelled = true;
+                break;
+            }
         }
 
         tokio::select! {
@@ -722,7 +748,9 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
         }
     }
 
-    drop(terminal);
+    if let Some(t) = terminal {
+        drop(t);
+    }
 
     if cancelled {
         let _ = proxy.verify_stop().await;
@@ -730,8 +758,9 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
         std::process::exit(130);
     }
 
+    let mut authenticated = false;
     if let Some((result, faces, rgb_status, ir_status)) = verify_result {
-        if verbose {
+        if verbose && !silent {
             println!(
                 "\n{:<20} {:>10} {:>8} {:>8} {:>10} {:>8} {:>8}",
                 style("Face").bold(),
@@ -777,44 +806,56 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
         }
 
         if result == VerifyResult::VerifyMatch {
-            let matched = faces
-                .iter()
-                .find(|(_, _, _, rgb_p, _, _, ir_p)| *rgb_p || *ir_p)
-                .map(|(n, _, rgb_pct, rgb_p, _, ir_pct, ir_p)| {
-                    let pct = if *rgb_p && *ir_p {
-                        rgb_pct.max(*ir_pct)
-                    } else if *rgb_p {
-                        *rgb_pct
-                    } else {
-                        *ir_pct
-                    };
-                    (n.clone(), pct)
-                });
-            if let Some((face, pct)) = matched {
-                term.write_line(&format!(
-                    "{} Authenticated as: {} ({:.1}%, {}ms)",
-                    style("✓").green().bold(),
-                    style(&face).green().bold(),
-                    pct,
-                    start.elapsed().as_millis()
-                ))?;
-            } else {
-                term.write_line(&format!(
-                    "{} Authenticated as: {} ({}ms)",
-                    style("✓").green().bold(),
-                    style(user).green().bold(),
-                    start.elapsed().as_millis()
-                ))?;
+            authenticated = true;
+            if !silent {
+                let matched = faces
+                    .iter()
+                    .find(|(_, _, _, rgb_p, _, _, ir_p)| *rgb_p || *ir_p)
+                    .map(|(n, _, rgb_pct, rgb_p, _, ir_pct, ir_p)| {
+                        let pct = if *rgb_p && *ir_p {
+                            rgb_pct.max(*ir_pct)
+                        } else if *rgb_p {
+                            *rgb_pct
+                        } else {
+                            *ir_pct
+                        };
+                        (n.clone(), pct)
+                    });
+                if let Some((face, pct)) = matched {
+                    term.write_line(&format!(
+                        "{} Authenticated as: {} ({:.1}%, {}ms)",
+                        style("✓").green().bold(),
+                        style(&face).green().bold(),
+                        pct,
+                        start.elapsed().as_millis()
+                    ))?;
+                } else {
+                    term.write_line(&format!(
+                        "{} Authenticated as: {} ({}ms)",
+                        style("✓").green().bold(),
+                        style(user).green().bold(),
+                        start.elapsed().as_millis()
+                    ))?;
+                }
             }
-        } else {
+        } else if !silent {
             term.write_line(&format!(
                 "{} Authentication failed ({}ms)",
                 style("✗").red().bold(),
                 start.elapsed().as_millis()
             ))?;
         }
+    } else if !silent {
+        term.write_line(&format!(
+            "{} Authentication failed ({}ms)",
+            style("✗").red().bold(),
+            start.elapsed().as_millis()
+        ))?;
     }
     let _ = proxy.release().await;
+    if !authenticated {
+        std::process::exit(1);
+    }
     Ok(())
 }
 
@@ -1414,8 +1455,18 @@ async fn run() -> anyhow::Result<()> {
     let proxy = connect_gaze().await?;
 
     match cli.command {
-        Commands::Auth { user, verbose } => {
-            handle_auth(&proxy, &user.unwrap_or_else(get_current_user), verbose).await?;
+        Commands::Auth {
+            user,
+            verbose,
+            silent,
+        } => {
+            handle_auth(
+                &proxy,
+                &user.unwrap_or_else(get_current_user),
+                verbose,
+                silent,
+            )
+            .await?;
         }
         Commands::AddFace { user, face } => {
             handle_enroll(&proxy, &user.unwrap_or_else(get_current_user), &face, false).await?;
@@ -1575,8 +1626,19 @@ mod tests {
             cli.command,
             Commands::Auth {
                 user: Some(ref user),
-                verbose: true
+                verbose: true,
+                silent: false,
             } if user == "alice"
+        ));
+
+        let cli = Cli::try_parse_from(["gaze", "auth", "-s", "-u", "bob"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Auth {
+                user: Some(ref user),
+                verbose: false,
+                silent: true,
+            } if user == "bob"
         ));
 
         let cli = Cli::try_parse_from(["gaze", "uninstall", "--yes", "--keep-data", "--dry-run"])

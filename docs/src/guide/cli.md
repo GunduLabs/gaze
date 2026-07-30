@@ -70,6 +70,8 @@ Useful options:
 ```bash
 gaze auth -v          # show detailed authentication metrics (short form)
 gaze auth --verbose   # same
+gaze auth -s          # run silently without TUI or stdout output (short form)
+gaze auth --silent    # same
 ```
 
 Result meanings:
