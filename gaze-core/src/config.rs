@@ -27,6 +27,12 @@ pub const INFERENCE_DEVICE_OPTIONS: [&str; 3] = ["cpu", "gpu", "npu"];
 pub const DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO: f64 = 0.25;
 pub const MIN_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.10;
 pub const MAX_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.75;
+pub const DEFAULT_SECURITY_THRESHOLD: f64 = 0.4;
+pub const MIN_SECURITY_THRESHOLD: f64 = 0.10;
+pub const MAX_SECURITY_THRESHOLD: f64 = 1.0;
+pub const MIN_LIVENESS_THRESHOLD: f64 = 0.10;
+pub const MAX_LIVENESS_THRESHOLD: f64 = 1.0;
+pub const MIN_LIVENESS_MAX_FRAMES: u32 = 1;
 
 fn default_level() -> String {
     "medium".to_string()
@@ -222,8 +228,30 @@ impl SecurityLevel {
                     "invalid recognizer level {other:?}: expected \"standard\" or \"accurate\""
                 ),
             }
+            if !Self::threshold_in_range(self.threshold) {
+                anyhow::bail!(
+                    "security.threshold must be between {} and {}, got {}",
+                    MIN_SECURITY_THRESHOLD,
+                    MAX_SECURITY_THRESHOLD,
+                    self.threshold
+                );
+            }
+            if !self.hybrid_policy.is_empty()
+                && !HYBRID_POLICY_OPTIONS.contains(&self.hybrid_policy.as_str())
+            {
+                anyhow::bail!(
+                    "invalid security.hybrid_policy {:?}: expected one of {:?}",
+                    self.hybrid_policy,
+                    HYBRID_POLICY_OPTIONS
+                );
+            }
         }
         Ok(())
+    }
+
+    fn threshold_in_range(threshold: f64) -> bool {
+        threshold.is_finite()
+            && (MIN_SECURITY_THRESHOLD..=MAX_SECURITY_THRESHOLD).contains(&threshold)
     }
 
     pub fn threshold(&self) -> f32 {
@@ -232,7 +260,14 @@ impl SecurityLevel {
             "medium" => 0.4,
             "high" => 0.5,
             "maximum" => 0.6,
-            "custom" => self.threshold as f32,
+            "custom" if Self::threshold_in_range(self.threshold) => self.threshold as f32,
+            "custom" => {
+                tracing::warn!(
+                    threshold = self.threshold,
+                    "security.threshold is out of range; using the medium default"
+                );
+                DEFAULT_SECURITY_THRESHOLD as f32
+            }
             _ => 0.4,
         }
     }
@@ -396,6 +431,48 @@ impl Default for LivenessConfig {
             enabled: default_liveness_enabled(),
             threshold: default_liveness_threshold(),
             max_frames: default_max_frames(),
+        }
+    }
+}
+
+impl LivenessConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if !Self::threshold_in_range(self.threshold) {
+            anyhow::bail!(
+                "liveness.threshold must be between {} and {}, got {}",
+                MIN_LIVENESS_THRESHOLD,
+                MAX_LIVENESS_THRESHOLD,
+                self.threshold
+            );
+        }
+        if self.max_frames < MIN_LIVENESS_MAX_FRAMES {
+            anyhow::bail!(
+                "liveness.max_frames must be at least {}, got {}",
+                MIN_LIVENESS_MAX_FRAMES,
+                self.max_frames
+            );
+        }
+        Ok(())
+    }
+
+    fn threshold_in_range(threshold: f64) -> bool {
+        threshold.is_finite()
+            && (MIN_LIVENESS_THRESHOLD..=MAX_LIVENESS_THRESHOLD).contains(&threshold)
+    }
+
+    pub fn effective_threshold(&self) -> f64 {
+        if Self::threshold_in_range(self.threshold) {
+            self.threshold
+        } else {
+            default_liveness_threshold()
+        }
+    }
+
+    pub fn effective_max_frames(&self) -> u32 {
+        if self.max_frames >= MIN_LIVENESS_MAX_FRAMES {
+            self.max_frames
+        } else {
+            default_max_frames()
         }
     }
 }
@@ -636,6 +713,9 @@ impl Config {
             if let Err(e) = config.inference.validate() {
                 tracing::warn!("{e}; inference configuration will be checked when models load");
             }
+            if let Err(e) = config.liveness.validate() {
+                tracing::warn!("{e}; using the default liveness settings");
+            }
             Ok(config)
         } else {
             Ok(Config::default())
@@ -764,6 +844,140 @@ mod tests {
         assert_eq!(custom_standard.detector(), "det_500m.onnx");
         assert_eq!(custom_standard.recognizer(), "w600k_mbf.onnx");
         assert!((custom_standard.threshold() - 0.35).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn validate_rejects_out_of_range_custom_threshold() {
+        for bad in [-1.0, -0.5, 0.0, 0.09, 1.01, 5.0, f64::NAN, f64::INFINITY] {
+            let level = SecurityLevel::custom(
+                "standard".to_string(),
+                "standard".to_string(),
+                bad,
+                String::new(),
+            );
+            assert!(level.validate().is_err(), "{bad}");
+        }
+
+        for good in [MIN_SECURITY_THRESHOLD, 0.4, MAX_SECURITY_THRESHOLD] {
+            let level = SecurityLevel::custom(
+                "standard".to_string(),
+                "standard".to_string(),
+                good,
+                String::new(),
+            );
+            level.validate().unwrap();
+        }
+    }
+
+    #[test]
+    fn out_of_range_custom_threshold_never_reaches_the_matcher() {
+        for bad in [-1.0, 0.0, 5.0, f64::NAN, f64::INFINITY] {
+            let level = SecurityLevel::custom(
+                "standard".to_string(),
+                "standard".to_string(),
+                bad,
+                String::new(),
+            );
+            assert_eq!(
+                level.threshold(),
+                DEFAULT_SECURITY_THRESHOLD as f32,
+                "{bad}"
+            );
+        }
+
+        let level = SecurityLevel::custom(
+            "standard".to_string(),
+            "standard".to_string(),
+            0.73,
+            String::new(),
+        );
+        assert!((level.threshold() - 0.73).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn validate_rejects_unknown_hybrid_policy() {
+        let bad = SecurityLevel::custom(
+            "standard".to_string(),
+            "standard".to_string(),
+            0.5,
+            "not-a-real-policy".to_string(),
+        );
+        assert!(bad.validate().is_err());
+
+        for policy in HYBRID_POLICY_OPTIONS {
+            let level = SecurityLevel::custom(
+                "standard".to_string(),
+                "standard".to_string(),
+                0.5,
+                policy.to_string(),
+            );
+            level.validate().unwrap();
+        }
+
+        let empty = SecurityLevel::custom(
+            "standard".to_string(),
+            "standard".to_string(),
+            0.5,
+            String::new(),
+        );
+        empty.validate().unwrap();
+        assert_eq!(empty.hybrid_policy(), "fallback_on_dark");
+    }
+
+    #[test]
+    fn preset_levels_ignore_a_stored_custom_threshold() {
+        for preset in ["low", "medium", "high", "maximum"] {
+            let mut level = SecurityLevel::medium();
+            level.level = preset.to_string();
+            level.threshold = -1.0;
+            level.validate().unwrap();
+            assert!(level.threshold() > 0.0, "{preset}");
+        }
+    }
+
+    #[test]
+    fn liveness_validate_rejects_degenerate_settings() {
+        let mut cfg = LivenessConfig::default();
+        cfg.validate().unwrap();
+
+        for bad in [-1.0, 0.0, 0.09, 1.01, f64::NAN, f64::INFINITY] {
+            cfg.threshold = bad;
+            assert!(cfg.validate().is_err(), "{bad}");
+            assert_eq!(cfg.effective_threshold(), default_liveness_threshold());
+        }
+
+        cfg.threshold = 0.9;
+        assert_eq!(cfg.effective_threshold(), 0.9);
+
+        cfg.max_frames = 0;
+        assert!(cfg.validate().is_err());
+        assert_eq!(cfg.effective_max_frames(), default_max_frames());
+
+        cfg.max_frames = 25;
+        cfg.validate().unwrap();
+        assert_eq!(cfg.effective_max_frames(), 25);
+    }
+
+    #[test]
+    fn load_from_falls_back_on_a_degenerate_custom_threshold() {
+        let temp = TempDir::new("bad-threshold");
+        let path = temp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[security]\nlevel = \"custom\"\nthreshold = 0.0\n\n[liveness]\nthreshold = 0.0\nmax_frames = 0\n",
+        )
+        .unwrap();
+
+        let config = Config::load_from(path.to_str().unwrap()).unwrap();
+        assert_eq!(
+            config.security.threshold(),
+            DEFAULT_SECURITY_THRESHOLD as f32
+        );
+        assert_eq!(
+            config.liveness.effective_threshold(),
+            default_liveness_threshold()
+        );
+        assert_eq!(config.liveness.effective_max_frames(), default_max_frames());
     }
 
     #[test]

@@ -176,6 +176,7 @@ async fn main() -> anyhow::Result<()> {
         active_cancel: Arc::new(Mutex::new(None)),
         active_extensions: Arc::new(Mutex::new(std::collections::HashMap::new())),
         resume_pending: resume_pending.clone(),
+        benchmark_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         rt_handle: tokio::runtime::Handle::current(),
     };
 

@@ -12,9 +12,11 @@ use console::{Term, style};
 use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 use futures::StreamExt;
 use gaze_core::config::{
-    AuthConfig, Config, HYBRID_POLICY_OPTIONS, INFERENCE_DEVICE_OPTIONS,
-    INFERENCE_EXECUTION_PROVIDER_OPTIONS, MAX_ENROLLMENT_FACE_SIZE_RATIO,
-    MIN_ENROLLMENT_FACE_SIZE_RATIO, MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS, SecurityLevel,
+    AuthConfig, Config, DEFAULT_SECURITY_THRESHOLD, HYBRID_POLICY_OPTIONS,
+    INFERENCE_DEVICE_OPTIONS, INFERENCE_EXECUTION_PROVIDER_OPTIONS, MAX_ENROLLMENT_FACE_SIZE_RATIO,
+    MAX_LIVENESS_THRESHOLD, MAX_SECURITY_THRESHOLD, MIN_ENROLLMENT_FACE_SIZE_RATIO,
+    MIN_LIVENESS_THRESHOLD, MIN_SECURITY_THRESHOLD, MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS,
+    SecurityLevel,
 };
 use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon, connect_gaze,
@@ -310,12 +312,28 @@ async fn run_config_wizard(
             .interact()?;
         let recognizer = SecurityLevel::model_quality_from_index(selected_rec_idx).to_string();
 
-        let threshold = Input::with_theme(&theme)
-            .with_prompt("Custom threshold (0.0 - 1.0)")
+        let threshold = Input::<String>::with_theme(&theme)
+            .with_prompt(format!(
+                "Custom threshold ({} - {})",
+                MIN_SECURITY_THRESHOLD, MAX_SECURITY_THRESHOLD
+            ))
             .default(old_threshold.to_string())
+            .validate_with(|input: &String| match input.trim().parse::<f64>() {
+                Ok(value)
+                    if value.is_finite()
+                        && (MIN_SECURITY_THRESHOLD..=MAX_SECURITY_THRESHOLD).contains(&value) =>
+                {
+                    Ok(())
+                }
+                Ok(_) => Err(format!(
+                    "must be between {MIN_SECURITY_THRESHOLD} and {MAX_SECURITY_THRESHOLD}"
+                )),
+                Err(_) => Err("must be a number".to_string()),
+            })
             .interact_text()?
+            .trim()
             .parse::<f64>()
-            .unwrap_or(0.6);
+            .unwrap_or(DEFAULT_SECURITY_THRESHOLD);
 
         let selected_hybrid_idx = Select::with_theme(&theme)
             .with_prompt("Custom hybrid combining policy")
@@ -474,10 +492,26 @@ async fn run_config_wizard(
         .default(config.liveness.enabled)
         .interact()?;
     if config.liveness.enabled {
-        config.liveness.threshold = Input::with_theme(&theme)
-            .with_prompt("Liveness threshold (0.0 - 1.0)")
+        config.liveness.threshold = Input::<String>::with_theme(&theme)
+            .with_prompt(format!(
+                "Liveness threshold ({} - {})",
+                MIN_LIVENESS_THRESHOLD, MAX_LIVENESS_THRESHOLD
+            ))
             .default(config.liveness.threshold.to_string())
+            .validate_with(|input: &String| match input.trim().parse::<f64>() {
+                Ok(value)
+                    if value.is_finite()
+                        && (MIN_LIVENESS_THRESHOLD..=MAX_LIVENESS_THRESHOLD).contains(&value) =>
+                {
+                    Ok(())
+                }
+                Ok(_) => Err(format!(
+                    "must be between {MIN_LIVENESS_THRESHOLD} and {MAX_LIVENESS_THRESHOLD}"
+                )),
+                Err(_) => Err("must be a number".to_string()),
+            })
             .interact_text()?
+            .trim()
             .parse::<f64>()
             .unwrap_or(0.8);
         config.liveness.max_frames = Input::with_theme(&theme)
