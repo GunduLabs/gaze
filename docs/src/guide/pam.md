@@ -32,6 +32,103 @@ sudo -v
 
 If camera opens and face auth runs, PAM wiring is active.
 
+### Selective setup: password at GDM, face authentication for sudo and Polkit
+
+On GNOME systems, some users may want to keep password authentication at
+the initial GDM login so that GNOME Keyring is unlocked normally, while still
+using Gaze for privilege elevation and graphical Polkit prompts.
+
+Enabling the Debian/Ubuntu Gaze profile through `pam-auth-update` adds Gaze to
+the shared `common-auth` stack. Because `gdm-password` also includes
+`common-auth`, this may make Gaze run during the initial desktop login.
+
+The following setup was manually verified on Ubuntu 26.04 with GNOME 50.
+
+> [!WARNING]
+> PAM configuration errors can prevent authentication. Keep an active root
+> shell open, keep password authentication enabled, and create backups before
+> editing these files.
+
+First disable the shared Gaze profiles:
+
+```bash
+sudo pam-auth-update --disable gaze gaze-simultaneous
+```
+
+Verify that Gaze is no longer present in the shared stack:
+
+```bash
+grep -n pam_gaze /etc/pam.d/common-auth \
+  || echo "Gaze is not enabled in common-auth"
+```
+
+Keep the GDM face-login switch disabled:
+
+```bash
+sudo rm -f /etc/dconf/db/gdm.d/99-gaze*
+sudo dconf update
+```
+
+#### sudo
+
+Back up `/etc/pam.d/sudo`, then add this line immediately before
+`@include common-auth`:
+
+```text
+auth    sufficient    pam_gaze.so
+```
+
+The relevant part should look like:
+
+```text
+auth    sufficient    pam_gaze.so
+@include common-auth
+```
+
+Test it with:
+
+```bash
+sudo -k
+sudo -v
+```
+
+The same change can be applied to `/etc/pam.d/sudo-i` if face authentication
+is also wanted for `sudo -i`.
+
+#### Polkit
+
+If `/etc/pam.d/polkit-1` does not exist but the vendor file is available,
+create a local override:
+
+```bash
+sudo install -o root -g root -m 0644 \
+  /usr/lib/pam.d/polkit-1 \
+  /etc/pam.d/polkit-1
+```
+
+Add the following line immediately before `@include common-auth`:
+
+```text
+auth    sufficient    pam_gaze.so
+```
+
+Restart Polkit and test a graphical authentication request:
+
+```bash
+sudo systemctl restart polkit
+pkexec /usr/bin/true
+```
+
+With this arrangement:
+
+- GDM login uses the normal account password.
+- GNOME Keyring is unlocked during login.
+- `sudo` and `sudo -i` can use face authentication.
+- GNOME Settings, package-management applications, and other Polkit clients
+  can use face authentication.
+- The GNOME extension can remain enabled for face unlock on the lock screen.
+- Password authentication remains available as a fallback.
+
 ## Fedora and compatible RPM systems
 
 RPM packages install an authselect profile at:
