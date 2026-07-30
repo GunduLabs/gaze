@@ -520,8 +520,8 @@ impl AuthDaemon {
 #[cfg(test)]
 mod tests {
     use super::{
-        AuthDaemon, ClaimState, auth_streams, claim_has_epoch, eyes_from_kpss, hybrid_auth_passed,
-        pipewire_runtime_update,
+        AuthDaemon, ClaimState, and_policy_unsatisfiable, auth_streams, claim_has_epoch,
+        eyes_from_kpss, hybrid_auth_passed, pipewire_runtime_update,
     };
     use gaze_core::dbus::CaptureStatus;
 
@@ -872,6 +872,67 @@ mod tests {
     }
 
     #[test]
+    fn and_policy_refuses_to_degrade_to_one_spectrum() {
+        let (run_rgb, run_ir) = auth_streams("primary", "/dev/video2", true, false);
+        assert!(and_policy_unsatisfiable(
+            "and",
+            "primary",
+            "/dev/video2",
+            run_rgb,
+            run_ir
+        ));
+
+        let (run_rgb, run_ir) = auth_streams("primary", "/dev/video2", false, true);
+        assert!(and_policy_unsatisfiable(
+            "and",
+            "primary",
+            "/dev/video2",
+            run_rgb,
+            run_ir
+        ));
+    }
+
+    #[test]
+    fn and_policy_is_satisfiable_with_both_spectra_enrolled() {
+        let (run_rgb, run_ir) = auth_streams("primary", "/dev/video2", true, true);
+        assert!(!and_policy_unsatisfiable(
+            "and",
+            "primary",
+            "/dev/video2",
+            run_rgb,
+            run_ir
+        ));
+    }
+
+    #[test]
+    fn single_camera_hosts_are_not_blocked_by_the_and_policy() {
+        let (run_rgb, run_ir) = auth_streams("primary", "", true, false);
+        assert!(!and_policy_unsatisfiable(
+            "and", "primary", "", run_rgb, run_ir
+        ));
+
+        let (run_rgb, run_ir) = auth_streams("", "/dev/video2", false, true);
+        assert!(!and_policy_unsatisfiable(
+            "and",
+            "",
+            "/dev/video2",
+            run_rgb,
+            run_ir
+        ));
+    }
+
+    #[test]
+    fn other_policies_still_allow_a_single_spectrum() {
+        for policy in ["or", "fallback_on_dark", "default", ""] {
+            let (run_rgb, run_ir) = auth_streams("primary", "/dev/video2", true, false);
+            assert!(
+                !and_policy_unsatisfiable(policy, "primary", "/dev/video2", run_rgb, run_ir),
+                "{policy}"
+            );
+        }
+    }
+
+    #[test]
     fn hybrid_or_and_policies_require_the_configured_successes() {
         for rgb_status in [CaptureStatus::Usable, CaptureStatus::TooDark] {
             assert!(hybrid_auth_passed(
@@ -1091,6 +1152,16 @@ fn auth_streams(
         !rgb_device.is_empty() && has_rgb_templates,
         !ir_device.is_empty() && has_ir_templates,
     )
+}
+
+fn and_policy_unsatisfiable(
+    policy: &str,
+    rgb_device: &str,
+    ir_device: &str,
+    run_rgb: bool,
+    run_ir: bool,
+) -> bool {
+    policy == "and" && !rgb_device.is_empty() && !ir_device.is_empty() && !(run_rgb && run_ir)
 }
 
 fn process_frame_sync(
@@ -2588,6 +2659,21 @@ impl AuthDaemon {
 
             if !run_rgb && !run_ir {
                 error!("No matching templates or cameras configured for auth");
+                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                return;
+            }
+
+            if and_policy_unsatisfiable(&hybrid_policy, &rgb_device, &ir_device, run_rgb, run_ir) {
+                error!(
+                    run_rgb,
+                    run_ir,
+                    has_rgb_templates,
+                    has_ir_templates,
+                    "Hybrid policy \"and\" requires both spectra but {} has no {} templates; \
+                     refusing to authenticate on one spectrum. Re-enrol to cover both.",
+                    username,
+                    if has_rgb_templates { "IR" } else { "RGB" }
+                );
                 let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
                 return;
             }
