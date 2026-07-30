@@ -2277,6 +2277,10 @@ impl AuthDaemon {
             .inference
             .validate()
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        new_config
+            .liveness
+            .validate()
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
 
         self.cancel_active_tasks().await;
 
@@ -2608,7 +2612,7 @@ impl AuthDaemon {
 
             info!(
                 liveness_enabled = liveness_cfg.enabled,
-                liveness_threshold = liveness_cfg.threshold,
+                liveness_threshold = liveness_cfg.effective_threshold(),
                 run_rgb = run_rgb,
                 run_ir = run_ir,
                 "VerifyStart: sensing faces for user {}",
@@ -2634,7 +2638,7 @@ impl AuthDaemon {
                 let username_clone = username.clone();
                 let threshold_arc = threshold_arc.clone();
                 let liveness_enabled = liveness_cfg.enabled;
-                let liveness_threshold = liveness_cfg.threshold;
+                let liveness_threshold = liveness_cfg.effective_threshold();
                 let rgb_device_clone = rgb_device.clone();
                 let rgb_phase_done_clone = rgb_phase_done.clone();
 
@@ -2972,7 +2976,7 @@ impl AuthDaemon {
                                 if has_face {
                                     last_face_at = Instant::now();
                                     frames_seen += 1;
-                                    if frames_seen >= liveness_cfg.max_frames {
+                                    if frames_seen >= liveness_cfg.effective_max_frames() {
                                         info!("VerifyStart: liveness gate timed out");
                                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                                         emit_verify_with_scores!(VerifyResult::VerifyNoMatch);
