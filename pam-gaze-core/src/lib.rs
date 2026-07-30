@@ -222,6 +222,10 @@ pub fn confirmation_accepted(response: Option<&str>) -> bool {
     matches!(response, Some(CONFIRMATION_ACK))
 }
 
+pub fn confirmation_required(auth: Option<&gaze_core::config::AuthConfig>) -> bool {
+    auth.is_none_or(|auth| auth.require_confirmation)
+}
+
 pub struct AuthState {
     pub password: Option<String>,
     pub started: bool,
@@ -853,6 +857,26 @@ mod tests {
             enrollment_disposition::<&str>(Err("daemon unavailable")),
             EnrollmentDisposition::Unavailable
         );
+    }
+
+    #[test]
+    fn confirmation_is_required_when_the_config_could_not_be_read() {
+        assert!(confirmation_required(None));
+    }
+
+    #[test]
+    fn confirmation_follows_the_config_when_it_is_available() {
+        let off = gaze_core::config::AuthConfig {
+            require_confirmation: false,
+            ..Default::default()
+        };
+        assert!(!confirmation_required(Some(&off)));
+
+        let on = gaze_core::config::AuthConfig {
+            require_confirmation: true,
+            ..Default::default()
+        };
+        assert!(confirmation_required(Some(&on)));
     }
 
     #[test]
