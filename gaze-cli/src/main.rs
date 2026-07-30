@@ -1431,8 +1431,8 @@ async fn run() -> anyhow::Result<()> {
 
     let silent_auth = matches!(cli.command, Commands::Auth { silent: true, .. });
 
-    let _polkit_agent = (command_may_be_challenged(&cli.command) && !silent_auth)
-        .then(polkit::PolkitAgent::spawn);
+    let _polkit_agent =
+        (command_may_be_challenged(&cli.command) && !silent_auth).then(polkit::PolkitAgent::spawn);
 
     match &cli.command {
         Commands::Uninstall {
