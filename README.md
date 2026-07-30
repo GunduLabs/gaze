@@ -191,6 +191,7 @@ gaze add-face <name>         Enroll a new face
 gaze refine-face <name>      Add samples to an existing enrollment
 gaze auth                    Authenticate
 gaze auth --verbose          Authenticate with detailed metrics
+gaze auth --silent           Authenticate silently (exit code only)
 gaze list-faces              List enrolled faces
 gaze rename-face <old> <new> Rename a face
 gaze remove-face <name>      Remove a face
