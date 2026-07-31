@@ -234,11 +234,31 @@ pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> a
         .map_err(|e| anyhow::anyhow!("Failed to set config property: {}", e))
 }
 
+pub const LOGIN_SESSION_PATH_PREFIX: &str = "/org/freedesktop/login1/session";
+
+#[derive(Clone, Debug)]
+pub struct ActiveSession {
+    pub uid: u32,
+    pub class: String,
+    pub path: String,
+}
+
+impl ActiveSession {
+    pub fn is_greeter(&self) -> bool {
+        self.class == "greeter"
+    }
+}
+
 pub async fn get_active_session_uid() -> anyhow::Result<u32> {
     Ok(get_active_session_uid_and_class().await?.0)
 }
 
 pub async fn get_active_session_uid_and_class() -> anyhow::Result<(u32, String)> {
+    let session = get_active_session().await?;
+    Ok((session.uid, session.class))
+}
+
+pub async fn get_active_session() -> anyhow::Result<ActiveSession> {
     let connection = zbus::Connection::system().await?;
     let proxy = zbus::Proxy::new(
         &connection,
@@ -249,6 +269,7 @@ pub async fn get_active_session_uid_and_class() -> anyhow::Result<(u32, String)>
     .await?;
     let active_session: (String, zbus::zvariant::ObjectPath) =
         proxy.get_property("ActiveSession").await?;
+    let path = active_session.1.to_string();
 
     let session_proxy = zbus::Proxy::new(
         &connection,
@@ -260,7 +281,11 @@ pub async fn get_active_session_uid_and_class() -> anyhow::Result<(u32, String)>
     let user: (u32, zbus::zvariant::ObjectPath) = session_proxy.get_property("User").await?;
     let class: String = session_proxy.get_property("Class").await?;
 
-    Ok((user.0, class))
+    Ok(ActiveSession {
+        uid: user.0,
+        class,
+        path,
+    })
 }
 
 #[proxy(
@@ -436,7 +461,7 @@ mod tests {
         let decoded = config_from_property(raw)
             .expect("no error")
             .expect("current layout is readable");
-        assert_eq!(decoded.auth.start_delay_scope(), "all");
+        assert_eq!(decoded.auth.start_delay_scope(), "screen_lock");
     }
 
     #[test]

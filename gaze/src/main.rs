@@ -156,6 +156,7 @@ async fn main() -> anyhow::Result<()> {
     let sources = gaze_core::camera::resolve_configured_sources(&config.cameras);
 
     let resume_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let lock_epochs: daemon::LockEpochs = Arc::new(Mutex::new(std::collections::HashMap::new()));
 
     let daemon = AuthDaemon {
         detector: Arc::new(std::sync::Mutex::new(detector)),
@@ -176,6 +177,7 @@ async fn main() -> anyhow::Result<()> {
         active_cancel: Arc::new(Mutex::new(None)),
         active_extensions: Arc::new(Mutex::new(std::collections::HashMap::new())),
         resume_pending: resume_pending.clone(),
+        lock_epochs: lock_epochs.clone(),
         benchmark_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         rt_handle: tokio::runtime::Handle::current(),
     };
@@ -189,6 +191,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     tokio::spawn(daemon::watch_resume(conn.clone(), resume_pending));
+    tokio::spawn(daemon::watch_session_locks(conn.clone(), lock_epochs));
 
     info!("Gaze Daemon listening on System Bus");
     std::future::pending::<()>().await;

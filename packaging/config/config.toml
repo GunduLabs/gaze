@@ -51,15 +51,18 @@ resume_grace_ms = 0
 # you again immediately after you lock manually and are still in front of the
 # camera. 0 disables it.
 #
+# The wait is measured from the moment the session locked, not from each
+# authentication, so a retry on the same lock screen does not pay it again.
+#
 # When resuming from suspend, whichever of this and resume_grace_ms is longer
 # applies; they do not stack.
 start_delay_ms = 0
 # Which prompts wait for start_delay_ms.
-#   "all"         every face authentication, sudo and polkit included
 #   "screen_lock" screen lockers only; sudo, polkit, su and greeters skip it
+#   "all"         every face authentication, sudo and polkit included
 # Gaze reads the PAM service name to tell these apart. A service it does not
 # recognize counts as a screen lock, so an unusual locker still gets the delay.
-start_delay_scope = "all"
+start_delay_scope = "screen_lock"
 
 [enrollment]
 max_templates = 2

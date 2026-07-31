@@ -140,9 +140,13 @@ pub struct AuthDaemon {
     pub active_cancel: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     pub active_extensions: Arc<Mutex<std::collections::HashMap<u32, bool>>>,
     pub resume_pending: Arc<AtomicBool>,
+    pub lock_epochs: LockEpochs,
     pub benchmark_running: Arc<AtomicBool>,
     pub rt_handle: tokio::runtime::Handle,
 }
+
+/// When each logind session last became locked, keyed by session object path.
+pub type LockEpochs = Arc<Mutex<HashMap<String, std::time::Instant>>>;
 
 struct BenchmarkSlot(Arc<AtomicBool>);
 
@@ -537,6 +541,30 @@ impl AuthDaemon {
             let _ = sender.send(());
         }
     }
+
+    /// `gdm-face` serves the greeter as well as the lock screen.
+    fn classify_surface(
+        pam_service: Option<&str>,
+        active_session: Option<&gaze_core::dbus::ActiveSession>,
+    ) -> gaze_core::config::AuthSurface {
+        let surface = gaze_core::config::classify_pam_service(pam_service);
+        if surface == gaze_core::config::AuthSurface::ScreenLock
+            && active_session.is_some_and(|session| session.is_greeter())
+        {
+            return gaze_core::config::AuthSurface::Login;
+        }
+        surface
+    }
+
+    async fn lock_elapsed_ms(
+        &self,
+        active_session: Option<&gaze_core::dbus::ActiveSession>,
+    ) -> Option<u64> {
+        let session = active_session?;
+        let epochs = self.lock_epochs.lock().await;
+        let started = epochs.get(&session.path)?;
+        Some(started.elapsed().as_millis().min(u64::MAX as u128) as u64)
+    }
 }
 
 #[cfg(test)]
@@ -545,7 +573,40 @@ mod tests {
         AuthDaemon, ClaimState, and_policy_unsatisfiable, auth_streams, claim_has_epoch,
         eyes_from_kpss, hybrid_auth_passed, pipewire_runtime_update,
     };
-    use gaze_core::dbus::CaptureStatus;
+    use gaze_core::config::AuthSurface;
+    use gaze_core::dbus::{ActiveSession, CaptureStatus};
+
+    fn session(class: &str) -> ActiveSession {
+        ActiveSession {
+            uid: 1000,
+            class: class.to_string(),
+            path: "/org/freedesktop/login1/session/_32".to_string(),
+        }
+    }
+
+    #[test]
+    fn gdm_face_on_the_greeter_is_a_login_not_a_screen_lock() {
+        assert_eq!(
+            AuthDaemon::classify_surface(Some("gdm-face"), Some(&session("greeter"))),
+            AuthSurface::Login
+        );
+        assert_eq!(
+            AuthDaemon::classify_surface(Some("gdm-face"), Some(&session("user"))),
+            AuthSurface::ScreenLock
+        );
+        assert_eq!(
+            AuthDaemon::classify_surface(Some("gdm-face"), None),
+            AuthSurface::ScreenLock
+        );
+    }
+
+    #[test]
+    fn a_greeter_session_does_not_reclassify_elevation() {
+        assert_eq!(
+            AuthDaemon::classify_surface(Some("sudo"), Some(&session("greeter"))),
+            AuthSurface::Elevation
+        );
+    }
 
     #[test]
     fn watchdog_polls_faster_than_the_timeouts_it_guards() {
@@ -1206,6 +1267,63 @@ pub async fn watch_resume(conn: zbus::Connection, resume_pending: Arc<AtomicBool
     while let Some(Ok(msg)) = stream.next().await {
         if let Ok(false) = msg.body().deserialize::<bool>() {
             resume_pending.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+async fn session_properties_stream(conn: &zbus::Connection) -> zbus::Result<zbus::MessageStream> {
+    let rule = zbus::MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .sender("org.freedesktop.login1")?
+        .interface("org.freedesktop.DBus.Properties")?
+        .member("PropertiesChanged")?
+        .path_namespace(gaze_core::dbus::LOGIN_SESSION_PATH_PREFIX)?
+        .build();
+    zbus::MessageStream::for_match_rule(rule, conn, None).await
+}
+
+fn locked_hint_from_changed(body: &zbus::message::Body) -> Option<bool> {
+    let (interface, changed, _invalidated): (
+        String,
+        std::collections::HashMap<String, zbus::zvariant::Value>,
+        Vec<String>,
+    ) = body.deserialize().ok()?;
+
+    if interface != "org.freedesktop.login1.Session" {
+        return None;
+    }
+
+    match changed.get("LockedHint")? {
+        zbus::zvariant::Value::Bool(locked) => Some(*locked),
+        _ => None,
+    }
+}
+
+/// Records when each session locks, so the start delay can be measured from it.
+pub async fn watch_session_locks(conn: zbus::Connection, lock_epochs: LockEpochs) {
+    let mut stream = match session_properties_stream(&conn).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            warn!(
+                "Failed to subscribe to session LockedHint, start delay will apply per auth: {e}"
+            );
+            return;
+        }
+    };
+
+    while let Some(Ok(msg)) = stream.next().await {
+        let Some(path) = msg.header().path().map(|p| p.to_string()) else {
+            continue;
+        };
+        let Some(locked) = locked_hint_from_changed(&msg.body()) else {
+            continue;
+        };
+
+        let mut epochs = lock_epochs.lock().await;
+        if locked {
+            epochs.entry(path).or_insert_with(std::time::Instant::now);
+        } else {
+            epochs.remove(&path);
         }
     }
 }
@@ -2730,11 +2848,18 @@ impl AuthDaemon {
         let threshold_arc = self.threshold.clone();
 
         let config = Config::load_from(CONFIG_PATH).unwrap_or_default();
-        let surface = gaze_core::config::classify_pam_service(pam_service.as_deref());
-        let delay = Duration::from_millis(config.auth.effective_start_delay_ms(resumed, surface));
+        let active_session = gaze_core::dbus::get_active_session().await.ok();
+        let surface = Self::classify_surface(pam_service.as_deref(), active_session.as_ref());
+        let lock_elapsed_ms = self.lock_elapsed_ms(active_session.as_ref()).await;
+        let delay = Duration::from_millis(config.auth.start_delay_after_lock_ms(
+            resumed,
+            surface,
+            lock_elapsed_ms,
+        ));
         info!(
             service = pam_service.as_deref().unwrap_or("<unknown>"),
             ?surface,
+            lock_elapsed_ms,
             "Face auth requested"
         );
         let abort_if_lid_closed = *self.abort_if_lid_closed.lock().await;
