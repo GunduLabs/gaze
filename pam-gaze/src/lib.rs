@@ -73,9 +73,10 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         };
         unsafe { say(pamh, prompt) };
 
-        let budget = match setup_auth_env().await {
-            Ok((config, _)) => camera_auth_timeout(&config.auth, service.as_deref()),
-            Err(_) => Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS),
+        let loaded_auth = setup_auth_env().await.ok().map(|(config, _)| config.auth);
+        let budget = match loaded_auth.as_ref() {
+            Some(auth) => camera_auth_timeout(auth, service.as_deref()),
+            None => Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS),
         };
 
         match timeout(
@@ -84,7 +85,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         )
         .await
         {
-            Ok(Ok((AuthOutcome::Match, _))) => Ok(()),
+            Ok(Ok((AuthOutcome::Match, _))) => Ok(loaded_auth),
             Ok(Ok((AuthOutcome::NoMatch, _))) => {
                 unsafe { say(pamh, FACE_NOT_RECOGNIZED) };
                 Err(PAM_AUTH_ERR)
@@ -103,17 +104,12 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
             }
         }
     });
-    if let Err(code) = matched {
-        return code;
-    }
+    let loaded_auth = match matched {
+        Ok(auth) => auth,
+        Err(code) => return code,
+    };
 
-    let require_confirmation = rt.block_on(async {
-        match setup_auth_env().await {
-            Ok((config, _)) => config.auth.require_confirmation,
-            Err(_) => false,
-        }
-    });
-    if !require_confirmation {
+    if !confirmation_required(loaded_auth.as_ref()) {
         return PAM_SUCCESS;
     }
 

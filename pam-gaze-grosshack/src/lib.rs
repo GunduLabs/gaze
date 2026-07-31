@@ -96,11 +96,9 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         EnrollmentDisposition::Continue => {}
     }
 
-    let config = match rt.block_on(setup_auth_env()) {
-        Ok((cfg, _)) => cfg,
-        Err(_) => gaze_core::config::Config::default(),
-    };
-    let require_confirmation = config.auth.require_confirmation;
+    let loaded_auth = rt.block_on(setup_auth_env()).ok().map(|(cfg, _)| cfg.auth);
+    let require_confirmation = confirmation_required(loaded_auth.as_ref());
+    let auth = loaded_auth.unwrap_or_default();
 
     unsafe { say(pamh, LOOK_OR_PASSWORD_PROMPT) };
 
@@ -117,7 +115,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     let biometric_fut = authenticate_biometric_with_timeout(
         &username,
         service.as_deref(),
-        camera_auth_timeout(&config.auth, service.as_deref()),
+        camera_auth_timeout(&auth, service.as_deref()),
     );
     let password_fut = notify.notified();
 

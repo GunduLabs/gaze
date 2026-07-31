@@ -47,6 +47,7 @@ const VERIFY_NO_FACE_TIMEOUT: Duration = Duration::from_secs(5);
 /// still work. This bounds the RGB phase so it yields the camera to IR even without a
 /// match. See `verify_start`.
 const VERIFY_SERIAL_RGB_BUDGET: Duration = Duration::from_secs(4);
+const VERIFY_WATCHDOG_POLL: Duration = Duration::from_millis(250);
 const SSH_PROC_CHAIN_MAX_DEPTH: usize = 16;
 
 #[derive(Clone)]
@@ -139,7 +140,24 @@ pub struct AuthDaemon {
     pub active_cancel: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     pub active_extensions: Arc<Mutex<std::collections::HashMap<u32, bool>>>,
     pub resume_pending: Arc<AtomicBool>,
+    pub benchmark_running: Arc<AtomicBool>,
     pub rt_handle: tokio::runtime::Handle,
+}
+
+struct BenchmarkSlot(Arc<AtomicBool>);
+
+impl BenchmarkSlot {
+    fn acquire(flag: &Arc<AtomicBool>) -> Option<Self> {
+        flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| Self(flag.clone()))
+    }
+}
+
+impl Drop for BenchmarkSlot {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
 
 impl AuthDaemon {
@@ -374,6 +392,10 @@ impl AuthDaemon {
         caller_uid != 0
     }
 
+    fn benchmark_needs_authorization(caller_uid: u32) -> bool {
+        caller_uid != 0
+    }
+
     async fn ensure_face_write_access(
         header: &Header<'_>,
         username: &str,
@@ -520,10 +542,51 @@ impl AuthDaemon {
 #[cfg(test)]
 mod tests {
     use super::{
-        AuthDaemon, ClaimState, auth_streams, claim_has_epoch, eyes_from_kpss, hybrid_auth_passed,
-        pipewire_runtime_update,
+        AuthDaemon, ClaimState, and_policy_unsatisfiable, auth_streams, claim_has_epoch,
+        eyes_from_kpss, hybrid_auth_passed, pipewire_runtime_update,
     };
     use gaze_core::dbus::CaptureStatus;
+
+    #[test]
+    fn watchdog_polls_faster_than_the_timeouts_it_guards() {
+        use super::{VERIFY_NO_FACE_TIMEOUT, VERIFY_TOO_DARK_TIMEOUT, VERIFY_WATCHDOG_POLL};
+
+        assert!(VERIFY_WATCHDOG_POLL < VERIFY_NO_FACE_TIMEOUT);
+        assert!(VERIFY_WATCHDOG_POLL < VERIFY_TOO_DARK_TIMEOUT);
+        assert!(!VERIFY_WATCHDOG_POLL.is_zero());
+    }
+
+    #[test]
+    fn a_stalled_capture_stream_still_reaches_the_no_face_deadline() {
+        use super::VERIFY_WATCHDOG_POLL;
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (_retained_tx, mut rx) = tokio::sync::mpsc::channel::<u32>(10);
+            let deadline = std::time::Duration::from_millis(500);
+            let started = std::time::Instant::now();
+            let mut gave_up = false;
+
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(VERIFY_WATCHDOG_POLL) => {
+                        if started.elapsed() >= deadline {
+                            gave_up = true;
+                            break;
+                        }
+                    }
+                    msg = rx.recv() => {
+                        if msg.is_none() {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            assert!(gave_up);
+            assert!(started.elapsed() < deadline * 4);
+        });
+    }
 
     #[test]
     fn pipewire_runtime_update_only_changes_on_a_new_uid() {
@@ -802,6 +865,46 @@ mod tests {
     }
 
     #[test]
+    fn benchmarks_need_authorization_for_every_non_root_caller() {
+        assert!(AuthDaemon::benchmark_needs_authorization(1000));
+        assert!(AuthDaemon::benchmark_needs_authorization(42));
+        assert!(!AuthDaemon::benchmark_needs_authorization(0));
+    }
+
+    #[test]
+    fn only_one_benchmark_slot_is_available_at_a_time() {
+        use super::BenchmarkSlot;
+        use std::sync::atomic::AtomicBool;
+
+        let flag = std::sync::Arc::new(AtomicBool::new(false));
+        let first = BenchmarkSlot::acquire(&flag).expect("first caller acquires");
+        assert!(BenchmarkSlot::acquire(&flag).is_none());
+
+        drop(first);
+        let second = BenchmarkSlot::acquire(&flag).expect("slot is released");
+        drop(second);
+        assert!(!flag.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn benchmark_slot_is_released_when_the_holder_panics() {
+        use super::BenchmarkSlot;
+        use std::sync::atomic::AtomicBool;
+
+        let flag = std::sync::Arc::new(AtomicBool::new(false));
+        let inner = flag.clone();
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let _ = std::panic::catch_unwind(move || {
+            let _slot = BenchmarkSlot::acquire(&inner).expect("acquired");
+            panic!("benchmark blew up");
+        });
+        std::panic::set_hook(previous);
+
+        assert!(BenchmarkSlot::acquire(&flag).is_some());
+    }
+
+    #[test]
     fn camera_allows_login_greeter_for_root_caller() {
         // GDM login: target has no session yet, active seat is the greeter.
         let greeter_active = Some((42, true, true));
@@ -869,6 +972,67 @@ mod tests {
         assert_eq!(auth_streams("", "/dev/video2", true, true), (false, true));
         assert_eq!(auth_streams("primary", "", true, true), (true, false));
         assert_eq!(auth_streams("", "", true, true), (false, false));
+    }
+
+    #[test]
+    fn and_policy_refuses_to_degrade_to_one_spectrum() {
+        let (run_rgb, run_ir) = auth_streams("primary", "/dev/video2", true, false);
+        assert!(and_policy_unsatisfiable(
+            "and",
+            "primary",
+            "/dev/video2",
+            run_rgb,
+            run_ir
+        ));
+
+        let (run_rgb, run_ir) = auth_streams("primary", "/dev/video2", false, true);
+        assert!(and_policy_unsatisfiable(
+            "and",
+            "primary",
+            "/dev/video2",
+            run_rgb,
+            run_ir
+        ));
+    }
+
+    #[test]
+    fn and_policy_is_satisfiable_with_both_spectra_enrolled() {
+        let (run_rgb, run_ir) = auth_streams("primary", "/dev/video2", true, true);
+        assert!(!and_policy_unsatisfiable(
+            "and",
+            "primary",
+            "/dev/video2",
+            run_rgb,
+            run_ir
+        ));
+    }
+
+    #[test]
+    fn single_camera_hosts_are_not_blocked_by_the_and_policy() {
+        let (run_rgb, run_ir) = auth_streams("primary", "", true, false);
+        assert!(!and_policy_unsatisfiable(
+            "and", "primary", "", run_rgb, run_ir
+        ));
+
+        let (run_rgb, run_ir) = auth_streams("", "/dev/video2", false, true);
+        assert!(!and_policy_unsatisfiable(
+            "and",
+            "",
+            "/dev/video2",
+            run_rgb,
+            run_ir
+        ));
+    }
+
+    #[test]
+    fn other_policies_still_allow_a_single_spectrum() {
+        for policy in ["or", "fallback_on_dark", "default", ""] {
+            let (run_rgb, run_ir) = auth_streams("primary", "/dev/video2", true, false);
+            assert!(
+                !and_policy_unsatisfiable(policy, "primary", "/dev/video2", run_rgb, run_ir),
+                "{policy}"
+            );
+        }
     }
 
     #[test]
@@ -1091,6 +1255,16 @@ fn auth_streams(
         !rgb_device.is_empty() && has_rgb_templates,
         !ir_device.is_empty() && has_ir_templates,
     )
+}
+
+fn and_policy_unsatisfiable(
+    policy: &str,
+    rgb_device: &str,
+    ir_device: &str,
+    run_rgb: bool,
+    run_ir: bool,
+) -> bool {
+    policy == "and" && !rgb_device.is_empty() && !ir_device.is_empty() && !(run_rgb && run_ir)
 }
 
 fn process_frame_sync(
@@ -2025,6 +2199,8 @@ impl AuthDaemon {
                 }));
             }
 
+            drop(enroll_tx);
+
             let mut completed_steps = 0;
             let mut has_rgb_for_step = false;
             let mut has_ir_for_step = false;
@@ -2053,7 +2229,12 @@ impl AuthDaemon {
                         return;
                     }
                     msg_opt = enroll_rx.recv() => {
-                        let Some(msg) = msg_opt else { break };
+                        let Some(msg) = msg_opt else {
+                            warn!("EnrollStart: all capture threads exited before enrollment finished");
+                            let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::CameraFailed, -1.0).await;
+                            stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            return;
+                        };
                         match msg {
                             EnrollMsg::Status(step, spectrum, status) => {
                                 if step != completed_steps {
@@ -2193,7 +2374,20 @@ impl AuthDaemon {
             .is_some())
     }
 
-    async fn benchmark(&self) -> fdo::Result<Vec<gaze_core::dbus::BenchmarkResult>> {
+    async fn benchmark(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+    ) -> fdo::Result<Vec<gaze_core::dbus::BenchmarkResult>> {
+        if Self::benchmark_needs_authorization(Self::caller_uid(&header).await?) {
+            Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
+        }
+
+        let Some(_slot) = BenchmarkSlot::acquire(&self.benchmark_running) else {
+            return Err(fdo::Error::Failed(
+                "RETRYABLE: a benchmark is already running".into(),
+            ));
+        };
+
         let detector_arc = self.detector.clone();
         let recognizer_rgb_arc = self.recognizer_rgb.clone();
         let recognizer_ir_arc = self.recognizer_ir.clone();
@@ -2275,6 +2469,10 @@ impl AuthDaemon {
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
         new_config
             .inference
+            .validate()
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        new_config
+            .liveness
             .validate()
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
 
@@ -2592,6 +2790,21 @@ impl AuthDaemon {
                 return;
             }
 
+            if and_policy_unsatisfiable(&hybrid_policy, &rgb_device, &ir_device, run_rgb, run_ir) {
+                error!(
+                    run_rgb,
+                    run_ir,
+                    has_rgb_templates,
+                    has_ir_templates,
+                    "Hybrid policy \"and\" requires both spectra but {} has no {} templates; \
+                     refusing to authenticate on one spectrum. Re-enrol to cover both.",
+                    username,
+                    if has_rgb_templates { "IR" } else { "RGB" }
+                );
+                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                return;
+            }
+
             if !delay.is_zero() {
                 info!(?delay, resumed, ?surface, "Delaying face auth before capture");
                 if tokio::time::timeout(delay, &mut rx).await.is_ok() {
@@ -2608,7 +2821,7 @@ impl AuthDaemon {
 
             info!(
                 liveness_enabled = liveness_cfg.enabled,
-                liveness_threshold = liveness_cfg.threshold,
+                liveness_threshold = liveness_cfg.effective_threshold(),
                 run_rgb = run_rgb,
                 run_ir = run_ir,
                 "VerifyStart: sensing faces for user {}",
@@ -2634,7 +2847,7 @@ impl AuthDaemon {
                 let username_clone = username.clone();
                 let threshold_arc = threshold_arc.clone();
                 let liveness_enabled = liveness_cfg.enabled;
-                let liveness_threshold = liveness_cfg.threshold;
+                let liveness_threshold = liveness_cfg.effective_threshold();
                 let rgb_device_clone = rgb_device.clone();
                 let rgb_phase_done_clone = rgb_phase_done.clone();
 
@@ -2891,6 +3104,8 @@ impl AuthDaemon {
                 }));
             }
 
+            drop(result_tx);
+
             let mut last_emitted_status: Option<CaptureStatus> = None;
             let mut rgb_status = CaptureStatus::Unused;
             let mut ir_status = CaptureStatus::Unused;
@@ -2948,8 +3163,24 @@ impl AuthDaemon {
                         let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
                         break;
                     }
+                    _ = tokio::time::sleep(VERIFY_WATCHDOG_POLL) => {
+                        if last_face_at.elapsed() >= VERIFY_NO_FACE_TIMEOUT {
+                            info!(
+                                "VerifyStart: giving up after {}s without a detected face",
+                                VERIFY_NO_FACE_TIMEOUT.as_secs()
+                            );
+                            stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                            break;
+                        }
+                    }
                     msg_opt = result_rx.recv() => {
-                        let Some(msg) = msg_opt else { break };
+                        let Some(msg) = msg_opt else {
+                            warn!("VerifyStart: all capture threads exited without a result");
+                            stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                            break;
+                        };
                         match msg {
                             VerifyMsg::Status(spectrum, status, embed_opt) => {
                                 let has_face = embed_opt.is_some();
@@ -2972,7 +3203,7 @@ impl AuthDaemon {
                                 if has_face {
                                     last_face_at = Instant::now();
                                     frames_seen += 1;
-                                    if frames_seen >= liveness_cfg.max_frames {
+                                    if frames_seen >= liveness_cfg.effective_max_frames() {
                                         info!("VerifyStart: liveness gate timed out");
                                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                                         emit_verify_with_scores!(VerifyResult::VerifyNoMatch);
