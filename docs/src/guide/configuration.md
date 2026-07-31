@@ -15,6 +15,10 @@ dialog, so make sure the `polkit` package is installed.
 ## Default config
 
 ```toml
+[inference]
+execution_provider = "cpu"
+device = "cpu"
+
 [security]
 level = "medium"
 
@@ -30,6 +34,7 @@ abort_if_lid_closed = true
 require_confirmation = false
 resume_grace_ms = 0
 start_delay_ms = 0
+start_delay_scope = "all"
 
 [enrollment]
 max_templates = 2
@@ -52,6 +57,46 @@ packaged default changed, the new template is saved alongside it as
 dpkg keeps your file and asks before replacing it. Any option missing from
 your config uses its built-in default, so you don't need to merge new options
 after upgrading.
+
+## Select the inference device
+
+Gaze always loads its `.onnx` models through ONNX Runtime.
+
+The default uses the ONNX Runtime CPU execution provider:
+
+```toml
+[inference]
+execution_provider = "cpu"
+device = "cpu"
+```
+
+OpenVINO does not select a fixed device at build time. The same
+OpenVINO-enabled Gaze binary can use an Intel CPU, GPU, or NPU. Select the
+device in `/etc/gaze/config.toml`.
+
+An installation with OpenVINO support should select the Intel NPU by default:
+
+```toml
+[inference]
+execution_provider = "openvino"
+device = "npu"
+```
+
+Change `device` to `"gpu"` to use the Intel GPU. This does not require
+recompiling Gaze.
+
+The Gaze daemon must also be compiled with the `openvino` Cargo feature. On a
+CPU-only build, `gaze config` and the GUI refuse to set
+`execution_provider = "openvino"`. A config file that already contains it does
+not stop the daemon: it logs a warning and runs on the CPU, the same way every
+other unusable value in `/etc/gaze/config.toml` is handled.
+
+The values stay lowercase in the config. Gaze converts the device name only
+when it calls OpenVINO. ONNX Runtime keeps its CPU execution provider after
+OpenVINO. It runs unsupported model operations on the CPU. If Gaze cannot
+create an OpenVINO session, it logs the error and creates a CPU session.
+`gaze doctor --benchmark` reports the execution provider and device each model
+actually uses, and warns when that is not the configured one.
 
 ## Change security level
 
@@ -182,6 +227,7 @@ abort_if_lid_closed = true
 require_confirmation = false
 resume_grace_ms = 0
 start_delay_ms = 0
+start_delay_scope = "all"
 ```
 
 `abort_if_ssh` detects SSH sessions from the DBus caller process environment. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor.
@@ -207,13 +253,36 @@ With the `pam-gaze-grosshack` module:
 
 `start_delay_ms` delays face verification by the specified number of milliseconds, not only after suspend. Set to `0` to disable the delay.
 
-The daemon cannot tell which kind of prompt asked it to verify, so this delay applies to *every* face authentication, `sudo` and polkit prompts included, not just lock screens. Keep the value small if you use face authentication for `sudo`.
-
 Use it when your lock screen unlocks itself the moment you lock it manually. Lockers differ in when they start authenticating: hyprlock starts its PAM stack as soon as it launches, so if you are still sitting in front of the camera when you lock, Gaze matches your face and unlocks again immediately. A delay of `3000`-`5000` ms gives you time to step away. The GNOME lock screen does not need this, because face authentication there only begins once you dismiss the lock shield.
 
-Two things to keep in mind:
+`start_delay_scope` controls which prompts wait:
 
+| Value | Effect |
+| --- | --- |
+| `all` (default) | Every face authentication waits, `sudo` and polkit prompts included. |
+| `screen_lock` | Only screen lockers wait. `sudo`, `su`, `doas`, `run0`, polkit, `pkexec` and display-manager greeters start scanning immediately. |
+
+If you want the delay for your lock screen but not a slow `sudo`, use `screen_lock`:
+
+```toml
+[auth]
+start_delay_ms = 3000
+start_delay_scope = "screen_lock"
+```
+
+Gaze tells these apart by the PAM service name of the prompt, which is the only signal that works everywhere. On GNOME, for example, the same process drives both the lock screen and polkit dialogs, so nothing about the caller itself distinguishes them. A service Gaze does not recognize counts as a screen lock, so an unusual locker keeps the delay you configured rather than silently losing it. `gdm-face` counts as a screen lock too, because GDM uses it for both the greeter and the lock screen.
+
+To see what your prompts report, watch the daemon while you trigger one:
+
+```bash
+journalctl -u gazed -f | grep 'Face auth requested'
+```
+
+Four things to keep in mind:
+
+- Upgrading Gaze does not restart `gazed`, and the scope is only honored by a daemon new enough to know about it. Until you restart the daemon or reboot, the delay keeps applying to every prompt. Run `sudo systemctl restart gazed` after upgrading if `screen_lock` appears to be ignored.
 - On resume from suspend, Gaze waits for whichever of `start_delay_ms` and `resume_grace_ms` is longer. The two do not stack.
+- `resume_grace_ms` ignores `start_delay_scope`. It exists so the display can repaint after suspend, which has nothing to do with which prompt is asking, so it still applies to the first authentication after a resume whatever that prompt is.
 - With a sequential PAM stack (`hyprlock-gaze`, the default), `pam_gaze.so` runs before the password module, so the delay also postpones the point at which a typed password is accepted. You can type during the delay, but your first Enter may be consumed while PAM is still inside Gaze, requiring a second press. This is the same behavior as the existing wait while a face scan is in progress. The simultaneous stack (`hyprlock-gaze-simultaneous`) prompts for the password in parallel and avoids it.
 
 After changing config:

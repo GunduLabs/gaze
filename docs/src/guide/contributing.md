@@ -19,6 +19,22 @@ For source builds and component-specific setup, start with the [development guid
 - Keep changes small and reviewable. Prefer one bug fix or feature per pull request.
 - Do not commit downloaded ML models, face embeddings, local config, package artifacts, or secrets.
 
+## Licensing
+
+Gaze is licensed under the [GNU General Public License, version 3 or later](https://github.com/GunduLabs/gaze/blob/main/LICENSE) (`GPL-3.0-or-later`). By opening a pull request you agree that your contribution is licensed under the same terms.
+
+- Start every new source file with the SPDX header used throughout the tree:
+
+  ```rust
+  // SPDX-FileCopyrightText: 2026 Gundu Labs
+  // SPDX-License-Identifier: GPL-3.0-or-later
+  ```
+
+  Shell scripts use `#` comments and place the header directly below the shebang.
+
+- Do not copy code into Gaze from projects under a license that is incompatible with GPLv3, and do not add dependencies that cannot be distributed alongside GPLv3 code. `just audit` does not check licenses, so check the license of any new dependency yourself.
+- New crate manifests inherit the license from the workspace with `license.workspace = true`; new packaging files must declare `GPL-3.0-or-later`.
+
 ## Local setup
 
 Clone the repo, install dependencies from the [development guide](/guide/development), then run:

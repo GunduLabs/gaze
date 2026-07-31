@@ -1,7 +1,15 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use image::RgbImage;
 use image::imageops::{FilterType, crop_imm, resize};
 use ndarray::Array4;
-use ort::{session::Session, session::builder::GraphOptimizationLevel, value::TensorRef};
+use ort::{session::Session, value::TensorRef};
+
+use gaze_core::{
+    config::InferenceConfig,
+    inference::{InferenceRuntime, create_session},
+};
 
 const INPUT_SIZE: u32 = 80;
 const CROP_SCALE: f32 = 2.7;
@@ -10,16 +18,23 @@ const SUSTAINED_SCORE_RATIO: f32 = 0.85;
 
 pub struct LivenessDetector {
     session: Session,
+    inference_runtime: InferenceRuntime,
 }
 
 impl LivenessDetector {
-    pub fn new(model_path: &str) -> anyhow::Result<Self> {
-        let session = Session::builder()
-            .map_err(|e| anyhow::anyhow!("{e}"))?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| anyhow::anyhow!("{e}"))?
-            .commit_from_file(model_path)?;
-        Ok(Self { session })
+    pub fn new_with_inference(
+        model_path: &str,
+        inference: &InferenceConfig,
+    ) -> anyhow::Result<Self> {
+        let (session, inference_runtime) = create_session(model_path, inference)?;
+        Ok(Self {
+            session,
+            inference_runtime,
+        })
+    }
+
+    pub fn inference_runtime(&self) -> &InferenceRuntime {
+        &self.inference_runtime
     }
 
     // MiniFASNet expects BGR in raw 0-255 (upstream's ToTensor skips /255); RGB breaks scoring.

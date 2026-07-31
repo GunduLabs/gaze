@@ -86,7 +86,7 @@ rustPlatform.buildRustPackage {
   meta = {
     description = "GTK4/Adwaita GUI for Gaze facial authentication";
     homepage = "https://gaze.gundulabs.com";
-    license = lib.licenses.mit;
+    license = lib.licenses.gpl3Plus;
     platforms = [
       "x86_64-linux"
       "aarch64-linux"

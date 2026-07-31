@@ -9,7 +9,7 @@ maintainer: "Gundu Labs <maintainers@gundulabs.com>"
 description: "Daemon, CLI, and PAM integration for Gaze"
 vendor: "Gundu Labs"
 homepage: "https://gaze.gundulabs.com"
-license: "MIT"
+license: "GPL-3.0-or-later"
 
 contents:
   - src: "target/release/gazed"

@@ -11,6 +11,10 @@ publish.workspace = true
 readme.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+openvino = ["gaze-core/openvino-config"]
+
 [[bin]]
 name = "gaze"
 path = "src/main.rs"

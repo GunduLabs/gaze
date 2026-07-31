@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #![allow(unreachable_patterns)]
 use crate::config::Config;
 use serde::{Deserialize, Serialize};
@@ -120,10 +123,23 @@ pub enum VerifyResult {
 #[derive(Clone, Debug, Serialize, Deserialize, Value, OwnedValue, Type)]
 pub struct BenchmarkResult {
     pub component: String,
+    pub execution_provider: String,
+    pub device: String,
+    pub requested_execution_provider: String,
+    pub requested_device: String,
+    pub fallback_reason: String,
     pub mean_ms: f64,
     pub p95_ms: f64,
     pub min_ms: f64,
     pub fps: f64,
+}
+
+impl BenchmarkResult {
+    pub fn ran_as_configured(&self) -> bool {
+        self.fallback_reason.is_empty()
+            && self.execution_provider == self.requested_execution_provider
+            && self.device == self.requested_device
+    }
 }
 
 pub fn dbus_error_message(err: &zbus::Error) -> String {
@@ -148,11 +164,67 @@ pub async fn connect_gaze() -> zbus::Result<GazeProxy<'static>> {
     GazeProxy::new(&connection).await
 }
 
-pub async fn load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Config> {
-    proxy
-        .config()
+pub async fn try_benchmark_from_daemon(
+    proxy: &GazeProxy<'_>,
+) -> anyhow::Result<Option<Vec<BenchmarkResult>>> {
+    let raw: OwnedValue = proxy
+        .inner()
+        .call("Benchmark", &())
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to read config property: {}", e))
+        .map_err(|e| anyhow::anyhow!("{}", dbus_error_message(&e)))?;
+    benchmark_from_reply(raw)
+}
+
+pub fn benchmark_from_reply(raw: OwnedValue) -> anyhow::Result<Option<Vec<BenchmarkResult>>> {
+    let expected = <Vec<BenchmarkResult> as Type>::SIGNATURE;
+    let actual = raw.value_signature();
+    if actual != expected {
+        tracing::warn!(
+            %actual,
+            %expected,
+            "daemon benchmark layout does not match this build; restart gazed"
+        );
+        return Ok(None);
+    }
+
+    Vec::<BenchmarkResult>::try_from(raw)
+        .map(Some)
+        .map_err(|e| anyhow::anyhow!("Failed to decode benchmark results: {}", e))
+}
+
+pub async fn try_load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Option<Config>> {
+    let raw: OwnedValue = proxy
+        .inner()
+        .get_property("Config")
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to read config property: {}", e))?;
+    config_from_property(raw)
+}
+
+pub fn config_from_property(raw: OwnedValue) -> anyhow::Result<Option<Config>> {
+    let expected = <Config as Type>::SIGNATURE;
+    let actual = raw.value_signature();
+    if actual != expected {
+        tracing::warn!(
+            %actual,
+            %expected,
+            "daemon config layout does not match this build; restart gazed"
+        );
+        return Ok(None);
+    }
+
+    Config::try_from(raw)
+        .map(Some)
+        .map_err(|e| anyhow::anyhow!("Failed to decode config property: {}", e))
+}
+
+pub async fn load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Config> {
+    try_load_config_from_daemon(proxy).await?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "The running daemon predates this build and sends a config layout it \
+             cannot read. Restart it with `systemctl restart gazed`."
+        )
+    })
 }
 
 pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> anyhow::Result<()> {
@@ -162,11 +234,31 @@ pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> a
         .map_err(|e| anyhow::anyhow!("Failed to set config property: {}", e))
 }
 
+pub const LOGIN_SESSION_PATH_PREFIX: &str = "/org/freedesktop/login1/session";
+
+#[derive(Clone, Debug)]
+pub struct ActiveSession {
+    pub uid: u32,
+    pub class: String,
+    pub path: String,
+}
+
+impl ActiveSession {
+    pub fn is_greeter(&self) -> bool {
+        self.class == "greeter"
+    }
+}
+
 pub async fn get_active_session_uid() -> anyhow::Result<u32> {
     Ok(get_active_session_uid_and_class().await?.0)
 }
 
 pub async fn get_active_session_uid_and_class() -> anyhow::Result<(u32, String)> {
+    let session = get_active_session().await?;
+    Ok((session.uid, session.class))
+}
+
+pub async fn get_active_session() -> anyhow::Result<ActiveSession> {
     let connection = zbus::Connection::system().await?;
     let proxy = zbus::Proxy::new(
         &connection,
@@ -177,6 +269,7 @@ pub async fn get_active_session_uid_and_class() -> anyhow::Result<(u32, String)>
     .await?;
     let active_session: (String, zbus::zvariant::ObjectPath) =
         proxy.get_property("ActiveSession").await?;
+    let path = active_session.1.to_string();
 
     let session_proxy = zbus::Proxy::new(
         &connection,
@@ -188,7 +281,11 @@ pub async fn get_active_session_uid_and_class() -> anyhow::Result<(u32, String)>
     let user: (u32, zbus::zvariant::ObjectPath) = session_proxy.get_property("User").await?;
     let class: String = session_proxy.get_property("Class").await?;
 
-    Ok((user.0, class))
+    Ok(ActiveSession {
+        uid: user.0,
+        class,
+        path,
+    })
 }
 
 #[proxy(
@@ -204,6 +301,7 @@ pub trait Gaze {
     async fn is_extension_active(&self, uid: u32) -> zbus::Result<bool>;
 
     async fn verify_start(&self, face_name: &str) -> zbus::Result<()>;
+    async fn verify_start_for(&self, face_name: &str, pam_service: &str) -> zbus::Result<()>;
     async fn verify_stop(&self) -> zbus::Result<()>;
 
     async fn enroll_start(&self, face_name: &str) -> zbus::Result<()>;
@@ -260,6 +358,65 @@ pub trait Gaze {
 mod tests {
     use super::*;
 
+    #[derive(Clone, Debug, Value, OwnedValue, Type)]
+    struct OldBenchmarkResult {
+        component: String,
+        mean_ms: f64,
+        p95_ms: f64,
+        min_ms: f64,
+        fps: f64,
+    }
+
+    fn benchmark_result(requested_device: &str, fallback_reason: &str) -> BenchmarkResult {
+        BenchmarkResult {
+            component: "Face detector".to_string(),
+            execution_provider: "cpu".to_string(),
+            device: "cpu".to_string(),
+            requested_execution_provider: "cpu".to_string(),
+            requested_device: requested_device.to_string(),
+            fallback_reason: fallback_reason.to_string(),
+            mean_ms: 1.0,
+            p95_ms: 2.0,
+            min_ms: 0.5,
+            fps: 1000.0,
+        }
+    }
+
+    #[test]
+    fn current_benchmark_layout_decodes() {
+        let raw = OwnedValue::try_from(Value::from(vec![benchmark_result("cpu", "")])).unwrap();
+        let decoded = benchmark_from_reply(raw)
+            .expect("no error")
+            .expect("current layout is readable");
+
+        assert_eq!(decoded.len(), 1);
+        assert!(decoded[0].ran_as_configured());
+    }
+
+    #[test]
+    fn older_daemon_benchmark_layout_is_reported_not_decoded() {
+        let old = vec![OldBenchmarkResult {
+            component: "Face detector".to_string(),
+            mean_ms: 1.0,
+            p95_ms: 2.0,
+            min_ms: 0.5,
+            fps: 1000.0,
+        }];
+        let raw = OwnedValue::try_from(Value::from(old)).expect("old results convert to a value");
+
+        assert!(
+            benchmark_from_reply(raw)
+                .expect("a layout mismatch is not an error")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_device_fallback_is_not_reported_as_configured() {
+        assert!(!benchmark_result("npu", "no npu driver").ran_as_configured());
+        assert!(!benchmark_result("npu", "").ran_as_configured());
+    }
+
     #[test]
     fn enum_display_strings_are_user_facing_messages() {
         assert_eq!(
@@ -274,6 +431,61 @@ mod tests {
             "Turn your face slightly left"
         );
         assert_eq!(VerifyResult::VerifyNoMatch.as_ref(), "VerifyNoMatch");
+    }
+
+    #[derive(Clone, Debug, Value, OwnedValue, Type)]
+    struct OldConfig {
+        security: crate::config::SecurityLevel,
+        cameras: crate::config::CameraConfig,
+        auth: crate::config::AuthConfig,
+        enrollment: crate::config::EnrollmentConfig,
+        liveness: crate::config::LivenessConfig,
+        storage: crate::config::StorageConfig,
+    }
+
+    fn old_daemon_property() -> OwnedValue {
+        let old = OldConfig {
+            security: Default::default(),
+            cameras: Default::default(),
+            auth: Default::default(),
+            enrollment: Default::default(),
+            liveness: Default::default(),
+            storage: Default::default(),
+        };
+        OwnedValue::try_from(Value::from(old)).expect("old config converts to a value")
+    }
+
+    #[test]
+    fn current_layout_decodes() {
+        let raw = OwnedValue::try_from(Value::from(Config::default())).unwrap();
+        let decoded = config_from_property(raw)
+            .expect("no error")
+            .expect("current layout is readable");
+        assert_eq!(decoded.auth.start_delay_scope(), "screen_lock");
+    }
+
+    #[test]
+    fn older_daemon_layout_is_reported_not_decoded() {
+        assert!(
+            config_from_property(old_daemon_property())
+                .expect("a layout mismatch is not an error")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn decoding_an_older_layout_directly_would_panic() {
+        let raw = old_daemon_property();
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Config::try_from(raw).is_ok()
+        }));
+        std::panic::set_hook(previous);
+        assert!(
+            !matches!(attempt, Ok(true)),
+            "expected the raw conversion to fail loudly on a short structure"
+        );
     }
 
     #[test]

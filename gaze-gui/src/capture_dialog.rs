@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use crate::camera_view::{CameraFeed, build_camera_widget};
 use futures::StreamExt;
 use gaze_core::dbus::{EnrollPrompt, GazeProxy};

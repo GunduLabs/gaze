@@ -32,6 +32,126 @@ sudo -v
 
 If camera opens and face auth runs, PAM wiring is active.
 
+### Selective setup: password at GDM, face authentication for sudo and Polkit
+
+On GNOME systems, some users may want to keep password authentication at
+the initial GDM login so that GNOME Keyring is unlocked normally (see
+[Login warning](/guide/gnome#login-warning-gnome-keyring)), while still using
+Gaze for privilege elevation and graphical Polkit prompts.
+
+Enabling the Debian/Ubuntu Gaze profile through `pam-auth-update` adds Gaze to
+the shared `common-auth` stack. Because `gdm-password` also includes
+`common-auth`, this may make Gaze run during the initial desktop login.
+
+The following setup was manually verified on Ubuntu 26.04 with GNOME 50.
+
+::: warning
+PAM configuration errors can prevent authentication. Keep an active root
+shell open, keep password authentication enabled, and create backups before
+editing these files.
+:::
+
+First disable the shared Gaze profiles:
+
+```bash
+sudo pam-auth-update --disable gaze gaze-simultaneous
+```
+
+`--disable` (rather than `--remove`) records the choice, so the
+`pam-auth-update --package` call in the Gaze package's post-install script will
+not re-enable the profile on the next upgrade.
+
+Verify that Gaze is no longer present in the shared stack:
+
+```bash
+grep -n pam_gaze /etc/pam.d/common-auth \
+  || echo "Gaze is not enabled in common-auth"
+```
+
+Keep the GDM face-login switch disabled. The switch lives in the Gaze extension
+preferences (see
+[Disable face at GDM login](/guide/gnome#disable-face-at-gdm-login)); the daemon
+writes the override below when it is on, so remove it if it is already present:
+
+```bash
+sudo rm -f /etc/dconf/db/gdm.d/99-gaze*
+sudo dconf update
+```
+
+#### sudo
+
+Back up `/etc/pam.d/sudo`, then add this line immediately before
+`@include common-auth`:
+
+```text
+auth    sufficient    pam_gaze.so
+```
+
+The relevant part should look like:
+
+```text
+auth    sufficient    pam_gaze.so
+@include common-auth
+```
+
+Test it with:
+
+```bash
+sudo -k
+sudo -v
+```
+
+The same change can be applied to `/etc/pam.d/sudo-i` if face authentication
+is also wanted for `sudo -i`.
+
+Both files are dpkg conffiles, so a `sudo` package upgrade may prompt about the
+local modification. Keep the modified version to retain face authentication.
+
+#### Polkit
+
+If `/etc/pam.d/polkit-1` does not exist but the vendor file is available,
+create a local override:
+
+```bash
+sudo install -o root -g root -m 0644 \
+  /usr/lib/pam.d/polkit-1 \
+  /etc/pam.d/polkit-1
+```
+
+Add the following line immediately before `@include common-auth`:
+
+```text
+auth    sufficient    pam_gaze.so
+```
+
+Restart Polkit and test a graphical authentication request:
+
+```bash
+sudo systemctl restart polkit
+pkexec /usr/bin/true
+```
+
+A file in `/etc/pam.d` shadows the vendor file permanently, so this override
+will not pick up upstream changes to the Polkit stack. Diff it against
+`/usr/lib/pam.d/polkit-1` after Polkit upgrades.
+
+Finally, confirm Gaze still sees a live PAM wiring. `gaze doctor` scans every
+file in `/etc/pam.d`, so a per-service setup satisfies its PAM check:
+
+```bash
+gaze doctor
+```
+
+With this arrangement:
+
+- GDM login uses the normal account password.
+- GNOME Keyring is unlocked during login.
+- `sudo` and `sudo -i` can use face authentication.
+- GNOME Settings, package-management applications, and other Polkit clients
+  can use face authentication.
+- The GNOME extension can remain enabled for face unlock on the lock screen.
+- Password authentication remains available as a fallback.
+
 ## Fedora and compatible RPM systems
 
 RPM packages install an authselect profile at:
@@ -109,7 +229,7 @@ sudo systemctl restart polkit
 pkexec true
 ```
 
-Debian/Ubuntu, Fedora and other distributions ship their own `/etc/pam.d/polkit-1` and do not use `system-auth` the way Arch does, so Gaze never writes this file there. On those systems polkit picks up face auth through the shared auth stack (`pam-auth-update` on Debian/Ubuntu, the `gaze` authselect feature on Fedora).
+Debian/Ubuntu and Fedora ship their own `polkit-1` PAM service and do not use `system-auth` the way Arch does, so Gaze never writes this file there. On those systems polkit picks up face auth through the shared auth stack (`pam-auth-update` on Debian/Ubuntu, the `gaze` authselect feature on Fedora). Recent Debian and Ubuntu releases ship that file as a vendor default in `/usr/lib/pam.d/polkit-1` instead of `/etc/pam.d/polkit-1`, but it still includes `common-auth`, so the shared-stack route works either way. An explicit `/etc/pam.d/polkit-1` override is only needed there if you deliberately took Gaze out of the shared stack, as in [Selective setup](#selective-setup-password-at-gdm-face-authentication-for-sudo-and-polkit).
 
 ## Other distros (manual)
 

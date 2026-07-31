@@ -1,7 +1,11 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use console::{Term, style};
 use gaze_core::config::{CONFIG_PATH, Config};
 use gaze_core::dbus::{
     GazeProxy, dbus_error_message, dbus_is_file_not_found, dbus_is_not_activatable,
+    try_benchmark_from_daemon,
 };
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
@@ -391,6 +395,14 @@ fn config_findings(config: &Config) -> Vec<Check> {
             "Set enrollment.min_face_size_ratio to a value from 0.10 through 0.75.",
         );
     }
+    if let Err(err) = config.inference.validate() {
+        let fix = if cfg!(feature = "openvino") {
+            "Use cpu/cpu, openvino/cpu, openvino/gpu, or openvino/npu in the [inference] table."
+        } else {
+            "Use cpu/cpu, or install a Gaze build compiled with the openvino Cargo feature."
+        };
+        error(err.to_string(), fix);
+    }
 
     if config.security.level == "custom" {
         if !config.security.threshold.is_finite()
@@ -464,7 +476,8 @@ fn config_findings(config: &Config) -> Vec<Check> {
         findings.push(Check {
             level: Level::Pass,
             name: "Config values",
-            message: "camera, security, enrollment, and liveness values are valid".to_string(),
+            message: "camera, security, enrollment, inference, and liveness values are valid"
+                .to_string(),
             fix: None,
         });
     }
@@ -1021,27 +1034,50 @@ async fn check_benchmark(report: &mut Report, proxy: &GazeProxy<'_>) {
         style("i").cyan().bold()
     ));
 
-    let outcome = tokio::time::timeout(BENCHMARK_TIMEOUT, proxy.benchmark()).await;
+    let outcome = tokio::time::timeout(BENCHMARK_TIMEOUT, try_benchmark_from_daemon(proxy)).await;
     let _ = term.clear_last_lines(1);
 
     match outcome {
-        Ok(Ok(results)) => {
+        Ok(Ok(Some(results))) => {
             for result in results {
-                report.pass(
-                    "Benchmark",
-                    format!(
-                        "{}: {:.1}ms avg ({:.1} fps), {:.1}ms p95, {:.1}ms min",
-                        result.component, result.mean_ms, result.fps, result.p95_ms, result.min_ms
-                    ),
+                let timings = format!(
+                    "{} [{} / {}]: {:.1}ms avg ({:.1} fps), {:.1}ms p95, {:.1}ms min",
+                    result.component,
+                    result.execution_provider,
+                    result.device,
+                    result.mean_ms,
+                    result.fps,
+                    result.p95_ms,
+                    result.min_ms
                 );
+                if result.ran_as_configured() {
+                    report.pass("Benchmark", timings);
+                } else {
+                    report.warning(
+                        "Benchmark",
+                        format!(
+                            "{timings}; configured {}/{} is not in use: {}",
+                            result.requested_execution_provider,
+                            result.requested_device,
+                            if result.fallback_reason.is_empty() {
+                                "no reason reported"
+                            } else {
+                                result.fallback_reason.as_str()
+                            }
+                        ),
+                        "Check the gazed journal for the OpenVINO setup error, or set [inference] back to cpu/cpu.",
+                    );
+                }
             }
         }
+        Ok(Ok(None)) => report.warning(
+            "Benchmark",
+            "the running daemon reports a benchmark layout this build cannot read",
+            "Restart it with `systemctl restart gazed`.",
+        ),
         Ok(Err(err)) => report.warning(
             "Benchmark",
-            format!(
-                "gazed could not run the benchmark: {}",
-                dbus_error_message(&err)
-            ),
+            format!("gazed could not run the benchmark: {err}"),
             "Restart gazed and inspect its journal.",
         ),
         Err(_) => report.warning(

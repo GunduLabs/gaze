@@ -56,6 +56,8 @@ jobs:
             libadwaita-1-dev \
             dpkg-dev \
             gettext-base \
+            checkpolicy \
+            semodule-utils \
             pkg-config
 
       - name: Install Rust toolchain
@@ -101,6 +103,11 @@ jobs:
           RUSTFLAGS: -Cdebuginfo=0
         run: just build-rust
 
+      - name: Build SELinux policy
+        run: |
+          just build-selinux
+          test -f dist/selinux/gaze-gdm-camera.pp
+
       - name: Install nfpm
         run: |
           nfpm_version="${NFPM_VERSION#v}"
@@ -117,6 +124,9 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends rpm zstd gettext-base
           VERSION=0.0.0 just srpm
+
+      - name: Build and verify archlinux packages
+        run: VERSION=0.0.0 just package-prebuilt archlinux
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31

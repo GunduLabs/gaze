@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 mod doctor;
 mod polkit;
 mod tui;
@@ -9,8 +12,11 @@ use console::{Term, style};
 use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 use futures::StreamExt;
 use gaze_core::config::{
-    Config, HYBRID_POLICY_OPTIONS, MAX_ENROLLMENT_FACE_SIZE_RATIO, MIN_ENROLLMENT_FACE_SIZE_RATIO,
-    MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS, SecurityLevel,
+    AuthConfig, Config, DEFAULT_SECURITY_THRESHOLD, HYBRID_POLICY_OPTIONS,
+    INFERENCE_DEVICE_OPTIONS, INFERENCE_EXECUTION_PROVIDER_OPTIONS, MAX_ENROLLMENT_FACE_SIZE_RATIO,
+    MAX_LIVENESS_THRESHOLD, MAX_SECURITY_THRESHOLD, MIN_ENROLLMENT_FACE_SIZE_RATIO,
+    MIN_LIVENESS_THRESHOLD, MIN_SECURITY_THRESHOLD, MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS,
+    SecurityLevel,
 };
 use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon, connect_gaze,
@@ -173,8 +179,19 @@ enum Commands {
     Auth {
         #[arg(short, long)]
         user: Option<String>,
-        #[arg(short, long, help = "Show detailed authentication metrics")]
+        #[arg(
+            short,
+            long,
+            conflicts_with = "silent",
+            help = "Show detailed authentication metrics"
+        )]
         verbose: bool,
+        #[arg(
+            short,
+            long,
+            help = "Suppress the terminal UI and all output; report the result via exit code"
+        )]
+        silent: bool,
     },
     /// Capture a new face with guided multi-angle template
     AddFace {
@@ -295,12 +312,28 @@ async fn run_config_wizard(
             .interact()?;
         let recognizer = SecurityLevel::model_quality_from_index(selected_rec_idx).to_string();
 
-        let threshold = Input::with_theme(&theme)
-            .with_prompt("Custom threshold (0.0 - 1.0)")
+        let threshold = Input::<String>::with_theme(&theme)
+            .with_prompt(format!(
+                "Custom threshold ({} - {})",
+                MIN_SECURITY_THRESHOLD, MAX_SECURITY_THRESHOLD
+            ))
             .default(old_threshold.to_string())
+            .validate_with(|input: &String| match input.trim().parse::<f64>() {
+                Ok(value)
+                    if value.is_finite()
+                        && (MIN_SECURITY_THRESHOLD..=MAX_SECURITY_THRESHOLD).contains(&value) =>
+                {
+                    Ok(())
+                }
+                Ok(_) => Err(format!(
+                    "must be between {MIN_SECURITY_THRESHOLD} and {MAX_SECURITY_THRESHOLD}"
+                )),
+                Err(_) => Err("must be a number".to_string()),
+            })
             .interact_text()?
+            .trim()
             .parse::<f64>()
-            .unwrap_or(0.6);
+            .unwrap_or(DEFAULT_SECURITY_THRESHOLD);
 
         let selected_hybrid_idx = Select::with_theme(&theme)
             .with_prompt("Custom hybrid combining policy")
@@ -311,6 +344,38 @@ async fn run_config_wizard(
 
         config.security = SecurityLevel::custom(detector, recognizer, threshold, hybrid_policy);
     };
+
+    if config.inference.is_representable() {
+        let selected_execution_provider = Select::with_theme(&theme)
+            .with_prompt("Inference execution provider")
+            .items(INFERENCE_EXECUTION_PROVIDER_OPTIONS)
+            .default(config.inference.execution_provider_index() as usize)
+            .interact()?;
+        config.inference.execution_provider =
+            gaze_core::config::InferenceConfig::execution_provider_from_index(
+                selected_execution_provider,
+            )
+            .to_string();
+
+        if config.inference.execution_provider == "openvino" {
+            let selected_device = Select::with_theme(&theme)
+                .with_prompt("OpenVINO inference device")
+                .items(INFERENCE_DEVICE_OPTIONS)
+                .default(config.inference.device_index() as usize)
+                .interact()?;
+            config.inference.device =
+                gaze_core::config::InferenceConfig::device_from_index(selected_device).to_string();
+        } else {
+            config.inference.device = "cpu".to_string();
+        }
+    } else {
+        term.write_line(&format!(
+            "{} Keeping inference {}/{}: this build cannot change it",
+            style("!").yellow().bold(),
+            config.inference.execution_provider,
+            config.inference.device
+        ))?;
+    }
 
     let cameras = gaze_core::camera::enumerate_cameras().unwrap_or_default();
     if cameras.is_empty() {
@@ -387,9 +452,22 @@ async fn run_config_wizard(
         .interact_text()?;
 
     config.auth.start_delay_ms = Input::with_theme(&theme)
-        .with_prompt("Start delay in milliseconds (delays every auth, including sudo)")
+        .with_prompt("Start delay in milliseconds (0 disables)")
         .default(config.auth.start_delay_ms)
         .interact_text()?;
+
+    if config.auth.start_delay_ms > 0 {
+        let scope_labels = ["Every face auth (including sudo)", "Screen lockers only"];
+        let scope_index = Select::with_theme(&theme)
+            .with_prompt("Apply the start delay to")
+            .items(scope_labels)
+            .default(
+                AuthConfig::start_delay_scope_index_for_value(config.auth.start_delay_scope())
+                    as usize,
+            )
+            .interact()?;
+        config.auth.start_delay_scope = AuthConfig::start_delay_scope_from_index(scope_index);
+    }
 
     config.enrollment.max_templates = Input::with_theme(&theme)
         .with_prompt("Max templates (sets of captures)")
@@ -414,10 +492,26 @@ async fn run_config_wizard(
         .default(config.liveness.enabled)
         .interact()?;
     if config.liveness.enabled {
-        config.liveness.threshold = Input::with_theme(&theme)
-            .with_prompt("Liveness threshold (0.0 - 1.0)")
+        config.liveness.threshold = Input::<String>::with_theme(&theme)
+            .with_prompt(format!(
+                "Liveness threshold ({} - {})",
+                MIN_LIVENESS_THRESHOLD, MAX_LIVENESS_THRESHOLD
+            ))
             .default(config.liveness.threshold.to_string())
+            .validate_with(|input: &String| match input.trim().parse::<f64>() {
+                Ok(value)
+                    if value.is_finite()
+                        && (MIN_LIVENESS_THRESHOLD..=MAX_LIVENESS_THRESHOLD).contains(&value) =>
+                {
+                    Ok(())
+                }
+                Ok(_) => Err(format!(
+                    "must be between {MIN_LIVENESS_THRESHOLD} and {MAX_LIVENESS_THRESHOLD}"
+                )),
+                Err(_) => Err("must be a number".to_string()),
+            })
             .interact_text()?
+            .trim()
             .parse::<f64>()
             .unwrap_or(0.8);
         config.liveness.max_frames = Input::with_theme(&theme)
@@ -584,7 +678,12 @@ async fn handle_enroll(
     Ok(())
 }
 
-async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow::Result<()> {
+async fn handle_auth(
+    proxy: &GazeProxy<'_>,
+    user: &str,
+    verbose: bool,
+    silent: bool,
+) -> anyhow::Result<()> {
     let term = Term::stdout();
 
     let has_faces = match proxy.list_faces(user).await {
@@ -593,40 +692,51 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
         Err(e) => return Err(e.into()),
     };
     if !has_faces {
-        term.write_line(&format!(
-            "{} No faces enrolled for {}. Run {} to enroll a face.",
-            style("i").cyan().bold(),
-            style(user).bold(),
-            style("gaze add-face <name>").bold()
-        ))?;
-        return Ok(());
+        if !silent {
+            term.write_line(&format!(
+                "{} No faces enrolled for {}. Run {} to enroll a face.",
+                style("i").cyan().bold(),
+                style(user).bold(),
+                style("gaze add-face <name>").bold()
+            ))?;
+        }
+        std::process::exit(1);
     }
 
     let start = std::time::Instant::now();
 
     if let Err(err) = proxy.claim(user).await {
-        term.write_line(&format!(
-            "{} Failed to claim device: {}",
-            style("✗").red().bold(),
-            dbus_error_message(&err)
-        ))?;
-        return Ok(());
+        if !silent {
+            term.write_line(&format!(
+                "{} Failed to claim device: {}",
+                style("✗").red().bold(),
+                dbus_error_message(&err)
+            ))?;
+        }
+        std::process::exit(1);
     }
 
     let mut status_stream = proxy.receive_verify_status().await?;
     let mut capture_stream = proxy.receive_face_status().await?;
-    let mut terminal = match TuiTerminal::new() {
-        Ok(terminal) => terminal,
-        Err(err) => {
-            let _ = proxy.release().await;
-            return Err(err);
+    let mut terminal = if !silent {
+        match TuiTerminal::new() {
+            Ok(terminal) => Some(terminal),
+            Err(err) => {
+                let _ = proxy.release().await;
+                return Err(err);
+            }
         }
+    } else {
+        None
     };
+
     if let Err(e) = proxy.verify_start("any").await {
         drop(terminal);
-        term.write_line(&format!("{} Daemon error: {}", style("✗").red().bold(), e))?;
+        if !silent {
+            term.write_line(&format!("{} Daemon error: {}", style("✗").red().bold(), e))?;
+        }
         let _ = proxy.release().await;
-        return Ok(());
+        std::process::exit(1);
     }
 
     let mut status_msg = format!("Scanning face for {user}...");
@@ -636,32 +746,32 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
     let mut verify_result = None;
 
     loop {
-        terminal.draw_auth(&AuthScreen {
-            user,
-            status: &status_msg,
-            status_tone,
-            elapsed: start.elapsed(),
-            tick,
-        })?;
+        if let Some(ref mut terminal) = terminal {
+            terminal.draw_auth(&AuthScreen {
+                user,
+                status: &status_msg,
+                status_tone,
+                elapsed: start.elapsed(),
+                tick,
+            })?;
 
-        if let Some(TuiAction::Cancel) = tui::poll_action()? {
-            cancelled = true;
-            break;
+            if let Some(TuiAction::Cancel) = tui::poll_action()? {
+                cancelled = true;
+                break;
+            }
         }
 
         tokio::select! {
             signal = status_stream.next() => {
-                if let Some(signal) = signal
-                    && let Ok(args) = signal.args()
-                {
+                let Some(signal) = signal else { break };
+                if let Ok(args) = signal.args() {
                     verify_result = Some((*args.result(), args.faces().clone(), *args.rgb_status(), *args.ir_status()));
                     break;
                 }
             }
             signal = capture_stream.next() => {
-                if let Some(signal) = signal
-                    && let Ok(args) = signal.args()
-                {
+                let Some(signal) = signal else { break };
+                if let Ok(args) = signal.args() {
                     let status = *args.status();
                     status_tone = capture_tone(status);
                     status_msg = match status {
@@ -684,6 +794,7 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
         std::process::exit(130);
     }
 
+    let mut authenticated = false;
     if let Some((result, faces, rgb_status, ir_status)) = verify_result {
         if verbose {
             println!(
@@ -731,44 +842,53 @@ async fn handle_auth(proxy: &GazeProxy<'_>, user: &str, verbose: bool) -> anyhow
         }
 
         if result == VerifyResult::VerifyMatch {
-            let matched = faces
-                .iter()
-                .find(|(_, _, _, rgb_p, _, _, ir_p)| *rgb_p || *ir_p)
-                .map(|(n, _, rgb_pct, rgb_p, _, ir_pct, ir_p)| {
-                    let pct = if *rgb_p && *ir_p {
-                        rgb_pct.max(*ir_pct)
-                    } else if *rgb_p {
-                        *rgb_pct
-                    } else {
-                        *ir_pct
-                    };
-                    (n.clone(), pct)
-                });
-            if let Some((face, pct)) = matched {
-                term.write_line(&format!(
-                    "{} Authenticated as: {} ({:.1}%, {}ms)",
-                    style("✓").green().bold(),
-                    style(&face).green().bold(),
-                    pct,
-                    start.elapsed().as_millis()
-                ))?;
-            } else {
-                term.write_line(&format!(
-                    "{} Authenticated as: {} ({}ms)",
-                    style("✓").green().bold(),
-                    style(user).green().bold(),
-                    start.elapsed().as_millis()
-                ))?;
+            authenticated = true;
+            if !silent {
+                let matched = faces
+                    .iter()
+                    .find(|(_, _, _, rgb_p, _, _, ir_p)| *rgb_p || *ir_p)
+                    .map(|(n, _, rgb_pct, rgb_p, _, ir_pct, ir_p)| {
+                        let pct = if *rgb_p && *ir_p {
+                            rgb_pct.max(*ir_pct)
+                        } else if *rgb_p {
+                            *rgb_pct
+                        } else {
+                            *ir_pct
+                        };
+                        (n.clone(), pct)
+                    });
+                if let Some((face, pct)) = matched {
+                    term.write_line(&format!(
+                        "{} Authenticated as: {} ({:.1}%, {}ms)",
+                        style("✓").green().bold(),
+                        style(&face).green().bold(),
+                        pct,
+                        start.elapsed().as_millis()
+                    ))?;
+                } else {
+                    term.write_line(&format!(
+                        "{} Authenticated as: {} ({}ms)",
+                        style("✓").green().bold(),
+                        style(user).green().bold(),
+                        start.elapsed().as_millis()
+                    ))?;
+                }
             }
-        } else {
-            term.write_line(&format!(
-                "{} Authentication failed ({}ms)",
-                style("✗").red().bold(),
-                start.elapsed().as_millis()
-            ))?;
         }
     }
+
+    if !authenticated && !silent {
+        term.write_line(&format!(
+            "{} Authentication failed ({}ms)",
+            style("✗").red().bold(),
+            start.elapsed().as_millis()
+        ))?;
+    }
+
     let _ = proxy.release().await;
+    if !authenticated {
+        std::process::exit(1);
+    }
     Ok(())
 }
 
@@ -1346,7 +1466,10 @@ async fn run() -> anyhow::Result<()> {
         reexec_as_root(name)?;
     }
 
-    let _polkit_agent = command_may_be_challenged(&cli.command).then(polkit::PolkitAgent::spawn);
+    let silent_auth = matches!(cli.command, Commands::Auth { silent: true, .. });
+
+    let _polkit_agent =
+        (command_may_be_challenged(&cli.command) && !silent_auth).then(polkit::PolkitAgent::spawn);
 
     match &cli.command {
         Commands::Uninstall {
@@ -1365,11 +1488,29 @@ async fn run() -> anyhow::Result<()> {
         _ => {}
     }
 
-    let proxy = connect_gaze().await?;
+    let proxy = match connect_gaze().await {
+        Ok(proxy) => proxy,
+        Err(_) if silent_auth => std::process::exit(1),
+        Err(e) => return Err(e.into()),
+    };
 
     match cli.command {
-        Commands::Auth { user, verbose } => {
-            handle_auth(&proxy, &user.unwrap_or_else(get_current_user), verbose).await?;
+        Commands::Auth {
+            user,
+            verbose,
+            silent,
+        } => {
+            let result = handle_auth(
+                &proxy,
+                &user.unwrap_or_else(get_current_user),
+                verbose,
+                silent,
+            )
+            .await;
+            if silent && result.is_err() {
+                std::process::exit(1);
+            }
+            result?;
         }
         Commands::AddFace { user, face } => {
             handle_enroll(&proxy, &user.unwrap_or_else(get_current_user), &face, false).await?;
@@ -1392,6 +1533,16 @@ async fn run() -> anyhow::Result<()> {
         Commands::Config { show } => {
             let config = load_config_from_daemon(&proxy).await?;
             if show {
+                println!(
+                    "{} {}",
+                    style("inference.execution_provider:").bold(),
+                    config.inference.execution_provider
+                );
+                println!(
+                    "{} {}",
+                    style("inference.device:").bold(),
+                    config.inference.device
+                );
                 let level_name = config.security.level.as_str();
                 println!("{} {}", style("security.level:").bold(), level_name);
                 println!(
@@ -1455,6 +1606,11 @@ async fn run() -> anyhow::Result<()> {
                     style("auth.start_delay_ms:").bold(),
                     config.auth.start_delay_ms
                 );
+                println!(
+                    "{} {}",
+                    style("auth.start_delay_scope:").bold(),
+                    config.auth.start_delay_scope()
+                );
 
                 println!(
                     "{} {}",
@@ -1514,9 +1670,32 @@ mod tests {
             cli.command,
             Commands::Auth {
                 user: Some(ref user),
-                verbose: true
+                verbose: true,
+                silent: false,
             } if user == "alice"
         ));
+
+        let cli = Cli::try_parse_from(["gaze", "auth", "-s", "-u", "bob"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Auth {
+                user: Some(ref user),
+                verbose: false,
+                silent: true,
+            } if user == "bob"
+        ));
+
+        let cli = Cli::try_parse_from(["gaze", "auth", "--silent"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Auth {
+                user: None,
+                verbose: false,
+                silent: true,
+            }
+        ));
+
+        assert!(Cli::try_parse_from(["gaze", "auth", "--verbose", "--silent"]).is_err());
 
         let cli = Cli::try_parse_from(["gaze", "uninstall", "--yes", "--keep-data", "--dry-run"])
             .unwrap();

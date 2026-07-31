@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -12,9 +15,24 @@ pub const DEFAULT_RGB_CAMERA: &str = "primary";
 pub const SECURITY_LEVEL_OPTIONS: [&str; 5] = ["low", "medium", "high", "maximum", "custom"];
 pub const MODEL_QUALITY_OPTIONS: [&str; 2] = ["standard", "accurate"];
 pub const HYBRID_POLICY_OPTIONS: [&str; 4] = ["default", "or", "fallback_on_dark", "and"];
+pub const START_DELAY_SCOPE_OPTIONS: [&str; 2] = ["all", "screen_lock"];
+#[cfg(not(feature = "openvino-config"))]
+pub const INFERENCE_EXECUTION_PROVIDER_OPTIONS: [&str; 1] = ["cpu"];
+#[cfg(feature = "openvino-config")]
+pub const INFERENCE_EXECUTION_PROVIDER_OPTIONS: [&str; 2] = ["cpu", "openvino"];
+#[cfg(not(feature = "openvino-config"))]
+pub const INFERENCE_DEVICE_OPTIONS: [&str; 1] = ["cpu"];
+#[cfg(feature = "openvino-config")]
+pub const INFERENCE_DEVICE_OPTIONS: [&str; 3] = ["cpu", "gpu", "npu"];
 pub const DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO: f64 = 0.25;
 pub const MIN_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.10;
 pub const MAX_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.75;
+pub const DEFAULT_SECURITY_THRESHOLD: f64 = 0.4;
+pub const MIN_SECURITY_THRESHOLD: f64 = 0.10;
+pub const MAX_SECURITY_THRESHOLD: f64 = 1.0;
+pub const MIN_LIVENESS_THRESHOLD: f64 = 0.10;
+pub const MAX_LIVENESS_THRESHOLD: f64 = 1.0;
+pub const MIN_LIVENESS_MAX_FRAMES: u32 = 1;
 
 fn default_level() -> String {
     "medium".to_string()
@@ -210,8 +228,30 @@ impl SecurityLevel {
                     "invalid recognizer level {other:?}: expected \"standard\" or \"accurate\""
                 ),
             }
+            if !Self::threshold_in_range(self.threshold) {
+                anyhow::bail!(
+                    "security.threshold must be between {} and {}, got {}",
+                    MIN_SECURITY_THRESHOLD,
+                    MAX_SECURITY_THRESHOLD,
+                    self.threshold
+                );
+            }
+            if !self.hybrid_policy.is_empty()
+                && !HYBRID_POLICY_OPTIONS.contains(&self.hybrid_policy.as_str())
+            {
+                anyhow::bail!(
+                    "invalid security.hybrid_policy {:?}: expected one of {:?}",
+                    self.hybrid_policy,
+                    HYBRID_POLICY_OPTIONS
+                );
+            }
         }
         Ok(())
+    }
+
+    fn threshold_in_range(threshold: f64) -> bool {
+        threshold.is_finite()
+            && (MIN_SECURITY_THRESHOLD..=MAX_SECURITY_THRESHOLD).contains(&threshold)
     }
 
     pub fn threshold(&self) -> f32 {
@@ -220,7 +260,14 @@ impl SecurityLevel {
             "medium" => 0.4,
             "high" => 0.5,
             "maximum" => 0.6,
-            "custom" => self.threshold as f32,
+            "custom" if Self::threshold_in_range(self.threshold) => self.threshold as f32,
+            "custom" => {
+                tracing::warn!(
+                    threshold = self.threshold,
+                    "security.threshold is out of range; using the medium default"
+                );
+                DEFAULT_SECURITY_THRESHOLD as f32
+            }
             _ => 0.4,
         }
     }
@@ -245,6 +292,8 @@ impl SecurityLevel {
 #[derive(Deserialize, Serialize, Clone, Debug, Default, Value, OwnedValue, Type)]
 pub struct Config {
     #[serde(default)]
+    pub inference: InferenceConfig,
+    #[serde(default)]
     pub security: SecurityLevel,
     #[serde(default)]
     pub cameras: CameraConfig,
@@ -256,6 +305,97 @@ pub struct Config {
     pub liveness: LivenessConfig,
     #[serde(default)]
     pub storage: StorageConfig,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
+pub struct InferenceConfig {
+    #[serde(default = "default_execution_provider")]
+    pub execution_provider: String,
+    #[serde(default = "default_inference_device")]
+    pub device: String,
+}
+
+fn default_execution_provider() -> String {
+    "cpu".to_string()
+}
+
+fn default_inference_device() -> String {
+    "cpu".to_string()
+}
+
+impl Default for InferenceConfig {
+    fn default() -> Self {
+        Self {
+            execution_provider: default_execution_provider(),
+            device: default_inference_device(),
+        }
+    }
+}
+
+impl InferenceConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        #[cfg(not(feature = "openvino-config"))]
+        if self.execution_provider == "openvino" {
+            anyhow::bail!(
+                "this Gaze build does not include OpenVINO support; rebuild with the \"openvino\" Cargo feature"
+            );
+        }
+        if !INFERENCE_EXECUTION_PROVIDER_OPTIONS.contains(&self.execution_provider.as_str()) {
+            anyhow::bail!(
+                "invalid inference.execution_provider {:?}: expected one of {:?}",
+                self.execution_provider,
+                INFERENCE_EXECUTION_PROVIDER_OPTIONS
+            );
+        }
+        if !INFERENCE_DEVICE_OPTIONS.contains(&self.device.as_str()) {
+            anyhow::bail!(
+                "invalid inference.device {:?}: expected one of {:?}",
+                self.device,
+                INFERENCE_DEVICE_OPTIONS
+            );
+        }
+        if self.execution_provider == "cpu" && self.device != "cpu" {
+            anyhow::bail!(
+                "inference.device must be \"cpu\" when inference.execution_provider is \"cpu\""
+            );
+        }
+        Ok(())
+    }
+
+    pub fn is_representable(&self) -> bool {
+        INFERENCE_EXECUTION_PROVIDER_OPTIONS.contains(&self.execution_provider.as_str())
+            && INFERENCE_DEVICE_OPTIONS.contains(&self.device.as_str())
+    }
+
+    pub fn execution_provider_index(&self) -> u32 {
+        INFERENCE_EXECUTION_PROVIDER_OPTIONS
+            .iter()
+            .position(|value| *value == self.execution_provider)
+            .map(|index| index as u32)
+            .unwrap_or(0)
+    }
+
+    pub fn device_index(&self) -> u32 {
+        INFERENCE_DEVICE_OPTIONS
+            .iter()
+            .position(|value| *value == self.device)
+            .map(|index| index as u32)
+            .unwrap_or(0)
+    }
+
+    pub fn execution_provider_from_index(index: usize) -> &'static str {
+        INFERENCE_EXECUTION_PROVIDER_OPTIONS
+            .get(index)
+            .copied()
+            .unwrap_or("cpu")
+    }
+
+    pub fn device_from_index(index: usize) -> &'static str {
+        INFERENCE_DEVICE_OPTIONS
+            .get(index)
+            .copied()
+            .unwrap_or("cpu")
+    }
 }
 
 // Its own table: a security preset replaces `[security]` wholesale, resetting it.
@@ -295,6 +435,48 @@ impl Default for LivenessConfig {
     }
 }
 
+impl LivenessConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if !Self::threshold_in_range(self.threshold) {
+            anyhow::bail!(
+                "liveness.threshold must be between {} and {}, got {}",
+                MIN_LIVENESS_THRESHOLD,
+                MAX_LIVENESS_THRESHOLD,
+                self.threshold
+            );
+        }
+        if self.max_frames < MIN_LIVENESS_MAX_FRAMES {
+            anyhow::bail!(
+                "liveness.max_frames must be at least {}, got {}",
+                MIN_LIVENESS_MAX_FRAMES,
+                self.max_frames
+            );
+        }
+        Ok(())
+    }
+
+    fn threshold_in_range(threshold: f64) -> bool {
+        threshold.is_finite()
+            && (MIN_LIVENESS_THRESHOLD..=MAX_LIVENESS_THRESHOLD).contains(&threshold)
+    }
+
+    pub fn effective_threshold(&self) -> f64 {
+        if Self::threshold_in_range(self.threshold) {
+            self.threshold
+        } else {
+            default_liveness_threshold()
+        }
+    }
+
+    pub fn effective_max_frames(&self) -> u32 {
+        if self.max_frames >= MIN_LIVENESS_MAX_FRAMES {
+            self.max_frames
+        } else {
+            default_max_frames()
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
 pub struct CameraConfig {
     #[serde(default = "default_rgb_device")]
@@ -315,6 +497,46 @@ fn default_dark_luma_threshold() -> u8 {
     20
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AuthSurface {
+    ScreenLock,
+    Elevation,
+    Login,
+}
+
+const ELEVATION_SERVICES: [&str; 9] = [
+    "sudo",
+    "sudo-i",
+    "su",
+    "su-l",
+    "doas",
+    "run0",
+    "systemd-run0",
+    "polkit-1",
+    "pkexec",
+];
+
+const LOGIN_SERVICES: [&str; 6] = [
+    "login",
+    "sddm",
+    "lightdm",
+    "greetd",
+    "gdm-password",
+    "gdm-launch-environment",
+];
+
+pub fn classify_pam_service(service: Option<&str>) -> AuthSurface {
+    match service {
+        Some(name) if ELEVATION_SERVICES.contains(&name) => AuthSurface::Elevation,
+        Some(name) if LOGIN_SERVICES.contains(&name) => AuthSurface::Login,
+        _ => AuthSurface::ScreenLock,
+    }
+}
+
+fn default_start_delay_scope() -> String {
+    "screen_lock".to_string()
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
 pub struct AuthConfig {
     #[serde(default = "default_true")]
@@ -327,6 +549,8 @@ pub struct AuthConfig {
     pub resume_grace_ms: u64,
     #[serde(default = "default_start_delay_ms")]
     pub start_delay_ms: u64,
+    #[serde(default = "default_start_delay_scope")]
+    pub start_delay_scope: String,
 }
 
 fn default_false() -> bool {
@@ -342,17 +566,65 @@ fn default_start_delay_ms() -> u64 {
 }
 
 impl AuthConfig {
-    /// Milliseconds to wait before face verification begins.
-    ///
-    /// `start_delay_ms` applies to every verification; `resume_grace_ms` adds
-    /// nothing on top of it, so a resume waits for whichever is longer rather
-    /// than the sum of the two.
-    pub fn effective_start_delay_ms(&self, resumed: bool) -> u64 {
-        if resumed {
-            self.start_delay_ms.max(self.resume_grace_ms)
-        } else {
-            self.start_delay_ms
+    pub fn start_delay_scope(&self) -> &str {
+        match self.start_delay_scope.as_str() {
+            "screen_lock" => "screen_lock",
+            "" | "all" => "all",
+            other => {
+                tracing::warn!("invalid start delay scope {other:?}; delaying every auth");
+                "all"
+            }
         }
+    }
+
+    fn start_delay_applies_to(&self, surface: AuthSurface) -> bool {
+        match self.start_delay_scope() {
+            "screen_lock" => surface == AuthSurface::ScreenLock,
+            _ => true,
+        }
+    }
+
+    /// Milliseconds to wait before face verification begins.
+    pub fn effective_start_delay_ms(&self, resumed: bool, surface: AuthSurface) -> u64 {
+        self.start_delay_after_lock_ms(resumed, surface, None)
+    }
+
+    /// Milliseconds still owed on the start delay, measured from the lock.
+    pub fn start_delay_after_lock_ms(
+        &self,
+        resumed: bool,
+        surface: AuthSurface,
+        lock_elapsed_ms: Option<u64>,
+    ) -> u64 {
+        let start = if self.start_delay_applies_to(surface) {
+            match lock_elapsed_ms {
+                Some(elapsed) => self.start_delay_ms.saturating_sub(elapsed),
+                None => self.start_delay_ms,
+            }
+        } else {
+            0
+        };
+        if resumed {
+            start.max(self.resume_grace_ms)
+        } else {
+            start
+        }
+    }
+
+    pub fn start_delay_scope_index_for_value(value: &str) -> u32 {
+        START_DELAY_SCOPE_OPTIONS
+            .iter()
+            .position(|scope| *scope == value)
+            .map(|idx| idx as u32)
+            .unwrap_or(0)
+    }
+
+    pub fn start_delay_scope_from_index(index: usize) -> String {
+        START_DELAY_SCOPE_OPTIONS
+            .get(index)
+            .copied()
+            .unwrap_or("all")
+            .to_string()
     }
 }
 
@@ -418,6 +690,7 @@ impl Default for AuthConfig {
             require_confirmation: false,
             resume_grace_ms: default_resume_grace_ms(),
             start_delay_ms: default_start_delay_ms(),
+            start_delay_scope: default_start_delay_scope(),
         }
     }
 }
@@ -449,6 +722,12 @@ impl Config {
             }
             if let Err(e) = config.enrollment.validate() {
                 tracing::warn!("{e}; using the default enrollment face-size ratio");
+            }
+            if let Err(e) = config.inference.validate() {
+                tracing::warn!("{e}; inference configuration will be checked when models load");
+            }
+            if let Err(e) = config.liveness.validate() {
+                tracing::warn!("{e}; using the default liveness settings");
             }
             Ok(config)
         } else {
@@ -581,6 +860,140 @@ mod tests {
     }
 
     #[test]
+    fn validate_rejects_out_of_range_custom_threshold() {
+        for bad in [-1.0, -0.5, 0.0, 0.09, 1.01, 5.0, f64::NAN, f64::INFINITY] {
+            let level = SecurityLevel::custom(
+                "standard".to_string(),
+                "standard".to_string(),
+                bad,
+                String::new(),
+            );
+            assert!(level.validate().is_err(), "{bad}");
+        }
+
+        for good in [MIN_SECURITY_THRESHOLD, 0.4, MAX_SECURITY_THRESHOLD] {
+            let level = SecurityLevel::custom(
+                "standard".to_string(),
+                "standard".to_string(),
+                good,
+                String::new(),
+            );
+            level.validate().unwrap();
+        }
+    }
+
+    #[test]
+    fn out_of_range_custom_threshold_never_reaches_the_matcher() {
+        for bad in [-1.0, 0.0, 5.0, f64::NAN, f64::INFINITY] {
+            let level = SecurityLevel::custom(
+                "standard".to_string(),
+                "standard".to_string(),
+                bad,
+                String::new(),
+            );
+            assert_eq!(
+                level.threshold(),
+                DEFAULT_SECURITY_THRESHOLD as f32,
+                "{bad}"
+            );
+        }
+
+        let level = SecurityLevel::custom(
+            "standard".to_string(),
+            "standard".to_string(),
+            0.73,
+            String::new(),
+        );
+        assert!((level.threshold() - 0.73).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn validate_rejects_unknown_hybrid_policy() {
+        let bad = SecurityLevel::custom(
+            "standard".to_string(),
+            "standard".to_string(),
+            0.5,
+            "not-a-real-policy".to_string(),
+        );
+        assert!(bad.validate().is_err());
+
+        for policy in HYBRID_POLICY_OPTIONS {
+            let level = SecurityLevel::custom(
+                "standard".to_string(),
+                "standard".to_string(),
+                0.5,
+                policy.to_string(),
+            );
+            level.validate().unwrap();
+        }
+
+        let empty = SecurityLevel::custom(
+            "standard".to_string(),
+            "standard".to_string(),
+            0.5,
+            String::new(),
+        );
+        empty.validate().unwrap();
+        assert_eq!(empty.hybrid_policy(), "fallback_on_dark");
+    }
+
+    #[test]
+    fn preset_levels_ignore_a_stored_custom_threshold() {
+        for preset in ["low", "medium", "high", "maximum"] {
+            let mut level = SecurityLevel::medium();
+            level.level = preset.to_string();
+            level.threshold = -1.0;
+            level.validate().unwrap();
+            assert!(level.threshold() > 0.0, "{preset}");
+        }
+    }
+
+    #[test]
+    fn liveness_validate_rejects_degenerate_settings() {
+        let mut cfg = LivenessConfig::default();
+        cfg.validate().unwrap();
+
+        for bad in [-1.0, 0.0, 0.09, 1.01, f64::NAN, f64::INFINITY] {
+            cfg.threshold = bad;
+            assert!(cfg.validate().is_err(), "{bad}");
+            assert_eq!(cfg.effective_threshold(), default_liveness_threshold());
+        }
+
+        cfg.threshold = 0.9;
+        assert_eq!(cfg.effective_threshold(), 0.9);
+
+        cfg.max_frames = 0;
+        assert!(cfg.validate().is_err());
+        assert_eq!(cfg.effective_max_frames(), default_max_frames());
+
+        cfg.max_frames = 25;
+        cfg.validate().unwrap();
+        assert_eq!(cfg.effective_max_frames(), 25);
+    }
+
+    #[test]
+    fn load_from_falls_back_on_a_degenerate_custom_threshold() {
+        let temp = TempDir::new("bad-threshold");
+        let path = temp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[security]\nlevel = \"custom\"\nthreshold = 0.0\n\n[liveness]\nthreshold = 0.0\nmax_frames = 0\n",
+        )
+        .unwrap();
+
+        let config = Config::load_from(path.to_str().unwrap()).unwrap();
+        assert_eq!(
+            config.security.threshold(),
+            DEFAULT_SECURITY_THRESHOLD as f32
+        );
+        assert_eq!(
+            config.liveness.effective_threshold(),
+            default_liveness_threshold()
+        );
+        assert_eq!(config.liveness.effective_max_frames(), default_max_frames());
+    }
+
+    #[test]
     fn validate_rejects_unknown_security_level() {
         let mut level = SecurityLevel::medium();
         level.level = "bogus".to_string();
@@ -591,6 +1004,75 @@ mod tests {
             l.level = preset.to_string();
             l.validate().unwrap();
         }
+    }
+
+    #[test]
+    fn inference_config_accepts_supported_provider_device_pairs() {
+        #[cfg(feature = "openvino-config")]
+        let supported = [
+            ("cpu", "cpu"),
+            ("openvino", "cpu"),
+            ("openvino", "gpu"),
+            ("openvino", "npu"),
+        ];
+        #[cfg(not(feature = "openvino-config"))]
+        let supported = [("cpu", "cpu")];
+
+        for (execution_provider, device) in supported {
+            let inference = InferenceConfig {
+                execution_provider: execution_provider.to_string(),
+                device: device.to_string(),
+            };
+            inference.validate().unwrap();
+        }
+    }
+
+    #[test]
+    fn inference_config_rejects_invalid_pairs() {
+        #[cfg(feature = "openvino-config")]
+        let invalid = [
+            ("cpu", "gpu"),
+            ("cpu", "npu"),
+            ("openvino", "cuda"),
+            ("webgpu", "gpu"),
+        ];
+        #[cfg(not(feature = "openvino-config"))]
+        let invalid = [
+            ("cpu", "gpu"),
+            ("cpu", "npu"),
+            ("openvino", "cuda"),
+            ("webgpu", "gpu"),
+            ("openvino", "cpu"),
+            ("openvino", "gpu"),
+            ("openvino", "npu"),
+        ];
+
+        for (execution_provider, device) in invalid {
+            let inference = InferenceConfig {
+                execution_provider: execution_provider.to_string(),
+                device: device.to_string(),
+            };
+            assert!(inference.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn a_value_this_build_cannot_show_is_not_representable() {
+        let unknown = InferenceConfig {
+            execution_provider: "webgpu".to_string(),
+            device: "cuda".to_string(),
+        };
+        assert!(!unknown.is_representable());
+        assert!(InferenceConfig::default().is_representable());
+
+        let openvino = InferenceConfig {
+            execution_provider: "openvino".to_string(),
+            device: "npu".to_string(),
+        };
+        assert_eq!(
+            openvino.is_representable(),
+            cfg!(feature = "openvino-config")
+        );
     }
 
     #[test]
@@ -622,6 +1104,8 @@ mod tests {
             config.security.detector(),
             SecurityLevel::medium().detector()
         );
+        assert_eq!(config.inference.execution_provider, "cpu");
+        assert_eq!(config.inference.device, "cpu");
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
         assert_eq!(config.cameras.dark_luma_threshold, 20);
         assert!(config.auth.abort_if_ssh);
@@ -639,6 +1123,10 @@ mod tests {
         let temp = TempDir::new("round-trip");
         let path = temp.path().join("config.toml");
         let config = Config {
+            inference: InferenceConfig {
+                execution_provider: "openvino".to_string(),
+                device: "gpu".to_string(),
+            },
             security: SecurityLevel::high(),
             cameras: CameraConfig {
                 rgb: "primary".to_string(),
@@ -652,6 +1140,7 @@ mod tests {
                 require_confirmation: true,
                 resume_grace_ms: 3000,
                 start_delay_ms: 1500,
+                start_delay_scope: "screen_lock".to_string(),
             },
             enrollment: EnrollmentConfig {
                 max_templates: 8,
@@ -671,6 +1160,8 @@ mod tests {
         let loaded = Config::load_from(path.to_str().unwrap()).unwrap();
 
         assert_eq!(loaded.security.detector(), SecurityLevel::high().detector());
+        assert_eq!(loaded.inference.execution_provider, "openvino");
+        assert_eq!(loaded.inference.device, "gpu");
         assert_eq!(
             loaded.security.recognizer(),
             SecurityLevel::high().recognizer()
@@ -687,6 +1178,7 @@ mod tests {
         assert!(loaded.auth.require_confirmation);
         assert_eq!(loaded.auth.resume_grace_ms, 3000);
         assert_eq!(loaded.auth.start_delay_ms, 1500);
+        assert_eq!(loaded.auth.start_delay_scope(), "screen_lock");
         assert_eq!(loaded.enrollment.max_templates, 8);
         assert_eq!(loaded.enrollment.min_face_size_ratio, 0.20);
         assert!(loaded.liveness.enabled);
@@ -766,27 +1258,183 @@ mod tests {
     }
 
     #[test]
-    fn start_delay_applies_on_every_auth_and_does_not_stack_with_resume_grace() {
+    fn start_delay_outside_a_lock_does_not_stack_with_resume_grace() {
         let mut auth = AuthConfig::default();
+        let lock = AuthSurface::ScreenLock;
 
-        assert_eq!(auth.effective_start_delay_ms(false), 0);
-        assert_eq!(auth.effective_start_delay_ms(true), 0);
+        assert_eq!(auth.effective_start_delay_ms(false, lock), 0);
+        assert_eq!(auth.effective_start_delay_ms(true, lock), 0);
 
         auth.start_delay_ms = 5000;
-        assert_eq!(auth.effective_start_delay_ms(false), 5000);
-        assert_eq!(auth.effective_start_delay_ms(true), 5000);
+        assert_eq!(auth.effective_start_delay_ms(false, lock), 5000);
+        assert_eq!(auth.effective_start_delay_ms(true, lock), 5000);
 
         auth.resume_grace_ms = 3000;
-        assert_eq!(auth.effective_start_delay_ms(false), 5000);
-        assert_eq!(auth.effective_start_delay_ms(true), 5000);
+        assert_eq!(auth.effective_start_delay_ms(false, lock), 5000);
+        assert_eq!(auth.effective_start_delay_ms(true, lock), 5000);
 
         auth.resume_grace_ms = 8000;
-        assert_eq!(auth.effective_start_delay_ms(false), 5000);
-        assert_eq!(auth.effective_start_delay_ms(true), 8000);
+        assert_eq!(auth.effective_start_delay_ms(false, lock), 5000);
+        assert_eq!(auth.effective_start_delay_ms(true, lock), 8000);
 
         auth.start_delay_ms = 0;
-        assert_eq!(auth.effective_start_delay_ms(false), 0);
-        assert_eq!(auth.effective_start_delay_ms(true), 8000);
+        assert_eq!(auth.effective_start_delay_ms(false, lock), 0);
+        assert_eq!(auth.effective_start_delay_ms(true, lock), 8000);
+    }
+
+    #[test]
+    fn default_scope_spares_elevation_and_login() {
+        let auth = AuthConfig {
+            start_delay_ms: 3000,
+            ..Default::default()
+        };
+
+        assert_eq!(auth.start_delay_scope(), "screen_lock");
+        assert_eq!(
+            auth.effective_start_delay_ms(false, AuthSurface::ScreenLock),
+            3000
+        );
+        for surface in [AuthSurface::Elevation, AuthSurface::Login] {
+            assert_eq!(auth.effective_start_delay_ms(false, surface), 0);
+        }
+    }
+
+    #[test]
+    fn start_delay_is_measured_from_the_lock_not_each_auth() {
+        let auth = AuthConfig {
+            start_delay_ms: 3000,
+            ..Default::default()
+        };
+        let lock = AuthSurface::ScreenLock;
+
+        assert_eq!(auth.start_delay_after_lock_ms(false, lock, None), 3000);
+        assert_eq!(auth.start_delay_after_lock_ms(false, lock, Some(0)), 3000);
+        assert_eq!(
+            auth.start_delay_after_lock_ms(false, lock, Some(1000)),
+            2000
+        );
+        assert_eq!(auth.start_delay_after_lock_ms(false, lock, Some(3000)), 0);
+        assert_eq!(auth.start_delay_after_lock_ms(false, lock, Some(60_000)), 0);
+    }
+
+    #[test]
+    fn resume_grace_survives_an_already_elapsed_lock_window() {
+        let auth = AuthConfig {
+            start_delay_ms: 3000,
+            resume_grace_ms: 2000,
+            ..Default::default()
+        };
+        let lock = AuthSurface::ScreenLock;
+
+        assert_eq!(auth.start_delay_after_lock_ms(false, lock, Some(60_000)), 0);
+        assert_eq!(
+            auth.start_delay_after_lock_ms(true, lock, Some(60_000)),
+            2000
+        );
+    }
+
+    #[test]
+    fn elapsed_lock_time_never_revives_a_scoped_out_surface() {
+        let auth = AuthConfig {
+            start_delay_ms: 3000,
+            ..Default::default()
+        };
+
+        for surface in [AuthSurface::Elevation, AuthSurface::Login] {
+            assert_eq!(auth.start_delay_after_lock_ms(false, surface, None), 0);
+            assert_eq!(auth.start_delay_after_lock_ms(false, surface, Some(0)), 0);
+        }
+    }
+
+    #[test]
+    fn screen_lock_scope_exempts_elevation_and_login() {
+        let auth = AuthConfig {
+            start_delay_ms: 3000,
+            start_delay_scope: "screen_lock".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            auth.effective_start_delay_ms(false, AuthSurface::ScreenLock),
+            3000
+        );
+        assert_eq!(
+            auth.effective_start_delay_ms(false, AuthSurface::Elevation),
+            0
+        );
+        assert_eq!(auth.effective_start_delay_ms(false, AuthSurface::Login), 0);
+    }
+
+    #[test]
+    fn resume_grace_is_not_scoped_away_by_screen_lock() {
+        let auth = AuthConfig {
+            start_delay_ms: 3000,
+            resume_grace_ms: 5000,
+            start_delay_scope: "screen_lock".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            auth.effective_start_delay_ms(true, AuthSurface::Elevation),
+            5000
+        );
+        assert_eq!(
+            auth.effective_start_delay_ms(false, AuthSurface::Elevation),
+            0
+        );
+    }
+
+    #[test]
+    fn invalid_scope_falls_back_to_delaying_everything() {
+        let auth = AuthConfig {
+            start_delay_ms: 3000,
+            start_delay_scope: "lockscreen".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(auth.start_delay_scope(), "all");
+        assert_eq!(
+            auth.effective_start_delay_ms(false, AuthSurface::Elevation),
+            3000
+        );
+    }
+
+    #[test]
+    fn elevation_and_login_services_are_classified() {
+        for service in ["sudo", "sudo-i", "su", "su-l", "doas", "polkit-1", "pkexec"] {
+            assert_eq!(
+                classify_pam_service(Some(service)),
+                AuthSurface::Elevation,
+                "{service}"
+            );
+        }
+        for service in ["login", "sddm", "lightdm", "greetd", "gdm-password"] {
+            assert_eq!(
+                classify_pam_service(Some(service)),
+                AuthSurface::Login,
+                "{service}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_and_ambiguous_services_are_treated_as_screen_locks() {
+        for service in [
+            "hyprlock-gaze",
+            "hyprlock-gaze-simultaneous",
+            "gaze",
+            "swaylock",
+            "some-locker-nobody-has-heard-of",
+            "gdm-face",
+        ] {
+            assert_eq!(
+                classify_pam_service(Some(service)),
+                AuthSurface::ScreenLock,
+                "{service}"
+            );
+        }
+
+        assert_eq!(classify_pam_service(None), AuthSurface::ScreenLock);
     }
 
     #[test]

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use crate::ir::devices::{
     CameraBus, IrControl, IrDevice, IrQuery, camera_bus, find_device, usb_ids_of,
 };

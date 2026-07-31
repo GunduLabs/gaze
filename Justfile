@@ -44,6 +44,12 @@ build-rust:
     {{ opencv_env }} cargo build -p gaze --release
     {{ opencv_env }} cargo build -p gaze-cli -p gaze-gui -p pam-gaze -p pam-gaze-grosshack --release
 
+# Build all Rust workspace binaries with OpenVINO configuration and runtime support.
+[group("build")]
+build-rust-openvino:
+    {{ opencv_env }} cargo build -p gaze --release --features gaze/openvino
+    {{ opencv_env }} cargo build -p gaze-cli -p gaze-gui -p pam-gaze -p pam-gaze-grosshack --release --features gaze-cli/openvino,gaze-gui/openvino
+
 # Compile the SELinux policy module
 [group("build")]
 build-selinux:
@@ -117,8 +123,11 @@ build-flatpak: prepare-flatpak-vendor prepare-flatpak-ort
     install -Dm644 packaging/flatpak/com.gundulabs.Gaze.flatpakrepo dist/packages/com.gundulabs.Gaze.flatpakrepo
     if [ -n "${FLATPAK_GPG_SIGN:-}" ]; then \
         pubkey="$(gpg --export "${FLATPAK_GPG_SIGN}" | base64 -w0)"; \
-        printf 'GPGKey=%s\n' "$pubkey" >> dist/packages/com.gundulabs.Gaze.flatpakref; \
-        printf 'GPGKey=%s\n' "$pubkey" >> dist/packages/com.gundulabs.Gaze.flatpakrepo; \
+        for f in dist/packages/com.gundulabs.Gaze.flatpakref dist/packages/com.gundulabs.Gaze.flatpakrepo; do \
+            [ -s "$f" ] && [ "$(tail -c1 "$f" | od -An -tx1 | tr -d ' \n')" != "0a" ] \
+                && printf '\n' >> "$f" || true; \
+            printf 'GPGKey=%s\n' "$pubkey" >> "$f"; \
+        done; \
     fi
 
 # ── package ───────────────────────────────────────────────────────────────────
@@ -393,6 +402,13 @@ setup-hooks:
 [group("checks")]
 test:
     {{ opencv_env }} cargo test --workspace --release
+    {{ opencv_env }} cargo test -p gaze-core --release --no-default-features --features gaze-core/openvino-config config::
+
+# Run inference tests with an OpenVINO-enabled system ONNX Runtime.
+[group("checks")]
+test-openvino:
+    {{ opencv_env }} cargo test -p gaze -p gaze-core --release --features gaze/openvino,gaze-core/openvino
+    {{ opencv_env }} cargo test -p gaze-cli -p gaze-gui --release --features gaze-cli/openvino,gaze-gui/openvino
 
 # Check dependencies for known security advisories
 [group("checks")]
@@ -403,6 +419,12 @@ audit:
 [group("checks")]
 lint:
     {{ opencv_env }} cargo clippy --workspace --all-targets -- -D warnings
+
+# Run clippy lints with an OpenVINO-enabled system ONNX Runtime.
+[group("checks")]
+lint-openvino:
+    {{ opencv_env }} cargo clippy -p gaze -p gaze-core --all-targets --features gaze/openvino,gaze-core/openvino -- -D warnings
+    {{ opencv_env }} cargo clippy -p gaze-cli -p gaze-gui --all-targets --features gaze-cli/openvino,gaze-gui/openvino -- -D warnings
 
 # Check formatting (does not write)
 [group("checks")]

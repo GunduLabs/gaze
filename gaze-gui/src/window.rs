@@ -1,7 +1,11 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use crate::capture_dialog;
 use gaze_core::config::{
-    Config, DEFAULT_RGB_CAMERA, MAX_ENROLLMENT_FACE_SIZE_RATIO, MIN_ENROLLMENT_FACE_SIZE_RATIO,
-    SecurityLevel,
+    AuthConfig, Config, DEFAULT_RGB_CAMERA, INFERENCE_DEVICE_OPTIONS,
+    INFERENCE_EXECUTION_PROVIDER_OPTIONS, InferenceConfig, MAX_ENROLLMENT_FACE_SIZE_RATIO,
+    MIN_ENROLLMENT_FACE_SIZE_RATIO, SecurityLevel,
 };
 use gaze_core::dbus::{
     GazeProxy, apply_config_to_daemon, connect_gaze, dbus_error_message, dbus_is_file_not_found,
@@ -80,6 +84,13 @@ fn set_custom_config_rows_visible(
     hybrid_row.set_visible(is_custom);
 }
 
+fn set_start_delay_scope_row_visible(
+    start_delay_row: &libadwaita::SpinRow,
+    scope_row: &libadwaita::ComboRow,
+) {
+    scope_row.set_visible(start_delay_row.value() > 0.0);
+}
+
 fn set_liveness_config_rows_visible(
     enabled_switch: &gtk4::Switch,
     threshold_row: &libadwaita::SpinRow,
@@ -90,7 +101,18 @@ fn set_liveness_config_rows_visible(
     max_frames_row.set_visible(active);
 }
 
+fn set_inference_device_row_visible(
+    execution_provider_row: &libadwaita::ComboRow,
+    device_row: &libadwaita::ComboRow,
+) {
+    let provider =
+        InferenceConfig::execution_provider_from_index(execution_provider_row.selected() as usize);
+    device_row.set_visible(provider == "openvino");
+}
+
 struct ConfigRows<'a> {
+    inference_execution_provider: &'a libadwaita::ComboRow,
+    inference_device: &'a libadwaita::ComboRow,
     level: &'a libadwaita::ComboRow,
     detector: &'a libadwaita::ComboRow,
     recognizer: &'a libadwaita::ComboRow,
@@ -110,6 +132,7 @@ struct ConfigRows<'a> {
     abort_lid: &'a gtk4::Switch,
     resume_grace: &'a libadwaita::SpinRow,
     start_delay: &'a libadwaita::SpinRow,
+    start_delay_scope: &'a libadwaita::ComboRow,
     encrypt_templates: &'a gtk4::Switch,
 }
 
@@ -119,6 +142,21 @@ struct CameraChoices<'a> {
 }
 
 fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoices<'_>) {
+    rows.inference_execution_provider
+        .set_selected(cfg.inference.execution_provider_index());
+    rows.inference_device
+        .set_selected(cfg.inference.device_index());
+    if cfg.inference.is_representable() {
+        rows.inference_execution_provider
+            .set_subtitle("Use ONNX Runtime directly or through OpenVINO");
+    } else {
+        rows.inference_execution_provider.set_subtitle(&format!(
+            "Configured as {}/{}, which this build cannot show",
+            cfg.inference.execution_provider, cfg.inference.device
+        ));
+    }
+    set_inference_device_row_visible(rows.inference_execution_provider, rows.inference_device);
+
     rows.level.set_selected(cfg.security.level_index());
     set_custom_config_rows_visible(
         rows.level,
@@ -171,6 +209,11 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
     rows.abort_lid.set_active(cfg.auth.abort_if_lid_closed);
     rows.resume_grace.set_value(cfg.auth.resume_grace_ms as f64);
     rows.start_delay.set_value(cfg.auth.start_delay_ms as f64);
+    rows.start_delay_scope
+        .set_selected(AuthConfig::start_delay_scope_index_for_value(
+            cfg.auth.start_delay_scope(),
+        ));
+    set_start_delay_scope_row_visible(rows.start_delay, rows.start_delay_scope);
     rows.encrypt_templates
         .set_active(cfg.storage.encrypt_templates);
 
@@ -236,7 +279,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     recognizer_row.set_model(Some(&recognizer_model));
     security_group.add(&recognizer_row);
 
-    let threshold_row = libadwaita::SpinRow::with_range(0.0, 1.0, 0.01);
+    let threshold_row = libadwaita::SpinRow::with_range(
+        gaze_core::config::MIN_SECURITY_THRESHOLD,
+        gaze_core::config::MAX_SECURITY_THRESHOLD,
+        0.01,
+    );
     threshold_row.set_digits(3);
     threshold_row.set_title("Recognizer Threshold");
     threshold_row.set_subtitle("Minimum similarity for a match");
@@ -245,6 +292,21 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     let hardware_group = libadwaita::PreferencesGroup::new();
     hardware_group.set_title("Hardware");
     page.add(&hardware_group);
+
+    let inference_execution_provider_row = libadwaita::ComboRow::new();
+    inference_execution_provider_row.set_title("Inference execution provider");
+    inference_execution_provider_row.set_subtitle("Use ONNX Runtime directly or through OpenVINO");
+    let inference_execution_provider_model =
+        gtk4::StringList::new(&INFERENCE_EXECUTION_PROVIDER_OPTIONS);
+    inference_execution_provider_row.set_model(Some(&inference_execution_provider_model));
+    hardware_group.add(&inference_execution_provider_row);
+
+    let inference_device_row = libadwaita::ComboRow::new();
+    inference_device_row.set_title("OpenVINO inference device");
+    inference_device_row.set_subtitle("The Intel device used for all ONNX models");
+    let inference_device_model = gtk4::StringList::new(&INFERENCE_DEVICE_OPTIONS);
+    inference_device_row.set_model(Some(&inference_device_model));
+    hardware_group.add(&inference_device_row);
 
     let cameras = gaze_core::camera::enumerate_cameras()
         .unwrap_or_else(|_| vec![("Primary Camera".to_string(), DEFAULT_RGB_CAMERA.to_string())]);
@@ -318,7 +380,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     liveness_enabled_row.add_suffix(&liveness_enabled_switch);
     liveness_group.add(&liveness_enabled_row);
 
-    let liveness_threshold_row = libadwaita::SpinRow::with_range(0.0, 1.0, 0.01);
+    let liveness_threshold_row = libadwaita::SpinRow::with_range(
+        gaze_core::config::MIN_LIVENESS_THRESHOLD,
+        gaze_core::config::MAX_LIVENESS_THRESHOLD,
+        0.01,
+    );
     liveness_threshold_row.set_digits(3);
     liveness_threshold_row.set_title("Liveness Threshold");
     liveness_threshold_row.set_subtitle("Minimum spoof prevention confidence");
@@ -368,8 +434,16 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     let start_delay_row = libadwaita::SpinRow::with_range(0.0, 10000.0, 500.0);
     start_delay_row.set_digits(0);
     start_delay_row.set_title("Start Delay (ms)");
-    start_delay_row.set_subtitle("Delay before every face authentication, including sudo");
+    start_delay_row.set_subtitle("Delay before face authentication starts");
     auth_group.add(&start_delay_row);
+
+    let start_delay_scope_names = ["Every face auth (including sudo)", "Screen lockers only"];
+    let start_delay_scope_row = libadwaita::ComboRow::new();
+    start_delay_scope_row.set_title("Start Delay Applies To");
+    start_delay_scope_row.set_subtitle("Which prompts wait for the start delay");
+    let start_delay_scope_model = gtk4::StringList::new(&start_delay_scope_names);
+    start_delay_scope_row.set_model(Some(&start_delay_scope_model));
+    auth_group.add(&start_delay_scope_row);
 
     let hybrid_names = ["Default", "Or", "Fallback on Dark", "And"];
     let hybrid_row = libadwaita::ComboRow::new();
@@ -402,6 +476,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     ));
 
     let is_loading = Rc::new(std::cell::Cell::new(true));
+    let inference_touched = Rc::new(std::cell::Cell::new(false));
 
     level_row.connect_selected_notify(glib::clone!(
         #[weak]
@@ -423,9 +498,23 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         }
     ));
 
+    inference_execution_provider_row.connect_selected_notify(glib::clone!(
+        #[weak]
+        inference_device_row,
+        move |row| {
+            set_inference_device_row_visible(row, &inference_device_row);
+        }
+    ));
+
     let apply_changes = glib::clone!(
+        #[strong]
+        inference_touched,
         #[weak]
         overlay,
+        #[weak]
+        inference_execution_provider_row,
+        #[weak]
+        inference_device_row,
         #[weak]
         level_row,
         #[weak]
@@ -465,6 +554,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         start_delay_row,
         #[weak]
+        start_delay_scope_row,
+        #[weak]
         encrypt_templates_switch,
         #[strong]
         cameras,
@@ -480,6 +571,18 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             }
 
             let mut cfg = config.borrow_mut();
+            if inference_touched.get() || cfg.inference.is_representable() {
+                cfg.inference.execution_provider = InferenceConfig::execution_provider_from_index(
+                    inference_execution_provider_row.selected() as usize,
+                )
+                .to_string();
+                cfg.inference.device = if cfg.inference.execution_provider == "openvino" {
+                    InferenceConfig::device_from_index(inference_device_row.selected() as usize)
+                        .to_string()
+                } else {
+                    "cpu".to_string()
+                };
+            }
             let hybrid_idx = hybrid_row.selected() as usize;
             let hybrid_policy = SecurityLevel::hybrid_policy_from_index(hybrid_idx);
 
@@ -517,6 +620,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             cfg.auth.abort_if_lid_closed = abort_lid_switch.is_active();
             cfg.auth.resume_grace_ms = resume_grace_row.value() as u64;
             cfg.auth.start_delay_ms = start_delay_row.value() as u64;
+            cfg.auth.start_delay_scope =
+                AuthConfig::start_delay_scope_from_index(start_delay_scope_row.selected() as usize);
             cfg.storage.encrypt_templates = encrypt_templates_switch.is_active();
 
             let cfg_to_apply = cfg.clone();
@@ -545,6 +650,34 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         }
     );
 
+    inference_execution_provider_row.connect_selected_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        #[strong]
+        inference_touched,
+        #[strong]
+        is_loading,
+        move |_| {
+            if !is_loading.get() {
+                inference_touched.set(true);
+            }
+            apply_changes()
+        }
+    ));
+    inference_device_row.connect_selected_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        #[strong]
+        inference_touched,
+        #[strong]
+        is_loading,
+        move |_| {
+            if !is_loading.get() {
+                inference_touched.set(true);
+            }
+            apply_changes()
+        }
+    ));
     level_row.connect_selected_notify(glib::clone!(
         #[strong]
         apply_changes,
@@ -607,6 +740,16 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         move |_| apply_changes()
     ));
     start_delay_row.connect_value_notify(glib::clone!(
+        #[weak]
+        start_delay_scope_row,
+        #[strong]
+        apply_changes,
+        move |row| {
+            set_start_delay_scope_row_visible(row, &start_delay_scope_row);
+            apply_changes();
+        }
+    ));
+    start_delay_scope_row.connect_selected_notify(glib::clone!(
         #[strong]
         apply_changes,
         move |_| apply_changes()
@@ -653,6 +796,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         populate_config_rows(
             &cfg,
             ConfigRows {
+                inference_execution_provider: &inference_execution_provider_row,
+                inference_device: &inference_device_row,
                 level: &level_row,
                 detector: &detector_row,
                 recognizer: &recognizer_row,
@@ -672,6 +817,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 abort_lid: &abort_lid_switch,
                 resume_grace: &resume_grace_row,
                 start_delay: &start_delay_row,
+                start_delay_scope: &start_delay_scope_row,
                 encrypt_templates: &encrypt_templates_switch,
             },
             CameraChoices {
@@ -794,6 +940,10 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
     glib::MainContext::default().spawn_local(glib::clone!(
         #[weak]
+        inference_execution_provider_row,
+        #[weak]
+        inference_device_row,
+        #[weak]
         level_row,
         #[weak]
         detector_row,
@@ -832,6 +982,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         start_delay_row,
         #[weak]
+        start_delay_scope_row,
+        #[weak]
         encrypt_templates_switch,
         #[strong]
         cameras,
@@ -853,6 +1005,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 populate_config_rows(
                     &cfg,
                     ConfigRows {
+                        inference_execution_provider: &inference_execution_provider_row,
+                        inference_device: &inference_device_row,
                         level: &level_row,
                         detector: &detector_row,
                         recognizer: &recognizer_row,
@@ -872,6 +1026,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                         abort_lid: &abort_lid_switch,
                         resume_grace: &resume_grace_row,
                         start_delay: &start_delay_row,
+                        start_delay_scope: &start_delay_scope_row,
                         encrypt_templates: &encrypt_templates_switch,
                     },
                     CameraChoices {

@@ -1,7 +1,7 @@
 # Gaze vs. Other Linux Face Auth
 
 Gaze is one of several projects bringing Windows Hello-style facial
-authentication to Linux. They all plug into PAM, they are all open source (MIT),
+authentication to Linux. They all plug into PAM, they are all open source,
 and they all solve the same basic problem: log in with your face instead of a
 password. They differ in how far they push security, how they are architected,
 and how much of the desktop they cover.
@@ -34,7 +34,7 @@ written by the maintainers of Gaze, so treat it as informed and neutral to the b
 | Camera sources | GStreamer / PipeWire | V4L2 device path | V4L2 device path | V4L2 device path |
 | Runs on older (pre-AVX2) CPUs | Yes (clients don't link ML runtime) | Yes | Varies | Varies |
 | Packaging | deb / rpm / COPR / Arch / Nix / Flatpak / script | deb / AUR / COPR | deb / Nix / AUR | deb / rpm / AUR |
-| License | MIT | MIT | MIT | MIT |
+| License | GPL-3.0-or-later | MIT | MIT | MIT |
 
 ## Liveness and anti-spoofing
 

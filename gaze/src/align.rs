@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use image::RgbImage;
 use nalgebra::Matrix3;
 
@@ -10,6 +13,15 @@ pub const ARCFACE_SRC_PTS: [[f32; 2]; 5] = [
 ];
 
 pub fn umeyama(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> Option<Matrix3<f32>> {
+    if src
+        .iter()
+        .chain(dst.iter())
+        .flatten()
+        .any(|value| !value.is_finite())
+    {
+        return None;
+    }
+
     let num_pts = src.len() as f32;
 
     let mut src_mean = [0.0; 2];
@@ -50,8 +62,8 @@ pub fn umeyama(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> Option<Matrix3<f32>>
     }
 
     let svd = a.svd(true, true);
-    let u = svd.u.unwrap();
-    let v_t = svd.v_t.unwrap();
+    let u = svd.u?;
+    let v_t = svd.v_t?;
     let s = svd.singular_values;
 
     let d_mat = nalgebra::Matrix2::from_diagonal(&d_vec);
@@ -74,7 +86,7 @@ pub fn umeyama(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> Option<Matrix3<f32>>
         t[(i, 2)] = dst_mean[i] - scale * (r[(i, 0)] * src_mean[0] + r[(i, 1)] * src_mean[1]);
     }
 
-    Some(t)
+    t.iter().all(|value| value.is_finite()).then_some(t)
 }
 
 pub fn warp_affine(img: &RgbImage, transform: &Matrix3<f32>, width: u32, height: u32) -> RgbImage {
@@ -200,6 +212,53 @@ mod tests {
         assert_eq!(*out.get_pixel(0, 0), Rgb([0, 0, 0]));
         assert_eq!(*out.get_pixel(1, 0), Rgb([1, 0, 0]));
         assert_eq!(*out.get_pixel(2, 0), Rgb([2, 0, 0]));
+    }
+
+    #[test]
+    fn umeyama_rejects_non_finite_landmarks() {
+        let base = [
+            [38.3, 51.7],
+            [73.5, 51.5],
+            [56.0, 71.7],
+            [41.5, 92.4],
+            [70.7, 92.2],
+        ];
+
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut src = base;
+            src[0][0] = bad;
+            assert!(umeyama(&src, &ARCFACE_SRC_PTS).is_none(), "{bad}");
+
+            let mut dst = base;
+            dst[2][1] = bad;
+            assert!(umeyama(&base, &dst).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn umeyama_rejects_degenerate_coincident_landmarks() {
+        assert!(umeyama(&[[10.0, 10.0]; 5], &ARCFACE_SRC_PTS).is_none());
+    }
+
+    #[test]
+    fn umeyama_still_solves_well_formed_landmarks() {
+        let transform = umeyama(&ARCFACE_SRC_PTS, &ARCFACE_SRC_PTS).unwrap();
+        assert!(transform.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn align_face_surfaces_an_error_for_non_finite_landmarks() {
+        let mut kpss = ndarray::Array3::<f32>::zeros((1, 5, 2));
+        kpss[[0, 0, 0]] = f32::NAN;
+        let mat = opencv::core::Mat::new_rows_cols_with_default(
+            8,
+            8,
+            opencv::core::CV_8UC3,
+            opencv::core::Scalar::all(128.0),
+        )
+        .unwrap();
+
+        assert!(align_face(&mat, &kpss, 0).is_err());
     }
 
     #[test]

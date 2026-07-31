@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #![allow(clippy::missing_safety_doc)]
 use parking_lot::{Condvar, Mutex};
 use std::ffi::{CStr, CString};
@@ -36,9 +39,13 @@ pub const FACE_PAM_SERVICE: &str = "gdm-face";
 /// be added on top of the camera budget or it eats into it and the scan times
 /// out early. The resumed value is used because PAM cannot tell whether the
 /// daemon is about to treat this authentication as a resume.
-pub fn camera_auth_timeout(auth: &gaze_core::config::AuthConfig) -> std::time::Duration {
+pub fn camera_auth_timeout(
+    auth: &gaze_core::config::AuthConfig,
+    service: Option<&str>,
+) -> std::time::Duration {
+    let surface = gaze_core::config::classify_pam_service(service);
     std::time::Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS)
-        + std::time::Duration::from_millis(auth.effective_start_delay_ms(true))
+        + std::time::Duration::from_millis(auth.effective_start_delay_ms(true, surface))
 }
 const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to cancel.";
 pub const CONFIRMATION_REQUEST: &str = "GAZE_CONFIRMATION_REQUEST";
@@ -213,6 +220,10 @@ pub unsafe fn confirm_authentication(pamh: PamHandle) -> bool {
 
 pub fn confirmation_accepted(response: Option<&str>) -> bool {
     matches!(response, Some(CONFIRMATION_ACK))
+}
+
+pub fn confirmation_required(auth: Option<&gaze_core::config::AuthConfig>) -> bool {
+    auth.is_none_or(|auth| auth.require_confirmation)
 }
 
 pub struct AuthState {
@@ -432,9 +443,13 @@ pub async fn setup_auth_env() -> Result<(Config, GazeProxy<'static>), c_int> {
     let proxy = gaze_core::dbus::connect_gaze()
         .await
         .map_err(|_| PAM_SERVICE_ERR)?;
-    let config = gaze_core::dbus::load_config_from_daemon(&proxy)
-        .await
-        .map_err(|_| PAM_SERVICE_ERR)?;
+    let config = match gaze_core::dbus::try_load_config_from_daemon(&proxy).await {
+        Ok(Some(config)) => config,
+        Ok(None) => {
+            gaze_core::config::Config::load_from(gaze_core::config::CONFIG_PATH).unwrap_or_default()
+        }
+        Err(_) => return Err(PAM_SERVICE_ERR),
+    };
     Ok((config, proxy))
 }
 
@@ -505,12 +520,38 @@ fn auth_outcome(
     }
 }
 
-pub async fn authenticate_biometric(username: &str) -> anyhow::Result<AuthOutcome> {
-    Ok(authenticate_biometric_with_status(username).await?.0)
+async fn request_verify_start(
+    proxy: &GazeProxy<'static>,
+    service: Option<&str>,
+) -> anyhow::Result<()> {
+    match proxy
+        .verify_start_for("any", service.unwrap_or_default())
+        .await
+    {
+        Err(zbus::Error::MethodError(ref name, ..))
+            if name.as_str() == "org.freedesktop.DBus.Error.UnknownMethod" =>
+        {
+            proxy
+                .verify_start("any")
+                .await
+                .map_err(|e| anyhow::anyhow!("Verify start failed: {}", e))
+        }
+        other => other.map_err(|e| anyhow::anyhow!("Verify start failed: {}", e)),
+    }
+}
+
+pub async fn authenticate_biometric(
+    username: &str,
+    service: Option<&str>,
+) -> anyhow::Result<AuthOutcome> {
+    Ok(authenticate_biometric_with_status(username, service)
+        .await?
+        .0)
 }
 
 pub async fn authenticate_biometric_with_status(
     username: &str,
+    service: Option<&str>,
 ) -> anyhow::Result<(AuthOutcome, Option<gaze_core::dbus::CaptureStatus>)> {
     let (_config, proxy) = setup_auth_env()
         .await
@@ -534,10 +575,7 @@ pub async fn authenticate_biometric_with_status(
         .receive_face_status()
         .await
         .map_err(|e| anyhow::anyhow!("Stream failed: {}", e))?;
-    proxy
-        .verify_start("any")
-        .await
-        .map_err(|e| anyhow::anyhow!("Verify start failed: {}", e))?;
+    request_verify_start(&proxy, service).await?;
 
     use futures::StreamExt;
     let mut last_status: Option<gaze_core::dbus::CaptureStatus> = None;
@@ -678,25 +716,41 @@ mod tests {
         let mut auth = gaze_core::config::AuthConfig::default();
         let base = std::time::Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS);
 
-        assert_eq!(camera_auth_timeout(&auth), base);
+        assert_eq!(camera_auth_timeout(&auth, Some("hyprlock-gaze")), base);
 
         auth.start_delay_ms = 5000;
         assert_eq!(
-            camera_auth_timeout(&auth),
+            camera_auth_timeout(&auth, Some("hyprlock-gaze")),
             base + std::time::Duration::from_millis(5000)
         );
 
         // The daemon waits for whichever delay is longer, so budget for that.
         auth.resume_grace_ms = 9000;
         assert_eq!(
-            camera_auth_timeout(&auth),
+            camera_auth_timeout(&auth, Some("hyprlock-gaze")),
             base + std::time::Duration::from_millis(9000)
         );
 
         auth.start_delay_ms = 0;
         assert_eq!(
-            camera_auth_timeout(&auth),
+            camera_auth_timeout(&auth, Some("hyprlock-gaze")),
             base + std::time::Duration::from_millis(9000)
+        );
+    }
+
+    #[test]
+    fn scoped_away_prompts_keep_the_plain_camera_budget() {
+        let base = std::time::Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS);
+        let auth = gaze_core::config::AuthConfig {
+            start_delay_ms: 5000,
+            start_delay_scope: "screen_lock".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(camera_auth_timeout(&auth, Some("sudo")), base);
+        assert_eq!(
+            camera_auth_timeout(&auth, Some("hyprlock-gaze")),
+            base + std::time::Duration::from_millis(5000)
         );
     }
 
@@ -803,6 +857,26 @@ mod tests {
             enrollment_disposition::<&str>(Err("daemon unavailable")),
             EnrollmentDisposition::Unavailable
         );
+    }
+
+    #[test]
+    fn confirmation_is_required_when_the_config_could_not_be_read() {
+        assert!(confirmation_required(None));
+    }
+
+    #[test]
+    fn confirmation_follows_the_config_when_it_is_available() {
+        let off = gaze_core::config::AuthConfig {
+            require_confirmation: false,
+            ..Default::default()
+        };
+        assert!(!confirmation_required(Some(&off)));
+
+        let on = gaze_core::config::AuthConfig {
+            require_confirmation: true,
+            ..Default::default()
+        };
+        assert!(confirmation_required(Some(&on)));
     }
 
     #[test]

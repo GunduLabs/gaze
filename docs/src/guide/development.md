@@ -95,6 +95,41 @@ just audit        # check dependencies for known CVEs
 just fmt          # apply formatting (fmt-check only checks)
 ```
 
+The default build supports CPU inference only. To build the daemon and
+configuration tools with OpenVINO support, provide an OpenVINO-enabled system
+ONNX Runtime and run:
+
+```bash
+ORT_STRATEGY=system \
+ORT_LIB_LOCATION=/path/to/onnxruntime/lib \
+ORT_PREFER_DYNAMIC_LINK=1 \
+just build-rust-openvino
+```
+
+The `openvino` Cargo feature is explicit. The build fails when that feature is
+enabled without a matching ONNX Runtime library.
+
+The OpenVINO-enabled binary supports Intel CPU, GPU, and NPU devices. The
+`device` value in `/etc/gaze/config.toml` selects the device at run time; GPU
+and NPU do not require separate builds. An installation with OpenVINO support
+should set `execution_provider = "openvino"` and `device = "npu"` in its
+installed configuration. If OpenVINO setup fails at run time, Gaze still falls
+back to the ONNX Runtime CPU provider.
+
+::: warning OpenVINO is a source build only
+The released `.deb`, `.rpm`, Arch, and Flatpak packages are all produced by
+`just build-rust`, so none of them include OpenVINO. Getting it means building
+from source with `just build-rust-openvino` against your own OpenVINO-enabled
+ONNX Runtime.
+:::
+
+CI does not cover the OpenVINO features either: `just lint`, `just test`, and
+`just build-rust` all build CPU-only. Run `just test-openvino`,
+`just lint-openvino`, and `just build-rust-openvino` by hand before changing
+anything behind the `openvino` or `openvino-config` features. `just test` does
+compile `gaze-core` with `openvino-config` alone, which is what the CLI and GUI
+ship with, but that path needs no OpenVINO runtime.
+
 ::: warning Build with `just build-rust`, not `cargo build --workspace`
 `just build-rust` builds the daemon and the clients in separate cargo invocations so feature unification cannot link ONNX Runtime into the CLI, GUI, or PAM modules. ONNX Runtime's startup code requires AVX2, and a single workspace build would silently reintroduce crashes on older CPUs.
 :::

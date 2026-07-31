@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #![allow(clippy::missing_safety_doc)]
 use pam_gaze_core::*;
 use std::os::raw::{c_char, c_int};
@@ -70,13 +73,19 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         };
         unsafe { say(pamh, prompt) };
 
-        let budget = match setup_auth_env().await {
-            Ok((config, _)) => camera_auth_timeout(&config.auth),
-            Err(_) => Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS),
+        let loaded_auth = setup_auth_env().await.ok().map(|(config, _)| config.auth);
+        let budget = match loaded_auth.as_ref() {
+            Some(auth) => camera_auth_timeout(auth, service.as_deref()),
+            None => Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS),
         };
 
-        match timeout(budget, authenticate_biometric_with_status(&username)).await {
-            Ok(Ok((AuthOutcome::Match, _))) => Ok(()),
+        match timeout(
+            budget,
+            authenticate_biometric_with_status(&username, service.as_deref()),
+        )
+        .await
+        {
+            Ok(Ok((AuthOutcome::Match, _))) => Ok(loaded_auth),
             Ok(Ok((AuthOutcome::NoMatch, _))) => {
                 unsafe { say(pamh, FACE_NOT_RECOGNIZED) };
                 Err(PAM_AUTH_ERR)
@@ -95,17 +104,12 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
             }
         }
     });
-    if let Err(code) = matched {
-        return code;
-    }
+    let loaded_auth = match matched {
+        Ok(auth) => auth,
+        Err(code) => return code,
+    };
 
-    let require_confirmation = rt.block_on(async {
-        match setup_auth_env().await {
-            Ok((config, _)) => config.auth.require_confirmation,
-            Err(_) => false,
-        }
-    });
-    if !require_confirmation {
+    if !confirmation_required(loaded_auth.as_ref()) {
         return PAM_SUCCESS;
     }
 
