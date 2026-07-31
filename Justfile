@@ -120,8 +120,11 @@ build-flatpak: prepare-flatpak-vendor prepare-flatpak-ort
     install -Dm644 packaging/flatpak/com.gundulabs.Gaze.flatpakrepo dist/packages/com.gundulabs.Gaze.flatpakrepo
     if [ -n "${FLATPAK_GPG_SIGN:-}" ]; then \
         pubkey="$(gpg --export "${FLATPAK_GPG_SIGN}" | base64 -w0)"; \
-        printf 'GPGKey=%s\n' "$pubkey" >> dist/packages/com.gundulabs.Gaze.flatpakref; \
-        printf 'GPGKey=%s\n' "$pubkey" >> dist/packages/com.gundulabs.Gaze.flatpakrepo; \
+        for f in dist/packages/com.gundulabs.Gaze.flatpakref dist/packages/com.gundulabs.Gaze.flatpakrepo; do \
+            [ -s "$f" ] && [ "$(tail -c1 "$f" | od -An -tx1 | tr -d ' \n')" != "0a" ] \
+                && printf '\n' >> "$f" || true; \
+            printf 'GPGKey=%s\n' "$pubkey" >> "$f"; \
+        done; \
     fi
 
 # ── package ───────────────────────────────────────────────────────────────────
