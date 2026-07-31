@@ -803,8 +803,13 @@ if want_gnome_extension_package; then
     say "  ${DIM}GDM login face auth stays off until you enable it:${RESET}"
     link "${GNOME_DOCS_URL}#optional-enable-face-at-gdm-login"
 elif is_kde_session; then
-    ok "KDE Plasma lock screen face unlock: gaze-kde installed"
-    say "  ${DIM}Login greeter stays off until you enable it:${RESET}"
+    if [ "${KDE_PACKAGES_INSTALLED:-0}" -eq 1 ]; then
+        ok "KDE Plasma lock screen face unlock: gaze-kde installed"
+        say "  ${DIM}Login greeter stays off until you enable it:${RESET}"
+    else
+        warn "KDE Plasma lock screen face unlock: gaze-kde not installed"
+        say "  ${DIM}Install it to get hands-free lock screen face unlock:${RESET}"
+    fi
     link "$KDE_DOCS_URL"
 else
     say "  GNOME extension skipped (GNOME desktop not detected); see the PAM guide:"

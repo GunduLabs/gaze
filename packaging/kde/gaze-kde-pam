@@ -5,7 +5,7 @@ set -eu
 
 # KScreenLocker starts this slot up front, which is what needs no key press.
 PAM_FILE=${GAZE_KDE_PAM_FILE:-/etc/pam.d/kde-fingerprint}
-LOGIN_PAM_FILES=${GAZE_KDE_LOGIN_PAM_FILES:-/etc/pam.d/plasmalogin /etc/pam.d/sddm}
+LOGIN_PAM_FILES=${GAZE_KDE_LOGIN_PAM_FILES-/etc/pam.d/plasmalogin /etc/pam.d/sddm}
 STATE_DIR=${GAZE_KDE_STATE_DIR:-/etc/gaze}
 
 BEGIN_MARKER='# BEGIN gaze (managed by gaze-kde; remove with `gaze-kde-pam disable`)'
@@ -197,6 +197,7 @@ create_face_service() {
 $BEGIN_MARKER
 $AUTH_LINE
 $END_MARKER
+auth        required                                     pam_deny.so
 account     required                                     pam_permit.so
 password    required                                     pam_deny.so
 session     required                                     pam_permit.so
