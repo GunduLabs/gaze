@@ -121,6 +121,23 @@ in
         <https://gaze.gundulabs.com/guide/gnome> before enabling
       '';
     };
+
+    kde = {
+      lockScreen = lib.mkEnableOption ''
+        hands-free face unlock on the KDE Plasma lock screen. KScreenLocker
+        starts the `kde-fingerprint` service up front, alongside the password
+        field, so face auth begins with no key press. The equivalent of the
+        `gaze-kde` package
+      '';
+
+      loginScreen = lib.mkEnableOption ''
+        face authentication in the Plasma Login Manager / SDDM login stack.
+        Upstream gives the greeter no up-front biometric slot, so this only runs
+        when the login form is submitted, and KWallet will ask for its password
+        once because none was typed. Read
+        <https://gaze.gundulabs.com/guide/kde> before enabling
+      '';
+    };
   };
 
   # Per-service knobs live on the nixpkgs PAM submodule, the way `fprintAuth`
@@ -270,6 +287,26 @@ in
 
       (lib.mkIf cfg.gui.enable {
         environment.systemPackages = [ cfg.gui.package ];
+      })
+
+      (lib.mkIf cfg.kde.lockScreen {
+        # Never pam_gaze_grosshack.so here: it waits for a prompt nobody answers.
+        security.pam.services."kde-fingerprint".text = ''
+          auth       [success=done default=ignore]  ${cfg.package}/lib/security/pam_gaze.so
+          auth       required                       pam_deny.so
+
+          account    required                       pam_permit.so
+          password   required                       pam_deny.so
+          session    required                       pam_permit.so
+        '';
+
+        # Otherwise the interactive `kde` stack fights over the same camera claim.
+        security.pam.services.kde.gaze.enable = lib.mkDefault false;
+      })
+
+      (lib.mkIf cfg.kde.loginScreen {
+        security.pam.services.plasmalogin.gaze.enable = lib.mkDefault true;
+        security.pam.services.sddm.gaze.enable = lib.mkDefault true;
       })
 
       (lib.mkIf cfg.gnome.enable {

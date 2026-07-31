@@ -81,7 +81,14 @@ fn retire_prompt(state: &SharedAuthState, prompt_thread: thread::JoinHandle<()>)
 
 unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     let service = unsafe { get_pam_service(pamh) };
-    if service_defers_to_face_service(service.as_deref()) {
+    if service_defers_to_face_service(service.as_deref())
+        || service_defers_to_kde_face_service(service.as_deref())
+    {
+        return PAM_IGNORE;
+    }
+
+    // Racing a prompt nobody answers is a deadlock, not a race.
+    if service_cannot_be_prompted(service.as_deref()) {
         return PAM_IGNORE;
     }
 

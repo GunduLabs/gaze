@@ -1,0 +1,53 @@
+name: "gaze-kde"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+release: "${PACKAGE_RELEASE}"
+section: "admin"
+priority: "optional"
+maintainer: "Gundu Labs <maintainers@gundulabs.com>"
+description: "KDE Plasma lock screen and System Settings integration for Gaze"
+vendor: "Gundu Labs"
+homepage: "https://gaze.gundulabs.com"
+license: "GPL-3.0-or-later"
+
+# Ships no /etc/pam.d/kde-fingerprint: plasma-workspace owns it, so RPM would reject the conflict.
+contents:
+  - src: "packaging/kde/gaze-kde-pam"
+    dst: "/usr/bin/gaze-kde-pam"
+    file_info:
+      mode: 0755
+  # System Settings scans this directory and launches the entry's Exec.
+  - src: "packaging/kde/gaze-face-unlock.desktop"
+    dst: "/usr/share/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop"
+
+deb:
+  signature:
+    method: debsign
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+rpm:
+  signature:
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+archlinux:
+  scripts:
+    postupgrade: "packaging/postinst-kde.sh"
+
+scripts:
+  postinstall: "packaging/postinst-kde.sh"
+  postremove: "packaging/postrm-kde.sh"
+
+overrides:
+  deb:
+    recommends:
+      - gaze
+      - gaze-gui
+  rpm:
+    recommends:
+      - gaze
+      - gaze-gui
+  archlinux:
+    recommends:
+      - gaze
+      - gaze-gui

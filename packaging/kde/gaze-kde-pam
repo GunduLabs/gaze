@@ -1,0 +1,345 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -eu
+
+# KScreenLocker starts this slot up front, which is what needs no key press.
+PAM_FILE=${GAZE_KDE_PAM_FILE:-/etc/pam.d/kde-fingerprint}
+LOGIN_PAM_FILES=${GAZE_KDE_LOGIN_PAM_FILES:-/etc/pam.d/plasmalogin /etc/pam.d/sddm}
+STATE_DIR=${GAZE_KDE_STATE_DIR:-/etc/gaze}
+
+BEGIN_MARKER='# BEGIN gaze (managed by gaze-kde; remove with `gaze-kde-pam disable`)'
+END_MARKER='# END gaze'
+# `success=done` also skips pam_kwallet5, which would prompt for a password.
+AUTH_LINE='auth        [success=done default=ignore]                pam_gaze.so'
+
+usage() {
+	cat <<'EOF'
+Usage: gaze-kde-pam enable|disable|enable-login|disable-login|status
+
+enable         Run Gaze in KScreenLocker's biometric slot (/etc/pam.d/kde-fingerprint)
+disable        Remove Gaze from that slot
+enable-login   Also run Gaze in the login greeter stack (plasmalogin, sddm)
+disable-login  Remove Gaze from the login greeter stack
+status         Report what is wired up
+
+The lock screen starts face auth on its own. The login greeter has no
+noninteractive slot upstream, so there it runs when you submit the login form
+(including Enter on an empty password field).
+
+Set GAZE_KDE_PAM_FILE, GAZE_KDE_LOGIN_PAM_FILES or GAZE_KDE_STATE_DIR to
+operate on different files (used by tests).
+EOF
+}
+
+require_root() {
+	[ -z "${GAZE_KDE_PAM_FILE:-}" ] || return 0
+	if [ "$(id -u)" -ne 0 ]; then
+		printf 'This must run as root: sudo gaze-kde-pam %s\n' "$1" >&2
+		return 1
+	fi
+}
+
+created_flag() {
+	printf '%s/kde-fingerprint.created-by-gaze' "$STATE_DIR"
+}
+
+has_gaze() {
+	[ -f "$1" ] || return 1
+	awk '
+		{ line = $0; sub(/#.*/, "", line) }
+		line ~ /^[[:space:]]*-?auth[[:space:]]/ && line ~ /pam_gaze(_grosshack)?\.so([[:space:]]|$)/ { found = 1 }
+		END { exit !found }
+	' "$1" 2>/dev/null
+}
+
+# Fedora and Debian login stacks already include Gaze; a second line scans twice.
+stack_reaches_gaze() {
+	target=$1
+	has_gaze "$target" && return 0
+	[ -f "$target" ] || return 1
+
+	dir=$(dirname "$target")
+	for included in $(awk '
+		{ line = $0; sub(/#.*/, "", line) }
+		line ~ /^[[:space:]]*-?auth[[:space:]]+(include|substack)[[:space:]]/ { print $3 }
+		line ~ /^[[:space:]]*@include[[:space:]]/ { print $2 }
+	' "$target" 2>/dev/null | sort -u); do
+		case "$included" in
+		/*) candidate=$included ;;
+		*) candidate="$dir/$included" ;;
+		esac
+		has_gaze "$candidate" && return 0
+	done
+	return 1
+}
+
+pam_module_installed() {
+	for dir in /lib/security /lib64/security /usr/lib/security /usr/lib64/security \
+		/lib/*/security /usr/lib/*/security; do
+		[ -e "$dir/pam_gaze.so" ] && return 0
+	done
+	return 1
+}
+
+write_back() {
+	target=$1
+	replacement=$2
+	staged="$target.gaze-staged.$$"
+
+	cp -a "$target" "$staged"
+	cat "$replacement" >"$staged" || {
+		rm -f "$staged"
+		return 1
+	}
+	sync "$staged" 2>/dev/null || true
+	mv -f "$staged" "$target" || {
+		rm -f "$staged"
+		return 1
+	}
+	if command -v restorecon >/dev/null 2>&1; then
+		restorecon "$target" >/dev/null 2>&1 || true
+	fi
+}
+
+# First auth line safe to precede; the ones before it are gates, not authenticators.
+insert_position() {
+	awk '
+		BEGIN { first = 0; last = 0 }
+		{
+			line = $0
+			sub(/#.*/, "", line)
+			if (line ~ /^[[:space:]]*-?auth[[:space:]]/ || line ~ /^[[:space:]]*@include[[:space:]]+[^[:space:]]*auth/) {
+				last = NR
+				if (first == 0 &&
+					line !~ /pam_nologin\.so|pam_succeed_if\.so|pam_env\.so|pam_faillock\.so|pam_faildelay\.so|pam_keyinit\.so|pam_selinux\.so|pam_selinux_permit\.so|pam_tally2\.so/) {
+					first = NR
+				}
+			}
+		}
+		END {
+			if (first > 0) print first
+			else if (last > 0) print last + 1
+			else print 0
+		}
+	' "$1"
+}
+
+insert_block() {
+	target=$1
+	position=$(insert_position "$target")
+	if [ "$position" -eq 0 ]; then
+		printf '%s has no auth stack to extend; not modified.\n' "$target" >&2
+		return 1
+	fi
+
+	tmp=$(mktemp)
+	trap 'rm -f "$tmp"' EXIT
+
+	awk -v position="$position" -v begin="$BEGIN_MARKER" -v module="$AUTH_LINE" -v end="$END_MARKER" '
+		BEGIN { inserted = 0 }
+		NR == position && !inserted {
+			print begin
+			print module
+			print end
+			inserted = 1
+		}
+		{ print }
+		END { if (!inserted) { print begin; print module; print end } }
+	' "$target" >"$tmp"
+
+	write_back "$target" "$tmp"
+	rm -f "$tmp"
+	trap - EXIT
+}
+
+NOTHING_TO_REMOVE=3
+
+remove_block() {
+	target=$1
+	[ -f "$target" ] || return "$NOTHING_TO_REMOVE"
+
+	if ! grep -qF "$BEGIN_MARKER" "$target" 2>/dev/null; then
+		if has_gaze "$target"; then
+			printf '%s references pam_gaze outside the managed block; leaving it alone.\n' "$target"
+		fi
+		return "$NOTHING_TO_REMOVE"
+	fi
+
+	tmp=$(mktemp)
+	trap 'rm -f "$tmp"' EXIT
+
+	awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
+		$0 == begin && !holding { holding = 1; held = ""; next }
+		holding && $0 == end { holding = 0; next }
+		holding { held = held $0 "\n"; next }
+		{ print }
+		END { if (holding) printf "%s\n%s", begin, held }
+	' "$target" >"$tmp"
+
+	if cmp -s "$target" "$tmp"; then
+		rm -f "$tmp"
+		trap - EXIT
+		printf '%s has no complete Gaze block (missing %s); not modified.\n' "$target" "$END_MARKER" >&2
+		return 1
+	fi
+
+	write_back "$target" "$tmp"
+	rm -f "$tmp"
+	trap - EXIT
+}
+
+# plasma-workspace owns this path where it ships, so only create it if absent.
+create_face_service() {
+	mkdir -p "$(dirname "$PAM_FILE")"
+	cat >"$PAM_FILE" <<EOF
+#%PAM-1.0
+$BEGIN_MARKER
+$AUTH_LINE
+$END_MARKER
+account     required                                     pam_permit.so
+password    required                                     pam_deny.so
+session     required                                     pam_permit.so
+EOF
+	chmod 644 "$PAM_FILE"
+	mkdir -p "$STATE_DIR" 2>/dev/null || true
+	: >"$(created_flag)" 2>/dev/null || true
+	if command -v restorecon >/dev/null 2>&1; then
+		restorecon "$PAM_FILE" >/dev/null 2>&1 || true
+	fi
+}
+
+enable() {
+	require_root enable || return 1
+
+	if ! pam_module_installed; then
+		printf 'Warning: pam_gaze.so is not installed yet; install the gaze package so face unlock works.\n' >&2
+	fi
+
+	if [ ! -f "$PAM_FILE" ]; then
+		create_face_service
+		printf 'Created %s running Gaze in KScreenLocker biometric slot.\n' "$PAM_FILE"
+		return 0
+	fi
+
+	if has_gaze "$PAM_FILE"; then
+		printf 'Gaze is already referenced by %s.\n' "$PAM_FILE"
+		return 0
+	fi
+
+	# Ahead of pam_fprintd, which blocks on a swipe and would starve face auth.
+	insert_block "$PAM_FILE" || return 1
+	printf 'Enabled Gaze face unlock on the KDE lock screen (%s).\n' "$PAM_FILE"
+}
+
+disable() {
+	require_root disable || return 1
+
+	removed=0
+	remove_block "$PAM_FILE" || removed=$?
+	[ "$removed" -eq 1 ] && return 1
+
+	if [ -f "$(created_flag)" ]; then
+		rm -f "$PAM_FILE" "$(created_flag)"
+		printf 'Removed %s.\n' "$PAM_FILE"
+		return 0
+	fi
+	if [ "$removed" -eq 0 ]; then
+		printf 'Removed Gaze face unlock from the KDE lock screen (%s).\n' "$PAM_FILE"
+	else
+		printf 'Gaze face unlock was not enabled on the KDE lock screen (%s).\n' "$PAM_FILE"
+	fi
+}
+
+login_targets() {
+	found=0
+	for target in $LOGIN_PAM_FILES; do
+		if [ -f "$target" ]; then
+			printf '%s\n' "$target"
+			found=1
+		fi
+	done
+	[ "$found" -eq 1 ]
+}
+
+enable_login() {
+	require_root enable-login || return 1
+
+	if ! login_targets >/dev/null; then
+		printf 'No KDE login stack found (looked for: %s).\n' "$LOGIN_PAM_FILES" >&2
+		return 1
+	fi
+
+	login_targets | while read -r target; do
+		if has_gaze "$target"; then
+			printf 'Gaze is already referenced by %s.\n' "$target"
+			continue
+		fi
+		if stack_reaches_gaze "$target"; then
+			printf '%s already reaches Gaze through an included stack; leaving it alone.\n' "$target"
+			continue
+		fi
+		if insert_block "$target"; then
+			printf 'Enabled Gaze at the KDE login greeter (%s).\n' "$target"
+		fi
+	done
+
+	cat <<'EOF'
+
+The login greeter has no up-front biometric slot, so face auth there starts when
+you submit the login form -- press Enter with the password field empty.
+
+Your KWallet will ask for its password once after a face login, because no
+password was typed for it to reuse.
+EOF
+}
+
+disable_login() {
+	require_root disable-login || return 1
+
+	for target in $LOGIN_PAM_FILES; do
+		[ -f "$target" ] || continue
+		if remove_block "$target"; then
+			printf 'Removed Gaze from the KDE login greeter (%s).\n' "$target"
+		fi
+	done
+}
+
+status() {
+	rc=1
+	if [ ! -f "$PAM_FILE" ]; then
+		printf 'lock screen: not configured (%s does not exist)\n' "$PAM_FILE"
+	elif grep -qF "$BEGIN_MARKER" "$PAM_FILE" 2>/dev/null; then
+		printf 'lock screen: enabled (%s contains the Gaze block)\n' "$PAM_FILE"
+		rc=0
+	elif has_gaze "$PAM_FILE"; then
+		printf 'lock screen: enabled (%s references pam_gaze outside the managed block)\n' "$PAM_FILE"
+		rc=0
+	else
+		printf 'lock screen: disabled (%s does not reference pam_gaze)\n' "$PAM_FILE"
+	fi
+
+	for target in $LOGIN_PAM_FILES; do
+		[ -f "$target" ] || continue
+		if has_gaze "$target"; then
+			printf 'login greeter: enabled (%s)\n' "$target"
+		else
+			printf 'login greeter: disabled (%s)\n' "$target"
+		fi
+	done
+
+	return $rc
+}
+
+case "${1:-}" in
+enable) enable ;;
+disable) disable ;;
+enable-login) enable_login ;;
+disable-login) disable_login ;;
+status) status ;;
+-h | --help | help) usage ;;
+*)
+	usage >&2
+	exit 2
+	;;
+esac

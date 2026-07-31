@@ -31,6 +31,17 @@ rm -rf ~/.local/share/gnome-shell/extensions/gaze@gundulabs.com
 
 Repeat this for each desktop user who enabled lock screen face unlock. The last command removes any per-user copy of the extension (left by `gnome-extensions install` or a development checkout); without it GNOME keeps listing the extension as disabled.
 
+### Revert KDE face unlock
+
+Removing `gaze-kde` strips Gaze from `/etc/pam.d/kde-fingerprint` and, if you enabled it, from the login greeter stacks. To undo it without removing the package:
+
+```bash
+sudo gaze-kde-pam disable
+sudo gaze-kde-pam disable-login
+```
+
+A `pam_gaze` line you added to those files by hand, outside Gaze's marked block, is left in place — remove it yourself.
+
 ### Revert hyprlock face unlock
 
 If you enabled Gaze for hyprlock, remove the `module = hyprlock-gaze` line from the `auth { pam { ... } }` block in `~/.config/hypr/hyprlock.conf` (or restore `~/.config/hypr/hyprlock.conf.gaze-backup` if the installer created one). Repeat for every user that enabled it.
@@ -88,16 +99,16 @@ sudo systemctl disable gazed
 ::: code-group
 
 ```bash [Debian/Ubuntu]
-sudo apt remove --purge gaze gaze-gui gaze-gnome-extension gaze-hyprlock
+sudo apt remove --purge gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde
 sudo apt autoremove
 ```
 
 ```bash [Fedora and compatible]
-sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-hyprlock
+sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde
 ```
 
 ```bash [Arch Linux / Manjaro]
-sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin gaze-hyprlock-bin
+sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin gaze-hyprlock-bin gaze-kde-bin
 # AUR builds may also have installed -debug split packages:
 pacman -Q | awk '/^gaze.*-debug /{print $1}' | xargs -r sudo pacman -Rns --noconfirm
 ```

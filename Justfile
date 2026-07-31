@@ -301,7 +301,7 @@ package format: build-rust build-selinux && (package-prebuilt format)
 # Package already-built artifacts for a given packager
 [arg("format", pattern="deb|rpm|archlinux")]
 [group("package")]
-package-prebuilt format: _dist-packages (_nfpm "packaging/nfpm.yaml" format) (_nfpm "packaging/nfpm-gui.yaml" format) (_nfpm "packaging/nfpm-gnome-extension.yaml" format) (_nfpm "packaging/nfpm-hyprlock.yaml" format) && (_verify-package format)
+package-prebuilt format: _dist-packages (_nfpm "packaging/nfpm.yaml" format) (_nfpm "packaging/nfpm-gui.yaml" format) (_nfpm "packaging/nfpm-gnome-extension.yaml" format) (_nfpm "packaging/nfpm-hyprlock.yaml" format) (_nfpm "packaging/nfpm-kde.yaml" format) && (_verify-package format)
     @echo "Packages written to dist/packages/"
 
 # Remove all generated artifacts
@@ -368,6 +368,17 @@ dev-link-system: build-rust
 [group("dev")]
 dev-unlink-system:
     sudo scripts/dev-link-system.sh disable
+
+# Drive a PAM service the way KScreenLocker's greeter does; fails on a prompt.
+[group("dev")]
+kde-harness service="kde-fingerprint" rounds="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p dist
+    cc -Wall -Wextra -O2 -o dist/kde-pam-harness scripts/kde-pam-harness.c -lpam
+    echo "built dist/kde-pam-harness"
+    # Unprivileged, like kscreenlocker_greet; needs gazed running and a face enrolled.
+    ./dist/kde-pam-harness '{{ service }}' "$USER" '{{ rounds }}'
 
 # Show which installed Gaze paths are linked to this checkout
 [group("dev")]

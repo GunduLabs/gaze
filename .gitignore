@@ -26,3 +26,4 @@ docs/archive/
 # nix build outputs
 result
 result-*
+references/

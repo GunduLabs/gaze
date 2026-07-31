@@ -27,7 +27,7 @@ written by the maintainers of Gaze, so treat it as informed and neutral to the b
 | Templates at rest | Optional TPM-sealed encryption | Plaintext encodings | SQLite store | Local store |
 | Model integrity | SHA-256 verified on download | Bundled | SHA-256 pinned | Bundled |
 | Interfaces | CLI + GTK GUI + GNOME ext + Hyprland | CLI only | CLI only | GUI (Tauri) + CLI |
-| Desktop integration | GNOME lock screen, Hyprland/hyprlock | PAM only | PAM only | PAM + polkit |
+| Desktop integration | GNOME and KDE Plasma lock screens, Hyprland/hyprlock | PAM only | PAM only | PAM + polkit |
 | Configuration | `config.toml` + CLI + GUI | Manual ini file | Config file / Nix | GUI |
 | Guided multi-angle enrollment | Yes | Basic | Basic | Basic |
 | Built-in health check | Yes (one `doctor` command) | Partial | Partial | GUI status |

@@ -99,6 +99,8 @@ compatible `onnxruntime` instead of overriding `follows`.
 | `services.gaze.gui.enable` | `false` | Install `gaze-gui` |
 | `services.gaze.gnome.enable` | `false` | Install the GNOME Shell extension and the `gdm-face` PAM service |
 | `services.gaze.gnome.gdmFaceLogin` | `false` | Also enable face auth at the GDM login screen (read the [GNOME guide](/guide/gnome) first) |
+| `services.gaze.kde.lockScreen` | `false` | Define `kde-fingerprint` so the Plasma lock screen starts face unlock with no key press |
+| `services.gaze.kde.loginScreen` | `false` | Also run face auth in the Plasma Login Manager / SDDM stack (submit-driven; see the [KDE guide](/guide/kde)) |
 | `services.gaze.tpm.tcti` | `null` | `TPM2TOOLS_TCTI` for the daemon, e.g. `"device:/dev/tpm0"`. Only needed when neither `/dev/tpmrm0` nor `/dev/tpm0` is the right node |
 
 The gaze PAM rule is inserted ahead of both `pam_fprintd` and `pam_unix`, so
@@ -188,15 +190,38 @@ This modifies the `hyprlock` PAM service in place, so no `auth_pam_module`
 changes in `hyprlock.conf` are needed. See the [Hyprland guide](/guide/hyprland)
 for behavior details.
 
-### KDE Plasma and other desktops
+### KDE Plasma
+
+```nix
+services.gaze.kde.lockScreen = true;
+```
+
+That defines the `kde-fingerprint` PAM service, the slot KScreenLocker starts up
+front for biometrics, so face unlock begins with no key press. It also turns
+`security.pam.services.kde.gaze.enable` off, because the greeter runs the
+interactive `kde` service at the same time and two clients would fight over one
+camera. Don't set `kde.gaze.enable` by hand: that is the old submit-driven wiring
+and it conflicts with this one.
+
+The login greeter is separate and opt-in, because upstream gives it no up-front
+biometric slot, so face auth only runs when the login form is submitted:
+
+```nix
+services.gaze.kde.loginScreen = true;
+```
+
+KWallet will ask for its password once per session after a face login, since
+there was no password to hand it. See the [KDE Plasma guide](/guide/kde).
+
+The System Settings entry ships in the `gaze-kde` package rather than the NixOS
+module, so on Nix use `gaze add-face` or `services.gaze.gui.enable`.
+
+### Other desktops
 
 Add the relevant PAM service names, e.g.:
 
 ```nix
-security.pam.services = {
-  kde.gaze.enable = true; # Plasma lock screen
-  login.gaze.enable = true; # console/display-manager login
-};
+security.pam.services.login.gaze.enable = true; # console/display-manager login
 ```
 
 ### Uninstalling

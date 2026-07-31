@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Face Unlock
+Comment=Enrol faces and configure Gaze face authentication
+Icon=com.gundulabs.Gaze
+Exec=gaze-gui
+Terminal=false
+NoDisplay=true
+X-KDE-System-Settings-Parent-Category=system-administration
+X-KDE-Weight=60

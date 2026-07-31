@@ -1,5 +1,11 @@
 # GUI Guide
 
+::: tip On KDE Plasma
+`gaze-kde` adds a **Face Unlock** entry to System Settings that opens this same app,
+so you can reach it from where Plasma users expect to find it. See the
+[KDE Plasma guide](/guide/kde#system-settings).
+:::
+
 `gaze-gui` is the easiest way to enroll faces and check auth health.
 
 Launch it:

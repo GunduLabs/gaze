@@ -257,6 +257,18 @@ journalctl -f /usr/bin/gnome-shell
 
 For the unlock-dialog session mode (lock screen), changes only take effect after a fresh lock, not a shell reload.
 
+## Checking the KDE lock screen without Plasma
+
+`just kde-harness` drives a PAM service exactly the way KScreenLocker's greeter
+drives its noninteractive biometric slot: it renders error messages, discards
+info messages, and fails loudly if the module issues a prompt (which would hang
+the real greeter for the rest of the lock). Pass a service and a round count to
+emulate re-arming after a wrong password:
+
+```bash
+just kde-harness kde-fingerprint 2
+```
+
 ## Packaging
 
 ```bash

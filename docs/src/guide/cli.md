@@ -38,7 +38,7 @@ It checks:
 - access to the current PipeWire session and visibility of configured RGB/IR cameras
 - face enrollment and RGB/IR capture coverage for the current user
 - PAM module installation, permissions, and active PAM stack references
-- GNOME or hyprlock integration when running those desktops
+- GNOME, KDE, or hyprlock integration when running those desktops (on KDE it reports whether the `kde-fingerprint` slot runs Gaze)
 - TPM availability when encrypted template storage is enabled
 
 Every warning or error includes a suggested next step. Errors that can prevent Gaze from working make the command exit with status `1`; warnings are advisory and leave the exit status at `0`.

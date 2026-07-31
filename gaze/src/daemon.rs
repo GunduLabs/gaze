@@ -57,6 +57,13 @@ pub struct ClaimState {
     pub epoch: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CameraBinding {
+    Session(u32),
+    /// No PipeWire session to bind to; capture the seat's V4L2 device directly.
+    SeatDevice,
+}
+
 static CLAIM_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 fn claim_has_epoch(state: &Option<ClaimState>, epoch: u64) -> bool {
@@ -505,23 +512,28 @@ impl AuthDaemon {
         target_has_pipewire: bool,
         caller_has_pipewire: bool,
         active: Option<(u32, bool, bool)>,
-    ) -> Option<u32> {
-        // An active greeter holds the seat's camera ACL, so it outranks the target's leftover PipeWire socket.
+    ) -> Option<CameraBinding> {
         if caller_uid == 0
-            && let Some((active_uid, true, true)) = active
+            && let Some((active_uid, true, has_pipewire)) = active
         {
-            return Some(active_uid);
+            // An active greeter holds the seat's camera ACL, so it outranks the target's leftover PipeWire socket.
+            return Some(if has_pipewire {
+                CameraBinding::Session(active_uid)
+                // SDDM and Plasma Login Manager greeters have no `/run/user/<uid>` to bind to.
+            } else {
+                CameraBinding::SeatDevice
+            });
         }
         if target_has_pipewire {
-            return Some(target_uid);
+            return Some(CameraBinding::Session(target_uid));
         }
         if caller_uid != 0 {
-            return caller_has_pipewire.then_some(caller_uid);
+            return caller_has_pipewire.then_some(CameraBinding::Session(caller_uid));
         }
         None
     }
 
-    async fn camera_runtime_uid(caller_uid: u32, target_uid: u32) -> Option<u32> {
+    async fn camera_runtime_uid(caller_uid: u32, target_uid: u32) -> Option<CameraBinding> {
         let active = match gaze_core::dbus::get_active_session_uid_and_class().await {
             Ok((uid, class)) => Some((uid, class == "greeter", Self::has_pipewire_runtime(uid))),
             Err(_) => None,
@@ -570,8 +582,8 @@ impl AuthDaemon {
 #[cfg(test)]
 mod tests {
     use super::{
-        AuthDaemon, ClaimState, and_policy_unsatisfiable, auth_streams, claim_has_epoch,
-        eyes_from_kpss, hybrid_auth_passed, pipewire_runtime_update,
+        AuthDaemon, CameraBinding, ClaimState, and_policy_unsatisfiable, auth_streams,
+        claim_has_epoch, eyes_from_kpss, hybrid_auth_passed, pipewire_runtime_update,
     };
     use gaze_core::config::AuthSurface;
     use gaze_core::dbus::{ActiveSession, CaptureStatus};
@@ -884,7 +896,7 @@ mod tests {
         let attacker_active = Some((1000, false, true));
         assert_eq!(
             AuthDaemon::resolve_camera_uid(0, 1001, true, false, attacker_active),
-            Some(1001)
+            Some(CameraBinding::Session(1001))
         );
     }
 
@@ -971,12 +983,20 @@ mod tests {
         let greeter_active = Some((42, true, true));
         assert_eq!(
             AuthDaemon::resolve_camera_uid(0, 1001, false, false, greeter_active),
-            Some(42)
+            Some(CameraBinding::Session(42))
         );
-        // Greeter without a usable camera runtime -> refuse.
+    }
+
+    #[test]
+    fn a_pipewireless_greeter_captures_the_seat_device_instead_of_refusing() {
         assert_eq!(
             AuthDaemon::resolve_camera_uid(0, 1001, false, false, Some((42, true, false))),
-            None
+            Some(CameraBinding::SeatDevice)
+        );
+        // A leftover runtime dir for the target loses to the live greeter.
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(0, 1001, true, false, Some((42, true, false))),
+            Some(CameraBinding::SeatDevice)
         );
     }
 
@@ -986,12 +1006,7 @@ mod tests {
         let greeter_active = Some((42, true, true));
         assert_eq!(
             AuthDaemon::resolve_camera_uid(0, 1001, true, false, greeter_active),
-            Some(42)
-        );
-        // Greeter active but without PipeWire -> fall back to the target's runtime.
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, true, false, Some((42, true, false))),
-            Some(1001)
+            Some(CameraBinding::Session(42))
         );
     }
 
@@ -1000,11 +1015,24 @@ mod tests {
         // Admin (non-root) acting for another user after a polkit check uses their own camera.
         assert_eq!(
             AuthDaemon::resolve_camera_uid(1000, 1001, false, true, Some((1000, false, true))),
-            Some(1000)
+            Some(CameraBinding::Session(1000))
         );
         // ...but refuse if even the caller has no camera session.
         assert_eq!(
             AuthDaemon::resolve_camera_uid(1000, 1001, false, false, None),
+            None
+        );
+    }
+
+    #[test]
+    fn only_a_privileged_caller_at_a_greeter_reaches_the_seat_device() {
+        // Must never let an unprivileged caller borrow a device for someone else.
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(1000, 1001, false, false, Some((42, true, false))),
+            None
+        );
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(0, 1001, false, false, Some((1000, false, false))),
             None
         );
     }
@@ -1240,6 +1268,16 @@ pub fn set_pipewire_runtime_for_uid(uid: u32) {
     if let Some(target) = pipewire_runtime_update(current.as_deref(), uid) {
         unsafe {
             std::env::set_var("XDG_RUNTIME_DIR", target);
+        }
+    }
+}
+
+/// A stale `XDG_RUNTIME_DIR` makes `pipewiresrc` block on a dead socket (#300).
+pub fn clear_pipewire_runtime() {
+    let _guard = PIPEWIRE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if std::env::var_os("XDG_RUNTIME_DIR").is_some() {
+        unsafe {
+            std::env::remove_var("XDG_RUNTIME_DIR");
         }
     }
 }
@@ -1723,7 +1761,7 @@ impl AuthDaemon {
             Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_FACES).await?;
         }
 
-        let Some(camera_uid) = Self::camera_runtime_uid(caller_uid, target_uid).await else {
+        let Some(binding) = Self::camera_runtime_uid(caller_uid, target_uid).await else {
             return Err(fdo::Error::AccessDenied(
                 "refusing face auth: no camera belongs to the target user's session".into(),
             ));
@@ -1753,10 +1791,13 @@ impl AuthDaemon {
             username = %username,
             target_uid,
             caller_uid,
-            camera_uid,
+            ?binding,
             "Claimed daemon"
         );
-        set_pipewire_runtime_for_uid(camera_uid);
+        match binding {
+            CameraBinding::Session(camera_uid) => set_pipewire_runtime_for_uid(camera_uid),
+            CameraBinding::SeatDevice => clear_pipewire_runtime(),
+        }
         let epoch = CLAIM_EPOCH.fetch_add(1, Ordering::Relaxed);
         *state = Some(ClaimState {
             username,
