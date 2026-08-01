@@ -1,0 +1,220 @@
+# Template for the source RPM consumed by Copr. `just srpm` fills in the
+# ${...} placeholders (version, release, bundled ONNX Runtime release, and the
+# packaging/*.sh scriptlet bodies) so the scriptlets have a single source of
+# truth shared with the nfpm packages.
+%global ort_version ${ORT_VERSION}
+%global ort_libdir %{_libdir}/%{name}
+%global extension_uuid gaze@gundulabs.com
+
+# gazed links a bundled ONNX Runtime; keep the private library out of rpm's
+# automatic provides and requires so it neither satisfies nor demands a system
+# libonnxruntime.
+%global __provides_exclude_from ^%{ort_libdir}/.*\\.so.*$
+%global __requires_exclude ^libonnxruntime\\.so.*$
+%global __brp_check_rpaths %{nil}
+
+# Built with -Cdebuginfo=0, so there is nothing to split out.
+%global debug_package %{nil}
+
+Name:           gaze
+Version:        ${VERSION}
+Release:        ${PACKAGE_RELEASE}%{?dist}
+Summary:        Daemon, CLI, and PAM integration for Gaze
+License:        MIT
+URL:            https://gaze.gundulabs.com
+Vendor:         Gundu Labs
+
+Source0:        %{name}-%{version}.tar.gz
+Source1:        vendor.tar.zst
+Source2:        cargo-vendor-config.toml
+Source3:        onnxruntime-linux-x64-%{ort_version}.tgz
+Source4:        onnxruntime-linux-aarch64-%{ort_version}.tgz
+
+# Upstream ONNX Runtime ships prebuilt libraries for these two only.
+ExclusiveArch:  x86_64 aarch64
+
+%ifarch x86_64
+%global ort_source %{SOURCE3}
+%endif
+%ifarch aarch64
+%global ort_source %{SOURCE4}
+%endif
+
+BuildRequires:  cargo
+BuildRequires:  rust
+BuildRequires:  gcc
+BuildRequires:  gcc-c++
+BuildRequires:  clang
+BuildRequires:  clang-devel
+BuildRequires:  pkgconfig
+BuildRequires:  opencv-devel
+BuildRequires:  libv4l-devel
+BuildRequires:  pam-devel
+BuildRequires:  tpm2-tss-devel
+BuildRequires:  gtk4-devel
+BuildRequires:  libadwaita-devel
+BuildRequires:  gstreamer1-devel
+BuildRequires:  gstreamer1-plugins-base-devel
+BuildRequires:  openssl-devel
+BuildRequires:  checkpolicy
+BuildRequires:  policycoreutils
+BuildRequires:  desktop-file-utils
+BuildRequires:  systemd-rpm-macros
+BuildRequires:  zstd
+
+Requires:       pam
+Recommends:     authselect
+Provides:       bundled(onnxruntime) = %{ort_version}
+
+%description
+Gaze is a face authentication system for Linux. This package contains the
+gazed daemon, the gaze command line client, the PAM modules, and the
+authselect profile used to wire face authentication into system-auth.
+
+%package gui
+Summary:        GTK4/Adwaita GUI for Gaze
+Recommends:     %{name}%{?_isa} = %{version}-%{release}
+
+%description gui
+Graphical enrollment and configuration front end for Gaze. It talks to gazed
+over the system bus, so install the gaze package as well.
+
+%package gnome-extension
+Summary:        GNOME Shell extension for Gaze
+Requires:       gnome-shell
+Recommends:     %{name}%{?_isa} = %{version}-%{release}
+Recommends:     policycoreutils
+
+%description gnome-extension
+GNOME Shell extension and GDM integration that start face authentication from
+the GNOME lock screen and login screen.
+
+%package hyprlock
+Summary:        Hyprlock PAM integration for Gaze
+Recommends:     %{name}%{?_isa} = %{version}-%{release}
+
+%description hyprlock
+PAM service files that let hyprlock authenticate with Gaze, either on its own
+or simultaneously with a password.
+
+%prep
+%autosetup
+tar --zstd -xf %{SOURCE1}
+mkdir -p .cargo
+cp -p %{SOURCE2} .cargo/config.toml
+mkdir -p ort
+tar -xzf %{ort_source} --strip-components=1 -C ort
+
+%build
+# Mirrors the `opencv_env` probe in the Justfile: the opencv crate only looks
+# for the opencv4/opencv pkg-config names.
+if ! pkg-config --exists opencv4 && ! pkg-config --exists opencv && pkg-config --exists opencv5; then
+    export OPENCV_PKGCONFIG_NAME=opencv5
+fi
+
+# Split like `just build-rust`: gazed's `detection` feature must not unify ONNX
+# Runtime into the clients, whose constructors crash on non-AVX2 CPUs.
+ORT_STRATEGY=system \
+ORT_LIB_LOCATION="$PWD/ort/lib" \
+ORT_PREFER_DYNAMIC_LINK=1 \
+RUSTFLAGS="-Cdebuginfo=0 -Clink-arg=-Wl,-rpath,%{ort_libdir}" \
+    cargo build --release --locked --offline -p gaze
+
+RUSTFLAGS="-Cdebuginfo=0" \
+    cargo build --release --locked --offline -p gaze-cli -p gaze-gui -p pam-gaze -p pam-gaze-grosshack
+
+checkmodule -M -m -o gaze-gdm-camera.mod packaging/selinux/gaze-gdm-camera.te
+semodule_package -o gaze-gdm-camera.pp -m gaze-gdm-camera.mod
+
+%install
+install -Dpm 0755 target/release/gazed %{buildroot}%{_bindir}/gazed
+install -Dpm 0755 target/release/gaze %{buildroot}%{_bindir}/gaze
+install -Dpm 0644 packaging/config/config.toml %{buildroot}%{_sysconfdir}/gaze/config.toml
+install -Dpm 0644 packaging/config/com.gundulabs.Gaze.conf %{buildroot}%{_sysconfdir}/dbus-1/system.d/com.gundulabs.Gaze.conf
+install -Dpm 0644 packaging/config/com.gundulabs.gaze.policy %{buildroot}%{_datadir}/polkit-1/actions/com.gundulabs.gaze.policy
+install -Dpm 0644 packaging/config/gazed.service %{buildroot}%{_unitdir}/gazed.service
+install -Dpm 0755 target/release/libpam_gaze.so %{buildroot}%{_libdir}/security/pam_gaze.so
+install -Dpm 0755 target/release/libpam_gaze_grosshack.so %{buildroot}%{_libdir}/security/pam_gaze_grosshack.so
+
+install -dm 0755 %{buildroot}%{_datadir}/authselect/vendor/gaze
+cp -p packaging/authselect/custom/gaze/* %{buildroot}%{_datadir}/authselect/vendor/gaze/
+
+install -dm 0755 %{buildroot}%{ort_libdir}
+cp -aP ort/lib/libonnxruntime.so* %{buildroot}%{ort_libdir}/
+
+install -Dpm 0755 target/release/gaze-gui %{buildroot}%{_bindir}/gaze-gui
+install -Dpm 0644 packaging/gui/com.gundulabs.Gaze.desktop %{buildroot}%{_datadir}/applications/com.gundulabs.Gaze.desktop
+install -Dpm 0644 packaging/gui/com.gundulabs.Gaze.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/com.gundulabs.Gaze.svg
+install -Dpm 0644 packaging/gui/com.gundulabs.Gaze.metainfo.xml %{buildroot}%{_datadir}/metainfo/com.gundulabs.Gaze.metainfo.xml
+
+install -Dpm 0644 gnome-shell-extension/metadata.json %{buildroot}%{_datadir}/gnome-shell/extensions/%{extension_uuid}/metadata.json
+install -Dpm 0644 gnome-shell-extension/extension.js %{buildroot}%{_datadir}/gnome-shell/extensions/%{extension_uuid}/extension.js
+install -Dpm 0644 gnome-shell-extension/prefs.js %{buildroot}%{_datadir}/gnome-shell/extensions/%{extension_uuid}/prefs.js
+install -Dpm 0644 packaging/config/org.gnome.shell.extensions.gaze.gschema.xml %{buildroot}%{_datadir}/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml
+install -Dpm 0644 packaging/gdm/00-gaze-defaults %{buildroot}%{_sysconfdir}/dconf/db/gdm.d/00-gaze-defaults
+install -Dpm 0644 packaging/gdm/profile %{buildroot}%{_datadir}/gaze/dconf-profile-gdm
+install -Dpm 0644 packaging/pam/gdm-face %{buildroot}%{_sysconfdir}/pam.d/gdm-face
+install -Dpm 0644 gaze-gdm-camera.pp %{buildroot}%{_datadir}/gaze/gaze-gdm-camera.pp
+
+install -Dpm 0644 packaging/pam/hyprlock-gaze %{buildroot}%{_sysconfdir}/pam.d/hyprlock-gaze
+install -Dpm 0644 packaging/pam/hyprlock-gaze-simultaneous %{buildroot}%{_sysconfdir}/pam.d/hyprlock-gaze-simultaneous
+
+%check
+desktop-file-validate %{buildroot}%{_datadir}/applications/com.gundulabs.Gaze.desktop
+
+%post
+${SCRIPTLET_MAIN_POST}
+
+%post gnome-extension
+${SCRIPTLET_EXTENSION_POST}
+
+%postun gnome-extension
+${SCRIPTLET_EXTENSION_POSTUN}
+
+%post hyprlock
+${SCRIPTLET_HYPRLOCK_POST}
+
+%postun hyprlock
+${SCRIPTLET_HYPRLOCK_POSTUN}
+
+%files
+%license LICENSE
+%doc README.md
+%{_bindir}/gazed
+%{_bindir}/gaze
+%dir %{_sysconfdir}/gaze
+%config(noreplace) %{_sysconfdir}/gaze/config.toml
+%config(noreplace) %{_sysconfdir}/dbus-1/system.d/com.gundulabs.Gaze.conf
+%{_datadir}/polkit-1/actions/com.gundulabs.gaze.policy
+%{_unitdir}/gazed.service
+%{_libdir}/security/pam_gaze.so
+%{_libdir}/security/pam_gaze_grosshack.so
+%{_datadir}/authselect/vendor/gaze/
+%dir %{ort_libdir}
+%{ort_libdir}/libonnxruntime.so*
+
+%files gui
+%license LICENSE
+%{_bindir}/gaze-gui
+%{_datadir}/applications/com.gundulabs.Gaze.desktop
+%{_datadir}/icons/hicolor/scalable/apps/com.gundulabs.Gaze.svg
+%{_datadir}/metainfo/com.gundulabs.Gaze.metainfo.xml
+
+%files gnome-extension
+%license LICENSE
+%{_datadir}/gnome-shell/extensions/%{extension_uuid}/
+%{_datadir}/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml
+%config(noreplace) %{_sysconfdir}/dconf/db/gdm.d/00-gaze-defaults
+%config(noreplace) %{_sysconfdir}/pam.d/gdm-face
+%dir %{_datadir}/gaze
+%{_datadir}/gaze/dconf-profile-gdm
+%{_datadir}/gaze/gaze-gdm-camera.pp
+
+%files hyprlock
+%license LICENSE
+%config(noreplace) %{_sysconfdir}/pam.d/hyprlock-gaze
+%config(noreplace) %{_sysconfdir}/pam.d/hyprlock-gaze-simultaneous
+
+%changelog
+* ${CHANGELOG_DATE} Gundu Labs <maintainers@gundulabs.com> - ${VERSION}-${PACKAGE_RELEASE}
+- Release ${VERSION}. See https://github.com/GunduLabs/gaze/releases

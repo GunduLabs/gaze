@@ -77,6 +77,14 @@ sudo dnf makecache
 sudo dnf install gaze gaze-gui
 ```
 
+```bash [Fedora via Copr]
+# Alternative to the Gundu Labs dnf repository above; do not enable both.
+# Copr builds and signs these packages on Fedora's own builders.
+sudo dnf install dnf-plugins-core
+sudo dnf copr enable @gundulabs/gaze
+sudo dnf install gaze gaze-gui
+```
+
 ```bash [Arch Linux / Manjaro / CachyOS]
 # Requires an AUR helper such as yay or paru. yay shown here.
 yay -S --needed gaze-bin gaze-gui-bin

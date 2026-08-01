@@ -70,6 +70,14 @@ sudo dnf makecache
 sudo dnf install gaze gaze-gui
 ```
 
+**Fedora via Copr** (alternative to the repository above; do not enable both)
+
+```bash
+sudo dnf install dnf-plugins-core
+sudo dnf copr enable @gundulabs/gaze
+sudo dnf install gaze gaze-gui
+```
+
 **Arch / Manjaro / CachyOS**
 
 ```bash
