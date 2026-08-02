@@ -18,7 +18,7 @@ written by the maintainers of Gaze, so treat it as informed and neutral to the b
 |---|---|---|---|---|
 | Language | Rust | Python + C | Rust | C++ + Tauri |
 | Face detection | SCRFD | dlib (HOG/CNN) | SCRFD | YOLOv8-face |
-| Recognition | ArcFace / ResNet50 | dlib ResNet (128-d) | ArcFace (`w600k_r50`) | EdgeFace |
+| Recognition | ArcFace (MobileFaceNet / ResNet50) | dlib ResNet (128-d) | ArcFace (`w600k_r50`) | EdgeFace |
 | Inference runtime | ONNX Runtime | dlib | ONNX Runtime | ONNX Runtime |
 | IR camera support | Yes, hybrid RGB+IR combining | Yes | Yes, built-in UVC emitter | Yes |
 | Fingerprint | No | No | No | Yes |

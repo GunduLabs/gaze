@@ -164,15 +164,11 @@ impl SecurityLevel {
     }
 
     pub fn hybrid_policy_from_index(index: usize) -> String {
-        if index == 0 {
-            String::new()
-        } else {
-            HYBRID_POLICY_OPTIONS
-                .get(index)
-                .copied()
-                .unwrap_or_default()
-                .to_string()
-        }
+        HYBRID_POLICY_OPTIONS
+            .get(index)
+            .copied()
+            .unwrap_or("default")
+            .to_string()
     }
 
     // Accessors are total: an unknown level falls back to the medium models rather
@@ -204,6 +200,22 @@ impl SecurityLevel {
                 tracing::warn!("invalid security level {other:?}; using medium recognizer");
                 "w600k_mbf.onnx"
             }
+        }
+    }
+
+    // The quality tier a level actually resolves to. Derived from the model accessors so a
+    // UI pre-filling the custom rows from a preset can never drift from what the daemon loads.
+    pub fn effective_detector_quality(&self) -> &'static str {
+        match self.detector() {
+            "det_10g.onnx" => "accurate",
+            _ => "standard",
+        }
+    }
+
+    pub fn effective_recognizer_quality(&self) -> &'static str {
+        match self.recognizer() {
+            "w600k_r50.onnx" => "accurate",
+            _ => "standard",
         }
     }
 

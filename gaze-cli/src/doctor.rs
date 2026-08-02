@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use console::{Term, style};
-use gaze_core::config::{CONFIG_PATH, Config};
+use gaze_core::config::{
+    CONFIG_PATH, Config, MAX_LIVENESS_THRESHOLD, MIN_LIVENESS_MAX_FRAMES, MIN_LIVENESS_THRESHOLD,
+};
 use gaze_core::dbus::{
     GazeProxy, dbus_error_message, dbus_is_file_not_found, dbus_is_not_activatable,
     try_benchmark_from_daemon,
@@ -454,17 +456,18 @@ fn config_findings(config: &Config) -> Vec<Check> {
 
     if config.liveness.enabled {
         if !config.liveness.threshold.is_finite()
-            || !(0.0..=1.0).contains(&config.liveness.threshold)
+            || !(MIN_LIVENESS_THRESHOLD..=MAX_LIVENESS_THRESHOLD)
+                .contains(&config.liveness.threshold)
         {
             error(
                 format!(
-                    "liveness.threshold must be between 0.0 and 1.0, got {}",
+                    "liveness.threshold must be between {MIN_LIVENESS_THRESHOLD} and {MAX_LIVENESS_THRESHOLD}, got {}",
                     config.liveness.threshold
                 ),
-                "Set liveness.threshold to a value between 0.0 and 1.0.",
+                "Set liveness.threshold to a value between 0.10 and 1.0.",
             );
         }
-        if config.liveness.max_frames == 0 {
+        if config.liveness.max_frames < MIN_LIVENESS_MAX_FRAMES {
             error(
                 "liveness.max_frames is zero".to_string(),
                 "Set liveness.max_frames to a positive value (the default is 40).",
@@ -1236,6 +1239,11 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
                 "Verify PipeWire is running and the IR device is connected.",
             ),
         }
+    } else if let Some((vid, pid)) = gaze_core::camera::parse_usb_spec(ir) {
+        report.pass(
+            "IR camera",
+            format!("resolves the IR node for USB {vid:04x}:{pid:04x} at runtime"),
+        );
     } else {
         report.warning(
             "IR camera",

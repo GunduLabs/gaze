@@ -333,8 +333,8 @@ impl FaceChecker {
                 let w = frame.cols() as f32;
                 let h = frame.rows() as f32;
                 let max_dim = w.max(h);
-                let top = (max_dim - h) / 2.0;
-                let left = (max_dim - w) / 2.0;
+                let top = ((max_dim - h) / 2.0).floor();
+                let left = ((max_dim - w) / 2.0).floor();
 
                 let x1_unpadded = x1 - left;
                 let y1_unpadded = y1 - top;

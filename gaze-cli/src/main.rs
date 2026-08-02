@@ -216,14 +216,14 @@ enum Commands {
     RemoveFace {
         #[arg(short, long)]
         user: Option<String>,
-        #[arg(help = "The name of the face to remove")]
+        #[arg(help = "The name of the face to remove", add = ArgValueCompleter::new(face_completer))]
         face: String,
     },
     /// Rename a face for a user
     RenameFace {
         #[arg(short, long)]
         user: Option<String>,
-        #[arg(help = "Current face name")]
+        #[arg(help = "Current face name", add = ArgValueCompleter::new(face_completer))]
         from: String,
         #[arg(help = "New face name")]
         to: String,
@@ -291,10 +291,11 @@ async fn run_config_wizard(
                 )
             } else {
                 (
-                    "accurate".to_string(),
-                    "accurate".to_string(),
-                    0.6,
-                    String::new(),
+                    config.security.effective_detector_quality().to_string(),
+                    config.security.effective_recognizer_quality().to_string(),
+                    // Presets carry an f32 threshold; round so the prompt shows 0.4, not 0.4000000059604645.
+                    (config.security.threshold() as f64 * 100.0).round() / 100.0,
+                    config.security.hybrid_policy().to_string(),
                 )
             };
 

@@ -2342,7 +2342,7 @@ impl AuthDaemon {
                 tokio::select! {
                     _ = &mut rx => {
                         info!("EnrollStart: cancelled");
-                        let _ = Self::enroll_status(&ctxt, &face_name, 0, max_steps, true, EnrollPrompt::Cancelled, -1.0).await;
+                        let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::Cancelled, -1.0).await;
                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                         return;
                     }
@@ -2425,7 +2425,7 @@ impl AuthDaemon {
                             }
                             EnrollMsg::Error(e) => {
                                 error!("Enrollment error: {e}");
-                                let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::CameraFailed, -1.0).await;
+                                let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::CameraFailed, -1.0).await;
                                 stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                                 return;
                             }
