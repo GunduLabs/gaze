@@ -2831,7 +2831,8 @@ impl AuthDaemon {
         let claim = self.check_claim(&header).await?;
         self.ensure_auth_not_aborted(&header).await?;
 
-        let resumed = self.resume_pending.swap(false, Ordering::SeqCst);
+        let resumed = self.resume_pending.load(Ordering::SeqCst);
+        let resume_pending = self.resume_pending.clone();
 
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
@@ -2943,6 +2944,8 @@ impl AuthDaemon {
                     return;
                 }
             }
+
+            resume_pending.store(false, Ordering::SeqCst);
 
             info!(
                 liveness_enabled = liveness_cfg.enabled,

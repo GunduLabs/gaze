@@ -259,8 +259,10 @@ Use it when your lock screen unlocks itself the moment you lock it manually. Loc
 
 | Value | Effect |
 | --- | --- |
-| `all` (default) | Every face authentication waits, `sudo` and polkit prompts included. |
+| `all` (default) | Every face authentication prompt waits, `sudo` and polkit prompts included. |
 | `screen_lock` | Only screen lockers wait. `sudo`, `su`, `doas`, `run0`, polkit, `pkexec` and display-manager greeters start scanning immediately. |
+
+Neither scope delays `gaze auth` or the GUI's test button. Those call the daemon directly, with no PAM prompt and no locker to step away from, so they always start scanning at once. The `resume_grace_ms` wait still applies to them, because that one is about the camera and display settling after suspend.
 
 If you want the delay for your lock screen but not a slow `sudo`, use `screen_lock`:
 
@@ -270,7 +272,7 @@ start_delay_ms = 3000
 start_delay_scope = "screen_lock"
 ```
 
-Gaze tells these apart by the PAM service name of the prompt, which is the only signal that works everywhere. On GNOME, for example, the same process drives both the lock screen and polkit dialogs, so nothing about the caller itself distinguishes them. A service Gaze does not recognize counts as a screen lock, so an unusual locker keeps the delay you configured rather than silently losing it. `gdm-face` counts as a screen lock too, because GDM uses it for both the greeter and the lock screen.
+Gaze tells these apart by the PAM service name of the prompt, which is the only signal that works everywhere. On GNOME, for example, the same process drives both the lock screen and polkit dialogs, so nothing about the caller itself distinguishes them. A service Gaze does not recognize counts as a screen lock, so an unusual locker keeps the delay you configured rather than silently losing it. `gdm-face` counts as a screen lock by name, because GDM uses it for both the greeter and the lock screen; when the active session is a greeter the daemon reclassifies it as a login so the greeter does not wait.
 
 To see what your prompts report, watch the daemon while you trigger one:
 

@@ -502,6 +502,9 @@ pub enum AuthSurface {
     ScreenLock,
     Elevation,
     Login,
+    /// No PAM prompt at all: `gaze auth`, the GUI test button, anything that
+    /// calls the daemon directly. There is no locker to step away from.
+    Direct,
 }
 
 const ELEVATION_SERVICES: [&str; 9] = [
@@ -527,6 +530,7 @@ const LOGIN_SERVICES: [&str; 6] = [
 
 pub fn classify_pam_service(service: Option<&str>) -> AuthSurface {
     match service {
+        None | Some("") => AuthSurface::Direct,
         Some(name) if ELEVATION_SERVICES.contains(&name) => AuthSurface::Elevation,
         Some(name) if LOGIN_SERVICES.contains(&name) => AuthSurface::Login,
         _ => AuthSurface::ScreenLock,
@@ -578,6 +582,9 @@ impl AuthConfig {
     }
 
     fn start_delay_applies_to(&self, surface: AuthSurface) -> bool {
+        if surface == AuthSurface::Direct {
+            return false;
+        }
         match self.start_delay_scope() {
             "screen_lock" => surface == AuthSurface::ScreenLock,
             _ => true,
@@ -1433,8 +1440,40 @@ mod tests {
                 "{service}"
             );
         }
+    }
 
-        assert_eq!(classify_pam_service(None), AuthSurface::ScreenLock);
+    #[test]
+    fn callers_with_no_pam_service_are_direct() {
+        assert_eq!(classify_pam_service(None), AuthSurface::Direct);
+        assert_eq!(classify_pam_service(Some("")), AuthSurface::Direct);
+    }
+
+    #[test]
+    fn direct_callers_never_wait_out_the_start_delay() {
+        for scope in ["screen_lock", "all"] {
+            let auth = AuthConfig {
+                start_delay_ms: 3000,
+                resume_grace_ms: 5000,
+                start_delay_scope: scope.to_string(),
+                ..Default::default()
+            };
+
+            assert_eq!(
+                auth.effective_start_delay_ms(false, AuthSurface::Direct),
+                0,
+                "{scope}"
+            );
+            assert_eq!(
+                auth.effective_start_delay_ms(true, AuthSurface::Direct),
+                5000,
+                "{scope}"
+            );
+            assert_eq!(
+                auth.effective_start_delay_ms(false, AuthSurface::ScreenLock),
+                3000,
+                "{scope}"
+            );
+        }
     }
 
     #[test]
