@@ -462,11 +462,6 @@ jobs:
       DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
 
     steps:
-      - name: Checkout source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          ref: ${{ inputs.tag || github.ref }}
-
       - name: Install srpm tooling
         run: |
           dnf install -y \
@@ -481,7 +476,11 @@ jobs:
             rpm-build \
             rpm-sign
 
-      # `just srpm` runs `git archive HEAD` to produce Source0.
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
       - name: Trust workspace for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
