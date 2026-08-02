@@ -439,11 +439,18 @@ async fn run_config_wizard(
         .default(config.auth.abort_if_lid_closed)
         .interact()?;
 
-    config.auth.require_confirmation = Confirm::with_theme(&theme)
+    config.auth.require_confirmation_lock_screen = Confirm::with_theme(&theme)
         .with_prompt(
-            "Require confirmation (press Enter/Authenticate/OK) to authorize after face matches",
+            "Require confirmation (press Enter/Authenticate/OK) on the lock screen after face matches",
         )
-        .default(config.auth.require_confirmation)
+        .default(config.auth.require_confirmation_lock_screen)
+        .interact()?;
+
+    config.auth.require_confirmation_elevation = Confirm::with_theme(&theme)
+        .with_prompt(
+            "Require confirmation (press Enter/Authenticate/OK) for elevated auth (sudo, polkit, etc.) after face matches",
+        )
+        .default(config.auth.require_confirmation_elevation)
         .interact()?;
 
     config.auth.resume_grace_ms = Input::with_theme(&theme)
@@ -1593,8 +1600,13 @@ async fn run() -> anyhow::Result<()> {
                 );
                 println!(
                     "{} {}",
-                    style("auth.require_confirmation:").bold(),
-                    config.auth.require_confirmation
+                    style("auth.require_confirmation_lock_screen:").bold(),
+                    config.auth.require_confirmation_lock_screen
+                );
+                println!(
+                    "{} {}",
+                    style("auth.require_confirmation_elevation:").bold(),
+                    config.auth.require_confirmation_elevation
                 );
                 println!(
                     "{} {}",

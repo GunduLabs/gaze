@@ -222,8 +222,12 @@ pub fn confirmation_accepted(response: Option<&str>) -> bool {
     matches!(response, Some(CONFIRMATION_ACK))
 }
 
-pub fn confirmation_required(auth: Option<&gaze_core::config::AuthConfig>) -> bool {
-    auth.is_none_or(|auth| auth.require_confirmation)
+pub fn confirmation_required(
+    auth: Option<&gaze_core::config::AuthConfig>,
+    service: Option<&str>,
+) -> bool {
+    let surface = gaze_core::config::classify_pam_service(service);
+    auth.is_none_or(|auth| auth.requires_confirmation(surface))
 }
 
 pub struct AuthState {
@@ -861,22 +865,59 @@ mod tests {
 
     #[test]
     fn confirmation_is_required_when_the_config_could_not_be_read() {
-        assert!(confirmation_required(None));
+        assert!(confirmation_required(None, None));
+        assert!(confirmation_required(None, Some("sudo")));
+        assert!(confirmation_required(None, Some("swaylock")));
     }
 
     #[test]
-    fn confirmation_follows_the_config_when_it_is_available() {
+    fn confirmation_follows_the_lock_screen_toggle() {
         let off = gaze_core::config::AuthConfig {
-            require_confirmation: false,
+            require_confirmation_lock_screen: false,
             ..Default::default()
         };
-        assert!(!confirmation_required(Some(&off)));
+        assert!(!confirmation_required(Some(&off), Some("swaylock")));
+        assert!(!confirmation_required(Some(&off), Some("gdm-password")));
 
         let on = gaze_core::config::AuthConfig {
-            require_confirmation: true,
+            require_confirmation_lock_screen: true,
             ..Default::default()
         };
-        assert!(confirmation_required(Some(&on)));
+        assert!(confirmation_required(Some(&on), Some("swaylock")));
+        assert!(confirmation_required(Some(&on), Some("gdm-password")));
+    }
+
+    #[test]
+    fn confirmation_follows_the_elevation_toggle_independently() {
+        let lock_only = gaze_core::config::AuthConfig {
+            require_confirmation_lock_screen: true,
+            require_confirmation_elevation: false,
+            ..Default::default()
+        };
+        assert!(confirmation_required(Some(&lock_only), Some("swaylock")));
+        assert!(!confirmation_required(Some(&lock_only), Some("sudo")));
+
+        let elevation_only = gaze_core::config::AuthConfig {
+            require_confirmation_lock_screen: false,
+            require_confirmation_elevation: true,
+            ..Default::default()
+        };
+        assert!(!confirmation_required(
+            Some(&elevation_only),
+            Some("swaylock")
+        ));
+        assert!(confirmation_required(Some(&elevation_only), Some("sudo")));
+    }
+
+    #[test]
+    fn direct_callers_never_require_confirmation() {
+        let both_on = gaze_core::config::AuthConfig {
+            require_confirmation_lock_screen: true,
+            require_confirmation_elevation: true,
+            ..Default::default()
+        };
+        assert!(!confirmation_required(Some(&both_on), None));
+        assert!(!confirmation_required(Some(&both_on), Some("")));
     }
 
     #[test]

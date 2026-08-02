@@ -548,7 +548,9 @@ pub struct AuthConfig {
     #[serde(default = "default_true")]
     pub abort_if_lid_closed: bool,
     #[serde(default = "default_false")]
-    pub require_confirmation: bool,
+    pub require_confirmation_lock_screen: bool,
+    #[serde(default = "default_false")]
+    pub require_confirmation_elevation: bool,
     #[serde(default = "default_resume_grace_ms")]
     pub resume_grace_ms: u64,
     #[serde(default = "default_start_delay_ms")]
@@ -570,6 +572,14 @@ fn default_start_delay_ms() -> u64 {
 }
 
 impl AuthConfig {
+    pub fn requires_confirmation(&self, surface: AuthSurface) -> bool {
+        match surface {
+            AuthSurface::Elevation => self.require_confirmation_elevation,
+            AuthSurface::ScreenLock | AuthSurface::Login => self.require_confirmation_lock_screen,
+            AuthSurface::Direct => false,
+        }
+    }
+
     pub fn start_delay_scope(&self) -> &str {
         match self.start_delay_scope.as_str() {
             "screen_lock" => "screen_lock",
@@ -694,7 +704,8 @@ impl Default for AuthConfig {
         Self {
             abort_if_ssh: true,
             abort_if_lid_closed: true,
-            require_confirmation: false,
+            require_confirmation_lock_screen: false,
+            require_confirmation_elevation: false,
             resume_grace_ms: default_resume_grace_ms(),
             start_delay_ms: default_start_delay_ms(),
             start_delay_scope: default_start_delay_scope(),
@@ -1144,7 +1155,8 @@ mod tests {
             auth: AuthConfig {
                 abort_if_ssh: true,
                 abort_if_lid_closed: false,
-                require_confirmation: true,
+                require_confirmation_lock_screen: true,
+                require_confirmation_elevation: true,
                 resume_grace_ms: 3000,
                 start_delay_ms: 1500,
                 start_delay_scope: "screen_lock".to_string(),
@@ -1182,7 +1194,8 @@ mod tests {
         assert_eq!(loaded.cameras.dark_luma_threshold, 55);
         assert!(loaded.auth.abort_if_ssh);
         assert!(!loaded.auth.abort_if_lid_closed);
-        assert!(loaded.auth.require_confirmation);
+        assert!(loaded.auth.require_confirmation_lock_screen);
+        assert!(loaded.auth.require_confirmation_elevation);
         assert_eq!(loaded.auth.resume_grace_ms, 3000);
         assert_eq!(loaded.auth.start_delay_ms, 1500);
         assert_eq!(loaded.auth.start_delay_scope(), "screen_lock");
@@ -1241,7 +1254,8 @@ mod tests {
         assert_eq!(config.cameras.dark_luma_threshold, 20);
         assert!(config.auth.abort_if_ssh);
         assert!(config.auth.abort_if_lid_closed);
-        assert!(!config.auth.require_confirmation);
+        assert!(!config.auth.require_confirmation_lock_screen);
+        assert!(!config.auth.require_confirmation_elevation);
         assert_eq!(config.auth.start_delay_ms, 0);
         assert_eq!(config.enrollment.max_templates, 2);
         assert_eq!(
@@ -1404,6 +1418,29 @@ mod tests {
             auth.effective_start_delay_ms(false, AuthSurface::Elevation),
             3000
         );
+    }
+
+    #[test]
+    fn lock_screen_and_elevation_confirmation_toggles_are_independent() {
+        let lock_only = AuthConfig {
+            require_confirmation_lock_screen: true,
+            require_confirmation_elevation: false,
+            ..Default::default()
+        };
+        assert!(lock_only.requires_confirmation(AuthSurface::ScreenLock));
+        assert!(lock_only.requires_confirmation(AuthSurface::Login));
+        assert!(!lock_only.requires_confirmation(AuthSurface::Elevation));
+        assert!(!lock_only.requires_confirmation(AuthSurface::Direct));
+
+        let elevation_only = AuthConfig {
+            require_confirmation_lock_screen: false,
+            require_confirmation_elevation: true,
+            ..Default::default()
+        };
+        assert!(!elevation_only.requires_confirmation(AuthSurface::ScreenLock));
+        assert!(!elevation_only.requires_confirmation(AuthSurface::Login));
+        assert!(elevation_only.requires_confirmation(AuthSurface::Elevation));
+        assert!(!elevation_only.requires_confirmation(AuthSurface::Direct));
     }
 
     #[test]

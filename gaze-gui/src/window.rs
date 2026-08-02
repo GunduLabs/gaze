@@ -126,7 +126,8 @@ struct ConfigRows<'a> {
     liveness_enabled: &'a gtk4::Switch,
     liveness_threshold: &'a libadwaita::SpinRow,
     liveness_max_frames: &'a libadwaita::SpinRow,
-    require_confirm: &'a gtk4::Switch,
+    require_confirm_lock_screen: &'a gtk4::Switch,
+    require_confirm_elevation: &'a gtk4::Switch,
     hybrid: &'a libadwaita::ComboRow,
     abort_ssh: &'a gtk4::Switch,
     abort_lid: &'a gtk4::Switch,
@@ -199,8 +200,10 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
     rows.liveness_threshold.set_value(cfg.liveness.threshold);
     rows.liveness_max_frames
         .set_value(cfg.liveness.max_frames as f64);
-    rows.require_confirm
-        .set_active(cfg.auth.require_confirmation);
+    rows.require_confirm_lock_screen
+        .set_active(cfg.auth.require_confirmation_lock_screen);
+    rows.require_confirm_elevation
+        .set_active(cfg.auth.require_confirmation_elevation);
     rows.hybrid
         .set_selected(SecurityLevel::hybrid_policy_index_for_value(
             &cfg.security.hybrid_policy,
@@ -416,14 +419,25 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     abort_lid_row.add_suffix(&abort_lid_switch);
     auth_group.add(&abort_lid_row);
 
-    let require_confirm_row = libadwaita::ActionRow::new();
-    require_confirm_row.set_title("Require Confirmation");
-    require_confirm_row
-        .set_subtitle("Require pressing Enter or clicking OK to authorize after face matches");
-    let require_confirm_switch = gtk4::Switch::new();
-    require_confirm_switch.set_valign(gtk4::Align::Center);
-    require_confirm_row.add_suffix(&require_confirm_switch);
-    auth_group.add(&require_confirm_row);
+    let require_confirm_lock_screen_row = libadwaita::ActionRow::new();
+    require_confirm_lock_screen_row.set_title("Require Confirmation on Lock Screen");
+    require_confirm_lock_screen_row.set_subtitle(
+        "Require pressing Enter or clicking OK to authorize after face matches on the lock screen or login screen",
+    );
+    let require_confirm_lock_screen_switch = gtk4::Switch::new();
+    require_confirm_lock_screen_switch.set_valign(gtk4::Align::Center);
+    require_confirm_lock_screen_row.add_suffix(&require_confirm_lock_screen_switch);
+    auth_group.add(&require_confirm_lock_screen_row);
+
+    let require_confirm_elevation_row = libadwaita::ActionRow::new();
+    require_confirm_elevation_row.set_title("Require Confirmation for Elevated Auth");
+    require_confirm_elevation_row.set_subtitle(
+        "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts",
+    );
+    let require_confirm_elevation_switch = gtk4::Switch::new();
+    require_confirm_elevation_switch.set_valign(gtk4::Align::Center);
+    require_confirm_elevation_row.add_suffix(&require_confirm_elevation_switch);
+    auth_group.add(&require_confirm_elevation_row);
 
     let resume_grace_row = libadwaita::SpinRow::with_range(0.0, 10000.0, 100.0);
     resume_grace_row.set_digits(0);
@@ -544,7 +558,9 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         hybrid_row,
         #[weak]
-        require_confirm_switch,
+        require_confirm_lock_screen_switch,
+        #[weak]
+        require_confirm_elevation_switch,
         #[weak]
         abort_ssh_switch,
         #[weak]
@@ -615,7 +631,9 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             cfg.liveness.enabled = liveness_enabled_switch.is_active();
             cfg.liveness.threshold = liveness_threshold_row.value();
             cfg.liveness.max_frames = liveness_max_frames_row.value() as u32;
-            cfg.auth.require_confirmation = require_confirm_switch.is_active();
+            cfg.auth.require_confirmation_lock_screen =
+                require_confirm_lock_screen_switch.is_active();
+            cfg.auth.require_confirmation_elevation = require_confirm_elevation_switch.is_active();
             cfg.auth.abort_if_ssh = abort_ssh_switch.is_active();
             cfg.auth.abort_if_lid_closed = abort_lid_switch.is_active();
             cfg.auth.resume_grace_ms = resume_grace_row.value() as u64;
@@ -714,7 +732,12 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         move |_| apply_changes()
     ));
 
-    require_confirm_switch.connect_active_notify(glib::clone!(
+    require_confirm_lock_screen_switch.connect_active_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    require_confirm_elevation_switch.connect_active_notify(glib::clone!(
         #[strong]
         apply_changes,
         move |_| apply_changes()
@@ -811,7 +834,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 liveness_enabled: &liveness_enabled_switch,
                 liveness_threshold: &liveness_threshold_row,
                 liveness_max_frames: &liveness_max_frames_row,
-                require_confirm: &require_confirm_switch,
+                require_confirm_lock_screen: &require_confirm_lock_screen_switch,
+                require_confirm_elevation: &require_confirm_elevation_switch,
                 hybrid: &hybrid_row,
                 abort_ssh: &abort_ssh_switch,
                 abort_lid: &abort_lid_switch,
@@ -970,7 +994,9 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         liveness_max_frames_row,
         #[weak]
-        require_confirm_switch,
+        require_confirm_lock_screen_switch,
+        #[weak]
+        require_confirm_elevation_switch,
         #[weak]
         hybrid_row,
         #[weak]
@@ -1020,7 +1046,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                         liveness_enabled: &liveness_enabled_switch,
                         liveness_threshold: &liveness_threshold_row,
                         liveness_max_frames: &liveness_max_frames_row,
-                        require_confirm: &require_confirm_switch,
+                        require_confirm_lock_screen: &require_confirm_lock_screen_switch,
+                        require_confirm_elevation: &require_confirm_elevation_switch,
                         hybrid: &hybrid_row,
                         abort_ssh: &abort_ssh_switch,
                         abort_lid: &abort_lid_switch,

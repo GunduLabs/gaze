@@ -36,7 +36,7 @@ in
       example = lib.literalExpression ''
         {
           security.level = "high";
-          auth.require_confirmation = true;
+          auth.require_confirmation_lock_screen = true;
         }
       '';
       description = ''

@@ -31,7 +31,8 @@ dark_luma_threshold = 20
 [auth]
 abort_if_ssh = true
 abort_if_lid_closed = true
-require_confirmation = false
+require_confirmation_lock_screen = false
+require_confirmation_elevation = false
 resume_grace_ms = 0
 start_delay_ms = 0
 start_delay_scope = "all"
@@ -224,7 +225,8 @@ Gaze skips face authentication in sessions where the camera is unlikely or unsaf
 [auth]
 abort_if_ssh = true
 abort_if_lid_closed = true
-require_confirmation = false
+require_confirmation_lock_screen = false
+require_confirmation_elevation = false
 resume_grace_ms = 0
 start_delay_ms = 0
 start_delay_scope = "all"
@@ -232,7 +234,7 @@ start_delay_scope = "all"
 
 `abort_if_ssh` detects SSH sessions from the DBus caller process environment. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor.
 
-Setting `require_confirmation = true` adds a manual intent check step after a successful face match. Both PAM modules honor it.
+`require_confirmation_lock_screen` and `require_confirmation_elevation` each add a manual intent check step after a successful face match, and can be toggled independently. `require_confirmation_lock_screen` covers the lock screen and login/greeter screens (e.g. GDM); `require_confirmation_elevation` covers elevated auth prompts (`sudo`, `su`, `doas`, `run0`, polkit, `pkexec`). Both PAM modules honor them.
 
 With the standard `pam-gaze` module (e.g. `sudo`, `gdm-face`):
 - In a text-based (TTY) environment such as `sudo` in a terminal, it asks for text confirmation after the face match ("Press Enter to confirm, Esc to cancel").

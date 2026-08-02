@@ -97,7 +97,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     }
 
     let loaded_auth = rt.block_on(setup_auth_env()).ok().map(|(cfg, _)| cfg.auth);
-    let require_confirmation = confirmation_required(loaded_auth.as_ref());
+    let require_confirmation = confirmation_required(loaded_auth.as_ref(), service.as_deref());
     let auth = loaded_auth.unwrap_or_default();
 
     unsafe { say(pamh, LOOK_OR_PASSWORD_PROMPT) };

@@ -109,7 +109,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         Err(code) => return code,
     };
 
-    if !confirmation_required(loaded_auth.as_ref()) {
+    if !confirmation_required(loaded_auth.as_ref(), service.as_deref()) {
         return PAM_SUCCESS;
     }
 
