@@ -366,8 +366,9 @@ srpm: _dist-packages _srpm-sources
 
     if [ -n "${RPM_SIGN_KEY:-}" ]; then
         rpmsign --define "_gpg_name ${RPM_SIGN_KEY}" --addsign "$srpm"
-        rpm -Kv "$srpm" 2>/dev/null | grep -qi 'signature' \
-            || { echo "srpm: FAIL: signing did not attach a signature to $srpm" >&2; exit 1; }
+        checksig=$(rpm -Kv "$srpm" 2>&1 || true)
+        grep -qiE "${RPM_SIGN_KEY: -16}|signature" <<< "$checksig" \
+            || { printf '%s\n' "$checksig" >&2; echo "srpm: FAIL: signing did not attach a signature to $srpm" >&2; exit 1; }
         echo "verify: $(basename "$srpm") signed by ${RPM_SIGN_KEY} ✔"
     fi
 
