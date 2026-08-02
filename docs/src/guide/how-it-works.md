@@ -18,7 +18,7 @@ When using an IR camera and RGB liveness checking, Gaze offers significant resis
 ## Authentication pipeline
 
 ```text
-Camera frame -> Face detection (SCRFD) -> Face alignment -> Embedding (ArcFace/ResNet50) -> Similarity match -> Liveness check (MiniFASNet-V2 / eye-motion on IR)
+Camera frame -> Face detection (SCRFD) -> Face alignment -> Embedding (ArcFace: MobileFaceNet by default, ResNet50 at high/maximum security) -> Similarity match -> Liveness check (MiniFASNet-V2 / eye-motion on IR)
 ```
 
 High level:

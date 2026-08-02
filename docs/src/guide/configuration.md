@@ -35,7 +35,7 @@ require_confirmation_lock_screen = false
 require_confirmation_elevation = false
 resume_grace_ms = 0
 start_delay_ms = 0
-start_delay_scope = "all"
+start_delay_scope = "screen_lock"
 
 [enrollment]
 max_templates = 2
@@ -229,7 +229,7 @@ require_confirmation_lock_screen = false
 require_confirmation_elevation = false
 resume_grace_ms = 0
 start_delay_ms = 0
-start_delay_scope = "all"
+start_delay_scope = "screen_lock"
 ```
 
 `abort_if_ssh` detects SSH sessions from the DBus caller process environment. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor.
@@ -261,12 +261,12 @@ Use it when your lock screen unlocks itself the moment you lock it manually. Loc
 
 | Value | Effect |
 | --- | --- |
-| `all` (default) | Every face authentication prompt waits, `sudo` and polkit prompts included. |
-| `screen_lock` | Only screen lockers wait. `sudo`, `su`, `doas`, `run0`, polkit, `pkexec` and display-manager greeters start scanning immediately. |
+| `all` | Every face authentication prompt waits, `sudo` and polkit prompts included. |
+| `screen_lock` (default) | Only screen lockers wait. `sudo`, `su`, `doas`, `run0`, polkit, `pkexec` and display-manager greeters start scanning immediately. |
 
 Neither scope delays `gaze auth` or the GUI's test button. Those call the daemon directly, with no PAM prompt and no locker to step away from, so they always start scanning at once. The `resume_grace_ms` wait still applies to them, because that one is about the camera and display settling after suspend.
 
-If you want the delay for your lock screen but not a slow `sudo`, use `screen_lock`:
+The default `screen_lock` scope gives you the delay on your lock screen without a slow `sudo`:
 
 ```toml
 [auth]

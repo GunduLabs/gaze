@@ -167,10 +167,21 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
         rows.hybrid,
     );
 
+    let (detector_str, recognizer_str) = if cfg.security.level == "custom" {
+        (
+            cfg.security.detector.clone(),
+            cfg.security.recognizer.clone(),
+        )
+    } else {
+        (
+            cfg.security.effective_detector_quality().to_string(),
+            cfg.security.effective_recognizer_quality().to_string(),
+        )
+    };
     rows.detector
-        .set_selected(SecurityLevel::model_quality_index(&cfg.security.detector));
+        .set_selected(SecurityLevel::model_quality_index(&detector_str));
     rows.recognizer
-        .set_selected(SecurityLevel::model_quality_index(&cfg.security.recognizer));
+        .set_selected(SecurityLevel::model_quality_index(&recognizer_str));
     rows.threshold.set_value(if cfg.security.level == "custom" {
         cfg.security.threshold
     } else {
@@ -204,9 +215,14 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
         .set_active(cfg.auth.require_confirmation_lock_screen);
     rows.require_confirm_elevation
         .set_active(cfg.auth.require_confirmation_elevation);
+    let hybrid_policy_str = if cfg.security.level == "custom" {
+        cfg.security.hybrid_policy.clone()
+    } else {
+        cfg.security.hybrid_policy().to_string()
+    };
     rows.hybrid
         .set_selected(SecurityLevel::hybrid_policy_index_for_value(
-            &cfg.security.hybrid_policy,
+            &hybrid_policy_str,
         ));
     rows.abort_ssh.set_active(cfg.auth.abort_if_ssh);
     rows.abort_lid.set_active(cfg.auth.abort_if_lid_closed);

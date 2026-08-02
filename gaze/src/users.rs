@@ -467,17 +467,25 @@ impl UserDatabase {
     pub fn remove_face(&mut self, username: &str, face_name: &str) -> Result<(), UserDbError> {
         Self::validate_username(username)?;
         Self::validate_face_name(face_name)?;
-        let Some(faces) = self.users.get_mut(username) else {
+        let Some(faces) = self.users.get(username) else {
             return Err(UserDbError::UserNotFound(username.to_string()));
         };
-
-        if faces.remove(face_name).is_none() {
+        if !faces.contains_key(face_name) {
             return Err(UserDbError::FaceNotFound(face_name.to_string()));
         }
 
         let face_dir = self.base_dir.join(username).join(face_name);
-        if face_dir.exists() {
-            Self::remove_private_dir_all(&face_dir)?;
+        if face_dir.exists()
+            && let Err(e) = Self::remove_private_dir_all(&face_dir)
+        {
+            // A partial delete would leave in-memory templates outliving their files,
+            // so resync from disk rather than trusting either side.
+            let _ = self.load_all();
+            return Err(e.into());
+        }
+
+        if let Some(faces) = self.users.get_mut(username) {
+            faces.remove(face_name);
         }
 
         Ok(())
@@ -529,7 +537,10 @@ impl UserDatabase {
             return Err(UserDbError::FaceNotFound(old_face_name.to_string()));
         }
 
-        fs::rename(&old_face_dir, &new_face_dir)?;
+        if let Err(e) = fs::rename(&old_face_dir, &new_face_dir) {
+            faces.insert(old_face_name.to_string(), embeddings);
+            return Err(e.into());
+        }
 
         faces.insert(new_face_name.to_string(), embeddings);
 
@@ -538,11 +549,14 @@ impl UserDatabase {
 
     pub fn clear_user(&mut self, username: &str) -> Result<(), UserDbError> {
         Self::validate_username(username)?;
-        self.users.remove(username);
         let user_dir = self.user_dir(username);
-        if user_dir.exists() {
-            Self::remove_private_dir_all(&user_dir)?;
+        if user_dir.exists()
+            && let Err(e) = Self::remove_private_dir_all(&user_dir)
+        {
+            let _ = self.load_all();
+            return Err(e.into());
         }
+        self.users.remove(username);
         Ok(())
     }
 
