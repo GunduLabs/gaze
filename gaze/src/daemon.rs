@@ -76,21 +76,25 @@ pub struct FaceData {
 
 struct EmitterGuard {
     led: Option<IrLed>,
+    activation_message: Option<String>,
 }
 
 impl EmitterGuard {
     fn engage(kind: &CameraKind, enabled: bool) -> Self {
+        let mut activation_message = None;
         let led = match kind {
             CameraKind::Ir { node, .. } if enabled => match IrLed::for_path(node) {
                 Some(led) => {
                     if let Err(e) = led.set(true) {
                         warn!("IR emitter activate failed: {e}");
                     } else {
-                        info!(
+                        let message = format!(
                             "IR emitter enabled via {} on {}",
                             led.device_name(),
                             led.node()
                         );
+                        info!("{message}");
+                        activation_message = Some(message);
                     }
                     Some(led)
                 }
@@ -101,7 +105,14 @@ impl EmitterGuard {
             },
             _ => None,
         };
-        Self { led }
+        Self {
+            led,
+            activation_message,
+        }
+    }
+
+    fn activation_message(&self) -> Option<&str> {
+        self.activation_message.as_deref()
     }
 }
 
@@ -1355,6 +1366,7 @@ pub async fn watch_session_locks(conn: zbus::Connection, lock_epochs: LockEpochs
 
 enum VerifyMsg {
     PhaseStarted(Spectrum),
+    Diagnostic(String),
     Status(Spectrum, CaptureStatus, Option<ndarray::Array1<f32>>),
     Success(Spectrum, ndarray::Array1<f32>),
     Error(String),
@@ -2839,6 +2851,9 @@ impl AuthDaemon {
     ) -> zbus::Result<()>;
 
     #[zbus(signal)]
+    async fn verify_diagnostic(ctxt: &SignalEmitter<'_>, message: &str) -> zbus::Result<()>;
+
+    #[zbus(signal)]
     async fn face_status(ctxt: &SignalEmitter<'_>, status: CaptureStatus) -> zbus::Result<()>;
 
     #[zbus(signal)]
@@ -3178,10 +3193,13 @@ impl AuthDaemon {
 
                     let _ = tx.blocking_send(VerifyMsg::PhaseStarted(Spectrum::Ir));
 
-                    let _emitter = EmitterGuard::engage(
+                    let emitter = EmitterGuard::engage(
                         &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                         emitter_enabled
                     );
+                    if let Some(message) = emitter.activation_message() {
+                        let _ = tx.blocking_send(VerifyMsg::Diagnostic(message.to_owned()));
+                    }
 
                     let mut cam = match Camera::open_ir(&ir_device_clone) {
                         Ok(c) => c,
@@ -3207,10 +3225,12 @@ impl AuthDaemon {
                         match frame_kind {
                             IrFrameKind::Lit => {
                                 if !logged_lit_luma {
-                                    info!(
+                                    let message = format!(
                                         "IR stream produced a lit frame: mean_luma={luma}, threshold={}",
                                         config_clone.cameras.dark_luma_threshold
                                     );
+                                    info!("{message}");
+                                    let _ = tx.try_send(VerifyMsg::Diagnostic(message));
                                     logged_lit_luma = true;
                                 }
                             }
@@ -3375,6 +3395,9 @@ impl AuthDaemon {
                                 dark_since = None;
                             }
                             VerifyMsg::PhaseStarted(_) => {}
+                            VerifyMsg::Diagnostic(message) => {
+                                let _ = Self::verify_diagnostic(&ctxt, &message).await;
+                            }
                             VerifyMsg::Status(spectrum, status, embed_opt) => {
                                 let has_face = embed_opt.is_some();
                                 match spectrum {
