@@ -27,6 +27,7 @@ const GDM_FACE_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
 const GDM_DCONF_PROFILE: &str = "gdm";
 const GDM_DCONF_PROFILE_PATH: &str = "/etc/dconf/profile/gdm";
 const GDM_DCONF_FACE_AUTH_KEY: &str = "/org/gnome/shell/extensions/gaze/enable-face-authentication";
+const TPM_DEVICES: [&str; 2] = ["/dev/tpmrm0", "/dev/tpm0"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Level {
@@ -840,18 +841,42 @@ fn check_tpm(report: &mut Report, config: Option<&Config>) {
         return;
     }
 
-    if ["/dev/tpmrm0", "/dev/tpm0"]
+    let present: Vec<&str> = TPM_DEVICES
         .iter()
-        .any(|path| Path::new(path).exists())
-    {
-        report.pass("TPM", "a TPM device is present for encrypted templates");
-    } else {
+        .copied()
+        .filter(|path| Path::new(path).exists())
+        .collect();
+
+    if present.is_empty() {
         report.error(
             "TPM",
             "template encryption is enabled but no TPM device is present",
             "Enable TPM 2.0 in firmware or set storage.encrypt_templates = false, then restart gazed.",
         );
+        return;
     }
+
+    if !crate::is_root() || present.iter().any(|path| device_is_writable(path)) {
+        report.pass("TPM", "a TPM device is present for encrypted templates");
+        return;
+    }
+
+    report.error(
+        "TPM",
+        format!(
+            "template encryption is enabled but the TPM device is not writable ({})",
+            present.join(", ")
+        ),
+        "Grant gazed access to the TPM node (distributions restrict it to the `tss` user and \
+         group), then run `sudo systemctl restart gazed`.",
+    );
+}
+
+fn device_is_writable(device: &str) -> bool {
+    let Ok(path) = std::ffi::CString::new(device) else {
+        return false;
+    };
+    (unsafe { libc::access(path.as_ptr(), libc::R_OK | libc::W_OK) }) == 0
 }
 
 async fn read_daemon_config(proxy: &GazeProxy<'_>, ready_wait: Duration) -> zbus::Result<Config> {

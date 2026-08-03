@@ -31,7 +31,7 @@ const TPM_RAW_DEVICE: &str = "/dev/tpm0";
 const TPM_DEVICES: [&str; 2] = [TPM_RM_DEVICE, TPM_RAW_DEVICE];
 
 pub fn load_or_create_dek(state_dir: &Path) -> anyhow::Result<[u8; KEY_LEN]> {
-    if tpm_device().is_none() && !tcti_override_present() {
+    if present_devices().is_empty() && !tcti_override_present() {
         return Err(anyhow!(
             "no TPM device found (looked for {TPM_RM_DEVICE} and {TPM_RAW_DEVICE})"
         ));
@@ -71,10 +71,21 @@ pub fn load_or_create_dek(state_dir: &Path) -> anyhow::Result<[u8; KEY_LEN]> {
     Ok(dek)
 }
 
-fn tpm_device() -> Option<&'static str> {
+fn present_devices() -> Vec<&'static str> {
     TPM_DEVICES
         .into_iter()
-        .find(|device| Path::new(device).exists())
+        .filter(|device| Path::new(device).exists())
+        .collect()
+}
+
+fn device_is_writable(device: &str) -> Result<(), std::io::Error> {
+    let path = std::ffi::CString::new(device)
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    if unsafe { libc::access(path.as_ptr(), libc::R_OK | libc::W_OK) } == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
 }
 
 fn tcti_override_present() -> bool {
@@ -83,15 +94,38 @@ fn tcti_override_present() -> bool {
         .any(|name| std::env::var_os(name).is_some())
 }
 
+fn device_context(device: &str) -> anyhow::Result<Context> {
+    let config = DeviceConfig::from_str(device)
+        .map_err(|e| anyhow!("invalid TPM device path {device}: {e}"))?;
+    Ok(Context::new(TctiNameConf::Device(config))?)
+}
+
 fn build_context() -> anyhow::Result<Context> {
     if let Ok(tcti) = TctiNameConf::from_environment_variable() {
         return Ok(Context::new(tcti)?);
     }
 
-    let device = tpm_device().unwrap_or(TPM_RAW_DEVICE);
-    let config = DeviceConfig::from_str(device)
-        .map_err(|e| anyhow!("invalid TPM device path {device}: {e}"))?;
-    Ok(Context::new(TctiNameConf::Device(config))?)
+    let mut failures = Vec::new();
+    for device in present_devices() {
+        if let Err(e) = device_is_writable(device) {
+            failures.push(format!("{device}: {e}"));
+            continue;
+        }
+        match device_context(device) {
+            Ok(context) => return Ok(context),
+            Err(e) => failures.push(format!("{device}: {e}")),
+        }
+    }
+
+    if failures.is_empty() {
+        return device_context(TPM_RAW_DEVICE);
+    }
+
+    Err(anyhow!(
+        "could not open any TPM device ({}); gazed needs read/write access to the device node, \
+         which most distributions restrict to the `tss` user and group",
+        failures.join("; ")
+    ))
 }
 
 fn create_primary(context: &mut Context) -> anyhow::Result<tss_esapi::handles::KeyHandle> {
@@ -254,12 +288,33 @@ mod tests {
     fn device_probe_prefers_the_resource_manager() {
         assert_eq!(TPM_DEVICES, [TPM_RM_DEVICE, TPM_RAW_DEVICE]);
 
-        if let Some(device) = tpm_device() {
+        let present = present_devices();
+        for device in &present {
             assert!(Path::new(device).exists());
-            if Path::new(TPM_RM_DEVICE).exists() {
-                assert_eq!(device, TPM_RM_DEVICE);
-            }
         }
+        if Path::new(TPM_RM_DEVICE).exists() {
+            assert_eq!(present.first().copied(), Some(TPM_RM_DEVICE));
+        }
+    }
+
+    #[test]
+    fn writability_probe_reports_missing_devices() {
+        let err = device_is_writable("/dev/gaze-does-not-exist").expect_err("must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn writability_probe_reports_inaccessible_devices() {
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir().join(format!("gaze-tpm-perm-{}", std::process::id()));
+        std::fs::write(&path, b"").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let err = device_is_writable(path.to_str().unwrap()).expect_err("must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

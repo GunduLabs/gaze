@@ -85,10 +85,11 @@ in
       example = "device:/dev/tpm0";
       description = ''
         TCTI connection string for sealing template keys, exported to the
-        daemon as `TPM2TOOLS_TCTI`. When null, the daemon uses
-        {file}`/dev/tpmrm0` if it exists and {file}`/dev/tpm0` otherwise. Set
-        this only if neither node is the one you want, for example to reach a
-        TPM through `tabrmd`.
+        daemon as `TPM2TOOLS_TCTI`. When null, the daemon prefers
+        {file}`/dev/tpmrm0` and falls back to {file}`/dev/tpm0` when the
+        resource-manager node is missing or unreadable. Set this only if
+        neither node is the one you want, for example to reach a TPM through
+        `tabrmd`.
       '';
     };
 
@@ -241,7 +242,10 @@ in
             RestrictSUIDSGID = true;
             LockPersonality = true;
             SystemCallArchitectures = "native";
-            CapabilityBoundingSet = [ "CAP_DAC_READ_SEARCH" ];
+            CapabilityBoundingSet = [
+              "CAP_DAC_READ_SEARCH"
+              "CAP_DAC_OVERRIDE"
+            ];
             # The GUI's settings page rewrites config.toml through the daemon,
             # and the GDM face-login toggle writes a dconf database.
             ReadWritePaths = [
