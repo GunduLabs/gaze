@@ -27,6 +27,7 @@ const GDM_FACE_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
 const GDM_DCONF_PROFILE: &str = "gdm";
 const GDM_DCONF_PROFILE_PATH: &str = "/etc/dconf/profile/gdm";
 const GDM_DCONF_FACE_AUTH_KEY: &str = "/org/gnome/shell/extensions/gaze/enable-face-authentication";
+const TPM_DEVICES: [&str; 2] = ["/dev/tpmrm0", "/dev/tpm0"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Level {
@@ -840,18 +841,164 @@ fn check_tpm(report: &mut Report, config: Option<&Config>) {
         return;
     }
 
-    if ["/dev/tpmrm0", "/dev/tpm0"]
+    let present: Vec<&str> = TPM_DEVICES
         .iter()
-        .any(|path| Path::new(path).exists())
-    {
-        report.pass("TPM", "a TPM device is present for encrypted templates");
-    } else {
+        .copied()
+        .filter(|path| Path::new(path).exists())
+        .collect();
+
+    if present.is_empty() {
         report.error(
             "TPM",
             "template encryption is enabled but no TPM device is present",
             "Enable TPM 2.0 in firmware or set storage.encrypt_templates = false, then restart gazed.",
         );
+        return;
     }
+
+    let Some(credentials) = daemon_credentials() else {
+        report.pass("TPM", "a TPM device is present for encrypted templates");
+        return;
+    };
+
+    let mut blocked = Vec::new();
+    for path in &present {
+        let Ok(meta) = fs::metadata(path) else {
+            report.pass("TPM", "a TPM device is present for encrypted templates");
+            return;
+        };
+        if node_openable(meta.uid(), meta.gid(), meta.mode(), &credentials) {
+            report.pass(
+                "TPM",
+                format!("a TPM device is present and gazed can open {path}"),
+            );
+            return;
+        }
+        blocked.push(format!(
+            "{path} is {}:{} {:04o}",
+            user_name(meta.uid()),
+            group_name(meta.gid()),
+            meta.mode() & 0o777
+        ));
+    }
+
+    report.error(
+        "TPM",
+        format!(
+            "template encryption is enabled but the gazed unit cannot open the TPM device ({})",
+            blocked.join(", ")
+        ),
+        "Run `sudo systemctl edit gazed` and add `SupplementaryGroups=tss` (or \
+         `CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE`) under [Service], then run \
+         `sudo systemctl restart gazed`.",
+    );
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DaemonCredentials {
+    uid: u32,
+    gids: Vec<u32>,
+    dac_override: bool,
+}
+
+fn daemon_credentials() -> Option<DaemonCredentials> {
+    let (ok, text) = command_output(
+        "systemctl",
+        &[
+            "show",
+            "gazed",
+            "-p",
+            "LoadState",
+            "-p",
+            "User",
+            "-p",
+            "SupplementaryGroups",
+            "-p",
+            "CapabilityBoundingSet",
+        ],
+    )
+    .ok()?;
+    if !ok {
+        return None;
+    }
+    parse_daemon_credentials(&text)
+}
+
+fn parse_daemon_credentials(text: &str) -> Option<DaemonCredentials> {
+    let mut load_state = "";
+    let mut user = "";
+    let mut groups = "";
+    let mut capabilities = "";
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "LoadState" => load_state = value.trim(),
+            "User" => user = value.trim(),
+            "SupplementaryGroups" => groups = value.trim(),
+            "CapabilityBoundingSet" => capabilities = value.trim(),
+            _ => {}
+        }
+    }
+
+    if load_state != "loaded" {
+        return None;
+    }
+    if !(user.is_empty() || user == "root" || user == "0") {
+        return None;
+    }
+
+    let mut gids = vec![0];
+    gids.extend(groups.split_whitespace().filter_map(group_gid));
+    Some(DaemonCredentials {
+        uid: 0,
+        gids,
+        dac_override: capabilities
+            .split_whitespace()
+            .any(|capability| capability.eq_ignore_ascii_case("cap_dac_override")),
+    })
+}
+
+fn node_openable(uid: u32, gid: u32, mode: u32, credentials: &DaemonCredentials) -> bool {
+    if credentials.dac_override {
+        return true;
+    }
+    let class = if uid == credentials.uid {
+        0o600
+    } else if credentials.gids.contains(&gid) {
+        0o060
+    } else {
+        0o006
+    };
+    mode & class == class
+}
+
+fn group_gid(name: &str) -> Option<u32> {
+    let name = std::ffi::CString::new(name).ok()?;
+    let entry = unsafe { libc::getgrnam(name.as_ptr()) };
+    if entry.is_null() {
+        return None;
+    }
+    Some(unsafe { (*entry).gr_gid })
+}
+
+fn user_name(uid: u32) -> String {
+    let entry = unsafe { libc::getpwuid(uid) };
+    if entry.is_null() {
+        return uid.to_string();
+    }
+    let name = unsafe { std::ffi::CStr::from_ptr((*entry).pw_name) };
+    name.to_str().map(str::to_owned).unwrap_or(uid.to_string())
+}
+
+fn group_name(gid: u32) -> String {
+    let entry = unsafe { libc::getgrgid(gid) };
+    if entry.is_null() {
+        return gid.to_string();
+    }
+    let name = unsafe { std::ffi::CStr::from_ptr((*entry).gr_name) };
+    name.to_str().map(str::to_owned).unwrap_or(gid.to_string())
 }
 
 async fn read_daemon_config(proxy: &GazeProxy<'_>, ready_wait: Duration) -> zbus::Result<Config> {
@@ -1256,6 +1403,83 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn credentials(gids: &[u32], dac_override: bool) -> DaemonCredentials {
+        DaemonCredentials {
+            uid: 0,
+            gids: gids.to_vec(),
+            dac_override,
+        }
+    }
+
+    #[test]
+    fn root_owned_tpm_node_is_openable_without_dac_override() {
+        let creds = credentials(&[0], false);
+        assert!(node_openable(0, 972, 0o660, &creds));
+        assert!(!node_openable(0, 972, 0o060, &creds));
+    }
+
+    #[test]
+    fn tss_owned_tpm_node_needs_the_group_or_the_capability() {
+        let tss_uid = 972;
+        let tss_gid = 972;
+
+        let bare_root = credentials(&[0], false);
+        assert!(
+            !node_openable(tss_uid, tss_gid, 0o660, &bare_root),
+            "the reporter's Ubuntu node must read as unopenable"
+        );
+
+        assert!(node_openable(
+            tss_uid,
+            tss_gid,
+            0o660,
+            &credentials(&[0, tss_gid], false)
+        ));
+        assert!(node_openable(
+            tss_uid,
+            tss_gid,
+            0o660,
+            &credentials(&[0], true)
+        ));
+        assert!(node_openable(tss_uid, tss_gid, 0o666, &bare_root));
+    }
+
+    #[test]
+    fn group_access_does_not_rescue_an_owner_class_mismatch() {
+        let creds = credentials(&[0, 972], false);
+        assert!(!node_openable(0, 972, 0o060, &creds));
+    }
+
+    #[test]
+    fn daemon_credentials_come_from_the_effective_unit() {
+        let parsed = parse_daemon_credentials(
+            "LoadState=loaded\nCapabilityBoundingSet=cap_dac_read_search cap_dac_override\nUser=\nSupplementaryGroups=video",
+        )
+        .expect("a loaded root unit must be understood");
+        assert_eq!(parsed.uid, 0);
+        assert!(parsed.dac_override);
+        assert!(parsed.gids.contains(&0));
+
+        let capless = parse_daemon_credentials(
+            "LoadState=loaded\nCapabilityBoundingSet=cap_dac_read_search\nUser=\nSupplementaryGroups=video",
+        )
+        .expect("a loaded root unit must be understood");
+        assert!(!capless.dac_override);
+
+        assert_eq!(
+            parse_daemon_credentials("LoadState=not-found\nUser=\nCapabilityBoundingSet="),
+            None,
+            "an uninstalled unit must not be judged"
+        );
+        assert_eq!(
+            parse_daemon_credentials(
+                "LoadState=loaded\nUser=gaze\nCapabilityBoundingSet=cap_dac_read_search"
+            ),
+            None,
+            "a custom User= must not be judged"
+        );
+    }
 
     #[test]
     fn extension_schema_dir_finds_a_compiled_schema_in_the_extension() {

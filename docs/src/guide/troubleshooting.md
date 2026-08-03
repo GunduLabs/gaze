@@ -47,6 +47,20 @@ Fix it one of two ways:
 - Enable the TPM. Confirm a TPM 2.0 device exists (`ls /dev/tpmrm0`) and is turned on in your firmware/BIOS, then restart: `sudo systemctl restart gazed`.
 - Turn the feature off. Set `encrypt_templates = false` under `[storage]` in `/etc/gaze/config.toml` and restart.
 
+If the logs instead show *"Failed to open specified TCTI device file /dev/tpmrm0: Permission denied"*, the device exists but the daemon may not open it. Distributions restrict the TPM nodes to the `tss` user and group, so `gazed` needs `CAP_DAC_OVERRIDE` (which the packaged unit grants) or membership in that group. Check the node and the unit:
+
+```bash
+ls -l /dev/tpmrm0 /dev/tpm0
+systemctl show gazed -p CapabilityBoundingSet -p SupplementaryGroups
+```
+
+If a local override or drop-in tightened `CapabilityBoundingSet`, add `SupplementaryGroups=tss` instead:
+
+```bash
+sudo systemctl edit gazed   # [Service] / SupplementaryGroups=tss
+sudo systemctl restart gazed
+```
+
 If the TPM was reset/cleared after you enrolled, the previously sealed key can no longer be unsealed. Delete the stale key directory and re-enroll your faces:
 
 ```bash
