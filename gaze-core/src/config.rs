@@ -87,62 +87,38 @@ impl<'de> Deserialize<'de> for SecurityLevel {
 
 impl Default for SecurityLevel {
     fn default() -> Self {
-        Self {
-            level: default_level(),
-            detector: String::new(),
-            recognizer: String::new(),
-            rgb_threshold: 0.0,
-            ir_threshold: 0.0,
-            hybrid_policy: String::new(),
-        }
+        Self::preset(&default_level())
     }
 }
 
 impl SecurityLevel {
     pub const CUSTOM_LEVEL_INDEX: u32 = 4;
 
-    pub fn low() -> Self {
+    fn preset(level: &str) -> Self {
         Self {
-            level: "low".to_string(),
+            level: level.to_string(),
             detector: String::new(),
             recognizer: String::new(),
             rgb_threshold: 0.0,
             ir_threshold: 0.0,
             hybrid_policy: String::new(),
         }
+    }
+
+    pub fn low() -> Self {
+        Self::preset("low")
     }
 
     pub fn medium() -> Self {
-        Self {
-            level: "medium".to_string(),
-            detector: String::new(),
-            recognizer: String::new(),
-            rgb_threshold: 0.0,
-            ir_threshold: 0.0,
-            hybrid_policy: String::new(),
-        }
+        Self::preset("medium")
     }
 
     pub fn high() -> Self {
-        Self {
-            level: "high".to_string(),
-            detector: String::new(),
-            recognizer: String::new(),
-            rgb_threshold: 0.0,
-            ir_threshold: 0.0,
-            hybrid_policy: String::new(),
-        }
+        Self::preset("high")
     }
 
     pub fn maximum() -> Self {
-        Self {
-            level: "maximum".to_string(),
-            detector: String::new(),
-            recognizer: String::new(),
-            rgb_threshold: 0.0,
-            ir_threshold: 0.0,
-            hybrid_policy: String::new(),
-        }
+        Self::preset("maximum")
     }
 
     pub fn custom(

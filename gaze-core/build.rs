@@ -19,6 +19,8 @@ struct Device {
     product_id: u16,
     name: String,
     source: Option<String>,
+    #[serde(default)]
+    requires_ir_yuy2: bool,
 }
 
 #[derive(Deserialize)]
@@ -54,6 +56,7 @@ struct ProcessedProfile {
     pid: u16,
     name: String,
     source: String,
+    requires_ir_yuy2: bool,
     on: Vec<ProcessedStep>,
     off: Vec<ProcessedStep>,
 }
@@ -182,6 +185,7 @@ fn parse_profile(path: &Path) -> ProcessedProfile {
             .device
             .source
             .unwrap_or_else(|| "gaze-core profile".into()),
+        requires_ir_yuy2: p.device.requires_ir_yuy2,
         on,
         off,
     }
@@ -230,6 +234,12 @@ fn render(profiles: &[ProcessedProfile]) -> String {
         writeln!(out, "        on_sequence: {}_ON,", profile.ident).unwrap();
         writeln!(out, "        off_sequence: {}_OFF,", profile.ident).unwrap();
         writeln!(out, "        source: {:?},", profile.source).unwrap();
+        writeln!(
+            out,
+            "        requires_ir_yuy2: {},",
+            profile.requires_ir_yuy2
+        )
+        .unwrap();
         writeln!(out, "    }},").unwrap();
     }
     writeln!(out, "];\n").unwrap();

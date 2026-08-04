@@ -10,10 +10,17 @@ use tracing::{info, warn};
 use crate::config::{CameraConfig, DEFAULT_RGB_CAMERA};
 use crate::ir::devices::{find_device, usb_ids_of};
 
+const REALTEK_IR_YUY2_WIDTH: u32 = 640;
+const REALTEK_IR_YUY2_HEIGHT: u32 = 480;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CameraKind {
     Rgb { source: String },
     Ir { source: String, node: String },
+}
+
+fn requires_forced_ir_yuy2(vid: u16, pid: u16, want_color: bool) -> bool {
+    !want_color && find_device(vid, pid).is_some_and(|device| device.requires_ir_yuy2)
 }
 
 #[derive(Debug, Clone)]
@@ -367,7 +374,7 @@ impl Camera {
                 })?;
                 (
                     format!("v4l2src device={node}"),
-                    !want_color && vid == 0x0bda && matches!(pid, 0x5767 | 0x58c2),
+                    requires_forced_ir_yuy2(vid, pid, want_color),
                 )
             }
         };
@@ -535,9 +542,10 @@ impl Camera {
 fn camera_pipeline(src_element: &str, force_ir_yuy2: bool) -> String {
     if force_ir_yuy2 {
         // Dell/Realtek single-node RGB/IR modules silently remain in RGB mode
-        // unless the stream is negotiated as uncompressed 640x480 YUY2.
+        // unless the stream is negotiated as uncompressed YUY2 at this exact
+        // resolution.
         format!(
-            "{src_element} ! video/x-raw,format=YUY2,width=640,height=480,pixel-aspect-ratio=1/1 ! videoconvert ! videoscale ! appsink name=gaze_sink"
+            "{src_element} ! video/x-raw,format=YUY2,width={REALTEK_IR_YUY2_WIDTH},height={REALTEK_IR_YUY2_HEIGHT},pixel-aspect-ratio=1/1 ! videoconvert ! videoscale ! appsink name=gaze_sink"
         )
     } else {
         format!(

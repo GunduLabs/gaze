@@ -329,24 +329,24 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     recognizer_row.set_model(Some(&recognizer_model));
     security_group.add(&recognizer_row);
 
-    let rgb_threshold_row = libadwaita::SpinRow::with_range(
-        gaze_core::config::MIN_SECURITY_THRESHOLD,
-        gaze_core::config::MAX_SECURITY_THRESHOLD,
-        0.01,
-    );
-    rgb_threshold_row.set_digits(3);
-    rgb_threshold_row.set_title("RGB Recognizer Threshold");
-    rgb_threshold_row.set_subtitle("Minimum RGB similarity for a match");
+    let make_threshold_row = |title: &str, subtitle: &str| {
+        let row = libadwaita::SpinRow::with_range(
+            gaze_core::config::MIN_SECURITY_THRESHOLD,
+            gaze_core::config::MAX_SECURITY_THRESHOLD,
+            0.01,
+        );
+        row.set_digits(3);
+        row.set_title(title);
+        row.set_subtitle(subtitle);
+        row
+    };
+
+    let rgb_threshold_row =
+        make_threshold_row("RGB Recognizer Threshold", "Minimum RGB similarity for a match");
     security_group.add(&rgb_threshold_row);
 
-    let ir_threshold_row = libadwaita::SpinRow::with_range(
-        gaze_core::config::MIN_SECURITY_THRESHOLD,
-        gaze_core::config::MAX_SECURITY_THRESHOLD,
-        0.01,
-    );
-    ir_threshold_row.set_digits(3);
-    ir_threshold_row.set_title("IR Recognizer Threshold");
-    ir_threshold_row.set_subtitle("Minimum IR similarity for a match");
+    let ir_threshold_row =
+        make_threshold_row("IR Recognizer Threshold", "Minimum IR similarity for a match");
     security_group.add(&ir_threshold_row);
 
     let hardware_group = libadwaita::PreferencesGroup::new();

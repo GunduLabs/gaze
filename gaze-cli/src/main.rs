@@ -268,6 +268,35 @@ fn ensure_configured_source_listed(options: &mut Vec<(String, String)>, configur
     options.push((format!("{configured} (configured)"), configured.to_string()));
 }
 
+fn prompt_security_threshold(
+    theme: &ColorfulTheme,
+    spectrum: &str,
+    default: f64,
+) -> anyhow::Result<f64> {
+    let value = Input::<String>::with_theme(theme)
+        .with_prompt(format!(
+            "Custom {spectrum} threshold ({MIN_SECURITY_THRESHOLD} - {MAX_SECURITY_THRESHOLD})"
+        ))
+        .default(default.to_string())
+        .validate_with(|input: &String| match input.trim().parse::<f64>() {
+            Ok(value)
+                if value.is_finite()
+                    && (MIN_SECURITY_THRESHOLD..=MAX_SECURITY_THRESHOLD).contains(&value) =>
+            {
+                Ok(())
+            }
+            Ok(_) => Err(format!(
+                "must be between {MIN_SECURITY_THRESHOLD} and {MAX_SECURITY_THRESHOLD}"
+            )),
+            Err(_) => Err("must be a number".to_string()),
+        })
+        .interact_text()?
+        .trim()
+        .parse::<f64>()
+        .unwrap_or(DEFAULT_SECURITY_THRESHOLD);
+    Ok(value)
+}
+
 async fn run_config_wizard(
     term: &Term,
     proxy: &GazeProxy<'_>,
@@ -323,51 +352,8 @@ async fn run_config_wizard(
             .interact()?;
         let recognizer = SecurityLevel::model_quality_from_index(selected_rec_idx).to_string();
 
-        let rgb_threshold = Input::<String>::with_theme(&theme)
-            .with_prompt(format!(
-                "Custom RGB threshold ({} - {})",
-                MIN_SECURITY_THRESHOLD, MAX_SECURITY_THRESHOLD
-            ))
-            .default(old_rgb_threshold.to_string())
-            .validate_with(|input: &String| match input.trim().parse::<f64>() {
-                Ok(value)
-                    if value.is_finite()
-                        && (MIN_SECURITY_THRESHOLD..=MAX_SECURITY_THRESHOLD).contains(&value) =>
-                {
-                    Ok(())
-                }
-                Ok(_) => Err(format!(
-                    "must be between {MIN_SECURITY_THRESHOLD} and {MAX_SECURITY_THRESHOLD}"
-                )),
-                Err(_) => Err("must be a number".to_string()),
-            })
-            .interact_text()?
-            .trim()
-            .parse::<f64>()
-            .unwrap_or(DEFAULT_SECURITY_THRESHOLD);
-
-        let ir_threshold = Input::<String>::with_theme(&theme)
-            .with_prompt(format!(
-                "Custom IR threshold ({} - {})",
-                MIN_SECURITY_THRESHOLD, MAX_SECURITY_THRESHOLD
-            ))
-            .default(old_ir_threshold.to_string())
-            .validate_with(|input: &String| match input.trim().parse::<f64>() {
-                Ok(value)
-                    if value.is_finite()
-                        && (MIN_SECURITY_THRESHOLD..=MAX_SECURITY_THRESHOLD).contains(&value) =>
-                {
-                    Ok(())
-                }
-                Ok(_) => Err(format!(
-                    "must be between {MIN_SECURITY_THRESHOLD} and {MAX_SECURITY_THRESHOLD}"
-                )),
-                Err(_) => Err("must be a number".to_string()),
-            })
-            .interact_text()?
-            .trim()
-            .parse::<f64>()
-            .unwrap_or(DEFAULT_SECURITY_THRESHOLD);
+        let rgb_threshold = prompt_security_threshold(&theme, "RGB", old_rgb_threshold)?;
+        let ir_threshold = prompt_security_threshold(&theme, "IR", old_ir_threshold)?;
 
         let selected_hybrid_idx = Select::with_theme(&theme)
             .with_prompt("Custom hybrid combining policy")

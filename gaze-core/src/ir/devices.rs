@@ -26,6 +26,9 @@ pub struct IrDevice {
     pub on_sequence: &'static [IrControl],
     pub off_sequence: &'static [IrControl],
     pub source: &'static str,
+    /// Single-node RGB/IR modules that silently remain in RGB mode unless
+    /// the IR stream is negotiated as uncompressed 640x480 YUY2.
+    pub requires_ir_yuy2: bool,
 }
 
 include!(concat!(env!("OUT_DIR"), "/ir_devices.rs"));
