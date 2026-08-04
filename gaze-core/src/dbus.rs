@@ -167,17 +167,19 @@ pub async fn connect_gaze() -> zbus::Result<GazeProxy<'static>> {
 pub async fn try_benchmark_from_daemon(
     proxy: &GazeProxy<'_>,
 ) -> anyhow::Result<Option<Vec<BenchmarkResult>>> {
-    let raw: OwnedValue = proxy
+    let reply = proxy
         .inner()
-        .call("Benchmark", &())
+        .call_method("Benchmark", &())
         .await
         .map_err(|e| anyhow::anyhow!("{}", dbus_error_message(&e)))?;
-    benchmark_from_reply(raw)
+    benchmark_from_reply(&reply.body())
 }
 
-pub fn benchmark_from_reply(raw: OwnedValue) -> anyhow::Result<Option<Vec<BenchmarkResult>>> {
+pub fn benchmark_from_reply(
+    body: &zbus::message::Body,
+) -> anyhow::Result<Option<Vec<BenchmarkResult>>> {
     let expected = <Vec<BenchmarkResult> as Type>::SIGNATURE;
-    let actual = raw.value_signature();
+    let actual = body.signature();
     if actual != expected {
         tracing::warn!(
             %actual,
@@ -187,7 +189,7 @@ pub fn benchmark_from_reply(raw: OwnedValue) -> anyhow::Result<Option<Vec<Benchm
         return Ok(None);
     }
 
-    Vec::<BenchmarkResult>::try_from(raw)
+    body.deserialize::<Vec<BenchmarkResult>>()
         .map(Some)
         .map_err(|e| anyhow::anyhow!("Failed to decode benchmark results: {}", e))
 }
@@ -358,13 +360,25 @@ pub trait Gaze {
 mod tests {
     use super::*;
 
-    #[derive(Clone, Debug, Value, OwnedValue, Type)]
+    #[derive(Clone, Debug, Serialize, Deserialize, Value, OwnedValue, Type)]
     struct OldBenchmarkResult {
         component: String,
         mean_ms: f64,
         p95_ms: f64,
         min_ms: f64,
         fps: f64,
+    }
+
+    fn benchmark_method_return<B>(body: &B) -> zbus::message::Message
+    where
+        B: serde::Serialize + zvariant::DynamicType,
+    {
+        zbus::message::Message::method_call("/com/gundulabs/Gaze", "Benchmark")
+            .expect("a valid path and member")
+            .interface("com.gundulabs.Gaze")
+            .expect("a valid interface")
+            .build(body)
+            .expect("the body serializes")
     }
 
     fn benchmark_result(requested_device: &str, fallback_reason: &str) -> BenchmarkResult {
@@ -384,8 +398,8 @@ mod tests {
 
     #[test]
     fn current_benchmark_layout_decodes() {
-        let raw = OwnedValue::try_from(Value::from(vec![benchmark_result("cpu", "")])).unwrap();
-        let decoded = benchmark_from_reply(raw)
+        let reply = benchmark_method_return(&vec![benchmark_result("cpu", "")]);
+        let decoded = benchmark_from_reply(&reply.body())
             .expect("no error")
             .expect("current layout is readable");
 
@@ -402,12 +416,24 @@ mod tests {
             min_ms: 0.5,
             fps: 1000.0,
         }];
-        let raw = OwnedValue::try_from(Value::from(old)).expect("old results convert to a value");
+        let reply = benchmark_method_return(&old);
 
         assert!(
-            benchmark_from_reply(raw)
+            benchmark_from_reply(&reply.body())
                 .expect("a layout mismatch is not an error")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn a_benchmark_reply_body_is_not_a_variant() {
+        let reply = benchmark_method_return(&vec![benchmark_result("cpu", "")]);
+        let body = reply.body();
+
+        assert_eq!(body.signature(), <Vec<BenchmarkResult> as Type>::SIGNATURE);
+        assert!(
+            body.deserialize::<OwnedValue>().is_err(),
+            "a method reply body is the value itself, so reading it as a variant must fail"
         );
     }
 
