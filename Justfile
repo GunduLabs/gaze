@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Justfile for Gaze: https://gaze.gundulabs.com
 # Run `just` to see available targets.
 

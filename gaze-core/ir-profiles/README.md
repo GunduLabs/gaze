@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # IR emitter device profiles
 
 Each `*.toml` file maps a USB UVC camera VID:PID to the raw UVC extension-unit control sequence needed to enable and disable its IR emitter.

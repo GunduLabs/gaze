@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 {
   description = "Gaze: Linux facial authentication (daemon, CLI, GUI, PAM, and GNOME Shell extension)";
 

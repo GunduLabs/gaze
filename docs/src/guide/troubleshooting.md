@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Troubleshooting
 
 If Gaze is installed but not authenticating reliably, use this page as a quick diagnostic checklist.

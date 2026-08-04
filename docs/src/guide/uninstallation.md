@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Uninstallation
 
 This guide covers completely removing Gaze and all its components from your system.

@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Getting Started
 
 Get Gaze running in under 10 minutes: install, enroll your face, and verify authentication.

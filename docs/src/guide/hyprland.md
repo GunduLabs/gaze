@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Hyprland (hyprlock)
 
 Gaze integrates with [hyprlock](https://github.com/hyprwm/hyprlock), the Hyprland screen locker, via a dedicated PAM service. The `gaze-hyprlock` package installs `/etc/pam.d/hyprlock-gaze`, leaving the distro's own `/etc/pam.d/hyprlock` untouched.

@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # PAM
 
 This page is about normal PAM integration (`sudo`, polkit, shared auth stacks).

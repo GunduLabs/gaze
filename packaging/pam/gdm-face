@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 #%PAM-1.0
 auth        required                                     pam_env.so
 auth        [success=done default=bad]                   pam_gaze.so

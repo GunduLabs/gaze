@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name = "gaze"
 compatibility_date = "2026-06-09"
 pages_build_output_dir = "docs/.vitepress/dist"

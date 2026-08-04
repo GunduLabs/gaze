@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Linux build environment for building Gaze on a non-Linux host (e.g. macOS).
 #
 # Gaze targets Linux platform APIs (V4L2, PAM, TPM2/tss2, polkit, GTK4/libadwaita,

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Template for the source RPM consumed by Copr. `just srpm` fills in the
 # ${...} placeholders (version, release, bundled ONNX Runtime release, and the
 # packaging/*.sh scriptlet bodies) so the scriptlets have a single source of

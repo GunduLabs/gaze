@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Nix & NixOS
 
 Gaze ships a Nix flake with packages for the daemon, CLI, GUI, and GNOME Shell

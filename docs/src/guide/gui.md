@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # GUI Guide
 
 `gaze-gui` is the easiest way to enroll faces and check auth health.

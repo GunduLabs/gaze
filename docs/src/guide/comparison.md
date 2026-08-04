@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Gaze vs. Other Linux Face Auth
 
 Gaze is one of several projects bringing Windows Hello-style facial

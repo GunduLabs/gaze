@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Scope: matches USB 046d:085e only (the original Logitech BRIO 4K family)
 # (BRIO Ultra HD Webcam / BRIO 4K Pro / BRIO 4K Stream Edition; identical
 # hardware). The newer Brio 300 / 500 / 100 report different product IDs and

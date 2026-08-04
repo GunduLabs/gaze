@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Contributing
 
 Thanks for helping improve Gaze. This guide covers how to propose changes, what to test, and what to avoid when working on authentication, PAM, packaging, and docs.

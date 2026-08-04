@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 <div align="center">
 
 <img src="packaging/gui/com.gundulabs.Gaze.svg" alt="Gaze icon" width="120" />

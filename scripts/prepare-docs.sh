@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Gundu Labs
 # SPDX-License-Identifier: GPL-3.0-or-later
+
 # Download archived docs for versioned tags
 set -euo pipefail
 

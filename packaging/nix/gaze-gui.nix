@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # GTK4/Adwaita GUI for Gaze (mirrors packaging/nfpm-gui.yaml).
 {
   lib,

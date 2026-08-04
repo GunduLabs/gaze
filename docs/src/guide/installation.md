@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Installation
 
 Use one of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible, and skips GNOME-specific packages on KDE Plasma and other non-GNOME desktops. Manual GNOME package installs still need GNOME settings commands afterward.

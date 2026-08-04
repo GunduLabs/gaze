@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 auth        optional                   pam_ecryptfs.so unwrap                                 {include if "with-ecryptfs"}
 
 password    optional                   pam_ecryptfs.so unwrap                                 {include if "with-ecryptfs"}

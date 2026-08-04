@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 [org/gnome/login-screen]
 enable-smartcard-authentication=false
 enable-fingerprint-authentication={if "with-fingerprint":true|false}
