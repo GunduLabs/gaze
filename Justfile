@@ -408,11 +408,10 @@ test:
     {{ opencv_env }} cargo test --workspace --release
     {{ opencv_env }} cargo test -p gaze-core --release --no-default-features --features gaze-core/openvino-config config::
 
-# Run inference tests with an OpenVINO-enabled system ONNX Runtime.
+# Run the OpenVINO-gated tests with an OpenVINO-enabled system ONNX Runtime.
 [group("checks")]
 test-openvino:
-    {{ opencv_env }} cargo test -p gaze -p gaze-core --release --features gaze/openvino,gaze-core/openvino
-    {{ opencv_env }} cargo test -p gaze-cli -p gaze-gui --release --features gaze-cli/openvino,gaze-gui/openvino
+    {{ opencv_env }} cargo test -p gaze-core --release --features gaze-core/openvino -- inference:: config::
 
 # Check dependencies for known security advisories
 [group("checks")]
@@ -424,11 +423,10 @@ audit:
 lint:
     {{ opencv_env }} cargo clippy --workspace --all-targets -- -D warnings
 
-# Run clippy lints with an OpenVINO-enabled system ONNX Runtime.
+# Lint the OpenVINO-gated code with an OpenVINO-enabled system ONNX Runtime.
 [group("checks")]
 lint-openvino:
-    {{ opencv_env }} cargo clippy -p gaze -p gaze-core --all-targets --features gaze/openvino,gaze-core/openvino -- -D warnings
-    {{ opencv_env }} cargo clippy -p gaze-cli -p gaze-gui --all-targets --features gaze-cli/openvino,gaze-gui/openvino -- -D warnings
+    {{ opencv_env }} cargo clippy -p gaze-core --all-targets --features gaze-core/openvino -- -D warnings
 
 # Check formatting (does not write)
 [group("checks")]
