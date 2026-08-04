@@ -218,7 +218,10 @@ in
           after = [ "dbus.service" ];
           requires = [ "dbus.service" ];
           wantedBy = [ "multi-user.target" ];
-          environment = lib.optionalAttrs (cfg.tpm.tcti != null) {
+          environment = {
+            XDG_CACHE_HOME = "/var/cache/gaze";
+          }
+          // lib.optionalAttrs (cfg.tpm.tcti != null) {
             TPM2TOOLS_TCTI = cfg.tpm.tcti;
           };
           serviceConfig = {
