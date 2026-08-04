@@ -341,12 +341,16 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         row
     };
 
-    let rgb_threshold_row =
-        make_threshold_row("RGB Recognizer Threshold", "Minimum RGB similarity for a match");
+    let rgb_threshold_row = make_threshold_row(
+        "RGB Recognizer Threshold",
+        "Minimum RGB similarity for a match",
+    );
     security_group.add(&rgb_threshold_row);
 
-    let ir_threshold_row =
-        make_threshold_row("IR Recognizer Threshold", "Minimum IR similarity for a match");
+    let ir_threshold_row = make_threshold_row(
+        "IR Recognizer Threshold",
+        "Minimum IR similarity for a match",
+    );
     security_group.add(&ir_threshold_row);
 
     let hardware_group = libadwaita::PreferencesGroup::new();

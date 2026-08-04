@@ -116,6 +116,7 @@ mod tests {
         on_sequence: SAMPLE_ON,
         off_sequence: SAMPLE_OFF,
         source: "unit test",
+        requires_ir_yuy2: false,
     }];
 
     #[test]

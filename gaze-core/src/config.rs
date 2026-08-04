@@ -299,6 +299,9 @@ impl SecurityLevel {
             && (MIN_SECURITY_THRESHOLD..=MAX_SECURITY_THRESHOLD).contains(&threshold)
     }
 
+    /// Back-compat alias that resolves to the **RGB** threshold. Call
+    /// [`Self::rgb_threshold`] or [`Self::ir_threshold`] explicitly instead;
+    /// an IR path using this would silently match against the RGB value.
     pub fn threshold(&self) -> f32 {
         self.rgb_threshold()
     }

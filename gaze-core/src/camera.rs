@@ -23,6 +23,14 @@ fn requires_forced_ir_yuy2(vid: u16, pid: u16, want_color: bool) -> bool {
     !want_color && find_device(vid, pid).is_some_and(|device| device.requires_ir_yuy2)
 }
 
+/// The quirk belongs to the USB device, not to the way the source was spelled,
+/// so look it up from the node a source finally resolves to. `usb:VVVV:PPPP`,
+/// `/dev/videoN`, and PipeWire targets all reach the same profile this way.
+fn node_requires_forced_ir_yuy2(node: &str, want_color: bool) -> bool {
+    !want_color
+        && usb_ids_of(node).is_some_and(|(vid, pid)| requires_forced_ir_yuy2(vid, pid, want_color))
+}
+
 #[derive(Debug, Clone)]
 pub struct ConfiguredCameraSources {
     pub rgb: String,
@@ -211,7 +219,9 @@ fn select_usb_node(
             // Some Windows Hello cameras expose RGB and IR through one UVC
             // capture node. Their emitter profile switches that node into IR
             // mode, so there is no separately advertised mono node to select.
-            if want_color || find_device(vid, pid).is_none() {
+            // Only profiles flagged as single-node qualify; for every other
+            // device a missing mono node means IR is genuinely unavailable.
+            if want_color || !requires_forced_ir_yuy2(vid, pid, want_color) {
                 return None;
             }
 
@@ -360,7 +370,14 @@ impl Camera {
     fn open_kind(camera_source: &str, want_color: bool) -> anyhow::Result<Self> {
         gstreamer::init()?;
         let (src_element, force_ir_yuy2) = match classify_source(camera_source, want_color)? {
-            SourceElement::Element(element) => (element, false),
+            SourceElement::Element(element) => {
+                // `/dev/videoN` and PipeWire targets never carry USB ids, so
+                // resolve the node they name before checking for the quirk.
+                let force = !want_color
+                    && resolve_node(camera_source)
+                        .is_some_and(|node| node_requires_forced_ir_yuy2(&node, want_color));
+                (element, force)
+            }
             SourceElement::ResolveUsb {
                 vid,
                 pid,
@@ -389,7 +406,12 @@ impl Camera {
                     )
                 })?;
                 info!("Falling back to V4L2 camera node {node}");
-                Self::open_source_element(&format!("v4l2src device={node}"), camera_source, false)
+                let force_ir_yuy2 = node_requires_forced_ir_yuy2(&node, want_color);
+                Self::open_source_element(
+                    &format!("v4l2src device={node}"),
+                    camera_source,
+                    force_ir_yuy2,
+                )
             }
             Err(err) => Err(err),
         }
@@ -797,6 +819,18 @@ mod tests {
 
         let rgb_pipeline = camera_pipeline("v4l2src device=/dev/video0", false);
         assert!(rgb_pipeline.contains("image/jpeg"));
+    }
+
+    #[test]
+    fn forced_ir_yuy2_follows_the_device_profile_flag() {
+        // Both single-node Realtek modules are flagged in ir-profiles/*.toml.
+        assert!(requires_forced_ir_yuy2(0x0bda, 0x5767, false));
+        assert!(requires_forced_ir_yuy2(0x0bda, 0x58c2, false));
+
+        // The quirk is IR-only, and never applies to unflagged or unknown devices.
+        assert!(!requires_forced_ir_yuy2(0x0bda, 0x58c2, true));
+        assert!(!requires_forced_ir_yuy2(0x046d, 0x085e, false));
+        assert!(!requires_forced_ir_yuy2(0xdead, 0xbeef, false));
     }
 
     #[test]

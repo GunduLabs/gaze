@@ -3089,7 +3089,7 @@ impl AuthDaemon {
                                 luma.mean, luma.rolling_mean, luma.threshold
                             );
                             info!("{message}");
-                            let _ = tx.try_send(VerifyMsg::Diagnostic(message));
+                            let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
                             logged_rgb_luma_statuses.push(status);
                         }
 
@@ -3244,16 +3244,18 @@ impl AuthDaemon {
                                         "IR stream produced a lit frame: mean_luma={luma}"
                                     );
                                     info!("{message}");
-                                    let _ = tx.try_send(VerifyMsg::Diagnostic(message));
+                                    let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
                                     logged_lit_luma = true;
                                 }
                             }
                             IrFrameKind::StrobeDark => continue,
                             IrFrameKind::EmitterDark => {
                                 if !logged_dark_luma {
-                                    info!(
+                                    let message = format!(
                                         "IR stream remains dark after emitter warmup: mean_luma={luma}"
                                     );
+                                    info!("{message}");
+                                    let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
                                     logged_dark_luma = true;
                                 }
                                 let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, CaptureStatus::TooDark, None));

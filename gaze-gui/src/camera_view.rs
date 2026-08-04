@@ -51,11 +51,10 @@ impl CameraFeed {
                 }
             };
 
-            for frame in &mut cam {
-                if stop_clone.load(Ordering::Relaxed) {
-                    break;
-                }
-
+            // Poll interruptibly: `stop_and_wait` joins this thread from the GTK
+            // main loop, and plain iteration would block there until a frame
+            // arrives (forever, on a stalled camera).
+            while let Some(frame) = cam.next_interruptible(&stop_clone) {
                 let Ok(bytes) = frame_to_bytes(&frame) else {
                     continue;
                 };

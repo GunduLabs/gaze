@@ -293,6 +293,7 @@ mod tests {
         on_sequence: TEST_ON,
         off_sequence: TEST_OFF,
         source: "unit test",
+        requires_ir_yuy2: false,
     };
 
     #[test]
