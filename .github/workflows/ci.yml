@@ -209,7 +209,7 @@ jobs:
   package-rpm:
     name: Package (rpm)
     runs-on: ubuntu-latest
-    container: fedora:43
+    container: fedora:45
     env:
       ORT_CACHE_DIR: /github/home/.ort-cache
 
