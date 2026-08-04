@@ -1,0 +1,73 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Set up build environment
+description: Installs Gaze's Linux build dependencies, the Rust toolchain, just, and the cargo cache.
+
+inputs:
+  just-version:
+    description: just release to install.
+    required: true
+  components:
+    description: Extra rustup components (comma separated), e.g. "clippy".
+    default: ""
+  build-deps:
+    description: Install the system libraries needed to compile the workspace.
+    default: "true"
+  apt-packages:
+    description: Extra apt packages to install on top of the build dependencies.
+    default: ""
+  cache-key:
+    description: rust-cache shared key. Empty skips the cargo cache entirely.
+    default: ""
+  ort-cache-dir:
+    description: >-
+      Directory ort-sys extracts ONNX Runtime into. It links it by absolute path,
+      so it must live somewhere rust-cache persists (the default ~/.cache is not).
+    default: /home/runner/.ort-cache
+
+runs:
+  using: composite
+  steps:
+    - name: Install system packages
+      shell: bash
+      env:
+        BUILD_DEPS: ${{ inputs.build-deps }}
+        APT_PACKAGES: ${{ inputs.apt-packages }}
+      run: |
+        set -euo pipefail
+        packages="$APT_PACKAGES"
+        if [ "$BUILD_DEPS" = "true" ]; then
+          packages="clang libclang-dev libcairo2-dev libglib2.0-dev \
+            libgdk-pixbuf-2.0-dev libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base \
+            libpango1.0-dev libgraphene-1.0-dev libopencv-dev libv4l-dev \
+            libpam0g-dev libtss2-dev libgtk-4-dev libadwaita-1-dev pkg-config \
+            $packages"
+        fi
+        if [ -n "${packages// /}" ]; then
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $packages
+        fi
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: ${{ inputs.components }}
+
+    - name: Install just
+      uses: extractions/setup-just@v4
+      with:
+        just-version: ${{ inputs.just-version }}
+
+    - name: Export ORT cache directory
+      shell: bash
+      run: echo "ORT_CACHE_DIR=${{ inputs.ort-cache-dir }}" >> "$GITHUB_ENV"
+
+    - name: Restore Rust cache
+      if: inputs.cache-key != ''
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ inputs.cache-key }}
+        cache-on-failure: true
+        cache-directories: ${{ inputs.ort-cache-dir }}

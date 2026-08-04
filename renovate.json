@@ -1,7 +1,12 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:best-practices"
+    "config:recommended",
+    ":configMigration",
+    ":pinDevDependencies",
+    "abandonments:recommended",
+    "security:minimumReleaseAgeNpm",
+    ":maintainLockFilesWeekly"
   ],
   "timezone": "America/New_York",
   "labels": ["dependencies"],
@@ -52,6 +57,11 @@
       "matchUpdateTypes": ["minor", "patch"],
       "schedule": ["* 0-5 * * *"],
       "automerge": true
+    },
+    {
+      "description": "Never pin actions or container images to a digest. The presets that do this, helpers:pinGitHubActionDigests and docker:pinDigests, are deliberately left out of extends above; this rule is the backstop in case they ever come back, and it is last in packageRules so it overrides anything a preset sets",
+      "matchManagers": ["github-actions", "dockerfile", "docker-compose"],
+      "pinDigests": false
     }
   ],
   "customManagers": [

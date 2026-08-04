@@ -33,8 +33,6 @@ jobs:
     container: ${{ matrix.container }}
     env:
       DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
-      # ort-sys extracts ONNX Runtime here and links it by absolute path, so
-      # it must be a path rust-cache persists (default ~/.cache is not).
       ORT_CACHE_DIR: /github/home/.ort-cache
     strategy:
       fail-fast: false
@@ -208,7 +206,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -304,8 +302,6 @@ jobs:
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          # v2: v1 caches predate ORT_CACHE_DIR and can replay ort-sys link
-          # paths into a directory that no longer exists.
           shared-key: cd-${{ matrix.id }}-v2
           cache-on-failure: true
           cache-directories: ${{ env.ORT_CACHE_DIR }}
@@ -394,7 +390,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -460,7 +456,7 @@ jobs:
   build-srpm:
     name: Build source RPM for Copr
     runs-on: ubuntu-latest
-    container: fedora:45@sha256:0c1f63ed8fb818fad16cf6ae091598c410a21d2e1a9adf183beb93189299bfba
+    container: fedora:45
     env:
       DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
 
@@ -480,7 +476,7 @@ jobs:
             rpm-sign
 
       - name: Checkout source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -505,7 +501,6 @@ jobs:
             echo "RPM_SIGN_KEY=$fingerprint" >> "$GITHUB_ENV"
           fi
 
-      # PACKAGE_RELEASE stays at the default 1: Copr appends %{?dist} per chroot.
       - name: Build source RPM
         run: |
           VERSION="${DEPLOY_REF_NAME#v}" just srpm
@@ -522,15 +517,9 @@ jobs:
   dispatch-packages:
     name: Dispatch packages to self-hosted repo
     runs-on: ubuntu-latest
-    # Must wait for build-flatpak and build-srpm too: the packages repo downloads
-    # ALL of this run's artifacts by run_id when the dispatch lands, so every
-    # artifact (deb/rpm/arch, the flatpak bundles, and the Copr srpm) has to be
-    # uploaded first.
     needs: [build-packages, build-flatpak, build-srpm]
 
     steps:
-      # No checkout or artifact download needed: GunduLabs/packages pulls the
-      # packages-* artifacts itself by run_id and builds the apt/rpm/flatpak/aur repos.
       - name: Trigger GunduLabs/packages publish
         uses: peter-evans/repository-dispatch@v4
         with:
@@ -566,7 +555,3 @@ jobs:
             dist/packages/**/*.flatpakref
             dist/packages/**/*.flatpakrepo
 
-  # AUR publishing lives in GunduLabs/packages (its publish-repos.yml builds the
-  # Arch binary repo and pushes the AUR wrapper packages from the artifacts it
-  # downloads via the dispatch above). Publishing it from here too raced the
-  # packages repo on aur.archlinux.org, so it was removed.

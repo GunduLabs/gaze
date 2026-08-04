@@ -22,83 +22,163 @@ env:
   CARGO_TERM_COLOR: always
   JUST_VERSION: 1.58.0
   NFPM_VERSION: v2.47.0
-  # ort-sys extracts ONNX Runtime here and links it by absolute path, so it
-  # must be a path rust-cache persists (default ~/.cache is not).
-  ORT_CACHE_DIR: /home/runner/.ort-cache
 
 jobs:
-  checks:
-    name: Lint, Test, Build
+  fmt:
+    name: Formatting
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang \
-            libclang-dev \
-            libcairo2-dev \
-            libglib2.0-dev \
-            libgdk-pixbuf-2.0-dev \
-            libgstreamer1.0-dev \
-            libgstreamer-plugins-base1.0-dev \
-            gstreamer1.0-plugins-base \
-            libpango1.0-dev \
-            libgraphene-1.0-dev \
-            libopencv-dev \
-            libv4l-dev \
-            libpam0g-dev \
-            libtss2-dev \
-            libgtk-4-dev \
-            libadwaita-1-dev \
-            dpkg-dev \
-            gettext-base \
-            checkpolicy \
-            semodule-utils \
-            pkg-config
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Install just
-        uses: extractions/setup-just@v4
+      - name: Set up build environment
+        uses: ./.github/actions/setup-build
         with:
           just-version: ${{ env.JUST_VERSION }}
+          components: rustfmt
+          build-deps: "false"
 
       - name: Check Justfile formatting
         run: just --fmt --check
 
+      - name: Check Rust formatting
+        run: just fmt-check
+
+  audit:
+    name: Cargo audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Set up build environment
+        uses: ./.github/actions/setup-build
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+          build-deps: "false"
+
       - name: Install cargo-audit
         uses: taiki-e/install-action@cargo-audit
 
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          # v2: v1 caches predate ORT_CACHE_DIR and can replay ort-sys link
-          # paths into a directory that no longer exists.
-          shared-key: build-deb-v2
-          cache-on-failure: true
-          cache-directories: ${{ env.ORT_CACHE_DIR }}
+      - name: Run cargo audit
+        run: just audit
 
-      - name: Check formatting
-        run: just fmt-check
+  lint:
+    name: Clippy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Set up build environment
+        uses: ./.github/actions/setup-build
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+          components: clippy
+          cache-key: ci-lint-v1
 
       - name: Run clippy
         run: just lint
 
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Set up build environment
+        uses: ./.github/actions/setup-build
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+          cache-key: ci-test-v1
+
       - name: Run tests
+        env:
+          CARGO_BUILD_JOBS: 2
         run: just test
 
-      - name: Run cargo audit
-        run: just audit
+  openvino:
+    name: OpenVINO
+    runs-on: ubuntu-latest
+    env:
+      ORT_STRATEGY: system
+      ORT_PREFER_DYNAMIC_LINK: "1"
+      CARGO_BUILD_JOBS: 2
+      RUSTFLAGS: -Cdebuginfo=0
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Set up build environment
+        uses: ./.github/actions/setup-build
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+          components: clippy
+          cache-key: ci-openvino-v1
+
+      - name: Provide an OpenVINO-enabled ONNX Runtime
+        run: |
+          set -euo pipefail
+          version="$(just --evaluate ort_version)"
+          lib="$RUNNER_TEMP/ort-openvino/lib"
+          mkdir -p "$lib" "$RUNNER_TEMP/ov-wheel"
+          python3 -m pip download --no-deps --only-binary :all: \
+            --python-version 3.12 --platform manylinux_2_28_x86_64 \
+            "onnxruntime-openvino==$version" -d "$RUNNER_TEMP/ov-wheel"
+          unzip -qo "$RUNNER_TEMP"/ov-wheel/*.whl 'onnxruntime/capi/lib*.so*' \
+            -d "$RUNNER_TEMP/ov-wheel/extracted"
+          mv "$RUNNER_TEMP"/ov-wheel/extracted/onnxruntime/capi/lib*.so* "$lib/"
+          ln -sf "libonnxruntime.so.$version" "$lib/libonnxruntime.so"
+          objdump -T "$lib/libonnxruntime.so.$version" \
+            | grep -q OrtSessionOptionsAppendExecutionProvider_OpenVINO
+          echo "ORT_LIB_LOCATION=$lib" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+
+      - name: Run clippy with OpenVINO
+        run: just lint-openvino
+
+      - name: Run tests with OpenVINO
+        run: just test-openvino
+
+      - name: Build with OpenVINO
+        run: just build-rust-openvino
+
+  package:
+    name: Package ${{ matrix.format }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        format: [deb, archlinux]
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Set up build environment
+        uses: ./.github/actions/setup-build
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+          apt-packages: dpkg-dev gettext-base checkpolicy semodule-utils
+          cache-key: ci-package-v1
 
       - name: Build workspace
         env:
@@ -119,22 +199,119 @@ jobs:
           sudo tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm
           nfpm --version
 
-      - name: Build and verify deb packages
-        run: VERSION=0.0.0 just package-prebuilt deb
+      - name: Build and verify ${{ matrix.format }} packages
+        run: VERSION=0.0.0 just package-prebuilt ${{ matrix.format }}
 
-      # Catches spec and vendoring breakage here rather than in a Copr build.
-      - name: Build and verify source RPM
+  package-rpm:
+    name: Package rpm (Fedora)
+    runs-on: ubuntu-latest
+    container: fedora:43
+    env:
+      ORT_CACHE_DIR: /github/home/.ort-cache
+
+    steps:
+      - name: Install Fedora dependencies
         run: |
-          sudo apt-get install -y --no-install-recommends rpm zstd gettext-base
-          VERSION=0.0.0 just srpm
+          dnf install -y \
+            git \
+            ca-certificates \
+            curl \
+            clang \
+            clang-devel \
+            opencv-devel \
+            libv4l-devel \
+            pam-devel \
+            tpm2-tss-devel \
+            checkpolicy \
+            policycoreutils \
+            gtk4-devel \
+            libadwaita-devel \
+            gstreamer1-devel \
+            gstreamer1-plugins-base-devel \
+            openssl-devel \
+            pkg-config \
+            gettext \
+            gcc
 
-      - name: Build and verify archlinux packages
-        run: VERSION=0.0.0 just package-prebuilt archlinux
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Trust workspace for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-package-rpm-v1
+          cache-on-failure: true
+          cache-directories: ${{ env.ORT_CACHE_DIR }}
+
+      - name: Install nfpm
+        run: |
+          nfpm_version="${NFPM_VERSION#v}"
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/${NFPM_VERSION}/nfpm_${nfpm_version}_Linux_x86_64.tar.gz" \
+            -o /tmp/nfpm.tar.gz
+          tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm
+          nfpm --version
+
+      - name: Build workspace
+        env:
+          CARGO_BUILD_JOBS: 2
+          RUSTFLAGS: -Cdebuginfo=0
+        run: just build-rust
+
+      - name: Build SELinux policy
+        run: |
+          just build-selinux
+          test -f dist/selinux/gaze-gdm-camera.pp
+
+      - name: Build and verify rpm packages
+        run: VERSION=0.0.0 just package-prebuilt rpm
+
+  srpm:
+    name: Source RPM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Set up build environment
+        uses: ./.github/actions/setup-build
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+          build-deps: "false"
+          apt-packages: rpm zstd gettext-base
+          cache-key: ci-srpm-v1
+
+      - name: Build and verify source RPM
+        run: VERSION=0.0.0 just srpm
+
+  nix:
+    name: Nix
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
 
-      # Evaluation-only; catches flake and module errors without a full build.
       - name: Evaluate flake packages
         run: |
           nix flake check --no-build
@@ -161,10 +338,6 @@ jobs:
                       gui.enable = true;
                       gnome.enable = true;
                     };
-                    # Exercises pam.defaultServices, an explicitly enabled
-                    # service on the nixpkgs PAM submodule, the
-                    # gaze-before-fprintd rule ordering, and the TPM
-                    # supplementary group.
                     security.pam.services.login.gaze = {
                       enable = true;
                       simultaneous = true;
