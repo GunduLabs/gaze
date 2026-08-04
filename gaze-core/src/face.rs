@@ -194,6 +194,15 @@ impl IrDarkFrameGate {
 
     pub fn classify(&mut self, frame: &Mat) -> IrFrameKind {
         let luma = frame_mean_luma(frame).unwrap_or(0);
+        self.classify_luma(luma)
+    }
+
+    pub fn classify_with_luma(&mut self, frame: &Mat) -> (IrFrameKind, u8) {
+        let luma = frame_mean_luma(frame).unwrap_or(0);
+        (self.classify_luma(luma), luma)
+    }
+
+    fn classify_luma(&mut self, luma: u8) -> IrFrameKind {
         if luma >= self.threshold {
             self.consecutive_dark = 0;
             return IrFrameKind::Lit;

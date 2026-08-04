@@ -85,6 +85,12 @@ impl EmitterGuard {
                 Some(led) => {
                     if let Err(e) = led.set(true) {
                         warn!("IR emitter activate failed: {e}");
+                    } else {
+                        info!(
+                            "IR emitter enabled via {} on {}",
+                            led.device_name(),
+                            led.node()
+                        );
                     }
                     Some(led)
                 }
@@ -571,7 +577,7 @@ impl AuthDaemon {
 mod tests {
     use super::{
         AuthDaemon, ClaimState, and_policy_unsatisfiable, auth_streams, claim_has_epoch,
-        eyes_from_kpss, hybrid_auth_passed, pipewire_runtime_update,
+        eyes_from_kpss, hybrid_auth_passed, pipewire_runtime_update, should_yield_rgb_to_ir,
     };
     use gaze_core::config::AuthSurface;
     use gaze_core::dbus::{ActiveSession, CaptureStatus};
@@ -1155,6 +1161,25 @@ mod tests {
     }
 
     #[test]
+    fn hybrid_fallback_yields_dark_rgb_to_ir_immediately() {
+        for policy in ["fallback_on_dark", "default", ""] {
+            assert!(should_yield_rgb_to_ir(policy, true, CaptureStatus::TooDark));
+        }
+        assert!(!should_yield_rgb_to_ir(
+            "fallback_on_dark",
+            false,
+            CaptureStatus::TooDark
+        ));
+        assert!(!should_yield_rgb_to_ir(
+            "fallback_on_dark",
+            true,
+            CaptureStatus::NoFace
+        ));
+        assert!(!should_yield_rgb_to_ir("or", true, CaptureStatus::TooDark));
+        assert!(!should_yield_rgb_to_ir("and", true, CaptureStatus::TooDark));
+    }
+
+    #[test]
     fn single_spectrum_authentication_ignores_the_other_result() {
         assert!(hybrid_auth_passed(
             "and",
@@ -1329,9 +1354,14 @@ pub async fn watch_session_locks(conn: zbus::Connection, lock_epochs: LockEpochs
 }
 
 enum VerifyMsg {
+    PhaseStarted(Spectrum),
     Status(Spectrum, CaptureStatus, Option<ndarray::Array1<f32>>),
     Success(Spectrum, ndarray::Array1<f32>),
     Error(String),
+}
+
+fn should_yield_rgb_to_ir(policy: &str, run_ir: bool, status: CaptureStatus) -> bool {
+    run_ir && !matches!(policy, "or" | "and") && matches!(status, CaptureStatus::TooDark)
 }
 
 fn hybrid_auth_passed(
@@ -2160,6 +2190,8 @@ impl AuthDaemon {
                                 continue;
                             }
 
+                            // Realtek switches mode before the exact IR stream format is
+                            // negotiated; changing format afterwards silently restores RGB.
                             let _emitter = EmitterGuard::engage(
                                 &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                                 emitter_enabled
@@ -2978,6 +3010,7 @@ impl AuthDaemon {
                 let liveness_threshold = liveness_cfg.effective_threshold();
                 let rgb_device_clone = rgb_device.clone();
                 let rgb_phase_done_clone = rgb_phase_done.clone();
+                let hybrid_policy_clone = hybrid_policy.clone();
 
                 rgb_thread = Some(std::thread::spawn(move || {
                     // Set once the RGB camera is released, on every exit path (incl. panic),
@@ -3032,6 +3065,11 @@ impl AuthDaemon {
 
                         let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
                         let _ = tx.try_send(VerifyMsg::Status(Spectrum::Rgb, status, latest_embed));
+
+                        if should_yield_rgb_to_ir(&hybrid_policy_clone, run_ir, status) {
+                            yielded_to_ir = true;
+                            break;
+                        }
 
                         if status == CaptureStatus::Usable && let Some(data) = embed_opt {
                             let threshold = *threshold_arc.blocking_lock();
@@ -3138,6 +3176,8 @@ impl AuthDaemon {
                         }
                     }
 
+                    let _ = tx.blocking_send(VerifyMsg::PhaseStarted(Spectrum::Ir));
+
                     let _emitter = EmitterGuard::engage(
                         &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                         emitter_enabled
@@ -3154,6 +3194,8 @@ impl AuthDaemon {
 
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, false);
                     let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
+                    let mut logged_lit_luma = false;
+                    let mut logged_dark_luma = false;
                     let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
 
                     while let Some(frame) = cam.next_interruptible(&stop_clone) {
@@ -3161,10 +3203,26 @@ impl AuthDaemon {
                             break;
                         }
 
-                        match dark_gate.classify(&frame) {
-                            IrFrameKind::Lit => {}
+                        let (frame_kind, luma) = dark_gate.classify_with_luma(&frame);
+                        match frame_kind {
+                            IrFrameKind::Lit => {
+                                if !logged_lit_luma {
+                                    info!(
+                                        "IR stream produced a lit frame: mean_luma={luma}, threshold={}",
+                                        config_clone.cameras.dark_luma_threshold
+                                    );
+                                    logged_lit_luma = true;
+                                }
+                            }
                             IrFrameKind::StrobeDark => continue,
                             IrFrameKind::EmitterDark => {
+                                if !logged_dark_luma {
+                                    info!(
+                                        "IR stream remains dark after emitter warmup: mean_luma={luma}, threshold={}",
+                                        config_clone.cameras.dark_luma_threshold
+                                    );
+                                    logged_dark_luma = true;
+                                }
                                 let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, CaptureStatus::TooDark, None));
                                 continue;
                             }
@@ -3310,6 +3368,13 @@ impl AuthDaemon {
                             break;
                         };
                         match msg {
+                            VerifyMsg::PhaseStarted(Spectrum::Ir) => {
+                                // RGB and IR run serially on single-function cameras. Give
+                                // IR a fresh no-face window after RGB releases the device.
+                                last_face_at = Instant::now();
+                                dark_since = None;
+                            }
+                            VerifyMsg::PhaseStarted(_) => {}
                             VerifyMsg::Status(spectrum, status, embed_opt) => {
                                 let has_face = embed_opt.is_some();
                                 match spectrum {

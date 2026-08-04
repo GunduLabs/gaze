@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{info, warn};
 
 use crate::config::{CameraConfig, DEFAULT_RGB_CAMERA};
-use crate::ir::devices::usb_ids_of;
+use crate::ir::devices::{find_device, usb_ids_of};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CameraKind {
@@ -194,11 +194,24 @@ fn select_usb_node(
     pid: u16,
     want_color: bool,
 ) -> Option<String> {
-    nodes
-        .iter()
-        .filter(|n| n.vid == vid && n.pid == pid && n.is_color == want_color)
+    let matching_nodes = || nodes.iter().filter(|n| n.vid == vid && n.pid == pid);
+
+    matching_nodes()
+        .filter(|n| n.is_color == want_color)
         .min_by_key(|n| video_node_index(&n.node).unwrap_or(u32::MAX))
         .map(|n| n.node.clone())
+        .or_else(|| {
+            // Some Windows Hello cameras expose RGB and IR through one UVC
+            // capture node. Their emitter profile switches that node into IR
+            // mode, so there is no separately advertised mono node to select.
+            if want_color || find_device(vid, pid).is_none() {
+                return None;
+            }
+
+            matching_nodes()
+                .min_by_key(|n| video_node_index(&n.node).unwrap_or(u32::MAX))
+                .map(|n| n.node.clone())
+        })
 }
 
 fn video_node_index(node: &str) -> Option<u32> {
@@ -339,8 +352,8 @@ impl Camera {
 
     fn open_kind(camera_source: &str, want_color: bool) -> anyhow::Result<Self> {
         gstreamer::init()?;
-        let src_element = match classify_source(camera_source, want_color)? {
-            SourceElement::Element(element) => element,
+        let (src_element, force_ir_yuy2) = match classify_source(camera_source, want_color)? {
+            SourceElement::Element(element) => (element, false),
             SourceElement::ResolveUsb {
                 vid,
                 pid,
@@ -352,11 +365,14 @@ impl Camera {
                         if want_color { "color" } else { "IR" }
                     )
                 })?;
-                format!("v4l2src device={node}")
+                (
+                    format!("v4l2src device={node}"),
+                    !want_color && vid == 0x0bda && matches!(pid, 0x5767 | 0x58c2),
+                )
             }
         };
 
-        match Self::open_source_element(&src_element, camera_source) {
+        match Self::open_source_element(&src_element, camera_source, force_ir_yuy2) {
             Ok(camera) => Ok(camera),
             Err(err) if src_element == "pipewiresrc" => {
                 warn!("Opening the PipeWire camera failed ({err:#}); trying a direct V4L2 device");
@@ -366,16 +382,18 @@ impl Camera {
                     )
                 })?;
                 info!("Falling back to V4L2 camera node {node}");
-                Self::open_source_element(&format!("v4l2src device={node}"), camera_source)
+                Self::open_source_element(&format!("v4l2src device={node}"), camera_source, false)
             }
             Err(err) => Err(err),
         }
     }
 
-    fn open_source_element(src_element: &str, camera_source: &str) -> anyhow::Result<Self> {
-        let pipeline_str = format!(
-            "{src_element} ! video/x-raw,pixel-aspect-ratio=1/1; image/jpeg ! decodebin ! videoconvert ! videoscale ! appsink name=gaze_sink"
-        );
+    fn open_source_element(
+        src_element: &str,
+        camera_source: &str,
+        force_ir_yuy2: bool,
+    ) -> anyhow::Result<Self> {
+        let pipeline_str = camera_pipeline(src_element, force_ir_yuy2);
         info!("Attempting to open GStreamer camera: {}", pipeline_str);
 
         let pipeline = gstreamer::parse::launch(&pipeline_str)
@@ -511,6 +529,20 @@ impl Camera {
         }
 
         None
+    }
+}
+
+fn camera_pipeline(src_element: &str, force_ir_yuy2: bool) -> String {
+    if force_ir_yuy2 {
+        // Dell/Realtek single-node RGB/IR modules silently remain in RGB mode
+        // unless the stream is negotiated as uncompressed 640x480 YUY2.
+        format!(
+            "{src_element} ! video/x-raw,format=YUY2,width=640,height=480,pixel-aspect-ratio=1/1 ! videoconvert ! videoscale ! appsink name=gaze_sink"
+        )
+    } else {
+        format!(
+            "{src_element} ! video/x-raw,pixel-aspect-ratio=1/1; image/jpeg ! decodebin ! videoconvert ! videoscale ! appsink name=gaze_sink"
+        )
     }
 }
 
@@ -750,6 +782,16 @@ mod tests {
     }
 
     #[test]
+    fn realtek_ir_pipeline_forces_required_uncompressed_mode() {
+        let pipeline = camera_pipeline("v4l2src device=/dev/video0", true);
+        assert!(pipeline.contains("video/x-raw,format=YUY2,width=640,height=480"));
+        assert!(!pipeline.contains("image/jpeg"));
+
+        let rgb_pipeline = camera_pipeline("v4l2src device=/dev/video0", false);
+        assert!(rgb_pipeline.contains("image/jpeg"));
+    }
+
+    #[test]
     fn resolve_source_uses_rgb_when_no_ir_configured() {
         let cameras = CameraConfig {
             rgb: "primary".to_string(),
@@ -967,6 +1009,21 @@ mod tests {
         assert_eq!(
             select_usb_node(&nodes, 0x046d, 0x085e, true),
             Some("/dev/video2".to_string())
+        );
+    }
+
+    #[test]
+    fn select_usb_node_reuses_single_node_for_known_ir_profile() {
+        let nodes = vec![VideoNodeInfo {
+            node: "/dev/video6".to_string(),
+            vid: 0x0bda,
+            pid: 0x58c2,
+            is_color: true,
+        }];
+
+        assert_eq!(
+            select_usb_node(&nodes, 0x0bda, 0x58c2, false),
+            Some("/dev/video6".to_string())
         );
     }
 
