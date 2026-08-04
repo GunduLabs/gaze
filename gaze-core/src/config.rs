@@ -1053,7 +1053,18 @@ mod tests {
         let migrated = toml::to_string(&config).unwrap();
         assert!(migrated.contains("rgb_threshold = 0.47"));
         assert!(migrated.contains("ir_threshold = 0.47"));
-        assert!(!migrated.lines().any(|line| line.starts_with("threshold =")));
+
+        let security_section = migrated
+            .split("[security]")
+            .nth(1)
+            .and_then(|rest| rest.split("\n[").next())
+            .unwrap_or_default();
+        assert!(
+            !security_section
+                .lines()
+                .any(|line| line.trim_start().starts_with("threshold =")),
+            "the legacy security.threshold key must not be re-serialized: {security_section}"
+        );
     }
 
     #[test]
