@@ -236,6 +236,18 @@ impl CameraFeed {
         }
     }
 
+    /// Release the camera before another owner, such as `gazed`, opens it.
+    ///
+    /// This is only used after the user starts enrollment. A live preview has
+    /// already proven that frames are arriving, so joining normally completes
+    /// after at most one more frame.
+    pub fn stop_and_wait(&self) {
+        self.stop_flag.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.thread_handle.borrow_mut().take() {
+            let _ = handle.join();
+        }
+    }
+
     pub fn start(&self) {
         // Guidance-only feed (e.g. IR): no capture thread to pump.
         let Some(rx) = self.rx.borrow_mut().take() else {

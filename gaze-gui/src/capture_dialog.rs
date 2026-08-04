@@ -266,6 +266,10 @@ pub fn show_capture_dialog(
         #[strong]
         feed,
         move |btn| {
+            // The preview opens the RGB camera directly. Release it before
+            // asking gazed to open the same device for enrollment.
+            feed.stop_and_wait();
+
             btn.set_visible(false);
             stop_btn.set_visible(true);
             prompt_label.set_visible(true);
