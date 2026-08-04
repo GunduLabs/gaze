@@ -115,7 +115,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ORT_STRATEGY: system
+      ORT_LIB_LOCATION: ${{ runner.temp }}/ort-openvino/lib
       ORT_PREFER_DYNAMIC_LINK: "1"
+      LD_LIBRARY_PATH: ${{ runner.temp }}/ort-openvino/lib
       CARGO_BUILD_JOBS: 2
       RUSTFLAGS: -Cdebuginfo=0
 
@@ -136,19 +138,21 @@ jobs:
         run: |
           set -euo pipefail
           version="$(just --evaluate ort_version)"
-          lib="$RUNNER_TEMP/ort-openvino/lib"
-          mkdir -p "$lib" "$RUNNER_TEMP/ov-wheel"
+          wheel="$RUNNER_TEMP/ov-wheel"
+          mkdir -p "$ORT_LIB_LOCATION" "$wheel"
           python3 -m pip download --no-deps --only-binary :all: \
             --python-version 3.12 --platform manylinux_2_28_x86_64 \
-            "onnxruntime-openvino==$version" -d "$RUNNER_TEMP/ov-wheel"
-          unzip -qo "$RUNNER_TEMP"/ov-wheel/*.whl 'onnxruntime/capi/lib*.so*' \
-            -d "$RUNNER_TEMP/ov-wheel/extracted"
-          mv "$RUNNER_TEMP"/ov-wheel/extracted/onnxruntime/capi/lib*.so* "$lib/"
-          ln -sf "libonnxruntime.so.$version" "$lib/libonnxruntime.so"
-          objdump -T "$lib/libonnxruntime.so.$version" \
+            "onnxruntime-openvino==$version" -d "$wheel"
+          unzip -qo "$wheel"/*.whl 'onnxruntime/capi/lib*.so*' -d "$wheel/extracted"
+          mv "$wheel"/extracted/onnxruntime/capi/lib*.so* "$ORT_LIB_LOCATION/"
+          real="libonnxruntime.so.$version"
+          soname="$(objdump -p "$ORT_LIB_LOCATION/$real" | awk '/SONAME/ { print $2 }')"
+          test -n "$soname"
+          ln -sf "$real" "$ORT_LIB_LOCATION/libonnxruntime.so"
+          ln -sf "$real" "$ORT_LIB_LOCATION/$soname"
+          objdump -T "$ORT_LIB_LOCATION/$real" \
             | grep -q OrtSessionOptionsAppendExecutionProvider_OpenVINO
-          echo "ORT_LIB_LOCATION=$lib" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=$lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          test -e "$ORT_LIB_LOCATION/$soname"
 
       - name: Run clippy with OpenVINO
         run: just lint-openvino
