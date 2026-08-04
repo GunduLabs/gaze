@@ -72,11 +72,7 @@ impl<'de> Deserialize<'de> for SecurityLevel {
         D: serde::Deserializer<'de>,
     {
         let file = SecurityLevelFile::deserialize(deserializer)?;
-        let fallback_threshold = file
-            .threshold
-            .or(file.rgb_threshold)
-            .or(file.ir_threshold)
-            .unwrap_or(0.0);
+        let fallback_threshold = file.threshold.unwrap_or(0.0);
 
         Ok(Self {
             level: file.level,
@@ -1058,6 +1054,27 @@ mod tests {
         assert!(migrated.contains("rgb_threshold = 0.47"));
         assert!(migrated.contains("ir_threshold = 0.47"));
         assert!(!migrated.lines().any(|line| line.starts_with("threshold =")));
+    }
+
+    #[test]
+    fn setting_one_spectrum_threshold_does_not_leak_into_the_other() {
+        let config: Config = toml::from_str(
+            r#"
+            [security]
+            level = "custom"
+            detector = "standard"
+            recognizer = "standard"
+            rgb_threshold = 0.6
+            "#,
+        )
+        .unwrap();
+
+        assert!((config.security.rgb_threshold() - 0.6).abs() < f32::EPSILON);
+        assert_eq!(
+            config.security.ir_threshold(),
+            DEFAULT_SECURITY_THRESHOLD as f32,
+            "an unset ir_threshold must not silently inherit rgb_threshold"
+        );
     }
 
     #[test]
