@@ -142,6 +142,24 @@ struct CameraChoices<'a> {
     ir_options: &'a [(String, String)],
 }
 
+fn is_listed_source(options: &[(String, String)], configured: &str) -> bool {
+    options.iter().any(|(_, target)| target == configured)
+}
+
+fn set_camera_row_subtitle(
+    row: &libadwaita::ComboRow,
+    options: &[(String, String)],
+    configured: &str,
+) {
+    if is_listed_source(options, configured) {
+        row.set_subtitle("");
+    } else {
+        row.set_subtitle(&format!(
+            "Configured as {configured}, which this list cannot show"
+        ));
+    }
+}
+
 fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoices<'_>) {
     rows.inference_execution_provider
         .set_selected(cfg.inference.execution_provider_index());
@@ -194,12 +212,14 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
         .position(|(_, target)| target == &cfg.cameras.rgb)
         .unwrap_or(0);
     rows.camera.set_selected(cam_idx as u32);
+    set_camera_row_subtitle(rows.camera, choices.cameras, &cfg.cameras.rgb);
     let ir_idx = choices
         .ir_options
         .iter()
         .position(|(_, target)| target == &cfg.cameras.ir)
         .unwrap_or(0);
     rows.ir.set_selected(ir_idx as u32);
+    set_camera_row_subtitle(rows.ir, choices.ir_options, &cfg.cameras.ir);
     rows.emitter.set_active(cfg.cameras.emitter_enabled);
     rows.dark_luma_threshold
         .set_value(cfg.cameras.dark_luma_threshold as f64);
@@ -507,6 +527,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
     let is_loading = Rc::new(std::cell::Cell::new(true));
     let inference_touched = Rc::new(std::cell::Cell::new(false));
+    let camera_touched = Rc::new(std::cell::Cell::new(false));
+    let ir_touched = Rc::new(std::cell::Cell::new(false));
 
     level_row.connect_selected_notify(glib::clone!(
         #[weak]
@@ -597,6 +619,10 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         config,
         #[strong]
         is_loading,
+        #[strong]
+        camera_touched,
+        #[strong]
+        ir_touched,
         move || {
             if is_loading.get() {
                 return;
@@ -632,13 +658,17 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 );
             }
 
-            let cam_idx = camera_row.selected() as usize;
-            if let Some((_, target)) = cameras.get(cam_idx) {
-                cfg.cameras.rgb = target.clone();
+            if camera_touched.get() || is_listed_source(&cameras, &cfg.cameras.rgb) {
+                let cam_idx = camera_row.selected() as usize;
+                if let Some((_, target)) = cameras.get(cam_idx) {
+                    cfg.cameras.rgb = target.clone();
+                }
             }
-            let ir_idx = ir_row.selected() as usize;
-            if let Some((_, target)) = ir_options.get(ir_idx) {
-                cfg.cameras.ir = target.clone();
+            if ir_touched.get() || is_listed_source(&ir_options, &cfg.cameras.ir) {
+                let ir_idx = ir_row.selected() as usize;
+                if let Some((_, target)) = ir_options.get(ir_idx) {
+                    cfg.cameras.ir = target.clone();
+                }
             }
             cfg.cameras.emitter_enabled = emitter_switch.is_active();
             cfg.cameras.dark_luma_threshold = dark_luma_threshold_row.value() as u8;
@@ -720,7 +750,17 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     camera_row.connect_selected_notify(glib::clone!(
         #[strong]
         apply_changes,
-        move |_| apply_changes()
+        #[strong]
+        camera_touched,
+        #[strong]
+        is_loading,
+        move |row| {
+            if !is_loading.get() {
+                camera_touched.set(true);
+                row.set_subtitle("");
+            }
+            apply_changes()
+        }
     ));
     threshold_row.connect_value_notify(glib::clone!(
         #[strong]
@@ -807,7 +847,17 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     ir_row.connect_selected_notify(glib::clone!(
         #[strong]
         apply_changes,
-        move |_| apply_changes()
+        #[strong]
+        ir_touched,
+        #[strong]
+        is_loading,
+        move |row| {
+            if !is_loading.get() {
+                ir_touched.set(true);
+                row.set_subtitle("");
+            }
+            apply_changes()
+        }
     ));
     emitter_switch.connect_active_notify(glib::clone!(
         #[strong]

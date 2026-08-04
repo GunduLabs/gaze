@@ -110,15 +110,9 @@ pub fn resolve_node(source: &str) -> Option<String> {
         if let Some(props) = device.properties()
             && let Some(t) = pipewire_target(&props)
             && t == target
+            && let Some(path) = v4l2_node_of(&props)
         {
-            if let Some(path) = string_property(&props, "api.v4l2.path") {
-                return Some(path);
-            }
-            if let Some(path) = string_property(&props, "device.path")
-                && path.starts_with("/dev/video")
-            {
-                return Some(path);
-            }
+            return Some(path);
         }
     }
 
@@ -535,14 +529,56 @@ impl Iterator for Camera {
 }
 
 pub fn enumerate_cameras() -> anyhow::Result<Vec<(String, String)>> {
-    enumerate_cameras_filtered(false)
+    let mut cameras = vec![CameraEntry {
+        display_name: PRIMARY_CAMERA_DISPLAY_NAME.to_string(),
+        target: DEFAULT_RGB_CAMERA.to_string(),
+        node: None,
+    }];
+    cameras.extend(collect_camera_entries(Some(true))?);
+    Ok(label_camera_entries(cameras))
 }
 
 pub fn enumerate_ir_cameras() -> anyhow::Result<Vec<(String, String)>> {
-    enumerate_cameras_filtered(true)
+    let mono = collect_camera_entries(Some(false))?;
+    if !mono.is_empty() {
+        return Ok(label_camera_entries(mono));
+    }
+
+    let all = collect_camera_entries(None)?;
+    if all.len() < 2 {
+        return Ok(Vec::new());
+    }
+    Ok(label_camera_entries(all))
 }
 
-fn enumerate_cameras_filtered(mono_only: bool) -> anyhow::Result<Vec<(String, String)>> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CameraEntry {
+    display_name: String,
+    target: String,
+    node: Option<String>,
+}
+
+fn label_camera_entries(entries: Vec<CameraEntry>) -> Vec<(String, String)> {
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for entry in &entries {
+        *counts.entry(entry.display_name.clone()).or_default() += 1;
+    }
+
+    entries
+        .into_iter()
+        .map(|entry| {
+            let shared = counts
+                .get(&entry.display_name)
+                .is_some_and(|count| *count > 1);
+            match entry.node {
+                Some(node) if shared => (format!("{} ({node})", entry.display_name), entry.target),
+                _ => (entry.display_name, entry.target),
+            }
+        })
+        .collect()
+}
+
+fn collect_camera_entries(want_color: Option<bool>) -> anyhow::Result<Vec<CameraEntry>> {
     gstreamer::init()?;
     let monitor = gstreamer::DeviceMonitor::new();
     let caps = gstreamer::Caps::builder("video/x-raw").build();
@@ -552,14 +588,7 @@ fn enumerate_cameras_filtered(mono_only: bool) -> anyhow::Result<Vec<(String, St
     let devices = monitor.devices();
     monitor.stop();
 
-    let mut cameras = if !mono_only {
-        vec![(
-            PRIMARY_CAMERA_DISPLAY_NAME.to_string(),
-            DEFAULT_RGB_CAMERA.to_string(),
-        )]
-    } else {
-        Vec::new()
-    };
+    let mut cameras: Vec<CameraEntry> = Vec::new();
 
     for device in devices {
         let display_name = device.display_name().to_string();
@@ -567,24 +596,31 @@ fn enumerate_cameras_filtered(mono_only: bool) -> anyhow::Result<Vec<(String, St
             if !props.has_name("pipewire-proplist") {
                 continue;
             }
-            let is_color = has_color_caps(&device);
-            if !mono_only && !is_color {
-                continue;
-            }
-            if mono_only && is_color {
+            if want_color.is_some_and(|want_color| want_color != has_color_caps(&device)) {
                 continue;
             }
             let Some(target) = pipewire_target(&props) else {
                 continue;
             };
             let target = format!("pipewiresrc target-object={}", target);
-            if !cameras.iter().any(|(_, t)| t == &target) {
-                cameras.push((display_name, target));
+            if !cameras.iter().any(|entry| entry.target == target) {
+                cameras.push(CameraEntry {
+                    display_name,
+                    target,
+                    node: v4l2_node_of(&props),
+                });
             }
         }
     }
 
     Ok(cameras)
+}
+
+fn v4l2_node_of(props: &gstreamer::StructureRef) -> Option<String> {
+    if let Some(path) = string_property(props, "api.v4l2.path") {
+        return Some(path);
+    }
+    string_property(props, "device.path").filter(|path| path.starts_with("/dev/video"))
 }
 
 fn wait_for_device_updates(monitor: &gstreamer::DeviceMonitor) {
@@ -662,6 +698,56 @@ fn is_mono_format(format: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry(display_name: &str, target: &str, node: Option<&str>) -> CameraEntry {
+        CameraEntry {
+            display_name: display_name.to_string(),
+            target: format!("pipewiresrc target-object={target}"),
+            node: node.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn shared_display_names_are_labelled_with_their_v4l2_node() {
+        let labelled = label_camera_entries(vec![
+            entry("ASUS 5M webcam (V4L2)", "cam0", Some("/dev/video0")),
+            entry("ASUS 5M webcam (V4L2)", "cam2", Some("/dev/video2")),
+        ]);
+
+        assert_eq!(
+            labelled
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "ASUS 5M webcam (V4L2) (/dev/video0)",
+                "ASUS 5M webcam (V4L2) (/dev/video2)"
+            ]
+        );
+        assert_eq!(labelled[1].1, "pipewiresrc target-object=cam2");
+    }
+
+    #[test]
+    fn a_unique_display_name_is_left_alone() {
+        let labelled = label_camera_entries(vec![
+            entry("Integrated Webcam", "cam0", Some("/dev/video0")),
+            entry("IR Camera", "cam2", Some("/dev/video2")),
+        ]);
+
+        assert_eq!(labelled[0].0, "Integrated Webcam");
+        assert_eq!(labelled[1].0, "IR Camera");
+    }
+
+    #[test]
+    fn shared_display_names_without_a_node_stay_as_they_are() {
+        let labelled = label_camera_entries(vec![
+            entry("ASUS 5M webcam (V4L2)", "cam0", None),
+            entry("ASUS 5M webcam (V4L2)", "cam2", Some("/dev/video2")),
+        ]);
+
+        assert_eq!(labelled[0].0, "ASUS 5M webcam (V4L2)");
+        assert_eq!(labelled[1].0, "ASUS 5M webcam (V4L2) (/dev/video2)");
+    }
 
     #[test]
     fn resolve_source_uses_rgb_when_no_ir_configured() {
