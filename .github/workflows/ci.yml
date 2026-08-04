@@ -115,9 +115,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ORT_STRATEGY: system
-      ORT_LIB_LOCATION: ${{ runner.temp }}/ort-openvino/lib
+      ORT_LIB_LOCATION: /home/runner/ort-openvino/lib
       ORT_PREFER_DYNAMIC_LINK: "1"
-      LD_LIBRARY_PATH: ${{ runner.temp }}/ort-openvino/lib
+      LD_LIBRARY_PATH: /home/runner/ort-openvino/lib
       CARGO_BUILD_JOBS: 2
       RUSTFLAGS: -Cdebuginfo=0
 
