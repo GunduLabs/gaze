@@ -105,7 +105,7 @@ if gaze auth --silent; then
 fi
 ```
 
-Because silent mode is non-interactive, it cannot be cancelled from the terminal UI and it does not start a polkit agent, so authenticating another user with `--user` fails instead of prompting. Silent mode has no timeout of its own — wrap it in `timeout(1)` if the caller needs a deadline:
+Because silent mode is non-interactive, it cannot be cancelled from the terminal UI and it does not start a polkit agent, so authenticating another user with `--user` fails instead of prompting. Silent mode has no timeout of its own, wrap it in `timeout(1)` if the caller needs a deadline:
 
 ```bash
 timeout 15 gaze auth --silent

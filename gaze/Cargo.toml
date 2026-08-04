@@ -37,8 +37,6 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 futures = "0.3.33"
 zbus_polkit = "5.0.0"
-# Seals the face-template encryption key to the TPM. Only `gazed` links this;
-# the CLI/GUI/PAM clients must not (mirrors the `ort` isolation in AGENTS.md).
 tss-esapi = "7.7.0"
 
 [[bin]]

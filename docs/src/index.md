@@ -25,7 +25,7 @@ features:
     link: /guide/getting-started
     linkText: Start setup
   - title: Desktop login
-    details: Face unlock at login and the lock screen — the GNOME extension, Hyprland's hyprlock, or any PAM-based login manager such as SDDM.
+    details: Face unlock at login and the lock screen, the GNOME extension, Hyprland's hyprlock, or any PAM-based login manager such as SDDM.
     link: /guide/gnome
     linkText: Configure desktop auth
   - title: PAM integration
