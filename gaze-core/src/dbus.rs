@@ -345,6 +345,9 @@ pub trait Gaze {
     ) -> zbus::Result<()>;
 
     #[zbus(signal)]
+    fn verify_diagnostic(&self, message: &str) -> zbus::Result<()>;
+
+    #[zbus(signal)]
     fn enroll_status(
         &self,
         face_name: &str,

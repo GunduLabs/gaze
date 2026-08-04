@@ -736,6 +736,7 @@ async fn handle_auth(
 
     let mut status_stream = proxy.receive_verify_status().await?;
     let mut capture_stream = proxy.receive_face_status().await?;
+    let mut diagnostic_stream = proxy.receive_verify_diagnostic().await?;
     let mut terminal = if !silent {
         match TuiTerminal::new() {
             Ok(terminal) => Some(terminal),
@@ -762,6 +763,7 @@ async fn handle_auth(
     let mut tick = 0_u64;
     let mut cancelled = false;
     let mut verify_result = None;
+    let mut diagnostics = Vec::new();
 
     loop {
         if let Some(ref mut terminal) = terminal {
@@ -798,6 +800,12 @@ async fn handle_auth(
                     };
                 }
             }
+            signal = diagnostic_stream.next(), if verbose => {
+                let Some(signal) = signal else { break };
+                if let Ok(args) = signal.args() {
+                    diagnostics.push(args.message().to_string());
+                }
+            }
             _ = tokio::time::sleep(Duration::from_millis(80)) => {
                 tick = tick.wrapping_add(1);
             }
@@ -805,6 +813,16 @@ async fn handle_auth(
     }
 
     drop(terminal);
+
+    if verbose {
+        while let Ok(Some(signal)) =
+            tokio::time::timeout(Duration::from_millis(20), diagnostic_stream.next()).await
+        {
+            if let Ok(args) = signal.args() {
+                diagnostics.push(args.message().to_string());
+            }
+        }
+    }
 
     if cancelled {
         let _ = proxy.verify_stop().await;
@@ -815,6 +833,12 @@ async fn handle_auth(
     let mut authenticated = false;
     if let Some((result, faces, rgb_status, ir_status)) = verify_result {
         if verbose {
+            for message in &diagnostics {
+                println!("{message}");
+            }
+            if !diagnostics.is_empty() {
+                println!();
+            }
             println!(
                 "\n{:<20} {:>10} {:>8} {:>8} {:>10} {:>8} {:>8}",
                 style("Face").bold(),
