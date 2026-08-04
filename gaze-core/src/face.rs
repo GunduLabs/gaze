@@ -31,6 +31,13 @@ pub struct CaptureResult {
     pub pitch: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct RgbFaceLuma {
+    pub mean: u8,
+    pub rolling_mean: f64,
+    pub threshold: u8,
+}
+
 fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|err| err.into_inner())
 }
@@ -248,6 +255,7 @@ pub struct FaceChecker {
     pub detector: std::sync::Arc<std::sync::Mutex<FaceDetector>>,
     pub dark_luma_threshold: u8,
     pub rgb_luma_history: std::collections::VecDeque<u8>,
+    last_rgb_face_luma: Option<RgbFaceLuma>,
     pub spectrum: Spectrum,
     pub check_centering_and_proximity: bool,
     pub min_face_size_ratio: f32,
@@ -264,6 +272,7 @@ impl FaceChecker {
             detector,
             dark_luma_threshold: config.cameras.dark_luma_threshold,
             rgb_luma_history: std::collections::VecDeque::new(),
+            last_rgb_face_luma: None,
             spectrum,
             check_centering_and_proximity,
             min_face_size_ratio: config.enrollment.effective_min_face_size_ratio(),
@@ -294,6 +303,8 @@ impl FaceChecker {
         &mut self,
         frame: &Mat,
     ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
+        self.last_rgb_face_luma = None;
+
         let detection = {
             let mut detector = lock_recover(&self.detector);
             detector.detect(frame)
@@ -367,6 +378,12 @@ impl FaceChecker {
                     let is_current_frame_dark = (luma as f64) < threshold;
                     let is_avg_dark = avg_luma < threshold;
 
+                    self.last_rgb_face_luma = Some(RgbFaceLuma {
+                        mean: luma,
+                        rolling_mean: avg_luma,
+                        threshold: self.dark_luma_threshold,
+                    });
+
                     tracing::debug!("luma: {} avg_luma: {}", luma, avg_luma);
 
                     if !is_current_frame_dark {
@@ -395,6 +412,10 @@ impl FaceChecker {
                 pitch,
             )?),
         ))
+    }
+
+    pub fn rgb_face_luma(&self) -> Option<RgbFaceLuma> {
+        self.last_rgb_face_luma
     }
 }
 

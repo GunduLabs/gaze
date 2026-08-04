@@ -25,7 +25,7 @@ use gaze_core::dbus::{CaptureStatus, EnrollPrompt, VerifyResult};
 use gaze_core::detect::FaceDetector;
 use gaze_core::face::{
     EnrollmentPoseStability, FaceChecker, IrDarkFrameGate, IrFrameKind, Spectrum,
-    enrollment_pose_matches, frame_mean_luma,
+    enrollment_pose_matches,
 };
 use gaze_core::ir::led::IrLed;
 
@@ -3055,7 +3055,7 @@ impl AuthDaemon {
                     tracing::debug!("RGB camera opened successfully at: {}", rgb_device_clone);
 
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, false);
-                    let mut logged_rgb_luma = false;
+                    let mut logged_rgb_luma_statuses = Vec::new();
                     let mut live_scores: Vec<f32> = Vec::new();
                     let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
 
@@ -3072,17 +3072,6 @@ impl AuthDaemon {
                             break;
                         }
 
-                        if !logged_rgb_luma {
-                            let luma = frame_mean_luma(&frame).unwrap_or(0);
-                            let message = format!(
-                                "RGB stream produced a frame: mean_luma={luma}, threshold={}",
-                                config_clone.cameras.dark_luma_threshold
-                            );
-                            info!("{message}");
-                            let _ = tx.try_send(VerifyMsg::Diagnostic(message));
-                            logged_rgb_luma = true;
-                        }
-
                         let (status, embed_opt) = {
                             let mut recognizer = recognizer_rgb_arc.blocking_lock();
                             match process_frame_sync(&mut checker, &mut recognizer, &frame, liveness_enabled) {
@@ -3091,6 +3080,18 @@ impl AuthDaemon {
                             }
                         };
                         tracing::debug!("Processed RGB frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
+
+                        if let Some(luma) = checker.rgb_face_luma()
+                            && !logged_rgb_luma_statuses.contains(&status)
+                        {
+                            let message = format!(
+                                "RGB face region: mean_luma={}, rolling_mean_luma={:.1}, threshold={}, status={status:?}",
+                                luma.mean, luma.rolling_mean, luma.threshold
+                            );
+                            info!("{message}");
+                            let _ = tx.try_send(VerifyMsg::Diagnostic(message));
+                            logged_rgb_luma_statuses.push(status);
+                        }
 
                         let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
                         let _ = tx.try_send(VerifyMsg::Status(Spectrum::Rgb, status, latest_embed));
