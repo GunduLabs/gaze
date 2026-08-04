@@ -25,7 +25,7 @@ env:
 
 jobs:
   fmt:
-    name: Formatting
+    name: Format
     runs-on: ubuntu-latest
 
     steps:
@@ -48,7 +48,7 @@ jobs:
         run: just fmt-check
 
   audit:
-    name: Cargo audit
+    name: Audit
     runs-on: ubuntu-latest
 
     steps:
@@ -70,7 +70,7 @@ jobs:
         run: just audit
 
   lint:
-    name: Clippy
+    name: Lint
     runs-on: ubuntu-latest
 
     steps:
@@ -90,7 +90,7 @@ jobs:
         run: just lint
 
   test:
-    name: Tests
+    name: Test
     runs-on: ubuntu-latest
 
     steps:
@@ -160,7 +160,7 @@ jobs:
         run: just build-rust-openvino
 
   package:
-    name: Package ${{ matrix.format }}
+    name: Package (${{ matrix.format }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -203,7 +203,7 @@ jobs:
         run: VERSION=0.0.0 just package-prebuilt ${{ matrix.format }}
 
   package-rpm:
-    name: Package rpm (Fedora)
+    name: Package (rpm)
     runs-on: ubuntu-latest
     container: fedora:43
     env:
@@ -279,7 +279,7 @@ jobs:
         run: VERSION=0.0.0 just package-prebuilt rpm
 
   srpm:
-    name: Source RPM
+    name: Package (srpm)
     runs-on: ubuntu-latest
 
     steps:

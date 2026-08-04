@@ -22,7 +22,7 @@ env:
 
 jobs:
   build:
-    name: Build site
+    name: Build
     runs-on: ubuntu-latest
     concurrency:
       group: docs-build-${{ github.ref }}
@@ -51,7 +51,7 @@ jobs:
           path: docs/.vitepress/dist
 
   deploy:
-    name: Deploy to GitHub Pages
+    name: Deploy
     if: ${{ github.event_name != 'pull_request' }}
     needs: build
     runs-on: ubuntu-latest
