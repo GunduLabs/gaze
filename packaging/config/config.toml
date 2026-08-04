@@ -27,7 +27,8 @@ level = "medium"
 # level = "custom"
 # detector = "accurate"          # "standard" or "accurate"
 # recognizer = "accurate"        # "standard" or "accurate"
-# threshold = 0.45
+# rgb_threshold = 0.45
+# ir_threshold = 0.45
 # hybrid_policy = "fallback_on_dark"  # optional; default, or, fallback_on_dark, and
 
 [cameras]

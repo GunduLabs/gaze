@@ -74,13 +74,15 @@ fn set_custom_config_rows_visible(
     level_row: &libadwaita::ComboRow,
     detector_row: &libadwaita::ComboRow,
     recognizer_row: &libadwaita::ComboRow,
-    threshold_row: &libadwaita::SpinRow,
+    rgb_threshold_row: &libadwaita::SpinRow,
+    ir_threshold_row: &libadwaita::SpinRow,
     hybrid_row: &libadwaita::ComboRow,
 ) {
     let is_custom = level_row.selected() == SecurityLevel::CUSTOM_LEVEL_INDEX;
     detector_row.set_visible(is_custom);
     recognizer_row.set_visible(is_custom);
-    threshold_row.set_visible(is_custom);
+    rgb_threshold_row.set_visible(is_custom);
+    ir_threshold_row.set_visible(is_custom);
     hybrid_row.set_visible(is_custom);
 }
 
@@ -116,7 +118,8 @@ struct ConfigRows<'a> {
     level: &'a libadwaita::ComboRow,
     detector: &'a libadwaita::ComboRow,
     recognizer: &'a libadwaita::ComboRow,
-    threshold: &'a libadwaita::SpinRow,
+    rgb_threshold: &'a libadwaita::SpinRow,
+    ir_threshold: &'a libadwaita::SpinRow,
     camera: &'a libadwaita::ComboRow,
     ir: &'a libadwaita::ComboRow,
     emitter: &'a gtk4::Switch,
@@ -181,7 +184,8 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
         rows.level,
         rows.detector,
         rows.recognizer,
-        rows.threshold,
+        rows.rgb_threshold,
+        rows.ir_threshold,
         rows.hybrid,
     );
 
@@ -200,11 +204,18 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
         .set_selected(SecurityLevel::model_quality_index(&detector_str));
     rows.recognizer
         .set_selected(SecurityLevel::model_quality_index(&recognizer_str));
-    rows.threshold.set_value(if cfg.security.level == "custom" {
-        cfg.security.threshold
-    } else {
-        cfg.security.threshold() as f64
-    });
+    rows.rgb_threshold
+        .set_value(if cfg.security.level == "custom" {
+            cfg.security.rgb_threshold
+        } else {
+            cfg.security.rgb_threshold() as f64
+        });
+    rows.ir_threshold
+        .set_value(if cfg.security.level == "custom" {
+            cfg.security.ir_threshold
+        } else {
+            cfg.security.ir_threshold() as f64
+        });
 
     let cam_idx = choices
         .cameras
@@ -318,15 +329,25 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     recognizer_row.set_model(Some(&recognizer_model));
     security_group.add(&recognizer_row);
 
-    let threshold_row = libadwaita::SpinRow::with_range(
+    let rgb_threshold_row = libadwaita::SpinRow::with_range(
         gaze_core::config::MIN_SECURITY_THRESHOLD,
         gaze_core::config::MAX_SECURITY_THRESHOLD,
         0.01,
     );
-    threshold_row.set_digits(3);
-    threshold_row.set_title("Recognizer Threshold");
-    threshold_row.set_subtitle("Minimum similarity for a match");
-    security_group.add(&threshold_row);
+    rgb_threshold_row.set_digits(3);
+    rgb_threshold_row.set_title("RGB Recognizer Threshold");
+    rgb_threshold_row.set_subtitle("Minimum RGB similarity for a match");
+    security_group.add(&rgb_threshold_row);
+
+    let ir_threshold_row = libadwaita::SpinRow::with_range(
+        gaze_core::config::MIN_SECURITY_THRESHOLD,
+        gaze_core::config::MAX_SECURITY_THRESHOLD,
+        0.01,
+    );
+    ir_threshold_row.set_digits(3);
+    ir_threshold_row.set_title("IR Recognizer Threshold");
+    ir_threshold_row.set_subtitle("Minimum IR similarity for a match");
+    security_group.add(&ir_threshold_row);
 
     let hardware_group = libadwaita::PreferencesGroup::new();
     hardware_group.set_title("Hardware");
@@ -536,7 +557,9 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         recognizer_row,
         #[weak]
-        threshold_row,
+        rgb_threshold_row,
+        #[weak]
+        ir_threshold_row,
         #[weak]
         hybrid_row,
         move |row| {
@@ -544,7 +567,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 row,
                 &detector_row,
                 &recognizer_row,
-                &threshold_row,
+                &rgb_threshold_row,
+                &ir_threshold_row,
                 &hybrid_row,
             );
         }
@@ -574,7 +598,9 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         recognizer_row,
         #[weak]
-        threshold_row,
+        rgb_threshold_row,
+        #[weak]
+        ir_threshold_row,
         #[weak]
         camera_row,
         #[weak]
@@ -650,10 +676,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 let det = SecurityLevel::model_quality_from_index(detector_row.selected() as usize);
                 let rec =
                     SecurityLevel::model_quality_from_index(recognizer_row.selected() as usize);
-                cfg.security = SecurityLevel::custom(
+                cfg.security = SecurityLevel::custom_with_thresholds(
                     det.to_string(),
                     rec.to_string(),
-                    threshold_row.value(),
+                    rgb_threshold_row.value(),
+                    ir_threshold_row.value(),
                     hybrid_policy,
                 );
             }
@@ -762,7 +789,12 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             apply_changes()
         }
     ));
-    threshold_row.connect_value_notify(glib::clone!(
+    rgb_threshold_row.connect_value_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
+    ));
+    ir_threshold_row.connect_value_notify(glib::clone!(
         #[strong]
         apply_changes,
         move |_| apply_changes()
@@ -890,7 +922,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 level: &level_row,
                 detector: &detector_row,
                 recognizer: &recognizer_row,
-                threshold: &threshold_row,
+                rgb_threshold: &rgb_threshold_row,
+                ir_threshold: &ir_threshold_row,
                 camera: &camera_row,
                 ir: &ir_row,
                 emitter: &emitter_switch,
@@ -1040,7 +1073,9 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         recognizer_row,
         #[weak]
-        threshold_row,
+        rgb_threshold_row,
+        #[weak]
+        ir_threshold_row,
         #[weak]
         camera_row,
         #[weak]
@@ -1102,7 +1137,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                         level: &level_row,
                         detector: &detector_row,
                         recognizer: &recognizer_row,
-                        threshold: &threshold_row,
+                        rgb_threshold: &rgb_threshold_row,
+                        ir_threshold: &ir_threshold_row,
                         camera: &camera_row,
                         ir: &ir_row,
                         emitter: &emitter_switch,

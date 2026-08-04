@@ -86,7 +86,8 @@ async fn main() -> anyhow::Result<()> {
         level = ?security,
         detector = security.detector(),
         recognizer = security.recognizer(),
-        threshold = security.threshold(),
+        rgb_threshold = security.rgb_threshold(),
+        ir_threshold = security.ir_threshold(),
         "Loaded security config"
     );
     info!(
@@ -169,7 +170,8 @@ async fn main() -> anyhow::Result<()> {
         recognizer_ir: Arc::new(Mutex::new(recognizer_ir)),
         liveness: Arc::new(Mutex::new(liveness_detector)),
         db: Arc::new(Mutex::new(db)),
-        threshold: Arc::new(Mutex::new(security.threshold())),
+        rgb_threshold: Arc::new(Mutex::new(security.rgb_threshold())),
+        ir_threshold: Arc::new(Mutex::new(security.ir_threshold())),
         rgb_device: Arc::new(Mutex::new(sources.rgb)),
         ir_device: Arc::new(Mutex::new(sources.ir)),
         ir_node: Arc::new(Mutex::new(sources.ir_node)),

@@ -144,7 +144,8 @@ pub struct AuthDaemon {
     pub recognizer_ir: Arc<Mutex<FaceRecognizer>>,
     pub liveness: Arc<Mutex<Option<LivenessDetector>>>,
     pub db: Arc<Mutex<UserDatabase>>,
-    pub threshold: Arc<Mutex<f32>>,
+    pub rgb_threshold: Arc<Mutex<f32>>,
+    pub ir_threshold: Arc<Mutex<f32>>,
     pub rgb_device: Arc<Mutex<String>>,
     pub ir_device: Arc<Mutex<String>>,
     pub ir_node: Arc<Mutex<String>>,
@@ -1500,16 +1501,17 @@ fn crop_liveness_face(data: &FaceData) -> anyhow::Result<image::RgbImage> {
 fn build_hybrid_scores(
     db: &UserDatabase,
     username: &str,
-    threshold: f32,
+    rgb_threshold: f32,
+    ir_threshold: f32,
     rgb_embed: Option<&ndarray::Array1<f32>>,
     ir_embed: Option<&ndarray::Array1<f32>>,
 ) -> Vec<(String, f64, f64, bool, f64, f64, bool)> {
     let rgb_scores = rgb_embed.and_then(|embed| {
-        db.match_faces(username, embed, threshold, Spectrum::Rgb)
+        db.match_faces(username, embed, rgb_threshold, Spectrum::Rgb)
             .ok()
     });
     let ir_scores = ir_embed.and_then(|embed| {
-        db.match_faces(username, embed, threshold, Spectrum::Ir)
+        db.match_faces(username, embed, ir_threshold, Spectrum::Ir)
             .ok()
     });
 
@@ -2653,9 +2655,8 @@ impl AuthDaemon {
             None
         };
 
-        let mut threshold = self.threshold.lock().await;
-        *threshold = new_config.security.threshold();
-        drop(threshold);
+        *self.rgb_threshold.lock().await = new_config.security.rgb_threshold();
+        *self.ir_threshold.lock().await = new_config.security.ir_threshold();
         *self.hybrid_policy.lock().await = new_config.security.hybrid_policy().to_string();
 
         let sources = resolve_configured_sources(&new_config.cameras);
@@ -2893,7 +2894,8 @@ impl AuthDaemon {
         let recognizer_ir_arc = self.recognizer_ir.clone();
         let liveness_arc = self.liveness.clone();
         let db_arc = self.db.clone();
-        let threshold_arc = self.threshold.clone();
+        let rgb_threshold_arc = self.rgb_threshold.clone();
+        let ir_threshold_arc = self.ir_threshold.clone();
 
         let config = Config::load_from(CONFIG_PATH).unwrap_or_default();
         let active_session = gaze_core::dbus::get_active_session().await.ok();
@@ -3020,7 +3022,7 @@ impl AuthDaemon {
                 let liveness_arc = liveness_arc.clone();
                 let db_arc = db_arc.clone();
                 let username_clone = username.clone();
-                let threshold_arc = threshold_arc.clone();
+                let rgb_threshold_arc = rgb_threshold_arc.clone();
                 let liveness_enabled = liveness_cfg.enabled;
                 let liveness_threshold = liveness_cfg.effective_threshold();
                 let rgb_device_clone = rgb_device.clone();
@@ -3099,7 +3101,7 @@ impl AuthDaemon {
                         }
 
                         if status == CaptureStatus::Usable && let Some(data) = embed_opt {
-                            let threshold = *threshold_arc.blocking_lock();
+                            let threshold = *rgb_threshold_arc.blocking_lock();
                             let db = db_arc.blocking_lock();
                             let scores = match db.match_faces(&username_clone, &data.embedding, threshold, Spectrum::Rgb) {
                                 Ok(s) => s,
@@ -3181,7 +3183,7 @@ impl AuthDaemon {
                 let recognizer_ir_arc = recognizer_ir_arc.clone();
                 let db_arc = db_arc.clone();
                 let username_clone = username.clone();
-                let threshold_arc = threshold_arc.clone();
+                let ir_threshold_arc = ir_threshold_arc.clone();
                 let liveness_enabled = liveness_cfg.enabled;
                 let ir_device_clone = ir_device.clone();
                 let ir_node_clone = ir_node.clone();
@@ -3271,7 +3273,7 @@ impl AuthDaemon {
                         let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, status, latest_embed));
 
                         if status == CaptureStatus::Usable && let Some(data) = embed_opt {
-                            let threshold = *threshold_arc.blocking_lock();
+                            let threshold = *ir_threshold_arc.blocking_lock();
                             let db = db_arc.blocking_lock();
                             let scores = match db.match_faces(&username_clone, &data.embedding, threshold, Spectrum::Ir) {
                                 Ok(s) => s,
@@ -3337,12 +3339,14 @@ impl AuthDaemon {
 
             macro_rules! emit_verify_with_scores {
                 ($result:expr) => {{
-                    let threshold = *threshold_arc.lock().await;
+                    let rgb_threshold = *rgb_threshold_arc.lock().await;
+                    let ir_threshold = *ir_threshold_arc.lock().await;
                     let db = db_arc.lock().await;
                     let final_scores = build_hybrid_scores(
                         &db,
                         &username,
-                        threshold,
+                        rgb_threshold,
+                        ir_threshold,
                         rgb_success_embed.as_ref().or(rgb_latest_embed.as_ref()),
                         ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
                     );

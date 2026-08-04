@@ -38,18 +38,55 @@ fn default_level() -> String {
     "medium".to_string()
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
+#[derive(Serialize, Clone, Debug, Value, OwnedValue, Type)]
 pub struct SecurityLevel {
-    #[serde(default = "default_level")]
     pub level: String,
-    #[serde(default)]
     pub detector: String,
-    #[serde(default)]
     pub recognizer: String,
-    #[serde(default)]
-    pub threshold: f64,
-    #[serde(default)]
+    pub rgb_threshold: f64,
+    pub ir_threshold: f64,
     pub hybrid_policy: String,
+}
+
+#[derive(Deserialize)]
+struct SecurityLevelFile {
+    #[serde(default = "default_level")]
+    level: String,
+    #[serde(default)]
+    detector: String,
+    #[serde(default)]
+    recognizer: String,
+    #[serde(default)]
+    threshold: Option<f64>,
+    #[serde(default)]
+    rgb_threshold: Option<f64>,
+    #[serde(default)]
+    ir_threshold: Option<f64>,
+    #[serde(default)]
+    hybrid_policy: String,
+}
+
+impl<'de> Deserialize<'de> for SecurityLevel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let file = SecurityLevelFile::deserialize(deserializer)?;
+        let fallback_threshold = file
+            .threshold
+            .or(file.rgb_threshold)
+            .or(file.ir_threshold)
+            .unwrap_or(0.0);
+
+        Ok(Self {
+            level: file.level,
+            detector: file.detector,
+            recognizer: file.recognizer,
+            rgb_threshold: file.rgb_threshold.unwrap_or(fallback_threshold),
+            ir_threshold: file.ir_threshold.unwrap_or(fallback_threshold),
+            hybrid_policy: file.hybrid_policy,
+        })
+    }
 }
 
 impl Default for SecurityLevel {
@@ -58,7 +95,8 @@ impl Default for SecurityLevel {
             level: default_level(),
             detector: String::new(),
             recognizer: String::new(),
-            threshold: 0.0,
+            rgb_threshold: 0.0,
+            ir_threshold: 0.0,
             hybrid_policy: String::new(),
         }
     }
@@ -72,7 +110,8 @@ impl SecurityLevel {
             level: "low".to_string(),
             detector: String::new(),
             recognizer: String::new(),
-            threshold: 0.0,
+            rgb_threshold: 0.0,
+            ir_threshold: 0.0,
             hybrid_policy: String::new(),
         }
     }
@@ -82,7 +121,8 @@ impl SecurityLevel {
             level: "medium".to_string(),
             detector: String::new(),
             recognizer: String::new(),
-            threshold: 0.0,
+            rgb_threshold: 0.0,
+            ir_threshold: 0.0,
             hybrid_policy: String::new(),
         }
     }
@@ -92,7 +132,8 @@ impl SecurityLevel {
             level: "high".to_string(),
             detector: String::new(),
             recognizer: String::new(),
-            threshold: 0.0,
+            rgb_threshold: 0.0,
+            ir_threshold: 0.0,
             hybrid_policy: String::new(),
         }
     }
@@ -102,7 +143,8 @@ impl SecurityLevel {
             level: "maximum".to_string(),
             detector: String::new(),
             recognizer: String::new(),
-            threshold: 0.0,
+            rgb_threshold: 0.0,
+            ir_threshold: 0.0,
             hybrid_policy: String::new(),
         }
     }
@@ -113,11 +155,22 @@ impl SecurityLevel {
         threshold: f64,
         hybrid_policy: String,
     ) -> Self {
+        Self::custom_with_thresholds(detector, recognizer, threshold, threshold, hybrid_policy)
+    }
+
+    pub fn custom_with_thresholds(
+        detector: String,
+        recognizer: String,
+        rgb_threshold: f64,
+        ir_threshold: f64,
+        hybrid_policy: String,
+    ) -> Self {
         Self {
             level: "custom".to_string(),
             detector,
             recognizer,
-            threshold,
+            rgb_threshold,
+            ir_threshold,
             hybrid_policy,
         }
     }
@@ -240,12 +293,20 @@ impl SecurityLevel {
                     "invalid recognizer level {other:?}: expected \"standard\" or \"accurate\""
                 ),
             }
-            if !Self::threshold_in_range(self.threshold) {
+            if !Self::threshold_in_range(self.rgb_threshold) {
                 anyhow::bail!(
-                    "security.threshold must be between {} and {}, got {}",
+                    "security.rgb_threshold must be between {} and {}, got {}",
                     MIN_SECURITY_THRESHOLD,
                     MAX_SECURITY_THRESHOLD,
-                    self.threshold
+                    self.rgb_threshold
+                );
+            }
+            if !Self::threshold_in_range(self.ir_threshold) {
+                anyhow::bail!(
+                    "security.ir_threshold must be between {} and {}, got {}",
+                    MIN_SECURITY_THRESHOLD,
+                    MAX_SECURITY_THRESHOLD,
+                    self.ir_threshold
                 );
             }
             if !self.hybrid_policy.is_empty()
@@ -267,16 +328,29 @@ impl SecurityLevel {
     }
 
     pub fn threshold(&self) -> f32 {
+        self.rgb_threshold()
+    }
+
+    pub fn rgb_threshold(&self) -> f32 {
+        self.threshold_for("rgb", self.rgb_threshold)
+    }
+
+    pub fn ir_threshold(&self) -> f32 {
+        self.threshold_for("ir", self.ir_threshold)
+    }
+
+    fn threshold_for(&self, spectrum: &str, custom_threshold: f64) -> f32 {
         match self.level.as_str() {
             "low" => 0.3,
             "medium" => 0.4,
             "high" => 0.5,
             "maximum" => 0.6,
-            "custom" if Self::threshold_in_range(self.threshold) => self.threshold as f32,
+            "custom" if Self::threshold_in_range(custom_threshold) => custom_threshold as f32,
             "custom" => {
                 tracing::warn!(
-                    threshold = self.threshold,
-                    "security.threshold is out of range; using the medium default"
+                    spectrum,
+                    threshold = custom_threshold,
+                    "security threshold is out of range; using the medium default"
                 );
                 DEFAULT_SECURITY_THRESHOLD as f32
             }
@@ -866,6 +940,7 @@ mod tests {
             assert_eq!(level.detector(), detector);
             assert_eq!(level.recognizer(), recognizer);
             assert!((level.threshold() - threshold).abs() < f32::EPSILON);
+            assert!((level.ir_threshold() - threshold).abs() < f32::EPSILON);
         }
 
         let custom = SecurityLevel::custom(
@@ -877,6 +952,7 @@ mod tests {
         assert_eq!(custom.detector(), "det_10g.onnx");
         assert_eq!(custom.recognizer(), "w600k_r50.onnx");
         assert!((custom.threshold() - 0.73).abs() < f32::EPSILON);
+        assert!((custom.ir_threshold() - 0.73).abs() < f32::EPSILON);
 
         let custom_standard = SecurityLevel::custom(
             "standard".to_string(),
@@ -895,6 +971,17 @@ mod tests {
             let level = SecurityLevel::custom(
                 "standard".to_string(),
                 "standard".to_string(),
+                bad,
+                String::new(),
+            );
+            assert!(level.validate().is_err(), "{bad}");
+        }
+
+        for bad in [-1.0, -0.5, 0.0, 0.09, 1.01, 5.0, f64::NAN, f64::INFINITY] {
+            let level = SecurityLevel::custom_with_thresholds(
+                "standard".to_string(),
+                "standard".to_string(),
+                0.4,
                 bad,
                 String::new(),
             );
@@ -938,6 +1025,42 @@ mod tests {
     }
 
     #[test]
+    fn custom_security_thresholds_are_spectrum_specific() {
+        let level = SecurityLevel::custom_with_thresholds(
+            "standard".to_string(),
+            "standard".to_string(),
+            0.73,
+            0.31,
+            String::new(),
+        );
+
+        assert!((level.rgb_threshold() - 0.73).abs() < f32::EPSILON);
+        assert!((level.ir_threshold() - 0.31).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn legacy_security_threshold_applies_to_both_spectra() {
+        let config: Config = toml::from_str(
+            r#"
+            [security]
+            level = "custom"
+            detector = "standard"
+            recognizer = "standard"
+            threshold = 0.47
+            "#,
+        )
+        .unwrap();
+
+        assert!((config.security.rgb_threshold() - 0.47).abs() < f32::EPSILON);
+        assert!((config.security.ir_threshold() - 0.47).abs() < f32::EPSILON);
+
+        let migrated = toml::to_string(&config).unwrap();
+        assert!(migrated.contains("rgb_threshold = 0.47"));
+        assert!(migrated.contains("ir_threshold = 0.47"));
+        assert!(!migrated.lines().any(|line| line.starts_with("threshold =")));
+    }
+
+    #[test]
     fn validate_rejects_unknown_hybrid_policy() {
         let bad = SecurityLevel::custom(
             "standard".to_string(),
@@ -972,9 +1095,11 @@ mod tests {
         for preset in ["low", "medium", "high", "maximum"] {
             let mut level = SecurityLevel::medium();
             level.level = preset.to_string();
-            level.threshold = -1.0;
+            level.rgb_threshold = -1.0;
+            level.ir_threshold = -1.0;
             level.validate().unwrap();
             assert!(level.threshold() > 0.0, "{preset}");
+            assert!(level.ir_threshold() > 0.0, "{preset}");
         }
     }
 
@@ -1014,6 +1139,10 @@ mod tests {
         let config = Config::load_from(path.to_str().unwrap()).unwrap();
         assert_eq!(
             config.security.threshold(),
+            DEFAULT_SECURITY_THRESHOLD as f32
+        );
+        assert_eq!(
+            config.security.ir_threshold(),
             DEFAULT_SECURITY_THRESHOLD as f32
         );
         assert_eq!(
@@ -1282,12 +1411,21 @@ mod tests {
         let mut cfg = Config::default();
         cfg.auth.start_delay_ms = 4500;
         cfg.auth.resume_grace_ms = 1500;
+        cfg.security = SecurityLevel::custom_with_thresholds(
+            "standard".to_string(),
+            "standard".to_string(),
+            0.61,
+            0.29,
+            String::new(),
+        );
 
         let value = zvariant::OwnedValue::try_from(cfg).unwrap();
         let back = Config::try_from(value).unwrap();
 
         assert_eq!(back.auth.start_delay_ms, 4500);
         assert_eq!(back.auth.resume_grace_ms, 1500);
+        assert!((back.security.rgb_threshold() - 0.61).abs() < f32::EPSILON);
+        assert!((back.security.ir_threshold() - 0.29).abs() < f32::EPSILON);
     }
 
     #[test]

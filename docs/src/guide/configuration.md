@@ -106,7 +106,7 @@ actually uses, and warns when that is not the configured one.
 
 `level` (under `[security]`) controls model choice and match strictness.
 
-| Level | Detector | Recognizer | Threshold | Hybrid Policy | Notes |
+| Level | Detector | Recognizer | RGB / IR Threshold | Hybrid Policy | Notes |
 |---|---|---|---|---|---|
 | `low` | SCRFD-500M | MobileFaceNet | 0.30 | `or` | Fastest |
 | `medium` | SCRFD-500M | MobileFaceNet | 0.40 | `fallback_on_dark` | Default |
@@ -126,9 +126,12 @@ Practical guidance:
 level = "custom"
 detector = "accurate"   # "standard" or "accurate"
 recognizer = "accurate" # "standard" or "accurate"
-threshold = 0.55
+rgb_threshold = 0.55
+ir_threshold = 0.45
 hybrid_policy = "or"    # optional; default, or, fallback_on_dark, and
 ```
+
+RGB and IR similarity thresholds are independent for the custom level. The legacy `threshold` key remains accepted and supplies both values when the spectrum-specific keys are absent.
 
 ### Hybrid combining policy
 

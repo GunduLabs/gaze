@@ -289,12 +289,13 @@ async fn run_config_wizard(
     if let Some(level) = SecurityLevel::preset_from_index(selected) {
         config.security = level;
     } else {
-        let (old_detector, old_recognizer, old_threshold, old_hybrid_policy) =
+        let (old_detector, old_recognizer, old_rgb_threshold, old_ir_threshold, old_hybrid_policy) =
             if config.security.level == "custom" {
                 (
                     config.security.detector.clone(),
                     config.security.recognizer.clone(),
-                    config.security.threshold,
+                    config.security.rgb_threshold,
+                    config.security.ir_threshold,
                     config.security.hybrid_policy.clone(),
                 )
             } else {
@@ -302,7 +303,8 @@ async fn run_config_wizard(
                     config.security.effective_detector_quality().to_string(),
                     config.security.effective_recognizer_quality().to_string(),
                     // Presets carry an f32 threshold; round so the prompt shows 0.4, not 0.4000000059604645.
-                    (config.security.threshold() as f64 * 100.0).round() / 100.0,
+                    (config.security.rgb_threshold() as f64 * 100.0).round() / 100.0,
+                    (config.security.ir_threshold() as f64 * 100.0).round() / 100.0,
                     config.security.hybrid_policy().to_string(),
                 )
             };
@@ -321,12 +323,35 @@ async fn run_config_wizard(
             .interact()?;
         let recognizer = SecurityLevel::model_quality_from_index(selected_rec_idx).to_string();
 
-        let threshold = Input::<String>::with_theme(&theme)
+        let rgb_threshold = Input::<String>::with_theme(&theme)
             .with_prompt(format!(
-                "Custom threshold ({} - {})",
+                "Custom RGB threshold ({} - {})",
                 MIN_SECURITY_THRESHOLD, MAX_SECURITY_THRESHOLD
             ))
-            .default(old_threshold.to_string())
+            .default(old_rgb_threshold.to_string())
+            .validate_with(|input: &String| match input.trim().parse::<f64>() {
+                Ok(value)
+                    if value.is_finite()
+                        && (MIN_SECURITY_THRESHOLD..=MAX_SECURITY_THRESHOLD).contains(&value) =>
+                {
+                    Ok(())
+                }
+                Ok(_) => Err(format!(
+                    "must be between {MIN_SECURITY_THRESHOLD} and {MAX_SECURITY_THRESHOLD}"
+                )),
+                Err(_) => Err("must be a number".to_string()),
+            })
+            .interact_text()?
+            .trim()
+            .parse::<f64>()
+            .unwrap_or(DEFAULT_SECURITY_THRESHOLD);
+
+        let ir_threshold = Input::<String>::with_theme(&theme)
+            .with_prompt(format!(
+                "Custom IR threshold ({} - {})",
+                MIN_SECURITY_THRESHOLD, MAX_SECURITY_THRESHOLD
+            ))
+            .default(old_ir_threshold.to_string())
             .validate_with(|input: &String| match input.trim().parse::<f64>() {
                 Ok(value)
                     if value.is_finite()
@@ -351,7 +376,13 @@ async fn run_config_wizard(
             .interact()?;
         let hybrid_policy = SecurityLevel::hybrid_policy_from_index(selected_hybrid_idx);
 
-        config.security = SecurityLevel::custom(detector, recognizer, threshold, hybrid_policy);
+        config.security = SecurityLevel::custom_with_thresholds(
+            detector,
+            recognizer,
+            rgb_threshold,
+            ir_threshold,
+            hybrid_policy,
+        );
     };
 
     if config.inference.is_representable() {
@@ -1599,8 +1630,13 @@ async fn run() -> anyhow::Result<()> {
                 );
                 println!(
                     "{} {:.2}",
-                    style("security.threshold:").bold(),
-                    config.security.threshold()
+                    style("security.rgb_threshold:").bold(),
+                    config.security.rgb_threshold()
+                );
+                println!(
+                    "{} {:.2}",
+                    style("security.ir_threshold:").bold(),
+                    config.security.ir_threshold()
                 );
                 println!(
                     "{} {}",

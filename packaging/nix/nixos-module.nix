@@ -16,8 +16,19 @@ let
 
   # Merge user `settings` over the upstream default config.
   defaultSettings = builtins.fromTOML (builtins.readFile ../config/config.toml);
+  userSecuritySettings = cfg.settings.security or { };
+  legacySecurityThreshold = userSecuritySettings.threshold or null;
+  normalizedSecuritySettings =
+    (removeAttrs userSecuritySettings [ "threshold" ])
+    // lib.optionalAttrs (legacySecurityThreshold != null) {
+      rgb_threshold = userSecuritySettings.rgb_threshold or legacySecurityThreshold;
+      ir_threshold = userSecuritySettings.ir_threshold or legacySecurityThreshold;
+    };
+  normalizedSettings = cfg.settings // lib.optionalAttrs (cfg.settings ? security) {
+    security = normalizedSecuritySettings;
+  };
   configFile = settingsFormat.generate "gaze-config.toml" (
-    lib.recursiveUpdate defaultSettings cfg.settings
+    lib.recursiveUpdate defaultSettings normalizedSettings
   );
 
   pamModuleFor =
@@ -88,11 +99,10 @@ in
       example = "device:/dev/tpm0";
       description = ''
         TCTI connection string for sealing template keys, exported to the
-        daemon as `TPM2TOOLS_TCTI`. When null, the daemon prefers
-        {file}`/dev/tpmrm0` and falls back to {file}`/dev/tpm0` when the
-        resource-manager node is missing or unreadable. Set this only if
-        neither node is the one you want, for example to reach a TPM through
-        `tabrmd`.
+        daemon as `TPM2TOOLS_TCTI`. When null, the daemon uses
+        {file}`/dev/tpmrm0` if it exists and {file}`/dev/tpm0` otherwise. Set
+        this only if neither node is the one you want, for example to reach a
+        TPM through `tabrmd`.
       '';
     };
 
@@ -221,10 +231,7 @@ in
           after = [ "dbus.service" ];
           requires = [ "dbus.service" ];
           wantedBy = [ "multi-user.target" ];
-          environment = {
-            XDG_CACHE_HOME = "/var/cache/gaze";
-          }
-          // lib.optionalAttrs (cfg.tpm.tcti != null) {
+          environment = lib.optionalAttrs (cfg.tpm.tcti != null) {
             TPM2TOOLS_TCTI = cfg.tpm.tcti;
           };
           serviceConfig = {
@@ -248,10 +255,7 @@ in
             RestrictSUIDSGID = true;
             LockPersonality = true;
             SystemCallArchitectures = "native";
-            CapabilityBoundingSet = [
-              "CAP_DAC_READ_SEARCH"
-              "CAP_DAC_OVERRIDE"
-            ];
+            CapabilityBoundingSet = [ "CAP_DAC_READ_SEARCH" ];
             # The GUI's settings page rewrites config.toml through the daemon,
             # and the GDM face-login toggle writes a dconf database.
             ReadWritePaths = [
