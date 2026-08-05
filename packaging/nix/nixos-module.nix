@@ -33,6 +33,8 @@ let
 
   pamModuleFor =
     svc: "${cfg.package}/lib/security/pam_gaze${lib.optionalString svc.simultaneous "_grosshack"}.so";
+
+  gnomeExtensionUuid = cfg.gnome.extensionPackage.passthru.extensionUuid;
 in
 {
   options.services.gaze = {
@@ -119,15 +121,36 @@ in
 
     gnome = {
       enable = lib.mkEnableOption ''
-        the Gaze GNOME Shell extension (lock screen face unlock). Users still
-        have to turn it on per user with
-        `gnome-extensions enable gaze@gundulabs.com`
+        the Gaze GNOME Shell extension (lock screen face unlock). Turned on for
+        every GNOME session by default, see
+        {option}`services.gaze.gnome.enableForUsers`
       '';
 
       extensionPackage = lib.mkOption {
         type = lib.types.package;
         description = "The gaze-gnome-extension package.";
         defaultText = lib.literalExpression ''gaze.packages.''${system}.gaze-gnome-extension'';
+      };
+
+      enableForUsers = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Load the extension and turn on lock screen face auth in every GNOME
+          user session, by writing dconf defaults into the `user` profile.
+          Without this the extension is only installed, and each user has to
+          turn it on from the Extensions app before face unlock works.
+
+          These are defaults rather than locks, so a user who switches the
+          extension off in the Extensions app, or face auth off in the
+          extension preferences, keeps that choice.
+
+          Set this to `false` if you manage `org/gnome/shell`
+          `enabled-extensions` yourself, through home-manager or your own
+          {option}`programs.dconf.profiles.user` database. Two system databases
+          that both set the key shadow each other instead of merging, and only
+          the one listed first in the profile takes effect.
+        '';
       };
 
       gdmFaceLogin = lib.mkEnableOption ''
@@ -302,16 +325,28 @@ in
 
         # Equivalent of packaging/gdm/00-gaze-defaults.
         programs.dconf.enable = true;
-        programs.dconf.profiles.gdm.databases = [
+        programs.dconf.profiles =
           {
-            settings = {
-              "org/gnome/shell".enabled-extensions = [
-                cfg.gnome.extensionPackage.passthru.extensionUuid
-              ];
-              "org/gnome/shell/extensions/gaze".enable-face-authentication = cfg.gnome.gdmFaceLogin;
-            };
+            gdm.databases = [
+              {
+                settings = {
+                  "org/gnome/shell".enabled-extensions = [ gnomeExtensionUuid ];
+                  "org/gnome/shell/extensions/gaze".enable-face-authentication =
+                    cfg.gnome.gdmFaceLogin;
+                };
+              }
+            ];
           }
-        ];
+          // lib.optionalAttrs cfg.gnome.enableForUsers {
+            user.databases = [
+              {
+                settings = {
+                  "org/gnome/shell".enabled-extensions = [ gnomeExtensionUuid ];
+                  "org/gnome/shell/extensions/gaze".enable-face-authentication = true;
+                };
+              }
+            ];
+          };
 
         # Face-only PAM service, equivalent of packaging/pam/gdm-face.arch.
         security.pam.services."gdm-face".text = ''

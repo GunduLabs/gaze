@@ -101,6 +101,7 @@ compatible `onnxruntime` instead of overriding `follows`.
 | `security.pam.services.<name>.gaze.order` | `null` | Explicit rule `order`; `null` places gaze ahead of `pam_fprintd` and `pam_unix` |
 | `services.gaze.gui.enable` | `false` | Install `gaze-gui` |
 | `services.gaze.gnome.enable` | `false` | Install the GNOME Shell extension and the `gdm-face` PAM service |
+| `services.gaze.gnome.enableForUsers` | `true` | Turn the extension and lock screen face auth on in every GNOME user session via dconf defaults. Set to `false` if you manage `enabled-extensions` yourself |
 | `services.gaze.gnome.gdmFaceLogin` | `false` | Also enable face auth at the GDM login screen (read the [GNOME guide](/guide/gnome) first) |
 | `services.gaze.tpm.tcti` | `null` | `TPM2TOOLS_TCTI` for the daemon, e.g. `"device:/dev/tpm0"`. Only needed when neither `/dev/tpmrm0` nor `/dev/tpm0` is the right node |
 
@@ -153,13 +154,22 @@ of those strings verbatim.
 services.gaze.gnome.enable = true;
 ```
 
-Then, from your GNOME session, enable the extension for your user and turn on
-lock screen face auth in its preferences:
+That installs the extension and, through
+`services.gaze.gnome.enableForUsers` (on by default), writes dconf defaults
+into the `user` profile that load it and switch lock screen face auth on for
+every GNOME session. Log out and back in after the rebuild: GNOME Shell only
+scans extension directories at session start, so a running session will not
+pick up a newly installed extension.
+
+Those are defaults, not locks. To change them for your user, use the Extensions
+app or the extension preferences:
 
 ```bash
-gnome-extensions enable gaze@gundulabs.com
 gnome-extensions prefs gaze@gundulabs.com
 ```
+
+Whatever you set there is written to your own dconf database and wins over the
+system default from then on.
 
 The extension's settings schema is installed inside the extension directory
 rather than into the system schema path, so a bare
@@ -171,7 +181,13 @@ need the schema:
 dconf write /org/gnome/shell/extensions/gaze/enable-face-authentication true
 ```
 
-Log out and back in once if the lock screen does not pick it up immediately.
+If you already manage `org/gnome/shell` `enabled-extensions` yourself, in
+home-manager or your own `programs.dconf.profiles.user` database, set
+`services.gaze.gnome.enableForUsers = false;` and add
+`gaze@gundulabs.com` to your own list instead. Two system databases that both
+set the key shadow each other rather than merging, and only the one listed
+first in the profile takes effect.
+
 GDM *login* face auth stays disabled unless you set
 `services.gaze.gnome.gdmFaceLogin = true;`. The extension preferences and
 `gaze doctor` both report whatever that option compiled into the GDM dconf
