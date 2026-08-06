@@ -73,6 +73,21 @@ sudo dnf makecache
 sudo dnf install gaze gaze-gui
 ```
 
+**Fedora OSTree (Silverblue / Bazzite / Kinoite)**
+
+```bash
+sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<'EOF'
+[gundulabs]
+name=Gundu Labs
+baseurl=https://packages.gundulabs.com/rpm/fedora/$releasever/$basearch
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.gundulabs.com/keys/gundulabs-repo.asc
+EOF
+sudo rpm-ostree install gaze gaze-gui
+```
+
 **Fedora via Copr** (alternative to the repository above; do not enable both)
 
 ```bash

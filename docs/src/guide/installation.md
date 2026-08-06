@@ -81,7 +81,6 @@ sudo dnf install gaze gaze-gui
 ```
 
 ```bash [Fedora OSTree (Silverblue / Bazzite / Kinoite)]
-sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
 sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<'EOF'
 [gundulabs]
 name=Gundu Labs

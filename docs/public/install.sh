@@ -635,8 +635,12 @@ EOF
 
     # Import the fingerprint-verified key up front so repo_gpgcheck does not drop
     # into an interactive "import key? [y/N]" prompt that reads the piped script.
+    # Skip rpm --import on OSTree systems since /usr/share/rpm is read-only;
+    # rpm-ostree fetches and validates gpgkey directly from the .repo file.
     KEY_PATH="$(fetch_repo_key)"
-    sudo rpm --import "$KEY_PATH"
+    if [ "$RPM_TOOL" != "rpm-ostree" ]; then
+        sudo rpm --import "$KEY_PATH" 2>/dev/null || true
+    fi
 
     step "Refreshing repository metadata"
     if [ "$RPM_TOOL" = "rpm-ostree" ]; then
