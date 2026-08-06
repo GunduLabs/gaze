@@ -194,18 +194,25 @@ async fn main() -> anyhow::Result<()> {
     info!(elapsed = ?t_load.elapsed(), "Models & user DB loaded");
 
     let conn = Builder::system()?
-        .name("com.gundulabs.Gaze")?
         .serve_at("/com/gundulabs/Gaze", daemon)?
         .build()
         .await?;
 
     tokio::spawn(daemon::watch_resume(conn.clone(), resume_pending));
     tokio::spawn(daemon::watch_session_locks(conn.clone(), lock_epochs));
+
+    // Subscribe before the well-known name exists: until it does no client can claim, so
+    // this is what makes "the watcher cannot miss a disappearance" true rather than a
+    // race the daemon usually wins. A failure here is fatal by design, so systemd
+    // restarts us instead of running on with claims that only the timeout can release.
+    let claim_owners = daemon::subscribe_claim_owners(&conn).await?;
     tokio::spawn(daemon::watch_claim_owner(
-        conn.clone(),
+        claim_owners,
         claim_state,
         active_cancel,
     ));
+
+    conn.request_name("com.gundulabs.Gaze").await?;
 
     info!("Gaze Daemon listening on System Bus");
     std::future::pending::<()>().await;
