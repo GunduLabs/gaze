@@ -252,7 +252,7 @@ With the `pam-gaze-grosshack` module:
 - If face verification succeeds before you finish entering your password:
   - In a text-based (TTY) environment, it cancels the password prompt and asks for text confirmation ("Press Enter to confirm, Esc to cancel").
   - In a graphical Polkit environment:
-    - On **GNOME** (with the Gaze Extension active), it hides the password field, activates the "Authenticate" button, and lets you confirm with a single click. If the extension is inactive, it bypasses confirmation entirely to avoid locking you out.
+    - On **GNOME** (with the Gaze Extension active), it hides the password field, focuses the "Authenticate" button, and lets you confirm by pressing Enter or clicking the button. If the extension is inactive, it bypasses confirmation entirely to avoid locking you out.
     - On **KDE Plasma & LXQt**, it prompts you to press "OK" to confirm.
     - On **Hyprland**, it prompts you to press "Authenticate" to confirm.
     - On other graphical environments, it prompts you to press "Enter" to confirm.
