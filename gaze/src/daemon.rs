@@ -191,6 +191,12 @@ pub struct AuthDaemon {
 /// When each logind session last became locked, keyed by session object path.
 pub type LockEpochs = Arc<Mutex<HashMap<String, std::time::Instant>>>;
 
+/// The single claim the daemon will honour, if any.
+pub type ClaimStateHandle = Arc<Mutex<Option<ClaimState>>>;
+
+/// Cancellation channel for whatever task the current claim owns.
+pub type ActiveCancelHandle = Arc<Mutex<Option<oneshot::Sender<()>>>>;
+
 struct BenchmarkSlot(Arc<AtomicBool>);
 
 impl BenchmarkSlot {
@@ -1451,6 +1457,67 @@ pub async fn watch_resume(conn: zbus::Connection, resume_pending: Arc<AtomicBool
     }
 }
 
+/// Release the active claim as soon as its owning D-Bus name loses its owner.
+///
+/// One subscription for the daemon's lifetime, taken before any claim can exist. A
+/// per-claim watcher has to subscribe after recording the claim, which loses the signal
+/// for a sender that disappears during that setup and strands the claim until
+/// `CLAIM_TIMEOUT_SECS`. Subscribing once up front cannot lose it, and does not leave a
+/// task and a signal receiver behind for every claim ever taken.
+pub async fn watch_claim_owner(
+    conn: zbus::Connection,
+    claim_state: ClaimStateHandle,
+    active_cancel: ActiveCancelHandle,
+) {
+    let dbus = match fdo::DBusProxy::new(&conn).await {
+        Ok(dbus) => dbus,
+        Err(e) => {
+            warn!("Failed to create DBus proxy, claims will only be released on timeout: {e}");
+            return;
+        }
+    };
+
+    let mut stream = match dbus.receive_name_owner_changed().await {
+        Ok(stream) => stream,
+        Err(e) => {
+            warn!(
+                "Failed to subscribe to NameOwnerChanged, claims will only be released on timeout: {e}"
+            );
+            return;
+        }
+    };
+
+    while let Some(signal) = stream.next().await {
+        let Ok(args) = signal.args() else {
+            continue;
+        };
+        let name = args.name().as_str();
+        let epoch = {
+            let state = claim_state.lock().await;
+            match &*state {
+                Some(claim)
+                    if is_vanish_of(
+                        name,
+                        args.new_owner().as_ref().map(|o| o.as_str()),
+                        &claim.sender,
+                    ) =>
+                {
+                    Some(claim.epoch)
+                }
+                _ => None,
+            }
+        };
+        let Some(epoch) = epoch else {
+            continue;
+        };
+
+        let name = name.to_string();
+        if release_claim_epoch(&claim_state, &active_cancel, epoch).await {
+            info!(sender = %name, "Sender vanished, auto-releasing claim");
+        }
+    }
+}
+
 async fn session_properties_stream(conn: &zbus::Connection) -> zbus::Result<zbus::MessageStream> {
     let rule = zbus::MatchRule::builder()
         .msg_type(zbus::message::Type::Signal)
@@ -1970,80 +2037,37 @@ impl AuthDaemon {
         let claim_state = self.claim_state.clone();
         let active_cancel = self.active_cancel.clone();
         let conn = conn.clone();
-        let sender_for_watcher = sender.clone();
+        let sender_for_check = sender.clone();
 
+        // `watch_claim_owner` subscribed before this claim existed, so it cannot miss a
+        // disappearance from here on. It can however have already handled the vanish
+        // while this claim was still being authorized and recorded, in which case it
+        // found no claim to release. Confirm the owner once, now that there is one. A
+        // name that cannot be parsed skips the confirmation and relies on the timeout.
         self.rt_handle.spawn(async move {
-            let dbus = match fdo::DBusProxy::new(&conn).await {
-                Ok(dbus) => dbus,
-                Err(e) => {
-                    warn!(
-                        sender = %sender_for_watcher,
-                        error = %e,
-                        "No DBus proxy for the claim owner watcher; this claim will hold \
-                         until it times out"
-                    );
-                    return;
-                }
+            let Ok(dbus) = fdo::DBusProxy::new(&conn).await else {
+                return;
+            };
+            let Ok(watched) = BusName::try_from(sender_for_check.clone()) else {
+                return;
             };
 
-            let mut stream = match dbus.receive_name_owner_changed().await {
-                Ok(stream) => stream,
-                Err(e) => {
-                    warn!(
-                        sender = %sender_for_watcher,
-                        error = %e,
-                        "Could not watch the claim owner; this claim will hold until it \
-                         times out"
-                    );
-                    return;
-                }
-            };
-
-            // The match rule only exists once the subscribe above resolves, so a sender
-            // that vanished during setup produces no signal at all. Re-check the owner
-            // now that the stream is live: between the two there is no gap.
-            match BusName::try_from(sender_for_watcher.clone()) {
-                Ok(watched) => match dbus.name_has_owner(watched).await {
-                    Ok(false) => {
-                        if release_claim_epoch(&claim_state, &active_cancel, epoch).await {
-                            info!(
-                                sender = %sender_for_watcher,
-                                "Sender vanished before the watcher subscribed, auto-releasing claim"
-                            );
-                        }
-                        return;
-                    }
-                    Ok(true) => {}
-                    Err(e) => warn!(
-                        sender = %sender_for_watcher,
-                        error = %e,
-                        "Could not re-check the claim owner; a sender that vanished during \
-                         setup will hold the claim until it times out"
-                    ),
-                },
-                Err(e) => warn!(
-                    sender = %sender_for_watcher,
-                    error = %e,
-                    "Unparsable claim sender; skipping the owner re-check"
-                ),
-            }
-
-            while let Some(signal) = stream.next().await {
-                if let Ok(args) = signal.args()
-                    && is_vanish_of(
-                        args.name().as_str(),
-                        args.new_owner().as_ref().map(|o| o.as_str()),
-                        &sender_for_watcher,
-                    )
-                {
+            match dbus.name_has_owner(watched).await {
+                Ok(false) => {
                     if release_claim_epoch(&claim_state, &active_cancel, epoch).await {
                         info!(
-                            sender = %sender_for_watcher,
-                            "Sender vanished, auto-releasing claim"
+                            sender = %sender_for_check,
+                            "Sender vanished while claiming, auto-releasing claim"
                         );
                     }
-                    break;
                 }
+                Ok(true) => {}
+                Err(e) => warn!(
+                    sender = %sender_for_check,
+                    error = %e,
+                    "Could not confirm the claim owner; a sender that vanished while \
+                     claiming will hold the claim until it times out"
+                ),
             }
         });
 
