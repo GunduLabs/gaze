@@ -80,7 +80,7 @@ const CONFIRMATION_REQUEST = "GAZE_CONFIRMATION_REQUEST";
 const CONFIRMATION_ACK = "CONFIRM";
 const CONFIRMATION_QUESTION = "Face Verified. Press Enter to confirm.";
 const CONFIRMATION_DIALOG_LABEL =
-  "Face verified. Press Enter to confirm, or type your password.";
+  "Face verified. Press Enter or click Authenticate to confirm.";
 
 const cancelDelayedReset = (dialog) => {
   if (!dialog._sessionRequestTimeoutId) return;
@@ -99,8 +99,12 @@ const keepPasswordEntryVisible = (dialog) => {
 
 const enterConfirmMode = (dialog, path) => {
   gazeTiming("CONFIRM_SHOWN", `path=${path}`);
-  keepPasswordEntryVisible(dialog);
+  cancelDelayedReset(dialog);
   dialog._passwordEntry?.set_text("");
+  if (dialog._passwordEntry) {
+    dialog._passwordEntry.reactive = false;
+    dialog._passwordEntry.hide();
+  }
 
   if (dialog._infoMessageLabel) {
     dialog._infoMessageLabel.text = CONFIRMATION_DIALOG_LABEL;
@@ -115,14 +119,13 @@ const enterConfirmMode = (dialog, path) => {
   }
 
   dialog._confirmMode = true;
-  dialog._passwordEntry?.grab_key_focus();
   dialog._ensureOpen();
+  dialog._okButton?.grab_key_focus();
 };
 
 const respondToConfirm = (dialog) => {
-  const typed = dialog._passwordEntry?.get_text() ?? "";
   dialog._confirmMode = false;
-  dialog._session.response(typed.length > 0 ? typed : CONFIRMATION_ACK);
+  dialog._session.response(CONFIRMATION_ACK);
   dialog._passwordEntry?.set_text("");
   if (dialog._passwordEntry) dialog._passwordEntry.reactive = false;
   if (dialog._okButton) dialog._okButton.reactive = false;
@@ -266,11 +269,6 @@ export default class GazeFaceAuthExtension extends Extension {
           }
 
           keepPasswordEntryVisible(dialog);
-
-          dialog._passwordEntry?.clutter_text.connect("text-changed", () => {
-            if (dialog._confirmMode && dialog._okButton)
-              dialog._okButton.reactive = true;
-          });
 
           const klass = dialog.constructor;
 
