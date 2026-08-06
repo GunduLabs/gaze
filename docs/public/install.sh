@@ -468,7 +468,7 @@ supported_fedora_compatible_version() {
 
 if ! is_rpm && ! is_deb && ! is_arch; then
     fail "Unsupported distribution: $DISTRO_ID"
-    say "Supported: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora-compatible 42/43/44 systems with standard DNF package installation, Arch Linux, and Arch-compatible AUR distros"
+    say "Supported: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora-compatible 42/43/44 systems (including rpm-ostree image-based distros like Silverblue, Bazzite, and Kinoite), Arch Linux, and Arch-compatible AUR distros"
     exit 1
 fi
 
@@ -490,13 +490,6 @@ fi
 if is_rpm && ! is_fedora_compatible; then
     fail "Unsupported RPM distribution: ${NAME:-$DISTRO_ID}"
     say "This installer supports RPM distributions that identify as Fedora-compatible in /etc/os-release."
-    exit 1
-fi
-
-if is_fedora_compatible && is_ostree_system; then
-    fail "Image-based Fedora-compatible system detected: ${NAME:-$DISTRO_ID}"
-    say "This installer currently supports systems that install packages directly with DNF (also called mutable or non-image-based systems)."
-    say "Systems that use rpm-ostree, such as Bazzite, Fedora Silverblue, and Fedora Kinoite, are not yet supported."
     exit 1
 fi
 
@@ -530,7 +523,9 @@ if is_deb; then
     plan "Set up the PAM modules through pam-auth-update if available"
     plan "Enable the Gaze daemon"
 elif is_rpm; then
-    if command -v dnf >/dev/null 2>&1; then
+    if is_ostree_system && command -v rpm-ostree >/dev/null 2>&1; then
+        RPM_TOOL="rpm-ostree"
+    elif command -v dnf >/dev/null 2>&1; then
         RPM_TOOL="dnf"
     else
         RPM_TOOL="yum"
@@ -539,7 +534,7 @@ elif is_rpm; then
     STEP_TOTAL=6
     echo ""
     title "This will:"
-    plan "Configure the dnf repository"
+    plan "Configure the package repository"
     if want_gnome_extension_package; then
         plan "Install gaze, gaze-gui, and gaze-gnome-extension"
         plan "Enable GNOME lock screen auth for this user when possible"
@@ -627,7 +622,7 @@ if is_deb; then
     sudo systemctl enable --now gazed </dev/null 2>/dev/null || true
 
 elif is_rpm; then
-    step "Configuring dnf repository"
+    step "Configuring repository"
     sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
 [gundulabs]
 name=Gundu Labs
@@ -644,7 +639,9 @@ EOF
     sudo rpm --import "$KEY_PATH"
 
     step "Refreshing repository metadata"
-    if command -v dnf >/dev/null 2>&1; then
+    if [ "$RPM_TOOL" = "rpm-ostree" ]; then
+        sudo rpm-ostree refresh-md </dev/null 2>/dev/null || true
+    elif command -v dnf >/dev/null 2>&1; then
         sudo dnf makecache </dev/null
     else
         sudo yum makecache </dev/null
@@ -658,7 +655,14 @@ EOF
     if want_hyprlock_setup; then
         RPM_PKGS="$RPM_PKGS gaze-hyprlock"
     fi
-    if command -v dnf >/dev/null 2>&1; then
+    if [ "$RPM_TOOL" = "rpm-ostree" ]; then
+        if sudo rpm-ostree install --idempotent --apply-live $RPM_PKGS </dev/null 2>/dev/null; then
+            ok "Layered and live-applied packages via rpm-ostree."
+        else
+            sudo rpm-ostree install --idempotent $RPM_PKGS </dev/null
+            ok "Layered packages via rpm-ostree (system reboot required to activate)."
+        fi
+    elif command -v dnf >/dev/null 2>&1; then
         sudo dnf install -y $RPM_PKGS </dev/null
     else
         sudo yum install -y $RPM_PKGS </dev/null

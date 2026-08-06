@@ -5,7 +5,7 @@
 
 Use one of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible, and skips GNOME-specific packages on KDE Plasma and other non-GNOME desktops. Manual GNOME package installs still need GNOME settings commands afterward.
 
-Supported installer targets on x86_64 and arm64: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44 and compatible distributions with standard DNF package installation, such as Nobara and Ultramarine, Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS.
+Supported installer targets on x86_64 and arm64: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44 and compatible distributions (including image-based OSTree distros such as Fedora Silverblue, Kinoite, and Bazzite), Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS.
 
 ## Path A: one-line installer (recommended)
 
@@ -19,7 +19,7 @@ This installs:
 - `gaze-gui`
 - the GNOME Shell extension package only when a GNOME desktop session is detected
 
-It also configures package updates where needed, enables the `gazed` daemon, and tries to enable lock screen face unlock for the current GNOME user when applicable. On KDE Plasma and other non-GNOME desktops, it skips the GNOME extension package so it does not pull in GNOME Shell.
+It also configures package updates where needed, enables the `gazed` daemon, and tries to enable lock screen face unlock for the current GNOME user when applicable. On KDE Plasma and other non-GNOME desktops, it skips the GNOME extension package so it does not pull in GNOME Shell. On OSTree systems (Silverblue, Bazzite, Kinoite), the installer automatically uses `rpm-ostree` layering.
 
 Desktop behavior:
 
@@ -36,7 +36,7 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
 
 ## Path B: manual package install
 
-Use this if you prefer to configure package sources yourself. Debian/Ubuntu and Fedora-compatible systems with standard DNF package installation use Gundu Labs repositories. Arch Linux and Arch-compatible distributions such as Manjaro and CachyOS use the AUR packages.
+Use this if you prefer to configure package sources yourself. Debian/Ubuntu and Fedora-compatible systems with standard DNF or rpm-ostree package installation use Gundu Labs repositories. Arch Linux and Arch-compatible distributions such as Manjaro and CachyOS use the AUR packages.
 
 Debian/Ubuntu packages are built per release, and each apt suite carries only the builds for that release: `noble` (Ubuntu 24.04), `questing` (Ubuntu 25.10), `resolute` (Ubuntu 26.04), and `trixie` (Debian 13). The snippet below picks the suite matching your system; installing another release's package leaves `gazed` unable to load its OpenCV libraries.
 
@@ -47,7 +47,7 @@ If you are replacing an existing manual repository configuration, remove the cur
 sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
 ```
 
-**Fedora and compatible DNF systems:**
+**Fedora and compatible DNF/rpm-ostree systems:**
 ```bash
 sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
 ```
@@ -78,6 +78,20 @@ gpgkey=https://packages.gundulabs.com/keys/gundulabs-repo.asc
 EOF
 sudo dnf makecache
 sudo dnf install gaze gaze-gui
+```
+
+```bash [Fedora OSTree (Silverblue / Bazzite / Kinoite)]
+sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
+sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<'EOF'
+[gundulabs]
+name=Gundu Labs
+baseurl=https://packages.gundulabs.com/rpm/fedora/$releasever/$basearch
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.gundulabs.com/keys/gundulabs-repo.asc
+EOF
+sudo rpm-ostree install gaze gaze-gui
 ```
 
 ```bash [Fedora via Copr]
