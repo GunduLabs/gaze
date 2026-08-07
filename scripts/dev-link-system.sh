@@ -76,12 +76,18 @@ artifact() {
     printf '%s/%s' "$TARGET" "$1"
 }
 
+# The GUI is optional: `GAZE_GUI=0 just build-rust` never produces it, and a
+# TUI-only install has nothing to link. Absent artifact means absent feature,
+# not a broken build.
+have_gui() {
+    [ -e "$(artifact gaze-gui)" ]
+}
+
 require_artifacts() {
     missing=0
     for file in \
         "$(artifact gazed)" \
         "$(artifact gaze)" \
-        "$(artifact gaze-gui)" \
         "$(artifact libpam_gaze.so)" \
         "$(artifact libpam_gaze_grosshack.so)"
     do
@@ -185,10 +191,14 @@ restore_or_remove() {
 link_binaries() {
     backup_and_install "$(artifact gazed)" "$LOCAL_BIN_DIR/gazed" 0755
     backup_and_install "$(artifact gaze)" "$LOCAL_BIN_DIR/gaze" 0755
-    backup_and_install "$(artifact gaze-gui)" "$LOCAL_BIN_DIR/gaze-gui" 0755
     backup_and_link "$LOCAL_BIN_DIR/gazed" /usr/bin/gazed
     backup_and_link "$LOCAL_BIN_DIR/gaze" /usr/bin/gaze
-    backup_and_link "$LOCAL_BIN_DIR/gaze-gui" /usr/bin/gaze-gui
+    if have_gui; then
+        backup_and_install "$(artifact gaze-gui)" "$LOCAL_BIN_DIR/gaze-gui" 0755
+        backup_and_link "$LOCAL_BIN_DIR/gaze-gui" /usr/bin/gaze-gui
+    else
+        printf 'skipping gaze-gui: not built\n'
+    fi
 }
 
 restore_binaries() {
