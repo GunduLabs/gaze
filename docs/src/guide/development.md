@@ -281,8 +281,8 @@ three together.
 ```bash
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 flatpak install --user -y flathub \
-  org.gnome.Sdk//49 \
-  org.gnome.Platform//49 \
+  org.gnome.Sdk//50 \
+  org.gnome.Platform//50 \
   org.freedesktop.Sdk.Extension.rust-stable//25.08 \
   org.freedesktop.Sdk.Extension.llvm20//25.08
 ```

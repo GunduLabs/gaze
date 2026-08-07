@@ -166,55 +166,32 @@ jobs:
   package:
     name: Package (${{ matrix.format }})
     runs-on: ubuntu-latest
+    container: ${{ matrix.container }}
+    env:
+      ORT_CACHE_DIR: /github/home/.ort-cache
     strategy:
       fail-fast: false
       matrix:
-        format: [deb, archlinux]
-
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 1
-
-      - name: Set up build environment
-        uses: ./.github/actions/setup-build
-        with:
-          just-version: ${{ env.JUST_VERSION }}
-          apt-packages: dpkg-dev gettext-base checkpolicy semodule-utils
-          cache-key: ci-package-v1
-
-      - name: Build workspace
-        env:
-          CARGO_BUILD_JOBS: 2
-          RUSTFLAGS: -Cdebuginfo=0
-        run: just build-rust
-
-      - name: Build SELinux policy
-        run: |
-          just build-selinux
-          test -f dist/selinux/gaze-gdm-camera.pp
-
-      - name: Install nfpm
-        run: |
-          nfpm_version="${NFPM_VERSION#v}"
-          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/${NFPM_VERSION}/nfpm_${nfpm_version}_Linux_x86_64.tar.gz" \
-            -o /tmp/nfpm.tar.gz
-          sudo tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm
-          nfpm --version
-
-      - name: Build and verify ${{ matrix.format }} packages
-        run: VERSION=0.0.0 just package-prebuilt ${{ matrix.format }}
-
-  package-rpm:
-    name: Package (rpm)
-    runs-on: ubuntu-latest
-    container: fedora:45
-    env:
-      ORT_CACHE_DIR: /github/home/.ort-cache
+        include:
+          - format: deb
+            build_deps: "true"
+            apt_packages: dpkg-dev gettext-base checkpolicy semodule-utils
+            cache_key: ci-package-v1
+          - format: archlinux
+            build_deps: "true"
+            apt_packages: dpkg-dev gettext-base checkpolicy semodule-utils
+            cache_key: ci-package-v1
+          - format: rpm
+            container: fedora:45
+            cache_key: ci-package-rpm-v1
+          - format: srpm
+            build_deps: "false"
+            apt_packages: rpm zstd gettext-base
+            cache_key: ci-srpm-v1
 
     steps:
       - name: Install Fedora dependencies
+        if: ${{ matrix.format == 'rpm' }}
         run: |
           dnf install -y \
             git \
@@ -243,7 +220,80 @@ jobs:
           fetch-depth: 1
 
       - name: Trust workspace for git
+        if: ${{ matrix.format == 'rpm' }}
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install Rust toolchain
+        if: ${{ matrix.format == 'rpm' }}
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install just
+        if: ${{ matrix.format == 'rpm' }}
+        uses: extractions/setup-just@v4
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+
+      - name: Restore Rust cache
+        if: ${{ matrix.format == 'rpm' }}
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.cache_key }}
+          cache-on-failure: true
+          cache-directories: ${{ env.ORT_CACHE_DIR }}
+
+      - name: Set up build environment
+        if: ${{ matrix.format != 'rpm' }}
+        uses: ./.github/actions/setup-build
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+          build-deps: ${{ matrix.build_deps }}
+          apt-packages: ${{ matrix.apt_packages }}
+          cache-key: ${{ matrix.cache_key }}
+
+      - name: Install nfpm
+        if: ${{ matrix.format != 'srpm' }}
+        run: |
+          nfpm_version="${NFPM_VERSION#v}"
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/${NFPM_VERSION}/nfpm_${nfpm_version}_Linux_x86_64.tar.gz" \
+            -o /tmp/nfpm.tar.gz
+          ${{ matrix.format == 'rpm' && 'tar' || 'sudo tar' }} -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm
+          nfpm --version
+
+      - name: Build workspace
+        if: ${{ matrix.format != 'srpm' }}
+        env:
+          CARGO_BUILD_JOBS: 2
+          RUSTFLAGS: -Cdebuginfo=0
+        run: just build-rust
+
+      - name: Build SELinux policy
+        if: ${{ matrix.format != 'srpm' }}
+        run: |
+          just build-selinux
+          test -f dist/selinux/gaze-gdm-camera.pp
+
+      - name: Build and verify ${{ matrix.format }} packages
+        if: ${{ matrix.format != 'srpm' }}
+        run: VERSION=0.0.0 just package-prebuilt ${{ matrix.format }}
+
+      - name: Build and verify source RPM
+        if: ${{ matrix.format == 'srpm' }}
+        run: VERSION=0.0.0 just srpm
+
+  package-flatpak:
+    name: Package (flatpak)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Install flatpak tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -253,55 +303,53 @@ jobs:
         with:
           just-version: ${{ env.JUST_VERSION }}
 
-      - name: Restore Rust cache
+      - name: Restore Rust vendor cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ci-package-rpm-v1
+          shared-key: ci-flatpak-vendor-v1
           cache-on-failure: true
-          cache-directories: ${{ env.ORT_CACHE_DIR }}
 
-      - name: Install nfpm
-        run: |
-          nfpm_version="${NFPM_VERSION#v}"
-          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/${NFPM_VERSION}/nfpm_${nfpm_version}_Linux_x86_64.tar.gz" \
-            -o /tmp/nfpm.tar.gz
-          tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm
-          nfpm --version
+      - name: Resolve ONNX Runtime version
+        run: echo "ORT_VERSION=$(just --evaluate ort_version)" >> "$GITHUB_ENV"
 
-      - name: Build workspace
+      - name: Cache ONNX Runtime download
+        uses: actions/cache@v4
+        with:
+          path: .flatpak-cache/ort
+          key: flatpak-ort-${{ env.ORT_VERSION }}-v1
+
+      - name: Cache flatpak-builder state (skips rebuilding unchanged modules, e.g. OpenCV)
+        uses: actions/cache@v4
+        with:
+          path: .flatpak-builder
+          key: flatpak-builder-state-${{ hashFiles('packaging/flatpak/com.gundulabs.Gaze.yml') }}
+          restore-keys: |
+            flatpak-builder-state-
+
+      - name: Cache flatpak runtimes/SDKs
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/flatpak
+          key: flatpak-runtimes-gnome50-rust2508-llvm2508-v1
+
+      - name: Add flathub remote
+        run: flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Install Flatpak GNOME SDK
+        run: flatpak install --user -y flathub org.gnome.Sdk//50 org.gnome.Platform//50
+
+      - name: Install Flatpak Rust SDK extension
+        run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.rust-stable//25.08
+
+      - name: Install Flatpak LLVM SDK extension
+        run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.llvm20//25.08
+
+      - name: Build and verify flatpak bundle
         env:
-          CARGO_BUILD_JOBS: 2
-          RUSTFLAGS: -Cdebuginfo=0
-        run: just build-rust
-
-      - name: Build SELinux policy
+          FLATPAK_BUILDER_JOBS: 4
         run: |
-          just build-selinux
-          test -f dist/selinux/gaze-gdm-camera.pp
-
-      - name: Build and verify rpm packages
-        run: VERSION=0.0.0 just package-prebuilt rpm
-
-  srpm:
-    name: Package (srpm)
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 1
-
-      - name: Set up build environment
-        uses: ./.github/actions/setup-build
-        with:
-          just-version: ${{ env.JUST_VERSION }}
-          build-deps: "false"
-          apt-packages: rpm zstd gettext-base
-          cache-key: ci-srpm-v1
-
-      - name: Build and verify source RPM
-        run: VERSION=0.0.0 just srpm
+          VERSION=0.0.0 just build-flatpak
+          test -s dist/packages/com.gundulabs.Gaze-x86_64.flatpak
 
   nix:
     name: Nix

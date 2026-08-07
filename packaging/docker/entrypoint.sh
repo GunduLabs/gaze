@@ -20,8 +20,8 @@ if printf '%s ' "$@" | grep -q 'flatpak'; then
         https://flathub.org/repo/flathub.flatpakrepo
     # Keep these branch versions in sync with .github/workflows/cd.yml.
     flatpak install --user -y flathub \
-        org.gnome.Sdk//49 \
-        org.gnome.Platform//49 \
+        org.gnome.Sdk//50 \
+        org.gnome.Platform//50 \
         org.freedesktop.Sdk.Extension.rust-stable//25.08 \
         org.freedesktop.Sdk.Extension.llvm20//25.08
 fi
