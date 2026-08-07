@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Set up Flatpak build environment
+description: Installs Flatpak tooling and restores the architecture-specific build caches.
+
+inputs:
+  just-version:
+    description: just release to install.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up build tools
+      uses: ./.github/actions/setup-build
+      with:
+        just-version: ${{ inputs.just-version }}
+        build-deps: "false"
+        apt-packages: flatpak flatpak-builder elfutils
+        cache-key: flatpak-vendor-${{ runner.arch }}-v1
+
+    - name: Resolve Flatpak cache versions
+      shell: bash
+      run: |
+        set -euo pipefail
+        runtime_version="$(sed -n 's/^runtime-version: "\([^"]*\)"/\1/p' packaging/flatpak/com.gundulabs.Gaze.yml)"
+        test -n "$runtime_version"
+        echo "FLATPAK_RUNTIME_VERSION=$runtime_version" >> "$GITHUB_ENV"
+        echo "FLATPAK_ORT_VERSION=$(just --evaluate ort_version)" >> "$GITHUB_ENV"
+
+    - name: Restore ONNX Runtime download
+      uses: actions/cache@v4
+      with:
+        path: .flatpak-cache/ort
+        key: flatpak-ort-${{ runner.os }}-${{ runner.arch }}-${{ env.FLATPAK_ORT_VERSION }}-v1
+
+    - name: Restore flatpak-builder state
+      uses: actions/cache@v4
+      with:
+        path: .flatpak-builder
+        key: flatpak-builder-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packaging/flatpak/com.gundulabs.Gaze.yml', 'Cargo.lock') }}
+        restore-keys: |
+          flatpak-builder-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Restore Flatpak runtimes and SDKs
+      uses: actions/cache@v4
+      with:
+        path: ~/.local/share/flatpak
+        key: flatpak-runtimes-${{ runner.os }}-${{ runner.arch }}-gnome${{ env.FLATPAK_RUNTIME_VERSION }}-v1

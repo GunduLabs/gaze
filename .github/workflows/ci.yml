@@ -281,8 +281,16 @@ jobs:
         run: VERSION=0.0.0 just srpm
 
   package-flatpak:
-    name: Package (flatpak)
-    runs-on: ubuntu-latest
+    name: Package (flatpak, ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
 
     steps:
       - name: Checkout source
@@ -290,66 +298,17 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install flatpak tooling
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install just
-        uses: extractions/setup-just@v4
+      - name: Set up Flatpak build environment
+        uses: ./.github/actions/setup-flatpak
         with:
           just-version: ${{ env.JUST_VERSION }}
-
-      - name: Restore Rust vendor cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci-flatpak-vendor-v1
-          cache-on-failure: true
-
-      - name: Resolve ONNX Runtime version
-        run: echo "ORT_VERSION=$(just --evaluate ort_version)" >> "$GITHUB_ENV"
-
-      - name: Cache ONNX Runtime download
-        uses: actions/cache@v4
-        with:
-          path: .flatpak-cache/ort
-          key: flatpak-ort-${{ env.ORT_VERSION }}-v1
-
-      - name: Cache flatpak-builder state (skips rebuilding unchanged modules, e.g. OpenCV)
-        uses: actions/cache@v4
-        with:
-          path: .flatpak-builder
-          key: flatpak-builder-state-${{ hashFiles('packaging/flatpak/com.gundulabs.Gaze.yml') }}
-          restore-keys: |
-            flatpak-builder-state-
-
-      - name: Cache flatpak runtimes/SDKs
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/share/flatpak
-          key: flatpak-runtimes-gnome50-rust2508-llvm2508-v1
-
-      - name: Add flathub remote
-        run: flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-
-      - name: Install Flatpak GNOME SDK
-        run: flatpak install --user -y flathub org.gnome.Sdk//50 org.gnome.Platform//50
-
-      - name: Install Flatpak Rust SDK extension
-        run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.rust-stable//25.08
-
-      - name: Install Flatpak LLVM SDK extension
-        run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.llvm20//25.08
 
       - name: Build and verify flatpak bundle
         env:
           FLATPAK_BUILDER_JOBS: 4
         run: |
           VERSION=0.0.0 just build-flatpak
-          test -s dist/packages/com.gundulabs.Gaze-x86_64.flatpak
+          test -s "dist/packages/com.gundulabs.Gaze-${{ matrix.arch }}.flatpak"
 
   nix:
     name: Nix

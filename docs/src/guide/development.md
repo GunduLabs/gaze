@@ -16,7 +16,7 @@ you're not on Linux, skip straight to [Building without a Linux host (Docker)](#
 - Rust 1.85+ (or install current stable via `rustup`)
 - `just` 1.51+ (https://github.com/casey/just) for task automation
 - `nfpm` (https://nfpm.goreleaser.com) for packaging
-- `flatpak` and `flatpak-builder` (https://github.com/flatpak/flatpak-builder) for the Flatpak build, plus the Flathub remote and GNOME/Rust/LLVM SDKs. See [Flatpak build](#flatpak-build) below.
+- `flatpak` and `flatpak-builder` (https://github.com/flatpak/flatpak-builder) for the Flatpak build. See [Flatpak build](#flatpak-build) below.
 
 The repo pins versions for `rust`, `just`, `nfpm`, plus `bun`/`node` (used by the docs site) and
 `rust-analyzer`, in `mise.toml`. If you use [mise](https://mise.jdx.dev), `mise trust && mise
@@ -272,22 +272,9 @@ Package output:
 
 ## Flatpak build
 
-The `flatpak`/`flatpak-builder` packages above are not enough on their own. The manifest
-(`packaging/flatpak/com.gundulabs.Gaze.yml`) also needs the Flathub remote and the exact
-GNOME runtime/SDK plus the Rust and LLVM SDK extensions it builds against. These versions
-must match `.github/workflows/cd.yml` and `packaging/docker/entrypoint.sh`, so bump all
-three together.
-
-```bash
-flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user -y flathub \
-  org.gnome.Sdk//50 \
-  org.gnome.Platform//50 \
-  org.freedesktop.Sdk.Extension.rust-stable//25.08 \
-  org.freedesktop.Sdk.Extension.llvm20//25.08
-```
-
-Then build:
+The build recipe adds the Flathub remote and installs or updates the GNOME runtime/SDK
+and Rust/LLVM extensions declared by the manifest, so their versions have a single source
+of truth. Build with:
 
 ```bash
 just build-flatpak
@@ -335,8 +322,8 @@ Notes:
   automatically on first use.
 - Cargo registry, build target, and Flatpak state persist in named Docker volumes across
   runs, so repeat builds don't re-download crates or the GNOME SDK.
-- For `build-flatpak`, the entrypoint lazily adds the Flathub remote and installs the same
-  GNOME/Rust/LLVM SDKs listed above into a volume the first time a `flatpak` target runs.
+- For `build-flatpak`, the recipe installs the manifest's GNOME/Rust/LLVM dependencies into
+  a volume the first time the target runs.
 - If your checkout lives on a sshfs-backed mount (e.g. a Colima VM on an external/network
   drive), Flatpak's ostree repo can't live on that mount. The wrapper already redirects
   `flatpak-builder`'s state/build/repo dirs to an in-VM Docker volume, so this works out of

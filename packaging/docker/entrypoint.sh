@@ -11,21 +11,6 @@ set -euo pipefail
 # `git describe` to derive the version, so trust the mount before running just.
 git config --global --add safe.directory /work
 
-# Flatpak builds need the flathub remote and the GNOME/Rust/LLVM SDKs (cd.yml
-# installs these as separate steps). Do it lazily, only when a flatpak target is
-# requested. The SDKs land in the gaze-flatpak volume, so this is a one-time
-# download that subsequent runs skip.
-if printf '%s ' "$@" | grep -q 'flatpak'; then
-    flatpak remote-add --user --if-not-exists flathub \
-        https://flathub.org/repo/flathub.flatpakrepo
-    # Keep these branch versions in sync with .github/workflows/cd.yml.
-    flatpak install --user -y flathub \
-        org.gnome.Sdk//50 \
-        org.gnome.Platform//50 \
-        org.freedesktop.Sdk.Extension.rust-stable//25.08 \
-        org.freedesktop.Sdk.Extension.llvm20//25.08
-fi
-
 rc=0
 just "$@" || rc=$?
 

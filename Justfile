@@ -99,10 +99,12 @@ flatpak_repo_dir := env("FLATPAK_REPO_DIR", "dist/flatpak-repo")
 [group("build")]
 build-flatpak: prepare-flatpak-vendor prepare-flatpak-ort
     mkdir -p dist/packages {{ quote(flatpak_repo_dir) }}
+    flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
     flatpak-builder \
         --force-clean \
         --disable-rofiles-fuse \
+        --install-deps-from=flathub \
         --state-dir={{ quote(flatpak_state_dir) }} \
         --jobs="${FLATPAK_BUILDER_JOBS:-2}" \
         --repo={{ quote(flatpak_repo_dir) }} \
