@@ -10,6 +10,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+const PROMPT_RETIRE_TIMEOUT: Duration = Duration::from_secs(2);
+const PROMPT_SIGNAL_INTERVAL: Duration = Duration::from_millis(50);
+
 async fn authenticate_biometric_with_timeout(
     username: &str,
     service: Option<&str>,
@@ -54,29 +57,56 @@ unsafe fn restore_interrupt_handler(old: Option<libc::sigaction>) {
     }
 }
 
-fn retire_prompt(state: &SharedAuthState, prompt_thread: thread::JoinHandle<()>) {
-    if unblock_terminal() {
-        wait_for_prompt_finish(state);
-        let _ = prompt_thread.join();
-        return;
-    }
+enum PromptUnblock {
+    Injected,
+    SignalOnly,
+    NoTerminal,
+}
 
-    let tid = prompt_thread.as_pthread_t();
+fn prompt_is_finished(state: &SharedAuthState) -> bool {
+    let (lock, _) = &**state;
+    lock.lock().finished
+}
+
+fn signal_prompt_until_finished(
+    state: &SharedAuthState,
+    tid: libc::pthread_t,
+    deadline: Duration,
+) -> bool {
     let old_handler = unsafe { install_interrupt_handler() };
+    let start = std::time::Instant::now();
 
-    {
+    let finished = {
         let (lock, condvar) = &**state;
         let mut shared_state = lock.lock();
-        while !shared_state.finished {
+        while !shared_state.finished && start.elapsed() < deadline {
             unsafe {
                 libc::pthread_kill(tid, libc::SIGUSR1);
             }
-            condvar.wait_for(&mut shared_state, Duration::from_millis(50));
+            condvar.wait_for(&mut shared_state, PROMPT_SIGNAL_INTERVAL);
         }
-    }
+        shared_state.finished
+    };
 
-    let _ = prompt_thread.join();
     unsafe { restore_interrupt_handler(old_handler) };
+    finished
+}
+
+fn retire_prompt(state: &SharedAuthState, prompt_thread: thread::JoinHandle<()>) {
+    let retired = match unblock_terminal() {
+        PromptUnblock::Injected => {
+            wait_for_prompt_finish(state);
+            true
+        }
+        PromptUnblock::SignalOnly => {
+            signal_prompt_until_finished(state, prompt_thread.as_pthread_t(), PROMPT_RETIRE_TIMEOUT)
+        }
+        PromptUnblock::NoTerminal => prompt_is_finished(state),
+    };
+
+    if retired {
+        let _ = prompt_thread.join();
+    }
 }
 
 unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
@@ -175,17 +205,93 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 }
 // Inject newline via TIOCSTI to unblock the PAM conversation read thread.
 
-fn unblock_terminal() -> bool {
-    if let Ok(tty) = std::fs::OpenOptions::new()
+fn unblock_terminal() -> PromptUnblock {
+    let Ok(tty) = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .open("/dev/tty")
-    {
-        let fd = tty.as_raw_fd();
-        let nl = b'\n' as libc::c_char;
-        unsafe { libc::ioctl(fd, libc::TIOCSTI, &nl as *const libc::c_char) == 0 }
+    else {
+        return PromptUnblock::NoTerminal;
+    };
+
+    let fd = tty.as_raw_fd();
+    let nl = b'\n' as libc::c_char;
+    if unsafe { libc::ioctl(fd, libc::TIOCSTI, &nl as *const libc::c_char) == 0 } {
+        PromptUnblock::Injected
     } else {
-        false
+        PromptUnblock::SignalOnly
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::Instant;
+
+    fn mark_finished(state: &SharedAuthState) {
+        let (lock, condvar) = &**state;
+        lock.lock().finished = true;
+        condvar.notify_all();
+    }
+
+    fn parked_thread() -> (thread::JoinHandle<()>, mpsc::Sender<()>) {
+        let (tx, rx) = mpsc::channel::<()>();
+        let handle = thread::spawn(move || while rx.recv().is_ok() {});
+        (handle, tx)
+    }
+
+    #[test]
+    fn prompt_is_finished_reads_the_shared_state() {
+        let state = new_auth_state();
+        assert!(!prompt_is_finished(&state));
+        mark_finished(&state);
+        assert!(prompt_is_finished(&state));
+    }
+
+    #[test]
+    fn a_finished_prompt_is_retired_without_signalling() {
+        let state = new_auth_state();
+        mark_finished(&state);
+        let (handle, tx) = parked_thread();
+
+        let start = Instant::now();
+        let retired =
+            signal_prompt_until_finished(&state, handle.as_pthread_t(), Duration::from_secs(5));
+
+        assert!(retired);
+        assert!(
+            start.elapsed() < Duration::from_millis(250),
+            "should not have waited: {:?}",
+            start.elapsed()
+        );
+
+        drop(tx);
+        let _ = handle.join();
+    }
+
+    #[test]
+    fn an_unanswerable_prompt_is_abandoned_at_the_deadline() {
+        let state = new_auth_state();
+        let (handle, tx) = parked_thread();
+        let deadline = Duration::from_millis(250);
+
+        let start = Instant::now();
+        let retired = signal_prompt_until_finished(&state, handle.as_pthread_t(), deadline);
+        let waited = start.elapsed();
+
+        assert!(
+            !retired,
+            "an unfinished prompt must report that it was abandoned"
+        );
+        assert!(waited >= deadline, "gave up too early: {waited:?}");
+        assert!(
+            waited < Duration::from_secs(2),
+            "did not honour the deadline: {waited:?}"
+        );
+
+        drop(tx);
+        let _ = handle.join();
     }
 }
 
