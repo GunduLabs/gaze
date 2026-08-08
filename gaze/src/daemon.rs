@@ -64,6 +64,40 @@ pub type ClaimStateHandle = Arc<Mutex<Option<ClaimState>>>;
 pub type ActiveCancelHandle = Arc<Mutex<Option<oneshot::Sender<()>>>>;
 
 static CLAIM_EPOCH: AtomicU64 = AtomicU64::new(0);
+static SYSTEM_BUS: tokio::sync::OnceCell<zbus::Connection> = tokio::sync::OnceCell::const_new();
+static DBUS_PROXY: tokio::sync::OnceCell<fdo::DBusProxy<'static>> =
+    tokio::sync::OnceCell::const_new();
+
+pub async fn system_bus() -> fdo::Result<zbus::Connection> {
+    SYSTEM_BUS
+        .get_or_try_init(zbus::Connection::system)
+        .await
+        .cloned()
+        .map_err(|e| fdo::Error::Failed(format!("Failed to connect to system bus: {e}")))
+}
+
+async fn active_session() -> Option<gaze_core::dbus::ActiveSession> {
+    let conn = system_bus().await.ok()?;
+    gaze_core::dbus::active_session_on(&conn).await.ok()
+}
+
+async fn active_session_uid_and_class() -> Option<(u32, String)> {
+    let conn = system_bus().await.ok()?;
+    gaze_core::dbus::active_session_uid_and_class_on(&conn)
+        .await
+        .ok()
+}
+
+async fn dbus_proxy() -> fdo::Result<&'static fdo::DBusProxy<'static>> {
+    DBUS_PROXY
+        .get_or_try_init(|| async {
+            let conn = system_bus().await?;
+            fdo::DBusProxy::new(&conn)
+                .await
+                .map_err(|e| fdo::Error::Failed(format!("Failed to create DBus proxy: {e}")))
+        })
+        .await
+}
 
 fn claim_has_epoch(state: &Option<ClaimState>, epoch: u64) -> bool {
     matches!(state, Some(claim) if claim.epoch == epoch)
@@ -290,13 +324,9 @@ impl AuthDaemon {
         let sender = header
             .sender()
             .ok_or_else(|| fdo::Error::AccessDenied("Missing DBus sender".into()))?;
-        let conn = zbus::Connection::system()
-            .await
-            .map_err(|e| fdo::Error::Failed(format!("Failed to connect to system bus: {e}")))?;
-        let dbus = fdo::DBusProxy::new(&conn)
-            .await
-            .map_err(|e| fdo::Error::Failed(format!("Failed to create DBus proxy: {e}")))?;
-        dbus.get_connection_unix_user(sender.to_owned().into())
+        dbus_proxy()
+            .await?
+            .get_connection_unix_user(sender.to_owned().into())
             .await
             .map_err(|e| fdo::Error::Failed(format!("Failed to get caller uid: {e}")))
     }
@@ -305,13 +335,9 @@ impl AuthDaemon {
         let sender = header
             .sender()
             .ok_or_else(|| fdo::Error::AccessDenied("Missing DBus sender".into()))?;
-        let conn = zbus::Connection::system()
-            .await
-            .map_err(|e| fdo::Error::Failed(format!("Failed to connect to system bus: {e}")))?;
-        let dbus = fdo::DBusProxy::new(&conn)
-            .await
-            .map_err(|e| fdo::Error::Failed(format!("Failed to create DBus proxy: {e}")))?;
-        dbus.get_connection_unix_process_id(sender.to_owned().into())
+        dbus_proxy()
+            .await?
+            .get_connection_unix_process_id(sender.to_owned().into())
             .await
             .map_err(|e| fdo::Error::Failed(format!("Failed to get caller pid: {e}")))
     }
@@ -386,7 +412,7 @@ impl AuthDaemon {
         present && closed
     }
     async fn lid_is_closed_via_upower() -> Option<bool> {
-        let conn = zbus::Connection::system().await.ok()?;
+        let conn = system_bus().await.ok()?;
         let proxy = zbus::Proxy::new(
             &conn,
             "org.freedesktop.UPower",
@@ -478,10 +504,9 @@ impl AuthDaemon {
     ) -> fdo::Result<()> {
         let caller_uid = Self::caller_uid(header).await?;
         let target_uid = Self::username_uid(username)?;
-        let active = match gaze_core::dbus::get_active_session_uid_and_class().await {
-            Ok((uid, class)) => Some((uid, class == "greeter")),
-            Err(_) => None,
-        };
+        let active = active_session_uid_and_class()
+            .await
+            .map(|(uid, class)| (uid, class == "greeter"));
         if Self::user_query_allowed(caller_uid, target_uid, active) {
             return Ok(());
         }
@@ -495,9 +520,7 @@ impl AuthDaemon {
     }
 
     async fn ensure_authorized(header: &Header<'_>, action_id: &str) -> fdo::Result<()> {
-        let conn = zbus::Connection::system()
-            .await
-            .map_err(|e| fdo::Error::Failed(format!("Failed to connect to system bus: {e}")))?;
+        let conn = system_bus().await?;
 
         let authority = zbus_polkit::policykit1::AuthorityProxy::new(&conn)
             .await
@@ -571,7 +594,10 @@ impl AuthDaemon {
     }
 
     async fn camera_runtime_uid(caller_uid: u32, target_uid: u32) -> Option<u32> {
-        let active = match gaze_core::dbus::get_active_session_uid_and_class().await {
+        let active = match match system_bus().await {
+            Ok(conn) => gaze_core::dbus::active_session_uid_and_class_on(&conn).await,
+            Err(e) => Err(anyhow::anyhow!(e)),
+        } {
             Ok((uid, class)) => Some((uid, class == "greeter", Self::has_pipewire_runtime(uid))),
             Err(_) => None,
         };
@@ -733,6 +759,28 @@ mod tests {
             sender: ":1.42".to_string(),
             epoch,
         })))
+    }
+
+    #[tokio::test]
+    async fn system_bus_is_reused_across_calls() {
+        let Ok(first) = super::system_bus().await else {
+            return;
+        };
+        let second = super::system_bus().await.expect("cached bus");
+        assert_eq!(
+            first.unique_name(),
+            second.unique_name(),
+            "every caller must share one connection"
+        );
+
+        let fresh = zbus::Connection::system()
+            .await
+            .expect("a second connection must still be possible");
+        assert_ne!(
+            first.unique_name(),
+            fresh.unique_name(),
+            "a distinct connection is what the cache exists to avoid"
+        );
     }
 
     // The vanish watcher, the owner re-check, and the claim timeout all release here.
@@ -3119,7 +3167,7 @@ impl AuthDaemon {
         let ir_threshold_arc = self.ir_threshold.clone();
 
         let config = Config::load_from(CONFIG_PATH).unwrap_or_default();
-        let active_session = gaze_core::dbus::get_active_session().await.ok();
+        let active_session = active_session().await;
         let surface = Self::classify_surface(pam_service.as_deref(), active_session.as_ref());
         let lock_elapsed_ms = self.lock_elapsed_ms(active_session.as_ref()).await;
         let delay = Duration::from_millis(config.auth.start_delay_after_lock_ms(
