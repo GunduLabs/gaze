@@ -308,6 +308,7 @@ fn device_video_node(device: &gstreamer::Device) -> Option<String> {
 }
 
 const PRIMARY_CAMERA_DISPLAY_NAME: &str = "Primary Camera";
+pub const IR_NONE_DISPLAY_NAME: &str = "None";
 const DEVICE_SETTLE_TIMEOUT_MS: u64 = 100;
 const INTERRUPTIBLE_POLL_TIMEOUT_MS: u64 = 100;
 
@@ -611,6 +612,25 @@ pub fn enumerate_ir_cameras() -> anyhow::Result<Vec<(String, String)>> {
         return Ok(Vec::new());
     }
     Ok(label_camera_entries(all))
+}
+
+/// The IR picker, always led by an explicit "None" entry so a list index means
+/// the same thing in every front end.
+pub fn ir_choices() -> Vec<(String, String)> {
+    let mut options = vec![(IR_NONE_DISPLAY_NAME.to_string(), String::new())];
+    options.extend(enumerate_ir_cameras().unwrap_or_default());
+    options
+}
+
+pub fn is_listed_source(options: &[(String, String)], configured: &str) -> bool {
+    options.iter().any(|(_, target)| target == configured)
+}
+
+pub fn source_index(options: &[(String, String)], configured: &str) -> usize {
+    options
+        .iter()
+        .position(|(_, target)| target == configured)
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1099,5 +1119,26 @@ mod tests {
         for format in ["RGB", "BGR", "RGBA", "YUY2", "NV12", "DMA_DRM", ""] {
             assert!(!is_mono_format(format), "{format} should be color/unknown");
         }
+    }
+
+    fn sample_options() -> Vec<(String, String)> {
+        vec![
+            (IR_NONE_DISPLAY_NAME.to_string(), String::new()),
+            ("Integrated IR".to_string(), "/dev/video2".to_string()),
+        ]
+    }
+
+    #[test]
+    fn source_index_resolves_configured_targets() {
+        let options = sample_options();
+        assert_eq!(source_index(&options, ""), 0);
+        assert_eq!(source_index(&options, "/dev/video2"), 1);
+    }
+
+    #[test]
+    fn source_index_falls_back_for_unlisted_targets() {
+        let options = sample_options();
+        assert!(!is_listed_source(&options, "/dev/video99"));
+        assert_eq!(source_index(&options, "/dev/video99"), 0);
     }
 }
