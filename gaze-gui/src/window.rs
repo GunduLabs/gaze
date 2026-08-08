@@ -114,32 +114,35 @@ fn set_inference_device_row_visible(
     device_row.set_visible(provider == "openvino");
 }
 
-struct ConfigRows<'a> {
-    inference_execution_provider: &'a libadwaita::ComboRow,
-    inference_device: &'a libadwaita::ComboRow,
-    level: &'a libadwaita::ComboRow,
-    detector: &'a libadwaita::ComboRow,
-    recognizer: &'a libadwaita::ComboRow,
-    rgb_threshold: &'a libadwaita::SpinRow,
-    ir_threshold: &'a libadwaita::SpinRow,
-    camera: &'a libadwaita::ComboRow,
-    ir: &'a libadwaita::ComboRow,
-    emitter: &'a gtk4::Switch,
-    dark_luma_threshold: &'a libadwaita::SpinRow,
-    templates: &'a libadwaita::SpinRow,
-    min_face_size_ratio: &'a libadwaita::SpinRow,
-    liveness_enabled: &'a gtk4::Switch,
-    liveness_threshold: &'a libadwaita::SpinRow,
-    liveness_max_frames: &'a libadwaita::SpinRow,
-    require_confirm_lock_screen: &'a gtk4::Switch,
-    require_confirm_elevation: &'a gtk4::Switch,
-    hybrid: &'a libadwaita::ComboRow,
-    abort_ssh: &'a gtk4::Switch,
-    abort_lid: &'a gtk4::Switch,
-    resume_grace: &'a libadwaita::SpinRow,
-    start_delay: &'a libadwaita::SpinRow,
-    start_delay_scope: &'a libadwaita::ComboRow,
-    encrypt_templates: &'a gtk4::Switch,
+/// Holds the rows the config dialog populates. The widgets are reference
+/// counted, so this owns handles rather than borrows and can be shared with the
+/// async reload without naming all 25 rows a second time.
+struct ConfigRows {
+    inference_execution_provider: libadwaita::ComboRow,
+    inference_device: libadwaita::ComboRow,
+    level: libadwaita::ComboRow,
+    detector: libadwaita::ComboRow,
+    recognizer: libadwaita::ComboRow,
+    rgb_threshold: libadwaita::SpinRow,
+    ir_threshold: libadwaita::SpinRow,
+    camera: libadwaita::ComboRow,
+    ir: libadwaita::ComboRow,
+    emitter: gtk4::Switch,
+    dark_luma_threshold: libadwaita::SpinRow,
+    templates: libadwaita::SpinRow,
+    min_face_size_ratio: libadwaita::SpinRow,
+    liveness_enabled: gtk4::Switch,
+    liveness_threshold: libadwaita::SpinRow,
+    liveness_max_frames: libadwaita::SpinRow,
+    require_confirm_lock_screen: gtk4::Switch,
+    require_confirm_elevation: gtk4::Switch,
+    hybrid: libadwaita::ComboRow,
+    abort_ssh: gtk4::Switch,
+    abort_lid: gtk4::Switch,
+    resume_grace: libadwaita::SpinRow,
+    start_delay: libadwaita::SpinRow,
+    start_delay_scope: libadwaita::ComboRow,
+    encrypt_templates: gtk4::Switch,
 }
 
 struct CameraChoices<'a> {
@@ -161,7 +164,7 @@ fn set_camera_row_subtitle(
     }
 }
 
-fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoices<'_>) {
+fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<'_>) {
     rows.inference_execution_provider
         .set_selected(cfg.inference.execution_provider_index());
     rows.inference_device
@@ -175,16 +178,16 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
             cfg.inference.execution_provider, cfg.inference.device
         ));
     }
-    set_inference_device_row_visible(rows.inference_execution_provider, rows.inference_device);
+    set_inference_device_row_visible(&rows.inference_execution_provider, &rows.inference_device);
 
     rows.level.set_selected(cfg.security.level_index());
     set_custom_config_rows_visible(
-        rows.level,
-        rows.detector,
-        rows.recognizer,
-        rows.rgb_threshold,
-        rows.ir_threshold,
-        rows.hybrid,
+        &rows.level,
+        &rows.detector,
+        &rows.recognizer,
+        &rows.rgb_threshold,
+        &rows.ir_threshold,
+        &rows.hybrid,
     );
 
     let seed = cfg.security.custom_form();
@@ -197,10 +200,10 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
 
     let cam_idx = source_index(choices.cameras, &cfg.cameras.rgb);
     rows.camera.set_selected(cam_idx as u32);
-    set_camera_row_subtitle(rows.camera, choices.cameras, &cfg.cameras.rgb);
+    set_camera_row_subtitle(&rows.camera, choices.cameras, &cfg.cameras.rgb);
     let ir_idx = source_index(choices.ir_options, &cfg.cameras.ir);
     rows.ir.set_selected(ir_idx as u32);
-    set_camera_row_subtitle(rows.ir, choices.ir_options, &cfg.cameras.ir);
+    set_camera_row_subtitle(&rows.ir, choices.ir_options, &cfg.cameras.ir);
     rows.emitter.set_active(cfg.cameras.emitter_enabled);
     rows.dark_luma_threshold
         .set_value(cfg.cameras.dark_luma_threshold as f64);
@@ -228,14 +231,14 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
         .set_selected(AuthConfig::start_delay_scope_index_for_value(
             cfg.auth.start_delay_scope(),
         ));
-    set_start_delay_scope_row_visible(rows.start_delay, rows.start_delay_scope);
+    set_start_delay_scope_row_visible(&rows.start_delay, &rows.start_delay_scope);
     rows.encrypt_templates
         .set_active(cfg.storage.encrypt_templates);
 
     set_liveness_config_rows_visible(
-        rows.liveness_enabled,
-        rows.liveness_threshold,
-        rows.liveness_max_frames,
+        &rows.liveness_enabled,
+        &rows.liveness_threshold,
+        &rows.liveness_max_frames,
     );
 }
 
@@ -877,37 +880,39 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         move |_| apply_changes()
     ));
 
+    let rows = Rc::new(ConfigRows {
+        inference_execution_provider: inference_execution_provider_row.clone(),
+        inference_device: inference_device_row.clone(),
+        level: level_row.clone(),
+        detector: detector_row.clone(),
+        recognizer: recognizer_row.clone(),
+        rgb_threshold: rgb_threshold_row.clone(),
+        ir_threshold: ir_threshold_row.clone(),
+        camera: camera_row.clone(),
+        ir: ir_row.clone(),
+        emitter: emitter_switch.clone(),
+        dark_luma_threshold: dark_luma_threshold_row.clone(),
+        templates: templates_row.clone(),
+        min_face_size_ratio: min_face_size_ratio_row.clone(),
+        liveness_enabled: liveness_enabled_switch.clone(),
+        liveness_threshold: liveness_threshold_row.clone(),
+        liveness_max_frames: liveness_max_frames_row.clone(),
+        require_confirm_lock_screen: require_confirm_lock_screen_switch.clone(),
+        require_confirm_elevation: require_confirm_elevation_switch.clone(),
+        hybrid: hybrid_row.clone(),
+        abort_ssh: abort_ssh_switch.clone(),
+        abort_lid: abort_lid_switch.clone(),
+        resume_grace: resume_grace_row.clone(),
+        start_delay: start_delay_row.clone(),
+        start_delay_scope: start_delay_scope_row.clone(),
+        encrypt_templates: encrypt_templates_switch.clone(),
+    });
+
     {
         let cfg = config.borrow();
         populate_config_rows(
             &cfg,
-            ConfigRows {
-                inference_execution_provider: &inference_execution_provider_row,
-                inference_device: &inference_device_row,
-                level: &level_row,
-                detector: &detector_row,
-                recognizer: &recognizer_row,
-                rgb_threshold: &rgb_threshold_row,
-                ir_threshold: &ir_threshold_row,
-                camera: &camera_row,
-                ir: &ir_row,
-                emitter: &emitter_switch,
-                dark_luma_threshold: &dark_luma_threshold_row,
-                templates: &templates_row,
-                min_face_size_ratio: &min_face_size_ratio_row,
-                liveness_enabled: &liveness_enabled_switch,
-                liveness_threshold: &liveness_threshold_row,
-                liveness_max_frames: &liveness_max_frames_row,
-                require_confirm_lock_screen: &require_confirm_lock_screen_switch,
-                require_confirm_elevation: &require_confirm_elevation_switch,
-                hybrid: &hybrid_row,
-                abort_ssh: &abort_ssh_switch,
-                abort_lid: &abort_lid_switch,
-                resume_grace: &resume_grace_row,
-                start_delay: &start_delay_row,
-                start_delay_scope: &start_delay_scope_row,
-                encrypt_templates: &encrypt_templates_switch,
-            },
+            &rows,
             CameraChoices {
                 cameras: &cameras,
                 ir_options: &ir_options,
@@ -1027,56 +1032,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     ));
 
     glib::MainContext::default().spawn_local(glib::clone!(
-        #[weak]
-        inference_execution_provider_row,
-        #[weak]
-        inference_device_row,
-        #[weak]
-        level_row,
-        #[weak]
-        detector_row,
-        #[weak]
-        recognizer_row,
-        #[weak]
-        rgb_threshold_row,
-        #[weak]
-        ir_threshold_row,
-        #[weak]
-        camera_row,
-        #[weak]
-        ir_row,
-        #[weak]
-        emitter_switch,
-        #[weak]
-        dark_luma_threshold_row,
-        #[weak]
-        templates_row,
-        #[weak]
-        min_face_size_ratio_row,
-        #[weak]
-        liveness_enabled_switch,
-        #[weak]
-        liveness_threshold_row,
-        #[weak]
-        liveness_max_frames_row,
-        #[weak]
-        require_confirm_lock_screen_switch,
-        #[weak]
-        require_confirm_elevation_switch,
-        #[weak]
-        hybrid_row,
-        #[weak]
-        abort_ssh_switch,
-        #[weak]
-        abort_lid_switch,
-        #[weak]
-        resume_grace_row,
-        #[weak]
-        start_delay_row,
-        #[weak]
-        start_delay_scope_row,
-        #[weak]
-        encrypt_templates_switch,
+        #[strong]
+        rows,
         #[strong]
         cameras,
         #[strong]
@@ -1096,33 +1053,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 is_loading.set(true);
                 populate_config_rows(
                     &cfg,
-                    ConfigRows {
-                        inference_execution_provider: &inference_execution_provider_row,
-                        inference_device: &inference_device_row,
-                        level: &level_row,
-                        detector: &detector_row,
-                        recognizer: &recognizer_row,
-                        rgb_threshold: &rgb_threshold_row,
-                        ir_threshold: &ir_threshold_row,
-                        camera: &camera_row,
-                        ir: &ir_row,
-                        emitter: &emitter_switch,
-                        dark_luma_threshold: &dark_luma_threshold_row,
-                        templates: &templates_row,
-                        min_face_size_ratio: &min_face_size_ratio_row,
-                        liveness_enabled: &liveness_enabled_switch,
-                        liveness_threshold: &liveness_threshold_row,
-                        liveness_max_frames: &liveness_max_frames_row,
-                        require_confirm_lock_screen: &require_confirm_lock_screen_switch,
-                        require_confirm_elevation: &require_confirm_elevation_switch,
-                        hybrid: &hybrid_row,
-                        abort_ssh: &abort_ssh_switch,
-                        abort_lid: &abort_lid_switch,
-                        resume_grace: &resume_grace_row,
-                        start_delay: &start_delay_row,
-                        start_delay_scope: &start_delay_scope_row,
-                        encrypt_templates: &encrypt_templates_switch,
-                    },
+                    &rows,
                     CameraChoices {
                         cameras: &cameras,
                         ir_options: &ir_options,
