@@ -6,6 +6,7 @@ use anyhow::Context;
 #[cfg(feature = "openvino")]
 use ort::ep;
 use ort::session::{Session, builder::GraphOptimizationLevel};
+use std::ffi::CStr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InferenceRuntime {
@@ -37,6 +38,30 @@ impl InferenceRuntime {
             fallback_reason: None,
         }
     }
+}
+
+pub fn runtime_version() -> anyhow::Result<String> {
+    let base = unsafe { ort::sys::OrtGetApiBase() };
+    if base.is_null() {
+        anyhow::bail!("the ONNX Runtime library returned a null API base pointer");
+    }
+    let version = unsafe { CStr::from_ptr(((*base).GetVersionString)()) };
+    Ok(version.to_string_lossy().into_owned())
+}
+
+pub fn ensure_supported_runtime() -> anyhow::Result<()> {
+    let version = runtime_version()?;
+    let base = unsafe { ort::sys::OrtGetApiBase() };
+    let api = unsafe { ((*base).GetApi)(ort::sys::ORT_API_VERSION) };
+    if api.is_null() {
+        anyhow::bail!(
+            "the ONNX Runtime library loaded at startup is version {version}, \
+             which is older than the 1.{}.x this build of Gaze requires; \
+             install a newer ONNX Runtime, or rebuild Gaze against the one you have",
+            ort::MINOR_VERSION
+        );
+    }
+    Ok(())
 }
 
 fn build_cpu_session(model_path: &str) -> anyhow::Result<Session> {
@@ -167,6 +192,24 @@ mod tests {
         };
         let reason = unusable_reason(&config).expect("a cpu-only build cannot honour openvino");
         assert!(reason.contains("does not include OpenVINO support"));
+    }
+
+    #[test]
+    fn the_linked_onnx_runtime_supports_the_api_version_gaze_asks_for() {
+        let version = runtime_version().expect("the linked ONNX Runtime reports a version");
+        ensure_supported_runtime().unwrap_or_else(|error| {
+            panic!(
+                "ort asks for API {}, linked runtime {version}: {error}",
+                ort::MINOR_VERSION
+            )
+        });
+    }
+
+    #[test]
+    fn an_unsupported_api_version_is_detectable_without_aborting() {
+        let base = unsafe { ort::sys::OrtGetApiBase() };
+        assert!(!base.is_null());
+        assert!(unsafe { ((*base).GetApi)(u32::MAX) }.is_null());
     }
 
     #[test]

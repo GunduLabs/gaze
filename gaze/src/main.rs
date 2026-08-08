@@ -60,6 +60,11 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
+    gaze_core::inference::ensure_supported_runtime()?;
+    if let Ok(version) = gaze_core::inference::runtime_version() {
+        info!(version, "Loaded ONNX Runtime");
+    }
+
     let _initialized = ort::init()
         .with_name("gazed")
         .with_logger(std::sync::Arc::new(

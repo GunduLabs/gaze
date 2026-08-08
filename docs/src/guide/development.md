@@ -112,6 +112,18 @@ just build-rust-openvino
 The `openvino` Cargo feature is explicit. The build fails when that feature is
 enabled without a matching ONNX Runtime library.
 
+::: warning Keep the `api-22` feature on the `ort` dependency
+`gaze` and `gaze-core` depend on `ort` with `default-features = false` and
+`api-22`, which pins the ONNX Runtime C API version the binaries ask for. `ort`
+defaults to the newest API its release targets, and a runtime older than that
+makes ONNX Runtime hand back a null API pointer, which `ort` turns into a panic
+during process teardown and a core dump. Anything that links a system runtime
+(Nix, Flatpak, RPM source builds, `ORT_STRATEGY=system` in CI) uses ONNX Runtime
+1.22, so an `ort` upgrade must keep the `api-22` feature rather than inherit the
+new default. `gazed` also checks the loaded runtime before touching `ort`, and
+`gaze-core`'s `inference::` tests fail against a runtime that is too old.
+:::
+
 The OpenVINO-enabled binary supports Intel CPU, GPU, and NPU devices. The
 `device` value in `/etc/gaze/config.toml` selects the device at run time; GPU
 and NPU do not require separate builds. An installation with OpenVINO support
