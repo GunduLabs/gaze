@@ -260,10 +260,21 @@ pub async fn get_active_session_uid_and_class() -> anyhow::Result<(u32, String)>
     Ok((session.uid, session.class))
 }
 
+pub async fn active_session_uid_and_class_on(
+    connection: &zbus::Connection,
+) -> anyhow::Result<(u32, String)> {
+    let session = active_session_on(connection).await?;
+    Ok((session.uid, session.class))
+}
+
 pub async fn get_active_session() -> anyhow::Result<ActiveSession> {
     let connection = zbus::Connection::system().await?;
+    active_session_on(&connection).await
+}
+
+pub async fn active_session_on(connection: &zbus::Connection) -> anyhow::Result<ActiveSession> {
     let proxy = zbus::Proxy::new(
-        &connection,
+        connection,
         "org.freedesktop.login1",
         "/org/freedesktop/login1/seat/seat0",
         "org.freedesktop.login1.Seat",
@@ -274,7 +285,7 @@ pub async fn get_active_session() -> anyhow::Result<ActiveSession> {
     let path = active_session.1.to_string();
 
     let session_proxy = zbus::Proxy::new(
-        &connection,
+        connection,
         "org.freedesktop.login1",
         active_session.1,
         "org.freedesktop.login1.Session",
