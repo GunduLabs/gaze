@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::capture_dialog;
+use gaze_core::camera::{is_listed_source, source_index};
 use gaze_core::config::{
-    AuthConfig, Config, DEFAULT_RGB_CAMERA, INFERENCE_DEVICE_OPTIONS,
+    AuthConfig, Config, DEFAULT_RGB_CAMERA, HYBRID_POLICY_LABELS, INFERENCE_DEVICE_OPTIONS,
     INFERENCE_EXECUTION_PROVIDER_OPTIONS, InferenceConfig, MAX_ENROLLMENT_FACE_SIZE_RATIO,
-    MIN_ENROLLMENT_FACE_SIZE_RATIO, SecurityLevel,
+    MIN_ENROLLMENT_FACE_SIZE_RATIO, MODEL_QUALITY_LABELS, SECURITY_LEVEL_LABELS,
+    START_DELAY_SCOPE_LABELS, SecurityLevel,
 };
 use gaze_core::dbus::{
     GazeProxy, apply_config_to_daemon, connect_gaze, dbus_error_message, dbus_is_file_not_found,
@@ -145,10 +147,6 @@ struct CameraChoices<'a> {
     ir_options: &'a [(String, String)],
 }
 
-fn is_listed_source(options: &[(String, String)], configured: &str) -> bool {
-    options.iter().any(|(_, target)| target == configured)
-}
-
 fn set_camera_row_subtitle(
     row: &libadwaita::ComboRow,
     options: &[(String, String)],
@@ -189,46 +187,18 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
         rows.hybrid,
     );
 
-    let (detector_str, recognizer_str) = if cfg.security.level == "custom" {
-        (
-            cfg.security.detector.clone(),
-            cfg.security.recognizer.clone(),
-        )
-    } else {
-        (
-            cfg.security.effective_detector_quality().to_string(),
-            cfg.security.effective_recognizer_quality().to_string(),
-        )
-    };
+    let seed = cfg.security.custom_form();
     rows.detector
-        .set_selected(SecurityLevel::model_quality_index(&detector_str));
+        .set_selected(SecurityLevel::model_quality_index(&seed.detector));
     rows.recognizer
-        .set_selected(SecurityLevel::model_quality_index(&recognizer_str));
-    rows.rgb_threshold
-        .set_value(if cfg.security.level == "custom" {
-            cfg.security.rgb_threshold
-        } else {
-            cfg.security.rgb_threshold() as f64
-        });
-    rows.ir_threshold
-        .set_value(if cfg.security.level == "custom" {
-            cfg.security.ir_threshold
-        } else {
-            cfg.security.ir_threshold() as f64
-        });
+        .set_selected(SecurityLevel::model_quality_index(&seed.recognizer));
+    rows.rgb_threshold.set_value(seed.rgb_threshold);
+    rows.ir_threshold.set_value(seed.ir_threshold);
 
-    let cam_idx = choices
-        .cameras
-        .iter()
-        .position(|(_, target)| target == &cfg.cameras.rgb)
-        .unwrap_or(0);
+    let cam_idx = source_index(choices.cameras, &cfg.cameras.rgb);
     rows.camera.set_selected(cam_idx as u32);
     set_camera_row_subtitle(rows.camera, choices.cameras, &cfg.cameras.rgb);
-    let ir_idx = choices
-        .ir_options
-        .iter()
-        .position(|(_, target)| target == &cfg.cameras.ir)
-        .unwrap_or(0);
+    let ir_idx = source_index(choices.ir_options, &cfg.cameras.ir);
     rows.ir.set_selected(ir_idx as u32);
     set_camera_row_subtitle(rows.ir, choices.ir_options, &cfg.cameras.ir);
     rows.emitter.set_active(cfg.cameras.emitter_enabled);
@@ -246,14 +216,9 @@ fn populate_config_rows(cfg: &Config, rows: ConfigRows<'_>, choices: CameraChoic
         .set_active(cfg.auth.require_confirmation_lock_screen);
     rows.require_confirm_elevation
         .set_active(cfg.auth.require_confirmation_elevation);
-    let hybrid_policy_str = if cfg.security.level == "custom" {
-        cfg.security.hybrid_policy.clone()
-    } else {
-        cfg.security.hybrid_policy().to_string()
-    };
     rows.hybrid
         .set_selected(SecurityLevel::hybrid_policy_index_for_value(
-            &hybrid_policy_str,
+            &seed.hybrid_policy,
         ));
     rows.abort_ssh.set_active(cfg.auth.abort_if_ssh);
     rows.abort_lid.set_active(cfg.auth.abort_if_lid_closed);
@@ -313,19 +278,19 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     let level_row = libadwaita::ComboRow::new();
     level_row.set_title("Security Level");
     level_row.set_subtitle("Adjust the balance between speed and security");
-    let level_model = gtk4::StringList::new(&["Low", "Medium", "High", "Maximum", "Custom"]);
+    let level_model = gtk4::StringList::new(&SECURITY_LEVEL_LABELS);
     level_row.set_model(Some(&level_model));
     security_group.add(&level_row);
 
     let detector_row = libadwaita::ComboRow::new();
     detector_row.set_title("Detector Level");
-    let detector_model = gtk4::StringList::new(&["Standard", "Accurate"]);
+    let detector_model = gtk4::StringList::new(&MODEL_QUALITY_LABELS);
     detector_row.set_model(Some(&detector_model));
     security_group.add(&detector_row);
 
     let recognizer_row = libadwaita::ComboRow::new();
     recognizer_row.set_title("Recognizer Level");
-    let recognizer_model = gtk4::StringList::new(&["Standard", "Accurate"]);
+    let recognizer_model = gtk4::StringList::new(&MODEL_QUALITY_LABELS);
     recognizer_row.set_model(Some(&recognizer_model));
     security_group.add(&recognizer_row);
 
@@ -383,9 +348,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     camera_row.set_model(Some(&cam_model));
     hardware_group.add(&camera_row);
 
-    let ir_cameras = gaze_core::camera::enumerate_ir_cameras().unwrap_or_default();
-    let mut ir_options = vec![("None".to_string(), String::new())];
-    ir_options.extend(ir_cameras);
+    let ir_options = gaze_core::camera::ir_choices();
     let ir_names = ir_options
         .iter()
         .map(|(n, _)| n.clone())
@@ -512,19 +475,17 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     start_delay_row.set_subtitle("Delay before face authentication starts");
     auth_group.add(&start_delay_row);
 
-    let start_delay_scope_names = ["Every face auth (including sudo)", "Screen lockers only"];
     let start_delay_scope_row = libadwaita::ComboRow::new();
     start_delay_scope_row.set_title("Start Delay Applies To");
     start_delay_scope_row.set_subtitle("Which prompts wait for the start delay");
-    let start_delay_scope_model = gtk4::StringList::new(&start_delay_scope_names);
+    let start_delay_scope_model = gtk4::StringList::new(&START_DELAY_SCOPE_LABELS);
     start_delay_scope_row.set_model(Some(&start_delay_scope_model));
     auth_group.add(&start_delay_scope_row);
 
-    let hybrid_names = ["Default", "Or", "Fallback on Dark", "And"];
     let hybrid_row = libadwaita::ComboRow::new();
     hybrid_row.set_title("Hybrid combining policy");
     hybrid_row.set_subtitle("Combining policy when both RGB and IR cameras are active");
-    let hybrid_model = gtk4::StringList::new(&hybrid_names);
+    let hybrid_model = gtk4::StringList::new(&HYBRID_POLICY_LABELS);
     hybrid_row.set_model(Some(&hybrid_model));
     security_group.add(&hybrid_row);
 
