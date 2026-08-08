@@ -38,6 +38,22 @@ fn default_level() -> String {
     "medium".to_string()
 }
 
+/// Which part of `[security]` a validation error came from, so a caller can
+/// offer the fix that matches instead of one message for the whole table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SecurityField {
+    Level,
+    ModelQuality,
+    Threshold,
+    HybridPolicy,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SecurityValidationError {
+    pub field: SecurityField,
+    pub message: String,
+}
+
 #[derive(Serialize, Clone, Debug, Value, OwnedValue, Type)]
 pub struct SecurityLevel {
     pub level: String,
@@ -244,54 +260,69 @@ impl SecurityLevel {
         }
     }
 
-    pub fn validate(&self) -> anyhow::Result<()> {
+    /// Every problem with the current values. `validate` reports only the first,
+    /// so a report that wants to list them all must use this instead.
+    pub fn validation_errors(&self) -> Vec<SecurityValidationError> {
+        let mut errors = Vec::new();
         if !SECURITY_LEVEL_OPTIONS.contains(&self.level.as_str()) {
-            anyhow::bail!(
-                "invalid security level {:?}: expected one of {:?}",
-                self.level,
-                SECURITY_LEVEL_OPTIONS
-            );
+            errors.push(SecurityValidationError {
+                field: SecurityField::Level,
+                message: format!(
+                    "invalid security level {:?}: expected one of {:?}",
+                    self.level, SECURITY_LEVEL_OPTIONS
+                ),
+            });
+            return errors;
         }
-        if self.level == "custom" {
-            match self.detector.as_str() {
-                "standard" | "accurate" => {}
-                other => anyhow::bail!(
-                    "invalid detector level {other:?}: expected \"standard\" or \"accurate\""
-                ),
+        if self.level != "custom" {
+            return errors;
+        }
+
+        for (name, quality) in [
+            ("detector", self.detector.as_str()),
+            ("recognizer", self.recognizer.as_str()),
+        ] {
+            if !MODEL_QUALITY_OPTIONS.contains(&quality) {
+                errors.push(SecurityValidationError {
+                    field: SecurityField::ModelQuality,
+                    message: format!(
+                        "invalid {name} level {quality:?}: expected \"standard\" or \"accurate\""
+                    ),
+                });
             }
-            match self.recognizer.as_str() {
-                "standard" | "accurate" => {}
-                other => anyhow::bail!(
-                    "invalid recognizer level {other:?}: expected \"standard\" or \"accurate\""
-                ),
+        }
+        for (name, threshold) in [
+            ("rgb_threshold", self.rgb_threshold),
+            ("ir_threshold", self.ir_threshold),
+        ] {
+            if !Self::threshold_in_range(threshold) {
+                errors.push(SecurityValidationError {
+                    field: SecurityField::Threshold,
+                    message: format!(
+                        "security.{name} must be between {MIN_SECURITY_THRESHOLD} and {MAX_SECURITY_THRESHOLD}, got {threshold}"
+                    ),
+                });
             }
-            if !Self::threshold_in_range(self.rgb_threshold) {
-                anyhow::bail!(
-                    "security.rgb_threshold must be between {} and {}, got {}",
-                    MIN_SECURITY_THRESHOLD,
-                    MAX_SECURITY_THRESHOLD,
-                    self.rgb_threshold
-                );
-            }
-            if !Self::threshold_in_range(self.ir_threshold) {
-                anyhow::bail!(
-                    "security.ir_threshold must be between {} and {}, got {}",
-                    MIN_SECURITY_THRESHOLD,
-                    MAX_SECURITY_THRESHOLD,
-                    self.ir_threshold
-                );
-            }
-            if !self.hybrid_policy.is_empty()
-                && !HYBRID_POLICY_OPTIONS.contains(&self.hybrid_policy.as_str())
-            {
-                anyhow::bail!(
+        }
+        if !self.hybrid_policy.is_empty()
+            && !HYBRID_POLICY_OPTIONS.contains(&self.hybrid_policy.as_str())
+        {
+            errors.push(SecurityValidationError {
+                field: SecurityField::HybridPolicy,
+                message: format!(
                     "invalid security.hybrid_policy {:?}: expected one of {:?}",
-                    self.hybrid_policy,
-                    HYBRID_POLICY_OPTIONS
-                );
-            }
+                    self.hybrid_policy, HYBRID_POLICY_OPTIONS
+                ),
+            });
         }
-        Ok(())
+        errors
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        match self.validation_errors().into_iter().next() {
+            Some(err) => Err(anyhow::anyhow!(err.message)),
+            None => Ok(()),
+        }
     }
 
     fn threshold_in_range(threshold: f64) -> bool {
@@ -1739,5 +1770,62 @@ level = "low""#,
         config.security.level = "custom".to_string();
         config.security.hybrid_policy = "custom_policy".to_string();
         assert_eq!(config.security.hybrid_policy(), "custom_policy");
+    }
+
+    #[test]
+    fn validation_errors_accumulate_across_fields() {
+        let level = SecurityLevel::custom_with_thresholds(
+            "sharp".to_string(),
+            "standard".to_string(),
+            1.5,
+            -0.1,
+            "sometimes".to_string(),
+        );
+
+        let fields: Vec<SecurityField> = level
+            .validation_errors()
+            .iter()
+            .map(|err| err.field)
+            .collect();
+        assert_eq!(
+            fields,
+            vec![
+                SecurityField::ModelQuality,
+                SecurityField::Threshold,
+                SecurityField::Threshold,
+                SecurityField::HybridPolicy,
+            ]
+        );
+    }
+
+    #[test]
+    fn validate_reports_only_the_first_error() {
+        let level = SecurityLevel::custom_with_thresholds(
+            "standard".to_string(),
+            "standard".to_string(),
+            1.5,
+            -0.1,
+            String::new(),
+        );
+
+        let message = level.validate().unwrap_err().to_string();
+        assert!(message.contains("security.rgb_threshold"), "{message}");
+        assert_eq!(level.validation_errors().len(), 2);
+    }
+
+    #[test]
+    fn an_unknown_level_stops_before_the_custom_checks() {
+        let mut level = SecurityLevel::custom_with_thresholds(
+            "sharp".to_string(),
+            "sharp".to_string(),
+            1.5,
+            -0.1,
+            "sometimes".to_string(),
+        );
+        level.level = "paranoid".to_string();
+
+        let errors = level.validation_errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].field, SecurityField::Level);
     }
 }

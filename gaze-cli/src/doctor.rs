@@ -3,8 +3,8 @@
 
 use console::{Term, style};
 use gaze_core::config::{
-    CONFIG_PATH, Config, MAX_LIVENESS_THRESHOLD, MAX_SECURITY_THRESHOLD, MIN_LIVENESS_MAX_FRAMES,
-    MIN_LIVENESS_THRESHOLD, MIN_SECURITY_THRESHOLD,
+    CONFIG_PATH, Config, MAX_LIVENESS_THRESHOLD, MIN_LIVENESS_MAX_FRAMES, MIN_LIVENESS_THRESHOLD,
+    SecurityField,
 };
 use gaze_core::dbus::{
     GazeProxy, dbus_error_message, dbus_is_file_not_found, dbus_is_not_activatable,
@@ -387,11 +387,17 @@ fn config_findings(config: &Config) -> Vec<Check> {
         });
     };
 
-    if let Err(err) = config.security.validate() {
-        error(
-            err.to_string(),
-            "Choose a supported security level with `gaze config`.",
-        );
+    for err in config.security.validation_errors() {
+        let fix = match err.field {
+            SecurityField::Level | SecurityField::ModelQuality => {
+                "Choose a supported security level with `gaze config`."
+            }
+            SecurityField::Threshold => {
+                "Set valid custom RGB and IR thresholds in /etc/gaze/config.toml."
+            }
+            SecurityField::HybridPolicy => "Use default, or, fallback_on_dark, or and.",
+        };
+        error(err.message, fix);
     }
     if let Err(err) = config.enrollment.validate() {
         error(
@@ -406,36 +412,6 @@ fn config_findings(config: &Config) -> Vec<Check> {
             "Use cpu/cpu, or install a Gaze build compiled with the openvino Cargo feature."
         };
         error(err.to_string(), fix);
-    }
-
-    if config.security.level == "custom" {
-        for (name, threshold) in [
-            ("rgb_threshold", config.security.rgb_threshold),
-            ("ir_threshold", config.security.ir_threshold),
-        ] {
-            if !threshold.is_finite()
-                || !(MIN_SECURITY_THRESHOLD..=MAX_SECURITY_THRESHOLD).contains(&threshold)
-            {
-                error(
-                    format!(
-                        "security.{name} must be between {MIN_SECURITY_THRESHOLD} and {MAX_SECURITY_THRESHOLD}, got {threshold}"
-                    ),
-                    "Set valid custom RGB and IR thresholds in /etc/gaze/config.toml.",
-                );
-            }
-        }
-        if !matches!(
-            config.security.hybrid_policy.as_str(),
-            "" | "default" | "or" | "fallback_on_dark" | "and"
-        ) {
-            error(
-                format!(
-                    "unsupported security.hybrid_policy {:?}",
-                    config.security.hybrid_policy
-                ),
-                "Use default, or, fallback_on_dark, or and.",
-            );
-        }
     }
 
     let rgb = config.cameras.rgb.trim();
@@ -1661,6 +1637,48 @@ mod tests {
                 .iter()
                 .any(|message| message.contains("max_frames"))
         );
+    }
+
+    #[test]
+    fn every_invalid_security_field_is_reported_exactly_once() {
+        let mut config = Config::default();
+        config.security.level = "custom".to_string();
+        config.security.detector = "standard".to_string();
+        config.security.recognizer = "standard".to_string();
+        config.security.rgb_threshold = 1.5;
+        config.security.ir_threshold = -0.1;
+        config.security.hybrid_policy = "sometimes".to_string();
+
+        let findings = config_findings(&config);
+        let count = |needle: &str| {
+            findings
+                .iter()
+                .filter(|check| check.message.contains(needle))
+                .count()
+        };
+        assert_eq!(count("security.rgb_threshold"), 1);
+        assert_eq!(count("security.ir_threshold"), 1);
+        assert_eq!(count("security.hybrid_policy"), 1);
+    }
+
+    #[test]
+    fn invalid_security_fields_get_their_own_fix() {
+        let mut config = Config::default();
+        config.security.level = "custom".to_string();
+        config.security.detector = "standard".to_string();
+        config.security.recognizer = "standard".to_string();
+        config.security.rgb_threshold = 1.5;
+        config.security.hybrid_policy = "sometimes".to_string();
+
+        let fix_for = |needle: &str| {
+            config_findings(&config)
+                .into_iter()
+                .find(|check| check.message.contains(needle))
+                .and_then(|check| check.fix)
+                .unwrap_or_default()
+        };
+        assert!(fix_for("security.rgb_threshold").contains("custom RGB and IR thresholds"));
+        assert!(fix_for("security.hybrid_policy").contains("fallback_on_dark"));
     }
 
     #[test]
