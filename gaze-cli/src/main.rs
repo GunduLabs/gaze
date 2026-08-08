@@ -16,7 +16,7 @@ use gaze_core::config::{
     INFERENCE_DEVICE_OPTIONS, INFERENCE_EXECUTION_PROVIDER_OPTIONS, MAX_ENROLLMENT_FACE_SIZE_RATIO,
     MAX_LIVENESS_THRESHOLD, MAX_SECURITY_THRESHOLD, MIN_ENROLLMENT_FACE_SIZE_RATIO,
     MIN_LIVENESS_THRESHOLD, MIN_SECURITY_THRESHOLD, MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS,
-    SecurityLevel,
+    START_DELAY_SCOPE_LABELS, SecurityLevel,
 };
 use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon, connect_gaze,
@@ -262,7 +262,7 @@ enum Commands {
 
 fn ensure_configured_source_listed(options: &mut Vec<(String, String)>, configured: &str) {
     let configured = configured.trim();
-    if configured.is_empty() || options.iter().any(|(_, target)| target == configured) {
+    if configured.is_empty() || gaze_core::camera::is_listed_source(options, configured) {
         return;
     }
     options.push((format!("{configured} (configured)"), configured.to_string()));
@@ -318,47 +318,29 @@ async fn run_config_wizard(
     if let Some(level) = SecurityLevel::preset_from_index(selected) {
         config.security = level;
     } else {
-        let (old_detector, old_recognizer, old_rgb_threshold, old_ir_threshold, old_hybrid_policy) =
-            if config.security.level == "custom" {
-                (
-                    config.security.detector.clone(),
-                    config.security.recognizer.clone(),
-                    config.security.rgb_threshold,
-                    config.security.ir_threshold,
-                    config.security.hybrid_policy.clone(),
-                )
-            } else {
-                (
-                    config.security.effective_detector_quality().to_string(),
-                    config.security.effective_recognizer_quality().to_string(),
-                    // Presets carry an f32 threshold; round so the prompt shows 0.4, not 0.4000000059604645.
-                    (config.security.rgb_threshold() as f64 * 100.0).round() / 100.0,
-                    (config.security.ir_threshold() as f64 * 100.0).round() / 100.0,
-                    config.security.hybrid_policy().to_string(),
-                )
-            };
+        let seed = config.security.custom_form();
 
         let selected_det_idx = Select::with_theme(&theme)
             .with_prompt("Custom detector level")
             .items(MODEL_QUALITY_OPTIONS)
-            .default(SecurityLevel::model_quality_index(&old_detector) as usize)
+            .default(SecurityLevel::model_quality_index(&seed.detector) as usize)
             .interact()?;
         let detector = SecurityLevel::model_quality_from_index(selected_det_idx).to_string();
 
         let selected_rec_idx = Select::with_theme(&theme)
             .with_prompt("Custom recognizer level")
             .items(MODEL_QUALITY_OPTIONS)
-            .default(SecurityLevel::model_quality_index(&old_recognizer) as usize)
+            .default(SecurityLevel::model_quality_index(&seed.recognizer) as usize)
             .interact()?;
         let recognizer = SecurityLevel::model_quality_from_index(selected_rec_idx).to_string();
 
-        let rgb_threshold = prompt_security_threshold(&theme, "RGB", old_rgb_threshold)?;
-        let ir_threshold = prompt_security_threshold(&theme, "IR", old_ir_threshold)?;
+        let rgb_threshold = prompt_security_threshold(&theme, "RGB", seed.rgb_threshold)?;
+        let ir_threshold = prompt_security_threshold(&theme, "IR", seed.ir_threshold)?;
 
         let selected_hybrid_idx = Select::with_theme(&theme)
             .with_prompt("Custom hybrid combining policy")
             .items(HYBRID_POLICY_OPTIONS)
-            .default(SecurityLevel::hybrid_policy_index_for_value(&old_hybrid_policy) as usize)
+            .default(SecurityLevel::hybrid_policy_index_for_value(&seed.hybrid_policy) as usize)
             .interact()?;
         let hybrid_policy = SecurityLevel::hybrid_policy_from_index(selected_hybrid_idx);
 
@@ -409,10 +391,7 @@ async fn run_config_wizard(
     }
     ensure_configured_source_listed(&mut cameras, &config.cameras.rgb);
     let cam_names: Vec<String> = cameras.iter().map(|(n, _)| n.clone()).collect();
-    let default_cam_idx = cameras
-        .iter()
-        .position(|(_, target)| target == &config.cameras.rgb)
-        .unwrap_or(0);
+    let default_cam_idx = gaze_core::camera::source_index(&cameras, &config.cameras.rgb);
 
     let selected_cam_idx = Select::with_theme(&theme)
         .with_prompt("RGB camera source")
@@ -429,16 +408,11 @@ async fn run_config_wizard(
         .parse::<u8>()
         .unwrap_or(30);
 
-    let ir_cameras = gaze_core::camera::enumerate_ir_cameras().unwrap_or_default();
-    let mut ir_options = vec![("None".to_string(), String::new())];
-    ir_options.extend(ir_cameras);
+    let mut ir_options = gaze_core::camera::ir_choices();
     ensure_configured_source_listed(&mut ir_options, &config.cameras.ir);
 
     let ir_names: Vec<String> = ir_options.iter().map(|(n, _)| n.clone()).collect();
-    let default_ir_idx = ir_options
-        .iter()
-        .position(|(_, target)| target == &config.cameras.ir)
-        .unwrap_or(0);
+    let default_ir_idx = gaze_core::camera::source_index(&ir_options, &config.cameras.ir);
 
     let selected_ir_idx = Select::with_theme(&theme)
         .with_prompt("IR camera source")
@@ -492,10 +466,9 @@ async fn run_config_wizard(
         .interact_text()?;
 
     if config.auth.start_delay_ms > 0 {
-        let scope_labels = ["Every face auth (including sudo)", "Screen lockers only"];
         let scope_index = Select::with_theme(&theme)
             .with_prompt("Apply the start delay to")
-            .items(scope_labels)
+            .items(START_DELAY_SCOPE_LABELS)
             .default(
                 AuthConfig::start_delay_scope_index_for_value(config.auth.start_delay_scope())
                     as usize,
