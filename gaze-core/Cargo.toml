@@ -42,7 +42,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_plain = "1.0.2"
 tracing = "0.1.44"
 toml = "1.1.4"
-ureq = "3.3"
+ureq = "3.4.0"
 uuid = { version = "1.24.0", features = ["v4"] }
 zip = "8.6"
 gstreamer = "0.25.3"

@@ -40,7 +40,7 @@ ort = { version = "2.0.0-rc.13", default-features = false, features = [
 rayon = "1.12"
 sha2 = "0.11"
 tokio = { version = "1.53.1", features = ["full", "rt-multi-thread"] }
-ureq = "3.3"
+ureq = "3.4.0"
 uuid = { version = "1.24.0", features = ["v4"] }
 zbus = "5.18.0"
 zip = "8.6"
