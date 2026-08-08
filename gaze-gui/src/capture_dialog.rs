@@ -7,7 +7,7 @@ use gaze_core::dbus::{EnrollPrompt, GazeProxy};
 use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
 use tracing::error;
@@ -75,6 +75,7 @@ pub fn show_capture_dialog(
 
     let resolved_face = Rc::new(RefCell::new(face_name.unwrap_or("default").to_string()));
     let existing_face_names = Rc::new(RefCell::new(HashSet::<String>::new()));
+    let enrollment_completed = Rc::new(Cell::new(false));
     let face_name_valid = Rc::new(RefCell::new(is_refine));
     let mut face_name_entry: Option<libadwaita::EntryRow> = None;
 
@@ -265,6 +266,8 @@ pub fn show_capture_dialog(
         on_done,
         #[strong]
         feed,
+        #[strong]
+        enrollment_completed,
         move |btn| {
             // The preview opens the RGB camera directly. Release it before
             // asking gazed to open the same device for enrollment.
@@ -297,6 +300,8 @@ pub fn show_capture_dialog(
                 on_done,
                 #[strong]
                 feed,
+                #[strong]
+                enrollment_completed,
                 async move {
                     let mut enroll_stream = match proxy.receive_enroll_status().await {
                         Ok(s) => s,
@@ -353,6 +358,7 @@ pub fn show_capture_dialog(
                                     }
 
                                     if is_done && raw_msg == EnrollPrompt::Completed {
+                                        enrollment_completed.set(true);
                                         prompt_label.set_text("✓ Enrollment Complete!");
                                         stop_btn.set_visible(false);
                                         on_done();
@@ -406,8 +412,10 @@ pub fn show_capture_dialog(
         proxy,
         #[strong]
         show_cancel_confirmation,
+        #[strong]
+        enrollment_completed,
         move |dialog| {
-            if stop_btn.get_visible() && !prompt_label.text().contains("Complete") {
+            if stop_btn.get_visible() && !enrollment_completed.get() {
                 show_cancel_confirmation(dialog.clone().upcast());
                 glib::Propagation::Stop
             } else {
