@@ -225,7 +225,25 @@ pub struct AuthDaemon {
     pub resume_pending: Arc<AtomicBool>,
     pub lock_epochs: LockEpochs,
     pub benchmark_running: Arc<AtomicBool>,
+    pub last_good_config: Arc<Mutex<Config>>,
     pub rt_handle: tokio::runtime::Handle,
+}
+
+fn resolve_config(loaded: anyhow::Result<Config>, last_good: &mut Config) -> Config {
+    match loaded {
+        Ok(config) => {
+            *last_good = config.clone();
+            config
+        }
+        Err(e) => {
+            error!(
+                error = %e,
+                path = CONFIG_PATH,
+                "config is unreadable; keeping the last valid configuration"
+            );
+            last_good.clone()
+        }
+    }
 }
 
 /// When each logind session last became locked, keyed by session object path.
@@ -248,6 +266,11 @@ impl Drop for BenchmarkSlot {
 }
 
 impl AuthDaemon {
+    async fn current_config(&self) -> Config {
+        let mut last_good = self.last_good_config.lock().await;
+        resolve_config(Config::load_from(CONFIG_PATH), &mut last_good)
+    }
+
     fn map_user_db_error(err: UserDbError) -> fdo::Error {
         let message = err.to_string();
         match err {
@@ -759,6 +782,52 @@ mod tests {
             sender: ":1.42".to_string(),
             epoch,
         })))
+    }
+
+    fn hardened_config() -> gaze_core::config::Config {
+        let mut config = gaze_core::config::Config::default();
+        config.security = gaze_core::config::SecurityLevel::maximum();
+        config.auth.require_confirmation_lock_screen = true;
+        config.auth.require_confirmation_elevation = true;
+        config
+    }
+
+    #[test]
+    fn an_unreadable_config_keeps_the_last_good_one() {
+        let mut last_good = hardened_config();
+
+        let resolved = super::resolve_config(
+            Err(anyhow::anyhow!("expected `=` after key, found newline")),
+            &mut last_good,
+        );
+
+        assert_eq!(resolved.security.level, "maximum");
+        assert!(resolved.auth.require_confirmation_lock_screen);
+        assert!(resolved.auth.require_confirmation_elevation);
+        assert_eq!(last_good.security.level, "maximum");
+    }
+
+    #[test]
+    fn defaults_would_have_weakened_the_running_settings() {
+        let defaults = gaze_core::config::Config::default();
+        let hardened = hardened_config();
+
+        assert_ne!(defaults.security.level, hardened.security.level);
+        assert!(!defaults.auth.require_confirmation_lock_screen);
+        assert!(!defaults.auth.require_confirmation_elevation);
+    }
+
+    #[test]
+    fn a_readable_config_replaces_the_last_good_one() {
+        let mut last_good = hardened_config();
+        let mut updated = gaze_core::config::Config::default();
+        updated.liveness.threshold = 0.95;
+
+        let resolved = super::resolve_config(Ok(updated), &mut last_good);
+
+        assert_eq!(resolved.liveness.threshold, 0.95);
+        assert_eq!(last_good.liveness.threshold, 0.95);
+        assert_eq!(last_good.security.level, "medium");
     }
 
     #[tokio::test]
@@ -2203,7 +2272,7 @@ impl AuthDaemon {
         let recognizer_ir_arc = self.recognizer_ir.clone();
         let db_arc = self.db.clone();
 
-        let config = Config::load_from(CONFIG_PATH).unwrap_or_default();
+        let config = self.current_config().await;
         let sources = resolve_configured_sources(&config.cameras);
         let rgb_device = sources.rgb;
         let ir_device = sources.ir;
@@ -2879,7 +2948,7 @@ impl AuthDaemon {
 
     #[zbus(property)]
     async fn config(&self) -> Config {
-        Config::load_from(CONFIG_PATH).unwrap_or_default()
+        self.current_config().await
     }
 
     #[zbus(property)]
@@ -3166,7 +3235,7 @@ impl AuthDaemon {
         let rgb_threshold_arc = self.rgb_threshold.clone();
         let ir_threshold_arc = self.ir_threshold.clone();
 
-        let config = Config::load_from(CONFIG_PATH).unwrap_or_default();
+        let config = self.current_config().await;
         let active_session = active_session().await;
         let surface = Self::classify_surface(pam_service.as_deref(), active_session.as_ref());
         let lock_elapsed_ms = self.lock_elapsed_ms(active_session.as_ref()).await;
