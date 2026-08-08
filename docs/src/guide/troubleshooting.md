@@ -262,7 +262,29 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 
 On CPUs without AVX2 (roughly pre-2013), older builds of `gaze` and `gaze-gui` crashed immediately with a segmentation fault because the ONNX Runtime they statically linked requires AVX2. Current packages no longer link ONNX Runtime into the client binaries, so update to the latest packages if you see this. The `gazed` daemon itself still requires a CPU with AVX2.
 
-## 11. Collect useful logs before asking for help
+## 11. Daemon dumps core with "Failed to initialize ORT API"
+
+```
+The requested API version [27] is not available, only API versions [1, 26] are supported in this build. Current ORT Version is: 1.26.0
+thread 'main' panicked at ort-2.0.0-rc.13/src/lib.rs: Failed to initialize ORT API
+```
+
+The ONNX Runtime `gazed` links against is older than the ONNX Runtime API the
+build asks for. It only affects builds that link a system ONNX Runtime
+(`ORT_STRATEGY=system`), such as the Nix package, the Flatpak, and RPM source
+builds; the released `.deb`, `.rpm`, and Arch packages bundle their own runtime.
+
+Gaze requires ONNX Runtime 1.22 or newer. Current builds report the mismatch and
+exit with an error instead of aborting:
+
+```
+the ONNX Runtime library loaded at startup is version 1.21.0, which is older than the 1.22.x this build of Gaze requires
+```
+
+Update `gazed` to a current release, or build it against an ONNX Runtime that is
+at least 1.22.
+
+## 12. Collect useful logs before asking for help
 
 ```bash
 gaze doctor

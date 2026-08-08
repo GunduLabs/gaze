@@ -27,7 +27,15 @@ libc = "0.2.189"
 nalgebra = "0.35.0"
 ndarray = "0.17.2"
 opencv = { version = "0.100.1", default-features = false, features = ["imgproc", "videoio"] }
-ort = { version = "2.0.0-rc.13", optional = true }
+ort = { version = "2.0.0-rc.13", optional = true, default-features = false, features = [
+    "std",
+    "ndarray",
+    "tracing",
+    "download-binaries",
+    "copy-dylibs",
+    "tls-native",
+    "api-22",
+] }
 zbus = "5.18.0"
 zvariant = "5.13.1"
 serde = { version = "1.0.229", features = ["derive"] }
