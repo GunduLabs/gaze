@@ -13,9 +13,14 @@ pub const USERS_DIR: &str = "/var/lib/gaze/users";
 pub const MODELS_DIR: &str = "/var/cache/gaze";
 pub const DEFAULT_RGB_CAMERA: &str = "primary";
 pub const SECURITY_LEVEL_OPTIONS: [&str; 5] = ["low", "medium", "high", "maximum", "custom"];
+pub const SECURITY_LEVEL_LABELS: [&str; 5] = ["Low", "Medium", "High", "Maximum", "Custom"];
 pub const MODEL_QUALITY_OPTIONS: [&str; 2] = ["standard", "accurate"];
+pub const MODEL_QUALITY_LABELS: [&str; 2] = ["Standard", "Accurate"];
 pub const HYBRID_POLICY_OPTIONS: [&str; 4] = ["default", "or", "fallback_on_dark", "and"];
+pub const HYBRID_POLICY_LABELS: [&str; 4] = ["Default", "Or", "Fallback on Dark", "And"];
 pub const START_DELAY_SCOPE_OPTIONS: [&str; 2] = ["all", "screen_lock"];
+pub const START_DELAY_SCOPE_LABELS: [&str; 2] =
+    ["Every face auth (including sudo)", "Screen lockers only"];
 #[cfg(not(feature = "openvino-config"))]
 pub const INFERENCE_EXECUTION_PROVIDER_OPTIONS: [&str; 1] = ["cpu"];
 #[cfg(feature = "openvino-config")]
@@ -36,6 +41,78 @@ pub const MIN_LIVENESS_MAX_FRAMES: u32 = 1;
 
 fn default_level() -> String {
     "medium".to_string()
+}
+
+/// Which part of `[security]` a validation error came from, so a caller can
+/// offer the fix that matches instead of one message for the whole table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SecurityField {
+    Level,
+    ModelQuality,
+    Threshold,
+    HybridPolicy,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SecurityValidationError {
+    pub field: SecurityField,
+    pub message: String,
+}
+
+const fn str_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+const fn const_index_of(options: &[&str], value: &str) -> u32 {
+    let mut i = 0;
+    while i < options.len() {
+        if str_eq(options[i], value) {
+            return i as u32;
+        }
+        i += 1;
+    }
+    panic!("option is not present in its own option list")
+}
+
+/// Index of `value` in `options`, or `fallback` when it is not listed.
+pub fn index_of(options: &[&str], value: &str, fallback: u32) -> u32 {
+    options
+        .iter()
+        .position(|option| *option == value)
+        .map(|index| index as u32)
+        .unwrap_or(fallback)
+}
+
+/// Value at `index` in `options`, or `fallback` when the index is out of range.
+pub fn value_at(options: &[&'static str], index: usize, fallback: &'static str) -> &'static str {
+    options.get(index).copied().unwrap_or(fallback)
+}
+
+/// The values the custom security rows should show for a given level: either the
+/// stored custom values, or the values the selected preset actually resolves to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CustomSecurityForm {
+    pub detector: String,
+    pub recognizer: String,
+    pub rgb_threshold: f64,
+    pub ir_threshold: f64,
+    pub hybrid_policy: String,
+}
+
+// Presets carry an f32 threshold; round so a prompt shows 0.4, not 0.4000000059604645.
+fn round_threshold(threshold: f32) -> f64 {
+    (threshold as f64 * 100.0).round() / 100.0
 }
 
 #[derive(Serialize, Clone, Debug, Value, OwnedValue, Type)]
@@ -92,7 +169,7 @@ impl Default for SecurityLevel {
 }
 
 impl SecurityLevel {
-    pub const CUSTOM_LEVEL_INDEX: u32 = 4;
+    pub const CUSTOM_LEVEL_INDEX: u32 = const_index_of(&SECURITY_LEVEL_OPTIONS, "custom");
 
     fn preset(level: &str) -> Self {
         Self {
@@ -158,42 +235,45 @@ impl SecurityLevel {
     }
 
     pub fn level_index(&self) -> u32 {
-        SECURITY_LEVEL_OPTIONS
-            .iter()
-            .position(|level| *level == self.level.as_str())
-            .map(|idx| idx as u32)
-            .unwrap_or(1)
+        index_of(&SECURITY_LEVEL_OPTIONS, &self.level, 1)
     }
 
     pub fn model_quality_index(value: &str) -> u32 {
-        MODEL_QUALITY_OPTIONS
-            .iter()
-            .position(|quality| *quality == value)
-            .map(|idx| idx as u32)
-            .unwrap_or(0)
+        index_of(&MODEL_QUALITY_OPTIONS, value, 0)
     }
 
     pub fn model_quality_from_index(index: usize) -> &'static str {
-        MODEL_QUALITY_OPTIONS
-            .get(index)
-            .copied()
-            .unwrap_or("standard")
+        value_at(&MODEL_QUALITY_OPTIONS, index, "standard")
     }
 
     pub fn hybrid_policy_index_for_value(value: &str) -> u32 {
-        HYBRID_POLICY_OPTIONS
-            .iter()
-            .position(|policy| *policy == value)
-            .map(|idx| idx as u32)
-            .unwrap_or(0)
+        index_of(&HYBRID_POLICY_OPTIONS, value, 0)
     }
 
     pub fn hybrid_policy_from_index(index: usize) -> String {
-        HYBRID_POLICY_OPTIONS
-            .get(index)
-            .copied()
-            .unwrap_or("default")
-            .to_string()
+        value_at(&HYBRID_POLICY_OPTIONS, index, "default").to_string()
+    }
+
+    /// Seeds the custom rows so switching a preset to "custom" starts from what
+    /// the preset resolved to, instead of resetting to an unrelated default.
+    pub fn custom_form(&self) -> CustomSecurityForm {
+        if self.level == "custom" {
+            CustomSecurityForm {
+                detector: self.detector.clone(),
+                recognizer: self.recognizer.clone(),
+                rgb_threshold: self.rgb_threshold,
+                ir_threshold: self.ir_threshold,
+                hybrid_policy: self.hybrid_policy.clone(),
+            }
+        } else {
+            CustomSecurityForm {
+                detector: self.effective_detector_quality().to_string(),
+                recognizer: self.effective_recognizer_quality().to_string(),
+                rgb_threshold: round_threshold(self.rgb_threshold()),
+                ir_threshold: round_threshold(self.ir_threshold()),
+                hybrid_policy: self.hybrid_policy().to_string(),
+            }
+        }
     }
 
     // Accessors are total: an unknown level falls back to the medium models rather
@@ -244,54 +324,69 @@ impl SecurityLevel {
         }
     }
 
-    pub fn validate(&self) -> anyhow::Result<()> {
+    /// Every problem with the current values. `validate` reports only the first,
+    /// so a report that wants to list them all must use this instead.
+    pub fn validation_errors(&self) -> Vec<SecurityValidationError> {
+        let mut errors = Vec::new();
         if !SECURITY_LEVEL_OPTIONS.contains(&self.level.as_str()) {
-            anyhow::bail!(
-                "invalid security level {:?}: expected one of {:?}",
-                self.level,
-                SECURITY_LEVEL_OPTIONS
-            );
+            errors.push(SecurityValidationError {
+                field: SecurityField::Level,
+                message: format!(
+                    "invalid security level {:?}: expected one of {:?}",
+                    self.level, SECURITY_LEVEL_OPTIONS
+                ),
+            });
+            return errors;
         }
-        if self.level == "custom" {
-            match self.detector.as_str() {
-                "standard" | "accurate" => {}
-                other => anyhow::bail!(
-                    "invalid detector level {other:?}: expected \"standard\" or \"accurate\""
-                ),
+        if self.level != "custom" {
+            return errors;
+        }
+
+        for (name, quality) in [
+            ("detector", self.detector.as_str()),
+            ("recognizer", self.recognizer.as_str()),
+        ] {
+            if !MODEL_QUALITY_OPTIONS.contains(&quality) {
+                errors.push(SecurityValidationError {
+                    field: SecurityField::ModelQuality,
+                    message: format!(
+                        "invalid {name} level {quality:?}: expected \"standard\" or \"accurate\""
+                    ),
+                });
             }
-            match self.recognizer.as_str() {
-                "standard" | "accurate" => {}
-                other => anyhow::bail!(
-                    "invalid recognizer level {other:?}: expected \"standard\" or \"accurate\""
-                ),
+        }
+        for (name, threshold) in [
+            ("rgb_threshold", self.rgb_threshold),
+            ("ir_threshold", self.ir_threshold),
+        ] {
+            if !Self::threshold_in_range(threshold) {
+                errors.push(SecurityValidationError {
+                    field: SecurityField::Threshold,
+                    message: format!(
+                        "security.{name} must be between {MIN_SECURITY_THRESHOLD} and {MAX_SECURITY_THRESHOLD}, got {threshold}"
+                    ),
+                });
             }
-            if !Self::threshold_in_range(self.rgb_threshold) {
-                anyhow::bail!(
-                    "security.rgb_threshold must be between {} and {}, got {}",
-                    MIN_SECURITY_THRESHOLD,
-                    MAX_SECURITY_THRESHOLD,
-                    self.rgb_threshold
-                );
-            }
-            if !Self::threshold_in_range(self.ir_threshold) {
-                anyhow::bail!(
-                    "security.ir_threshold must be between {} and {}, got {}",
-                    MIN_SECURITY_THRESHOLD,
-                    MAX_SECURITY_THRESHOLD,
-                    self.ir_threshold
-                );
-            }
-            if !self.hybrid_policy.is_empty()
-                && !HYBRID_POLICY_OPTIONS.contains(&self.hybrid_policy.as_str())
-            {
-                anyhow::bail!(
+        }
+        if !self.hybrid_policy.is_empty()
+            && !HYBRID_POLICY_OPTIONS.contains(&self.hybrid_policy.as_str())
+        {
+            errors.push(SecurityValidationError {
+                field: SecurityField::HybridPolicy,
+                message: format!(
                     "invalid security.hybrid_policy {:?}: expected one of {:?}",
-                    self.hybrid_policy,
-                    HYBRID_POLICY_OPTIONS
-                );
-            }
+                    self.hybrid_policy, HYBRID_POLICY_OPTIONS
+                ),
+            });
         }
-        Ok(())
+        errors
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        match self.validation_errors().into_iter().next() {
+            Some(err) => Err(anyhow::anyhow!(err.message)),
+            None => Ok(()),
+        }
     }
 
     fn threshold_in_range(threshold: f64) -> bool {
@@ -429,33 +524,23 @@ impl InferenceConfig {
     }
 
     pub fn execution_provider_index(&self) -> u32 {
-        INFERENCE_EXECUTION_PROVIDER_OPTIONS
-            .iter()
-            .position(|value| *value == self.execution_provider)
-            .map(|index| index as u32)
-            .unwrap_or(0)
+        index_of(
+            &INFERENCE_EXECUTION_PROVIDER_OPTIONS,
+            &self.execution_provider,
+            0,
+        )
     }
 
     pub fn device_index(&self) -> u32 {
-        INFERENCE_DEVICE_OPTIONS
-            .iter()
-            .position(|value| *value == self.device)
-            .map(|index| index as u32)
-            .unwrap_or(0)
+        index_of(&INFERENCE_DEVICE_OPTIONS, &self.device, 0)
     }
 
     pub fn execution_provider_from_index(index: usize) -> &'static str {
-        INFERENCE_EXECUTION_PROVIDER_OPTIONS
-            .get(index)
-            .copied()
-            .unwrap_or("cpu")
+        value_at(&INFERENCE_EXECUTION_PROVIDER_OPTIONS, index, "cpu")
     }
 
     pub fn device_from_index(index: usize) -> &'static str {
-        INFERENCE_DEVICE_OPTIONS
-            .get(index)
-            .copied()
-            .unwrap_or("cpu")
+        value_at(&INFERENCE_DEVICE_OPTIONS, index, "cpu")
     }
 }
 
@@ -690,19 +775,11 @@ impl AuthConfig {
     }
 
     pub fn start_delay_scope_index_for_value(value: &str) -> u32 {
-        START_DELAY_SCOPE_OPTIONS
-            .iter()
-            .position(|scope| *scope == value)
-            .map(|idx| idx as u32)
-            .unwrap_or(0)
+        index_of(&START_DELAY_SCOPE_OPTIONS, value, 0)
     }
 
     pub fn start_delay_scope_from_index(index: usize) -> String {
-        START_DELAY_SCOPE_OPTIONS
-            .get(index)
-            .copied()
-            .unwrap_or("all")
-            .to_string()
+        value_at(&START_DELAY_SCOPE_OPTIONS, index, "all").to_string()
     }
 }
 
@@ -1739,5 +1816,119 @@ level = "low""#,
         config.security.level = "custom".to_string();
         config.security.hybrid_policy = "custom_policy".to_string();
         assert_eq!(config.security.hybrid_policy(), "custom_policy");
+    }
+
+    #[test]
+    fn validation_errors_accumulate_across_fields() {
+        let level = SecurityLevel::custom_with_thresholds(
+            "sharp".to_string(),
+            "standard".to_string(),
+            1.5,
+            -0.1,
+            "sometimes".to_string(),
+        );
+
+        let fields: Vec<SecurityField> = level
+            .validation_errors()
+            .iter()
+            .map(|err| err.field)
+            .collect();
+        assert_eq!(
+            fields,
+            vec![
+                SecurityField::ModelQuality,
+                SecurityField::Threshold,
+                SecurityField::Threshold,
+                SecurityField::HybridPolicy,
+            ]
+        );
+    }
+
+    #[test]
+    fn option_lists_and_labels_stay_aligned() {
+        assert_eq!(SECURITY_LEVEL_OPTIONS.len(), SECURITY_LEVEL_LABELS.len());
+        assert_eq!(MODEL_QUALITY_OPTIONS.len(), MODEL_QUALITY_LABELS.len());
+        assert_eq!(HYBRID_POLICY_OPTIONS.len(), HYBRID_POLICY_LABELS.len());
+        assert_eq!(
+            START_DELAY_SCOPE_OPTIONS.len(),
+            START_DELAY_SCOPE_LABELS.len()
+        );
+    }
+
+    #[test]
+    fn validate_reports_only_the_first_error() {
+        let level = SecurityLevel::custom_with_thresholds(
+            "standard".to_string(),
+            "standard".to_string(),
+            1.5,
+            -0.1,
+            String::new(),
+        );
+
+        let message = level.validate().unwrap_err().to_string();
+        assert!(message.contains("security.rgb_threshold"), "{message}");
+        assert_eq!(level.validation_errors().len(), 2);
+    }
+
+    #[test]
+    fn an_unknown_level_stops_before_the_custom_checks() {
+        let mut level = SecurityLevel::custom_with_thresholds(
+            "sharp".to_string(),
+            "sharp".to_string(),
+            1.5,
+            -0.1,
+            "sometimes".to_string(),
+        );
+        level.level = "paranoid".to_string();
+
+        let errors = level.validation_errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].field, SecurityField::Level);
+    }
+
+    #[test]
+    fn custom_level_index_tracks_the_option_list() {
+        assert_eq!(
+            SecurityLevel::CUSTOM_LEVEL_INDEX as usize,
+            SECURITY_LEVEL_OPTIONS
+                .iter()
+                .position(|level| *level == "custom")
+                .expect("custom must be listed")
+        );
+    }
+
+    #[test]
+    fn index_helpers_fall_back_when_unlisted() {
+        assert_eq!(index_of(&SECURITY_LEVEL_OPTIONS, "high", 1), 2);
+        assert_eq!(index_of(&SECURITY_LEVEL_OPTIONS, "nonsense", 1), 1);
+        assert_eq!(value_at(&MODEL_QUALITY_OPTIONS, 1, "standard"), "accurate");
+        assert_eq!(value_at(&MODEL_QUALITY_OPTIONS, 9, "standard"), "standard");
+    }
+
+    #[test]
+    fn custom_form_seeds_from_the_resolved_preset() {
+        let seed = SecurityLevel::high().custom_form();
+        assert_eq!(seed.detector, "accurate");
+        assert_eq!(seed.recognizer, "accurate");
+        assert_eq!(seed.rgb_threshold, 0.5);
+        assert_eq!(seed.ir_threshold, 0.5);
+        assert_eq!(seed.hybrid_policy, "fallback_on_dark");
+    }
+
+    #[test]
+    fn custom_form_keeps_stored_custom_values() {
+        let level = SecurityLevel::custom_with_thresholds(
+            "standard".to_string(),
+            "accurate".to_string(),
+            0.31,
+            0.62,
+            "and".to_string(),
+        );
+        let seed = level.custom_form();
+        assert_eq!(seed.detector, "standard");
+        assert_eq!(seed.recognizer, "accurate");
+        assert_eq!(seed.rgb_threshold, 0.31);
+        assert_eq!(seed.ir_threshold, 0.62);
+        assert_eq!(seed.hybrid_policy, "and");
     }
 }
