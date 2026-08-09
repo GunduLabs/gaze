@@ -687,22 +687,57 @@ fn default_start_delay_scope() -> String {
     "screen_lock".to_string()
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
+#[derive(Serialize, Clone, Debug, Value, OwnedValue, Type)]
 pub struct AuthConfig {
-    #[serde(default = "default_true")]
     pub abort_if_ssh: bool,
-    #[serde(default = "default_true")]
     pub abort_if_lid_closed: bool,
-    #[serde(default = "default_false")]
     pub require_confirmation_lock_screen: bool,
-    #[serde(default = "default_false")]
     pub require_confirmation_elevation: bool,
-    #[serde(default = "default_resume_grace_ms")]
     pub resume_grace_ms: u64,
-    #[serde(default = "default_start_delay_ms")]
     pub start_delay_ms: u64,
-    #[serde(default = "default_start_delay_scope")]
     pub start_delay_scope: String,
+}
+
+#[derive(Deserialize)]
+struct AuthConfigFile {
+    #[serde(default = "default_true")]
+    abort_if_ssh: bool,
+    #[serde(default = "default_true")]
+    abort_if_lid_closed: bool,
+    #[serde(default)]
+    require_confirmation: Option<bool>,
+    #[serde(default)]
+    require_confirmation_lock_screen: Option<bool>,
+    #[serde(default)]
+    require_confirmation_elevation: Option<bool>,
+    #[serde(default = "default_resume_grace_ms")]
+    resume_grace_ms: u64,
+    #[serde(default = "default_start_delay_ms")]
+    start_delay_ms: u64,
+    #[serde(default = "default_start_delay_scope")]
+    start_delay_scope: String,
+}
+
+impl<'de> Deserialize<'de> for AuthConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let file = AuthConfigFile::deserialize(deserializer)?;
+        let legacy = file.require_confirmation.unwrap_or(false);
+
+        Ok(Self {
+            abort_if_ssh: file.abort_if_ssh,
+            abort_if_lid_closed: file.abort_if_lid_closed,
+            require_confirmation_lock_screen: file
+                .require_confirmation_lock_screen
+                .unwrap_or(legacy),
+            require_confirmation_elevation: file.require_confirmation_elevation.unwrap_or(legacy),
+            resume_grace_ms: file.resume_grace_ms,
+            start_delay_ms: file.start_delay_ms,
+            start_delay_scope: file.start_delay_scope,
+        })
+    }
 }
 
 fn default_false() -> bool {
@@ -862,6 +897,35 @@ impl Default for CameraConfig {
     }
 }
 
+const LEGACY_CONFIG_KEYS: [&str; 2] = ["security.threshold", "auth.require_confirmation"];
+
+pub fn unknown_config_keys(contents: &str) -> Vec<String> {
+    let Ok(toml::Value::Table(known)) = toml::Value::try_from(Config::default()) else {
+        return Vec::new();
+    };
+    let Ok(actual) = contents.parse::<toml::Table>() else {
+        return Vec::new();
+    };
+
+    let mut unknown = Vec::new();
+    for (table_name, table_value) in &actual {
+        let Some(toml::Value::Table(known_table)) = known.get(table_name) else {
+            unknown.push(table_name.clone());
+            continue;
+        };
+        let Some(actual_table) = table_value.as_table() else {
+            continue;
+        };
+        for key in actual_table.keys() {
+            let path = format!("{table_name}.{key}");
+            if !known_table.contains_key(key) && !LEGACY_CONFIG_KEYS.contains(&path.as_str()) {
+                unknown.push(path);
+            }
+        }
+    }
+    unknown
+}
+
 impl Config {
     pub fn load() -> anyhow::Result<Self> {
         Self::load_from(CONFIG_PATH)
@@ -871,6 +935,11 @@ impl Config {
         if Path::new(path).exists() {
             let contents = std::fs::read_to_string(path)?;
             let config: Config = toml::from_str(&contents)?;
+            for key in unknown_config_keys(&contents) {
+                tracing::warn!(
+                    "{path} sets {key}, which Gaze does not read; it has no effect and is probably a typo"
+                );
+            }
             // Don't refuse to start on a bad level: warn and let the total accessors
             // fall back. Rejection is enforced at the set_config (admin input) boundary.
             if let Err(e) = config.security.validate() {
@@ -1370,6 +1439,106 @@ mod tests {
 
         let config = Config::load_from(path.to_str().unwrap()).unwrap();
         assert_eq!(config.security.detector(), "det_500m.onnx");
+    }
+
+    #[test]
+    fn misspelled_keys_are_reported_as_unknown() {
+        let contents =
+            "[storage]\nencrypt_template = true\n\n[auth]\nrequire_confirmation_elavation = true\n";
+        let unknown = unknown_config_keys(contents);
+        assert_eq!(
+            unknown,
+            vec![
+                "auth.require_confirmation_elavation".to_string(),
+                "storage.encrypt_template".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn correctly_spelled_and_legacy_keys_are_not_reported() {
+        let contents = "[storage]\nencrypt_templates = true\n\n[auth]\nrequire_confirmation = true\nrequire_confirmation_elevation = true\n\n[security]\nthreshold = 0.5\n";
+        assert!(unknown_config_keys(contents).is_empty());
+    }
+
+    #[test]
+    fn an_unknown_table_is_reported() {
+        assert_eq!(
+            unknown_config_keys("[storrage]\nencrypt_templates = true\n"),
+            vec!["storrage".to_string()]
+        );
+    }
+
+    #[test]
+    fn the_packaged_config_has_no_unknown_keys() {
+        let contents = include_str!("../../packaging/config/config.toml");
+        assert!(unknown_config_keys(contents).is_empty());
+    }
+
+    #[test]
+    fn the_dbus_signature_is_unchanged() {
+        use zvariant::Type;
+        assert_eq!(AuthConfig::SIGNATURE.to_string(), "(bbbbtts)");
+        assert_eq!(
+            Config::SIGNATURE.to_string(),
+            "((ss)(sssdds)(ssby)(bbbbtts)(ud)(bdu)(b))"
+        );
+    }
+
+    #[test]
+    fn legacy_require_confirmation_applies_to_both_surfaces() {
+        let auth: AuthConfig = toml::from_str("require_confirmation = true\n").unwrap();
+        assert!(auth.require_confirmation_lock_screen);
+        assert!(auth.require_confirmation_elevation);
+        assert!(auth.requires_confirmation(AuthSurface::Elevation));
+        assert!(auth.requires_confirmation(AuthSurface::ScreenLock));
+    }
+
+    #[test]
+    fn an_explicit_split_key_overrides_the_legacy_key() {
+        let auth: AuthConfig =
+            toml::from_str("require_confirmation = true\nrequire_confirmation_elevation = false\n")
+                .unwrap();
+        assert!(auth.require_confirmation_lock_screen);
+        assert!(!auth.require_confirmation_elevation);
+    }
+
+    #[test]
+    fn confirmation_defaults_to_off_without_any_key() {
+        let auth: AuthConfig = toml::from_str("").unwrap();
+        assert!(!auth.require_confirmation_lock_screen);
+        assert!(!auth.require_confirmation_elevation);
+    }
+
+    #[test]
+    fn load_from_keeps_loading_when_a_key_is_misspelled() {
+        let temp = TempDir::new("typo-key");
+        let path = temp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[storage]\nencrypt_template = true\n\n[security]\nlevel = \"high\"\n",
+        )
+        .unwrap();
+
+        let config = Config::load_from(path.to_str().unwrap()).unwrap();
+        assert!(!config.storage.encrypt_templates);
+        assert_eq!(config.security.level, "high");
+        assert_eq!(
+            unknown_config_keys(&std::fs::read_to_string(&path).unwrap()),
+            vec!["storage.encrypt_template".to_string()]
+        );
+    }
+
+    #[test]
+    fn load_from_honours_the_legacy_confirmation_key() {
+        let temp = TempDir::new("legacy-confirmation");
+        let path = temp.path().join("config.toml");
+        std::fs::write(&path, "[auth]\nrequire_confirmation = true\n").unwrap();
+
+        let config = Config::load_from(path.to_str().unwrap()).unwrap();
+        assert!(config.auth.require_confirmation_lock_screen);
+        assert!(config.auth.require_confirmation_elevation);
+        assert!(unknown_config_keys(&std::fs::read_to_string(&path).unwrap()).is_empty());
     }
 
     #[test]
