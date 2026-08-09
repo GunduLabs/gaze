@@ -34,10 +34,10 @@ pub const MIN_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.10;
 pub const MAX_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.75;
 pub const DEFAULT_SECURITY_THRESHOLD: f64 = 0.4;
 pub const MIN_SECURITY_THRESHOLD: f64 = 0.10;
-pub const MAX_SECURITY_THRESHOLD: f64 = 1.0;
+pub const MAX_SECURITY_THRESHOLD: f64 = 0.99;
 pub const MIN_LIVENESS_THRESHOLD: f64 = 0.10;
 pub const MAX_LIVENESS_THRESHOLD: f64 = 1.0;
-pub const MIN_LIVENESS_MAX_FRAMES: u32 = 1;
+pub const MIN_LIVENESS_MAX_FRAMES: u32 = 6;
 
 fn default_level() -> String {
     "medium".to_string()
@@ -1118,6 +1118,41 @@ mod tests {
             );
             level.validate().unwrap();
         }
+    }
+
+    #[test]
+    fn the_highest_allowed_threshold_can_still_be_matched() {
+        let perfect_score = 1.0_f32;
+        assert!(
+            perfect_score > MAX_SECURITY_THRESHOLD as f32,
+            "a threshold of {MAX_SECURITY_THRESHOLD} can never be matched, because scores are dot products of unit vectors and matching requires score > threshold"
+        );
+    }
+
+    #[test]
+    fn an_existing_config_below_the_new_frame_minimum_falls_back_to_the_default() {
+        for stale in 1..MIN_LIVENESS_MAX_FRAMES {
+            let liveness = LivenessConfig {
+                max_frames: stale,
+                ..LivenessConfig::default()
+            };
+            assert!(liveness.validate().is_err(), "{stale} must be rejected");
+            assert_eq!(
+                liveness.effective_max_frames(),
+                LivenessConfig::default().max_frames,
+                "{stale} must fall back to the default rather than gate auth"
+            );
+        }
+    }
+
+    #[test]
+    fn the_smallest_allowed_frame_budget_can_reach_sustained_liveness() {
+        const {
+            assert!(
+                MIN_LIVENESS_MAX_FRAMES > 5,
+                "liveness needs 5 scored frames before its sustained path triggers"
+            )
+        };
     }
 
     #[test]
