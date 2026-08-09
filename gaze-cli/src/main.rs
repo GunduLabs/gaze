@@ -134,10 +134,19 @@ fn capture_tone(status: CaptureStatus) -> Tone {
     }
 }
 
+fn interactive_terminal() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal() && std::io::stdin().is_terminal()
+}
+
 async fn run_busy<F, T>(title: &str, message: String, tone: Tone, future: F) -> anyhow::Result<T>
 where
     F: Future<Output = T>,
 {
+    if !interactive_terminal() {
+        return Ok(future.await);
+    }
+
     let mut terminal = TuiTerminal::new()?;
     let mut tick = 0_u64;
     tokio::pin!(future);
@@ -401,12 +410,10 @@ async fn run_config_wizard(
 
     config.cameras.rgb = cameras[selected_cam_idx].1.clone();
 
-    config.cameras.dark_luma_threshold = Input::with_theme(&theme)
+    config.cameras.dark_luma_threshold = Input::<u8>::with_theme(&theme)
         .with_prompt("Darkness cutoff: reject frames below this mean brightness (0-255)")
-        .default(config.cameras.dark_luma_threshold.to_string())
-        .interact_text()?
-        .parse::<u8>()
-        .unwrap_or(30);
+        .default(config.cameras.dark_luma_threshold)
+        .interact_text()?;
 
     let mut ir_options = gaze_core::camera::ir_choices();
     ensure_configured_source_listed(&mut ir_options, &config.cameras.ir);
@@ -556,7 +563,7 @@ async fn handle_enroll(
             style("✗").red().bold(),
             dbus_error_message(&err)
         ))?;
-        return Ok(());
+        std::process::exit(1);
     }
 
     let mut enroll_stream = proxy.receive_enroll_status().await?;
@@ -682,6 +689,7 @@ async fn handle_enroll(
             style("✗").red().bold(),
             current_enroll_msg
         ))?;
+        std::process::exit(1);
     }
     Ok(())
 }
@@ -986,6 +994,7 @@ async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
                     style("✗").red().bold(),
                     dbus_error_message(&e)
                 ))?;
+                std::process::exit(1);
             }
         }
     }
@@ -1025,6 +1034,7 @@ async fn handle_remove_face(proxy: &GazeProxy<'_>, user: &str, face: &str) -> an
                 style("✗").red().bold(),
                 dbus_error_message(&err)
             ))?;
+            std::process::exit(1);
         }
     }
     Ok(())
@@ -1069,6 +1079,7 @@ async fn handle_rename_face(
                 style("✗").red().bold(),
                 dbus_error_message(&err)
             ))?;
+            std::process::exit(1);
         }
     }
     Ok(())
@@ -1105,6 +1116,7 @@ async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
                 style("✗").red().bold(),
                 dbus_error_message(&err)
             ))?;
+            std::process::exit(1);
         }
     }
     Ok(())
