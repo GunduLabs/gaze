@@ -15,8 +15,8 @@ use gaze_core::config::{
     AuthConfig, Config, DEFAULT_SECURITY_THRESHOLD, HYBRID_POLICY_OPTIONS,
     INFERENCE_DEVICE_OPTIONS, INFERENCE_EXECUTION_PROVIDER_OPTIONS, MAX_ENROLLMENT_FACE_SIZE_RATIO,
     MAX_LIVENESS_THRESHOLD, MAX_SECURITY_THRESHOLD, MIN_ENROLLMENT_FACE_SIZE_RATIO,
-    MIN_LIVENESS_THRESHOLD, MIN_SECURITY_THRESHOLD, MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS,
-    START_DELAY_SCOPE_LABELS, SecurityLevel,
+    MIN_LIVENESS_MAX_FRAMES, MIN_LIVENESS_THRESHOLD, MIN_SECURITY_THRESHOLD, MODEL_QUALITY_OPTIONS,
+    SECURITY_LEVEL_OPTIONS, START_DELAY_SCOPE_LABELS, SecurityLevel,
 };
 use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon, connect_gaze,
@@ -134,10 +134,19 @@ fn capture_tone(status: CaptureStatus) -> Tone {
     }
 }
 
+fn interactive_terminal() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal() && std::io::stdin().is_terminal()
+}
+
 async fn run_busy<F, T>(title: &str, message: String, tone: Tone, future: F) -> anyhow::Result<T>
 where
     F: Future<Output = T>,
 {
+    if !interactive_terminal() {
+        return Ok(future.await);
+    }
+
     let mut terminal = TuiTerminal::new()?;
     let mut tick = 0_u64;
     tokio::pin!(future);
@@ -401,12 +410,10 @@ async fn run_config_wizard(
 
     config.cameras.rgb = cameras[selected_cam_idx].1.clone();
 
-    config.cameras.dark_luma_threshold = Input::with_theme(&theme)
+    config.cameras.dark_luma_threshold = Input::<u8>::with_theme(&theme)
         .with_prompt("Darkness cutoff: reject frames below this mean brightness (0-255)")
-        .default(config.cameras.dark_luma_threshold.to_string())
-        .interact_text()?
-        .parse::<u8>()
-        .unwrap_or(30);
+        .default(config.cameras.dark_luma_threshold)
+        .interact_text()?;
 
     let mut ir_options = gaze_core::camera::ir_choices();
     ensure_configured_source_listed(&mut ir_options, &config.cameras.ir);
@@ -523,8 +530,17 @@ async fn run_config_wizard(
             .parse::<f64>()
             .unwrap_or(0.8);
         config.liveness.max_frames = Input::with_theme(&theme)
-            .with_prompt("Liveness max frames")
+            .with_prompt(format!(
+                "Liveness max frames (min {MIN_LIVENESS_MAX_FRAMES})"
+            ))
             .default(config.liveness.max_frames)
+            .validate_with(|value: &u32| {
+                if *value >= MIN_LIVENESS_MAX_FRAMES {
+                    Ok(())
+                } else {
+                    Err(format!("must be at least {MIN_LIVENESS_MAX_FRAMES}"))
+                }
+            })
             .interact_text()?;
     }
 
@@ -556,7 +572,7 @@ async fn handle_enroll(
             style("✗").red().bold(),
             dbus_error_message(&err)
         ))?;
-        return Ok(());
+        std::process::exit(1);
     }
 
     let mut enroll_stream = proxy.receive_enroll_status().await?;
@@ -682,6 +698,7 @@ async fn handle_enroll(
             style("✗").red().bold(),
             current_enroll_msg
         ))?;
+        std::process::exit(1);
     }
     Ok(())
 }
@@ -986,6 +1003,7 @@ async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
                     style("✗").red().bold(),
                     dbus_error_message(&e)
                 ))?;
+                std::process::exit(1);
             }
         }
     }
@@ -1025,6 +1043,7 @@ async fn handle_remove_face(proxy: &GazeProxy<'_>, user: &str, face: &str) -> an
                 style("✗").red().bold(),
                 dbus_error_message(&err)
             ))?;
+            std::process::exit(1);
         }
     }
     Ok(())
@@ -1069,6 +1088,7 @@ async fn handle_rename_face(
                 style("✗").red().bold(),
                 dbus_error_message(&err)
             ))?;
+            std::process::exit(1);
         }
     }
     Ok(())
@@ -1105,6 +1125,7 @@ async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
                 style("✗").red().bold(),
                 dbus_error_message(&err)
             ))?;
+            std::process::exit(1);
         }
     }
     Ok(())
@@ -1305,12 +1326,12 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     }
 
     plan.push((
-        "Remove hyprlock pam_module references",
+        "Remove hyprlock Gaze PAM references",
         "for d in /home/*/.config/hypr /root/.config/hypr; do \
           f=\"$d/hyprlock.conf\"; \
           [ -f \"$f\" ] || continue; \
           sudo sed -i.gaze-uninstall-bak \
-            '/^\\s*pam_module\\s*=\\s*hyprlock-gaze\\(-simultaneous\\)\\?\\s*$/d' \"$f\" || true; \
+            '/^\\s*\\(pam_\\)\\?module\\s*=\\s*hyprlock-gaze\\(-simultaneous\\)\\?\\s*$/d' \"$f\" || true; \
           done"
             .into(),
     ));

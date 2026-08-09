@@ -6,8 +6,8 @@ use gaze_core::camera::{is_listed_source, source_index};
 use gaze_core::config::{
     AuthConfig, Config, DEFAULT_RGB_CAMERA, HYBRID_POLICY_LABELS, INFERENCE_DEVICE_OPTIONS,
     INFERENCE_EXECUTION_PROVIDER_OPTIONS, InferenceConfig, MAX_ENROLLMENT_FACE_SIZE_RATIO,
-    MIN_ENROLLMENT_FACE_SIZE_RATIO, MODEL_QUALITY_LABELS, SECURITY_LEVEL_LABELS,
-    START_DELAY_SCOPE_LABELS, SecurityLevel,
+    MIN_ENROLLMENT_FACE_SIZE_RATIO, MIN_LIVENESS_MAX_FRAMES, MODEL_QUALITY_LABELS,
+    SECURITY_LEVEL_LABELS, START_DELAY_SCOPE_LABELS, SecurityLevel,
 };
 use gaze_core::dbus::{
     GazeProxy, apply_config_to_daemon, connect_gaze, dbus_error_message, dbus_is_file_not_found,
@@ -420,7 +420,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     liveness_threshold_row.set_subtitle("Minimum spoof prevention confidence");
     liveness_group.add(&liveness_threshold_row);
 
-    let liveness_max_frames_row = libadwaita::SpinRow::with_range(1.0, 500.0, 1.0);
+    let liveness_max_frames_row =
+        libadwaita::SpinRow::with_range(MIN_LIVENESS_MAX_FRAMES as f64, 500.0, 1.0);
     liveness_max_frames_row.set_digits(0);
     liveness_max_frames_row.set_title("Liveness Max Frames");
     liveness_max_frames_row.set_subtitle("Maximum frames analyzed for liveness verification");
@@ -737,11 +738,6 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             apply_changes()
         }
     ));
-    level_row.connect_selected_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
     camera_row.connect_selected_notify(glib::clone!(
         #[strong]
         apply_changes,
@@ -756,93 +752,6 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             }
             apply_changes()
         }
-    ));
-    rgb_threshold_row.connect_value_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-    ir_threshold_row.connect_value_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-    templates_row.connect_value_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-    min_face_size_ratio_row.connect_value_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-    detector_row.connect_selected_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-    recognizer_row.connect_selected_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-
-    require_confirm_lock_screen_switch.connect_active_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-    require_confirm_elevation_switch.connect_active_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-    hybrid_row.connect_selected_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-    abort_ssh_switch.connect_active_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-    abort_lid_switch.connect_active_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-    resume_grace_row.connect_value_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-    start_delay_row.connect_value_notify(glib::clone!(
-        #[weak]
-        start_delay_scope_row,
-        #[strong]
-        apply_changes,
-        move |row| {
-            set_start_delay_scope_row_visible(row, &start_delay_scope_row);
-            apply_changes();
-        }
-    ));
-    start_delay_scope_row.connect_selected_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-    encrypt_templates_switch.connect_active_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-
-    dark_luma_threshold_row.connect_value_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
     ));
     ir_row.connect_selected_notify(glib::clone!(
         #[strong]
@@ -859,26 +768,63 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             apply_changes()
         }
     ));
-    emitter_switch.connect_active_notify(glib::clone!(
+    start_delay_row.connect_value_notify(glib::clone!(
+        #[weak]
+        start_delay_scope_row,
         #[strong]
         apply_changes,
-        move |_| apply_changes()
+        move |row| {
+            set_start_delay_scope_row_visible(row, &start_delay_scope_row);
+            apply_changes();
+        }
     ));
-    liveness_enabled_switch.connect_active_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-    liveness_threshold_row.connect_value_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
-    liveness_max_frames_row.connect_value_notify(glib::clone!(
-        #[strong]
-        apply_changes,
-        move |_| apply_changes()
-    ));
+
+    for row in [
+        &level_row,
+        &detector_row,
+        &recognizer_row,
+        &hybrid_row,
+        &start_delay_scope_row,
+    ] {
+        row.connect_selected_notify(glib::clone!(
+            #[strong]
+            apply_changes,
+            move |_| apply_changes()
+        ));
+    }
+
+    for row in [
+        &rgb_threshold_row,
+        &ir_threshold_row,
+        &templates_row,
+        &min_face_size_ratio_row,
+        &dark_luma_threshold_row,
+        &resume_grace_row,
+        &liveness_threshold_row,
+        &liveness_max_frames_row,
+    ] {
+        row.connect_value_notify(glib::clone!(
+            #[strong]
+            apply_changes,
+            move |_| apply_changes()
+        ));
+    }
+
+    for switch in [
+        &emitter_switch,
+        &liveness_enabled_switch,
+        &abort_ssh_switch,
+        &abort_lid_switch,
+        &require_confirm_lock_screen_switch,
+        &require_confirm_elevation_switch,
+        &encrypt_templates_switch,
+    ] {
+        switch.connect_active_notify(glib::clone!(
+            #[strong]
+            apply_changes,
+            move |_| apply_changes()
+        ));
+    }
 
     let rows = Rc::new(ConfigRows {
         inference_execution_provider: inference_execution_provider_row.clone(),
