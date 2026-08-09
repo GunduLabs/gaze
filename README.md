@@ -180,7 +180,7 @@ Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Matc
 # /etc/gaze/config.toml
 [inference]
 execution_provider = "cpu" # cpu | openvino (requires an OpenVINO build)
-device = "cpu"             # cpu | gpu | npu
+device = "cpu"             # cpu, or gpu | npu on an OpenVINO build
 
 [security]
 level = "medium"    # low | medium | high | maximum | custom
