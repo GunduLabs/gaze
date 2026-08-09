@@ -3184,7 +3184,8 @@ impl AuthDaemon {
         Ok(())
     }
 
-    async fn get_gdm_face_auth(&self) -> fdo::Result<bool> {
+    async fn get_gdm_face_auth(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<bool> {
+        Self::ensure_config_read_access(&header).await?;
         if let Some(enabled) = gdm_face_auth_from_dconf() {
             return Ok(enabled);
         }
