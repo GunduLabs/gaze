@@ -1252,6 +1252,7 @@ dependencies = [
  "strum",
  "strum_macros",
  "toml",
+ "toml_edit",
  "tracing",
  "zbus",
  "zvariant",
@@ -3732,6 +3733,7 @@ dependencies = [
  "indexmap",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
