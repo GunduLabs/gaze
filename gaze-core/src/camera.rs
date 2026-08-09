@@ -73,22 +73,6 @@ pub fn preferred_capture_source(cameras: &CameraConfig) -> (String, bool) {
     }
 }
 
-pub fn resolve_source(cameras: &CameraConfig) -> (String, CameraKind) {
-    if let Some((ir_source, ir_node)) = resolve_ir_source(cameras) {
-        (
-            ir_source.clone(),
-            CameraKind::Ir {
-                source: ir_source,
-                node: ir_node,
-            },
-        )
-    } else {
-        let rgb_source =
-            resolve_rgb_source(cameras).unwrap_or_else(|| DEFAULT_RGB_CAMERA.to_string());
-        (rgb_source.clone(), CameraKind::Rgb { source: rgb_source })
-    }
-}
-
 pub fn resolve_node(source: &str) -> Option<String> {
     let source = source.trim();
     if source.is_empty() {
@@ -854,39 +838,48 @@ mod tests {
     }
 
     #[test]
-    fn resolve_source_uses_rgb_when_no_ir_configured() {
+    fn configured_sources_leave_ir_empty_when_no_ir_configured() {
         let cameras = CameraConfig {
             rgb: "primary".to_string(),
             ir: String::new(),
             emitter_enabled: false,
             dark_luma_threshold: 30,
         };
-        let (source, kind) = resolve_source(&cameras);
-        assert_eq!(source, "primary");
+        let sources = resolve_configured_sources(&cameras);
+        assert_eq!(sources.rgb, "primary");
+        assert_eq!(sources.ir, "");
+        assert_eq!(sources.ir_node, "");
         assert_eq!(
-            kind,
-            CameraKind::Rgb {
-                source: "primary".to_string()
-            }
+            preferred_capture_source(&cameras),
+            ("primary".to_string(), false)
         );
     }
 
     #[test]
-    fn resolve_source_builds_v4l2src_pipeline_for_ir_node() {
+    fn configured_sources_resolve_an_ir_device_node() {
         let cameras = CameraConfig {
             rgb: "primary".to_string(),
             ir: "/dev/video2".to_string(),
             emitter_enabled: true,
             dark_luma_threshold: 30,
         };
-        let (source, kind) = resolve_source(&cameras);
-        assert_eq!(source, "/dev/video2");
+        let sources = resolve_configured_sources(&cameras);
+        assert_eq!(sources.rgb, "primary");
+        assert_eq!(sources.ir, "/dev/video2");
+        assert_eq!(sources.ir_node, "/dev/video2");
+    }
+
+    #[test]
+    fn preferred_capture_source_falls_back_to_ir_when_rgb_is_unset() {
+        let cameras = CameraConfig {
+            rgb: String::new(),
+            ir: "/dev/video2".to_string(),
+            emitter_enabled: true,
+            dark_luma_threshold: 30,
+        };
         assert_eq!(
-            kind,
-            CameraKind::Ir {
-                source: "/dev/video2".to_string(),
-                node: "/dev/video2".to_string()
-            }
+            preferred_capture_source(&cameras),
+            ("/dev/video2".to_string(), true)
         );
     }
 
@@ -1090,22 +1083,16 @@ mod tests {
     }
 
     #[test]
-    fn resolve_source_builds_pipewiresrc_pipeline_for_ir() {
+    fn configured_sources_leave_the_node_empty_for_a_pipewire_ir_source() {
         let cameras = CameraConfig {
             rgb: "primary".to_string(),
             ir: "pipewiresrc target-object=device-name".to_string(),
             emitter_enabled: true,
             dark_luma_threshold: 30,
         };
-        let (source, kind) = resolve_source(&cameras);
-        assert_eq!(source, "pipewiresrc target-object=device-name");
-        assert_eq!(
-            kind,
-            CameraKind::Ir {
-                source: "pipewiresrc target-object=device-name".to_string(),
-                node: String::new()
-            }
-        );
+        let sources = resolve_configured_sources(&cameras);
+        assert_eq!(sources.ir, "pipewiresrc target-object=device-name");
+        assert_eq!(sources.ir_node, "");
     }
 
     #[test]
