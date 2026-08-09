@@ -290,7 +290,7 @@ journalctl -u gazed -f | grep 'Face auth requested'
 
 Four things to keep in mind:
 
-- Upgrading Gaze does not restart `gazed`, and the scope is only honored by a daemon new enough to know about it. Until you restart the daemon or reboot, the delay keeps applying to every prompt. Run `sudo systemctl restart gazed` after upgrading if `screen_lock` appears to be ignored.
+- The scope is only honored by a daemon new enough to know about it. Package upgrades restart `gazed` if it was already running, but if you built or installed Gaze some other way and the old daemon is still live, the delay keeps applying to every prompt. Run `sudo systemctl restart gazed` if `screen_lock` appears to be ignored.
 - On resume from suspend, Gaze waits for whichever of `start_delay_ms` and `resume_grace_ms` is longer. The two do not stack.
 - `resume_grace_ms` ignores `start_delay_scope`. It exists so the display can repaint after suspend, which has nothing to do with which prompt is asking, so it still applies to the first authentication after a resume whatever that prompt is.
 - With a sequential PAM stack (`hyprlock-gaze`, the default), `pam_gaze.so` runs before the password module, so the delay also postpones the point at which a typed password is accepted. You can type during the delay, but your first Enter may be consumed while PAM is still inside Gaze, requiring a second press. This is the same behavior as the existing wait while a face scan is in progress. The simultaneous stack (`hyprlock-gaze-simultaneous`) prompts for the password in parallel and avoids it.
