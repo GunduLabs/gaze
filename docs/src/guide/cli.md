@@ -182,7 +182,32 @@ Show-only mode:
 gaze config --show
 ```
 
-Prints all current config values (security level, detector and recognizer model, threshold, camera sources, emitter state, dark-frame threshold, auth behavior, hybrid combining policy, enrollment limit and minimum face-size ratio, and liveness settings) without opening the editor.
+Prints all current config values without opening the editor: inference execution provider and device, security level, detector and recognizer model, RGB and IR thresholds, hybrid combining policy (both the raw value and what it resolves to), camera sources, emitter state, dark-frame threshold, auth behavior, enrollment limit and minimum face-size ratio, liveness settings, and whether template encryption is on.
+
+## Shell completions
+
+`gaze` generates its own completions at runtime, including the names of your
+enrolled faces for commands that take one. Add the line for your shell to its
+startup file:
+
+::: code-group
+
+```bash [bash]
+echo 'source <(COMPLETE=bash gaze)' >> ~/.bashrc
+```
+
+```zsh [zsh]
+echo 'source <(COMPLETE=zsh gaze)' >> ~/.zshrc
+```
+
+```fish [fish]
+echo 'COMPLETE=fish gaze | source' >> ~/.config/fish/config.fish
+```
+
+:::
+
+Start a new shell to pick them up. Nothing is installed to disk, so there is no
+completion file to keep in sync when you enroll or rename a face.
 
 ## Manage another user
 

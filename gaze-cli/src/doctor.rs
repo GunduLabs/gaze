@@ -804,24 +804,27 @@ fn check_desktop_integration(report: &mut Report) {
         let configured = config_path
             .as_ref()
             .and_then(|path| fs::read_to_string(path).ok())
-            .is_some_and(|contents| {
-                contents.lines().any(|line| {
-                    let line = line.split('#').next().unwrap_or_default();
-                    line.contains("pam_module")
-                        && (line.contains("hyprlock-gaze")
-                            || line.contains("hyprlock-gaze-simultaneous"))
-                })
-            });
+            .is_some_and(|contents| hyprlock_selects_gaze(&contents));
         if configured {
             report.pass("hyprlock", "configured to use a Gaze PAM service");
         } else {
             report.warning(
                 "hyprlock",
                 "the current user's hyprlock.conf does not select a Gaze PAM service",
-                "Set `pam_module = hyprlock-gaze` in the hyprlock general block.",
+                "Set `module = hyprlock-gaze` in the hyprlock `auth { pam { ... } }` block.",
             );
         }
     }
+}
+
+fn hyprlock_selects_gaze(contents: &str) -> bool {
+    contents.lines().any(|line| {
+        let line = line.split('#').next().unwrap_or_default();
+        let Some((key, value)) = line.split_once('=') else {
+            return false;
+        };
+        matches!(key.trim(), "module" | "pam_module") && value.trim().starts_with("hyprlock-gaze")
+    })
 }
 
 fn check_tpm(report: &mut Report, config: Option<&Config>) {
@@ -1398,6 +1401,30 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hyprlock_modern_pam_module_key_is_detected() {
+        let contents = "auth {\n    pam {\n        module = hyprlock-gaze\n    }\n}\n";
+        assert!(hyprlock_selects_gaze(contents));
+    }
+
+    #[test]
+    fn hyprlock_legacy_pam_module_key_is_detected() {
+        let contents = "general {\n    pam_module = hyprlock-gaze-simultaneous\n}\n";
+        assert!(hyprlock_selects_gaze(contents));
+    }
+
+    #[test]
+    fn hyprlock_without_gaze_is_not_detected() {
+        let contents = "auth {\n    pam {\n        module = hyprlock\n    }\n}\n";
+        assert!(!hyprlock_selects_gaze(contents));
+    }
+
+    #[test]
+    fn hyprlock_commented_out_module_is_not_detected() {
+        let contents = "auth {\n    pam {\n        # module = hyprlock-gaze\n    }\n}\n";
+        assert!(!hyprlock_selects_gaze(contents));
+    }
 
     fn credentials(gids: &[u32], dac_override: bool) -> DaemonCredentials {
         DaemonCredentials {
