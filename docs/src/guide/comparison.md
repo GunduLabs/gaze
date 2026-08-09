@@ -35,7 +35,7 @@ written by the maintainers of Gaze, so treat it as informed and neutral to the b
 | Guided multi-angle enrollment | Yes | Basic | Basic | Basic |
 | Built-in health check | Yes (one `doctor` command) | Partial | Partial | GUI status |
 | Camera sources | GStreamer / PipeWire | V4L2 device path | V4L2 device path | V4L2 device path |
-| Runs on older (pre-AVX2) CPUs | Yes (clients don't link ML runtime) | Yes | Varies | Varies |
+| Runs on older (pre-AVX2) CPUs | No (`gazed` requires AVX2; clients run anywhere) | Yes | Varies | Varies |
 | Packaging | deb / rpm / COPR / Arch / Nix / Flatpak / script | deb / AUR / COPR | deb / Nix / AUR | deb / rpm / AUR |
 | License | GPL-3.0-or-later | MIT | MIT | MIT |
 

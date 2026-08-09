@@ -269,6 +269,7 @@ in
             StateDirectoryMode = "0700";
             CacheDirectory = "gaze";
             UMask = "0077";
+            LimitCORE = 0;
             NoNewPrivileges = true;
             PrivateTmp = true;
             ProtectSystem = "strict";
@@ -276,9 +277,14 @@ in
               "/home"
               "/root"
             ];
+            ProtectClock = true;
+            ProtectHostname = true;
             ProtectKernelTunables = true;
             ProtectKernelModules = true;
             ProtectControlGroups = true;
+            ProtectKernelLogs = true;
+            RestrictNamespaces = true;
+            RestrictRealtime = true;
             RestrictSUIDSGID = true;
             LockPersonality = true;
             SystemCallArchitectures = "native";

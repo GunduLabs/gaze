@@ -22,15 +22,49 @@ gaze-gui
 
 Open the config dialog from the header-bar settings button.
 
-From there you can edit:
+The dialog mirrors `/etc/gaze/config.toml`, grouped the same way. Saving writes
+the file through the daemon, so it needs a polkit authorization.
 
-- Security level (`low`, `medium`, `high`, `maximum`, or custom models/threshold)
-- RGB camera source, IR camera device, and IR emitter
-- Dark-frame rejection cutoff
-- Maximum enrollment templates per face
-- Minimum enrollment face-size ratio (lower values allow enrollment from farther away)
-- Liveness anti-spoofing (enable, threshold, max frames)
-- Auth behavior (abort if SSH, abort if lid closed, require confirmation)
+**Security**
+
+- Security level (`low`, `medium`, `high`, `maximum`, or `custom`)
+- For `custom`: detector level, recognizer level, RGB and IR similarity thresholds
+
+**Hardware**
+
+- Inference execution provider, either ONNX Runtime directly or through OpenVINO
+- OpenVINO inference device
+
+Both offer only `cpu` on the released packages. The other values need a build
+compiled with the `openvino-config` Cargo feature. See
+[Configuration](/guide/configuration) for what those builds accept.
+
+**Cameras**
+
+- RGB camera source, IR camera source, and Force IR Emitter
+- Darkness cutoff, the dark-frame rejection threshold
+
+**Enrollment**
+
+- Max templates per face
+- Minimum face size ratio, where lower values allow enrollment from farther away
+
+**Liveness Anti-Spoofing**
+
+- Enable liveness spoof prevention, liveness threshold, liveness max frames
+
+**Auth**
+
+- Abort if SSH, abort if lid closed
+- Require confirmation on lock screen, require confirmation for elevated auth
+- Resume grace period and start delay, both in milliseconds
+- Start delay applies to, either every face auth or screen lockers only
+- Hybrid combining policy, used when both RGB and IR are enrolled
+
+**Storage**
+
+- Encrypt face templates, which seals enrolled templates with the TPM. See
+  [How it works](/guide/how-it-works) for what that protects against.
 
 ## Common tasks
 
