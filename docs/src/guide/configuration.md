@@ -138,10 +138,20 @@ RGB and IR similarity thresholds are independent for the custom level. The legac
 `hybrid_policy` (under `[security]`, only configurable when `level = "custom"`) controls how RGB and IR (infrared) authentication results are combined when templates are enrolled for both modes and both cameras are available.
 
 Supported policies:
-- `default`: uses the policy shown in the table above for the active level.
 - `or`: auth succeeds if either RGB or IR matches.
 - `fallback_on_dark`: requires both, unless RGB is too dark (below `dark_luma_threshold`), in which case only IR is required.
 - `and`: auth succeeds only if both RGB and IR match.
+- `default`: a synonym for `fallback_on_dark`. It does not resolve to the policy
+  the table above lists for the active level.
+
+To get the policy the table lists for a level, omit `hybrid_policy` entirely.
+The key is only read when `level = "custom"`, and a custom level with the key
+absent also resolves to `fallback_on_dark`.
+
+Both `fallback_on_dark` and `default` require RGB and IR to match when RGB was
+never attempted at all, for example when the RGB camera could not be opened.
+Only a frame that was captured and measured as too dark relaxes the requirement
+to IR alone.
 
 ## Select Camera Source
 
@@ -161,9 +171,13 @@ rgb = "pipewiresrc target-object=<pipewire-target>"
 
 `pipewiresrc` needs a PipeWire session to attach to. GDM's greeter runs its own
 user session and provides one, but greeters like KDE's `plasmalogin`, SDDM,
-greetd, and a plain TTY do not, so `primary` cannot capture RGB there. For those
-setups, point `rgb` at the camera directly, which uses `v4l2src` and needs no
-session:
+greetd, and a plain TTY do not. When the PipeWire source fails to open, Gaze logs
+`Opening the PipeWire camera failed` and falls back to the first matching V4L2
+node on its own, so `primary` still works in those greeters.
+
+Pinning `rgb` to the camera directly skips that fallback and uses `v4l2src`
+straight away. Prefer it when the machine has several cameras and you want a
+specific one, rather than as a workaround for a greeter without a session:
 
 ```toml
 [cameras]

@@ -47,8 +47,50 @@ unit = 4
 selector = 11
 query = "get_cur"
 size = 8
+
+[[emitter.off]]
+unit = 4
+selector = 10
+query = "set_cur"
+control_bytes = [0xff, 0, 0, 0, 0, 0, 0, 0]
+
+[[emitter.off]]
+unit = 4
+selector = 11
+query = "set_cur"
+control_bytes = [0x01, 0, 0, 0, 0, 0, 0, 0]
 ```
 
+A profile that defines `[[emitter.on]]` must also define `[[emitter.off]]`. The
+build script fails with `uses emitter.on but has no emitter.off` otherwise,
+which breaks the whole workspace build. Only the simple single-control format
+may omit its off sequence.
+
+`0bda-5767.toml` in this directory is the complete version of the profile above,
+with all five steps in each direction.
+
 Supported `query` values are `set_cur` and `get_cur`.
+
+Each step takes its payload from exactly one of:
+
+- `control_bytes`, the bytes to send
+- `payload`, an accepted alias for `control_bytes`
+- `size`, which sends that many zero bytes and is the usual choice for a
+  `get_cur` priming read
+
+## Forcing YUY2 on the IR node
+
+Some cameras report a pixel format on their IR node that they cannot actually
+stream. Set `requires_ir_yuy2` to make Gaze pin that node to YUY2:
+
+```toml
+[device]
+vendor_id        = 0x0BDA
+product_id       = 0x5767
+name             = "Realtek/Dell 0JCXG0 Integrated_Webcam_HD"
+requires_ir_yuy2 = true
+```
+
+It defaults to `false` and applies only to the IR node, never the color node.
 
 Gaze also has a safe runtime fallback for Microsoft Face Authentication XU controls: when no VID:PID profile exists, it probes read-only `GET_CUR` on selector `0x06` for the standard 9-byte `[1, 3, mode, 0, ...]` shape and uses `[1,3,2,0,...]`/`[1,3,1,0,...]` if found.

@@ -21,7 +21,9 @@ the Flatpak.
 | `packages.<system>.gaze` | `gazed` daemon, `gaze` CLI, and the PAM modules |
 | `packages.<system>.gaze-gui` | GTK4/Adwaita configuration GUI |
 | `packages.<system>.gaze-gnome-extension` | GNOME Shell extension |
-| `nixosModules.default` | NixOS module (`services.gaze.*`) |
+| `packages.<system>.default` | Alias for `packages.<system>.gaze` |
+| `nixosModules.gaze` | NixOS module (`services.gaze.*`) |
+| `nixosModules.default` | Alias for `nixosModules.gaze` |
 | `overlays.default` | Adds the three packages to `pkgs` |
 | `devShells.<system>.default` | Development shell with the full build environment |
 
@@ -100,7 +102,9 @@ input to a revision with a newer `onnxruntime` instead of overriding `follows`.
 | `security.pam.services.<name>.gaze.simultaneous` | `false` | Use `pam_gaze_grosshack.so` (face and password prompt at the same time) instead of sequential `pam_gaze.so` |
 | `security.pam.services.<name>.gaze.order` | `null` | Explicit rule `order`; `null` places gaze ahead of `pam_fprintd` and `pam_unix` |
 | `services.gaze.gui.enable` | `false` | Install `gaze-gui` |
+| `services.gaze.gui.package` | flake's `gaze-gui` | GUI package |
 | `services.gaze.gnome.enable` | `false` | Install the GNOME Shell extension and the `gdm-face` PAM service |
+| `services.gaze.gnome.extensionPackage` | flake's `gaze-gnome-extension` | GNOME Shell extension package |
 | `services.gaze.gnome.enableForUsers` | `true` | Turn the extension and lock screen face auth on in every GNOME user session via dconf defaults. Set to `false` if you manage `enabled-extensions` yourself |
 | `services.gaze.gnome.gdmFaceLogin` | `false` | Also enable face auth at the GDM login screen (read the [GNOME guide](/guide/gnome) first) |
 | `services.gaze.tpm.tcti` | `null` | `TPM2TOOLS_TCTI` for the daemon, e.g. `"device:/dev/tpm0"`. Only needed when neither `/dev/tpmrm0` nor `/dev/tpm0` is the right node |
