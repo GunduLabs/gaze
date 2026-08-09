@@ -17,7 +17,9 @@
 # "openvino" requires a Gaze build compiled with the openvino Cargo feature
 # and keeps the ONNX models while sending supported work through OpenVINO.
 execution_provider = "cpu"
-# Valid values: "cpu", "gpu", "npu". Use "cpu" with execution_provider = "cpu".
+# "cpu" is the only value the released packages accept. "gpu" and "npu" require
+# a Gaze build compiled with the openvino-config Cargo feature, and need
+# execution_provider = "openvino".
 device = "cpu"
 
 [security]

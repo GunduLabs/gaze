@@ -32,7 +32,7 @@ export default defineVersionedConfig({
       },
     ],
   },
-  ignoreDeadLinks: true,
+  ignoreDeadLinks: false,
   title: "Gaze",
   description: "Facial authentication for Linux",
   head: [
