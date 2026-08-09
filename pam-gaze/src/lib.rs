@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #![allow(clippy::missing_safety_doc)]
+use gaze_core::dbus::GazeProxy;
 use pam_gaze_core::*;
 use std::os::raw::{c_char, c_int};
 use std::time::Duration;
@@ -22,13 +23,15 @@ fn confirm_via_gnome_extension(pamh: PamHandle) -> c_int {
 unsafe fn confirm_via_polkit_dialog(
     pamh: PamHandle,
     username: &str,
+    proxy: &GazeProxy<'static>,
     rt: &tokio::runtime::Runtime,
 ) -> c_int {
     let active_uid = rt.block_on(active_or_user_uid(username));
     let de = active_uid
         .map(detect_desktop_environment)
         .unwrap_or_else(|| "Other".to_string());
-    let extension_active = de == "GNOME" && rt.block_on(gnome_extension_active(active_uid));
+    let extension_active =
+        de == "GNOME" && rt.block_on(gnome_extension_active_on(proxy, active_uid));
 
     // No confirm channel without the extension; let the stack fall
     // through to password auth.
@@ -60,7 +63,9 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     let is_polkit = matches!(service, Some(ref s) if s == "polkit-1");
 
     let matched = rt.block_on(async {
-        match enrollment_disposition(has_enrolled_faces(&username).await) {
+        let (config, proxy) = setup_auth_env().await.map_err(|_| PAM_AUTHINFO_UNAVAIL)?;
+
+        match enrollment_disposition(has_enrolled_faces_on(&proxy, &username).await) {
             EnrollmentDisposition::Ignore => return Err(PAM_IGNORE),
             EnrollmentDisposition::Unavailable => return Err(PAM_AUTHINFO_UNAVAIL),
             EnrollmentDisposition::Continue => {}
@@ -73,19 +78,15 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         };
         unsafe { say(pamh, prompt) };
 
-        let loaded_auth = setup_auth_env().await.ok().map(|(config, _)| config.auth);
-        let budget = match loaded_auth.as_ref() {
-            Some(auth) => camera_auth_timeout(auth, service.as_deref()),
-            None => Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS),
-        };
+        let budget = camera_auth_timeout(&config.auth, service.as_deref());
 
         match timeout(
             budget,
-            authenticate_biometric_with_status(&username, service.as_deref()),
+            authenticate_biometric_with_status_on(&proxy, &username, service.as_deref()),
         )
         .await
         {
-            Ok(Ok((AuthOutcome::Match, _))) => Ok(loaded_auth),
+            Ok(Ok((AuthOutcome::Match, _))) => Ok((config.auth, proxy)),
             Ok(Ok((AuthOutcome::NoMatch, _))) => {
                 unsafe { say(pamh, FACE_NOT_RECOGNIZED) };
                 Err(PAM_AUTH_ERR)
@@ -104,17 +105,17 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
             }
         }
     });
-    let loaded_auth = match matched {
-        Ok(auth) => auth,
+    let (loaded_auth, proxy) = match matched {
+        Ok(session) => session,
         Err(code) => return code,
     };
 
-    if !confirmation_required(loaded_auth.as_ref(), service.as_deref()) {
+    if !confirmation_required(Some(&loaded_auth), service.as_deref()) {
         return PAM_SUCCESS;
     }
 
     if is_polkit {
-        return unsafe { confirm_via_polkit_dialog(pamh, &username, &rt) };
+        return unsafe { confirm_via_polkit_dialog(pamh, &username, &proxy, &rt) };
     }
 
     if has_controlling_tty() {
@@ -133,7 +134,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     // extension directly rather than trusting DE detection on its transient
     // processes; otherwise GDM silently bypasses Require Confirmation.
     let extension_active =
-        (is_greeter || de == "GNOME") && rt.block_on(gnome_extension_active(uid));
+        (is_greeter || de == "GNOME") && rt.block_on(gnome_extension_active_on(&proxy, uid));
 
     match graphical_confirm_decision(&de, extension_active, is_greeter) {
         GraphicalConfirm::GnomeExtension => confirm_via_gnome_extension(pamh),

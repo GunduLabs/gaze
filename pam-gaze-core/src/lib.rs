@@ -402,12 +402,19 @@ pub async fn active_confirm_target(username: &str) -> (Option<u32>, bool) {
     }
 }
 
-pub async fn gnome_extension_active(uid: Option<u32>) -> bool {
+pub async fn gnome_extension_active_on(proxy: &GazeProxy<'_>, uid: Option<u32>) -> bool {
     let Some(uid) = uid else {
         return false;
     };
+    proxy.is_extension_active(uid).await.unwrap_or(false)
+}
+
+pub async fn gnome_extension_active(uid: Option<u32>) -> bool {
+    if uid.is_none() {
+        return false;
+    }
     match setup_auth_env().await {
-        Ok((_config, proxy)) => proxy.is_extension_active(uid).await.unwrap_or(false),
+        Ok((_config, proxy)) => gnome_extension_active_on(&proxy, uid).await,
         Err(_) => false,
     }
 }
@@ -462,16 +469,20 @@ pub async fn setup_auth_env() -> Result<(Config, GazeProxy<'static>), c_int> {
     Ok((config, proxy))
 }
 
-pub async fn has_enrolled_faces(username: &str) -> anyhow::Result<bool> {
-    let (_config, proxy) = setup_auth_env()
-        .await
-        .map_err(|e| anyhow::anyhow!("PAM error: {}", e))?;
+pub async fn has_enrolled_faces_on(proxy: &GazeProxy<'_>, username: &str) -> anyhow::Result<bool> {
     match proxy.list_faces(username).await {
         // Treat unenrolled users as having no faces.
         Ok(faces) => Ok(!faces.is_empty()),
         Err(ref err) if gaze_core::dbus::dbus_is_file_not_found(err) => Ok(false),
         Err(err) => Err(err.into()),
     }
+}
+
+pub async fn has_enrolled_faces(username: &str) -> anyhow::Result<bool> {
+    let (_config, proxy) = setup_auth_env()
+        .await
+        .map_err(|e| anyhow::anyhow!("PAM error: {}", e))?;
+    has_enrolled_faces_on(&proxy, username).await
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -565,7 +576,14 @@ pub async fn authenticate_biometric_with_status(
     let (_config, proxy) = setup_auth_env()
         .await
         .map_err(|e| anyhow::anyhow!("PAM error: {}", e))?;
+    authenticate_biometric_with_status_on(&proxy, username, service).await
+}
 
+pub async fn authenticate_biometric_with_status_on(
+    proxy: &GazeProxy<'static>,
+    username: &str,
+    service: Option<&str>,
+) -> anyhow::Result<(AuthOutcome, Option<gaze_core::dbus::CaptureStatus>)> {
     proxy
         .claim(username)
         .await
@@ -584,7 +602,7 @@ pub async fn authenticate_biometric_with_status(
         .receive_face_status()
         .await
         .map_err(|e| anyhow::anyhow!("Stream failed: {}", e))?;
-    request_verify_start(&proxy, service).await?;
+    request_verify_start(proxy, service).await?;
 
     use futures::StreamExt;
     let mut last_status: Option<gaze_core::dbus::CaptureStatus> = None;
