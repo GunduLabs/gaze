@@ -39,6 +39,37 @@ gsettings set org.gnome.shell enabled-extensions \
 gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
+## Retry behavior
+
+The extension decides how many times face authentication is retried within one
+authentication cycle. Both settings live in the extension preferences under
+**Behavior**, and both are per dconf profile, so GDM and your desktop session can
+differ.
+
+| Setting | dconf key | Values | Default |
+|---|---|---|---|
+| Face retry mode | `face-retry-mode` | `disabled`, `fixed`, `infinite` | `fixed` |
+| Maximum face tries | `max-face-tries` | 2 to 20 | 3 |
+
+- `disabled`: one attempt. After it fails, face auth stops for that cycle and you
+  finish with your password.
+- `fixed`: retries until `max-face-tries` failures, then stops for that cycle.
+- `infinite`: keeps retrying for as long as the prompt is open. The password entry
+  stays usable throughout.
+
+`max-face-tries` only applies in `fixed` mode, and the extension clamps it to a
+minimum of 2 even if dconf holds a lower value.
+
+From a terminal:
+
+```bash
+gsettings set org.gnome.shell.extensions.gaze face-retry-mode infinite
+gsettings set org.gnome.shell.extensions.gaze max-face-tries 5
+```
+
+To set these for the GDM login screen, write them into the same
+`/etc/dconf/db/gdm.d/99-gaze` override described below and run `sudo dconf update`.
+
 ## Create a face profile
 
 Open the Gaze extension settings from GNOME Extensions or Extension Manager, then use **Face profiles** to create or refine a profile for your current user. The profile name defaults to `default`, matching the CLI quick-start flow.

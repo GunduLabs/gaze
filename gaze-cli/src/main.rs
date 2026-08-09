@@ -15,8 +15,8 @@ use gaze_core::config::{
     AuthConfig, Config, DEFAULT_SECURITY_THRESHOLD, HYBRID_POLICY_OPTIONS,
     INFERENCE_DEVICE_OPTIONS, INFERENCE_EXECUTION_PROVIDER_OPTIONS, MAX_ENROLLMENT_FACE_SIZE_RATIO,
     MAX_LIVENESS_THRESHOLD, MAX_SECURITY_THRESHOLD, MIN_ENROLLMENT_FACE_SIZE_RATIO,
-    MIN_LIVENESS_THRESHOLD, MIN_SECURITY_THRESHOLD, MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS,
-    START_DELAY_SCOPE_LABELS, SecurityLevel,
+    MIN_LIVENESS_MAX_FRAMES, MIN_LIVENESS_THRESHOLD, MIN_SECURITY_THRESHOLD, MODEL_QUALITY_OPTIONS,
+    SECURITY_LEVEL_OPTIONS, START_DELAY_SCOPE_LABELS, SecurityLevel,
 };
 use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon, connect_gaze,
@@ -530,8 +530,17 @@ async fn run_config_wizard(
             .parse::<f64>()
             .unwrap_or(0.8);
         config.liveness.max_frames = Input::with_theme(&theme)
-            .with_prompt("Liveness max frames")
+            .with_prompt(format!(
+                "Liveness max frames (min {MIN_LIVENESS_MAX_FRAMES})"
+            ))
             .default(config.liveness.max_frames)
+            .validate_with(|value: &u32| {
+                if *value >= MIN_LIVENESS_MAX_FRAMES {
+                    Ok(())
+                } else {
+                    Err(format!("must be at least {MIN_LIVENESS_MAX_FRAMES}"))
+                }
+            })
             .interact_text()?;
     }
 
@@ -1317,12 +1326,12 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     }
 
     plan.push((
-        "Remove hyprlock pam_module references",
+        "Remove hyprlock Gaze PAM references",
         "for d in /home/*/.config/hypr /root/.config/hypr; do \
           f=\"$d/hyprlock.conf\"; \
           [ -f \"$f\" ] || continue; \
           sudo sed -i.gaze-uninstall-bak \
-            '/^\\s*pam_module\\s*=\\s*hyprlock-gaze\\(-simultaneous\\)\\?\\s*$/d' \"$f\" || true; \
+            '/^\\s*\\(pam_\\)\\?module\\s*=\\s*hyprlock-gaze\\(-simultaneous\\)\\?\\s*$/d' \"$f\" || true; \
           done"
             .into(),
     ));

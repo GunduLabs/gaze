@@ -58,6 +58,17 @@ impl CaptureStatus {
             Self::Unused => 0,
         }
     }
+
+    pub fn indicates_face(self) -> bool {
+        self.priority() >= Self::Clipped.priority()
+    }
+
+    pub fn is_framing_hint(self) -> bool {
+        matches!(
+            self,
+            Self::Clipped | Self::NotCentered | Self::TooFar | Self::TooClose
+        )
+    }
 }
 
 #[derive(
@@ -373,6 +384,54 @@ pub trait Gaze {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mis_framed_face_still_counts_as_a_detected_face() {
+        for status in [
+            CaptureStatus::Clipped,
+            CaptureStatus::NotCentered,
+            CaptureStatus::TooFar,
+            CaptureStatus::TooClose,
+            CaptureStatus::Ready,
+            CaptureStatus::Usable,
+        ] {
+            assert!(status.indicates_face(), "{status:?} should indicate a face");
+        }
+        for status in [
+            CaptureStatus::Unused,
+            CaptureStatus::NoFace,
+            CaptureStatus::TooDark,
+        ] {
+            assert!(
+                !status.indicates_face(),
+                "{status:?} should not indicate a face"
+            );
+        }
+    }
+
+    #[test]
+    fn only_framing_problems_are_framing_hints() {
+        for status in [
+            CaptureStatus::Clipped,
+            CaptureStatus::NotCentered,
+            CaptureStatus::TooFar,
+            CaptureStatus::TooClose,
+        ] {
+            assert!(status.is_framing_hint(), "{status:?} is a framing hint");
+        }
+        for status in [
+            CaptureStatus::Unused,
+            CaptureStatus::NoFace,
+            CaptureStatus::TooDark,
+            CaptureStatus::Ready,
+            CaptureStatus::Usable,
+        ] {
+            assert!(
+                !status.is_framing_hint(),
+                "{status:?} is not a framing hint"
+            );
+        }
+    }
 
     #[derive(Clone, Debug, Serialize, Deserialize, Value, OwnedValue, Type)]
     struct OldBenchmarkResult {
