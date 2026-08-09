@@ -49,6 +49,10 @@ rpm:
   signature:
     key_file: "${NFPM_SIGNING_KEY_FILE}"
 
+archlinux:
+  scripts:
+    postupgrade: "packaging/postinst-hyprlock.sh"
+
 scripts:
   postinstall: "packaging/postinst-hyprlock.sh"
   postremove: "packaging/postrm-hyprlock.sh"

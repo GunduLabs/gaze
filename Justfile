@@ -288,6 +288,16 @@ _verify-package format:
             echo "verify: FAIL: $(basename "$pkg") is missing post_upgrade(); arch upgrades will skip postinst-arch.sh" >&2
             exit 1
         fi
+        for name in gaze-gnome-extension gaze-hyprlock; do
+            pkg=$(newest "dist/packages/${name}-[0-9]*.pkg.tar.*")
+            [ -n "$pkg" ] || { echo "verify: no arch $name package in dist/packages" >&2; exit 1; }
+            if tar -xOf "$pkg" .INSTALL 2>/dev/null | grep -q 'post_upgrade *()'; then
+                echo "verify: $(basename "$pkg") embeds post_upgrade() ✔"
+            else
+                echo "verify: FAIL: $(basename "$pkg") is missing post_upgrade(); arch upgrades will skip its scriptlet" >&2
+                exit 1
+            fi
+        done
         for name in gaze gaze-gui; do
             pkg=$(newest "dist/packages/${name}-[0-9]*.pkg.tar.*")
             [ -n "$pkg" ] || { echo "verify: no arch $name package in dist/packages" >&2; exit 1; }

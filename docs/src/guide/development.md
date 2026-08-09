@@ -18,10 +18,13 @@ you're not on Linux, skip straight to [Building without a Linux host (Docker)](#
 - `nfpm` (https://nfpm.goreleaser.com) for packaging
 - `flatpak` and `flatpak-builder` (https://github.com/flatpak/flatpak-builder) for the Flatpak build. See [Flatpak build](#flatpak-build) below.
 
-The repo pins versions for `rust`, `just`, `nfpm`, plus `bun`/`node` (used by the docs site) and
-`rust-analyzer`, in `mise.toml`. If you use [mise](https://mise.jdx.dev), `mise trust && mise
-install` from the repo root installs all of the above at the pinned versions instead of doing it
-by hand. Either way you still need the distro system libraries below; mise doesn't manage those.
+`mise.toml` lists `rust`, `just`, `nfpm`, plus `bun`/`node` (used by the docs site) and
+`rust-analyzer`. If you use [mise](https://mise.jdx.dev), `mise trust && mise install` from the
+repo root installs all of the above instead of doing it by hand. Every tool is set to `latest`
+rather than a pinned version, so mise gives you current releases and not necessarily the
+versions CI runs. When you need to match CI exactly, read the versions out of
+`.github/workflows/ci.yml`. Either way you still need the distro system libraries below; mise
+doesn't manage those.
 
 ::: code-group
 

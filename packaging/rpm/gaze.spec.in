@@ -23,7 +23,7 @@ Name:           gaze
 Version:        ${VERSION}
 Release:        ${PACKAGE_RELEASE}%{?dist}
 Summary:        Daemon, CLI, and PAM integration for Gaze
-License:        MIT
+License:        GPL-3.0-or-later
 URL:            https://gaze.gundulabs.com
 Vendor:         Gundu Labs
 
@@ -166,7 +166,14 @@ install -Dpm 0644 packaging/pam/hyprlock-gaze-simultaneous %{buildroot}%{_syscon
 desktop-file-validate %{buildroot}%{_datadir}/applications/com.gundulabs.Gaze.desktop
 
 %post
+%systemd_post gazed.service
 ${SCRIPTLET_MAIN_POST}
+
+%preun
+%systemd_preun gazed.service
+
+%postun
+%systemd_postun gazed.service
 
 %post gnome-extension
 ${SCRIPTLET_EXTENSION_POST}
