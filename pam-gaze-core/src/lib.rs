@@ -639,52 +639,84 @@ pub fn service_defers_to_face_service(service: Option<&str>) -> bool {
     }
 }
 
-pub fn detect_desktop_environment(uid: u32) -> String {
+const GNOME_BINARIES: [&str; 1] = ["gnome-shell"];
+const KDE_BINARIES: [&str; 5] = [
+    "plasmashell",
+    "kwin_wayland",
+    "kwin_x11",
+    "lxqt-policykit-agent",
+    "lxqt-policykit",
+];
+const HYPRLAND_BINARIES: [&str; 2] = ["hyprland", "Hyprland"];
+
+pub fn binary_is_trusted(owner_uid: u32, mode: u32) -> bool {
+    owner_uid == 0 && mode & 0o022 == 0
+}
+
+pub fn system_binary_path(link: &str) -> &str {
+    link.strip_suffix(" (deleted)").unwrap_or(link)
+}
+
+pub fn desktop_from_binaries<I: IntoIterator<Item = String>>(names: I) -> String {
+    let mut is_gnome = false;
     let mut is_kde = false;
     let mut is_hyprland = false;
-    let mut is_gnome = false;
 
-    if let Ok(entries) = std::fs::read_dir("/proc") {
-        for entry in entries.flatten() {
-            if let Ok(metadata) = entry.metadata()
-                && metadata.is_dir()
-            {
-                let path = entry.path();
-                if let Some(pid_str) = path.file_name().and_then(|s| s.to_str())
-                    && pid_str.chars().all(|c| c.is_ascii_digit())
-                {
-                    use std::os::unix::fs::MetadataExt;
-                    if metadata.uid() == uid
-                        && let Ok(comm) = std::fs::read_to_string(path.join("comm"))
-                    {
-                        let comm_trim = comm.trim();
-                        if comm_trim == "plasmashell"
-                            || comm_trim == "kwin_wayland"
-                            || comm_trim == "kwin_x11"
-                            || comm_trim == "lxqt-policykit-agent"
-                            || comm_trim == "lxqt-policykit"
-                        {
-                            is_kde = true;
-                        } else if comm_trim == "hyprland" || comm_trim == "Hyprland" {
-                            is_hyprland = true;
-                        } else if comm_trim == "gnome-shell" {
-                            is_gnome = true;
-                        }
-                    }
-                }
-            }
+    for name in names {
+        let name = name.as_str();
+        if GNOME_BINARIES.contains(&name) {
+            is_gnome = true;
+        } else if KDE_BINARIES.contains(&name) {
+            is_kde = true;
+        } else if HYPRLAND_BINARIES.contains(&name) {
+            is_hyprland = true;
         }
     }
 
-    if is_kde {
+    if is_gnome {
+        "GNOME".to_string()
+    } else if is_kde {
         "KDE".to_string()
     } else if is_hyprland {
         "Hyprland".to_string()
-    } else if is_gnome {
-        "GNOME".to_string()
     } else {
         "Other".to_string()
     }
+}
+
+fn trusted_binary_name(proc_entry: &std::path::Path) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+
+    let link = std::fs::read_link(proc_entry.join("exe")).ok()?;
+    let exe = std::path::Path::new(system_binary_path(link.to_str()?));
+    let metadata = std::fs::metadata(exe).ok()?;
+    if !binary_is_trusted(metadata.uid(), metadata.mode()) {
+        return None;
+    }
+    Some(exe.file_name()?.to_str()?.to_string())
+}
+
+pub fn detect_desktop_environment(uid: u32) -> String {
+    use std::os::unix::fs::MetadataExt;
+
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return "Other".to_string();
+    };
+
+    let names = entries.flatten().filter_map(|entry| {
+        let metadata = entry.metadata().ok()?;
+        if !metadata.is_dir() || metadata.uid() != uid {
+            return None;
+        }
+        let path = entry.path();
+        let pid = path.file_name()?.to_str()?;
+        if !pid.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        trusted_binary_name(&path)
+    });
+
+    desktop_from_binaries(names)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -714,6 +746,59 @@ pub fn graphical_confirm_decision(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn only_root_owned_unwritable_binaries_are_trusted() {
+        assert!(binary_is_trusted(0, 0o755));
+        assert!(binary_is_trusted(0, 0o555));
+        assert!(!binary_is_trusted(1000, 0o755));
+        assert!(!binary_is_trusted(0, 0o775));
+        assert!(!binary_is_trusted(0, 0o777));
+    }
+
+    #[test]
+    fn a_replaced_binary_still_resolves_to_its_path() {
+        assert_eq!(
+            system_binary_path("/usr/bin/gnome-shell (deleted)"),
+            "/usr/bin/gnome-shell"
+        );
+        assert_eq!(
+            system_binary_path("/usr/bin/gnome-shell"),
+            "/usr/bin/gnome-shell"
+        );
+    }
+
+    #[test]
+    fn each_desktop_is_recognised_by_its_binary() {
+        assert_eq!(desktop_from_binaries(names(&["gnome-shell"])), "GNOME");
+        assert_eq!(desktop_from_binaries(names(&["plasmashell"])), "KDE");
+        assert_eq!(desktop_from_binaries(names(&["Hyprland"])), "Hyprland");
+        assert_eq!(desktop_from_binaries(names(&["sleep", "bash"])), "Other");
+    }
+
+    #[test]
+    fn a_long_binary_name_is_no_longer_truncated_away() {
+        assert_eq!(
+            desktop_from_binaries(names(&["lxqt-policykit-agent"])),
+            "KDE"
+        );
+    }
+
+    #[test]
+    fn an_ambiguous_session_takes_the_strictest_desktop() {
+        assert_eq!(
+            desktop_from_binaries(names(&["plasmashell", "gnome-shell"])),
+            "GNOME"
+        );
+        assert_eq!(
+            desktop_from_binaries(names(&["Hyprland", "gnome-shell"])),
+            "GNOME"
+        );
+    }
 
     #[test]
     fn pre_auth_delay_extends_the_camera_budget_instead_of_consuming_it() {
