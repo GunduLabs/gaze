@@ -2994,7 +2994,7 @@ impl AuthDaemon {
         Ok(true)
     }
 
-    #[zbus(property)]
+    #[zbus(property(emits_changed_signal = "invalidates"))]
     async fn config(&self, #[zbus(header)] header: Option<Header<'_>>) -> fdo::Result<Config> {
         let header =
             header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
