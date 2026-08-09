@@ -34,27 +34,15 @@ async fn authenticate_biometric_with_timeout(
 
 extern "C" fn interrupt_noop_handler(_sig: c_int) {}
 
-unsafe fn install_interrupt_handler() -> Option<libc::sigaction> {
-    unsafe {
-        let mut new_action: libc::sigaction = std::mem::zeroed();
-        new_action.sa_sigaction = interrupt_noop_handler as *const () as usize;
-        libc::sigemptyset(&mut new_action.sa_mask);
-        new_action.sa_flags = 0;
-        let mut old_action: libc::sigaction = std::mem::zeroed();
-        if libc::sigaction(libc::SIGUSR1, &new_action, &mut old_action) == 0 {
-            Some(old_action)
-        } else {
-            None
-        }
-    }
-}
-
-unsafe fn restore_interrupt_handler(old: Option<libc::sigaction>) {
-    if let Some(old) = old {
-        unsafe {
-            libc::sigaction(libc::SIGUSR1, &old, std::ptr::null_mut());
-        }
-    }
+fn ensure_interrupt_handler() {
+    static INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    INSTALLED.get_or_init(|| unsafe {
+        let mut action: libc::sigaction = std::mem::zeroed();
+        action.sa_sigaction = interrupt_noop_handler as *const () as usize;
+        libc::sigemptyset(&mut action.sa_mask);
+        action.sa_flags = 0;
+        libc::sigaction(libc::SIGUSR1, &action, std::ptr::null_mut());
+    });
 }
 
 enum PromptUnblock {
@@ -73,23 +61,18 @@ fn signal_prompt_until_finished(
     tid: libc::pthread_t,
     deadline: Duration,
 ) -> bool {
-    let old_handler = unsafe { install_interrupt_handler() };
+    ensure_interrupt_handler();
     let start = std::time::Instant::now();
 
-    let finished = {
-        let (lock, condvar) = &**state;
-        let mut shared_state = lock.lock();
-        while !shared_state.finished && start.elapsed() < deadline {
-            unsafe {
-                libc::pthread_kill(tid, libc::SIGUSR1);
-            }
-            condvar.wait_for(&mut shared_state, PROMPT_SIGNAL_INTERVAL);
+    let (lock, condvar) = &**state;
+    let mut shared_state = lock.lock();
+    while !shared_state.finished && start.elapsed() < deadline {
+        unsafe {
+            libc::pthread_kill(tid, libc::SIGUSR1);
         }
-        shared_state.finished
-    };
-
-    unsafe { restore_interrupt_handler(old_handler) };
-    finished
+        condvar.wait_for(&mut shared_state, PROMPT_SIGNAL_INTERVAL);
+    }
+    shared_state.finished
 }
 
 fn retire_prompt(state: &SharedAuthState, prompt_thread: thread::JoinHandle<()>) {
