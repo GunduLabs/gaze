@@ -4,7 +4,7 @@
 use console::{Term, style};
 use gaze_core::config::{
     CONFIG_PATH, Config, MAX_LIVENESS_THRESHOLD, MIN_LIVENESS_MAX_FRAMES, MIN_LIVENESS_THRESHOLD,
-    SecurityField,
+    SecurityField, unknown_config_keys,
 };
 use gaze_core::dbus::{
     GazeProxy, dbus_error_message, dbus_is_file_not_found, dbus_is_not_activatable,
@@ -311,10 +311,24 @@ fn check_config(report: &mut Report) -> Option<Config> {
 
     let config = match Config::load_from(CONFIG_PATH) {
         Ok(config) => {
-            report.pass(
-                "Configuration",
-                format!("{CONFIG_PATH} parses successfully"),
-            );
+            let unknown = fs::read_to_string(CONFIG_PATH)
+                .map(|contents| unknown_config_keys(&contents))
+                .unwrap_or_default();
+            if unknown.is_empty() {
+                report.pass(
+                    "Configuration",
+                    format!("{CONFIG_PATH} parses successfully"),
+                );
+            } else {
+                report.warning(
+                    "Configuration",
+                    format!(
+                        "{CONFIG_PATH} parses, but Gaze does not read: {}",
+                        unknown.join(", ")
+                    ),
+                    "Remove or correct those keys; they have no effect, so a misspelled setting is silently off.",
+                );
+            }
             config
         }
         Err(err)
