@@ -113,16 +113,16 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         return PAM_SUCCESS;
     }
 
+    if is_polkit {
+        return unsafe { confirm_via_polkit_dialog(pamh, &username, &rt) };
+    }
+
     if has_controlling_tty() {
         return if unsafe { confirm_authentication(pamh) } {
             PAM_SUCCESS
         } else {
             PAM_AUTH_ERR
         };
-    }
-
-    if is_polkit {
-        return unsafe { confirm_via_polkit_dialog(pamh, &username, &rt) };
     }
 
     let (uid, is_greeter) = rt.block_on(active_confirm_target(&username));
