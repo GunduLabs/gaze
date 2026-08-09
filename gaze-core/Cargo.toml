@@ -41,6 +41,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_plain = "1.0.2"
 tracing = "0.1.44"
 toml = "1.1.4"
+toml_edit = "0.25.13"
 gstreamer = "0.25.3"
 gstreamer-app = "0.25.2"
 gstreamer-video = "0.25.3"

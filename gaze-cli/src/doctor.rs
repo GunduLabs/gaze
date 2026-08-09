@@ -338,7 +338,9 @@ fn check_config(report: &mut Report) -> Option<Config> {
         {
             report.pass(
                 "Configuration",
-                format!("{CONFIG_PATH} is private; values will be checked through gazed"),
+                format!(
+                    "{CONFIG_PATH} is not readable here; values are checked through gazed, but the file itself is not inspected for unknown keys"
+                ),
             );
             return None;
         }

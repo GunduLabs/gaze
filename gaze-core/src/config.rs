@@ -4,7 +4,7 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use zvariant::{OwnedValue, Type, Value};
 
@@ -38,6 +38,7 @@ pub const MAX_SECURITY_THRESHOLD: f64 = 0.99;
 pub const MIN_LIVENESS_THRESHOLD: f64 = 0.10;
 pub const MAX_LIVENESS_THRESHOLD: f64 = 1.0;
 pub const MIN_LIVENESS_MAX_FRAMES: u32 = 6;
+const DEFAULT_CONFIG_MODE: u32 = 0o644;
 
 fn default_level() -> String {
     "medium".to_string()
@@ -965,8 +966,17 @@ impl Config {
     }
 
     pub fn save_to(&self, path: &str) -> anyhow::Result<()> {
-        let encoded = toml::to_string_pretty(self).context("failed to serialize config")?;
         let path = Path::new(path);
+        let existing = std::fs::read_to_string(path).ok();
+        let existing_mode = std::fs::metadata(path)
+            .ok()
+            .map(|meta| meta.permissions().mode() & 0o777);
+
+        let encoded = self
+            .rewrite_preserving_comments(existing.as_deref())
+            .unwrap_or_else(|| {
+                toml::to_string_pretty(self).unwrap_or_else(|_| String::from("# unwritable\n"))
+            });
         let parent = path
             .parent()
             .context("config path must have a parent directory")?;
@@ -995,10 +1005,72 @@ impl Config {
                 .with_context(|| format!("failed to write config file: {}", path.display()));
         }
         drop(file);
+        let target_mode = existing_mode.unwrap_or(DEFAULT_CONFIG_MODE);
+        if let Err(err) =
+            std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(target_mode))
+        {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(err).with_context(|| {
+                format!("failed to set mode {target_mode:o} on {}", path.display())
+            });
+        }
         std::fs::rename(&tmp_path, path)
             .with_context(|| format!("failed to replace config file: {}", path.display()))?;
         Ok(())
     }
+
+    fn rewrite_preserving_comments(&self, existing: Option<&str>) -> Option<String> {
+        let mut doc = existing?.parse::<toml_edit::DocumentMut>().ok()?;
+        let toml::Value::Table(desired) = toml::Value::try_from(self).ok()? else {
+            return None;
+        };
+        merge_into_toml_table(doc.as_table_mut(), &desired).then(|| doc.to_string())
+    }
+}
+
+fn toml_value_to_edit(value: &toml::Value) -> Option<toml_edit::Value> {
+    Some(match value {
+        toml::Value::String(v) => v.clone().into(),
+        toml::Value::Integer(v) => (*v).into(),
+        toml::Value::Float(v) => (*v).into(),
+        toml::Value::Boolean(v) => (*v).into(),
+        _ => return None,
+    })
+}
+
+fn merge_into_toml_table(target: &mut toml_edit::Table, desired: &toml::Table) -> bool {
+    for (key, value) in desired {
+        match value {
+            toml::Value::Table(sub) => {
+                if !target.contains_key(key) {
+                    target.insert(key, toml_edit::Item::Table(toml_edit::Table::new()));
+                }
+                let Some(sub_target) = target.get_mut(key).and_then(|item| item.as_table_mut())
+                else {
+                    return false;
+                };
+                if !merge_into_toml_table(sub_target, sub) {
+                    return false;
+                }
+            }
+            scalar => {
+                let Some(new_value) = toml_value_to_edit(scalar) else {
+                    return false;
+                };
+                match target.get_mut(key).and_then(|item| item.as_value_mut()) {
+                    Some(slot) => {
+                        let decor = slot.decor().clone();
+                        *slot = new_value;
+                        *slot.decor_mut() = decor;
+                    }
+                    None => {
+                        target.insert(key, toml_edit::value(new_value));
+                    }
+                }
+            }
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -1539,6 +1611,74 @@ mod tests {
         assert!(config.auth.require_confirmation_lock_screen);
         assert!(config.auth.require_confirmation_elevation);
         assert!(unknown_config_keys(&std::fs::read_to_string(&path).unwrap()).is_empty());
+    }
+
+    #[test]
+    fn save_to_keeps_comments_and_file_mode() {
+        let temp = TempDir::new("preserve-comments");
+        let path = temp.path().join("config.toml");
+        let original = include_str!("../../packaging/config/config.toml");
+        fs::write(&path, original).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+
+        let comments_before = original
+            .lines()
+            .filter(|l| l.trim_start().starts_with('#'))
+            .count();
+        assert!(comments_before > 20, "fixture should be comment-heavy");
+
+        let mut config = Config::load_from(path.to_str().unwrap()).unwrap();
+        config.security.level = "high".to_string();
+        config.save_to(path.to_str().unwrap()).unwrap();
+
+        let rewritten = fs::read_to_string(&path).unwrap();
+        let comments_after = rewritten
+            .lines()
+            .filter(|l| l.trim_start().starts_with('#'))
+            .count();
+        assert_eq!(
+            comments_after, comments_before,
+            "every comment must survive a save"
+        );
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644,
+            "an existing file's mode must not change"
+        );
+        assert_eq!(
+            Config::load_from(path.to_str().unwrap())
+                .unwrap()
+                .security
+                .level,
+            "high",
+            "the edited value must actually be written"
+        );
+    }
+
+    #[test]
+    fn save_to_a_new_file_uses_the_packaged_mode() {
+        let temp = TempDir::new("new-config-mode");
+        let path = temp.path().join("config.toml");
+        Config::default().save_to(path.to_str().unwrap()).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+    }
+
+    #[test]
+    fn save_to_preserves_a_tightened_mode() {
+        let temp = TempDir::new("tight-config-mode");
+        let path = temp.path().join("config.toml");
+        fs::write(&path, "[security]\nlevel = \"medium\"\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        Config::default().save_to(path.to_str().unwrap()).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600,
+            "a deliberately tightened mode must be kept"
+        );
     }
 
     #[test]
