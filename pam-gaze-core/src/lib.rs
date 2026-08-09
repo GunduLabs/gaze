@@ -28,6 +28,8 @@ pub const PAM_AUTHINFO_UNAVAIL: c_int = 9;
 pub const PAM_IGNORE: c_int = 25;
 
 pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
+pub const TTY_CONFIRM_DECISECONDS: libc::cc_t = 200;
+const _: () = assert!(TTY_CONFIRM_DECISECONDS > 0);
 pub const FACE_PAM_SERVICE: &str = "gdm-face";
 
 /// Total time PAM will wait on the daemon, camera time plus any configured
@@ -182,8 +184,8 @@ fn confirm_from_tty() -> Option<bool> {
         let original = original.assume_init();
         let mut raw = original;
         raw.c_lflag &= !(libc::ICANON | libc::ECHO);
-        raw.c_cc[libc::VMIN] = 1;
-        raw.c_cc[libc::VTIME] = 0;
+        raw.c_cc[libc::VMIN] = 0;
+        raw.c_cc[libc::VTIME] = TTY_CONFIRM_DECISECONDS;
         if libc::tcsetattr(fd, libc::TCSANOW, &raw) != 0 {
             return None;
         }
@@ -193,8 +195,11 @@ fn confirm_from_tty() -> Option<bool> {
         tty.flush().ok()?;
 
         let mut key = [0_u8; 1];
-        tty.read_exact(&mut key).ok()?;
+        let read = tty.read(&mut key).ok()?;
         writeln!(tty).ok()?;
+        if read == 0 {
+            return None;
+        }
 
         let confirmed = matches!(key[0], b'\n' | b'\r');
         Some(confirmed)
