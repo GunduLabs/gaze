@@ -299,11 +299,27 @@ impl FaceChecker {
         })
     }
 
+    pub fn dark_gate(spectrum: Spectrum, threshold: u8, frame: &Mat) -> Option<CaptureStatus> {
+        match spectrum {
+            Spectrum::Rgb if frame_is_too_dark(frame, threshold) => Some(CaptureStatus::TooDark),
+            _ => None,
+        }
+    }
+
     pub fn capture_status(
         &mut self,
         frame: &Mat,
     ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
         self.last_rgb_face_luma = None;
+
+        if let Some(status) = Self::dark_gate(self.spectrum, self.dark_luma_threshold, frame) {
+            tracing::debug!(
+                "frame too dark: luma={} threshold={}",
+                frame_mean_luma(frame).unwrap_or(0),
+                self.dark_luma_threshold
+            );
+            return Ok((status, None));
+        }
 
         let detection = {
             let mut detector = lock_recover(&self.detector);
@@ -311,19 +327,7 @@ impl FaceChecker {
         };
         let (bboxes, kps, mat_rgb) = match detection {
             Ok(result) => result,
-            Err(DetectError::NoFacesDetected) => {
-                if let Spectrum::Rgb = self.spectrum {
-                    tracing::debug!(
-                        "no face detected: luma={} threshold={}",
-                        frame_mean_luma(frame).unwrap_or(0),
-                        self.dark_luma_threshold
-                    );
-                    if frame_is_too_dark(frame, self.dark_luma_threshold) {
-                        return Ok((CaptureStatus::TooDark, None));
-                    }
-                }
-                return Ok((CaptureStatus::NoFace, None));
-            }
+            Err(DetectError::NoFacesDetected) => return Ok((CaptureStatus::NoFace, None)),
             Err(err) => return Err(err.into()),
         };
 
@@ -478,6 +482,27 @@ mod tests {
             Mat::new_rows_cols_with_default(12, 12, core::CV_8UC3, Scalar::all(0.0)).unwrap();
 
         assert!(frame_mean_luma(&frame).unwrap() < 30);
+    }
+
+    #[test]
+    fn dark_gate_rejects_a_dark_rgb_frame_before_detection() {
+        let black = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(0.0)).unwrap();
+        assert_eq!(
+            FaceChecker::dark_gate(Spectrum::Rgb, 20, &black),
+            Some(CaptureStatus::TooDark)
+        );
+    }
+
+    #[test]
+    fn dark_gate_passes_a_lit_rgb_frame_through_to_detection() {
+        let lit = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(120.0)).unwrap();
+        assert_eq!(FaceChecker::dark_gate(Spectrum::Rgb, 20, &lit), None);
+    }
+
+    #[test]
+    fn dark_gate_never_rejects_an_ir_frame() {
+        let black = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(0.0)).unwrap();
+        assert_eq!(FaceChecker::dark_gate(Spectrum::Ir, 20, &black), None);
     }
 
     #[test]

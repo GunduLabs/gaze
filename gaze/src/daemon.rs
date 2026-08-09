@@ -2994,7 +2994,7 @@ impl AuthDaemon {
         Ok(true)
     }
 
-    #[zbus(property)]
+    #[zbus(property(emits_changed_signal = "invalidates"))]
     async fn config(&self, #[zbus(header)] header: Option<Header<'_>>) -> fdo::Result<Config> {
         let header =
             header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
@@ -3822,10 +3822,13 @@ impl AuthDaemon {
                                     }
                                 }
 
-                                if has_face {
+                                if status.indicates_face() {
                                     last_face_at = Instant::now();
+                                }
+
+                                if has_face {
                                     frames_seen += 1;
-                                    if frames_seen >= liveness_cfg.effective_max_frames() {
+                                    if frames_seen > liveness_cfg.effective_max_frames() {
                                         info!("VerifyStart: liveness gate timed out");
                                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                                         emit_verify_with_scores!(VerifyResult::VerifyNoMatch);
