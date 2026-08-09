@@ -519,6 +519,21 @@ impl AuthDaemon {
 
     // The GDM greeter asks which login users have faces and cannot answer an
     // interactive polkit challenge. `active` is (uid, is_greeter) for the seat.
+    fn config_read_allowed(caller_uid: u32, active_uid: Option<u32>) -> bool {
+        caller_uid == 0 || active_uid == Some(caller_uid)
+    }
+
+    async fn ensure_config_read_access(header: &Header<'_>) -> fdo::Result<()> {
+        let caller_uid = Self::caller_uid(header).await?;
+        let active_uid = active_session_uid_and_class().await.map(|(uid, _)| uid);
+        if Self::config_read_allowed(caller_uid, active_uid) {
+            return Ok(());
+        }
+        Err(fdo::Error::AccessDenied(
+            "only root or the active session may read the Gaze configuration".into(),
+        ))
+    }
+
     fn user_query_allowed(caller_uid: u32, target_uid: u32, active: Option<(u32, bool)>) -> bool {
         if caller_uid == 0 || caller_uid == target_uid {
             return true;
@@ -801,6 +816,20 @@ mod tests {
             sender: ":1.42".to_string(),
             epoch,
         })))
+    }
+
+    #[test]
+    fn root_and_the_active_session_may_read_the_config() {
+        assert!(AuthDaemon::config_read_allowed(0, Some(1000)));
+        assert!(AuthDaemon::config_read_allowed(0, None));
+        assert!(AuthDaemon::config_read_allowed(1000, Some(1000)));
+    }
+
+    #[test]
+    fn other_local_users_may_not_read_the_config() {
+        assert!(!AuthDaemon::config_read_allowed(1001, Some(1000)));
+        assert!(!AuthDaemon::config_read_allowed(1000, None));
+        assert!(!AuthDaemon::config_read_allowed(65534, Some(1000)));
     }
 
     fn hardened_config() -> gaze_core::config::Config {
@@ -2966,8 +2995,11 @@ impl AuthDaemon {
     }
 
     #[zbus(property)]
-    async fn config(&self) -> Config {
-        self.current_config().await
+    async fn config(&self, #[zbus(header)] header: Option<Header<'_>>) -> fdo::Result<Config> {
+        let header =
+            header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
+        Self::ensure_config_read_access(&header).await?;
+        Ok(self.current_config().await)
     }
 
     #[zbus(property)]
