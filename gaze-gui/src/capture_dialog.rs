@@ -384,6 +384,11 @@ pub fn show_capture_dialog(
                                     feed.set_face_status(status);
                                 }
                             }
+                            else => {
+                                prompt_label.set_text("Lost contact with the Gaze daemon.");
+                                stop_btn.set_visible(false);
+                                break;
+                            }
                         }
                     }
 
