@@ -28,6 +28,9 @@ const GDM_FACE_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
 const GDM_DCONF_PROFILE: &str = "gdm";
 const GDM_DCONF_PROFILE_PATH: &str = "/etc/dconf/profile/gdm";
 const GDM_DCONF_FACE_AUTH_KEY: &str = "/org/gnome/shell/extensions/gaze/enable-face-authentication";
+const GDM_ENABLED_EXTENSIONS_KEY: &str = "/org/gnome/shell/enabled-extensions";
+const GDM_COMPILED_DB_PATH: &str = "/etc/dconf/db/gdm";
+const GDM_FACE_PAM_SERVICE: &str = "gdm-face";
 const TPM_DEVICES: [&str; 2] = ["/dev/tpmrm0", "/dev/tpm0"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -239,19 +242,80 @@ fn extension_setting(key: &str) -> std::io::Result<(bool, String)> {
     command_output_env("gsettings", &["get", GNOME_EXTENSION_SCHEMA, key], &env)
 }
 
+fn gdm_system_dconf_read(key: &str) -> Option<String> {
+    let profile = std::env::temp_dir().join(format!(
+        "gaze-doctor-{}-{}.profile",
+        GDM_DCONF_PROFILE,
+        std::process::id()
+    ));
+    fs::write(&profile, format!("system-db:{GDM_DCONF_PROFILE}\n")).ok()?;
+    let result = command_output_env(
+        "dconf",
+        &["read", key],
+        &[("DCONF_PROFILE", profile.as_os_str())],
+    );
+    let _ = fs::remove_file(&profile);
+    match result {
+        Ok((true, value)) => Some(value.trim().to_string()),
+        _ => None,
+    }
+}
+
 /// The value GDM itself sees, which a NixOS configuration sets without `GDM_FACE_OVERRIDE_PATH`.
 fn gdm_face_auth_from_dconf() -> Option<bool> {
     if !Path::new(GDM_DCONF_PROFILE_PATH).exists() {
         return None;
     }
-    let env = [("DCONF_PROFILE", OsStr::new(GDM_DCONF_PROFILE))];
-    match command_output_env("dconf", &["read", GDM_DCONF_FACE_AUTH_KEY], &env) {
-        Ok((true, value)) => match value.trim() {
-            "true" => Some(true),
-            "false" => Some(false),
-            _ => None,
-        },
+    match gdm_system_dconf_read(GDM_DCONF_FACE_AUTH_KEY)?.as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
         _ => None,
+    }
+}
+
+fn profile_reads_system_db(contents: &str, db: &str) -> bool {
+    let wanted = format!("system-db:{db}");
+    contents.lines().any(|line| line.trim() == wanted)
+}
+
+fn extensions_include(value: &str, uuid: &str) -> bool {
+    value
+        .trim_matches(|c: char| c == '[' || c == ']')
+        .split(',')
+        .any(|entry| entry.trim().trim_matches(|c| c == '\'' || c == '"') == uuid)
+}
+
+enum GdmGreeterReadiness {
+    Ready,
+    ProfileMissingSystemDb,
+    CompiledDbMissing,
+    ExtensionNotEnabled,
+    Unverifiable(String),
+}
+
+fn gdm_greeter_readiness() -> GdmGreeterReadiness {
+    match fs::read_to_string(GDM_DCONF_PROFILE_PATH) {
+        Ok(contents) if !profile_reads_system_db(&contents, GDM_DCONF_PROFILE) => {
+            return GdmGreeterReadiness::ProfileMissingSystemDb;
+        }
+        Ok(_) => {}
+        Err(err) => {
+            return GdmGreeterReadiness::Unverifiable(format!(
+                "could not read {GDM_DCONF_PROFILE_PATH}: {err}"
+            ));
+        }
+    }
+
+    if !Path::new(GDM_COMPILED_DB_PATH).exists() {
+        return GdmGreeterReadiness::CompiledDbMissing;
+    }
+
+    match gdm_system_dconf_read(GDM_ENABLED_EXTENSIONS_KEY) {
+        Some(value) if extensions_include(&value, GNOME_EXTENSION_ID) => GdmGreeterReadiness::Ready,
+        Some(_) => GdmGreeterReadiness::ExtensionNotEnabled,
+        None => GdmGreeterReadiness::Unverifiable(
+            "`dconf read` against the GDM database failed".to_string(),
+        ),
     }
 }
 
@@ -788,12 +852,44 @@ fn check_desktop_integration(report: &mut Report) {
                 "GDM login face auth",
                 "enabled in the GDM dconf profile by your system configuration, not by Gaze (on NixOS, `services.gaze.gnome.gdmFaceLogin`)",
             ),
-            (_, true) => report.pass(
-                "GDM login face auth",
-                format!(
-                    "enabled system-wide via {GDM_FACE_OVERRIDE_PATH}; toggle it from the extension preferences \"GDM login screen\" section"
+            (_, true) => match gdm_greeter_readiness() {
+                GdmGreeterReadiness::Ready => report.pass(
+                    "GDM login face auth",
+                    format!(
+                        "enabled system-wide via {GDM_FACE_OVERRIDE_PATH}; toggle it from the extension preferences \"GDM login screen\" section"
+                    ),
                 ),
-            ),
+                GdmGreeterReadiness::ProfileMissingSystemDb => report.error(
+                    "GDM login face auth",
+                    format!(
+                        "{GDM_FACE_OVERRIDE_PATH} exists, but {GDM_DCONF_PROFILE_PATH} does not list `system-db:{GDM_DCONF_PROFILE}`, so GDM never reads it"
+                    ),
+                    format!(
+                        "Add a `system-db:{GDM_DCONF_PROFILE}` line to {GDM_DCONF_PROFILE_PATH}, run `sudo dconf update`, then reboot."
+                    ),
+                ),
+                GdmGreeterReadiness::CompiledDbMissing => report.error(
+                    "GDM login face auth",
+                    format!(
+                        "{GDM_FACE_OVERRIDE_PATH} exists, but the compiled database {GDM_COMPILED_DB_PATH} does not"
+                    ),
+                    "Run `sudo dconf update`, then reboot.",
+                ),
+                GdmGreeterReadiness::ExtensionNotEnabled => report.error(
+                    "GDM login face auth",
+                    format!(
+                        "the GDM database does not enable {GNOME_EXTENSION_ID} for the greeter, so the login screen never starts the {GDM_FACE_PAM_SERVICE} PAM service"
+                    ),
+                    "Reinstall the Gaze GNOME extension package, run `sudo dconf update`, then reboot.",
+                ),
+                GdmGreeterReadiness::Unverifiable(why) => report.warning(
+                    "GDM login face auth",
+                    format!(
+                        "{GDM_FACE_OVERRIDE_PATH} enables it, but the greeter configuration could not be verified: {why}"
+                    ),
+                    "Install the `dconf` command-line tool and re-run `gaze doctor`.",
+                ),
+            },
             (_, false) => report.pass("GDM login face auth", "disabled"),
         }
     }
@@ -1403,6 +1499,41 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_gdm_profile_without_the_system_db_is_detected() {
+        let debian = "user-db:user\nsystem-db:gdm\nfile-db:/usr/share/gdm/greeter-dconf-defaults\n";
+        assert!(profile_reads_system_db(debian, "gdm"));
+
+        for broken in [
+            "user-db:user\n",
+            "",
+            "system-db:distro\nfile-db:/usr/share/gdm/greeter-dconf-defaults\n",
+            "system-db:gdmx\n",
+            "#system-db:gdm\n",
+        ] {
+            assert!(
+                !profile_reads_system_db(broken, "gdm"),
+                "{broken:?} must not count as reading system-db:gdm"
+            );
+        }
+    }
+
+    #[test]
+    fn a_greeter_extension_list_is_matched_exactly() {
+        let uuid = "gaze@gundulabs.com";
+        assert!(extensions_include("['gaze@gundulabs.com']", uuid));
+        assert!(extensions_include(
+            "['dash-to-dock@micxgx.gmail.com', 'gaze@gundulabs.com']",
+            uuid
+        ));
+        assert!(!extensions_include("@as []", uuid));
+        assert!(!extensions_include("['other@example.com']", uuid));
+        assert!(
+            !extensions_include("['gaze-clock-diag@gundulabs.com']", uuid),
+            "a different extension sharing the domain must not match"
+        );
+    }
 
     #[test]
     fn hyprlock_modern_pam_module_key_is_detected() {
