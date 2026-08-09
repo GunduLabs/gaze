@@ -9,9 +9,15 @@ profile=/etc/dconf/profile/gdm
 insert_profile_db() {
     db="system-db:$1"
     after="$2"
+    required="$3"
 
     grep -qxF "$db" "$profile" && return 0
-    grep -qxF "$after" "$profile" || return 0
+
+    if ! grep -qxF "$after" "$profile"; then
+        [ "$required" = "required" ] || return 0
+        printf '%s\n' "$db" >>"$profile"
+        return 0
+    fi
 
     tmp="${profile}.gaze-tmp"
     if awk -v db="$db" -v after="$after" '
@@ -34,8 +40,8 @@ ensure_gdm_dconf_profile() {
         return 0
     fi
 
-    insert_profile_db gdm user-db:user
-    [ -d /etc/dconf/db/distro.d ] && insert_profile_db distro system-db:gdm
+    insert_profile_db gdm user-db:user required
+    [ -d /etc/dconf/db/distro.d ] && insert_profile_db distro system-db:gdm optional
 
     return 0
 }
