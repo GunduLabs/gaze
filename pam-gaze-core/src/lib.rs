@@ -535,6 +535,7 @@ fn auth_outcome(
             Some(
                 gaze_core::dbus::CaptureStatus::TooDark | gaze_core::dbus::CaptureStatus::NoFace,
             ) => AuthOutcome::Unavailable,
+            Some(status) if status.is_framing_hint() => AuthOutcome::Unavailable,
             _ => AuthOutcome::NoMatch,
         },
     }
@@ -1110,5 +1111,23 @@ mod tests {
             auth_outcome(VerifyResult::VerifyMatch, Some(CaptureStatus::TooDark)),
             AuthOutcome::Match
         );
+    }
+
+    #[test]
+    fn a_mis_framed_face_does_not_count_as_a_failed_attempt() {
+        use gaze_core::dbus::{CaptureStatus, VerifyResult};
+
+        for status in [
+            CaptureStatus::Clipped,
+            CaptureStatus::NotCentered,
+            CaptureStatus::TooFar,
+            CaptureStatus::TooClose,
+        ] {
+            assert_eq!(
+                auth_outcome(VerifyResult::VerifyNoMatch, Some(status)),
+                AuthOutcome::Unavailable,
+                "{status:?} must fall through to the password, not count as a failure"
+            );
+        }
     }
 }
