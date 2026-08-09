@@ -64,6 +64,12 @@ pub type ClaimStateHandle = Arc<Mutex<Option<ClaimState>>>;
 pub type ActiveCancelHandle = Arc<Mutex<Option<oneshot::Sender<()>>>>;
 
 static CLAIM_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Interaction {
+    Allow,
+    Deny,
+}
 static SYSTEM_BUS: tokio::sync::OnceCell<zbus::Connection> = tokio::sync::OnceCell::const_new();
 static DBUS_PROXY: tokio::sync::OnceCell<fdo::DBusProxy<'static>> =
     tokio::sync::OnceCell::const_new();
@@ -487,7 +493,7 @@ impl AuthDaemon {
             return Ok(());
         }
 
-        Self::ensure_authorized(header, action_id).await
+        Self::ensure_authorized_with(header, action_id, Interaction::Deny).await
     }
 
     fn face_write_needs_authorization(caller_uid: u32) -> bool {
@@ -534,7 +540,7 @@ impl AuthDaemon {
             return Ok(());
         }
 
-        Self::ensure_authorized(header, action_id).await
+        Self::ensure_authorized_with(header, action_id, Interaction::Deny).await
     }
 
     fn signal_destination(sender: &str) -> fdo::Result<BusName<'static>> {
@@ -543,6 +549,14 @@ impl AuthDaemon {
     }
 
     async fn ensure_authorized(header: &Header<'_>, action_id: &str) -> fdo::Result<()> {
+        Self::ensure_authorized_with(header, action_id, Interaction::Allow).await
+    }
+
+    async fn ensure_authorized_with(
+        header: &Header<'_>,
+        action_id: &str,
+        interaction: Interaction,
+    ) -> fdo::Result<()> {
         let conn = system_bus().await?;
 
         let authority = zbus_polkit::policykit1::AuthorityProxy::new(&conn)
@@ -553,7 +567,12 @@ impl AuthDaemon {
             .map_err(|e| fdo::Error::Failed(format!("Failed to create polkit subject: {e}")))?;
 
         let details: HashMap<&str, &str> = HashMap::new();
-        let flags = zbus_polkit::policykit1::CheckAuthorizationFlags::AllowUserInteraction.into();
+        let flags = match interaction {
+            Interaction::Allow => {
+                zbus_polkit::policykit1::CheckAuthorizationFlags::AllowUserInteraction.into()
+            }
+            Interaction::Deny => Default::default(),
+        };
 
         let result = authority
             .check_authorization(&subject, action_id, &details, flags, "")
