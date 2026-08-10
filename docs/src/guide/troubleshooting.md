@@ -88,6 +88,42 @@ If pacman reports that upgrading `opencv` would break the dependency and no
 updated `gaze-bin` exists yet, wait for the rebuilt release before upgrading,
 or build and install Gaze from source against the new OpenCV.
 
+### Gaze disappears after an AUR helper upgrade (Arch Linux)
+
+If face auth stops working across every surface at once (sudo, polkit, the lock
+screen, greetd) and `systemctl status gazed` reports that the unit does not
+exist, check whether an AUR helper replaced Gaze with an unrelated package:
+
+```bash
+pacman -Qi gaze 2>/dev/null | head -n 3
+ls /usr/lib/security/pam_gaze.so
+```
+
+An unrelated AUR package is also named `gaze` (a file watcher, currently at a
+much higher version number). If Gaze was installed under the plain names `gaze`
+and `gaze-gui`, for example by running `pacman -U` on the `.pkg.tar.zst` files
+attached to a GitHub release, pacman records them as foreign packages, and
+`yay -Syu` or `paru -Syu` treats the unrelated AUR `gaze` as a newer version and
+installs it over ours. That removes `gazed`, both PAM modules, and the systemd
+unit, and turns `/etc/gaze/config.toml` into a `.pacsave` file.
+
+The failure is silent: the `sufficient` PAM lines fail to load the missing
+module, logging `PAM adding faulty module: pam_gaze.so`, and every surface falls
+back to fingerprint or password.
+
+Recover by removing the wrong package and reinstalling the AUR packages.
+Enrolled templates live in `/var/lib/gaze` and survive this:
+
+```bash
+sudo pacman -Rns gaze gaze-gui
+yay -S --needed gaze-bin gaze-gui-bin
+sudo systemctl enable --now gazed
+```
+
+If `/etc/gaze/config.toml.pacsave` exists, restore your settings from it. The
+AUR packages install under the names `gaze-bin` and `gaze-gui-bin`, which do not
+collide, so this cannot happen again once you are on them.
+
 ### Daemon fails with "error while loading shared libraries: libopencv_*" (Debian/Ubuntu)
 
 ```
