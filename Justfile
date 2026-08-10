@@ -24,14 +24,19 @@ ort_version := env("ORT_VERSION", "1.22.0")
 # `opencv5`. Empty (no override) when opencv4/opencv resolve or opencv5 doesn't.
 opencv_env := shell("pkg-config --exists opencv4 2>/dev/null || pkg-config --exists opencv 2>/dev/null || ! pkg-config --exists opencv5 2>/dev/null || echo OPENCV_PKGCONFIG_NAME=opencv5")
 
-# Build the GTK front-end (`gaze-gui`). `GAZE_GUI=0` drops it from every build,
-# test, and lint recipe, which also drops gtk4/libadwaita (and their cairo,
-# pango, graphene, gdk-pixbuf headers) from the build dependencies. The TUI
-# lives in the separate `gaze` binary and is unaffected.
-gui := env("GAZE_GUI", "1")
-gui_pkg := if gui == "0" { "" } else { "-p gaze-gui" }
-gui_feature := if gui == "0" { "" } else { ",gaze-gui/openvino" }
-gui_exclude := if gui == "0" { "--exclude gaze-gui" } else { "" }
+# Build the GTK front-end (`gaze-gui`). `GAZE_GUI=0` (also `false`, `no`, `off`,
+# case-insensitive) drops it from every build, test, and lint recipe, which also
+# drops gtk4/libadwaita (and their cairo, pango, graphene, gdk-pixbuf headers)
+# from the build dependencies. The TUI lives in the separate `gaze` binary and is
+# unaffected. This covers the recipes below only: a bare `cargo build`/`cargo
+# test` still builds every workspace member, and the packaging paths (`package`,
+# `build-flatpak`, and the spec `srpm` feeds) always include the GUI.
+gui := lowercase(env("GAZE_GUI", "1"))
+gui_off := if gui =~ '^(0|false|no|off)$' { "1" } else { "" }
+gui_pkg := if gui_off == "1" { "" } else { "-p gaze-gui" }
+gui_feature := if gui_off == "1" { "" } else { ",gaze-gui/openvino" }
+gui_exclude := if gui_off == "1" { "--exclude gaze-gui" } else { "" }
+gui_notice := if gui_off == "1" { "echo 'note: GAZE_GUI is off, gaze-gui is excluded here; CI still checks it'" } else { "true" }
 
 # Derived vars
 multiarch := if arch == "aarch64" { "aarch64-linux-gnu" } else { "x86_64-linux-gnu" }
@@ -426,6 +431,7 @@ setup-hooks:
 # Run the full test suite
 [group("checks")]
 test:
+    @{{ gui_notice }}
     {{ opencv_env }} cargo test --workspace {{ gui_exclude }} --release
     {{ opencv_env }} cargo test -p gaze-core --release --no-default-features --features gaze-core/openvino-config config::
 
@@ -442,6 +448,7 @@ audit:
 # Run clippy lints across the workspace
 [group("checks")]
 lint:
+    @{{ gui_notice }}
     {{ opencv_env }} cargo clippy --workspace {{ gui_exclude }} --all-targets -- -D warnings
 
 # Lint the OpenVINO-gated code with an OpenVINO-enabled system ONNX Runtime.

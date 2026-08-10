@@ -16,7 +16,7 @@ Run as root after building release artifacts as your normal user:
     sudo scripts/dev-link-system.sh enable
 
 This links:
-  - /usr/bin/gazed, /usr/bin/gaze, /usr/bin/gaze-gui
+  - /usr/bin/gazed, /usr/bin/gaze, and /usr/bin/gaze-gui when the GUI was built
   - installed PAM modules
   - the hyprlock-gaze / hyprlock-gaze-simultaneous PAM services (for hyprlock)
   - system and current-user GNOME extension files
@@ -81,6 +81,13 @@ artifact() {
 # not a broken build.
 have_gui() {
     [ -e "$(artifact gaze-gui)" ]
+}
+
+is_gui_path() {
+    case "$1" in
+    */gaze-gui) return 0 ;;
+    esac
+    return 1
 }
 
 require_artifacts() {
@@ -488,6 +495,8 @@ show_status() {
             printf '%s -> %s\n' "$path" "$(readlink "$path")"
         elif [ -e "$path" ]; then
             printf '%s is not a symlink\n' "$path"
+        elif is_gui_path "$path" && ! have_gui; then
+            printf '%s is absent: gaze-gui not built\n' "$path"
         else
             printf '%s is missing\n' "$path"
         fi
