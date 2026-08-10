@@ -161,9 +161,8 @@ in
     };
   };
 
-  # Per-service knobs live on the nixpkgs PAM submodule, the way `fprintAuth`
-  # and `howdy` do. Only the type may be declared a second time: a `default`,
-  # `example`, or `description` here would collide with nixpkgs'.
+  # Per-service knobs live on the nixpkgs PAM submodule, as `fprintAuth` and `howdy` do. Only
+  # the type may be redeclared, since a `default`, `example`, or `description` collides.
   options.security.pam.services = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule (

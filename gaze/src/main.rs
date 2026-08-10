@@ -207,10 +207,8 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(daemon::watch_resume(conn.clone(), resume_pending));
     tokio::spawn(daemon::watch_session_locks(conn.clone(), lock_epochs));
 
-    // Subscribe before the well-known name exists: until it does no client can claim, so
-    // this is what makes "the watcher cannot miss a disappearance" true rather than a
-    // race the daemon usually wins. A failure here is fatal by design, so systemd
-    // restarts us instead of running on with claims that only the timeout can release.
+    // No client can claim before the well-known name exists, so subscribing here is what makes
+    // the watcher airtight. Fatal by design, so systemd restarts rather than stranding claims.
     let claim_owners = daemon::subscribe_claim_owners(&conn).await?;
     tokio::spawn(daemon::watch_claim_owner(
         claim_owners,

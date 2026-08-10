@@ -23,9 +23,8 @@ fn requires_forced_ir_yuy2(vid: u16, pid: u16, want_color: bool) -> bool {
     !want_color && find_device(vid, pid).is_some_and(|device| device.requires_ir_yuy2)
 }
 
-/// The quirk belongs to the USB device, not to the way the source was spelled,
-/// so look it up from the node a source finally resolves to. `usb:VVVV:PPPP`,
-/// `/dev/videoN`, and PipeWire targets all reach the same profile this way.
+/// The quirk belongs to the USB device, not to how the source was spelled, so it is looked up
+/// from the resolved node; `usb:VVVV:PPPP`, `/dev/videoN`, and PipeWire all reach one profile.
 fn node_requires_forced_ir_yuy2(node: &str, want_color: bool) -> bool {
     !want_color
         && usb_ids_of(node).is_some_and(|(vid, pid)| requires_forced_ir_yuy2(vid, pid, want_color))
@@ -130,12 +129,8 @@ enum SourceElement {
     },
 }
 
-/// Turn a configured `rgb`/`ir` value into a GStreamer source element.
-///
-/// `primary` is PipeWire (needs a session); `/dev/video<n>` and `usb:VVVV:PPPP`
-/// go straight to `v4l2src`, which works in greeters that never hand out a
-/// PipeWire session. `want_color` picks the color node for RGB and the mono
-/// node for IR when a `usb:` spec resolves to more than one node.
+/// Turn a configured `rgb`/`ir` value into a GStreamer source element. `primary` needs a PipeWire
+/// session; node and `usb:` specs use `v4l2src`, which still works in greeters that have none.
 fn classify_source(source: &str, want_color: bool) -> anyhow::Result<SourceElement> {
     let source = source.trim();
     if source.is_empty() {
@@ -184,9 +179,8 @@ struct VideoNodeInfo {
     is_color: bool,
 }
 
-/// Pick the `/dev/video<n>` node matching `vid:pid` whose color-ness matches the
-/// caller (color for RGB, mono for IR), preferring the lowest-numbered node so
-/// the choice is stable across boots.
+/// Pick the `/dev/video<n>` node for `vid:pid` with the requested color-ness, lowest-numbered
+/// first so the choice stays stable across boots.
 fn select_usb_node(
     nodes: &[VideoNodeInfo],
     vid: u16,
@@ -200,11 +194,8 @@ fn select_usb_node(
         .min_by_key(|n| video_node_index(&n.node).unwrap_or(u32::MAX))
         .map(|n| n.node.clone())
         .or_else(|| {
-            // Some Windows Hello cameras expose RGB and IR through one UVC
-            // capture node. Their emitter profile switches that node into IR
-            // mode, so there is no separately advertised mono node to select.
-            // Only profiles flagged as single-node qualify; for every other
-            // device a missing mono node means IR is genuinely unavailable.
+            // Single-node Windows Hello cameras expose RGB and IR through one UVC node, so no
+            // mono node is advertised. Elsewhere a missing mono node means IR really is absent.
             if want_color || !requires_forced_ir_yuy2(vid, pid, want_color) {
                 return None;
             }
@@ -219,10 +210,8 @@ fn video_node_index(node: &str) -> Option<u32> {
     node.strip_prefix("/dev/video")?.parse().ok()
 }
 
-/// Scan V4L2 nodes for one matching `vid:pid` with the requested color-ness.
-///
-/// Uses the GStreamer device monitor (which enumerates through the plain V4L2
-/// provider without a PipeWire session) and reads the USB ids from sysfs.
+/// Scan V4L2 nodes for one matching `vid:pid` with the requested color-ness. The GStreamer device
+/// monitor enumerates via the plain V4L2 provider without a PipeWire session; ids come from sysfs.
 fn resolve_usb_video_node(vid: u16, pid: u16, want_color: bool) -> Option<String> {
     gstreamer::init().ok()?;
     let monitor = gstreamer::DeviceMonitor::new();
@@ -548,9 +537,8 @@ impl Camera {
 
 fn camera_pipeline(src_element: &str, force_ir_yuy2: bool) -> String {
     if force_ir_yuy2 {
-        // Dell/Realtek single-node RGB/IR modules silently remain in RGB mode
-        // unless the stream is negotiated as uncompressed YUY2 at this exact
-        // resolution.
+        // Dell/Realtek single-node RGB/IR modules silently stay in RGB mode unless the
+        // stream is negotiated as uncompressed YUY2 at this exact resolution.
         format!(
             "{src_element} ! video/x-raw,format=YUY2,width={REALTEK_IR_YUY2_WIDTH},height={REALTEK_IR_YUY2_HEIGHT},pixel-aspect-ratio=1/1 ! videoconvert ! videoscale ! appsink name=gaze_sink"
         )

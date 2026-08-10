@@ -1,17 +1,14 @@
 # SPDX-FileCopyrightText: 2026 Gundu Labs
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Template for the source RPM consumed by Copr. `just srpm` fills in the
-# ${...} placeholders (version, release, bundled ONNX Runtime release, and the
-# packaging/*.sh scriptlet bodies) so the scriptlets have a single source of
-# truth shared with the nfpm packages.
+# Template for the source RPM consumed by Copr. `just srpm` fills the ${...} placeholders, so
+# version, ONNX Runtime release, and scriptlet bodies share one source with the nfpm packages.
 %global ort_version ${ORT_VERSION}
 %global ort_libdir %{_libdir}/%{name}
 %global extension_uuid gaze@gundulabs.com
 
-# gazed links a bundled ONNX Runtime; keep the private library out of rpm's
-# automatic provides and requires so it neither satisfies nor demands a system
-# libonnxruntime.
+# gazed links a bundled ONNX Runtime, so keep the private library out of rpm's automatic
+# provides and requires; otherwise it either satisfies or demands a system libonnxruntime.
 %global __provides_exclude_from ^%{ort_libdir}/.*\\.so.*$
 %global __requires_exclude ^libonnxruntime\\.so.*$
 %global __brp_check_rpaths %{nil}

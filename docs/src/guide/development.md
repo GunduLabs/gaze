@@ -10,21 +10,40 @@ For pull request workflow, testing expectations, and safety notes, see [Contribu
 ## Prerequisites
 
 Gaze targets Linux platform APIs (V4L2, PAM, TPM2/tss2, polkit, GTK4/libadwaita, Flatpak,
-SELinux) that do not exist on macOS or Windows, so none of this builds natively there. If
-you're not on Linux, skip straight to [Building without a Linux host (Docker)](#building-without-a-linux-host-docker).
+SELinux) that do not exist on macOS or Windows, so none of this builds natively there.
 
-- Rust 1.85+ (or install current stable via `rustup`)
-- `just` 1.51+ (https://github.com/casey/just) for task automation
-- `nfpm` (https://nfpm.goreleaser.com) for packaging
-- `flatpak` and `flatpak-builder` (https://github.com/flatpak/flatpak-builder) for the Flatpak build. See [Flatpak build](#flatpak-build) below.
+There are three ways to get an environment, and they all end at the same `just` recipes. Take
+whichever asks the least of you.
 
-`mise.toml` lists `rust`, `just`, `nfpm`, plus `bun`/`node` (used by the docs site) and
-`rust-analyzer`. If you use [mise](https://mise.jdx.dev), `mise trust && mise install` from the
-repo root installs all of the above instead of doing it by hand. Every tool is set to `latest`
-rather than a pinned version, so mise gives you current releases and not necessarily the
-versions CI runs. When you need to match CI exactly, read the versions out of
-`.github/workflows/ci.yml`. Either way you still need the distro system libraries below; mise
-doesn't manage those.
+### Nix, the shortest path
+
+```bash
+nix develop
+```
+
+That is the entire setup. The shell has the Rust toolchain and every native dependency (OpenCV,
+GStreamer, GTK4, ONNX Runtime, tpm2-tss) already wired up. See the [Nix & NixOS guide](/guide/nixos).
+
+### Docker, if you are not on Linux
+
+```bash
+just docker build-rust
+```
+
+Any recipe also runs inside a container that mirrors CI, so the host needs nothing but Docker.
+See [Building without a Linux host](#building-without-a-linux-host-docker).
+
+### Distro packages
+
+Install the tooling:
+
+- Rust 1.85+, via [rustup](https://rustup.rs)
+- [`just`](https://github.com/casey/just) 1.51+, the task runner everything below goes through
+- [`nfpm`](https://nfpm.goreleaser.com), only for `just package`
+- [`flatpak-builder`](https://github.com/flatpak/flatpak-builder), only for `just build-flatpak`
+
+CI pins its own versions in `.github/workflows/ci.yml` if you need to match them exactly. Then
+the system libraries:
 
 ::: code-group
 
@@ -75,12 +94,13 @@ pkg-config name; when running `cargo` directly, set
 git clone https://github.com/gundulabs/gaze
 cd gaze
 just setup-hooks
-just --list
+just build-rust
+just test
 ```
 
-Git hooks are local to each clone. `just setup-hooks` points Git at the tracked hook scripts so pre-commit checks stay up to date when the repo changes. CI still runs the same required checks for pushes and pull requests.
+That is a full working checkout. `just --list` shows every other recipe.
 
-With Nix installed you can skip the distro prerequisites entirely: `nix develop` drops you into a shell with the Rust toolchain and every native build dependency (OpenCV, GStreamer, GTK4, ONNX Runtime, tpm2-tss) already configured. See the [Nix & NixOS guide](/guide/nixos).
+Git hooks are local to each clone. `just setup-hooks` points Git at the tracked hook scripts so pre-commit checks stay up to date when the repo changes. CI still runs the same required checks for pushes and pull requests.
 
 ## Workspace layout
 

@@ -33,9 +33,8 @@ LockPersonality=yes
 SystemCallArchitectures=native
 CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
 ReadWritePaths=-/etc/gaze -/etc/dconf/db
-# IR cameras are driven directly via V4L2 (v4l2src) and need read/write access to
-# their /dev/video* node for the UVC emitter control ioctl. /dev is left intact
-# (no PrivateDevices); the video group is added defensively for non-root setups.
+# The UVC emitter control ioctl needs read/write on the IR /dev/video* node, so /dev is left
+# intact (no PrivateDevices) and the video group is added defensively for non-root setups.
 SupplementaryGroups=video
 
 [Install]

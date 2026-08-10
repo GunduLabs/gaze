@@ -25,6 +25,7 @@ impl EmbeddingCipher {
         }
     }
 
+    /// AES-256-GCM seals the plaintext under a fresh nonce, framed as `MAGIC || nonce || ciphertext`.
     pub fn encrypt(&self, plaintext: &[u8]) -> anyhow::Result<Vec<u8>> {
         let mut nonce_bytes = [0u8; NONCE_LEN];
         getrandom::fill(&mut nonce_bytes)
@@ -42,6 +43,7 @@ impl EmbeddingCipher {
         Ok(out)
     }
 
+    /// Reverses [`Self::encrypt`]: checks the magic header, splits off the nonce, and opens the ciphertext.
     pub fn decrypt(&self, data: &[u8]) -> anyhow::Result<Vec<u8>> {
         if !is_encrypted(data) {
             return Err(anyhow!("not a Gaze-encrypted embedding"));

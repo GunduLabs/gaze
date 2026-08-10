@@ -519,9 +519,8 @@ export default class GazeFaceAuthExtension extends Extension {
           // stacks can still route the token here, so match it on any service.
           if (secretQuestion?.trim() === CONFIRMATION_REQUEST) {
             gazeTiming("CONFIRM_SHOWN", `svc=${serviceName} path=secretInfoQuery`);
-            // _filterServiceMessages only force-clears the display when another
-            // message is queued behind the current one; a lone standing hint
-            // rides out its full display interval (~1s). Clear it outright.
+            // _filterServiceMessages only force-clears when another message is queued behind
+            // the current one, so a lone hint rides out its full ~1s interval unless cleared.
             if (typeof this._clearMessageQueue === "function") {
               this._clearMessageQueue();
               gazeTiming("CLEAR_QUEUE_CALLED");

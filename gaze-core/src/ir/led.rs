@@ -8,10 +8,14 @@ use std::collections::HashMap;
 use std::os::unix::io::AsRawFd;
 use std::sync::{Mutex, OnceLock};
 
+// UVCIOC_CTRL_QUERY, i.e. _IOWR('u', 0x21, struct uvc_xu_control_query). Hardcoded because
+// libc exposes no uvcvideo bindings; the 0x0010 in the middle is this struct's 16-byte size.
 const UVC_CTRL_QUERY: libc::c_ulong = 0xC010_7521;
 const SET_CUR: u8 = 0x01;
 const GET_CUR: u8 = 0x81;
 
+// Microsoft's Face Authentication extension unit, shared by most Windows Hello cameras. Byte 2
+// of the 9-byte payload is the emitter mode, where 1 is off and 2 strobes on alternate frames.
 const FACE_AUTH_SELECTOR: u8 = 0x06;
 const FACE_AUTH_LEN: usize = 9;
 const FACE_AUTH_ON_ALT_FRAME: [u8; FACE_AUTH_LEN] = [1, 3, 2, 0, 0, 0, 0, 0, 0];
@@ -214,6 +218,8 @@ fn cached_face_auth_profile(node: &str, vid: u16, pid: u16) -> Option<IrProfile>
     }
 }
 
+/// Extension unit ids are assigned per device and V4L2 offers no way to enumerate them, so the
+/// only way to find the face-auth unit on an unlisted camera is to GET_CUR every id in turn.
 fn probe_face_auth_profile(node: &str, vid: u16, pid: u16) -> anyhow::Result<Option<IrProfile>> {
     let file = std::fs::OpenOptions::new()
         .read(true)

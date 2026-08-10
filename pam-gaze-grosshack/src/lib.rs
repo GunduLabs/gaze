@@ -34,6 +34,8 @@ async fn authenticate_biometric_with_timeout(
 
 extern "C" fn interrupt_noop_handler(_sig: c_int) {}
 
+/// The handler does nothing; what matters is `sa_flags = 0`, which withholds SA_RESTART so the
+/// prompt thread's blocking read fails with EINTR instead of being resumed by the kernel.
 fn ensure_interrupt_handler() {
     static INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     INSTALLED.get_or_init(|| unsafe {
@@ -186,8 +188,8 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         }
     }
 }
-// Inject newline via TIOCSTI to unblock the PAM conversation read thread.
-
+/// Push a newline into the tty's input queue to unblock the PAM conversation read. TIOCSTI is
+/// compiled out or sysctl-disabled on hardened kernels, so failure falls back to signalling.
 fn unblock_terminal() -> PromptUnblock {
     let Ok(tty) = std::fs::OpenOptions::new()
         .read(true)

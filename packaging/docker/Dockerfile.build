@@ -1,14 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Gundu Labs
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Linux build environment for building Gaze on a non-Linux host (e.g. macOS).
-#
-# Gaze targets Linux platform APIs (V4L2, PAM, TPM2/tss2, polkit, GTK4/libadwaita,
-# flatpak, SELinux) that do not exist on macOS, so the build cannot run natively.
-# This image reproduces the same toolchain the CD workflow uses (.github/workflows/cd.yml)
-# so the existing `just` targets run unchanged inside a Linux container.
-#
-# Built and driven by the `just docker <target>` recipe.
+# Linux build environment for hosts that lack the platform APIs Gaze needs (V4L2, PAM, TPM2,
+# polkit, GTK4). Mirrors the CD workflow toolchain and is driven by `just docker <target>`.
 FROM ubuntu:26.04@sha256:53958ec7b67c2c9355df922dd08dbf0360611f8c3cdb656875e81873db9ffdba
 
 # amd64 | arm64. Auto-populated by buildkit; on the legacy builder it is empty,
@@ -88,10 +82,8 @@ RUN set -eux; \
     rm /tmp/nfpm.tar.gz; \
     nfpm --version
 
-# Leave LIBCLANG_PATH unset. clang-sys (pulled in by opencv and tss-esapi) only
-# treats it as a single directory, so a colon-separated list becomes one bogus
-# path and discovery fails; unset, clang-sys globs /usr/lib*/*/* and finds the
-# libclang shipped by libclang-dev, arch- and llvm-version-agnostically.
+# Leave LIBCLANG_PATH unset. clang-sys treats it as a single directory, so a path list becomes
+# one bogus entry; unset, it globs /usr/lib*/*/* and finds libclang whatever the arch or version.
 
 COPY entrypoint.sh /usr/local/bin/gaze-build-entry
 RUN chmod +x /usr/local/bin/gaze-build-entry
