@@ -78,7 +78,7 @@ gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 
 On Wayland, log out and back in after installing extension updates if the lock screen does not pick it up immediately.
 
-Hands-free lock screen and GDM login face auth through this extension are GNOME-specific. Other desktops integrate the lock screen through PAM instead — see [Hyprland](/guide/hyprland) and [PAM](/guide/pam).
+Hands-free lock screen and GDM login face auth through this extension are GNOME-specific. Other desktops integrate the lock screen through PAM instead, see [Hyprland](/guide/hyprland) and [PAM](/guide/pam).
 GDM login face auth is separate and disabled by default due to GNOME keyring behavior.
 See [GNOME Extension](/guide/gnome) for details and optional login enablement.
 
