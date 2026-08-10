@@ -42,10 +42,8 @@ const GDM_DCONF_FACE_AUTH_KEY: &str = "/org/gnome/shell/extensions/gaze/enable-f
 const CLAIM_TIMEOUT_SECS: u64 = 300;
 const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
 const VERIFY_NO_FACE_TIMEOUT: Duration = Duration::from_secs(5);
-/// In hybrid (RGB+IR) verify the two spectra are captured one camera at a time so
-/// single-function UVC devices (e.g. Logitech Brio) that cannot stream both at once
-/// still work. This bounds the RGB phase so it yields the camera to IR even without a
-/// match. See `verify_start`.
+/// Hybrid verify runs one camera at a time for single-function UVC devices (e.g. Logitech
+/// Brio). Caps the RGB phase so it yields to IR even without a match. See `verify_start`.
 const VERIFY_SERIAL_RGB_BUDGET: Duration = Duration::from_secs(4);
 const VERIFY_WATCHDOG_POLL: Duration = Duration::from_millis(250);
 const SSH_PROC_CHAIN_MAX_DEPTH: usize = 16;
@@ -921,8 +919,8 @@ mod tests {
 
         assert!(!release_claim_epoch(&claim_state, &active_cancel, 7).await);
         assert!(claim_has_epoch(&*claim_state.lock().await, 8));
-        // Empty, not just Err: a dropped sender also reports Err but leaves the newer
-        // claim's task uncancellable.
+        // Empty, not just Err, because a dropped sender also reports Err but leaves the
+        // newer claim's task uncancellable.
         assert!(
             matches!(rx.try_recv(), Err(TryRecvError::Empty)),
             "the newer claim's task must not be cancelled"
@@ -961,8 +959,8 @@ mod tests {
         assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
     }
 
-    // The case the epoch guard exists for: one connection claims, releases, and claims
-    // again, so the same unique name backs two different claims.
+    // The case the epoch guard exists for, where one connection claims, releases, and
+    // claims again, so the same unique name backs two different claims.
     #[tokio::test]
     async fn same_sender_reclaiming_is_not_released_by_the_old_epoch() {
         let claim_state = claim_at(11);
@@ -1002,7 +1000,7 @@ mod tests {
         // An acquisition or hand-off is not a disappearance.
         assert!(!is_vanish_of(":1.42", Some(":1.42"), ":1.42"));
         assert!(!is_vanish_of(":1.99", None, ":1.42"));
-        // Prefix collision: ":1.4" vanishing must not release ":1.42".
+        // Prefix collision, where ":1.4" vanishing must not release ":1.42".
         assert!(!is_vanish_of(":1.4", None, ":1.42"));
     }
 
@@ -1299,7 +1297,7 @@ mod tests {
 
     #[test]
     fn camera_allows_login_greeter_for_root_caller() {
-        // GDM login: target has no session yet, active seat is the greeter.
+        // GDM login, where the target has no session yet and the active seat is the greeter.
         let greeter_active = Some((42, true, true));
         assert_eq!(
             AuthDaemon::resolve_camera_uid(0, 1001, false, false, greeter_active),
@@ -1314,7 +1312,7 @@ mod tests {
 
     #[test]
     fn camera_prefers_active_greeter_over_target_leftover_runtime() {
-        // GDM login while the target's runtime lingers: the greeter owns the seat camera.
+        // GDM login while the target's runtime lingers, so the greeter owns the seat camera.
         let greeter_active = Some((42, true, true));
         assert_eq!(
             AuthDaemon::resolve_camera_uid(0, 1001, true, false, greeter_active),
@@ -1622,11 +1620,8 @@ pub async fn watch_resume(conn: zbus::Connection, resume_pending: Arc<AtomicBool
     }
 }
 
-/// Subscribe to NameOwnerChanged, resolving only once the match rule is installed.
-///
-/// Call this before the daemon requests its well-known name. The subscription has to be
-/// live before any client can claim, or a sender that vanishes in between produces no
-/// signal and strands the claim until `CLAIM_TIMEOUT_SECS`.
+/// Subscribe to NameOwnerChanged, resolving only once the match rule is installed. Call it
+/// before requesting the well-known name, or a sender vanishing in between strands the claim.
 pub async fn subscribe_claim_owners(
     conn: &zbus::Connection,
 ) -> zbus::Result<fdo::NameOwnerChangedStream> {
@@ -1636,10 +1631,8 @@ pub async fn subscribe_claim_owners(
         .await
 }
 
-/// Release the active claim as soon as its owning D-Bus name loses its owner.
-///
-/// One subscription for the daemon's lifetime rather than one per claim, which leaves no
-/// task or signal receiver behind for every claim ever taken.
+/// Release the active claim as soon as its owning D-Bus name loses its owner. One subscription
+/// for the daemon's lifetime, so no task or signal receiver is left behind per claim.
 pub async fn watch_claim_owner(
     mut stream: fdo::NameOwnerChangedStream,
     claim_state: ClaimStateHandle,
@@ -1761,6 +1754,7 @@ fn hybrid_auth_passed(
         (true, true) => match policy {
             "or" => rgb_success || ir_success,
             "and" => rgb_success && ir_success,
+            // Fallback policy, where both spectra must pass unless RGB ran and was too dark to judge.
             _ => {
                 if !rgb_attempted {
                     rgb_success && ir_success
@@ -1847,7 +1841,8 @@ fn process_frame_sync(
     }
 }
 
-// Strip the square padding first: its black bars read as a replay bezel to the anti-spoof model.
+// Strip the square padding first, since its black bars read as a replay bezel
+// to the anti-spoof model.
 fn crop_liveness_face(data: &FaceData) -> anyhow::Result<image::RgbImage> {
     let mat_rgb = data
         .liveness_frame
@@ -1869,6 +1864,8 @@ fn crop_liveness_face(data: &FaceData) -> anyhow::Result<image::RgbImage> {
     crate::liveness::crop_face(&content, bbox)
 }
 
+/// One row per enrolled face, holding (name, rgb_sim, rgb_pct, rgb_passed, ir_sim, ir_pct,
+/// ir_passed) and sorted best match first.
 fn build_hybrid_scores(
     db: &UserDatabase,
     username: &str,
@@ -2200,9 +2197,8 @@ impl AuthDaemon {
         let conn = conn.clone();
         let sender_for_check = sender.clone();
 
-        // The watcher cannot miss a disappearance from here on, but it may already have
-        // handled this one while the claim was still being authorized, finding nothing to
-        // release. Confirm the owner once, now that there is a claim to drop.
+        // The watcher may have handled this sender's disappearance while the claim was still
+        // being authorized, finding nothing to release, so confirm the owner once here.
         self.rt_handle.spawn(async move {
             let dbus = match fdo::DBusProxy::new(&conn).await {
                 Ok(dbus) => dbus,
@@ -2386,9 +2382,8 @@ impl AuthDaemon {
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, true);
                     let mut pose_baseline = None;
 
-                    // Dual-spectrum mode holds one camera at a time: some cameras
-                    // (e.g. Logitech Brio 4K) cannot stream RGB and IR at once, so
-                    // the RGB camera is released as soon as a step is captured.
+                    // Cameras like the Logitech Brio 4K cannot stream RGB and IR at once, so
+                    // dual-spectrum mode releases the RGB camera once a step is captured.
                     if run_ir {
                         let mut dead_streams = 0u32;
 
@@ -2568,9 +2563,8 @@ impl AuthDaemon {
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, true);
                     let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
 
-                    // Dual-spectrum mode: wait for RGB to capture and release the
-                    // camera, then hold the IR camera just long enough to grab one
-                    // lit usable frame; the pose was already validated over RGB.
+                    // Dual-spectrum mode waits for RGB to capture and release the camera, then
+                    // holds IR just long enough for one lit frame; RGB already checked the pose.
                     if run_rgb {
                         let mut captured_step = usize::MAX;
                         let mut dead_streams = 0u32;
@@ -3397,9 +3391,8 @@ impl AuthDaemon {
 
             let (result_tx, mut result_rx) = tokio::sync::mpsc::channel::<VerifyMsg>(10);
             let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            // Signals that the RGB capture phase has finished and released its camera, so
-            // the IR thread can then hold the camera. Lets single-function UVC devices
-            // (e.g. Logitech Brio) that cannot stream RGB+IR at once run hybrid verify.
+            // Signals that the RGB phase released its camera so the IR thread can take it,
+            // letting single-function UVC devices (e.g. Logitech Brio) run hybrid verify.
             let rgb_phase_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
             let mut rgb_thread = None;
@@ -3420,9 +3413,8 @@ impl AuthDaemon {
                 let hybrid_policy_clone = hybrid_policy.clone();
 
                 rgb_thread = Some(std::thread::spawn(move || {
-                    // Set once the RGB camera is released, on every exit path (incl. panic),
-                    // so the IR thread can then safely open its stream. Declared before `cam`
-                    // so `cam` drops first, guaranteeing release precedes the signal.
+                    // Set on every exit path (incl. panic) once the RGB camera is released.
+                    // Declared before `cam` so `cam` drops first and release precedes the signal.
                     struct RgbPhaseGuard(Arc<std::sync::atomic::AtomicBool>);
                     impl Drop for RgbPhaseGuard {
                         fn drop(&mut self) {
@@ -3456,8 +3448,8 @@ impl AuthDaemon {
                         if let Some(deadline) = rgb_deadline
                             && Instant::now() >= deadline
                         {
-                            // Serial mode: hand the camera to the IR phase even without a
-                            // match so hybrid auth can still capture the IR spectrum.
+                            // Serial mode hands the camera to the IR phase even without a
+                            // match, so hybrid auth can still capture the IR spectrum.
                             yielded_to_ir = true;
                             break;
                         }
@@ -3582,9 +3574,8 @@ impl AuthDaemon {
                 let rgb_phase_done_clone = rgb_phase_done.clone();
 
                 ir_thread = Some(std::thread::spawn(move || {
-                    // Serial mode: wait for the RGB phase to release its camera before
-                    // opening IR (and firing the emitter), so only one stream is live at a
-                    // time on single-function UVC devices. Bail if verify already passed.
+                    // Wait for RGB to release its camera before opening IR and firing the emitter,
+                    // so single-function devices keep one live stream. Bail if verify passed.
                     if run_rgb {
                         while !rgb_phase_done_clone.load(std::sync::atomic::Ordering::Relaxed)
                             && !stop_clone.load(std::sync::atomic::Ordering::Relaxed)
@@ -3638,6 +3629,7 @@ impl AuthDaemon {
                                     logged_lit_luma = true;
                                 }
                             }
+                            // A gap between emitter strobes rather than a fault, so drop it silently.
                             IrFrameKind::StrobeDark => continue,
                             IrFrameKind::EmitterDark => {
                                 if !logged_dark_luma {

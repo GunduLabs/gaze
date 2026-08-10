@@ -104,9 +104,8 @@ ${RPM_LIB_DEPENDS}
     scripts:
       postinstall: "packaging/postinst-arch.sh"
     depends:
-      # Bounds computed by the Justfile `_nfpm` recipe from the libopencv_core
-      # soversion gazed linked against; Arch bumps the soname every opencv
-      # minor release, so an unbounded dep crash-loops after `pacman -Syu`.
+      # The Justfile `_nfpm` recipe computes these from the libopencv_core soversion gazed
+      # linked; Arch bumps that every minor release, so an unbounded dep dies on `pacman -Syu`.
       - "opencv>=${OPENCV_MIN}"
       - "opencv<${OPENCV_NEXT}"
       - pam

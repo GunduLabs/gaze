@@ -17,9 +17,8 @@ fn confirm_via_gnome_extension(pamh: PamHandle) -> c_int {
     }
 }
 
-// Polkit dialogs ignore echo-off confirmation prompts, so keep a password
-// request pending for the agent to answer, then flip the dialog into
-// confirm mode via the info-message token.
+// Polkit dialogs ignore echo-off confirmation prompts, so keep a password request pending
+// for the agent to answer and flip the dialog into confirm mode via the info-message token.
 unsafe fn confirm_via_polkit_dialog(
     pamh: PamHandle,
     username: &str,
@@ -130,9 +129,8 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     let de = uid
         .map(detect_desktop_environment)
         .unwrap_or_else(|| "Other".to_string());
-    // The greeter always runs GNOME + the gaze extension, so query the
-    // extension directly rather than trusting DE detection on its transient
-    // processes; otherwise GDM silently bypasses Require Confirmation.
+    // The greeter always runs GNOME + the extension, so query it directly rather than trusting
+    // DE detection on transient processes; otherwise GDM silently bypasses Require Confirmation.
     let extension_active =
         (is_greeter || de == "GNOME") && rt.block_on(gnome_extension_active_on(&proxy, uid));
 

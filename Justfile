@@ -19,9 +19,8 @@ rpmbuild := require("rpmbuild")
 # ONNX Runtime release bundled into the offline builds (flatpak and srpm).
 ort_version := env("ORT_VERSION", "1.22.0")
 
-# The opencv crate's build script only probes the `opencv4`/`opencv`
-# pkg-config names, so on distros that ship OpenCV 5 (e.g. Arch) point it at
-# `opencv5`. Empty (no override) when opencv4/opencv resolve or opencv5 doesn't.
+# The opencv crate probes only the `opencv4`/`opencv` pkg-config names, so distros shipping
+# OpenCV 5 (e.g. Arch) need this override. Empty when opencv4/opencv resolve or opencv5 doesn't.
 opencv_env := shell("pkg-config --exists opencv4 2>/dev/null || pkg-config --exists opencv 2>/dev/null || ! pkg-config --exists opencv5 2>/dev/null || echo OPENCV_PKGCONFIG_NAME=opencv5")
 
 # Derived vars
@@ -36,12 +35,9 @@ default:
 
 # ── build ─────────────────────────────────────────────────────────────────────
 
+# Two invocations so gaze-core's `detection` feature does not unify into the client binaries;
+# ONNX Runtime's constructors require AVX2 and crash on older CPUs.
 # Build all Rust workspace binaries (release)
-#
-# Split into two invocations so the daemon's `detection` feature on
-# gaze-core does not unify into the client binaries. ONNX Runtime's
-# constructors require AVX2 and crash on older CPUs, so the
-# CLI, GUI, and PAM modules must build without it.
 [group("build")]
 build-rust:
     {{ opencv_env }} cargo build -p gaze --release
@@ -88,9 +84,8 @@ prepare-flatpak-ort:
         curl -fsSL "$ort_url" -o .flatpak-cache/ort/onnxruntime.tgz; \
     fi
 
-# flatpak-builder's state/build/repo dirs (ostree, needs xattrs + same-filesystem
-# co-location). Default to the repo tree; the `docker` wrapper redirects them to an
-# in-VM volume because the sshfs-backed bind mount can't host ostree.
+# flatpak-builder's ostree dirs need xattrs and same-filesystem co-location, so they default to
+# the repo tree; the `docker` wrapper moves them into a volume the sshfs mount can't host.
 flatpak_state_dir := env("FLATPAK_STATE_DIR", ".flatpak-builder")
 flatpak_build_dir := env("FLATPAK_BUILD_DIR", "flatpak-build")
 flatpak_repo_dir := env("FLATPAK_REPO_DIR", "dist/flatpak-repo")
@@ -189,10 +184,8 @@ _nfpm config format:
             lib_depends=$(printf '%s' "$requires" | yaml_list)
             ;;
         archlinux)
-            # Arch bumps the OpenCV soname on every minor release, so pin the
-            # package dependency to the soversion the shipped binaries actually
-            # linked; otherwise an opencv upgrade leaves the daemon crash-looping
-            # on a missing library instead of failing the pacman transaction.
+            # Arch bumps the OpenCV soname every minor release, so pin the soversion the shipped
+            # binaries linked; unpinned, an upgrade crash-loops the daemon instead of failing.
             opencv_soname=$(needed | grep '^libopencv_core\.so\.' || true)
             if [ -n "$opencv_soname" ]; then
                 sover=${opencv_soname##*.so.}
@@ -233,11 +226,8 @@ _nfpm config format:
 _dist-packages:
     mkdir -p dist/packages
 
-# Assert every packaged format pins the opencv soversion gazed linked against
-# (without it, an opencv bump or a package installed on the wrong distro release
-# crash-loops gazed instead of failing the package transaction), and that the
-# arch package embeds a post_upgrade() scriptlet (without it, upgrades skip the
-# daemon-reload / polkit-restart / PAM setup in postinst-arch.sh).
+# Assert every packaged format pins the opencv soversion gazed linked against, so a bump fails the
+# transaction rather than crash-looping, and that arch embeds post_upgrade() from postinst-arch.sh.
 [arg("format", pattern="deb|rpm|archlinux")]
 [private]
 _verify-package format:
@@ -450,8 +440,8 @@ fmt-check:
 fmt:
     cargo fmt --all
 
+# Also enables TPM template encryption when a TPM is present; GAZE_DEV_TPM=0 skips it.
 # Link the installed system runtime to this checkout's release build
-# (also enables TPM template encryption when a TPM is present; GAZE_DEV_TPM=0 skips it)
 [group("dev")]
 dev-link-system: build-rust
     sudo GAZE_DEV_TPM="${GAZE_DEV_TPM:-1}" scripts/dev-link-system.sh enable
@@ -482,13 +472,9 @@ docker_image := env("GAZE_DOCKER_IMAGE", "gaze-build:local")
 docker-image:
     docker build -t {{ quote(docker_image) }} -f packaging/docker/Dockerfile.build packaging/docker
 
-# Run any build/package target inside the Linux container, e.g. `just docker build-rust`,
-# `just docker build-flatpak`, `just docker package-prebuilt deb`. Artifacts land in dist/.
-#
-# flatpak-builder writes ostree (needs xattrs + same-filesystem co-location) which a
-# sshfs-backed /work bind mount can't host, so its state/build/repo are redirected to a
-# single in-VM volume (/flatpak); the final .flatpak bundle is a plain file and still
-# lands in dist/packages.
+# flatpak-builder writes ostree, which a sshfs-backed /work bind mount can't host, so its dirs go
+# to the in-VM /flatpak volume; the bundle itself is a plain file and still lands in dist/packages.
+# Run any build/package target in the Linux container, e.g. `just docker build-rust`
 [group("docker")]
 docker target *args: docker-image
     docker run --rm --privileged \

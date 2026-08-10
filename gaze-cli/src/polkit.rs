@@ -8,6 +8,8 @@ use std::process::{Child, Command, Stdio};
 
 use console::style;
 
+// pkttyagent signals that it has registered with polkit by closing this fd, so the parent waits
+// for EOF rather than for any data. dup2 in pre_exec strips O_CLOEXEC, letting the child inherit it.
 const NOTIFY_FD: RawFd = 3;
 
 const REGISTER_TIMEOUT_MS: libc::c_int = 5_000;

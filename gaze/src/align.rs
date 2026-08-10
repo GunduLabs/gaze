@@ -4,6 +4,7 @@
 use image::RgbImage;
 use nalgebra::Matrix3;
 
+/// Standard 112x112 ArcFace alignment template, taken from InsightFace's `arcface_dst` in face_align.py.
 pub const ARCFACE_SRC_PTS: [[f32; 2]; 5] = [
     [38.2946, 51.6963],
     [73.5318, 51.5014],
@@ -12,6 +13,8 @@ pub const ARCFACE_SRC_PTS: [[f32; 2]; 5] = [
     [70.7299, 92.2041],
 ];
 
+/// Least-squares similarity transform from Umeyama 1991, the same estimator scikit-image and
+/// InsightFace use. Returns the 3x3 matrix taking `src` onto `dst` with uniform scale.
 pub fn umeyama(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> Option<Matrix3<f32>> {
     if src
         .iter()
@@ -56,6 +59,8 @@ pub fn umeyama(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> Option<Matrix3<f32>>
     }
     a /= num_pts;
 
+    // Flipping the sign on the smallest singular value keeps the result a rotation. Without it a
+    // negative determinant yields a mirrored face, which the recognizer scores as a stranger.
     let mut d_vec = nalgebra::Vector2::new(1.0, 1.0);
     if a.determinant() < 0.0 {
         d_vec[1] = -1.0;

@@ -114,9 +114,8 @@ fn set_inference_device_row_visible(
     device_row.set_visible(provider == "openvino");
 }
 
-/// Holds the rows the config dialog populates. The widgets are reference
-/// counted, so this owns handles rather than borrows and can be shared with the
-/// async reload without naming all 25 rows a second time.
+/// Holds the rows the config dialog populates. GTK widgets are reference counted, so this owns
+/// handles rather than borrows and the async reload can share it without relisting all 25 rows.
 struct ConfigRows {
     inference_execution_provider: libadwaita::ComboRow,
     inference_device: libadwaita::ComboRow,
