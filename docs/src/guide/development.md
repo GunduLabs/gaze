@@ -88,6 +88,18 @@ the `just` recipes automatically point the `opencv` crate at the `opencv5`
 pkg-config name; when running `cargo` directly, set
 `OPENCV_PKGCONFIG_NAME=opencv5` yourself.
 
+Only `gaze-gui` needs gtk4 and libadwaita (`libgtk-4-dev`/`gtk4-devel`/`gtk4`,
+`libadwaita-1-dev`/`libadwaita-devel`/`libadwaita`, and on Debian/Ubuntu the
+cairo, glib, gdk-pixbuf, pango, and graphene headers listed with them). For a
+TUI-only checkout, set `GAZE_GUI=0` (also `false`, `no`, or `off`) and skip
+those packages: `build-rust`, `build-rust-openvino`, `test`, and `lint` then
+leave `gaze-gui` out, and `dev-link-system` skips the binary it never built.
+The daemon, the `gaze` TUI, the CLI, and the PAM modules are unaffected. Like
+`OPENCV_PKGCONFIG_NAME`, this only covers those `just` recipes: a bare `cargo
+build`/`cargo test` still builds every workspace member, and the packaging paths
+(`package`, `build-flatpak`, and the spec `srpm` feeds) always include the GUI,
+so building packages still needs the GUI dependencies installed.
+
 ## Setup
 
 ```bash
@@ -197,8 +209,9 @@ just dev-link-system    # runs scripts/dev-link-system.sh under sudo itself
 
 `dev-link-system` (`scripts/dev-link-system.sh enable`) does more than swap binaries:
 
-- Links `/usr/bin/gazed`, `/usr/bin/gaze`, `/usr/bin/gaze-gui`, the PAM modules, the polkit
-  policy, and the GNOME extension (system-wide and current-user) over the package-installed files.
+- Links `/usr/bin/gazed`, `/usr/bin/gaze`, the PAM modules, the polkit policy, and the GNOME
+  extension (system-wide and current-user) over the package-installed files. `/usr/bin/gaze-gui`
+  is linked too when the build produced it, and skipped after a `GAZE_GUI=0` build.
 - Adds a `pam_gaze.so` line to `/etc/pam.d/sudo` if one isn't already there.
 - Installs a systemd drop-in for `gazed` that clears `InaccessiblePaths=/home /root` so the
   packaged unit can execute a binary linked from your checkout, then restarts `gazed`.

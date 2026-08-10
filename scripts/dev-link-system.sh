@@ -16,7 +16,7 @@ Run as root after building release artifacts as your normal user:
     sudo scripts/dev-link-system.sh enable
 
 This links:
-  - /usr/bin/gazed, /usr/bin/gaze, /usr/bin/gaze-gui
+  - /usr/bin/gazed, /usr/bin/gaze, and /usr/bin/gaze-gui when the GUI was built
   - installed PAM modules
   - the hyprlock-gaze / hyprlock-gaze-simultaneous PAM services (for hyprlock)
   - system and current-user GNOME extension files
@@ -76,12 +76,25 @@ artifact() {
     printf '%s/%s' "$TARGET" "$1"
 }
 
+# The GUI is optional: `GAZE_GUI=0 just build-rust` never produces it, and a
+# TUI-only install has nothing to link. Absent artifact means absent feature,
+# not a broken build.
+have_gui() {
+    [ -e "$(artifact gaze-gui)" ]
+}
+
+is_gui_path() {
+    case "$1" in
+    */gaze-gui) return 0 ;;
+    esac
+    return 1
+}
+
 require_artifacts() {
     missing=0
     for file in \
         "$(artifact gazed)" \
         "$(artifact gaze)" \
-        "$(artifact gaze-gui)" \
         "$(artifact libpam_gaze.so)" \
         "$(artifact libpam_gaze_grosshack.so)"
     do
@@ -185,10 +198,14 @@ restore_or_remove() {
 link_binaries() {
     backup_and_install "$(artifact gazed)" "$LOCAL_BIN_DIR/gazed" 0755
     backup_and_install "$(artifact gaze)" "$LOCAL_BIN_DIR/gaze" 0755
-    backup_and_install "$(artifact gaze-gui)" "$LOCAL_BIN_DIR/gaze-gui" 0755
     backup_and_link "$LOCAL_BIN_DIR/gazed" /usr/bin/gazed
     backup_and_link "$LOCAL_BIN_DIR/gaze" /usr/bin/gaze
-    backup_and_link "$LOCAL_BIN_DIR/gaze-gui" /usr/bin/gaze-gui
+    if have_gui; then
+        backup_and_install "$(artifact gaze-gui)" "$LOCAL_BIN_DIR/gaze-gui" 0755
+        backup_and_link "$LOCAL_BIN_DIR/gaze-gui" /usr/bin/gaze-gui
+    else
+        printf 'skipping gaze-gui: not built\n'
+    fi
 }
 
 restore_binaries() {
@@ -478,6 +495,8 @@ show_status() {
             printf '%s -> %s\n' "$path" "$(readlink "$path")"
         elif [ -e "$path" ]; then
             printf '%s is not a symlink\n' "$path"
+        elif is_gui_path "$path" && ! have_gui; then
+            printf '%s is absent: gaze-gui not built\n' "$path"
         else
             printf '%s is missing\n' "$path"
         fi

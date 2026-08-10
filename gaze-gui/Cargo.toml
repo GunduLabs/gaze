@@ -30,7 +30,7 @@ zbus = "5.19.0"
 zbus_polkit = "5.0.0"
 enumflags2 = "0.7.12"
 anyhow = "1.0.104"
-opencv = { version = "0.100.1", default-features = false, features = ["imgproc", "videoio"] }
+opencv = { version = "0.100.1", default-features = false, features = ["imgproc"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 futures = "0.3.33"
