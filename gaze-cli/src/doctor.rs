@@ -29,6 +29,16 @@ const GDM_FACE_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
 const KDE_FACE_PAM_FILE: &str = "/etc/pam.d/kde-fingerprint";
 const KDE_SMARTCARD_PAM_FILE: &str = "/etc/pam.d/kde-smartcard";
 const PLASMALOGIN_FACE_PAM_FILE: &str = "/etc/pam.d/plasmalogin-fingerprint";
+/// PAM falls back here when `/etc/pam.d` has no such service, and Arch, Debian and
+/// openSUSE ship these slots only there, so reading `/etc` alone sees nothing.
+const VENDOR_PAM_DIR: &str = "/usr/lib/pam.d";
+
+fn read_pam_service(path: &str) -> Option<String> {
+    fs::read_to_string(path).ok().or_else(|| {
+        let name = path.rsplit('/').next()?;
+        fs::read_to_string(format!("{VENDOR_PAM_DIR}/{name}")).ok()
+    })
+}
 const GDM_DCONF_PROFILE: &str = "gdm";
 const GDM_DCONF_PROFILE_PATH: &str = "/etc/dconf/profile/gdm";
 const GDM_DCONF_FACE_AUTH_KEY: &str = "/org/gnome/shell/extensions/gaze/enable-face-authentication";
@@ -787,13 +797,58 @@ fn check_pam(report: &mut Report) {
 }
 
 fn desktop_name() -> String {
-    [
+    let from_env = [
         std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
         std::env::var("XDG_SESSION_DESKTOP").unwrap_or_default(),
         std::env::var("DESKTOP_SESSION").unwrap_or_default(),
     ]
     .join(":")
-    .to_ascii_lowercase()
+    .to_ascii_lowercase();
+    if from_env.chars().any(|c| c != ':') {
+        return from_env;
+    }
+    // `sudo` strips those, so fall back to what is running: otherwise
+    // `sudo gaze doctor` silently drops every desktop check.
+    desktop_from_processes(owning_uid())
+}
+
+/// The user whose session is being checked: the invoking user under `sudo`.
+fn owning_uid() -> u32 {
+    std::env::var("SUDO_UID")
+        .ok()
+        .and_then(|uid| uid.parse().ok())
+        .unwrap_or_else(|| unsafe { libc::getuid() })
+}
+
+/// Names only, joined like the environment variables above so the callers'
+/// `contains` checks are unchanged. `pam-gaze-core` does the same scan, but the
+/// CLI does not link it, and pulling in libpam for one lookup is not worth it.
+fn desktop_from_processes(uid: u32) -> String {
+    use std::os::unix::fs::MetadataExt;
+
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return String::new();
+    };
+    let mut found = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !entry.metadata().is_ok_and(|meta| meta.uid() == uid) {
+            continue;
+        }
+        let Ok(comm) = fs::read_to_string(path.join("comm")) else {
+            continue;
+        };
+        let name = match comm.trim() {
+            "plasmashell" | "kwin_wayland" | "kwin_x11" => "kde",
+            "gnome-shell" => "gnome",
+            "Hyprland" | "hyprland" => "hyprland",
+            _ => continue,
+        };
+        if !found.contains(&name) {
+            found.push(name);
+        }
+    }
+    found.join(":")
 }
 
 fn check_desktop_integration(report: &mut Report) {
@@ -921,14 +976,12 @@ fn check_desktop_integration(report: &mut Report) {
     if desktop.contains("kde") || desktop.contains("plasma") {
         check_kde_lock_screen(
             report,
-            fs::read_to_string(KDE_FACE_PAM_FILE).ok().as_deref(),
-            fs::read_to_string(KDE_SMARTCARD_PAM_FILE).ok().as_deref(),
+            read_pam_service(KDE_FACE_PAM_FILE).as_deref(),
+            read_pam_service(KDE_SMARTCARD_PAM_FILE).as_deref(),
         );
         check_kde_login_greeter(
             report,
-            fs::read_to_string(PLASMALOGIN_FACE_PAM_FILE)
-                .ok()
-                .as_deref(),
+            read_pam_service(PLASMALOGIN_FACE_PAM_FILE).as_deref(),
         );
     }
 }
@@ -949,12 +1002,16 @@ fn slot_status(slot: Option<&str>) -> KdeLockStatus {
     };
     let auth_lines = || {
         contents.lines().filter(|line| {
-            line.split('#')
-                .next()
-                .unwrap_or_default()
-                .split_whitespace()
-                .next()
-                == Some("auth")
+            matches!(
+                line.split('#')
+                    .next()
+                    .unwrap_or_default()
+                    .split_whitespace()
+                    .next(),
+                // `-auth` is what the helper writes: a missing module is then
+                // skipped instead of aborting the greeter's stack.
+                Some("auth") | Some("-auth")
+            )
         })
     };
     if auth_lines().any(|line| line.contains("pam_gaze_grosshack.so")) {
@@ -1006,7 +1063,7 @@ fn check_kde_lock_screen(
         KdeLockStatus::Grosshack => report.warning(
             NAME,
             format!("{slot} runs pam_gaze_grosshack.so, which waits for a password prompt that KScreenLocker can never answer"),
-            format!("Use the plain module there: replace it with `auth [success=done default=ignore] pam_gaze.so` in {file}, or reinstall gaze-kde."),
+            format!("Use the plain module there: replace it with `-auth [success=done default=ignore] pam_gaze.so` in {file}, or reinstall gaze-kde."),
         ),
         KdeLockStatus::NotWired => report.warning(
             NAME,
@@ -1797,6 +1854,15 @@ mod tests {
             KdeLockStatus::NotWired
         );
         assert_eq!(slot_status(None), KdeLockStatus::NoService);
+
+        // What gaze-kde-pam actually writes: `-` so a missing module is skipped.
+        assert_eq!(
+            slot_status(Some(
+                "-auth       [success=done default=ignore]                pam_gaze.so"
+            )),
+            KdeLockStatus::Wired,
+            "the reported state must match the line the helper installs"
+        );
     }
 
     #[test]

@@ -97,6 +97,17 @@ Recommends:     %{name}%{?_isa} = %{version}-%{release}
 PAM service files that let hyprlock authenticate with Gaze, either on its own
 or simultaneously with a password.
 
+%package kde
+Summary:        KDE Plasma lock screen and System Settings integration for Gaze
+Recommends:     %{name}%{?_isa} = %{version}-%{release}
+Recommends:     %{name}-gui%{?_isa} = %{version}-%{release}
+
+%description kde
+Runs Gaze in the biometric PAM slot KScreenLocker starts before you touch
+anything, so the KDE Plasma lock screen unlocks on a face match with no key
+press, and adds a Face Unlock entry to System Settings. Ships no PAM service
+file of its own: plasma-workspace owns those, so they are edited in place.
+
 %prep
 %autosetup
 tar --zstd -xf %{SOURCE1}
@@ -156,6 +167,9 @@ install -Dpm 0644 packaging/gdm/profile %{buildroot}%{_datadir}/gaze/dconf-profi
 install -Dpm 0644 packaging/pam/gdm-face %{buildroot}%{_sysconfdir}/pam.d/gdm-face
 install -Dpm 0644 gaze-gdm-camera.pp %{buildroot}%{_datadir}/gaze/gaze-gdm-camera.pp
 
+install -Dpm 0755 packaging/kde/gaze-kde-pam %{buildroot}%{_bindir}/gaze-kde-pam
+install -Dpm 0644 packaging/kde/gaze-face-unlock.desktop %{buildroot}%{_datadir}/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop
+
 install -Dpm 0644 packaging/pam/hyprlock-gaze %{buildroot}%{_sysconfdir}/pam.d/hyprlock-gaze
 install -Dpm 0644 packaging/pam/hyprlock-gaze-simultaneous %{buildroot}%{_sysconfdir}/pam.d/hyprlock-gaze-simultaneous
 
@@ -178,6 +192,12 @@ ${SCRIPTLET_EXTENSION_POST}
 %postun gnome-extension
 ${SCRIPTLET_EXTENSION_POSTUN}
 
+%post kde
+${SCRIPTLET_KDE_POST}
+
+%postun kde
+${SCRIPTLET_KDE_POSTUN}
+
 %post hyprlock
 ${SCRIPTLET_HYPRLOCK_POST}
 
@@ -197,6 +217,8 @@ ${SCRIPTLET_HYPRLOCK_POSTUN}
 %{_libdir}/security/pam_gaze.so
 %{_libdir}/security/pam_gaze_grosshack.so
 %{_datadir}/authselect/vendor/gaze/
+%dir %{_datadir}/gaze
+%{_datadir}/gaze/gaze-gdm-camera.pp
 %dir %{ort_libdir}
 %{ort_libdir}/libonnxruntime.so*
 
@@ -213,14 +235,17 @@ ${SCRIPTLET_HYPRLOCK_POSTUN}
 %{_datadir}/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml
 %config(noreplace) %{_sysconfdir}/dconf/db/gdm.d/00-gaze-defaults
 %config(noreplace) %{_sysconfdir}/pam.d/gdm-face
-%dir %{_datadir}/gaze
 %{_datadir}/gaze/dconf-profile-gdm
-%{_datadir}/gaze/gaze-gdm-camera.pp
 
 %files hyprlock
 %license LICENSE
 %config(noreplace) %{_sysconfdir}/pam.d/hyprlock-gaze
 %config(noreplace) %{_sysconfdir}/pam.d/hyprlock-gaze-simultaneous
+
+%files kde
+%license LICENSE
+%{_bindir}/gaze-kde-pam
+%{_datadir}/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop
 
 %changelog
 * ${CHANGELOG_DATE} Gundu Labs <maintainers@gundulabs.com> - ${VERSION}-${PACKAGE_RELEASE}

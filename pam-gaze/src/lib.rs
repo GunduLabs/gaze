@@ -72,10 +72,18 @@ async fn verify_within(
     service: Option<&str>,
     budget: Duration,
 ) -> Verdict {
-    verify_until(budget, service_retries_transient_give_up(service), || {
+    let verdict = verify_until(budget, service_retries_transient_give_up(service), || {
         authenticate_biometric_with_status_on(proxy, username, service)
     })
-    .await
+    .await;
+
+    // Running out of budget drops the attempt mid-flight, and its release guard
+    // can only spawn the release onto a runtime this call is about to drop, so it
+    // would never be sent. Give the daemon its camera back explicitly instead.
+    if !matches!(verdict, Verdict::Reached(AuthOutcome::Match, _)) {
+        let _ = proxy.release().await;
+    }
+    verdict
 }
 
 async fn verify_until<F, Fut, E>(budget: Duration, retry: bool, mut attempt: F) -> Verdict
@@ -207,7 +215,6 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
     match graphical_confirm_decision(&de, extension_active, is_greeter) {
         GraphicalConfirm::GnomeExtension => confirm_via_gnome_extension(pamh),
-        GraphicalConfirm::Bypass => PAM_SUCCESS,
         GraphicalConfirm::FailClosed => PAM_AUTH_ERR,
     }
 }

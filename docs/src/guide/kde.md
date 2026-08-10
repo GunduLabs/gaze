@@ -52,11 +52,19 @@ slots that run up front for biometrics, `kde-fingerprint` and `kde-smartcard`.
 That is the same slot a fingerprint reader uses, and it is why hands-free face
 unlock is possible here at all.
 
-`gaze-kde` puts Gaze in one of those two slots:
+`gaze-kde` puts Gaze in one of those two slots, inside a marked block:
 
 ```
-auth        [success=done default=ignore]                pam_gaze.so
+# BEGIN gaze (managed by gaze-kde; remove with `gaze-kde-pam disable`)
+-auth       requisite                                    pam_nologin.so
+-auth       requisite                                    pam_faillock.so    preauth
+-auth       [success=done default=ignore]                pam_gaze.so
+# END gaze
 ```
+
+The leading `-` means a missing module is skipped rather than aborting the stack,
+so uninstalling Gaze cannot leave a greeter that accepts input and never answers.
+The two gates are explained under [Account locking](#account-locking).
 
 1. The greeter calls that service as soon as the lock screen appears, before you
    touch anything.
@@ -83,6 +91,14 @@ wrong for a camera, though Gaze replaces it with a real message the moment there
 something to say. `gaze doctor` reports which slot is in use, and `gaze-kde-pam`
 never wires both.
 
+The reader has to actually be installed for this to kick in, not merely mentioned:
+every distribution's `kde-fingerprint` names `pam_fprintd` whether or not `fprintd`
+is present, so the check is for the module on disk.
+
+On openSUSE and Gentoo the smartcard slot ships `pam_pkcs11 wait_for_card`, which
+blocks with no timeout. Gaze runs above it, so face unlock is unaffected, but after
+a face non-match that module goes on holding the slot for the rest of the lock.
+
 ### One attempt per lock
 
 The greeter gives a noninteractive slot a single authentication per lock: it
@@ -94,10 +110,14 @@ moment later still unlocks.
 
 ### Status messages
 
-The lock screen renders PAM *error* messages from a biometric slot but discards
-informational ones, so Gaze sends anything you need to read ("Face not
-recognized", "Too dark for face authentication") as an error message. It appears
-in place of the "(or scan your fingerprint on the reader)" hint.
+The lock screen has no handler at all for an *informational* message from a
+biometric slot, so anything you need to read ("Face not recognized", "Too dark for
+face authentication") is sent as an *error* message, which briefly replaces the
+slot's hint label. Gaze still sends one informational message when it starts
+looking, even though nothing displays it: that is what tells the greeter this
+unlock had a prompt, and without it a face match lands on an extra "Unlock" button
+instead of going straight to the desktop
+([bug 497904](https://bugs.kde.org/show_bug.cgi?id=497904)).
 
 ### Only one Gaze per unlock
 
@@ -111,6 +131,33 @@ and have those clients fight for one camera. `kde` yields to either slot, and
 Removing `gaze-kde` restores the previous behaviour automatically, because the
 module decides by reading the slot files at authentication time rather than from
 a build flag.
+
+### Account locking
+
+A `success=done` match ends the whole auth stack, so anything below Gaze in the
+slot is skipped, including checks that are meant to refuse you. Gaze therefore
+goes in **below** the stack's gates rather than at the top, and carries
+`pam_nologin` and `pam_faillock preauth` inside its own block for the distributions
+that keep those behind an `include` where inserting below them is not possible.
+A locked-out or `nologin`-blocked account cannot be unlocked by face.
+
+Where the slot can reach `pam_faillock authfail` (Fedora, through
+`substack fingerprint-auth`), Gaze fails the slot outright on a non-match instead
+of falling through to it, so looking away a few times cannot spend your login
+attempts and lock the account. Gaze never does this in a stack that also serves
+the password, where failing outright would deny a correct password whenever the
+daemon is down.
+
+::: warning An unrelated upstream bug can still lock you out
+On Plasma before 6.7 (and before the 6.5.x and 6.6.x backports), a *successful*
+biometric unlock made `pam_unix` in the password service report a failure, so
+unlocking repeatedly in quick succession could trip `pam_faillock` and lock the
+account. That is
+[kscreenlocker 29d01bf7](https://invent.kde.org/plasma/kscreenlocker/-/commit/29d01bf74958b96b41d1726b5ff6b133a7a0e402),
+fixing [bug 484363](https://bugs.kde.org/show_bug.cgi?id=484363), and it applies to
+fingerprint readers exactly as much as to Gaze. `faillock --user "$USER"` shows
+what has been recorded, and `faillock --reset` clears it.
+:::
 
 ## require_confirmation
 
@@ -217,12 +264,20 @@ fingerprint reader. A `pam_gaze` line you added yourself, outside the marked
 block, is left alone.
 
 Where a distribution ships the service under `/usr/lib/pam.d` instead of `/etc`
-(Arch does), `enable` copies it to `/etc/pam.d` first and edits the copy, because
-a file in `/etc` shadows the vendor one and writing a fresh file there would
-silently drop whatever the distribution had configured. `disable` deletes that
-copy again so the vendor stack becomes authoritative, unless it has picked up
-changes of its own, in which case only the Gaze block goes. Where no such file
-exists anywhere, `enable` creates one and `disable` removes it.
+(Arch, Debian, Ubuntu and openSUSE do), `enable` copies it to `/etc/pam.d` first
+and edits the copy, because a file in `/etc` shadows the vendor one and writing a
+fresh file there would silently drop whatever the distribution had configured.
+`disable` deletes that copy again so the vendor stack becomes authoritative, unless
+it has been changed since Gaze wrote it, in which case only the Gaze block goes.
+Where no such file exists anywhere, `enable` creates one and `disable` removes it.
+
+None of those vendor files are packaged as configuration files, so a later
+distribution update produces no `.pacnew` or `.rpmnew` to tell you that your
+`/etc` copy has gone stale. `gaze doctor` and `gaze-kde-pam status` compare the
+vendor file against what was copied and warn when it has moved on.
+
+`gaze-kde-pam disable` is remembered, so a package upgrade does not quietly turn
+face unlock back on. Use `enable --force` to undo it.
 
 ## Prerequisites
 

@@ -365,12 +365,14 @@ srpm: _dist-packages _srpm-sources
     export SCRIPTLET_MAIN_POST="$(cat packaging/postinst-rpm.sh)"
     export SCRIPTLET_EXTENSION_POST="$(cat packaging/postinst-gnome-extension.sh)"
     export SCRIPTLET_EXTENSION_POSTUN="$(cat packaging/postrm-gnome-extension.sh)"
+    export SCRIPTLET_KDE_POST="$(cat packaging/postinst-kde.sh)"
+    export SCRIPTLET_KDE_POSTUN="$(cat packaging/postrm-kde.sh)"
     export SCRIPTLET_HYPRLOCK_POST="$(cat packaging/postinst-hyprlock.sh)"
     export SCRIPTLET_HYPRLOCK_POSTUN="$(cat packaging/postrm-hyprlock.sh)"
 
     mkdir -p "{{ srpm_topdir }}/SPECS"
     spec="{{ srpm_topdir }}/SPECS/gaze.spec"
-    envsubst '$VERSION $PACKAGE_RELEASE $ORT_VERSION $CHANGELOG_DATE $SCRIPTLET_MAIN_POST $SCRIPTLET_EXTENSION_POST $SCRIPTLET_EXTENSION_POSTUN $SCRIPTLET_HYPRLOCK_POST $SCRIPTLET_HYPRLOCK_POSTUN' \
+    envsubst '$VERSION $PACKAGE_RELEASE $ORT_VERSION $CHANGELOG_DATE $SCRIPTLET_MAIN_POST $SCRIPTLET_EXTENSION_POST $SCRIPTLET_EXTENSION_POSTUN $SCRIPTLET_HYPRLOCK_POST $SCRIPTLET_HYPRLOCK_POSTUN $SCRIPTLET_KDE_POST $SCRIPTLET_KDE_POSTUN' \
         < packaging/rpm/gaze.spec.in > "$spec"
 
     {{ quote(rpmbuild) }} -bs "$spec" --define "_topdir $PWD/{{ srpm_topdir }}"

@@ -842,11 +842,10 @@ pub fn detect_desktop_environment(uid: u32) -> String {
 #[derive(Debug, PartialEq, Eq)]
 pub enum GraphicalConfirm {
     GnomeExtension,
-    Bypass,
     FailClosed,
 }
 
-/// No channel to confirm through means the match stands; a greeter never does.
+/// No channel to confirm through means the match is refused, not granted.
 pub fn graphical_confirm_decision(
     de: &str,
     extension_active: bool,
@@ -859,10 +858,12 @@ pub fn graphical_confirm_decision(
             GraphicalConfirm::FailClosed
         };
     }
+    // Not Bypass: the slots that genuinely cannot answer a prompt are handled by
+    // `service_cannot_be_prompted` before this is reached, so bypassing here would
+    // only weaken surfaces that can be confirmed, such as hyprlock.
     match de {
         "GNOME" if extension_active => GraphicalConfirm::GnomeExtension,
-        "GNOME" => GraphicalConfirm::FailClosed,
-        _ => GraphicalConfirm::Bypass,
+        _ => GraphicalConfirm::FailClosed,
     }
 }
 
@@ -1025,7 +1026,7 @@ mod tests {
     }
 
     #[test]
-    fn desktops_without_a_confirm_channel_let_the_match_stand() {
+    fn other_desktops_fail_closed_without_a_channel() {
         assert_eq!(
             graphical_confirm_decision("GNOME", true, false),
             GraphicalConfirm::GnomeExtension
@@ -1037,9 +1038,22 @@ mod tests {
         for de in ["KDE", "Hyprland", "LXQt", "Other"] {
             assert_eq!(
                 graphical_confirm_decision(de, false, false),
-                GraphicalConfirm::Bypass,
-                "{de} has no channel that could answer a confirmation"
+                GraphicalConfirm::FailClosed,
+                "{de} has no confirm channel and must fail closed, not bypass"
             );
+        }
+    }
+
+    #[test]
+    fn an_unpromptable_slot_never_reaches_the_graphical_decision() {
+        // Why failing closed above is safe: the KDE lock screen slots return
+        // before a confirmation is ever attempted.
+        for slot in [
+            KDE_FACE_PAM_SERVICE,
+            KDE_SMARTCARD_PAM_SERVICE,
+            PLASMALOGIN_FACE_PAM_SERVICE,
+        ] {
+            assert!(service_cannot_be_prompted(Some(slot)), "{slot}");
         }
     }
 
