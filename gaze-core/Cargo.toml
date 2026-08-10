@@ -35,8 +35,8 @@ ort = { version = "2.0.0-rc.13", optional = true, default-features = false, feat
     "tls-native",
     "api-22",
 ] }
-zbus = "5.18.0"
-zvariant = "5.13.1"
+zbus = "5.19.0"
+zvariant = "5.14.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_plain = "1.0.2"
 tracing = "0.1.44"
