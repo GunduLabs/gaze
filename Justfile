@@ -321,7 +321,7 @@ package format: build-rust build-selinux && (package-prebuilt format)
 # Package already-built artifacts for a given packager
 [arg("format", pattern="deb|rpm|archlinux")]
 [group("package")]
-package-prebuilt format: _dist-packages (_nfpm "packaging/nfpm.yaml" format) (_nfpm "packaging/nfpm-gui.yaml" format) (_nfpm "packaging/nfpm-gnome-extension.yaml" format) (_nfpm "packaging/nfpm-hyprlock.yaml" format) && (_verify-package format)
+package-prebuilt format: _dist-packages (_nfpm "packaging/nfpm.yaml" format) (_nfpm "packaging/nfpm-gui.yaml" format) (_nfpm "packaging/nfpm-gnome-extension.yaml" format) (_nfpm "packaging/nfpm-hyprlock.yaml" format) (_nfpm "packaging/nfpm-kde.yaml" format) && (_verify-package format)
     @echo "Packages written to dist/packages/"
 
 # ── srpm ──────────────────────────────────────────────────────────────────────
@@ -461,6 +461,33 @@ dev-link-system: build-rust
 [group("dev")]
 dev-unlink-system:
     sudo scripts/dev-link-system.sh disable
+
+# Drive a PAM service the way KScreenLocker's greeter does; fails on a prompt.
+# With confdir=self, builds a throwaway stack around this checkout's module so a
+# slot can be driven without editing the one the real lock screen uses.
+[group("dev")]
+kde-harness service="kde-fingerprint" rounds="1" confdir="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p dist
+    cc -Wall -Wextra -O2 -o dist/kde-pam-harness scripts/kde-pam-harness.c -lpam
+    echo "built dist/kde-pam-harness"
+    confdir='{{ confdir }}'
+    if [ "$confdir" = self ]; then
+        cargo build --release -p pam-gaze
+        # A space-free directory, because a PAM config field cannot quote a path.
+        confdir=$(mktemp -d /tmp/gaze-kde-harness.XXXXXX)
+        trap 'rm -rf "$confdir"' EXIT
+        cp target/release/libpam_gaze.so "$confdir/pam_gaze_test.so"
+        printf '#%%PAM-1.0\nauth [success=done default=ignore] %s/pam_gaze_test.so\nauth required pam_deny.so\naccount required pam_permit.so\n' \
+            "$confdir" >"$confdir/{{ service }}"
+    fi
+    # Unprivileged, like kscreenlocker_greet; needs gazed running and a face enrolled.
+    if [ -n "$confdir" ]; then
+        ./dist/kde-pam-harness '{{ service }}' "$USER" '{{ rounds }}' "$confdir"
+    else
+        ./dist/kde-pam-harness '{{ service }}' "$USER" '{{ rounds }}'
+    fi
 
 # Show which installed Gaze paths are linked to this checkout
 [group("dev")]

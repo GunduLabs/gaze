@@ -348,6 +348,8 @@ jobs:
                       enable = true;
                       gui.enable = true;
                       gnome.enable = true;
+                      kde.lockScreen = true;
+                      kde.loginScreen = true;
                     };
                     security.pam.services.login.gaze = {
                       enable = true;

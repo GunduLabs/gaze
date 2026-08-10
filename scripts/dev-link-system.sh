@@ -19,6 +19,7 @@ This links:
   - /usr/bin/gazed, /usr/bin/gaze, and /usr/bin/gaze-gui when the GUI was built
   - installed PAM modules
   - the hyprlock-gaze / hyprlock-gaze-simultaneous PAM services (for hyprlock)
+  - the KDE lock screen biometric slot (pam_gaze in /etc/pam.d/kde-fingerprint)
   - system and current-user GNOME extension files
   - the installed GNOME settings schema
 
@@ -71,6 +72,9 @@ HYPRLOCK_PAM_SRC="$REPO/packaging/pam/hyprlock-gaze"
 HYPRLOCK_PAM_DST=/etc/pam.d/hyprlock-gaze
 HYPRLOCK_SIMUL_PAM_SRC="$REPO/packaging/pam/hyprlock-gaze-simultaneous"
 HYPRLOCK_SIMUL_PAM_DST=/etc/pam.d/hyprlock-gaze-simultaneous
+KDE_PAM_HELPER_SRC="$REPO/packaging/kde/gaze-kde-pam"
+KDE_PAM_HELPER_DST=/usr/bin/gaze-kde-pam
+KDE_PAM_SLOTS="/etc/pam.d/kde-fingerprint /etc/pam.d/kde-smartcard"
 
 artifact() {
     printf '%s/%s' "$TARGET" "$1"
@@ -379,6 +383,20 @@ restore_hyprlock_pam() {
     restore_or_remove "$HYPRLOCK_SIMUL_PAM_DST"
 }
 
+# The helper edits kde-fingerprint in place, so `disable` asks it to undo that.
+link_kde_pam() {
+    backup_and_install "$KDE_PAM_HELPER_SRC" "$KDE_PAM_HELPER_DST" 0755
+    "$KDE_PAM_HELPER_DST" enable || printf 'KDE lock screen PAM setup failed; run `gaze-kde-pam enable` by hand.\n' >&2
+}
+
+restore_kde_pam() {
+    if [ -x "$KDE_PAM_HELPER_DST" ]; then
+        "$KDE_PAM_HELPER_DST" disable >/dev/null 2>&1 || true
+        "$KDE_PAM_HELPER_DST" disable-login >/dev/null 2>&1 || true
+    fi
+    restore_or_remove "$KDE_PAM_HELPER_DST"
+}
+
 link_extension_files() {
     dir=$1
     install -d "$dir"
@@ -489,7 +507,8 @@ show_status() {
         "$SCHEMA_DST" \
         "$POLKIT_POLICY_DST" \
         "$HYPRLOCK_PAM_DST" \
-        "$HYPRLOCK_SIMUL_PAM_DST"
+        "$HYPRLOCK_SIMUL_PAM_DST" \
+        "$KDE_PAM_HELPER_DST"
     do
         if [ -L "$path" ]; then
             printf '%s -> %s\n' "$path" "$(readlink "$path")"
@@ -502,6 +521,20 @@ show_status() {
         fi
     done
     systemctl show gazed -p DropInPaths -p ExecStart -p InaccessiblePaths 2>/dev/null || true
+
+    if [ -x "$KDE_PAM_HELPER_DST" ]; then
+        "$KDE_PAM_HELPER_DST" status || true
+    else
+        # No helper to ask, so read the slots rather than guessing about them.
+        for slot in $KDE_PAM_SLOTS; do
+            [ -e "$slot" ] || continue
+            if grep -qE '^[[:space:]]*-?auth[[:space:]].*pam_gaze' "$slot" 2>/dev/null; then
+                printf '%s: runs pam_gaze (gaze-kde-pam is not installed to manage it)\n' "$slot"
+            else
+                printf '%s: does not run pam_gaze\n' "$slot"
+            fi
+        done
+    fi
 
     if tpm_present; then tpm=$([ -e /dev/tpmrm0 ] && echo /dev/tpmrm0 || echo /dev/tpm0); else tpm=none; fi
     printf 'tpm device: %s\n' "$tpm"
@@ -586,6 +619,7 @@ case "$cmd" in
         link_polkit_policy
         link_gnome_extension
         link_hyprlock_pam
+        link_kde_pam
         setup_tpm_encryption
         install_systemd_dropin
         printf '\nGaze is linked to this checkout. Rebuild after switching branches, then restart gazed.\n'
@@ -595,6 +629,9 @@ case "$cmd" in
                 ;;
             hyprland)
                 printf 'Set `pam_module = hyprlock-gaze` in ~/.config/hypr/hyprlock.conf to test hyprlock face unlock.\n'
+                ;;
+            kde)
+                printf 'Lock your screen and look at the camera to test KDE face unlock. Add the login greeter with `gaze-kde-pam enable-login`.\n'
                 ;;
         esac
         ;;
@@ -607,6 +644,7 @@ case "$cmd" in
         restore_polkit_policy
         restore_gnome_extension
         restore_hyprlock_pam
+        restore_kde_pam
         teardown_tpm_encryption
         remove_systemd_dropin
         ;;

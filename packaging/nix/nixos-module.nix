@@ -159,6 +159,27 @@ in
         <https://gaze.gundulabs.com/guide/gnome> before enabling
       '';
     };
+
+    kde = {
+      lockScreen = lib.mkEnableOption ''
+        hands-free face unlock on the KDE Plasma lock screen. KScreenLocker starts
+        two biometric services up front, alongside the password field, so face
+        auth begins with no key press. Gaze takes `kde-fingerprint`, or
+        `kde-smartcard` when {option}`services.fprintd.enable` already owns the
+        first, so face and finger race instead of queueing. The equivalent of the
+        `gaze-kde` package
+      '';
+
+      loginScreen = lib.mkEnableOption ''
+        face authentication in the Plasma Login Manager / SDDM login stack. On a
+        greeter without an up-front biometric service this only runs when the
+        login form is submitted, exactly as a fingerprint reader does there, and
+        KWallet will ask for its password once because none was typed. It also
+        writes `plasmalogin-fingerprint`, which a Plasma Login Manager carrying
+        plasma-login-manager!185 runs before you type. Read
+        <https://gaze.gundulabs.com/guide/kde> before enabling
+      '';
+    };
   };
 
   # Per-service knobs live on the nixpkgs PAM submodule, as `fprintAuth` and `howdy` do. Only
@@ -319,6 +340,61 @@ in
 
       (lib.mkIf cfg.gui.enable {
         environment.systemPackages = [ cfg.gui.package ];
+      })
+
+      (lib.mkIf cfg.kde.lockScreen (
+        let
+          # nixpkgs generates these two slots from fprintd and p11, and replacing
+          # the text of one would drop what it configured there.
+          readerHasFingerprintSlot = config.services.fprintd.enable;
+          p11HasSmartcardSlot = config.security.pam.p11.enable;
+
+          # pam_fprintd blocks for its whole timeout, so sharing its slot starves
+          # whichever module runs second. Prefer a slot of our own.
+          slot =
+            if readerHasFingerprintSlot && !p11HasSmartcardSlot then
+              "kde-smartcard"
+            else
+              "kde-fingerprint";
+          shareWithReader = slot == "kde-fingerprint" && readerHasFingerprintSlot;
+        in
+        {
+          # A face-only stack, because a noninteractive slot must never reach a
+          # module that prompts. Never pam_gaze_grosshack.so here for that reason.
+          security.pam.services.${slot}.text = ''
+            auth       [success=done default=ignore]  ${cfg.package}/lib/security/pam_gaze.so
+          ''
+          + lib.optionalString shareWithReader ''
+            auth       sufficient                     ${pkgs.fprintd}/lib/security/pam_fprintd.so
+          ''
+          + ''
+            auth       required                       pam_deny.so
+
+            account    required                       pam_permit.so
+            password   required                       pam_deny.so
+            session    required                       pam_permit.so
+          '';
+
+          # Otherwise the interactive `kde` stack fights over the same camera claim.
+          security.pam.services.kde.gaze.enable = lib.mkDefault false;
+        }
+      ))
+
+      (lib.mkIf cfg.kde.loginScreen {
+        security.pam.services.plasmalogin.gaze.enable = lib.mkDefault true;
+        security.pam.services.sddm.gaze.enable = lib.mkDefault true;
+
+        # Plasma Login Manager runs this one alongside the password field instead
+        # of after it, so face auth needs no submit. A greeter without
+        # plasma-login-manager!185 never opens the service and ignores the file.
+        security.pam.services."plasmalogin-fingerprint".text = ''
+          auth       [success=done default=ignore]  ${cfg.package}/lib/security/pam_gaze.so
+          auth       required                       pam_deny.so
+
+          account    required                       pam_permit.so
+          password   required                       pam_deny.so
+          session    required                       pam_permit.so
+        '';
       })
 
       (lib.mkIf cfg.gnome.enable {

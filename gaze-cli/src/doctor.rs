@@ -25,6 +25,10 @@ const PAM_MODULES: [&str; 2] = ["pam_gaze.so", "pam_gaze_grosshack.so"];
 const GNOME_EXTENSION_ID: &str = "gaze@gundulabs.com";
 const GNOME_EXTENSION_SCHEMA: &str = "org.gnome.shell.extensions.gaze";
 const GDM_FACE_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
+/// Mirror `pam_gaze_core`'s paths for the slots Plasma starts up front.
+const KDE_FACE_PAM_FILE: &str = "/etc/pam.d/kde-fingerprint";
+const KDE_SMARTCARD_PAM_FILE: &str = "/etc/pam.d/kde-smartcard";
+const PLASMALOGIN_FACE_PAM_FILE: &str = "/etc/pam.d/plasmalogin-fingerprint";
 const GDM_DCONF_PROFILE: &str = "gdm";
 const GDM_DCONF_PROFILE_PATH: &str = "/etc/dconf/profile/gdm";
 const GDM_DCONF_FACE_AUTH_KEY: &str = "/org/gnome/shell/extensions/gaze/enable-face-authentication";
@@ -913,6 +917,130 @@ fn check_desktop_integration(report: &mut Report) {
             );
         }
     }
+
+    if desktop.contains("kde") || desktop.contains("plasma") {
+        check_kde_lock_screen(
+            report,
+            fs::read_to_string(KDE_FACE_PAM_FILE).ok().as_deref(),
+            fs::read_to_string(KDE_SMARTCARD_PAM_FILE).ok().as_deref(),
+        );
+        check_kde_login_greeter(
+            report,
+            fs::read_to_string(PLASMALOGIN_FACE_PAM_FILE)
+                .ok()
+                .as_deref(),
+        );
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KdeLockStatus {
+    Wired,
+    /// The simultaneous module, which deadlocks on this slot.
+    Grosshack,
+    NotWired,
+    /// KScreenLocker has no biometric slot configured at all.
+    NoService,
+}
+
+fn slot_status(slot: Option<&str>) -> KdeLockStatus {
+    let Some(contents) = slot else {
+        return KdeLockStatus::NoService;
+    };
+    let auth_lines = || {
+        contents.lines().filter(|line| {
+            line.split('#')
+                .next()
+                .unwrap_or_default()
+                .split_whitespace()
+                .next()
+                == Some("auth")
+        })
+    };
+    if auth_lines().any(|line| line.contains("pam_gaze_grosshack.so")) {
+        return KdeLockStatus::Grosshack;
+    }
+    if auth_lines().any(pam_line_has_reference) {
+        return KdeLockStatus::Wired;
+    }
+    KdeLockStatus::NotWired
+}
+
+/// Either slot the greeter starts up front will do, so report on whichever has
+/// the most to say: one being wired is a pass however the other looks.
+fn kde_lock_status(
+    kde_fingerprint: Option<&str>,
+    kde_smartcard: Option<&str>,
+) -> (KdeLockStatus, &'static str) {
+    let slots = [
+        (KDE_FACE_PAM_FILE, slot_status(kde_fingerprint)),
+        (KDE_SMARTCARD_PAM_FILE, slot_status(kde_smartcard)),
+    ];
+    for wanted in [
+        KdeLockStatus::Wired,
+        KdeLockStatus::Grosshack,
+        KdeLockStatus::NotWired,
+    ] {
+        if let Some((file, status)) = slots.iter().find(|(_, status)| *status == wanted) {
+            return (*status, file);
+        }
+    }
+    (KdeLockStatus::NoService, KDE_FACE_PAM_FILE)
+}
+
+fn check_kde_lock_screen(
+    report: &mut Report,
+    kde_fingerprint: Option<&str>,
+    kde_smartcard: Option<&str>,
+) {
+    const NAME: &str = "KDE lock screen";
+    let (status, file) = kde_lock_status(kde_fingerprint, kde_smartcard);
+    let slot = file.trim_start_matches("/etc/pam.d/");
+    match status {
+        KdeLockStatus::Wired => report.pass(
+            NAME,
+            format!(
+                "{slot} runs Gaze, so face unlock starts on its own next to the password field"
+            ),
+        ),
+        KdeLockStatus::Grosshack => report.warning(
+            NAME,
+            format!("{slot} runs pam_gaze_grosshack.so, which waits for a password prompt that KScreenLocker can never answer"),
+            format!("Use the plain module there: replace it with `auth [success=done default=ignore] pam_gaze.so` in {file}, or reinstall gaze-kde."),
+        ),
+        KdeLockStatus::NotWired => report.warning(
+            NAME,
+            format!("{file} does not run Gaze, so face auth only starts after you submit the password field"),
+            "Install the gaze-kde package, or run `sudo gaze-kde-pam enable`.",
+        ),
+        KdeLockStatus::NoService => report.warning(
+            NAME,
+            format!("{file} does not exist, so KScreenLocker has no biometric slot to start"),
+            "Install the gaze-kde package, or run `sudo gaze-kde-pam enable`, which creates it.",
+        ),
+    }
+}
+
+/// The greeter only scans before you type where it starts a service of its own,
+/// which upstream added in plasma-login-manager!185. Everywhere else face auth
+/// waits for the submit, exactly as a fingerprint reader does on that screen.
+fn check_kde_login_greeter(report: &mut Report, plasmalogin_face: Option<&str>) {
+    const NAME: &str = "KDE login greeter";
+    match plasmalogin_face {
+        None => report.pass(
+            NAME,
+            "no up-front biometric service upstream, so face auth runs when you submit the login form (press Enter on an empty password field)",
+        ),
+        Some(contents) if slot_status(Some(contents)) == KdeLockStatus::Wired => report.pass(
+            NAME,
+            "plasmalogin-fingerprint runs Gaze, so face auth starts as soon as the greeter shows your user",
+        ),
+        Some(_) => report.warning(
+            NAME,
+            format!("{PLASMALOGIN_FACE_PAM_FILE} exists but does not run Gaze, so face auth at the greeter waits for you to submit the form"),
+            "Run `sudo gaze-kde-pam enable-login` to scan before you type.",
+        ),
+    }
 }
 
 fn hyprlock_selects_gaze(contents: &str) -> bool {
@@ -1634,6 +1762,124 @@ mod tests {
             None,
             "a custom User= must not be judged"
         );
+    }
+
+    #[test]
+    fn slot_status_reads_the_auth_stack() {
+        assert_eq!(
+            slot_status(Some(
+                "#%PAM-1.0\nauth        [success=done default=ignore]                pam_gaze.so"
+            )),
+            KdeLockStatus::Wired
+        );
+        assert_eq!(
+            slot_status(Some(
+                "auth required pam_fprintd.so\nauth sufficient pam_gaze.so"
+            )),
+            KdeLockStatus::Wired
+        );
+        assert_eq!(
+            slot_status(Some("auth sufficient pam_gaze_grosshack.so")),
+            KdeLockStatus::Grosshack
+        );
+        assert_eq!(
+            slot_status(Some(
+                "auth required pam_fprintd.so\nauth required pam_deny.so"
+            )),
+            KdeLockStatus::NotWired
+        );
+        assert_eq!(
+            slot_status(Some("# auth sufficient pam_gaze.so")),
+            KdeLockStatus::NotWired
+        );
+        assert_eq!(
+            slot_status(Some("session optional pam_gaze.so")),
+            KdeLockStatus::NotWired
+        );
+        assert_eq!(slot_status(None), KdeLockStatus::NoService);
+    }
+
+    #[test]
+    fn either_biometric_slot_counts_as_wired() {
+        let reader = Some("auth required pam_fprintd.so");
+        let gaze = Some("auth [success=done default=ignore] pam_gaze.so");
+
+        assert_eq!(
+            kde_lock_status(gaze, reader),
+            (KdeLockStatus::Wired, KDE_FACE_PAM_FILE)
+        );
+        assert_eq!(
+            kde_lock_status(reader, gaze),
+            (KdeLockStatus::Wired, KDE_SMARTCARD_PAM_FILE),
+            "the smartcard slot is a first-class home for Gaze"
+        );
+        assert_eq!(
+            kde_lock_status(reader, None),
+            (KdeLockStatus::NotWired, KDE_FACE_PAM_FILE)
+        );
+        assert_eq!(
+            kde_lock_status(None, None),
+            (KdeLockStatus::NoService, KDE_FACE_PAM_FILE)
+        );
+        assert_eq!(
+            kde_lock_status(Some("auth sufficient pam_gaze_grosshack.so"), reader),
+            (KdeLockStatus::Grosshack, KDE_FACE_PAM_FILE),
+            "a deadlocking module must be reported over a merely unwired slot"
+        );
+    }
+
+    #[test]
+    fn kde_lock_screen_check_warns_unless_the_plain_module_is_wired() {
+        let level = |fingerprint: Option<&str>, smartcard: Option<&str>| {
+            let mut report = Report::default();
+            check_kde_lock_screen(&mut report, fingerprint, smartcard);
+            report
+                .checks
+                .iter()
+                .find(|check| check.name == "KDE lock screen")
+                .map(|check| check.level)
+                .expect("the KDE lock screen check always reports")
+        };
+
+        assert_eq!(
+            level(Some("auth sufficient pam_gaze.so"), None),
+            Level::Pass
+        );
+        assert_eq!(
+            level(
+                Some("auth required pam_fprintd.so"),
+                Some("auth sufficient pam_gaze.so")
+            ),
+            Level::Pass
+        );
+        assert_eq!(
+            level(Some("auth sufficient pam_gaze_grosshack.so"), None),
+            Level::Warning
+        );
+        assert_eq!(
+            level(Some("auth required pam_fprintd.so"), None),
+            Level::Warning
+        );
+        assert_eq!(level(None, None), Level::Warning);
+    }
+
+    #[test]
+    fn login_greeter_check_only_complains_about_an_unused_slot() {
+        let level = |contents: Option<&str>| {
+            let mut report = Report::default();
+            check_kde_login_greeter(&mut report, contents);
+            report
+                .checks
+                .iter()
+                .find(|check| check.name == "KDE login greeter")
+                .map(|check| check.level)
+                .expect("the KDE login greeter check always reports")
+        };
+
+        // Nothing to wire is the normal state today, not a problem to fix.
+        assert_eq!(level(None), Level::Pass);
+        assert_eq!(level(Some("auth sufficient pam_gaze.so")), Level::Pass);
+        assert_eq!(level(Some("auth required pam_fprintd.so")), Level::Warning);
     }
 
     #[test]
