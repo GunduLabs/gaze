@@ -89,6 +89,8 @@ fn geometry_status(
     }
 }
 
+/// Yaw and pitch here are unitless landmark ratios, not angles. Yaw is the nose offset in eye
+/// widths and pitch in eye-to-mouth heights, so every threshold comparing them is a ratio too.
 pub fn estimate_head_pose(kps: &ndarray::Array3<f32>) -> Option<(f32, f32)> {
     let shape = kps.shape();
     if shape[0] < 1 || shape[1] < 5 || shape[2] < 2 {
@@ -184,6 +186,8 @@ pub enum IrFrameKind {
     EmitterDark,
 }
 
+/// Windows Hello emitters strobe, lighting only alternate frames, so an isolated dark frame is
+/// normal and only an unbroken streak means the emitter never fired.
 pub struct IrDarkFrameGate {
     threshold: u8,
     consecutive_dark: u32,

@@ -32,15 +32,8 @@ pub const TTY_CONFIRM_DECISECONDS: libc::cc_t = 200;
 const _: () = assert!(TTY_CONFIRM_DECISECONDS > 0);
 pub const FACE_PAM_SERVICE: &str = "gdm-face";
 
-/// Total time PAM will wait on the daemon, camera time plus any configured
-/// pre-auth delay.
-///
-/// The daemon waits for `start_delay_ms` (or `resume_grace_ms` on resume)
-/// after `VerifyStart` returns and before it opens the camera. PAM is blocked
-/// waiting on the verification signal for that whole wait, so the delay has to
-/// be added on top of the camera budget or it eats into it and the scan times
-/// out early. The resumed value is used because PAM cannot tell whether the
-/// daemon is about to treat this authentication as a resume.
+/// Camera budget plus the daemon's pre-auth delay, which PAM also blocks through, so it must be
+/// added rather than absorbed. Assumes the resumed delay, which PAM cannot predict.
 pub fn camera_auth_timeout(
     auth: &gaze_core::config::AuthConfig,
     service: Option<&str>,
@@ -391,10 +384,8 @@ pub async fn active_or_user_uid(username: &str) -> Option<u32> {
     }
 }
 
-// Like `active_or_user_uid`, but also reports whether the active seat session
-// is a login greeter (e.g. GDM). A greeter always runs GNOME with the gaze
-// extension loaded, yet its short-lived processes make `/proc`-based DE
-// detection unreliable, so callers gate confirmation on this flag instead.
+// Like `active_or_user_uid`, but also flags a login greeter (e.g. GDM). A greeter always runs
+// GNOME, yet its transient processes defeat `/proc` DE detection, so callers gate on this.
 pub async fn active_confirm_target(username: &str) -> (Option<u32>, bool) {
     match gaze_core::dbus::get_active_session_uid_and_class().await {
         Ok((uid, class)) => (Some(uid), class == "greeter"),

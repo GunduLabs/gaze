@@ -154,7 +154,8 @@ fn create_primary(context: &mut Context) -> anyhow::Result<tss_esapi::handles::K
         .build()
         .context("failed to build primary ECC parameters")?;
 
-    // Owner hierarchy, no PCR policy: bound to this TPM but survives firmware/kernel updates.
+    // Nothing about this parent is stored on disk. CreatePrimary re-derives the identical key
+    // from the owner seed and this exact template, and no PCR policy means updates don't break it.
     let public = PublicBuilder::new()
         .with_public_algorithm(PublicAlgorithm::Ecc)
         .with_name_hashing_algorithm(HashingAlgorithm::Sha256)

@@ -108,6 +108,18 @@ yay -S --needed gaze-bin gaze-gui-bin
 
 :::
 
+::: warning Arch: install the `-bin` packages, not the release artifacts
+On Arch, install Gaze only through the AUR packages above. The
+`gaze-*.pkg.tar.zst` files attached to each GitHub release are the inputs the
+AUR wrappers unpack, not a supported install path: they carry the plain package
+names `gaze` and `gaze-gui`, and an unrelated AUR package is also named `gaze`
+(a file watcher). Installing them with `pacman -U` leaves a foreign `gaze` that
+the next `yay -Syu` or `paru -Syu` silently "upgrades" to the unrelated package,
+removing `gazed`, the PAM modules, and the systemd unit. See
+[Gaze disappears after an AUR helper upgrade](/guide/troubleshooting#gaze-disappears-after-an-aur-helper-upgrade-arch-linux)
+if this already happened to you.
+:::
+
 ## Path C: GUI-only via Flatpak
 
 The Flatpak is published to the Gundu Labs repository. The signing key and repo

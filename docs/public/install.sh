@@ -263,10 +263,8 @@ enable_gnome_extension() {
 
     EXT_ID="gaze@gundulabs.com"
 
-    # gnome-extensions enable works immediately when Shell already knows the extension.
-    # Newly installed system extensions are not scanned until Shell restarts, so it
-    # often fails on first install. Fall back to gsettings which writes directly to
-    # dconf and takes effect on the next login without needing Shell to know the ext.
+    # Shell does not scan newly installed system extensions until it restarts, so
+    # `gnome-extensions enable` usually fails here and gsettings writes dconf directly.
     if command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions enable "$EXT_ID" >/dev/null 2>&1 && _gsettings_enable_face_auth; then
         ok "Enabled GNOME lock screen face unlock for this user."
     elif _gsettings_add_extension "$EXT_ID" && _gsettings_enable_face_auth; then
@@ -594,10 +592,8 @@ if is_deb; then
     sudo mkdir -p -m 0755 /usr/share/keyrings
     sudo cp "$TMP/gundulabs-archive-keyring.gpg" /usr/share/keyrings/gundulabs-archive-keyring.gpg
     sudo chmod 0644 /usr/share/keyrings/gundulabs-archive-keyring.gpg
-    # Pin to the detected release suite so each distro gets the package built
-    # against its own toolchain/glibc; supported_deb_suite
-    # above already guaranteed DISTRO_CODENAME is one we publish.
-    # Restrict to the host arch so apt skips foreign arches like i386.
+    # Pin to the detected suite (already vetted by supported_deb_suite) so each distro gets
+    # the package built against its own glibc, and to the host arch so apt skips i386.
     DEB_ARCH="$(dpkg --print-architecture)"
     printf '%s\n' "deb [arch=${DEB_ARCH} signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] ${PKG_BASE_URL}/deb ${DISTRO_CODENAME} main" |
         sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
@@ -633,10 +629,8 @@ repo_gpgcheck=1
 gpgkey=${PKG_BASE_URL}/keys/gundulabs-repo.asc
 EOF
 
-    # Import the fingerprint-verified key up front so repo_gpgcheck does not drop
-    # into an interactive "import key? [y/N]" prompt that reads the piped script.
-    # Skip rpm --import on OSTree systems since /usr/share/rpm is read-only;
-    # rpm-ostree fetches and validates gpgkey directly from the .repo file.
+    # Import the key up front so repo_gpgcheck never opens an interactive import prompt that
+    # would read the piped script. OSTree systems skip it, /usr/share/rpm being read-only.
     KEY_PATH="$(fetch_repo_key)"
     if [ "$RPM_TOOL" != "rpm-ostree" ]; then
         sudo rpm --import "$KEY_PATH" 2>/dev/null || true
@@ -731,9 +725,8 @@ fi
 
 printf '\n%s\n\n' "${GREEN}${BOLD}✓ Gaze installed successfully${RESET}"
 
-# Surface problems while the user is still looking at the terminal. Expect a
-# few warnings on a fresh install (nothing enrolled yet, extension loads after
-# a reboot); doctor's exit code must not abort the summary.
+# Surface problems while the user is still watching. A fresh install always warns (nothing
+# enrolled, extension pending a reboot), so doctor's exit code must not abort the summary.
 if command -v gaze >/dev/null 2>&1; then
     title "Health check (gaze doctor)"
     say "${DIM}Warnings about enrollment or the GNOME extension are expected before the next steps below.${RESET}"

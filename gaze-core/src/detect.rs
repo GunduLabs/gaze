@@ -169,6 +169,8 @@ impl FaceDetector {
             )));
         }
 
+        // SCRFD emits one tensor per stride per head, laid out as scores, then boxes, then
+        // optional keypoints, so head `i` for a stride lives at i, i+3 and i+6. Two anchors per cell.
         let has_kps = num_outputs == 9;
         let strides = [8, 16, 32];
         let num_anchors = 2;
@@ -205,6 +207,8 @@ impl FaceDetector {
 
                         let score = score_data[point_idx];
                         if score >= self.conf_threshold {
+                            // Anchor-free FCOS encoding, so the four values are distances from
+                            // the anchor point to each edge in stride units, not corner offsets.
                             let b_idx = point_idx * 4;
                             let l = bbox_data[b_idx] * (*stride as f32);
                             let t = bbox_data[b_idx + 1] * (*stride as f32);
