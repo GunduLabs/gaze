@@ -24,13 +24,8 @@ ort_version := env("ORT_VERSION", "1.22.0")
 # `opencv5`. Empty (no override) when opencv4/opencv resolve or opencv5 doesn't.
 opencv_env := shell("pkg-config --exists opencv4 2>/dev/null || pkg-config --exists opencv 2>/dev/null || ! pkg-config --exists opencv5 2>/dev/null || echo OPENCV_PKGCONFIG_NAME=opencv5")
 
-# Build the GTK front-end (`gaze-gui`). `GAZE_GUI=0` (also `false`, `no`, `off`,
-# case-insensitive) drops it from every build, test, and lint recipe, which also
-# drops gtk4/libadwaita (and their cairo, pango, graphene, gdk-pixbuf headers)
-# from the build dependencies. The TUI lives in the separate `gaze` binary and is
-# unaffected. This covers the recipes below only: a bare `cargo build`/`cargo
-# test` still builds every workspace member, and the packaging paths (`package`,
-# `build-flatpak`, and the spec `srpm` feeds) always include the GUI.
+# Build the GTK front-end (`gaze-gui`). `GAZE_GUI=0`/`false`/`no`/`off` drops it,
+# and gtk4/libadwaita, from the build, test, and lint recipes below only.
 gui := lowercase(env("GAZE_GUI", "1"))
 gui_off := if gui =~ '^(0|false|no|off)$' { "1" } else { "" }
 gui_pkg := if gui_off == "1" { "" } else { "-p gaze-gui" }
