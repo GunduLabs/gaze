@@ -48,6 +48,7 @@ pub const CONFIRMATION_ACK: &str = "CONFIRM";
 
 pub const LOOK_PROMPT: &str = "Please look at the camera";
 pub const LOOK_OR_PASSWORD_PROMPT: &str = "Please look at the camera or enter password";
+pub const FACE_VERIFIED: &str = "Face Verified.";
 pub const FACE_NOT_RECOGNIZED: &str = "Face not recognized. Enter your password.";
 pub const FACE_NOT_DETECTED: &str = "Face not detected. Enter your password.";
 pub const FACE_TOO_DARK: &str = "Too dark for face authentication. Enter your password.";
@@ -161,6 +162,29 @@ impl Drop for TermiosGuard {
     }
 }
 
+fn replace_previous_line(writer: &mut impl Write, message: &str) -> std::io::Result<()> {
+    write!(writer, "\x1B[1A\x1B[2K\r{message}")
+}
+
+fn report_face_verified_to_tty() -> Option<()> {
+    let mut tty = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .ok()?;
+    replace_previous_line(&mut tty, FACE_VERIFIED).ok()?;
+    writeln!(tty).ok()?;
+    tty.flush().ok()
+}
+
+/// Replace the camera prompt with a non-interactive success message when a terminal is available.
+/// Graphical PAM clients receive the same message through their conversation function instead.
+pub unsafe fn report_face_verified(pamh: PamHandle) {
+    if report_face_verified_to_tty().is_none() {
+        unsafe { say(pamh, FACE_VERIFIED) };
+    }
+}
+
 fn confirm_from_tty() -> Option<bool> {
     let mut tty = OpenOptions::new()
         .read(true)
@@ -184,7 +208,7 @@ fn confirm_from_tty() -> Option<bool> {
         }
 
         let _guard = TermiosGuard { fd, original };
-        write!(tty, "\x1B[1A\x1B[2K\r{CONFIRMATION_PROMPT}").ok()?;
+        replace_previous_line(&mut tty, CONFIRMATION_PROMPT).ok()?;
         tty.flush().ok()?;
 
         let mut key = [0_u8; 1];
@@ -1027,6 +1051,19 @@ mod tests {
         assert!(!confirmation_accepted(Some("hunter2")));
         assert!(!confirmation_accepted(Some("confirm")));
         assert!(!confirmation_accepted(None));
+    }
+
+    #[test]
+    fn face_verified_replaces_the_previous_terminal_prompt() {
+        let mut output = Vec::new();
+
+        replace_previous_line(&mut output, FACE_VERIFIED).unwrap();
+
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "\x1B[1A\x1B[2K\rFace Verified."
+        );
+        assert!(!FACE_VERIFIED.contains("confirm"));
     }
 
     #[test]

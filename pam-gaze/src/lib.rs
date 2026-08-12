@@ -110,6 +110,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     };
 
     if !confirmation_required(Some(&loaded_auth), service.as_deref()) {
+        unsafe { report_face_verified(pamh) };
         return PAM_SUCCESS;
     }
 
