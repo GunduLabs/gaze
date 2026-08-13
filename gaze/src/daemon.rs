@@ -53,6 +53,9 @@ pub struct ClaimState {
     pub username: String,
     pub sender: String,
     pub epoch: u64,
+    /// The PipeWire session this claim may capture from, `None` for the seat device. Carried
+    /// here because a claim can be preempted before capture starts, and the replacement rebinds.
+    pub pipewire_uid: Option<u32>,
 }
 
 /// The single claim the daemon will honour, if any.
@@ -132,8 +135,8 @@ async fn release_claim_epoch(
         return false;
     }
     *state = None;
-    // A running pipeline keeps its own reference to the socket, so dropping the daemon's does
-    // not cut capture short; it only stops the next claim from inheriting this one's session.
+    // Capture already under way carries its own copy of this, so dropping it here cuts nothing
+    // short; it only stops the next claim from inheriting this one's session.
     clear_pipewire_session();
     let mut cancel = active_cancel.lock().await;
     if let Some(tx) = cancel.take() {
@@ -634,14 +637,8 @@ impl AuthDaemon {
         std::path::Path::new(&format!("/run/user/{uid}/pipewire-0")).exists()
     }
 
-    // Bind capture to the target's own session; a bystander's camera must never authenticate
-    // another user. `active` is (uid, is_greeter, has_pipewire) for the active seat.
-    //
-    // `seat_unoccupied` is deliberately stronger than "ActiveSession is empty". logind clears
-    // ActiveSession whenever the foreground VT holds no session, which is also true when
-    // another user is logged in on a background VT, so emptiness alone would hand their seat
-    // camera to a console login for someone else. It is only set when logind confirmed both
-    // that no session is active and that no session on seat0 belongs to anyone but the target.
+    // A bystander's camera must never authenticate another user. `active` is
+    // (uid, is_greeter, has_pipewire) for the active seat; `seat_unoccupied` is its own check.
     fn resolve_camera_uid(
         caller_uid: u32,
         target_uid: u32,
@@ -667,9 +664,8 @@ impl AuthDaemon {
         if caller_uid != 0 {
             return caller_has_pipewire.then_some(CameraBinding::Session(caller_uid));
         }
-        // A console login prompt runs before any session exists. With the seat otherwise empty
-        // nobody's ACL can be taken, so capture the device directly. A failed lookup leaves
-        // `seat_unoccupied` false and still refuses.
+        // A console login runs before any session exists, so with the seat otherwise empty
+        // nobody's ACL can be taken. A failed lookup leaves this false and still refuses.
         if seat_unoccupied {
             return Some(CameraBinding::SeatDevice);
         }
@@ -848,6 +844,7 @@ mod tests {
         let state = Some(ClaimState {
             username: "alice".to_string(),
             sender: ":1.42".to_string(),
+            pipewire_uid: None,
             epoch: 2,
         });
 
@@ -859,6 +856,7 @@ mod tests {
         Arc::new(Mutex::new(Some(ClaimState {
             username: "alice".to_string(),
             sender: ":1.42".to_string(),
+            pipewire_uid: None,
             epoch,
         })))
     }
@@ -1017,6 +1015,7 @@ mod tests {
         *claim_state.lock().await = Some(ClaimState {
             username: "alice".to_string(),
             sender: ":1.42".to_string(),
+            pipewire_uid: None,
             epoch: 12,
         });
 
@@ -2288,15 +2287,22 @@ impl AuthDaemon {
             ?binding,
             "Claimed daemon"
         );
-        match binding {
-            CameraBinding::Session(camera_uid) => bind_pipewire_session_for_uid(camera_uid),
-            CameraBinding::SeatDevice => clear_pipewire_session(),
-        }
+        let pipewire_uid = match binding {
+            CameraBinding::Session(camera_uid) => {
+                bind_pipewire_session_for_uid(camera_uid);
+                Some(camera_uid)
+            }
+            CameraBinding::SeatDevice => {
+                clear_pipewire_session();
+                None
+            }
+        };
         let epoch = CLAIM_EPOCH.fetch_add(1, Ordering::Relaxed);
         *state = Some(ClaimState {
             username,
             sender: sender.clone(),
             epoch,
+            pipewire_uid,
         });
         drop(state);
 
@@ -2428,6 +2434,7 @@ impl AuthDaemon {
         let username = claim.username.clone();
         Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let signal_destination = Self::signal_destination(&claim.sender)?;
+        let pipewire_uid = claim.pipewire_uid;
         self.cancel_active_tasks().await;
 
         UserDatabase::validate_face_name(&face_name).map_err(Self::map_user_db_error)?;
@@ -2503,6 +2510,7 @@ impl AuthDaemon {
                 let rgb_captured_for_step_clone = rgb_captured_for_step.clone();
 
                 rgb_thread = Some(std::thread::spawn(move || {
+                    gaze_core::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, true);
                     let mut pose_baseline = None;
 
@@ -2684,6 +2692,7 @@ impl AuthDaemon {
                 let rgb_captured_for_step_clone = rgb_captured_for_step.clone();
 
                 ir_thread = Some(std::thread::spawn(move || {
+                    gaze_core::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, true);
                     let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
 
@@ -3392,6 +3401,9 @@ impl AuthDaemon {
 
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
+        // From the claim just validated: the task below starts capture after awaits that a
+        // preempting claim can rebind across.
+        let pipewire_uid = claim.pipewire_uid;
         self.cancel_active_tasks().await;
 
         let (tx, mut rx) = oneshot::channel();
@@ -3537,6 +3549,7 @@ impl AuthDaemon {
                 let hybrid_policy_clone = hybrid_policy.clone();
 
                 rgb_thread = Some(std::thread::spawn(move || {
+                    gaze_core::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     // Set on every exit path (incl. panic) once the RGB camera is released.
                     // Declared before `cam` so `cam` drops first and release precedes the signal.
                     struct RgbPhaseGuard(Arc<std::sync::atomic::AtomicBool>);
@@ -3674,9 +3687,12 @@ impl AuthDaemon {
                     }
 
                     if !yielded_to_ir && !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                        let _ = tx.blocking_send(VerifyMsg::Error(
-                            "RGB camera stream stopped unexpectedly".into(),
-                        ));
+                        // A device taken by another program only fails once it tries to stream,
+                        // so this is where "already in use" surfaces.
+                        let reason = cam.take_stream_error().unwrap_or_else(|| {
+                            "RGB camera stream stopped unexpectedly".to_string()
+                        });
+                        let _ = tx.blocking_send(VerifyMsg::Error(reason));
                     }
                 }));
             }
@@ -3698,6 +3714,7 @@ impl AuthDaemon {
                 let rgb_phase_done_clone = rgb_phase_done.clone();
 
                 ir_thread = Some(std::thread::spawn(move || {
+                    gaze_core::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     // Wait for RGB to release its camera before opening IR and firing the emitter,
                     // so single-function devices keep one live stream. Bail if verify passed.
                     if run_rgb {
@@ -3824,9 +3841,10 @@ impl AuthDaemon {
                     }
 
                     if !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                        let _ = tx.blocking_send(VerifyMsg::Error(
-                            "IR camera stream stopped unexpectedly".into(),
-                        ));
+                        let reason = cam.take_stream_error().unwrap_or_else(|| {
+                            "IR camera stream stopped unexpectedly".to_string()
+                        });
+                        let _ = tx.blocking_send(VerifyMsg::Error(reason));
                     }
                 }));
             }
@@ -4014,7 +4032,11 @@ impl AuthDaemon {
                             VerifyMsg::Error(e) => {
                                 error!("VerifyStart loop error: {e}");
                                 stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                // The verdict alone reads as a face that was not found.
+                                let _ = Self::verify_diagnostic(&ctxt, &e).await;
+                                // Idle, not rejected: the run broke off instead of deciding, and
+                                // a hardware failure must not count against the lockout budget.
+                                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
                                 break;
                             }
                         }

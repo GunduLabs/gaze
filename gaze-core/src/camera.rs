@@ -287,6 +287,9 @@ const PRIMARY_CAMERA_DISPLAY_NAME: &str = "Primary Camera";
 pub const IR_NONE_DISPLAY_NAME: &str = "None";
 const DEVICE_SETTLE_TIMEOUT_MS: u64 = 100;
 const INTERRUPTIBLE_POLL_TIMEOUT_MS: u64 = 100;
+/// Long enough for a busy device to reject the stream, short enough not to sit through a live
+/// source that has simply not produced its first buffer. Later failures are the frame loop's.
+const PIPELINE_START_TIMEOUT_MS: u64 = 500;
 
 enum FramePoll {
     Frame(Mat),
@@ -294,14 +297,8 @@ enum FramePoll {
     Ended,
 }
 
-/// An open connection to one user's PipeWire socket, handed to `pipewiresrc` as `fd=`.
-///
-/// A system daemon cannot reach a user's PipeWire session by pointing `XDG_RUNTIME_DIR` at it:
-/// writing the process environment races every `getenv` in the process, and `pipewiresrc`
-/// caches its `pw_core` process-wide keyed on the `fd` property, whose default `-1` is shared
-/// by every element. Two overlapping pipelines would then quietly share one connection, and the
-/// second user's capture would come from the first user's session. Connecting here and passing
-/// the descriptor gives each claim its own core and touches no global state.
+/// An open connection to one user's PipeWire socket, passed to `pipewiresrc` as `fd=` because
+/// its `pw_core` cache is keyed on that fd: the shared default `-1` would merge two sessions.
 pub struct PipeWireSession(UnixStream);
 
 impl PipeWireSession {
@@ -314,26 +311,34 @@ impl PipeWireSession {
     }
 }
 
-/// The uid whose PipeWire session capture should attach to, or `None` to let `pipewiresrc`
-/// resolve a socket from the environment as it does inside a user's own session.
-///
-/// Only the uid is shared. Each pipeline opens its own socket at open time, so two captures
-/// never collide on one cached `pw_core`, and no connection is held open between them.
+/// The uid whose PipeWire session capture attaches to, or `None` to resolve a socket from the
+/// environment. Only the uid is shared; each pipeline opens its own socket at open time.
 static PIPEWIRE_UID: Mutex<Option<u32>> = Mutex::new(None);
+
+thread_local! {
+    /// The uid a capture thread was started for, which outranks the default. A thread still on
+    /// its way to opening a device must not follow a rebind by the claim that preempted it.
+    static PIPEWIRE_UID_FOR_THREAD: std::cell::Cell<Option<Option<u32>>> =
+        const { std::cell::Cell::new(None) };
+}
 
 pub fn set_pipewire_uid(uid: Option<u32>) {
     let mut slot = PIPEWIRE_UID.lock().unwrap_or_else(|e| e.into_inner());
     *slot = uid;
 }
 
-fn current_pipewire_uid() -> Option<u32> {
-    *PIPEWIRE_UID.lock().unwrap_or_else(|e| e.into_inner())
+pub fn bind_pipewire_uid_for_thread(uid: Option<u32>) {
+    PIPEWIRE_UID_FOR_THREAD.set(Some(uid));
 }
 
-/// Attach `fd=` to a `pipewiresrc` element so it connects to `session` instead of resolving a
-/// socket from the environment. Anything else is passed through untouched.
-/// V4L2 lets several processes open a camera and only rejects the second one that tries to
-/// stream, so a device held elsewhere fails during negotiation rather than at open.
+fn current_pipewire_uid() -> Option<u32> {
+    PIPEWIRE_UID_FOR_THREAD
+        .get()
+        .unwrap_or_else(|| *PIPEWIRE_UID.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+/// V4L2 lets several processes open a camera and rejects the second one that tries to stream,
+/// so a device held elsewhere fails during negotiation rather than at open.
 fn device_is_busy(detail: &str) -> bool {
     let detail = detail.to_ascii_lowercase();
     detail.contains("busy") || detail.contains("ebusy")
@@ -351,6 +356,14 @@ fn bus_error_detail(pipeline: &gstreamer::Pipeline) -> Option<String> {
     None
 }
 
+/// Only the bare element, which is what `primary` resolves to, means "any camera you can
+/// reach". A named target means one camera, and substituting another is not a fallback.
+fn may_fall_back_to_v4l2(src_element: &str) -> bool {
+    src_element == "pipewiresrc"
+}
+
+/// Attach `fd=` to a `pipewiresrc` element so it connects to the caller's session instead of
+/// resolving a socket from the environment. Anything else is passed through untouched.
 fn bind_pipewire_fd(element: &str, fd: RawFd) -> String {
     let is_pipewire = element == "pipewiresrc" || element.starts_with("pipewiresrc ");
     // A descriptor the caller spelled out wins; appending a second `fd=` would leave the
@@ -368,10 +381,12 @@ fn bind_pipewire_fd(element: &str, fd: RawFd) -> String {
 pub struct Camera {
     pipeline: gstreamer::Pipeline,
     appsink: gstreamer_app::AppSink,
-    /// Keeps the socket open for as long as the pipeline can use it. GStreamer caches its
-    /// `pw_core` keyed on the raw fd number, so recycling the number early could hand a later
-    /// capture this pipeline's cached core.
+    /// Keeps the socket open while the pipeline can use it. GStreamer caches its `pw_core` by
+    /// fd number, so recycling the number early could hand a later capture this one's core.
     _pipewire: Option<PipeWireSession>,
+    /// Why the stream ended, when the pipeline said. A frame loop that just stops looks the same
+    /// as one that never saw a face, which is the wrong thing to tell the user.
+    stream_error: Option<String>,
 }
 
 impl Drop for Camera {
@@ -470,7 +485,7 @@ impl Camera {
 
         match Self::open_source_element(&bound, camera_source, force_ir_yuy2, session) {
             Ok(camera) => Ok(camera),
-            Err(err) if is_pipewire => {
+            Err(err) if may_fall_back_to_v4l2(&src_element) => {
                 warn!("Opening the PipeWire camera failed ({err:#}); trying a direct V4L2 device");
                 let node = first_v4l2_node(want_color).ok_or_else(|| {
                     anyhow::anyhow!(
@@ -488,6 +503,43 @@ impl Camera {
             }
             Err(err) => Err(err),
         }
+    }
+
+    /// A live source reaches `Playing` asynchronously, so a device rejected as busy fails after
+    /// `set_state` returned success. Letting the change settle turns that into an open failure.
+    fn start_pipeline(pipeline: &gstreamer::Pipeline, camera_source: &str) -> anyhow::Result<()> {
+        let settled =
+            pipeline
+                .set_state(gstreamer::State::Playing)
+                .and_then(|change| match change {
+                    gstreamer::StateChangeSuccess::Async => {
+                        // A timeout is not a failure: a slow camera may still be starting, and the
+                        // frame loop reports an error that arrives later.
+                        pipeline
+                            .state(gstreamer::ClockTime::from_mseconds(
+                                PIPELINE_START_TIMEOUT_MS,
+                            ))
+                            .0
+                            .map(|_| change)
+                    }
+                    other => Ok(other),
+                });
+
+        let Err(e) = settled else {
+            return Ok(());
+        };
+
+        let detail = bus_error_detail(pipeline);
+        let _ = pipeline.set_state(gstreamer::State::Null);
+        if let Some(detail) = detail {
+            if device_is_busy(&detail) {
+                anyhow::bail!(
+                    "The camera is already in use by another program ({camera_source}): {detail}"
+                );
+            }
+            anyhow::bail!("Failed to start pipeline for {camera_source}: {e} ({detail})");
+        }
+        anyhow::bail!("Failed to start pipeline for {camera_source}: {e}");
     }
 
     fn open_source_element(
@@ -521,24 +573,13 @@ impl Camera {
         appsink.set_drop(true);
         appsink.set_max_buffers(1);
 
-        if let Err(e) = pipeline.set_state(gstreamer::State::Playing) {
-            let detail = bus_error_detail(&pipeline);
-            let _ = pipeline.set_state(gstreamer::State::Null);
-            if let Some(detail) = detail {
-                if device_is_busy(&detail) {
-                    anyhow::bail!(
-                        "The camera is already in use by another program ({camera_source}): {detail}"
-                    );
-                }
-                anyhow::bail!("Failed to start pipeline for {camera_source}: {e} ({detail})");
-            }
-            anyhow::bail!("Failed to start pipeline for {camera_source}: {e}");
-        }
+        Self::start_pipeline(&pipeline, camera_source)?;
 
         Ok(Self {
             pipeline,
             appsink,
             _pipewire: pipewire,
+            stream_error: None,
         })
     }
 
@@ -582,7 +623,7 @@ impl Camera {
         Ok(mirrored)
     }
 
-    fn poll_frame(&self, timeout: gstreamer::ClockTime) -> FramePoll {
+    fn poll_frame(&mut self, timeout: gstreamer::ClockTime) -> FramePoll {
         if let Some(sample) = self.appsink.try_pull_sample(timeout) {
             return match self.sample_to_mat(&sample) {
                 Ok(mat) => FramePoll::Frame(mat),
@@ -593,35 +634,45 @@ impl Camera {
             };
         }
 
+        // A failing element also pushes EOS, so the sink's flag would hide the reason. Drain
+        // rather than filter-pop: a zero timeout gives up on the first message that misses.
+        if let Some(bus) = self.pipeline.bus() {
+            while let Some(msg) = bus.pop() {
+                match msg.view() {
+                    gstreamer::MessageView::Error(err) => {
+                        if let Some(src) = err.src() {
+                            warn!(
+                                source = %src.path_string(),
+                                debug = ?err.debug(),
+                                "Camera pipeline error: {}",
+                                err.error()
+                            );
+                        } else {
+                            warn!(
+                                debug = ?err.debug(),
+                                "Camera pipeline error: {}",
+                                err.error()
+                            );
+                        }
+                        let detail =
+                            format!("{}: {}", err.error(), err.debug().unwrap_or_default());
+                        self.stream_error = Some(if device_is_busy(&detail) {
+                            format!("The camera is already in use by another program: {detail}")
+                        } else {
+                            detail
+                        });
+                        return FramePoll::Ended;
+                    }
+                    gstreamer::MessageView::Eos(_) => {
+                        info!("Camera stream ended (EOS)");
+                        return FramePoll::Ended;
+                    }
+                    _ => {}
+                }
+            }
+        }
         if self.appsink.is_eos() {
             info!("Camera stream ended (EOS)");
-            return FramePoll::Ended;
-        }
-        if let Some(msg) = self.pipeline.bus().and_then(|bus| {
-            bus.timed_pop_filtered(
-                gstreamer::ClockTime::ZERO,
-                &[gstreamer::MessageType::Error, gstreamer::MessageType::Eos],
-            )
-        }) {
-            match msg.view() {
-                gstreamer::MessageView::Error(err) => {
-                    if let Some(src) = err.src() {
-                        warn!(
-                            source = %src.path_string(),
-                            debug = ?err.debug(),
-                            "Camera pipeline error: {}",
-                            err.error()
-                        );
-                    } else {
-                        warn!(
-                            debug = ?err.debug(),
-                            "Camera pipeline error: {}",
-                            err.error()
-                        );
-                    }
-                }
-                _ => info!("Camera stream ended (EOS)"),
-            }
             return FramePoll::Ended;
         }
         let (_, current_state, _) = self.pipeline.state(Some(gstreamer::ClockTime::ZERO));
@@ -631,6 +682,10 @@ impl Camera {
         }
 
         FramePoll::Timeout
+    }
+
+    pub fn take_stream_error(&mut self) -> Option<String> {
+        self.stream_error.take()
     }
 
     /// Wait for the next frame while checking `stop` between short polling intervals.
@@ -906,6 +961,75 @@ mod tests {
     #[test]
     fn a_missing_socket_is_reported_rather_than_bound() {
         assert!(PipeWireSession::connect_for_uid(u32::MAX).is_err());
+    }
+
+    #[test]
+    fn only_an_untargeted_pipewire_source_falls_back_to_v4l2() {
+        assert!(may_fall_back_to_v4l2("pipewiresrc"));
+        assert!(!may_fall_back_to_v4l2("pipewiresrc target-object=cam1"));
+        assert!(!may_fall_back_to_v4l2("v4l2src device=/dev/video0"));
+        assert!(!may_fall_back_to_v4l2("pipewiresrcfoo"));
+    }
+
+    #[test]
+    fn a_failing_stream_keeps_the_reason_it_ended() {
+        // A failing element pushes EOS as well as posting the error, so the reason survives
+        // only if the bus is read first.
+        let mut camera =
+            Camera::open("videotestsrc ! identity error-after=3").expect("identity pipeline");
+        let stop = AtomicBool::new(false);
+        while camera.next_interruptible(&stop).is_some() {}
+
+        let reason = camera
+            .take_stream_error()
+            .expect("a pipeline error must be kept");
+        assert!(
+            reason.contains("Failed after iterations as requested"),
+            "unexpected reason: {reason}"
+        );
+        assert!(
+            camera.take_stream_error().is_none(),
+            "the reason is taken, so it is reported once"
+        );
+    }
+
+    #[test]
+    fn a_clean_end_of_stream_leaves_no_reason() {
+        let mut camera = Camera::open("videotestsrc num-buffers=2").expect("videotestsrc pipeline");
+        let stop = AtomicBool::new(false);
+        while camera.next_interruptible(&stop).is_some() {}
+
+        assert!(
+            camera.take_stream_error().is_none(),
+            "an ordinary EOS is not a failure"
+        );
+    }
+
+    #[test]
+    fn a_pinned_thread_keeps_its_session_when_the_default_moves() {
+        // A capture thread outlives the claim that started it, and the next claim rebinds the
+        // process-wide default. What the thread opens must not follow it.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+        let worker = std::thread::spawn(move || {
+            bind_pipewire_uid_for_thread(Some(1000));
+            tx.send(current_pipewire_uid()).unwrap();
+            go_rx.recv().unwrap();
+            tx.send(current_pipewire_uid()).unwrap();
+        });
+
+        assert_eq!(rx.recv().unwrap(), Some(1000));
+        set_pipewire_uid(Some(1001));
+        go_tx.send(()).unwrap();
+        assert_eq!(rx.recv().unwrap(), Some(1000));
+        worker.join().unwrap();
+
+        // An unpinned thread still follows the default, which is what a claim sets it for.
+        assert_eq!(
+            std::thread::spawn(current_pipewire_uid).join().unwrap(),
+            Some(1001)
+        );
+        set_pipewire_uid(None);
     }
 
     fn entry(display_name: &str, target: &str, node: Option<&str>) -> CameraEntry {

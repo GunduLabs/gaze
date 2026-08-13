@@ -821,8 +821,7 @@ fn owning_uid() -> u32 {
 }
 
 /// Names only, joined like the environment variables above so the callers'
-/// `contains` checks are unchanged. `pam-gaze-core` does the same scan, but the
-/// CLI does not link it, and pulling in libpam for one lookup is not worth it.
+/// `contains` checks are unchanged. The CLI does not link `pam-gaze-core`.
 fn desktop_from_processes(uid: u32) -> String {
     use std::os::unix::fs::MetadataExt;
 
@@ -1078,9 +1077,8 @@ fn check_kde_lock_screen(
     }
 }
 
-/// The greeter only scans before you type where it starts a service of its own,
-/// which upstream added in plasma-login-manager!185. Everywhere else face auth
-/// waits for the submit, exactly as a fingerprint reader does on that screen.
+/// The greeter only scans before you type where it starts a service of its own.
+/// Everywhere else face auth waits for the submit, as a fingerprint reader does.
 fn check_kde_login_greeter(report: &mut Report, plasmalogin_face: Option<&str>) {
     const NAME: &str = "KDE login greeter";
     match plasmalogin_face {

@@ -38,15 +38,38 @@ Arch needs a manual step. Gaze deliberately stays out of
 through that shared stack. Add Gaze to `/etc/pam.d/login` directly instead:
 
 ```bash
-sudo awk '
-    /^[[:space:]]*auth[[:space:]]/ && !done {
-        print "auth        sufficient    pam_gaze.so"
-        done = 1
+staged=$(sudo mktemp /etc/pam.d/login.gaze.XXXXXX) && \
+  sudo awk -v out="$staged" '
+    /^[[:space:]]*auth[[:space:]]+(include|substack)[[:space:]]/ && !inserted {
+        print "auth        sufficient    pam_gaze.so" > out
+        inserted = 1
     }
-    { print }
-' /etc/pam.d/login | sudo tee /tmp/pam-login-new && \
-  sudo install -m 644 /tmp/pam-login-new /etc/pam.d/login
+    { print > out }
+    END { if (!inserted) exit 1 }
+' /etc/pam.d/login && \
+  sudo install -m 644 "$staged" /etc/pam.d/login
+sudo rm -f "$staged"
 ```
+
+Two details of that command matter, because a mangled `/etc/pam.d/login` locks
+you out of every terminal:
+
+- The Gaze line goes immediately above `auth include system-login`, which is the
+  line that pulls in the shared stack. Everything Arch puts before it, meaning
+  `pam_nologin` and `pam_securetty` where it is used, is a veto that has to run
+  first. Gaze is `sufficient`, so a face match returns from the stack right there
+  and nothing printed after it runs.
+- `awk` writes the staged file itself rather than being piped into `tee`. A
+  pipeline reports only the exit status of its last command, so a failing `awk`
+  would still leave `tee` reporting success and `install` would happily replace
+  your login stack with a truncated or empty file. Written this way, `&&` sees
+  awk's own status, and awk exits non-zero if it never found the include line.
+
+The staging file is created by root inside `/etc/pam.d` on purpose. Building the
+new stack at a fixed path under `/tmp` would let any other local user pre-create
+it, and whatever they left there would become your authentication stack.
+
+Check the result with `cat /etc/pam.d/login` before you log out.
 
 ::: warning
 Keep a root shell open while you test this. A mistake in `/etc/pam.d/login` can
