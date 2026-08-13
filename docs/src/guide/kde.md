@@ -197,6 +197,13 @@ exist, after the stack's gate modules (`pam_nologin`, the `user != root` check,
 `pam_selinux_permit`) so a face match cannot skip them. Turn it back off with
 `sudo gaze-kde-pam disable-login`.
 
+A service counts as existing when it is in `/usr/lib/pam.d` too, which is where
+Fedora's `plasma-login-manager` ships `plasmalogin`: nothing appears under
+`/etc/pam.d` there until something customises the stack, and PAM falls back to the
+vendor copy meanwhile. `enable-login` reads whichever of the two the greeter would
+really use, so it neither reports a missing login stack on those systems nor
+writes an `/etc` file where there is no block to add.
+
 On Fedora and Debian it will report that the stack **already reaches Gaze** and
 change nothing. That is correct: those login stacks include the shared
 authentication stack Gaze installs into (`password-auth`, `common-auth`), so face
@@ -215,9 +222,10 @@ incorrect password does not stop it, and the first method to succeed starts the
 session. It installs a dedicated `plasmalogin-fingerprint` PAM service, the exact
 counterpart of `kde-fingerprint` on the lock screen.
 
-`enable-login` already handles it. If `/etc/pam.d/plasmalogin-fingerprint` exists,
-Gaze goes in there, ahead of `pam_fprintd` for the same reason as on the lock
-screen, and face auth then runs before you touch anything. If it does not exist,
+`enable-login` already handles it. If `plasmalogin-fingerprint` exists, in
+`/etc/pam.d` or in the vendor directory, Gaze goes in there, ahead of `pam_fprintd`
+for the same reason as on the lock screen, and face auth then runs before you touch
+anything. If it does not exist,
 nothing is written and you get the submit-triggered path above. The opt-in is
 remembered, so when your distribution ships a Plasma Login Manager carrying that
 change, the next `gaze-kde` upgrade wires it up without you running anything.
@@ -264,12 +272,15 @@ fingerprint reader. A `pam_gaze` line you added yourself, outside the marked
 block, is left alone.
 
 Where a distribution ships the service under `/usr/lib/pam.d` instead of `/etc`
-(Arch, Debian, Ubuntu and openSUSE do), `enable` copies it to `/etc/pam.d` first
-and edits the copy, because a file in `/etc` shadows the vendor one and writing a
-fresh file there would silently drop whatever the distribution had configured.
-`disable` deletes that copy again so the vendor stack becomes authoritative, unless
-it has been changed since Gaze wrote it, in which case only the Gaze block goes.
-Where no such file exists anywhere, `enable` creates one and `disable` removes it.
+(Arch, Debian, Ubuntu, Fedora and openSUSE all do, for one service or another),
+`enable` copies it to `/etc/pam.d` first and edits the copy, because a file in
+`/etc` shadows the vendor one and writing a fresh file there would silently drop
+whatever the distribution had configured. `disable` deletes that copy again so the
+vendor stack becomes authoritative, unless it has been changed since Gaze wrote it,
+in which case only the Gaze block goes. Where no such file exists anywhere,
+`enable` creates one and `disable` removes it. `enable-login` and `disable-login`
+do the same for the greeter's stack, and only make the copy when they have a block
+to write.
 
 None of those vendor files are packaged as configuration files, so a later
 distribution update produces no `.pacnew` or `.rpmnew` to tell you that your

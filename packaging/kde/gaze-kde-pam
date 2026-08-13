@@ -153,17 +153,17 @@ has_gaze() {
 # reader and faillock behind `auth substack fingerprint-auth`, so a check that only
 # read the service file itself would see neither.
 stack_matches() {
-	target=$1
+	stack=$1
 	pattern=$2
-	auth_line_matches "$target" "$pattern" && return 0
-	[ -f "$target" ] || return 1
+	auth_line_matches "$stack" "$pattern" && return 0
+	[ -f "$stack" ] || return 1
 
-	dir=$(dirname "$target")
+	dir=$(dirname "$PAM_FILE")
 	for included in $(awk '
 		{ line = $0; sub(/#.*/, "", line) }
 		line ~ /^[[:space:]]*-?auth[[:space:]]+(include|substack)[[:space:]]/ { print $3 }
 		line ~ /^[[:space:]]*@include[[:space:]]/ { print $2 }
-	' "$target" 2>/dev/null | sort -u); do
+	' "$stack" 2>/dev/null | sort -u); do
 		case "$included" in
 		/*) candidate=$included ;;
 		*) candidate="$dir/$included" ;;
@@ -426,7 +426,7 @@ ensure_local_copy() {
 }
 
 report_vendor_drift() {
-	for slot in "$PAM_FILE" "$SMARTCARD_PAM_FILE" "$LOGIN_FACE_PAM_FILE"; do
+	for slot in "$PAM_FILE" "$SMARTCARD_PAM_FILE" "$LOGIN_FACE_PAM_FILE" $LOGIN_PAM_FILES; do
 		recorded=$(cat "$(vendor_sum_flag "$slot")" 2>/dev/null) || continue
 		[ -n "$recorded" ] || continue
 		current=$(file_sum "$(vendor_file "$slot")" 2>/dev/null) || continue
@@ -531,7 +531,7 @@ disable() {
 login_targets() {
 	found=0
 	for target in $LOGIN_PAM_FILES; do
-		if [ -f "$target" ]; then
+		if slot_exists "$target"; then
 			printf '%s\n' "$target"
 			found=1
 		fi
@@ -559,7 +559,8 @@ enable_login() {
 	require_root enable-login || return 1
 
 	if ! login_targets >/dev/null && ! slot_exists "$LOGIN_FACE_PAM_FILE"; then
-		printf 'No KDE login stack found (looked for: %s).\n' "$LOGIN_PAM_FILES" >&2
+		printf 'No KDE login stack found (looked for: %s, and the same names in %s).\n' \
+			"$LOGIN_PAM_FILES" "$VENDOR_PAM_DIR" >&2
 		return 1
 	fi
 
@@ -568,17 +569,21 @@ enable_login() {
 
 	enable_login_face
 
-	login_targets | while read -r target; do
-		if has_gaze "$target"; then
-			printf 'Gaze is already referenced by %s.\n' "$target"
+	login_targets | while read -r service; do
+		effective=$(effective_file "$service")
+		if has_gaze "$effective"; then
+			printf 'Gaze is already referenced by %s.\n' "$effective"
 			continue
 		fi
-		if stack_reaches_gaze "$target"; then
-			printf '%s already reaches Gaze through an included stack; leaving it alone.\n' "$target"
+		if stack_reaches_gaze "$effective"; then
+			printf '%s already reaches Gaze through an included stack; leaving it alone.\n' "$effective"
 			continue
 		fi
-		if insert_block "$target"; then
-			printf 'Enabled Gaze at the KDE login greeter (%s).\n' "$target"
+		ensure_local_copy "$service" || continue
+		where=$(real_file "$service")
+		if insert_block "$service"; then
+			record_installed "$service"
+			printf 'Enabled Gaze at the KDE login greeter (%s).\n' "$where"
 		fi
 	done
 
@@ -610,17 +615,37 @@ disable_login() {
 
 	rm -f "$(login_flag)"
 
-	for target in $LOGIN_PAM_FILES $LOGIN_FACE_PAM_FILE; do
-		[ -f "$target" ] || continue
-		if remove_block "$target"; then
-			printf 'Removed Gaze from the KDE login greeter (%s).\n' "$target"
+	for service in $LOGIN_PAM_FILES $LOGIN_FACE_PAM_FILE; do
+		[ -f "$service" ] || continue
+		where=$(real_file "$service")
+		untouched=1
+		untouched_since_install "$service" || untouched=0
+
+		removed=0
+		remove_block "$service" || removed=$?
+		[ "$removed" -eq 1 ] && continue
+
+		if [ -f "$(created_flag "$service")" ]; then
+			if [ "$untouched" -eq 1 ]; then
+				rm -f "$where" "$(created_flag "$service")" \
+					"$(installed_sum_flag "$service")" "$(vendor_sum_flag "$service")"
+				printf 'Removed %s.\n' "$where"
+			else
+				rm -f "$(created_flag "$service")" \
+					"$(installed_sum_flag "$service")" "$(vendor_sum_flag "$service")"
+				printf 'Kept %s: it has been changed since Gaze wrote it.\n' "$where"
+			fi
+		elif [ "$removed" -eq 0 ]; then
+			rm -f "$(installed_sum_flag "$service")"
+			printf 'Removed Gaze from the KDE login greeter (%s).\n' "$where"
 		fi
 	done
 }
 
 status() {
 	rc=1
-	if slot=$(effective_file "$(wired_lock_slot)"); then
+	if wired=$(wired_lock_slot); then
+		slot=$(effective_file "$wired")
 		if grep -qF "$BEGIN_MARKER" "$slot" 2>/dev/null; then
 			printf 'lock screen: enabled (%s contains the Gaze block)\n' "$slot"
 		else
@@ -646,14 +671,15 @@ status() {
 
 	report_vendor_drift
 
-	for target in $LOGIN_PAM_FILES; do
-		[ -f "$target" ] || continue
-		if has_gaze "$target"; then
-			printf 'login greeter: enabled on submit (%s)\n' "$target"
-		elif stack_reaches_gaze "$target"; then
-			printf 'login greeter: enabled on submit (%s, through an included stack)\n' "$target"
+	for service in $LOGIN_PAM_FILES; do
+		slot_exists "$service" || continue
+		effective=$(effective_file "$service")
+		if has_gaze "$effective"; then
+			printf 'login greeter: enabled on submit (%s)\n' "$effective"
+		elif stack_reaches_gaze "$effective"; then
+			printf 'login greeter: enabled on submit (%s, through an included stack)\n' "$effective"
 		else
-			printf 'login greeter: disabled (%s)\n' "$target"
+			printf 'login greeter: disabled (%s)\n' "$effective"
 		fi
 	done
 
