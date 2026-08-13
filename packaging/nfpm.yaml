@@ -35,6 +35,11 @@ contents:
     dst: "/usr/share/polkit-1/actions/com.gundulabs.gaze.policy"
   - src: "packaging/config/gazed.service"
     dst: "/usr/lib/systemd/system/gazed.service"
+  # Lets a greeter running as xdm_t open the camera; both the GNOME and KDE
+  # packages load it, so the base package is the one place that ships it.
+  - src: "dist/selinux/gaze-gdm-camera.pp"
+    dst: "/usr/share/gaze/gaze-gdm-camera.pp"
+    packager: rpm
   - src: "target/release/libpam_gaze.so"
     dst: "/lib/${MULTIARCH}/security/pam_gaze.so"
     packager: deb

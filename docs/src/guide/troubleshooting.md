@@ -228,6 +228,8 @@ emitter_enabled = true
 
 ## 4. Lock screen does not trigger face auth
 
+### GNOME
+
 Enable or re-enable the extension from your GNOME session:
 
 ```bash
@@ -244,6 +246,28 @@ journalctl -u gazed -b
 ```
 
 Older Gaze builds could try to use the selected user's PipeWire runtime before that user session existed. Update Gaze if you see this behavior.
+
+### KDE Plasma
+
+Check the "KDE lock screen" line in `gaze doctor`, then:
+
+```bash
+sudo gaze-kde-pam enable
+gaze-kde-pam status
+```
+
+The lock screen only starts face auth on its own when `/etc/pam.d/kde-fingerprint`
+runs `pam_gaze.so`. Without it, KScreenLocker has no biometric slot to start and
+face auth waits until you submit the password field.
+
+If `gaze doctor` warns that the slot runs `pam_gaze_grosshack.so`, replace it with
+the plain module: the simultaneous one waits for a password prompt the greeter can
+never answer, which wedges the slot for the rest of the lock.
+
+At the **login greeter** (Plasma Login Manager or SDDM), face auth is opt-in and,
+unless the greeter ships an up-front biometric service, starts only when the login
+form is submitted: press Enter with the password field empty, exactly as you would
+for a fingerprint reader there. See the [KDE Plasma guide](/guide/kde).
 
 ## 5. PAM auth flow seems broken
 
@@ -329,4 +353,4 @@ journalctl -u gazed -n 300 --no-pager
 gaze auth --verbose
 ```
 
-Include the complete `gaze doctor` output, distro version, and desktop environment (GNOME/KDE/etc.) when reporting issues.
+Include the complete `gaze doctor` output, distro version, and desktop environment (GNOME/KDE/etc.) when reporting issues. On KDE, add `gaze-kde-pam status` and the contents of `/etc/pam.d/kde-fingerprint`.

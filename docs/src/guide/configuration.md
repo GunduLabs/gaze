@@ -261,7 +261,8 @@ When confirmation is disabled, a successful match replaces the camera prompt wit
 With the standard `pam-gaze` module (e.g. `sudo`, `gdm-face`):
 - In a text-based (TTY) environment such as `sudo` in a terminal, it asks for text confirmation after the face match ("Press Enter to confirm, Esc to cancel").
 - On the GNOME lock screen and GDM login screen (with the Gaze Extension active), it shows "Face Verified. Press Enter to confirm." below the password field; press Enter with the field empty to confirm. If the extension is inactive, the login is denied, because the extension is the expected confirmation channel on GNOME and Gaze will not silently skip the confirmation you asked for.
-- In other graphical prompts without a TTY (e.g. the KDE lock screen, `hyprlock`), there is no channel to answer the prompt, so the face match is denied and the stack falls back to password rather than silently skipping the confirmation you asked for. If you need the confirmation step enforced there, use the `pam-gaze-grosshack` module, which drives a graphical confirm dialog.
+- In other graphical prompts without a TTY (e.g. the KDE lock screen, `hyprlock`), there is no channel that could answer the prompt, so the face match unlocks on its own. On the KDE lock screen in particular, asking would not reach anybody: the greeter never delivers a response to its biometric slot, so the request would hang that slot for the rest of the lock. If you want the confirmation step enforced on a surface that can show a dialog, use the `pam-gaze-grosshack` module.
+- A **login greeter** is the exception: it never bypasses. GDM always runs GNOME with the Gaze Extension, so confirmation is enforced there or the login is denied.
 
 With the `pam-gaze-grosshack` module:
 - The password prompt still comes up immediately so you are never blocked.
@@ -277,7 +278,12 @@ With the `pam-gaze-grosshack` module:
 
 `start_delay_ms` delays face verification by the specified number of milliseconds, not only after suspend. Set to `0` to disable the delay.
 
-Use it when your lock screen unlocks itself the moment you lock it manually. Lockers differ in when they start authenticating: hyprlock starts its PAM stack as soon as it launches, so if you are still sitting in front of the camera when you lock, Gaze matches your face and unlocks again immediately. A delay of `3000`-`5000` ms gives you time to step away. The GNOME lock screen does not need this, because face authentication there only begins once you dismiss the lock shield.
+Use it when your lock screen unlocks itself the moment you lock it manually. Lockers differ in when they start authenticating: hyprlock starts its PAM stack as soon as it launches, and KDE's lock screen starts as soon as its UI appears, so if you are still sitting in front of the camera when you lock, Gaze matches your face and unlocks again immediately. A delay of `3000`-`5000` ms gives you time to step away. The GNOME lock screen does not need this, because face authentication there only begins once you dismiss the lock shield.
+
+The delay is measured from when the session locked, not from each attempt, so a
+second try during the same lock does not wait all over again. Gaze learns the lock
+time from logind's `LockedHint`, which GNOME, KScreenLocker and hyprlock all set.
+Where nothing sets it, every attempt waits the full delay.
 
 `start_delay_scope` controls which prompts wait:
 

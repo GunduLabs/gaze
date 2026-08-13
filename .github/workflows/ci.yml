@@ -333,30 +333,42 @@ jobs:
 
       - name: Evaluate NixOS module
         run: |
-          nix eval --raw --impure --expr '
-            let
-              flake = builtins.getFlake (toString ./.);
-              sys = flake.inputs.nixpkgs.lib.nixosSystem {
-                system = "x86_64-linux";
-                modules = [
-                  flake.nixosModules.default
-                  {
-                    boot.loader.grub.enable = false;
-                    fileSystems."/" = { device = "none"; fsType = "tmpfs"; };
-                    system.stateVersion = "25.11";
-                    services.gaze = {
-                      enable = true;
-                      gui.enable = true;
-                      gnome.enable = true;
-                    };
-                    security.pam.services.login.gaze = {
-                      enable = true;
-                      simultaneous = true;
-                    };
-                    services.fprintd.enable = true;
-                    security.tpm2.enable = true;
-                  }
-                ];
-              };
-            in sys.config.system.build.toplevel.drvPath
-          '
+          # Twice, because the KDE lock screen slot is chosen from these two
+          # options: fprintd alone takes kde-smartcard, both together fall back
+          # to sharing kde-fingerprint with the reader. One eval builds only one
+          # of those branches.
+          for p11 in false true; do
+            echo "::group::nixos eval (security.pam.p11.enable = $p11)"
+            nix eval --raw --impure --expr '
+              let
+                flake = builtins.getFlake (toString ./.);
+                sys = flake.inputs.nixpkgs.lib.nixosSystem {
+                  system = "x86_64-linux";
+                  modules = [
+                    flake.nixosModules.default
+                    {
+                      boot.loader.grub.enable = false;
+                      fileSystems."/" = { device = "none"; fsType = "tmpfs"; };
+                      system.stateVersion = "25.11";
+                      services.gaze = {
+                        enable = true;
+                        gui.enable = true;
+                        gnome.enable = true;
+                        kde.lockScreen = true;
+                        kde.loginScreen = true;
+                      };
+                      security.pam.services.login.gaze = {
+                        enable = true;
+                        simultaneous = true;
+                      };
+                      services.fprintd.enable = true;
+                      security.pam.p11.enable = '"$p11"';
+                      security.tpm2.enable = true;
+                    }
+                  ];
+                };
+              in sys.config.system.build.toplevel.drvPath
+            '
+            echo
+            echo "::endgroup::"
+          done

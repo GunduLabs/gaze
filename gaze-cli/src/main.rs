@@ -1268,8 +1268,8 @@ fn remove_arch_pam_configuration_cmd() -> String {
 fn remove_pacman_packages_cmd() -> String {
     // AUR builds split off `-debug` packages; remove those first since they can
     // depend on the base package.
-    "for base in gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-bin gaze-gui-bin \
-      gaze-gnome-extension-bin gaze-hyprlock-bin; do \
+    "for base in gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde gaze-bin gaze-gui-bin \
+      gaze-gnome-extension-bin gaze-hyprlock-bin gaze-kde-bin; do \
       for pkg in \"$base-debug\" \"$base\"; do \
       if pacman -Q \"$pkg\" >/dev/null 2>&1; then \
       sudo pacman -Rns --noconfirm \"$pkg\" || true; \
@@ -1344,7 +1344,7 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     if which("apt-get") {
         plan.push((
             "Remove apt packages",
-            "sudo apt-get remove --purge -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock 2>/dev/null || true"
+            "sudo apt-get remove --purge -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
                 .into(),
         ));
         plan.push((
@@ -1357,7 +1357,7 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     } else if which("dnf") {
         plan.push((
             "Remove dnf packages",
-            "sudo dnf remove -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock 2>/dev/null || true".into(),
+            "sudo dnf remove -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true".into(),
         ));
         plan.push((
             "Remove dnf repo",

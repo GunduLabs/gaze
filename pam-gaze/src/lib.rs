@@ -48,9 +48,84 @@ unsafe fn confirm_via_polkit_dialog(
     unsafe { confirm_graphical_polkit(pamh, &de, extension_active, &state, prompt_thread) }
 }
 
+const RETRY_BACKOFF: Duration = Duration::from_millis(500);
+
+#[derive(Debug, PartialEq, Eq)]
+enum Verdict {
+    Reached(AuthOutcome, Option<gaze_core::dbus::CaptureStatus>),
+    /// The budget ran out with nothing to report.
+    Exhausted,
+    /// The daemon could not be reached.
+    Failed,
+}
+
+type Attempt<E> = Result<(AuthOutcome, Option<gaze_core::dbus::CaptureStatus>), E>;
+
+/// Darkness will still be dark in half a second; an empty frame may not be.
+fn worth_another_look(status: Option<gaze_core::dbus::CaptureStatus>) -> bool {
+    !matches!(status, Some(gaze_core::dbus::CaptureStatus::TooDark))
+}
+
+async fn verify_within(
+    proxy: &GazeProxy<'static>,
+    username: &str,
+    service: Option<&str>,
+    budget: Duration,
+) -> Verdict {
+    let verdict = verify_until(budget, service_retries_transient_give_up(service), || {
+        authenticate_biometric_with_status_on(proxy, username, service)
+    })
+    .await;
+
+    // Running out of budget drops the attempt mid-flight, and its release guard
+    // can only spawn the release onto a runtime this call is about to drop, so it
+    // would never be sent. Give the daemon its camera back explicitly instead.
+    if !matches!(verdict, Verdict::Reached(AuthOutcome::Match, _)) {
+        let _ = proxy.release().await;
+    }
+    verdict
+}
+
+async fn verify_until<F, Fut, E>(budget: Duration, retry: bool, mut attempt: F) -> Verdict
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Attempt<E>>,
+{
+    let deadline = tokio::time::Instant::now() + budget;
+    let left = |deadline: tokio::time::Instant| {
+        deadline.saturating_duration_since(tokio::time::Instant::now())
+    };
+    let mut given_up = None;
+    // "No face detected" beats a bare timeout.
+    let expired = |given_up: Option<_>| match given_up {
+        Some(status) => Verdict::Reached(AuthOutcome::Unavailable, status),
+        None => Verdict::Exhausted,
+    };
+
+    loop {
+        let remaining = left(deadline);
+        if remaining.is_zero() {
+            return expired(given_up);
+        }
+
+        match timeout(remaining, attempt()).await {
+            Ok(Ok((AuthOutcome::Unavailable, status))) if retry && worth_another_look(status) => {
+                given_up = Some(status);
+                // Saturating: underflow would panic across the PAM FFI boundary.
+                tokio::time::sleep(RETRY_BACKOFF.min(left(deadline))).await;
+            }
+            Ok(Ok((outcome, status))) => return Verdict::Reached(outcome, status),
+            Ok(Err(_)) => return Verdict::Failed,
+            Err(_) => return expired(given_up),
+        }
+    }
+}
+
 unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     let service = unsafe { get_pam_service(pamh) };
-    if service_defers_to_face_service(service.as_deref()) {
+    if service_defers_to_face_service(service.as_deref())
+        || service_defers_to_face_slot(service.as_deref())
+    {
         return PAM_IGNORE;
     }
 
@@ -75,31 +150,30 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         } else {
             LOOK_PROMPT
         };
+        // KScreenLocker reads an info message as "this unlock had a prompt".
         unsafe { say(pamh, prompt) };
 
         let budget = camera_auth_timeout(&config.auth, service.as_deref());
 
-        match timeout(
-            budget,
-            authenticate_biometric_with_status_on(&proxy, &username, service.as_deref()),
-        )
-        .await
-        {
-            Ok(Ok((AuthOutcome::Match, _))) => Ok((config.auth, proxy)),
-            Ok(Ok((AuthOutcome::NoMatch, _))) => {
-                unsafe { say(pamh, FACE_NOT_RECOGNIZED) };
+        let tell = |text: &str| unsafe { report(pamh, service.as_deref(), text) };
+
+        let verdict = verify_within(&proxy, &username, service.as_deref(), budget).await;
+        match verdict {
+            Verdict::Reached(AuthOutcome::Match, _) => Ok((config.auth, proxy)),
+            Verdict::Reached(AuthOutcome::NoMatch, _) => {
+                tell(FACE_NOT_RECOGNIZED);
                 Err(PAM_AUTH_ERR)
             }
-            Ok(Ok((AuthOutcome::Unavailable, status))) => {
-                unsafe { say(pamh, give_up_message(status)) };
+            Verdict::Reached(AuthOutcome::Unavailable, status) => {
+                tell(give_up_message(status));
                 Err(PAM_AUTHINFO_UNAVAIL)
             }
-            Ok(Err(_)) => {
-                unsafe { say(pamh, FACE_UNAVAILABLE) };
+            Verdict::Exhausted => {
+                tell(FACE_TIMED_OUT);
                 Err(PAM_AUTHINFO_UNAVAIL)
             }
-            Err(_) => {
-                unsafe { say(pamh, FACE_TIMED_OUT) };
+            Verdict::Failed => {
+                tell(FACE_UNAVAILABLE);
                 Err(PAM_AUTHINFO_UNAVAIL)
             }
         }
@@ -111,6 +185,11 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
     if !confirmation_required(Some(&loaded_auth), service.as_deref()) {
         unsafe { report_face_verified(pamh) };
+        return PAM_SUCCESS;
+    }
+
+    // A prompt on a slot nobody answers blocks until the lock ends.
+    if service_cannot_be_prompted(service.as_deref()) {
         return PAM_SUCCESS;
     }
 
@@ -152,3 +231,143 @@ pub unsafe extern "C" fn pam_sm_authenticate(
 }
 
 pam_gaze_core::pam_success_stubs!();
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gaze_core::dbus::CaptureStatus;
+    use std::cell::Cell;
+
+    type Unreachable = &'static str;
+
+    fn scripted(
+        script: Vec<Attempt<Unreachable>>,
+    ) -> impl FnMut() -> std::future::Ready<Attempt<Unreachable>> {
+        let calls = Cell::new(0usize);
+        move || {
+            let index = calls.get().min(script.len() - 1);
+            calls.set(calls.get() + 1);
+            std::future::ready(script[index])
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_match_is_returned_without_retrying() {
+        let verdict = verify_until(
+            Duration::from_secs(12),
+            true,
+            scripted(vec![Ok((AuthOutcome::Match, None))]),
+        )
+        .await;
+        assert_eq!(verdict, Verdict::Reached(AuthOutcome::Match, None));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_no_match_is_final_even_where_retrying_is_enabled() {
+        let verdict = verify_until(
+            Duration::from_secs(12),
+            true,
+            scripted(vec![
+                Ok((AuthOutcome::NoMatch, None)),
+                Ok((AuthOutcome::Match, None)),
+            ]),
+        )
+        .await;
+        assert_eq!(verdict, Verdict::Reached(AuthOutcome::NoMatch, None));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_empty_frame_is_retried_until_a_face_arrives() {
+        let verdict = verify_until(
+            Duration::from_secs(12),
+            true,
+            scripted(vec![
+                Ok((AuthOutcome::Unavailable, Some(CaptureStatus::NoFace))),
+                Ok((AuthOutcome::Unavailable, Some(CaptureStatus::NoFace))),
+                Ok((AuthOutcome::Match, None)),
+            ]),
+        )
+        .await;
+        assert_eq!(verdict, Verdict::Reached(AuthOutcome::Match, None));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn darkness_is_not_retried() {
+        let verdict = verify_until(
+            Duration::from_secs(12),
+            true,
+            scripted(vec![
+                Ok((AuthOutcome::Unavailable, Some(CaptureStatus::TooDark))),
+                Ok((AuthOutcome::Match, None)),
+            ]),
+        )
+        .await;
+        assert_eq!(
+            verdict,
+            Verdict::Reached(AuthOutcome::Unavailable, Some(CaptureStatus::TooDark))
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_give_up_is_returned_once_without_retrying() {
+        let verdict = verify_until(
+            Duration::from_secs(12),
+            false,
+            scripted(vec![
+                Ok((AuthOutcome::Unavailable, Some(CaptureStatus::NoFace))),
+                Ok((AuthOutcome::Match, None)),
+            ]),
+        )
+        .await;
+        assert_eq!(
+            verdict,
+            Verdict::Reached(AuthOutcome::Unavailable, Some(CaptureStatus::NoFace))
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retrying_stops_at_the_budget_and_reports_the_last_reason() {
+        let verdict = verify_until(
+            Duration::from_secs(12),
+            true,
+            scripted(vec![Ok((
+                AuthOutcome::Unavailable,
+                Some(CaptureStatus::NoFace),
+            ))]),
+        )
+        .await;
+        assert_eq!(
+            verdict,
+            Verdict::Reached(AuthOutcome::Unavailable, Some(CaptureStatus::NoFace))
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_scan_that_never_returns_is_reported_as_exhausted() {
+        let verdict = verify_until(Duration::from_secs(12), true, || {
+            std::future::pending::<Attempt<Unreachable>>()
+        })
+        .await;
+        assert_eq!(verdict, Verdict::Exhausted);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_unreachable_daemon_is_not_retried() {
+        let verdict =
+            verify_until(Duration::from_secs(12), true, scripted(vec![Err("no bus")])).await;
+        assert_eq!(verdict, Verdict::Failed);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_zero_budget_does_not_scan_at_all() {
+        let verdict = verify_until(
+            Duration::ZERO,
+            true,
+            || -> std::future::Ready<Attempt<Unreachable>> {
+                panic!("must not attempt verification with no budget")
+            },
+        )
+        .await;
+        assert_eq!(verdict, Verdict::Exhausted);
+    }
+}

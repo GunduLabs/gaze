@@ -40,9 +40,6 @@ contents:
     dst: "/etc/pam.d/gdm-face"
     type: "config|noreplace"
     packager: deb
-  - src: "dist/selinux/gaze-gdm-camera.pp"
-    dst: "/usr/share/gaze/gaze-gdm-camera.pp"
-    packager: rpm
 
 deb:
   signature:

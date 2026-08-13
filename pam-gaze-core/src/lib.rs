@@ -22,6 +22,7 @@ pub const PAM_CONV: c_int = 5;
 pub const PAM_SERVICE: c_int = 1;
 pub const PAM_AUTHTOK: c_int = 6;
 pub const PAM_TEXT_INFO: c_int = 4;
+pub const PAM_ERROR_MSG: c_int = 3;
 pub const PAM_PROMPT_ECHO_OFF: c_int = 1;
 pub const PAM_PROMPT_ECHO_ON: c_int = 2;
 pub const PAM_AUTHINFO_UNAVAIL: c_int = 9;
@@ -440,6 +441,20 @@ pub unsafe fn say(pamh: PamHandle, text: &str) {
     }
 }
 
+pub unsafe fn warn(pamh: PamHandle, text: &str) {
+    unsafe {
+        let _ = converse(pamh, PAM_ERROR_MSG, text);
+    }
+}
+
+pub unsafe fn report(pamh: PamHandle, service: Option<&str>, text: &str) {
+    if service_shows_only_error_messages(service) {
+        unsafe { warn(pamh, text) }
+    } else {
+        unsafe { say(pamh, text) }
+    }
+}
+
 pub unsafe fn prompt_password(pamh: PamHandle) -> Option<String> {
     unsafe { converse(pamh, PAM_PROMPT_ECHO_OFF, "Password: ") }
 }
@@ -678,6 +693,96 @@ pub fn service_defers_to_face_service(service: Option<&str>) -> bool {
     }
 }
 
+/// The two noninteractive slots KScreenLocker starts up front, either of which
+/// can hold Gaze. `kde-smartcard` is used when a fingerprint reader already owns
+/// `kde-fingerprint`, so the two race instead of queueing.
+pub const KDE_FACE_PAM_SERVICE: &str = "kde-fingerprint";
+pub const KDE_FACE_PAM_FILE: &str = "/etc/pam.d/kde-fingerprint";
+pub const KDE_SMARTCARD_PAM_SERVICE: &str = "kde-smartcard";
+pub const KDE_SMARTCARD_PAM_FILE: &str = "/etc/pam.d/kde-smartcard";
+
+/// Plasma Login Manager's biometric helper, which runs alongside the password
+/// field instead of after it. Only distros carrying plasma-login-manager!185
+/// ship the service, so Gaze is wired into it only where it already exists.
+pub const PLASMALOGIN_FACE_PAM_SERVICE: &str = "plasmalogin-fingerprint";
+pub const PLASMALOGIN_FACE_PAM_FILE: &str = "/etc/pam.d/plasmalogin-fingerprint";
+
+/// The interactive services driving the password field, which reach Gaze through
+/// the shared stack it installs into.
+const KDE_INTERACTIVE_SERVICE: &str = "kde";
+const PLASMALOGIN_INTERACTIVE_SERVICE: &str = "plasmalogin";
+
+fn is_kde_noninteractive_service(service: Option<&str>) -> bool {
+    matches!(
+        service,
+        Some(KDE_FACE_PAM_SERVICE | KDE_SMARTCARD_PAM_SERVICE)
+    )
+}
+
+/// A slot the greeter starts by itself, with nothing to route a response back.
+fn is_unpromptable_slot(service: Option<&str>) -> bool {
+    is_kde_noninteractive_service(service) || service == Some(PLASMALOGIN_FACE_PAM_SERVICE)
+}
+
+pub fn pam_stack_runs_gaze(contents: Option<&str>) -> bool {
+    contents.is_some_and(|text| text.lines().any(pam_auth_line_runs_gaze))
+}
+
+const GAZE_PAM_MODULES: [&str; 2] = ["pam_gaze.so", "pam_gaze_grosshack.so"];
+
+fn pam_auth_line_runs_gaze(line: &str) -> bool {
+    let line = line.split('#').next().unwrap_or_default();
+    let mut fields = line.split_whitespace();
+    if !matches!(fields.next(), Some("auth") | Some("-auth")) {
+        return false;
+    }
+    fields.any(|field| {
+        GAZE_PAM_MODULES.iter().any(|module| {
+            // NixOS writes an absolute store path, not a bare module name.
+            field == *module || field.ends_with(&format!("/{module}"))
+        })
+    })
+}
+
+fn pam_service_contents(path: &str) -> Option<String> {
+    std::fs::read_to_string(path).ok()
+}
+
+/// Which up-front slots a service must stand down for, so one unlock claims the
+/// camera once. Plasma runs several PAM services for a single unlock and the
+/// password-side ones reach Gaze through the shared stack it installs into, so
+/// without this a lock screen or greeter would scan two or three times over and
+/// the clients would fight for one camera.
+fn face_slots_outranking(service: Option<&str>) -> &'static [&'static str] {
+    match service {
+        Some(KDE_INTERACTIVE_SERVICE) => &[KDE_FACE_PAM_FILE, KDE_SMARTCARD_PAM_FILE],
+        Some(KDE_SMARTCARD_PAM_SERVICE) => &[KDE_FACE_PAM_FILE],
+        Some(PLASMALOGIN_INTERACTIVE_SERVICE) => &[PLASMALOGIN_FACE_PAM_FILE],
+        _ => &[],
+    }
+}
+
+pub fn service_defers_to_face_slot(service: Option<&str>) -> bool {
+    face_slots_outranking(service)
+        .iter()
+        .any(|path| pam_stack_runs_gaze(pam_service_contents(path).as_deref()))
+}
+
+/// Nothing routes a response here, so a prompt wedges the slot for the lock.
+pub fn service_cannot_be_prompted(service: Option<&str>) -> bool {
+    is_unpromptable_slot(service)
+}
+
+/// The lock screen renders `PAM_ERROR_MSG` but discards `PAM_TEXT_INFO`.
+pub fn service_shows_only_error_messages(service: Option<&str>) -> bool {
+    is_kde_noninteractive_service(service)
+}
+
+/// These greeters allow one `pam_authenticate` per arming, so retry inside it.
+pub fn service_retries_transient_give_up(service: Option<&str>) -> bool {
+    is_unpromptable_slot(service)
+}
+
 const GNOME_BINARIES: [&str; 1] = ["gnome-shell"];
 const KDE_BINARIES: [&str; 5] = [
     "plasmashell",
@@ -764,6 +869,7 @@ pub enum GraphicalConfirm {
     FailClosed,
 }
 
+/// No channel to confirm through means the match is refused, not granted.
 pub fn graphical_confirm_decision(
     de: &str,
     extension_active: bool,
@@ -776,6 +882,9 @@ pub fn graphical_confirm_decision(
             GraphicalConfirm::FailClosed
         };
     }
+    // Not Bypass: the slots that genuinely cannot answer a prompt are handled by
+    // `service_cannot_be_prompted` before this is reached, so bypassing here would
+    // only weaken surfaces that can be confirmed, such as hyprlock.
     match de {
         "GNOME" if extension_active => GraphicalConfirm::GnomeExtension,
         _ => GraphicalConfirm::FailClosed,
@@ -837,6 +946,154 @@ mod tests {
             desktop_from_binaries(names(&["Hyprland", "gnome-shell"])),
             "GNOME"
         );
+    }
+
+    #[test]
+    fn face_slots_are_outranked_in_one_direction_only() {
+        assert_eq!(
+            face_slots_outranking(Some("kde")),
+            [KDE_FACE_PAM_FILE, KDE_SMARTCARD_PAM_FILE],
+            "the password field must yield to either biometric slot"
+        );
+        assert_eq!(
+            face_slots_outranking(Some(KDE_SMARTCARD_PAM_SERVICE)),
+            [KDE_FACE_PAM_FILE],
+            "the smartcard slot yields to the fingerprint slot, never the reverse"
+        );
+        assert_eq!(
+            face_slots_outranking(Some("plasmalogin")),
+            [PLASMALOGIN_FACE_PAM_FILE],
+            "one submit must not run face auth in both greeter helpers"
+        );
+        for service in [
+            Some(KDE_FACE_PAM_SERVICE),
+            Some(PLASMALOGIN_FACE_PAM_SERVICE),
+            // sddm has no up-front helper to yield to.
+            Some("sddm"),
+            None,
+        ] {
+            assert!(
+                face_slots_outranking(service).is_empty(),
+                "{service:?} must never stand down"
+            );
+        }
+    }
+
+    #[test]
+    fn gaze_is_detected_on_an_auth_line_only() {
+        assert!(pam_stack_runs_gaze(Some(
+            "auth        [success=done default=ignore]    pam_gaze.so"
+        )));
+        assert!(pam_stack_runs_gaze(Some(
+            "auth sufficient pam_gaze_grosshack.so"
+        )));
+        assert!(pam_stack_runs_gaze(Some(
+            "#%PAM-1.0\nauth required pam_fprintd.so\nauth sufficient pam_gaze.so"
+        )));
+        assert!(pam_stack_runs_gaze(Some(
+            "auth [success=done default=ignore] /nix/store/abc123-gaze-0.2.7/lib/security/pam_gaze.so"
+        )));
+        assert!(pam_stack_runs_gaze(Some("-auth optional pam_gaze.so")));
+
+        assert!(!pam_stack_runs_gaze(Some("# auth sufficient pam_gaze.so")));
+        assert!(!pam_stack_runs_gaze(Some(
+            "auth required pam_fprintd.so # not pam_gaze.so"
+        )));
+        assert!(!pam_stack_runs_gaze(Some("session optional pam_gaze.so")));
+        assert!(!pam_stack_runs_gaze(Some(
+            "auth optional pam_gaze_other.so"
+        )));
+        assert!(!pam_stack_runs_gaze(Some("auth required pam_fprintd.so")));
+        assert!(!pam_stack_runs_gaze(None));
+    }
+
+    #[test]
+    fn only_greeter_started_slots_are_treated_as_unpromptable() {
+        for slot in [
+            KDE_FACE_PAM_SERVICE,
+            KDE_SMARTCARD_PAM_SERVICE,
+            PLASMALOGIN_FACE_PAM_SERVICE,
+        ] {
+            assert!(service_cannot_be_prompted(Some(slot)), "{slot}");
+            assert!(service_retries_transient_give_up(Some(slot)), "{slot}");
+        }
+
+        // Discarding info messages is a KScreenLocker theme quirk, not a PLM one.
+        for slot in [KDE_FACE_PAM_SERVICE, KDE_SMARTCARD_PAM_SERVICE] {
+            assert!(service_shows_only_error_messages(Some(slot)), "{slot}");
+        }
+        assert!(!service_shows_only_error_messages(Some(
+            PLASMALOGIN_FACE_PAM_SERVICE
+        )));
+
+        for service in [
+            "kde",
+            "hyprlock-gaze",
+            "gdm-face",
+            "sudo",
+            "polkit-1",
+            "plasmalogin",
+        ] {
+            assert!(!service_cannot_be_prompted(Some(service)), "{service}");
+            assert!(
+                !service_shows_only_error_messages(Some(service)),
+                "{service}"
+            );
+            assert!(
+                !service_retries_transient_give_up(Some(service)),
+                "{service}"
+            );
+        }
+        assert!(!service_cannot_be_prompted(None));
+        assert!(!service_shows_only_error_messages(None));
+        assert!(!service_retries_transient_give_up(None));
+    }
+
+    #[test]
+    fn other_desktops_fail_closed_without_a_channel() {
+        assert_eq!(
+            graphical_confirm_decision("GNOME", true, false),
+            GraphicalConfirm::GnomeExtension
+        );
+        assert_eq!(
+            graphical_confirm_decision("GNOME", false, false),
+            GraphicalConfirm::FailClosed
+        );
+        for de in ["KDE", "Hyprland", "LXQt", "Other"] {
+            assert_eq!(
+                graphical_confirm_decision(de, false, false),
+                GraphicalConfirm::FailClosed,
+                "{de} has no confirm channel and must fail closed, not bypass"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unpromptable_slot_never_reaches_the_graphical_decision() {
+        // Why failing closed above is safe: the KDE lock screen slots return
+        // before a confirmation is ever attempted.
+        for slot in [
+            KDE_FACE_PAM_SERVICE,
+            KDE_SMARTCARD_PAM_SERVICE,
+            PLASMALOGIN_FACE_PAM_SERVICE,
+        ] {
+            assert!(service_cannot_be_prompted(Some(slot)), "{slot}");
+        }
+    }
+
+    #[test]
+    fn a_greeter_never_bypasses_confirmation() {
+        assert_eq!(
+            graphical_confirm_decision("Other", true, true),
+            GraphicalConfirm::GnomeExtension
+        );
+        for de in ["GNOME", "KDE", "Hyprland", "Other"] {
+            assert_eq!(
+                graphical_confirm_decision(de, false, true),
+                GraphicalConfirm::FailClosed,
+                "a greeter ({de}) must fail closed rather than bypass"
+            );
+        }
     }
 
     #[test]
@@ -909,54 +1166,6 @@ mod tests {
             );
         }
         assert!(!service_defers_to_face_service(None));
-    }
-
-    #[test]
-    fn gnome_with_active_extension_confirms_through_it() {
-        assert_eq!(
-            graphical_confirm_decision("GNOME", true, false),
-            GraphicalConfirm::GnomeExtension
-        );
-    }
-
-    #[test]
-    fn gnome_without_extension_fails_closed() {
-        assert_eq!(
-            graphical_confirm_decision("GNOME", false, false),
-            GraphicalConfirm::FailClosed
-        );
-    }
-
-    #[test]
-    fn other_desktops_fail_closed_without_a_channel() {
-        for de in ["KDE", "Hyprland", "LXQt", "Other"] {
-            assert_eq!(
-                graphical_confirm_decision(de, false, false),
-                GraphicalConfirm::FailClosed,
-                "{de} has no confirm channel and must fail closed, not bypass"
-            );
-        }
-    }
-
-    #[test]
-    fn greeter_confirms_through_extension_when_active() {
-        // A greeter's DE detection is unreliable, so the flag decides -- even
-        // if `/proc` scanning reported a non-GNOME desktop.
-        assert_eq!(
-            graphical_confirm_decision("Other", true, true),
-            GraphicalConfirm::GnomeExtension
-        );
-    }
-
-    #[test]
-    fn greeter_never_bypasses_and_fails_closed_without_extension() {
-        for de in ["GNOME", "KDE", "Hyprland", "Other"] {
-            assert_eq!(
-                graphical_confirm_decision(de, false, true),
-                GraphicalConfirm::FailClosed,
-                "a greeter ({de}) must fail closed, never bypass, without a confirm channel"
-            );
-        }
     }
 
     #[test]

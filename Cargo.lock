@@ -2537,6 +2537,7 @@ dependencies = [
 name = "pam-gaze"
 version = "0.2.9"
 dependencies = [
+ "futures",
  "gaze-core",
  "pam-gaze-core",
  "tokio",

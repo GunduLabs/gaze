@@ -1,0 +1,674 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -eu
+
+# KScreenLocker starts both of these up front, which is what needs no key press.
+PAM_FILE=${GAZE_KDE_PAM_FILE:-/etc/pam.d/kde-fingerprint}
+SMARTCARD_PAM_FILE=${GAZE_KDE_SMARTCARD_PAM_FILE:-/etc/pam.d/kde-smartcard}
+LOGIN_PAM_FILES=${GAZE_KDE_LOGIN_PAM_FILES-/etc/pam.d/plasmalogin /etc/pam.d/sddm}
+# Plasma Login Manager's up-front helper, where a distro ships one.
+LOGIN_FACE_PAM_FILE=${GAZE_KDE_LOGIN_FACE_PAM_FILE:-/etc/pam.d/plasmalogin-fingerprint}
+# Arch and others ship these services here rather than in /etc/pam.d.
+VENDOR_PAM_DIR=${GAZE_KDE_VENDOR_PAM_DIR:-/usr/lib/pam.d}
+STATE_DIR=${GAZE_KDE_STATE_DIR:-/etc/gaze}
+
+BEGIN_MARKER='# BEGIN gaze (managed by gaze-kde; remove with `gaze-kde-pam disable`)'
+END_MARKER='# END gaze'
+
+# The block Gaze owns. Every line carries the `-` prefix so a distro without the
+# module, or a Gaze that has been uninstalled, is skipped rather than aborting the
+# stack: a faulty module reference can leave the greeter accepting input and never
+# answering.
+#
+# The two gates are replicated here on purpose. `success=done` ends the whole auth
+# stack on a match, so any gate reached through an `include` (Arch keeps both of
+# these behind `auth include system-login`) would otherwise be skipped by a face
+# unlock, letting a locked-out or nologin-blocked account in. Running them twice is
+# harmless: neither counts an attempt.
+managed_block() {
+	control=$1
+	printf '%s\n' "$BEGIN_MARKER"
+	printf -- '-auth       requisite                                    pam_nologin.so\n'
+	printf -- '-auth       requisite                                    pam_faillock.so    preauth\n'
+	# `success=done` also skips pam_kwallet5, which would prompt for a password.
+	printf -- '-auth       [%s]                pam_gaze.so\n' "$control"
+	printf '%s\n' "$END_MARKER"
+}
+
+# A non-match must not be counted as a failed login. Where the stack can reach
+# `pam_faillock authfail`, falling through to it would spend the user's attempt
+# budget on the camera and eventually lock the account, so fail the stack outright
+# instead. Only ever for a biometric-only slot: in a stack that also serves the
+# password, `die` would deny a correct password whenever the daemon is down.
+gaze_control() {
+	case $1 in
+	"$PAM_FILE" | "$SMARTCARD_PAM_FILE" | "$LOGIN_FACE_PAM_FILE")
+		if stack_matches "$(effective_file "$1")" 'pam_faillock[.]so.*authfail'; then
+			printf 'success=done default=die\n'
+			return 0
+		fi
+		;;
+	esac
+	printf 'success=done default=ignore\n'
+}
+
+usage() {
+	cat <<'EOF'
+Usage: gaze-kde-pam enable|disable|enable-login|disable-login|status
+
+enable         Run Gaze in KScreenLocker's biometric slot (kde-fingerprint, or
+               kde-smartcard when a fingerprint reader already owns the first).
+               Pass --force to undo an earlier `disable`, which upgrades respect
+disable        Remove Gaze from that slot, and keep it off across upgrades
+enable-login   Also run Gaze in the login greeter stack (plasmalogin, sddm)
+disable-login  Remove Gaze from the login greeter stack
+status         Report what is wired up
+
+The lock screen starts face auth on its own. The login greeter runs it when you
+submit the login form (including Enter on an empty password field), exactly as a
+fingerprint reader does there, unless the greeter ships an up-front biometric
+service of its own, in which case enable-login uses that and needs no submit.
+
+Set GAZE_KDE_PAM_FILE, GAZE_KDE_SMARTCARD_PAM_FILE, GAZE_KDE_LOGIN_PAM_FILES,
+GAZE_KDE_LOGIN_FACE_PAM_FILE, GAZE_KDE_VENDOR_PAM_DIR or GAZE_KDE_STATE_DIR to
+operate on different files (used by tests).
+EOF
+}
+
+require_root() {
+	[ -z "${GAZE_KDE_PAM_FILE:-}" ] || return 0
+	if [ "$(id -u)" -ne 0 ]; then
+		printf 'This must run as root: sudo gaze-kde-pam %s\n' "$1" >&2
+		return 1
+	fi
+}
+
+created_flag() {
+	printf '%s/%s.created-by-gaze' "$STATE_DIR" "$(basename "$1")"
+}
+
+# Checksum of the file as Gaze left it. `disable` deletes a file it created only
+# when this still matches, so a copy someone has edited since is kept, and a copy
+# the vendor has since changed underneath is still removed rather than left
+# shadowing the new vendor stack forever.
+installed_sum_flag() {
+	printf '%s/%s.installed-sha256' "$STATE_DIR" "$(basename "$1")"
+}
+
+# The vendor file as it read when Gaze copied it. No distribution ships these as
+# conffiles, so a later vendor change produces no .pacnew or .rpmnew and nothing
+# else would ever tell the admin their /etc copy has gone stale.
+vendor_sum_flag() {
+	printf '%s/%s.vendor-sha256' "$STATE_DIR" "$(basename "$1")"
+}
+
+file_sum() {
+	[ -f "$1" ] || return 1
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum <"$1" | cut -d" " -f1
+	else
+		cksum <"$1" | cut -d" " -f1,2
+	fi
+}
+
+record_installed() {
+	mkdir -p "$STATE_DIR" 2>/dev/null || true
+	file_sum "$(real_file "$1")" >"$(installed_sum_flag "$1")" 2>/dev/null || true
+}
+
+untouched_since_install() {
+	recorded=$(cat "$(installed_sum_flag "$1")" 2>/dev/null) || return 1
+	[ -n "$recorded" ] || return 1
+	[ "$recorded" = "$(file_sum "$(real_file "$1")" 2>/dev/null)" ]
+}
+
+# An explicit `disable` outlives a package upgrade, which re-runs `enable`.
+opt_out_flag() {
+	printf '%s/lock-disabled' "$STATE_DIR"
+}
+
+# Remembered so a package upgrade re-applies the login opt-in without asking again.
+login_flag() {
+	printf '%s/login-enabled' "$STATE_DIR"
+}
+
+# Bracket rather than backslash escapes: awk mangles unknown escapes in a -v value.
+auth_line_matches() {
+	[ -f "$1" ] || return 1
+	awk -v pattern="$2" '
+		{ line = $0; sub(/#.*/, "", line) }
+		line ~ /^[[:space:]]*-?auth[[:space:]]/ && line ~ pattern { found = 1 }
+		END { exit !found }
+	' "$1" 2>/dev/null
+}
+
+GAZE_MODULES='pam_gaze(_grosshack)?[.]so([[:space:]]|$)'
+
+has_gaze() {
+	auth_line_matches "$1" "$GAZE_MODULES"
+}
+
+# One level of includes is as deep as any shipped stack goes. Fedora hides both the
+# reader and faillock behind `auth substack fingerprint-auth`, so a check that only
+# read the service file itself would see neither.
+stack_matches() {
+	target=$1
+	pattern=$2
+	auth_line_matches "$target" "$pattern" && return 0
+	[ -f "$target" ] || return 1
+
+	dir=$(dirname "$target")
+	for included in $(awk '
+		{ line = $0; sub(/#.*/, "", line) }
+		line ~ /^[[:space:]]*-?auth[[:space:]]+(include|substack)[[:space:]]/ { print $3 }
+		line ~ /^[[:space:]]*@include[[:space:]]/ { print $2 }
+	' "$target" 2>/dev/null | sort -u); do
+		case "$included" in
+		/*) candidate=$included ;;
+		*) candidate="$dir/$included" ;;
+		esac
+		auth_line_matches "$(effective_file "$candidate")" "$pattern" && return 0
+	done
+	return 1
+}
+
+# Fedora and Debian login stacks already include Gaze; a second line scans twice.
+stack_reaches_gaze() {
+	stack_matches "$1" "$GAZE_MODULES"
+}
+
+# A reader the greeter can actually use, not merely a slot that mentions one: every
+# distro's kde-fingerprint names pam_fprintd whether or not fprintd is installed.
+runs_fprintd() {
+	pam_module_present pam_fprintd.so || return 1
+	stack_matches "$1" 'pam_fprintd[.]so([[:space:]]|$)'
+}
+
+vendor_file() {
+	printf '%s/%s' "$VENDOR_PAM_DIR" "$(basename "$1")"
+}
+
+# PAM reads /etc/pam.d first and falls back to the vendor directory, so this is
+# the stack the service would really use today.
+effective_file() {
+	if [ -f "$1" ]; then
+		printf '%s\n' "$1"
+	else
+		vendor_file "$1"
+	fi
+}
+
+slot_exists() {
+	[ -f "$1" ] || [ -f "$(vendor_file "$1")" ]
+}
+
+# pam_fprintd blocks for its whole timeout, so whichever module runs second in a
+# slot is starved. KScreenLocker starts the smartcard slot up front too, so
+# handing that one to Gaze lets face and finger race instead of queueing.
+preferred_lock_slot() {
+	if runs_fprintd "$(effective_file "$PAM_FILE")" && slot_exists "$SMARTCARD_PAM_FILE"; then
+		printf '%s\n' "$SMARTCARD_PAM_FILE"
+	elif slot_exists "$PAM_FILE" || ! slot_exists "$SMARTCARD_PAM_FILE"; then
+		printf '%s\n' "$PAM_FILE"
+	else
+		printf '%s\n' "$SMARTCARD_PAM_FILE"
+	fi
+}
+
+# Never add a second slot to an install that already has one.
+wired_lock_slot() {
+	for target in "$PAM_FILE" "$SMARTCARD_PAM_FILE"; do
+		if has_gaze "$(effective_file "$target")"; then
+			printf '%s\n' "$target"
+			return 0
+		fi
+	done
+	return 1
+}
+
+lock_slot() {
+	wired_lock_slot || preferred_lock_slot
+}
+
+pam_module_present() {
+	for dir in ${GAZE_KDE_SECURITY_DIRS:-/lib/security /lib64/security /usr/lib/security /usr/lib64/security \
+		/lib/*/security /usr/lib/*/security}; do
+		[ -e "$dir/$1" ] && return 0
+	done
+	return 1
+}
+
+pam_module_installed() {
+	pam_module_present pam_gaze.so
+}
+
+# Resolved so a symlinked service file is edited where it really lives, rather
+# than the link being replaced or its target rewritten behind a misleading name.
+real_file() {
+	if [ -L "$1" ] && command -v readlink >/dev/null 2>&1; then
+		resolved=$(readlink -f "$1" 2>/dev/null) || resolved=
+		[ -n "$resolved" ] && printf '%s\n' "$resolved" && return 0
+	fi
+	printf '%s\n' "$1"
+}
+
+write_back() {
+	target=$1
+	replacement=$2
+	staged="$target.gaze-staged.$$"
+
+	cp -a "$target" "$staged" || return 1
+	cat "$replacement" >"$staged" || {
+		rm -f "$staged"
+		return 1
+	}
+	sync "$staged" 2>/dev/null || true
+	mv -f "$staged" "$target" || {
+		rm -f "$staged"
+		return 1
+	}
+	if command -v restorecon >/dev/null 2>&1; then
+		restorecon "$target" >/dev/null 2>&1 || true
+	fi
+}
+
+# Modules that actually verify a credential. Everything ahead of the first of
+# them is a gate (pam_nologin, pam_shells, faillock preauth, SELinux) that a
+# `success=done` match must not skip, so Gaze goes in immediately above it. An
+# `include` counts too: the gates it pulls in would be skipped just the same.
+AUTHENTICATOR_MODULES='pam_unix|pam_unix2|pam_sss|pam_fprintd|pam_pkcs11|pam_p11|pam_u2f|pam_krb5|pam_ldap|pam_winbind|pam_yubico|pam_google_authenticator|pam_howdy|pam_gaze|pam_deny|pam_permit'
+
+insert_position() {
+	awk -v authenticators="$AUTHENTICATOR_MODULES" '
+		BEGIN { first = 0; last = 0 }
+		{
+			line = $0
+			sub(/#.*/, "", line)
+			if (line ~ /^[[:space:]]*-?auth[[:space:]]/) {
+				last = NR
+				if (first == 0 && (line ~ authenticators || line ~ /[[:space:]](include|substack)[[:space:]]/)) {
+					first = NR
+				}
+			} else if (line ~ /^[[:space:]]*@include[[:space:]]+[^[:space:]]*auth/) {
+				last = NR
+				if (first == 0) {
+					first = NR
+				}
+			}
+		}
+		END {
+			if (first > 0) print first
+			else if (last > 0) print last + 1
+			else print 0
+		}
+	' "$1"
+}
+
+insert_block() {
+	target=$(real_file "$1")
+	position=$(insert_position "$target")
+	if [ "$position" -eq 0 ]; then
+		printf '%s has no auth stack to extend; not modified.\n' "$target" >&2
+		return 1
+	fi
+
+	tmp=$(mktemp)
+	trap 'rm -f "$tmp"' EXIT
+
+	managed_block "$(gaze_control "$1")" >"$tmp.block"
+	awk -v position="$position" -v blockfile="$tmp.block" '
+		function emit() {
+			while ((getline line < blockfile) > 0) {
+				print line
+			}
+			close(blockfile)
+		}
+		BEGIN { inserted = 0 }
+		NR == position && !inserted {
+			emit()
+			inserted = 1
+		}
+		{ print }
+		END { if (!inserted) { emit() } }
+	' "$target" >"$tmp"
+
+	status=0
+	write_back "$target" "$tmp" || status=1
+	rm -f "$tmp" "$tmp.block"
+	trap - EXIT
+	return "$status"
+}
+
+NOTHING_TO_REMOVE=3
+
+remove_block() {
+	target=$(real_file "$1")
+	[ -f "$target" ] || return "$NOTHING_TO_REMOVE"
+
+	# Checked up front: reconstructing a truncated block and comparing cannot tell
+	# a missing END marker from a file that merely lacks a trailing newline.
+	if grep -qF "$BEGIN_MARKER" "$target" 2>/dev/null &&
+		! grep -qF "$END_MARKER" "$target" 2>/dev/null; then
+		printf '%s has no complete Gaze block (missing %s); not modified.\n' \
+			"$target" "$END_MARKER" >&2
+		return 1
+	fi
+
+	if ! grep -qF "$BEGIN_MARKER" "$target" 2>/dev/null; then
+		if has_gaze "$target"; then
+			printf '%s references pam_gaze outside the managed block; leaving it alone.\n' "$target"
+		fi
+		return "$NOTHING_TO_REMOVE"
+	fi
+
+	tmp=$(mktemp)
+	trap 'rm -f "$tmp"' EXIT
+
+	awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
+		$0 == begin && !holding { holding = 1; held = ""; next }
+		holding && $0 == end { holding = 0; next }
+		holding { held = held $0 "\n"; next }
+		{ print }
+		END { if (holding) printf "%s\n%s", begin, held }
+	' "$target" >"$tmp"
+
+	if cmp -s "$target" "$tmp"; then
+		rm -f "$tmp"
+		trap - EXIT
+		printf '%s has no complete Gaze block (missing %s); not modified.\n' "$target" "$END_MARKER" >&2
+		return 1
+	fi
+
+	status=0
+	write_back "$target" "$tmp" || status=1
+	rm -f "$tmp"
+	trap - EXIT
+	return "$status"
+}
+
+# plasma-workspace owns this path where it ships, so only create it if absent.
+create_face_service() {
+	target=$1
+	mkdir -p "$(dirname "$target")"
+	{
+		printf '#%%PAM-1.0\n'
+		managed_block "$(gaze_control "$target")"
+		cat <<EOF
+auth        required                                     pam_deny.so
+account     required                                     pam_permit.so
+password    required                                     pam_deny.so
+session     required                                     pam_permit.so
+EOF
+	} >"$target"
+	chmod 644 "$target"
+	mkdir -p "$STATE_DIR" 2>/dev/null || true
+	: >"$(created_flag "$target")" 2>/dev/null || true
+	if command -v restorecon >/dev/null 2>&1; then
+		restorecon "$target" >/dev/null 2>&1 || true
+	fi
+}
+
+# A file in /etc/pam.d shadows the vendor one, so start from a copy of it rather
+# than replacing what the distribution configured there.
+ensure_local_copy() {
+	slot=$1
+	[ ! -f "$slot" ] || return 0
+	[ -f "$(vendor_file "$slot")" ] || return 0
+
+	mkdir -p "$(dirname "$slot")"
+	cp -p "$(vendor_file "$slot")" "$slot" || return 1
+	mkdir -p "$STATE_DIR" 2>/dev/null || true
+	: >"$(created_flag "$slot")" 2>/dev/null || true
+	file_sum "$(vendor_file "$slot")" >"$(vendor_sum_flag "$slot")" 2>/dev/null || true
+	printf 'Copied %s to %s so the vendor stack is not shadowed.\n' \
+		"$(vendor_file "$slot")" "$slot"
+}
+
+report_vendor_drift() {
+	for slot in "$PAM_FILE" "$SMARTCARD_PAM_FILE" "$LOGIN_FACE_PAM_FILE"; do
+		recorded=$(cat "$(vendor_sum_flag "$slot")" 2>/dev/null) || continue
+		[ -n "$recorded" ] || continue
+		current=$(file_sum "$(vendor_file "$slot")" 2>/dev/null) || continue
+		[ "$recorded" = "$current" ] && continue
+		printf 'warning: %s has changed since Gaze copied it to %s, which shadows it.\n' \
+			"$(vendor_file "$slot")" "$slot" >&2
+		printf '         Re-run `sudo gaze-kde-pam disable && sudo gaze-kde-pam enable --force` to pick it up.\n' >&2
+	done
+}
+
+enable() {
+	force=0
+	[ "${1:-}" = "--force" ] && force=1
+	require_root enable || return 1
+
+	if [ "$force" -eq 0 ] && [ -f "$(opt_out_flag)" ]; then
+		printf 'Face unlock is switched off on the KDE lock screen (you ran `gaze-kde-pam disable`).\n'
+		printf 'Turn it back on with: sudo gaze-kde-pam enable --force\n'
+		return 0
+	fi
+	rm -f "$(opt_out_flag)"
+
+	if ! pam_module_installed; then
+		printf 'Warning: pam_gaze.so is not installed yet; install the gaze package so face unlock works.\n' >&2
+	fi
+
+	slot=$(lock_slot)
+	where=$(real_file "$slot")
+
+	ensure_local_copy "$slot" || return 1
+
+	if [ ! -f "$slot" ]; then
+		create_face_service "$slot"
+		printf 'Created %s running Gaze in KScreenLocker biometric slot.\n' "$slot"
+		record_installed "$slot"
+	elif has_gaze "$where"; then
+		printf 'Gaze is already referenced by %s.\n' "$where"
+	else
+		# Ahead of pam_fprintd, which blocks on a swipe and would starve face auth.
+		insert_block "$slot" || return 1
+		record_installed "$slot"
+		printf 'Enabled Gaze face unlock on the KDE lock screen (%s).\n' "$where"
+		if [ "$slot" = "$SMARTCARD_PAM_FILE" ]; then
+			printf 'Used the smartcard slot so your fingerprint reader keeps all of %s.\n' \
+				"$(effective_file "$PAM_FILE")"
+		fi
+	fi
+
+	# An upgrade must not silently drop a login opt-in made earlier.
+	if [ -f "$(login_flag)" ]; then
+		enable_login_face
+	fi
+}
+
+disable() {
+	require_root disable || return 1
+
+	mkdir -p "$STATE_DIR" 2>/dev/null || true
+	: >"$(opt_out_flag)" 2>/dev/null || true
+
+	removed_any=0
+	failed=0
+	for slot in "$PAM_FILE" "$SMARTCARD_PAM_FILE"; do
+		where=$(real_file "$slot")
+		untouched=1
+		untouched_since_install "$slot" || untouched=0
+
+		removed=0
+		remove_block "$slot" || removed=$?
+		if [ "$removed" -eq 1 ]; then
+			failed=1
+			continue
+		fi
+
+		if [ -f "$(created_flag "$slot")" ]; then
+			# Delete only what Gaze wrote and nobody has touched since. Comparing
+			# against the vendor file instead would keep a stale copy, or a
+			# face-only stack, shadowing the distribution's slot for good.
+			if [ "$untouched" -eq 1 ]; then
+				rm -f "$where" "$(created_flag "$slot")" \
+					"$(installed_sum_flag "$slot")" "$(vendor_sum_flag "$slot")"
+				printf 'Removed %s.\n' "$where"
+			else
+				rm -f "$(created_flag "$slot")" \
+					"$(installed_sum_flag "$slot")" "$(vendor_sum_flag "$slot")"
+				printf 'Kept %s: it has been changed since Gaze wrote it.\n' "$where"
+			fi
+			removed_any=1
+		elif [ "$removed" -eq 0 ]; then
+			rm -f "$(installed_sum_flag "$slot")"
+			printf 'Removed Gaze face unlock from the KDE lock screen (%s).\n' "$where"
+			removed_any=1
+		fi
+	done
+
+	[ "$failed" -eq 1 ] && return 1
+	if [ "$removed_any" -eq 0 ]; then
+		printf 'Gaze face unlock was not enabled on the KDE lock screen.\n'
+	fi
+}
+
+login_targets() {
+	found=0
+	for target in $LOGIN_PAM_FILES; do
+		if [ -f "$target" ]; then
+			printf '%s\n' "$target"
+			found=1
+		fi
+	done
+	[ "$found" -eq 1 ]
+}
+
+# The greeter runs this one alongside the password field, so a failed scan costs
+# the password prompt nothing and no submit is needed. Only where it exists.
+enable_login_face() {
+	slot_exists "$LOGIN_FACE_PAM_FILE" || return 0
+	if has_gaze "$(effective_file "$LOGIN_FACE_PAM_FILE")"; then
+		return 0
+	fi
+	ensure_local_copy "$LOGIN_FACE_PAM_FILE" || return 1
+	# Ahead of pam_fprintd for the same reason as the lock screen slot.
+	if insert_block "$LOGIN_FACE_PAM_FILE"; then
+		record_installed "$LOGIN_FACE_PAM_FILE"
+		printf 'Enabled hands-free Gaze at the KDE login greeter (%s).\n' \
+			"$(real_file "$LOGIN_FACE_PAM_FILE")"
+	fi
+}
+
+enable_login() {
+	require_root enable-login || return 1
+
+	if ! login_targets >/dev/null && ! slot_exists "$LOGIN_FACE_PAM_FILE"; then
+		printf 'No KDE login stack found (looked for: %s).\n' "$LOGIN_PAM_FILES" >&2
+		return 1
+	fi
+
+	mkdir -p "$STATE_DIR" 2>/dev/null || true
+	: >"$(login_flag)" 2>/dev/null || true
+
+	enable_login_face
+
+	login_targets | while read -r target; do
+		if has_gaze "$target"; then
+			printf 'Gaze is already referenced by %s.\n' "$target"
+			continue
+		fi
+		if stack_reaches_gaze "$target"; then
+			printf '%s already reaches Gaze through an included stack; leaving it alone.\n' "$target"
+			continue
+		fi
+		if insert_block "$target"; then
+			printf 'Enabled Gaze at the KDE login greeter (%s).\n' "$target"
+		fi
+	done
+
+	if slot_exists "$LOGIN_FACE_PAM_FILE"; then
+		cat <<'EOF'
+
+Face auth runs as soon as the greeter shows your user, with no key press. It only
+does that for a preselected user, since PAM needs a name before it can verify
+anyone; on a greeter that asks you to type your username, submit the form first.
+EOF
+	else
+		cat <<'EOF'
+
+This greeter has no up-front biometric service, so face auth starts when you
+submit the login form: press Enter with the password field empty, exactly as you
+would for a fingerprint reader on the same screen.
+EOF
+	fi
+
+	cat <<'EOF'
+
+Your KWallet will ask for its password once after a face login, because no
+password was typed for it to reuse.
+EOF
+}
+
+disable_login() {
+	require_root disable-login || return 1
+
+	rm -f "$(login_flag)"
+
+	for target in $LOGIN_PAM_FILES $LOGIN_FACE_PAM_FILE; do
+		[ -f "$target" ] || continue
+		if remove_block "$target"; then
+			printf 'Removed Gaze from the KDE login greeter (%s).\n' "$target"
+		fi
+	done
+}
+
+status() {
+	rc=1
+	if slot=$(effective_file "$(wired_lock_slot)"); then
+		if grep -qF "$BEGIN_MARKER" "$slot" 2>/dev/null; then
+			printf 'lock screen: enabled (%s contains the Gaze block)\n' "$slot"
+		else
+			printf 'lock screen: enabled (%s references pam_gaze outside the managed block)\n' "$slot"
+		fi
+		rc=0
+	elif ! slot_exists "$PAM_FILE" && ! slot_exists "$SMARTCARD_PAM_FILE"; then
+		printf 'lock screen: not configured (no biometric slot exists to wire)\n'
+	else
+		printf 'lock screen: disabled (%s does not reference pam_gaze)\n' \
+			"$(effective_file "$(preferred_lock_slot)")"
+	fi
+
+	if slot_exists "$LOGIN_FACE_PAM_FILE"; then
+		if has_gaze "$(effective_file "$LOGIN_FACE_PAM_FILE")"; then
+			printf 'login greeter: enabled hands-free (%s)\n' \
+				"$(effective_file "$LOGIN_FACE_PAM_FILE")"
+		else
+			printf 'login greeter: disabled (%s does not reference pam_gaze)\n' \
+				"$(effective_file "$LOGIN_FACE_PAM_FILE")"
+		fi
+	fi
+
+	report_vendor_drift
+
+	for target in $LOGIN_PAM_FILES; do
+		[ -f "$target" ] || continue
+		if has_gaze "$target"; then
+			printf 'login greeter: enabled on submit (%s)\n' "$target"
+		elif stack_reaches_gaze "$target"; then
+			printf 'login greeter: enabled on submit (%s, through an included stack)\n' "$target"
+		else
+			printf 'login greeter: disabled (%s)\n' "$target"
+		fi
+	done
+
+	return $rc
+}
+
+case "${1:-}" in
+enable) enable "${2:-}" ;;
+disable) disable ;;
+enable-login) enable_login ;;
+disable-login) disable_login ;;
+status) status ;;
+-h | --help | help) usage ;;
+*)
+	usage >&2
+	exit 2
+	;;
+esac

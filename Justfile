@@ -321,7 +321,7 @@ package format: build-rust build-selinux && (package-prebuilt format)
 # Package already-built artifacts for a given packager
 [arg("format", pattern="deb|rpm|archlinux")]
 [group("package")]
-package-prebuilt format: _dist-packages (_nfpm "packaging/nfpm.yaml" format) (_nfpm "packaging/nfpm-gui.yaml" format) (_nfpm "packaging/nfpm-gnome-extension.yaml" format) (_nfpm "packaging/nfpm-hyprlock.yaml" format) && (_verify-package format)
+package-prebuilt format: _dist-packages (_nfpm "packaging/nfpm.yaml" format) (_nfpm "packaging/nfpm-gui.yaml" format) (_nfpm "packaging/nfpm-gnome-extension.yaml" format) (_nfpm "packaging/nfpm-hyprlock.yaml" format) (_nfpm "packaging/nfpm-kde.yaml" format) && (_verify-package format)
     @echo "Packages written to dist/packages/"
 
 # ── srpm ──────────────────────────────────────────────────────────────────────
@@ -365,12 +365,14 @@ srpm: _dist-packages _srpm-sources
     export SCRIPTLET_MAIN_POST="$(cat packaging/postinst-rpm.sh)"
     export SCRIPTLET_EXTENSION_POST="$(cat packaging/postinst-gnome-extension.sh)"
     export SCRIPTLET_EXTENSION_POSTUN="$(cat packaging/postrm-gnome-extension.sh)"
+    export SCRIPTLET_KDE_POST="$(cat packaging/postinst-kde.sh)"
+    export SCRIPTLET_KDE_POSTUN="$(cat packaging/postrm-kde.sh)"
     export SCRIPTLET_HYPRLOCK_POST="$(cat packaging/postinst-hyprlock.sh)"
     export SCRIPTLET_HYPRLOCK_POSTUN="$(cat packaging/postrm-hyprlock.sh)"
 
     mkdir -p "{{ srpm_topdir }}/SPECS"
     spec="{{ srpm_topdir }}/SPECS/gaze.spec"
-    envsubst '$VERSION $PACKAGE_RELEASE $ORT_VERSION $CHANGELOG_DATE $SCRIPTLET_MAIN_POST $SCRIPTLET_EXTENSION_POST $SCRIPTLET_EXTENSION_POSTUN $SCRIPTLET_HYPRLOCK_POST $SCRIPTLET_HYPRLOCK_POSTUN' \
+    envsubst '$VERSION $PACKAGE_RELEASE $ORT_VERSION $CHANGELOG_DATE $SCRIPTLET_MAIN_POST $SCRIPTLET_EXTENSION_POST $SCRIPTLET_EXTENSION_POSTUN $SCRIPTLET_HYPRLOCK_POST $SCRIPTLET_HYPRLOCK_POSTUN $SCRIPTLET_KDE_POST $SCRIPTLET_KDE_POSTUN' \
         < packaging/rpm/gaze.spec.in > "$spec"
 
     {{ quote(rpmbuild) }} -bs "$spec" --define "_topdir $PWD/{{ srpm_topdir }}"
@@ -461,6 +463,33 @@ dev-link-system: build-rust
 [group("dev")]
 dev-unlink-system:
     sudo scripts/dev-link-system.sh disable
+
+# Drive a PAM service the way KScreenLocker's greeter does; fails on a prompt.
+# With confdir=self, builds a throwaway stack around this checkout's module so a
+# slot can be driven without editing the one the real lock screen uses.
+[group("dev")]
+kde-harness service="kde-fingerprint" rounds="1" confdir="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p dist
+    cc -Wall -Wextra -O2 -o dist/kde-pam-harness scripts/kde-pam-harness.c -lpam
+    echo "built dist/kde-pam-harness"
+    confdir='{{ confdir }}'
+    if [ "$confdir" = self ]; then
+        cargo build --release -p pam-gaze
+        # A space-free directory, because a PAM config field cannot quote a path.
+        confdir=$(mktemp -d /tmp/gaze-kde-harness.XXXXXX)
+        trap 'rm -rf "$confdir"' EXIT
+        cp target/release/libpam_gaze.so "$confdir/pam_gaze_test.so"
+        printf '#%%PAM-1.0\nauth [success=done default=ignore] %s/pam_gaze_test.so\nauth required pam_deny.so\naccount required pam_permit.so\n' \
+            "$confdir" >"$confdir/{{ service }}"
+    fi
+    # Unprivileged, like kscreenlocker_greet; needs gazed running and a face enrolled.
+    if [ -n "$confdir" ]; then
+        ./dist/kde-pam-harness '{{ service }}' "$USER" '{{ rounds }}' "$confdir"
+    else
+        ./dist/kde-pam-harness '{{ service }}' "$USER" '{{ rounds }}'
+    fi
 
 # Show which installed Gaze paths are linked to this checkout
 [group("dev")]
