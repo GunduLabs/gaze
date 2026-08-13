@@ -34,6 +34,11 @@ async fn authenticate_biometric_with_timeout(
 
 extern "C" fn interrupt_noop_handler(_sig: c_int) {}
 
+#[inline(never)]
+fn interrupt_handler_address() -> usize {
+    interrupt_noop_handler as *const () as usize
+}
+
 /// Borrows SIGUSR1 while a prompt is being interrupted, and gives the host process it runs
 /// inside its own back. `sa_flags = 0` withholds SA_RESTART, so the blocked read sees EINTR.
 struct InterruptHandler {
@@ -44,7 +49,7 @@ impl InterruptHandler {
     fn install() -> Self {
         unsafe {
             let mut action: libc::sigaction = std::mem::zeroed();
-            action.sa_sigaction = interrupt_noop_handler as *const () as usize;
+            action.sa_sigaction = interrupt_handler_address();
             libc::sigemptyset(&mut action.sa_mask);
             action.sa_flags = 0;
             let mut previous: libc::sigaction = std::mem::zeroed();
@@ -373,7 +378,8 @@ mod tests {
             let mut during: libc::sigaction = unsafe { std::mem::zeroed() };
             unsafe { libc::sigaction(libc::SIGUSR1, std::ptr::null(), &mut during) };
             assert_eq!(
-                during.sa_sigaction, interrupt_noop_handler as *const () as usize,
+                during.sa_sigaction,
+                interrupt_handler_address(),
                 "the interrupting handler must be in place while signalling"
             );
         }
