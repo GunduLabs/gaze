@@ -53,11 +53,6 @@ enum PromptUnblock {
     NoTerminal,
 }
 
-fn prompt_is_finished(state: &SharedAuthState) -> bool {
-    let (lock, _) = &**state;
-    lock.lock().finished
-}
-
 fn signal_prompt_until_finished(
     state: &SharedAuthState,
     tid: libc::pthread_t,
@@ -77,21 +72,34 @@ fn signal_prompt_until_finished(
     shared_state.finished
 }
 
+/// Whether a prompt started now could be unblocked again, rather than parking a thread inside
+/// the caller's conversation with no way back out.
+fn prompt_is_retirable() -> bool {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .is_ok()
+}
+
 fn retire_prompt(state: &SharedAuthState, prompt_thread: thread::JoinHandle<()>) {
-    let retired = match unblock_terminal() {
+    match unblock_terminal() {
         PromptUnblock::Injected => {
             wait_for_prompt_finish(state);
-            true
         }
         PromptUnblock::SignalOnly => {
-            signal_prompt_until_finished(state, prompt_thread.as_pthread_t(), PROMPT_RETIRE_TIMEOUT)
+            signal_prompt_until_finished(
+                state,
+                prompt_thread.as_pthread_t(),
+                PROMPT_RETIRE_TIMEOUT,
+            );
         }
-        PromptUnblock::NoTerminal => prompt_is_finished(state),
-    };
-
-    if retired {
-        let _ = prompt_thread.join();
+        PromptUnblock::NoTerminal => {}
     }
+
+    // Always join. Abandoning the thread would leave it inside the caller's conversation
+    // holding a handle that `pam_end` is about to free.
+    let _ = prompt_thread.join();
 }
 
 unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
@@ -125,6 +133,23 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     unsafe { say(pamh, LOOK_OR_PASSWORD_PROMPT) };
 
     let is_polkit = matches!(service, Some(ref s) if s == "polkit-1");
+
+    // Without a terminal to unblock, a password prompt started here could never be retired, so
+    // race nothing and let the next module in the stack collect the password.
+    if !require_confirmation && !prompt_is_retirable() {
+        let bio = rt.block_on(authenticate_biometric_with_timeout(
+            &username,
+            service.as_deref(),
+            camera_auth_timeout(&auth, service.as_deref()),
+        ));
+        return match bio {
+            Some(PAM_SUCCESS) => {
+                unsafe { report_face_verified(pamh) };
+                PAM_SUCCESS
+            }
+            _ => PAM_AUTHINFO_UNAVAIL,
+        };
+    }
 
     let state = new_auth_state();
 
@@ -232,14 +257,6 @@ mod tests {
         let (tx, rx) = mpsc::channel::<()>();
         let handle = thread::spawn(move || while rx.recv().is_ok() {});
         (handle, tx)
-    }
-
-    #[test]
-    fn prompt_is_finished_reads_the_shared_state() {
-        let state = new_auth_state();
-        assert!(!prompt_is_finished(&state));
-        mark_finished(&state);
-        assert!(prompt_is_finished(&state));
     }
 
     #[test]

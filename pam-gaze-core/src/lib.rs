@@ -562,8 +562,12 @@ fn auth_outcome(
     match result {
         gaze_core::dbus::VerifyResult::VerifyMatch => AuthOutcome::Match,
         gaze_core::dbus::VerifyResult::VerifyNoMatch => match last_status {
+            // `Unused` means the attempt was abandoned before it could decide, so it is not a
+            // rejection and must not be reported as one.
             Some(
-                gaze_core::dbus::CaptureStatus::TooDark | gaze_core::dbus::CaptureStatus::NoFace,
+                gaze_core::dbus::CaptureStatus::TooDark
+                | gaze_core::dbus::CaptureStatus::NoFace
+                | gaze_core::dbus::CaptureStatus::Unused,
             ) => AuthOutcome::Unavailable,
             Some(status) if status.is_framing_hint() => AuthOutcome::Unavailable,
             _ => AuthOutcome::NoMatch,
@@ -1347,6 +1351,18 @@ mod tests {
         assert_eq!(
             auth_outcome(VerifyResult::VerifyMatch, Some(CaptureStatus::TooDark)),
             AuthOutcome::Match
+        );
+    }
+
+    #[test]
+    fn a_cancelled_attempt_is_unavailable_rather_than_a_rejection() {
+        use gaze_core::dbus::{CaptureStatus, VerifyResult};
+
+        // A preempted claim reports an idle camera; treating that as a rejection would count
+        // an attempt the user never made toward lockout.
+        assert_eq!(
+            auth_outcome(VerifyResult::VerifyNoMatch, Some(CaptureStatus::Unused)),
+            AuthOutcome::Unavailable
         );
     }
 
