@@ -77,9 +77,8 @@ async fn verify_within(
     })
     .await;
 
-    // Running out of budget drops the attempt mid-flight, and its release guard
-    // can only spawn the release onto a runtime this call is about to drop, so it
-    // would never be sent. Give the daemon its camera back explicitly instead.
+    // Running out of budget drops the attempt mid-flight, and its release guard would spawn
+    // onto a runtime this call is about to drop. Give the daemon its camera back explicitly.
     if !matches!(verdict, Verdict::Reached(AuthOutcome::Match, _)) {
         let _ = proxy.release().await;
     }

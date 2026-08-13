@@ -34,17 +34,32 @@ async fn authenticate_biometric_with_timeout(
 
 extern "C" fn interrupt_noop_handler(_sig: c_int) {}
 
-/// The handler does nothing; what matters is `sa_flags = 0`, which withholds SA_RESTART so the
-/// prompt thread's blocking read fails with EINTR instead of being resumed by the kernel.
-fn ensure_interrupt_handler() {
-    static INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    INSTALLED.get_or_init(|| unsafe {
-        let mut action: libc::sigaction = std::mem::zeroed();
-        action.sa_sigaction = interrupt_noop_handler as *const () as usize;
-        libc::sigemptyset(&mut action.sa_mask);
-        action.sa_flags = 0;
-        libc::sigaction(libc::SIGUSR1, &action, std::ptr::null_mut());
-    });
+/// Borrows SIGUSR1 while a prompt is being interrupted, and gives the host process it runs
+/// inside its own back. `sa_flags = 0` withholds SA_RESTART, so the blocked read sees EINTR.
+struct InterruptHandler {
+    previous: libc::sigaction,
+}
+
+impl InterruptHandler {
+    fn install() -> Self {
+        unsafe {
+            let mut action: libc::sigaction = std::mem::zeroed();
+            action.sa_sigaction = interrupt_noop_handler as *const () as usize;
+            libc::sigemptyset(&mut action.sa_mask);
+            action.sa_flags = 0;
+            let mut previous: libc::sigaction = std::mem::zeroed();
+            libc::sigaction(libc::SIGUSR1, &action, &mut previous);
+            Self { previous }
+        }
+    }
+}
+
+impl Drop for InterruptHandler {
+    fn drop(&mut self) {
+        unsafe {
+            libc::sigaction(libc::SIGUSR1, &self.previous, std::ptr::null_mut());
+        }
+    }
 }
 
 enum PromptUnblock {
@@ -53,12 +68,13 @@ enum PromptUnblock {
     NoTerminal,
 }
 
+/// The caller must hold an [`InterruptHandler`] until the thread is joined: at SIGUSR1's
+/// default disposition, a signal still in flight would kill the host process.
 fn signal_prompt_until_finished(
     state: &SharedAuthState,
     tid: libc::pthread_t,
     deadline: Duration,
 ) -> bool {
-    ensure_interrupt_handler();
     let start = std::time::Instant::now();
 
     let (lock, condvar) = &**state;
@@ -68,6 +84,21 @@ fn signal_prompt_until_finished(
             libc::pthread_kill(tid, libc::SIGUSR1);
         }
         condvar.wait_for(&mut shared_state, PROMPT_SIGNAL_INTERVAL);
+    }
+    shared_state.finished
+}
+
+/// Bounded, because an injected newline only helps a conversation that reads the terminal. A
+/// graphical agent reads its own socket and would never see it.
+fn wait_for_prompt_finish_within(state: &SharedAuthState, deadline: Duration) -> bool {
+    let start = std::time::Instant::now();
+    let (lock, condvar) = &**state;
+    let mut shared_state = lock.lock();
+    while !shared_state.finished {
+        let Some(left) = deadline.checked_sub(start.elapsed()) else {
+            break;
+        };
+        condvar.wait_for(&mut shared_state, left);
     }
     shared_state.finished
 }
@@ -82,23 +113,37 @@ fn prompt_is_retirable() -> bool {
         .is_ok()
 }
 
+fn prompt_is_finished(state: &SharedAuthState) -> bool {
+    let (lock, _) = &**state;
+    lock.lock().finished
+}
+
 fn retire_prompt(state: &SharedAuthState, prompt_thread: thread::JoinHandle<()>) {
-    match unblock_terminal() {
-        PromptUnblock::Injected => {
-            wait_for_prompt_finish(state);
-        }
-        PromptUnblock::SignalOnly => {
-            signal_prompt_until_finished(
-                state,
-                prompt_thread.as_pthread_t(),
-                PROMPT_RETIRE_TIMEOUT,
-            );
-        }
-        PromptUnblock::NoTerminal => {}
+    let tid = prompt_thread.as_pthread_t();
+    // Held past the join, so no signal outlives the handler.
+    let _interrupts = InterruptHandler::install();
+
+    // Nothing to unblock if the user already answered, and an injected newline would be left
+    // for the confirmation prompt, which takes a bare newline as the confirmation.
+    let mut retired = prompt_is_finished(state);
+
+    if !retired {
+        retired = match unblock_terminal() {
+            PromptUnblock::Injected => wait_for_prompt_finish_within(state, PROMPT_RETIRE_TIMEOUT),
+            // Signalling interrupts the blocking read itself, so it needs no terminal and is the
+            // only lever left when there is none.
+            PromptUnblock::SignalOnly | PromptUnblock::NoTerminal => {
+                signal_prompt_until_finished(state, tid, PROMPT_RETIRE_TIMEOUT)
+            }
+        };
     }
 
-    // Always join. Abandoning the thread would leave it inside the caller's conversation
-    // holding a handle that `pam_end` is about to free.
+    // The thread holds the handle `pam_end` is about to free, so it cannot be abandoned. Keep
+    // interrupting rather than blocking in `join` with nothing left trying to wake it.
+    while !retired {
+        retired = signal_prompt_until_finished(state, tid, PROMPT_RETIRE_TIMEOUT);
+    }
+
     let _ = prompt_thread.join();
 }
 
@@ -134,21 +179,27 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
     let is_polkit = matches!(service, Some(ref s) if s == "polkit-1");
 
-    // Without a terminal to unblock, a password prompt started here could never be retired, so
-    // race nothing and let the next module in the stack collect the password.
-    if !require_confirmation && !prompt_is_retirable() {
+    // Without a terminal a prompt can only be retired by signalling, and graphical conversations
+    // resume their own read on EINTR. Polkit is exempt: it consumes the prompt for confirmation.
+    if !prompt_is_retirable() && !is_polkit {
         let bio = rt.block_on(authenticate_biometric_with_timeout(
             &username,
             service.as_deref(),
             camera_auth_timeout(&auth, service.as_deref()),
         ));
-        return match bio {
-            Some(PAM_SUCCESS) => {
-                unsafe { report_face_verified(pamh) };
+        if bio != Some(PAM_SUCCESS) {
+            return PAM_AUTHINFO_UNAVAIL;
+        }
+        if require_confirmation {
+            // Its own conversation, on this thread, so there is nothing left to unblock.
+            return if unsafe { confirm_authentication(pamh) } {
                 PAM_SUCCESS
-            }
-            _ => PAM_AUTHINFO_UNAVAIL,
-        };
+            } else {
+                PAM_AUTH_ERR
+            };
+        }
+        unsafe { report_face_verified(pamh) };
+        return PAM_SUCCESS;
     }
 
     let state = new_auth_state();
@@ -265,6 +316,7 @@ mod tests {
         mark_finished(&state);
         let (handle, tx) = parked_thread();
 
+        let _interrupts = InterruptHandler::install();
         let start = Instant::now();
         let retired =
             signal_prompt_until_finished(&state, handle.as_pthread_t(), Duration::from_secs(5));
@@ -286,6 +338,7 @@ mod tests {
         let (handle, tx) = parked_thread();
         let deadline = Duration::from_millis(250);
 
+        let _interrupts = InterruptHandler::install();
         let start = Instant::now();
         let retired = signal_prompt_until_finished(&state, handle.as_pthread_t(), deadline);
         let waited = start.elapsed();
@@ -302,6 +355,97 @@ mod tests {
 
         drop(tx);
         let _ = handle.join();
+    }
+
+    #[test]
+    fn the_hosts_signal_disposition_is_given_back() {
+        // This runs inside sudo, login, or a display manager. Leaving SIGUSR1 pointed at our
+        // no-op handler would silently disarm whatever the host uses it for.
+        extern "C" fn host_handler(_sig: c_int) {}
+
+        let mut host: libc::sigaction = unsafe { std::mem::zeroed() };
+        host.sa_sigaction = host_handler as *const () as usize;
+        let mut original: libc::sigaction = unsafe { std::mem::zeroed() };
+        unsafe { libc::sigaction(libc::SIGUSR1, &host, &mut original) };
+
+        {
+            let _interrupts = InterruptHandler::install();
+            let mut during: libc::sigaction = unsafe { std::mem::zeroed() };
+            unsafe { libc::sigaction(libc::SIGUSR1, std::ptr::null(), &mut during) };
+            assert_eq!(
+                during.sa_sigaction, interrupt_noop_handler as *const () as usize,
+                "the interrupting handler must be in place while signalling"
+            );
+        }
+
+        let mut after: libc::sigaction = unsafe { std::mem::zeroed() };
+        unsafe { libc::sigaction(libc::SIGUSR1, std::ptr::null(), &mut after) };
+        assert_eq!(
+            after.sa_sigaction, host.sa_sigaction,
+            "the host's handler must be back"
+        );
+
+        unsafe { libc::sigaction(libc::SIGUSR1, &original, std::ptr::null_mut()) };
+    }
+
+    #[test]
+    fn an_answered_prompt_is_retired_without_touching_the_terminal() {
+        let state = new_auth_state();
+        mark_finished(&state);
+        let (handle, tx) = parked_thread();
+
+        assert!(prompt_is_finished(&state));
+        drop(tx);
+        retire_prompt(&state, handle);
+    }
+
+    #[test]
+    fn waiting_for_an_injected_newline_gives_up_at_the_deadline() {
+        // A conversation that never reads the terminal keeps `finished` false. The wait has to
+        // return anyway, or `retire_prompt` would park here instead of signalling.
+        let state = new_auth_state();
+        let deadline = Duration::from_millis(250);
+
+        let start = Instant::now();
+        let finished = wait_for_prompt_finish_within(&state, deadline);
+        let waited = start.elapsed();
+
+        assert!(!finished);
+        assert!(waited >= deadline, "returned too early: {waited:?}");
+        assert!(
+            waited < Duration::from_secs(2),
+            "did not honour the deadline: {waited:?}"
+        );
+
+        mark_finished(&state);
+        let start = Instant::now();
+        assert!(wait_for_prompt_finish_within(&state, deadline));
+        assert!(
+            start.elapsed() < Duration::from_millis(100),
+            "a finished prompt should not be waited on"
+        );
+    }
+
+    #[test]
+    fn a_prompt_that_finishes_late_is_still_retired() {
+        // The unblock attempt times out, then the conversation returns. `retire_prompt` must
+        // notice and join rather than keep signalling.
+        let state = new_auth_state();
+        let (handle, tx) = parked_thread();
+
+        let waker = {
+            let state = state.clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(300));
+                mark_finished(&state);
+            })
+        };
+
+        // Let the thread itself exit; `retire_prompt` still has to notice `finished` before it
+        // stops signalling, which is what this exercises.
+        drop(tx);
+        retire_prompt(&state, handle);
+        let _ = waker.join();
     }
 }
 

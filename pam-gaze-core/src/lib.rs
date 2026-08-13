@@ -354,6 +354,7 @@ pub fn give_up_message(status: Option<gaze_core::dbus::CaptureStatus>) -> &'stat
     match status {
         Some(gaze_core::dbus::CaptureStatus::TooDark) => FACE_TOO_DARK,
         Some(gaze_core::dbus::CaptureStatus::NoFace) | None => FACE_NOT_DETECTED,
+        Some(gaze_core::dbus::CaptureStatus::Unused) => FACE_UNAVAILABLE,
         _ => FACE_NOT_RECOGNIZED,
     }
 }
@@ -555,6 +556,19 @@ pub enum AuthOutcome {
     Unavailable,
 }
 
+/// The verdict's own view of the capture, derived the way the daemon derives `FaceStatus`.
+/// That signal can be stale, missing on runs that never looked, or reached second by `select!`.
+fn decisive_status(
+    rgb_status: gaze_core::dbus::CaptureStatus,
+    ir_status: gaze_core::dbus::CaptureStatus,
+) -> Option<gaze_core::dbus::CaptureStatus> {
+    Some(if rgb_status.priority() >= ir_status.priority() {
+        rgb_status
+    } else {
+        ir_status
+    })
+}
+
 fn auth_outcome(
     result: gaze_core::dbus::VerifyResult,
     last_status: Option<gaze_core::dbus::CaptureStatus>,
@@ -645,6 +659,7 @@ pub async fn authenticate_biometric_with_status_on(
         tokio::select! {
             Some(signal) = verify_stream.next() => {
                 if let Ok(args) = signal.args() {
+                    last_status = decisive_status(*args.rgb_status(), *args.ir_status());
                     break auth_outcome(*args.result(), last_status);
                 }
             }
@@ -697,17 +712,15 @@ pub fn service_defers_to_face_service(service: Option<&str>) -> bool {
     }
 }
 
-/// The two noninteractive slots KScreenLocker starts up front, either of which
-/// can hold Gaze. `kde-smartcard` is used when a fingerprint reader already owns
-/// `kde-fingerprint`, so the two race instead of queueing.
+/// The two noninteractive slots KScreenLocker starts up front, either of which can hold Gaze.
+/// `kde-smartcard` is used when a fingerprint reader already owns `kde-fingerprint`.
 pub const KDE_FACE_PAM_SERVICE: &str = "kde-fingerprint";
 pub const KDE_FACE_PAM_FILE: &str = "/etc/pam.d/kde-fingerprint";
 pub const KDE_SMARTCARD_PAM_SERVICE: &str = "kde-smartcard";
 pub const KDE_SMARTCARD_PAM_FILE: &str = "/etc/pam.d/kde-smartcard";
 
-/// Plasma Login Manager's biometric helper, which runs alongside the password
-/// field instead of after it. Only distros carrying plasma-login-manager!185
-/// ship the service, so Gaze is wired into it only where it already exists.
+/// Plasma Login Manager's biometric helper, which runs alongside the password field instead
+/// of after it. Gaze is wired into it only on distros that ship the service.
 pub const PLASMALOGIN_FACE_PAM_SERVICE: &str = "plasmalogin-fingerprint";
 pub const PLASMALOGIN_FACE_PAM_FILE: &str = "/etc/pam.d/plasmalogin-fingerprint";
 
@@ -752,11 +765,8 @@ fn pam_service_contents(path: &str) -> Option<String> {
     std::fs::read_to_string(path).ok()
 }
 
-/// Which up-front slots a service must stand down for, so one unlock claims the
-/// camera once. Plasma runs several PAM services for a single unlock and the
-/// password-side ones reach Gaze through the shared stack it installs into, so
-/// without this a lock screen or greeter would scan two or three times over and
-/// the clients would fight for one camera.
+/// Which up-front slots a service must stand down for, so one unlock claims the camera once.
+/// Plasma runs several PAM services per unlock, and the password-side ones also reach Gaze.
 fn face_slots_outranking(service: Option<&str>) -> &'static [&'static str] {
     match service {
         Some(KDE_INTERACTIVE_SERVICE) => &[KDE_FACE_PAM_FILE, KDE_SMARTCARD_PAM_FILE],
@@ -886,9 +896,8 @@ pub fn graphical_confirm_decision(
             GraphicalConfirm::FailClosed
         };
     }
-    // Not Bypass: the slots that genuinely cannot answer a prompt are handled by
-    // `service_cannot_be_prompted` before this is reached, so bypassing here would
-    // only weaken surfaces that can be confirmed, such as hyprlock.
+    // Not Bypass: slots that genuinely cannot answer a prompt are handled by
+    // `service_cannot_be_prompted` first, so bypassing would only weaken hyprlock and friends.
     match de {
         "GNOME" if extension_active => GraphicalConfirm::GnomeExtension,
         _ => GraphicalConfirm::FailClosed,
@@ -1363,6 +1372,48 @@ mod tests {
         assert_eq!(
             auth_outcome(VerifyResult::VerifyNoMatch, Some(CaptureStatus::Unused)),
             AuthOutcome::Unavailable
+        );
+    }
+
+    #[test]
+    fn the_verdict_decides_what_the_camera_saw() {
+        use gaze_core::dbus::{CaptureStatus, VerifyResult};
+
+        // The higher-priority spectrum wins, matching how the daemon picks the status it
+        // reports, so the two cannot disagree.
+        assert_eq!(
+            decisive_status(CaptureStatus::Unused, CaptureStatus::Usable),
+            Some(CaptureStatus::Usable)
+        );
+        assert_eq!(
+            decisive_status(CaptureStatus::Usable, CaptureStatus::Unused),
+            Some(CaptureStatus::Usable)
+        );
+        assert_eq!(
+            decisive_status(CaptureStatus::NoFace, CaptureStatus::TooDark),
+            Some(CaptureStatus::TooDark)
+        );
+
+        // Every way a run can end without judging a frame. Neither is a rejection, and no
+        // `FaceStatus` is emitted on either path to say so.
+        for (rgb, ir) in [
+            (CaptureStatus::Unused, CaptureStatus::Unused),
+            (CaptureStatus::NoFace, CaptureStatus::NoFace),
+        ] {
+            assert_eq!(
+                auth_outcome(VerifyResult::VerifyNoMatch, decisive_status(rgb, ir)),
+                AuthOutcome::Unavailable,
+                "{rgb:?}/{ir:?} must fall through to the password, not count as a failure"
+            );
+        }
+
+        // A spectrum that did judge a face still produces a rejection that counts.
+        assert_eq!(
+            auth_outcome(
+                VerifyResult::VerifyNoMatch,
+                decisive_status(CaptureStatus::Usable, CaptureStatus::Unused)
+            ),
+            AuthOutcome::NoMatch
         );
     }
 

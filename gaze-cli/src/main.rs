@@ -807,7 +807,8 @@ async fn handle_auth(
                     };
                 }
             }
-            signal = diagnostic_stream.next(), if verbose => {
+            // Collected even without `--verbose`: a failure explains itself with the last one.
+            signal = diagnostic_stream.next() => {
                 let Some(signal) = signal else { break };
                 if let Ok(args) = signal.args() {
                     diagnostics.push(args.message().to_string());
@@ -821,13 +822,13 @@ async fn handle_auth(
 
     drop(terminal);
 
-    if verbose {
-        while let Ok(Some(signal)) =
-            tokio::time::timeout(Duration::from_millis(20), diagnostic_stream.next()).await
-        {
-            if let Ok(args) = signal.args() {
-                diagnostics.push(args.message().to_string());
-            }
+    // A diagnostic sent just before the verdict can still be in flight, and it is the one that
+    // says why: the streams are separate, so arrival order is not guaranteed.
+    while let Ok(Some(signal)) =
+        tokio::time::timeout(Duration::from_millis(20), diagnostic_stream.next()).await
+    {
+        if let Ok(args) = signal.args() {
+            diagnostics.push(args.message().to_string());
         }
     }
 
@@ -932,6 +933,11 @@ async fn handle_auth(
             style("✗").red().bold(),
             start.elapsed().as_millis()
         ))?;
+        // "Authentication failed" on its own reads as a face that was not recognised, even when
+        // the camera never opened. Verbose mode has already printed the whole list.
+        if !verbose && let Some(reason) = diagnostics.last() {
+            term.write_line(&format!("  {}", style(reason).yellow()))?;
+        }
     }
 
     let _ = proxy.release().await;

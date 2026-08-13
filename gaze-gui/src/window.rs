@@ -643,7 +643,13 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 let proxy_cell = proxy_cell.clone();
                 Box::pin(async move {
                     let proxy = shared_proxy(&proxy_cell).await?;
-                    apply_config_to_daemon(&proxy, &cfg).await
+                    let result = apply_config_to_daemon(&proxy, &cfg).await;
+                    if result.is_err() {
+                        // The connection is cached for the life of the dialog, so a daemon that
+                        // restarted would fail every later write too, silently losing each edit.
+                        *proxy_cell.borrow_mut() = None;
+                    }
+                    result
                 }) as ConfigWriteFuture
             }
         }),
@@ -676,7 +682,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 banner.set_button_label(Some("Unlock…"));
             } else if !loaded {
                 banner.set_title("Could not read the current configuration from the Gaze daemon");
-                banner.set_button_label(None);
+                banner.set_button_label(Some("Try again"));
             }
 
             banner.set_revealed(!authorized || !loaded);
@@ -1000,7 +1006,9 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     });
 
     {
-        let cfg = config.borrow();
+        // Cloned, not borrowed across the call: populating a row emits its change signal, and
+        // that handler takes `config` mutably.
+        let cfg = config.borrow().clone();
         populate_config_rows(
             &cfg,
             &rows,
@@ -1023,12 +1031,114 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         }
     ));
 
+    // Retryable, because a daemon that was not answering when the dialog opened may well answer
+    // now. Without this the rows stay desensitized for the life of the dialog.
+    let load_in_flight = Rc::new(Cell::new(false));
+    let load_config: Rc<dyn Fn()> = Rc::new(glib::clone!(
+        #[strong]
+        load_in_flight,
+        #[strong]
+        rows,
+        #[strong]
+        cameras,
+        #[strong]
+        ir_options,
+        #[strong]
+        config,
+        #[strong]
+        is_loading,
+        #[strong]
+        config_loaded,
+        #[strong]
+        update_locked_state,
+        #[strong]
+        proxy_cell,
+        #[strong]
+        overlay,
+        move || {
+            // A second load repopulating live rows fires every change handler, which writes the
+            // reloaded values back over whatever the user typed in between.
+            if load_in_flight.get() {
+                return;
+            }
+            load_in_flight.set(true);
+            is_loading.set(true);
+            glib::MainContext::default().spawn_local(glib::clone!(
+                #[strong]
+                load_in_flight,
+                #[strong]
+                rows,
+                #[strong]
+                cameras,
+                #[strong]
+                ir_options,
+                #[strong]
+                config,
+                #[strong]
+                is_loading,
+                #[strong]
+                config_loaded,
+                #[strong]
+                update_locked_state,
+                #[strong]
+                proxy_cell,
+                #[strong]
+                overlay,
+                async move {
+                    let load_result = async {
+                        let proxy = shared_proxy(&proxy_cell).await?;
+                        load_config_from_daemon(&proxy).await
+                    }
+                    .await;
+
+                    match load_result {
+                        Ok(cfg) => {
+                            populate_config_rows(
+                                &cfg,
+                                &rows,
+                                CameraChoices {
+                                    cameras: &cameras,
+                                    ir_options: &ir_options,
+                                },
+                            );
+
+                            *config.borrow_mut() = cfg;
+                            is_loading.set(false);
+                            config_loaded.set(true);
+                        }
+                        Err(e) => {
+                            // The next read may use a connection this one just lost.
+                            *proxy_cell.borrow_mut() = None;
+                            overlay.add_toast(libadwaita::Toast::new(&format!(
+                                "Failed to load configuration: {}",
+                                e
+                            )));
+                        }
+                    }
+
+                    load_in_flight.set(false);
+                    update_locked_state();
+                }
+            ));
+        }
+    ));
+
     banner.connect_button_clicked(glib::clone!(
         #[strong]
         is_authorized,
         #[strong]
+        config_loaded,
+        #[strong]
+        load_config,
+        #[strong]
         update_locked_state,
         move |_| {
+            // Already unlocked, so the button is offering the other thing the banner can be
+            // about: a configuration that could not be read.
+            if is_authorized.get() && !config_loaded.get() {
+                load_config();
+                return;
+            }
             glib::MainContext::default().spawn_local(glib::clone!(
                 #[strong]
                 is_authorized,
@@ -1124,58 +1234,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         }
     ));
 
-    glib::MainContext::default().spawn_local(glib::clone!(
-        #[strong]
-        rows,
-        #[strong]
-        cameras,
-        #[strong]
-        ir_options,
-        #[strong]
-        config,
-        #[strong]
-        is_loading,
-        #[strong]
-        config_loaded,
-        #[strong]
-        update_locked_state,
-        #[strong]
-        proxy_cell,
-        #[strong]
-        overlay,
-        async move {
-            let load_result = async {
-                let proxy = shared_proxy(&proxy_cell).await?;
-                load_config_from_daemon(&proxy).await
-            }
-            .await;
-
-            match load_result {
-                Ok(cfg) => {
-                    populate_config_rows(
-                        &cfg,
-                        &rows,
-                        CameraChoices {
-                            cameras: &cameras,
-                            ir_options: &ir_options,
-                        },
-                    );
-
-                    *config.borrow_mut() = cfg;
-                    is_loading.set(false);
-                    config_loaded.set(true);
-                }
-                Err(e) => {
-                    overlay.add_toast(libadwaita::Toast::new(&format!(
-                        "Failed to load configuration: {}",
-                        e
-                    )));
-                }
-            }
-
-            update_locked_state();
-        }
-    ));
+    load_config();
 
     window.present();
 }
