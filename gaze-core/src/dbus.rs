@@ -283,7 +283,12 @@ pub async fn get_active_session() -> anyhow::Result<ActiveSession> {
     active_session_on(&connection).await
 }
 
-pub async fn active_session_on(connection: &zbus::Connection) -> anyhow::Result<ActiveSession> {
+/// `Ok(None)` means logind answered and the seat has no active session, as at a console login
+/// prompt. `Err` means the lookup itself failed, which callers must not confuse for an idle
+/// seat: a bystander's session may well be active and simply unreadable.
+pub async fn active_session_lookup_on(
+    connection: &zbus::Connection,
+) -> anyhow::Result<Option<ActiveSession>> {
     let proxy = zbus::Proxy::new(
         connection,
         "org.freedesktop.login1",
@@ -294,6 +299,10 @@ pub async fn active_session_on(connection: &zbus::Connection) -> anyhow::Result<
     let active_session: (String, zbus::zvariant::ObjectPath) =
         proxy.get_property("ActiveSession").await?;
     let path = active_session.1.to_string();
+    // logind reports an empty id on the root path when the active VT holds no session.
+    if active_session.0.is_empty() || path == "/" {
+        return Ok(None);
+    }
 
     let session_proxy = zbus::Proxy::new(
         connection,
@@ -305,11 +314,17 @@ pub async fn active_session_on(connection: &zbus::Connection) -> anyhow::Result<
     let user: (u32, zbus::zvariant::ObjectPath) = session_proxy.get_property("User").await?;
     let class: String = session_proxy.get_property("Class").await?;
 
-    Ok(ActiveSession {
+    Ok(Some(ActiveSession {
         uid: user.0,
         class,
         path,
-    })
+    }))
+}
+
+pub async fn active_session_on(connection: &zbus::Connection) -> anyhow::Result<ActiveSession> {
+    active_session_lookup_on(connection)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("seat0 has no active session"))
 }
 
 #[proxy(

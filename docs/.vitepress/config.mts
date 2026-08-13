@@ -81,6 +81,7 @@ export default defineVersionedConfig({
               { text: "KDE Plasma", link: "/guide/kde" },
               { text: "Hyprland (hyprlock)", link: "/guide/hyprland" },
               { text: "LightDM", link: "/guide/lightdm" },
+              { text: "Console login (TTY)", link: "/guide/console" },
             ],
           },
           { text: "GUI Guide", link: "/guide/gui" },

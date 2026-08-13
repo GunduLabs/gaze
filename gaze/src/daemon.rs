@@ -635,13 +635,15 @@ impl AuthDaemon {
     }
 
     // Bind capture to the target's own session; a bystander's camera must never authenticate
-    // another user. `active` is (uid, is_greeter, has_pipewire) for the active seat.
+    // another user. `active` is (uid, is_greeter, has_pipewire) for the active seat, and
+    // `seat_idle` says logind confirmed the seat holds no active session at all.
     fn resolve_camera_uid(
         caller_uid: u32,
         target_uid: u32,
         target_has_pipewire: bool,
         caller_has_pipewire: bool,
         active: Option<(u32, bool, bool)>,
+        seat_idle: bool,
     ) -> Option<CameraBinding> {
         if caller_uid == 0
             && let Some((active_uid, true, has_pipewire)) = active
@@ -660,16 +662,31 @@ impl AuthDaemon {
         if caller_uid != 0 {
             return caller_has_pipewire.then_some(CameraBinding::Session(caller_uid));
         }
+        // A console login prompt runs before any session exists, so nothing owns the seat's
+        // camera and nobody's ACL can be stolen. Only an idle seat that logind actually
+        // reported qualifies; a failed lookup leaves `seat_idle` false and still refuses.
+        if seat_idle {
+            return Some(CameraBinding::SeatDevice);
+        }
         None
     }
 
     async fn camera_runtime_uid(caller_uid: u32, target_uid: u32) -> Option<CameraBinding> {
-        let active = match match system_bus().await {
-            Ok(conn) => gaze_core::dbus::active_session_uid_and_class_on(&conn).await,
+        let lookup = match system_bus().await {
+            Ok(conn) => gaze_core::dbus::active_session_lookup_on(&conn).await,
             Err(e) => Err(anyhow::anyhow!(e)),
-        } {
-            Ok((uid, class)) => Some((uid, class == "greeter", Self::has_pipewire_runtime(uid))),
-            Err(_) => None,
+        };
+        let (active, seat_idle) = match lookup {
+            Ok(Some(session)) => (
+                Some((
+                    session.uid,
+                    session.class == "greeter",
+                    Self::has_pipewire_runtime(session.uid),
+                )),
+                false,
+            ),
+            Ok(None) => (None, true),
+            Err(_) => (None, false),
         };
         Self::resolve_camera_uid(
             caller_uid,
@@ -677,6 +694,7 @@ impl AuthDaemon {
             Self::has_pipewire_runtime(target_uid),
             Self::has_pipewire_runtime(caller_uid),
             active,
+            seat_idle,
         )
     }
 
@@ -1223,7 +1241,7 @@ mod tests {
         // su victim while victim is logged in -> victim's own camera, not the attacker's.
         let attacker_active = Some((1000, false, true));
         assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, true, false, attacker_active),
+            AuthDaemon::resolve_camera_uid(0, 1001, true, false, attacker_active, false),
             Some(CameraBinding::Session(1001))
         );
     }
@@ -1233,12 +1251,39 @@ mod tests {
         // su victim while victim has no session; the active seat is a regular user (attacker).
         let attacker_active = Some((1000, false, true));
         assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, false, false, attacker_active),
+            AuthDaemon::resolve_camera_uid(0, 1001, false, false, attacker_active, false),
             None
         );
-        // No active session info at all -> also refuse.
+        // A failed logind lookup leaves the seat state unknown, so still refuse.
         assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, false, false, None),
+            AuthDaemon::resolve_camera_uid(0, 1001, false, false, None, false),
+            None
+        );
+    }
+
+    #[test]
+    fn camera_uses_the_seat_device_at_a_console_login_prompt() {
+        // `login` on a free VT: no session exists yet, so nothing owns the seat camera.
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(0, 1001, false, false, None, true),
+            Some(CameraBinding::SeatDevice)
+        );
+    }
+
+    #[test]
+    fn camera_prefers_a_real_session_over_the_seat_device() {
+        // An idle seat must not override a target who does have a live PipeWire session.
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(0, 1001, true, false, None, true),
+            Some(CameraBinding::Session(1001))
+        );
+    }
+
+    #[test]
+    fn camera_denies_the_seat_device_to_unprivileged_callers() {
+        // An idle seat is not a licence for a non-root caller to reach the device.
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(1000, 1001, false, false, None, true),
             None
         );
     }
@@ -1310,7 +1355,7 @@ mod tests {
         // GDM login, where the target has no session yet and the active seat is the greeter.
         let greeter_active = Some((42, true, true));
         assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, false, false, greeter_active),
+            AuthDaemon::resolve_camera_uid(0, 1001, false, false, greeter_active, false),
             Some(CameraBinding::Session(42))
         );
     }
@@ -1318,12 +1363,12 @@ mod tests {
     #[test]
     fn a_pipewireless_greeter_captures_the_seat_device_instead_of_refusing() {
         assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, false, false, Some((42, true, false))),
+            AuthDaemon::resolve_camera_uid(0, 1001, false, false, Some((42, true, false)), false),
             Some(CameraBinding::SeatDevice)
         );
         // A leftover runtime dir for the target loses to the live greeter.
         assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, true, false, Some((42, true, false))),
+            AuthDaemon::resolve_camera_uid(0, 1001, true, false, Some((42, true, false)), false),
             Some(CameraBinding::SeatDevice)
         );
     }
@@ -1333,7 +1378,7 @@ mod tests {
         // GDM login while the target's runtime lingers, so the greeter owns the seat camera.
         let greeter_active = Some((42, true, true));
         assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, true, false, greeter_active),
+            AuthDaemon::resolve_camera_uid(0, 1001, true, false, greeter_active, false),
             Some(CameraBinding::Session(42))
         );
     }
@@ -1342,12 +1387,19 @@ mod tests {
     fn camera_uses_caller_session_for_polkit_approved_caller() {
         // Admin (non-root) acting for another user after a polkit check uses their own camera.
         assert_eq!(
-            AuthDaemon::resolve_camera_uid(1000, 1001, false, true, Some((1000, false, true))),
+            AuthDaemon::resolve_camera_uid(
+                1000,
+                1001,
+                false,
+                true,
+                Some((1000, false, true)),
+                false
+            ),
             Some(CameraBinding::Session(1000))
         );
         // ...but refuse if even the caller has no camera session.
         assert_eq!(
-            AuthDaemon::resolve_camera_uid(1000, 1001, false, false, None),
+            AuthDaemon::resolve_camera_uid(1000, 1001, false, false, None, false),
             None
         );
     }
@@ -1356,11 +1408,25 @@ mod tests {
     fn only_a_privileged_caller_at_a_greeter_reaches_the_seat_device() {
         // Must never let an unprivileged caller borrow a device for someone else.
         assert_eq!(
-            AuthDaemon::resolve_camera_uid(1000, 1001, false, false, Some((42, true, false))),
+            AuthDaemon::resolve_camera_uid(
+                1000,
+                1001,
+                false,
+                false,
+                Some((42, true, false)),
+                false
+            ),
             None
         );
         assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, false, false, Some((1000, false, false))),
+            AuthDaemon::resolve_camera_uid(
+                0,
+                1001,
+                false,
+                false,
+                Some((1000, false, false)),
+                false
+            ),
             None
         );
     }
