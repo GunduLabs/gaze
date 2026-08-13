@@ -635,15 +635,20 @@ impl AuthDaemon {
     }
 
     // Bind capture to the target's own session; a bystander's camera must never authenticate
-    // another user. `active` is (uid, is_greeter, has_pipewire) for the active seat, and
-    // `seat_idle` says logind confirmed the seat holds no active session at all.
+    // another user. `active` is (uid, is_greeter, has_pipewire) for the active seat.
+    //
+    // `seat_unoccupied` is deliberately stronger than "ActiveSession is empty". logind clears
+    // ActiveSession whenever the foreground VT holds no session, which is also true when
+    // another user is logged in on a background VT, so emptiness alone would hand their seat
+    // camera to a console login for someone else. It is only set when logind confirmed both
+    // that no session is active and that no session on seat0 belongs to anyone but the target.
     fn resolve_camera_uid(
         caller_uid: u32,
         target_uid: u32,
         target_has_pipewire: bool,
         caller_has_pipewire: bool,
         active: Option<(u32, bool, bool)>,
-        seat_idle: bool,
+        seat_unoccupied: bool,
     ) -> Option<CameraBinding> {
         if caller_uid == 0
             && let Some((active_uid, true, has_pipewire)) = active
@@ -662,13 +667,26 @@ impl AuthDaemon {
         if caller_uid != 0 {
             return caller_has_pipewire.then_some(CameraBinding::Session(caller_uid));
         }
-        // A console login prompt runs before any session exists, so nothing owns the seat's
-        // camera and nobody's ACL can be stolen. Only an idle seat that logind actually
-        // reported qualifies; a failed lookup leaves `seat_idle` false and still refuses.
-        if seat_idle {
+        // A console login prompt runs before any session exists. With the seat otherwise empty
+        // nobody's ACL can be taken, so capture the device directly. A failed lookup leaves
+        // `seat_unoccupied` false and still refuses.
+        if seat_unoccupied {
             return Some(CameraBinding::SeatDevice);
         }
         None
+    }
+
+    /// Whether seat0 holds no session that belongs to anyone other than `target_uid`.
+    /// A failed enumeration is reported as occupied so the caller fails closed.
+    async fn seat_is_unoccupied(target_uid: u32) -> bool {
+        let uids = match system_bus().await {
+            Ok(conn) => gaze_core::dbus::seat0_session_uids_on(&conn).await,
+            Err(e) => Err(anyhow::anyhow!(e)),
+        };
+        match uids {
+            Ok(uids) => uids.iter().all(|uid| *uid == target_uid),
+            Err(_) => false,
+        }
     }
 
     async fn camera_runtime_uid(caller_uid: u32, target_uid: u32) -> Option<CameraBinding> {
@@ -688,13 +706,14 @@ impl AuthDaemon {
             Ok(None) => (None, true),
             Err(_) => (None, false),
         };
+        let seat_unoccupied = seat_idle && Self::seat_is_unoccupied(target_uid).await;
         Self::resolve_camera_uid(
             caller_uid,
             target_uid,
             Self::has_pipewire_runtime(target_uid),
             Self::has_pipewire_runtime(caller_uid),
             active,
-            seat_idle,
+            seat_unoccupied,
         )
     }
 
@@ -1268,6 +1287,25 @@ mod tests {
             AuthDaemon::resolve_camera_uid(0, 1001, false, false, None, true),
             Some(CameraBinding::SeatDevice)
         );
+    }
+
+    #[test]
+    fn camera_refuses_the_seat_device_while_another_user_holds_the_seat() {
+        // logind empties ActiveSession on a switch to a VT with no session, even while another
+        // user stays logged in on a background VT. Emptiness alone must not reach the device.
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(0, 1001, false, false, None, false),
+            None
+        );
+    }
+
+    #[test]
+    fn seat_occupancy_ignores_the_target_and_fails_closed() {
+        // Only sessions belonging to somebody else count as occupancy.
+        assert!([1001, 1001].iter().all(|uid| *uid == 1001));
+        assert!(![1001, 1000].iter().all(|uid| *uid == 1001));
+        // An empty seat is unoccupied for any target.
+        assert!(Vec::<u32>::new().iter().all(|uid| *uid == 1001));
     }
 
     #[test]

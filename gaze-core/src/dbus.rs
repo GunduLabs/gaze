@@ -327,6 +327,29 @@ pub async fn active_session_on(connection: &zbus::Connection) -> anyhow::Result<
         .ok_or_else(|| anyhow::anyhow!("seat0 has no active session"))
 }
 
+/// The uid of every session on seat0, foregrounded or not.
+///
+/// `ActiveSession` only names the session on the currently active VT, and logind clears it
+/// whenever that VT holds no session. So an empty `ActiveSession` does not mean the seat is
+/// unoccupied: another user can be logged in on a background VT the whole time. Callers that
+/// need "is anybody else here" have to enumerate.
+pub async fn seat0_session_uids_on(connection: &zbus::Connection) -> anyhow::Result<Vec<u32>> {
+    let proxy = zbus::Proxy::new(
+        connection,
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1",
+        "org.freedesktop.login1.Manager",
+    )
+    .await?;
+    let sessions: Vec<(String, u32, String, String, zbus::zvariant::OwnedObjectPath)> =
+        proxy.call("ListSessions", &()).await?;
+    Ok(sessions
+        .into_iter()
+        .filter(|(_, _, _, seat, _)| seat == "seat0")
+        .map(|(_, uid, _, _, _)| uid)
+        .collect())
+}
+
 #[proxy(
     interface = "com.gundulabs.Gaze",
     default_service = "com.gundulabs.Gaze",

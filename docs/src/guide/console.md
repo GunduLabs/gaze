@@ -56,21 +56,44 @@ lock you out of every virtual terminal.
 ## Camera at the login prompt
 
 No session exists before you log in, so there is no PipeWire to capture through
-and no ACL granting your user the camera. Gaze notices that the seat has no
-active session and reads its V4L2 device directly, as root.
+and no ACL granting your user the camera. Gaze notices this and captures the
+seat's V4L2 device instead. `gazed` opens the camera, not the PAM module, so the
+confinement that applies to `login` itself is not in the way.
 
-Two consequences:
+Pinning `cameras.rgb` to a `pipewiresrc` pipeline will not work here. Leave it as
+`primary`, which falls back to a V4L2 node when PipeWire cannot be reached, or
+pin it to `usb:VVVV:PPPP` to skip the failed attempt entirely. See
+[Select Camera Source](/guide/configuration#select-camera-source).
 
-- Pinning `cameras.rgb` to a `pipewiresrc` pipeline will not work here. Use
-  `usb:VVVV:PPPP` or leave it as `primary`. See
-  [Select Camera Source](/guide/configuration#select-camera-source).
-- On SELinux systems `login` runs confined and may not be able to open
-  `/dev/video*` without an extra policy module.
+### When Gaze will not use the seat camera
 
-Gaze only takes the seat device when logind reports that the seat has **no**
-active session. If someone is already logged in on the seat, their session owns
-the camera and Gaze will not reach past it, so a console login for a different
-user falls back to a password.
+Gaze takes the seat device only when logind reports that seat0 has no active
+session **and** that no session on that seat belongs to another user.
+
+Both halves matter. logind clears the active session whenever the foreground
+virtual terminal holds no session, which is also true when somebody else is
+logged in on a background terminal. So "no active session" on its own does not
+mean the seat is free, and Gaze does not treat it that way: if another user is
+logged in anywhere on the seat, console face authentication falls back to a
+password.
+
+If logind cannot be reached at all, Gaze refuses rather than guessing.
+
+Note also that an already-open camera is not closed when a session stops being
+active. A program left running in a background session can keep the device, so
+capture may fail as busy even when the seat looks free.
+
+## Time limits
+
+`login` allows 60 seconds for the whole attempt by default (`LOGIN_TIMEOUT` in
+`/etc/login.defs`) and up to three tries (`LOGIN_RETRIES`). Each face attempt can
+use up to 12 seconds, and some distros add a delay after a failure, so repeated
+face failures can use the budget before you have typed anything. If that happens,
+`login` exits and the terminal returns to a fresh prompt.
+
+Lower [`auth.start_delay_ms`](/guide/configuration) to nothing on this surface,
+and if you routinely fall back to a password, consider leaving Gaze off the
+console stack and using it for `sudo` and the lock screen instead.
 
 ## Keyring
 
