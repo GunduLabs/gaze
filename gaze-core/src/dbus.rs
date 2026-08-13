@@ -343,11 +343,41 @@ pub async fn seat0_session_uids_on(connection: &zbus::Connection) -> anyhow::Res
     .await?;
     let sessions: Vec<(String, u32, String, String, zbus::zvariant::OwnedObjectPath)> =
         proxy.call("ListSessions", &()).await?;
-    Ok(sessions
-        .into_iter()
-        .filter(|(_, _, _, seat, _)| seat == "seat0")
-        .map(|(_, uid, _, _, _)| uid)
-        .collect())
+
+    let mut uids = Vec::new();
+    for (_, uid, _, seat, path) in sessions {
+        if seat != "seat0" {
+            continue;
+        }
+        // A session logind is still tearing down holds nothing, so counting it would keep the
+        // seat looking busy for a while after the user logged out.
+        if session_is_closing(connection, &path).await {
+            continue;
+        }
+        uids.push(uid);
+    }
+    Ok(uids)
+}
+
+/// Treats an unreadable session as live, so a failed lookup keeps the seat looking occupied.
+async fn session_is_closing(
+    connection: &zbus::Connection,
+    path: &zbus::zvariant::OwnedObjectPath,
+) -> bool {
+    let Ok(proxy) = zbus::Proxy::new(
+        connection,
+        "org.freedesktop.login1",
+        path.clone(),
+        "org.freedesktop.login1.Session",
+    )
+    .await
+    else {
+        return false;
+    };
+    matches!(
+        proxy.get_property::<String>("State").await.as_deref(),
+        Ok("closing")
+    )
 }
 
 #[proxy(

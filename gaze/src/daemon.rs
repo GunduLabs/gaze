@@ -3889,7 +3889,9 @@ impl AuthDaemon {
                     _ = &mut rx => {
                         info!("VerifyStart: cancelled");
                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                        // Report the camera as idle, not as a rejection: a cancelled attempt
+                        // never decided anything, and a rejection counts toward lockout.
+                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
                         break;
                     }
                     _ = tokio::time::sleep(VERIFY_WATCHDOG_POLL) => {

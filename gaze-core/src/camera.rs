@@ -332,8 +332,33 @@ fn current_pipewire_uid() -> Option<u32> {
 
 /// Attach `fd=` to a `pipewiresrc` element so it connects to `session` instead of resolving a
 /// socket from the environment. Anything else is passed through untouched.
+/// V4L2 lets several processes open a camera and only rejects the second one that tries to
+/// stream, so a device held elsewhere fails during negotiation rather than at open.
+fn device_is_busy(detail: &str) -> bool {
+    let detail = detail.to_ascii_lowercase();
+    detail.contains("busy") || detail.contains("ebusy")
+}
+
+/// The state-change error says only that an element failed; the reason is on the bus.
+fn bus_error_detail(pipeline: &gstreamer::Pipeline) -> Option<String> {
+    let bus = pipeline.bus()?;
+    while let Some(msg) = bus.pop() {
+        if let gstreamer::MessageView::Error(err) = msg.view() {
+            let debug = err.debug().unwrap_or_default();
+            return Some(format!("{}: {debug}", err.error()));
+        }
+    }
+    None
+}
+
 fn bind_pipewire_fd(element: &str, fd: RawFd) -> String {
-    if element == "pipewiresrc" || element.starts_with("pipewiresrc ") {
+    let is_pipewire = element == "pipewiresrc" || element.starts_with("pipewiresrc ");
+    // A descriptor the caller spelled out wins; appending a second `fd=` would leave the
+    // element carrying two values for one property.
+    let already_bound = element
+        .split_whitespace()
+        .any(|field| field.starts_with("fd="));
+    if is_pipewire && !already_bound {
         format!("{element} fd={fd}")
     } else {
         element.to_string()
@@ -496,9 +521,19 @@ impl Camera {
         appsink.set_drop(true);
         appsink.set_max_buffers(1);
 
-        pipeline
-            .set_state(gstreamer::State::Playing)
-            .map_err(|e| anyhow::anyhow!("Failed to start pipeline for {camera_source}: {e}"))?;
+        if let Err(e) = pipeline.set_state(gstreamer::State::Playing) {
+            let detail = bus_error_detail(&pipeline);
+            let _ = pipeline.set_state(gstreamer::State::Null);
+            if let Some(detail) = detail {
+                if device_is_busy(&detail) {
+                    anyhow::bail!(
+                        "The camera is already in use by another program ({camera_source}): {detail}"
+                    );
+                }
+                anyhow::bail!("Failed to start pipeline for {camera_source}: {e} ({detail})");
+            }
+            anyhow::bail!("Failed to start pipeline for {camera_source}: {e}");
+        }
 
         Ok(Self {
             pipeline,
@@ -839,6 +874,20 @@ mod tests {
             bind_pipewire_fd("pipewiresrc target-object=cam1", 7),
             "pipewiresrc target-object=cam1 fd=7"
         );
+    }
+
+    #[test]
+    fn a_caller_supplied_descriptor_is_not_doubled() {
+        assert_eq!(bind_pipewire_fd("pipewiresrc fd=5", 7), "pipewiresrc fd=5");
+    }
+
+    #[test]
+    fn a_held_device_is_named_as_busy() {
+        assert!(device_is_busy(
+            "Could not open device: Device or resource busy"
+        ));
+        assert!(device_is_busy("v4l2 returned EBUSY"));
+        assert!(!device_is_busy("No such file or directory"));
     }
 
     #[test]
