@@ -19,14 +19,17 @@ use libadwaita::prelude::*;
 
 use enumflags2::BitFlag;
 use futures::StreamExt;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::OnceLock;
+use std::time::Duration;
 use zbus::Connection;
 use zbus_polkit::policykit1::{AuthorityProxy, CheckAuthorizationFlags, Subject};
 
 type RefreshCb = Rc<dyn Fn()>;
+
+const CONFIG_APPLY_DEBOUNCE: Duration = Duration::from_millis(400);
 
 fn load_auth_highlight_css() {
     static AUTH_HIGHLIGHT_CSS: OnceLock<()> = OnceLock::new();
@@ -114,6 +117,97 @@ fn set_inference_device_row_visible(
     device_row.set_visible(provider == "openvino");
 }
 
+type SharedProxy = Rc<RefCell<Option<Rc<GazeProxy<'static>>>>>;
+
+async fn shared_proxy(cell: &SharedProxy) -> zbus::Result<Rc<GazeProxy<'static>>> {
+    if let Some(proxy) = cell.borrow().clone() {
+        return Ok(proxy);
+    }
+    let proxy = Rc::new(connect_gaze().await?);
+    *cell.borrow_mut() = Some(proxy.clone());
+    Ok(proxy)
+}
+
+type ConfigWriteFuture = futures::future::LocalBoxFuture<'static, anyhow::Result<()>>;
+type ConfigWriter = Rc<dyn Fn(Config) -> ConfigWriteFuture>;
+type ConfigWriteErrorSink = Rc<dyn Fn(String)>;
+
+struct ConfigApplyQueue {
+    write: ConfigWriter,
+    report_error: ConfigWriteErrorSink,
+    pending: Option<Config>,
+    in_flight: bool,
+    debounce: Option<glib::SourceId>,
+}
+
+type ApplyQueue = Rc<RefCell<ConfigApplyQueue>>;
+
+fn new_apply_queue(write: ConfigWriter, report_error: ConfigWriteErrorSink) -> ApplyQueue {
+    Rc::new(RefCell::new(ConfigApplyQueue {
+        write,
+        report_error,
+        pending: None,
+        in_flight: false,
+        debounce: None,
+    }))
+}
+
+fn drain_config_apply_queue(queue: &ApplyQueue) {
+    {
+        let mut q = queue.borrow_mut();
+        if q.in_flight || q.pending.is_none() {
+            return;
+        }
+        q.in_flight = true;
+    }
+
+    glib::MainContext::default().spawn_local(glib::clone!(
+        #[strong]
+        queue,
+        async move {
+            loop {
+                let next = queue.borrow_mut().pending.take();
+                let Some(cfg) = next else {
+                    break;
+                };
+
+                let write = queue.borrow().write.clone();
+                if let Err(e) = write(cfg).await {
+                    let report_error = queue.borrow().report_error.clone();
+                    report_error(format!("Failed to apply config: {}", e));
+                }
+            }
+            queue.borrow_mut().in_flight = false;
+        }
+    ));
+}
+
+fn schedule_config_apply(queue: &ApplyQueue, cfg: Config) {
+    let mut q = queue.borrow_mut();
+    q.pending = Some(cfg);
+    if let Some(id) = q.debounce.take() {
+        id.remove();
+    }
+    q.debounce = Some(glib::timeout_add_local_once(
+        CONFIG_APPLY_DEBOUNCE,
+        glib::clone!(
+            #[strong]
+            queue,
+            move || {
+                queue.borrow_mut().debounce = None;
+                drain_config_apply_queue(&queue);
+            }
+        ),
+    ));
+}
+
+fn flush_config_apply(queue: &ApplyQueue) {
+    if let Some(id) = queue.borrow_mut().debounce.take() {
+        id.remove();
+    }
+    drain_config_apply_queue(queue);
+}
+
 /// Holds the rows the config dialog populates. GTK widgets are reference counted, so this owns
 /// handles rather than borrows and the async reload can share it without relisting all 25 rows.
 struct ConfigRows {
@@ -142,6 +236,29 @@ struct ConfigRows {
     start_delay: libadwaita::SpinRow,
     start_delay_scope: libadwaita::ComboRow,
     encrypt_templates: gtk4::Switch,
+}
+
+fn commit_focused_spin_row(window: &libadwaita::Window, rows: &ConfigRows) {
+    let Some(focus) = gtk4::prelude::GtkWindowExt::focus(window) else {
+        return;
+    };
+
+    for row in [
+        &rows.rgb_threshold,
+        &rows.ir_threshold,
+        &rows.dark_luma_threshold,
+        &rows.templates,
+        &rows.min_face_size_ratio,
+        &rows.liveness_threshold,
+        &rows.liveness_max_frames,
+        &rows.resume_grace,
+        &rows.start_delay,
+    ] {
+        if focus.is_ancestor(row) {
+            row.update();
+            return;
+        }
+    }
 }
 
 struct CameraChoices<'a> {
@@ -514,10 +631,58 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         }
     ));
 
-    let is_loading = Rc::new(std::cell::Cell::new(true));
-    let inference_touched = Rc::new(std::cell::Cell::new(false));
-    let camera_touched = Rc::new(std::cell::Cell::new(false));
-    let ir_touched = Rc::new(std::cell::Cell::new(false));
+    let is_loading = Rc::new(Cell::new(true));
+    let inference_touched = Rc::new(Cell::new(false));
+    let camera_touched = Rc::new(Cell::new(false));
+    let ir_touched = Rc::new(Cell::new(false));
+    let proxy_cell: SharedProxy = Rc::new(RefCell::new(None));
+    let apply_queue = new_apply_queue(
+        Rc::new({
+            let proxy_cell = proxy_cell.clone();
+            move |cfg: Config| {
+                let proxy_cell = proxy_cell.clone();
+                Box::pin(async move {
+                    let proxy = shared_proxy(&proxy_cell).await?;
+                    apply_config_to_daemon(&proxy, &cfg).await
+                }) as ConfigWriteFuture
+            }
+        }),
+        Rc::new({
+            let overlay = overlay.clone();
+            move |message: String| {
+                overlay.add_toast(libadwaita::Toast::new(&message));
+            }
+        }),
+    );
+
+    let is_authorized = Rc::new(Cell::new(false));
+    let config_loaded = Rc::new(Cell::new(false));
+
+    let update_locked_state = glib::clone!(
+        #[weak]
+        banner,
+        #[weak]
+        scrolled,
+        #[strong]
+        is_authorized,
+        #[strong]
+        config_loaded,
+        move || {
+            let authorized = is_authorized.get();
+            let loaded = config_loaded.get();
+
+            if !authorized {
+                banner.set_title("Settings are locked");
+                banner.set_button_label(Some("Unlock…"));
+            } else if !loaded {
+                banner.set_title("Could not read the current configuration from the Gaze daemon");
+                banner.set_button_label(None);
+            }
+
+            banner.set_revealed(!authorized || !loaded);
+            scrolled.set_sensitive(authorized && loaded);
+        }
+    );
 
     level_row.connect_selected_notify(glib::clone!(
         #[weak]
@@ -553,8 +718,6 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     let apply_changes = glib::clone!(
         #[strong]
         inference_touched,
-        #[weak]
-        overlay,
         #[weak]
         inference_execution_provider_row,
         #[weak]
@@ -617,6 +780,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         camera_touched,
         #[strong]
         ir_touched,
+        #[strong]
+        apply_queue,
         move || {
             if is_loading.get() {
                 return;
@@ -686,26 +851,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             let cfg_to_apply = cfg.clone();
             drop(cfg);
 
-            glib::MainContext::default().spawn_local(glib::clone!(
-                #[weak]
-                overlay,
-                #[strong]
-                cfg_to_apply,
-                async move {
-                    let result = async {
-                        let proxy = connect_gaze().await?;
-                        apply_config_to_daemon(&proxy, &cfg_to_apply).await
-                    }
-                    .await;
-
-                    if let Err(e) = result {
-                        overlay.add_toast(libadwaita::Toast::new(&format!(
-                            "Failed to apply config: {}",
-                            e
-                        )));
-                    }
-                }
-            ));
+            schedule_config_apply(&apply_queue, cfg_to_apply);
         }
     );
 
@@ -864,19 +1010,30 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             },
         );
     }
-    is_loading.set(false);
+
+    window.connect_close_request(glib::clone!(
+        #[strong]
+        rows,
+        #[strong]
+        apply_queue,
+        move |win| {
+            commit_focused_spin_row(win, &rows);
+            flush_config_apply(&apply_queue);
+            glib::Propagation::Proceed
+        }
+    ));
 
     banner.connect_button_clicked(glib::clone!(
-        #[weak]
-        banner,
-        #[weak]
-        scrolled,
+        #[strong]
+        is_authorized,
+        #[strong]
+        update_locked_state,
         move |_| {
             glib::MainContext::default().spawn_local(glib::clone!(
-                #[weak]
-                banner,
-                #[weak]
-                scrolled,
+                #[strong]
+                is_authorized,
+                #[strong]
+                update_locked_state,
                 async move {
                     let conn = match Connection::system().await {
                         Ok(conn) => conn,
@@ -911,8 +1068,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                         .await
                     {
                         Ok(res) => {
-                            banner.set_revealed(!res.is_authorized);
-                            scrolled.set_sensitive(res.is_authorized);
+                            is_authorized.set(res.is_authorized);
+                            update_locked_state();
                         }
                         Err(e) => eprintln!("gaze-gui: polkit CheckAuthorization failed: {e}"),
                     }
@@ -922,10 +1079,10 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     ));
 
     glib::MainContext::default().spawn_local(glib::clone!(
-        #[weak]
-        banner,
-        #[weak]
-        scrolled,
+        #[strong]
+        is_authorized,
+        #[strong]
+        update_locked_state,
         async move {
             let Ok(conn) = Connection::system().await else {
                 return;
@@ -949,19 +1106,9 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 .map(|res| res.is_authorized)
             };
 
-            let update_ui = glib::clone!(
-                #[weak]
-                banner,
-                #[weak]
-                scrolled,
-                move |allowed: bool| {
-                    banner.set_revealed(!allowed);
-                    scrolled.set_sensitive(allowed);
-                }
-            );
-
             if let Some(allowed) = check_auth(authority.clone()).await {
-                update_ui(allowed);
+                is_authorized.set(allowed);
+                update_locked_state();
             }
 
             let Ok(mut changed_stream) = authority.receive_changed().await else {
@@ -970,7 +1117,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
             while changed_stream.next().await.is_some() {
                 if let Some(allowed) = check_auth(authority.clone()).await {
-                    update_ui(allowed);
+                    is_authorized.set(allowed);
+                    update_locked_state();
                 }
             }
         }
@@ -987,27 +1135,45 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         config,
         #[strong]
         is_loading,
+        #[strong]
+        config_loaded,
+        #[strong]
+        update_locked_state,
+        #[strong]
+        proxy_cell,
+        #[strong]
+        overlay,
         async move {
             let load_result = async {
-                let proxy = connect_gaze().await?;
+                let proxy = shared_proxy(&proxy_cell).await?;
                 load_config_from_daemon(&proxy).await
             }
             .await;
 
-            if let Ok(cfg) = load_result {
-                is_loading.set(true);
-                populate_config_rows(
-                    &cfg,
-                    &rows,
-                    CameraChoices {
-                        cameras: &cameras,
-                        ir_options: &ir_options,
-                    },
-                );
+            match load_result {
+                Ok(cfg) => {
+                    populate_config_rows(
+                        &cfg,
+                        &rows,
+                        CameraChoices {
+                            cameras: &cameras,
+                            ir_options: &ir_options,
+                        },
+                    );
 
-                *config.borrow_mut() = cfg;
-                is_loading.set(false);
+                    *config.borrow_mut() = cfg;
+                    is_loading.set(false);
+                    config_loaded.set(true);
+                }
+                Err(e) => {
+                    overlay.add_toast(libadwaita::Toast::new(&format!(
+                        "Failed to load configuration: {}",
+                        e
+                    )));
+                }
             }
+
+            update_locked_state();
         }
     ));
 
@@ -1659,4 +1825,149 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
         }
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[derive(Default)]
+    struct WriteLog {
+        applied: Vec<u64>,
+        in_flight: usize,
+        max_in_flight: usize,
+    }
+
+    fn config_with_grace(resume_grace_ms: u64) -> Config {
+        let mut cfg = Config::default();
+        cfg.auth.resume_grace_ms = resume_grace_ms;
+        cfg
+    }
+
+    fn pump_until(condition: impl Fn() -> bool, timeout: Duration) -> bool {
+        let context = glib::MainContext::default();
+        let start = Instant::now();
+        while start.elapsed() < timeout {
+            if condition() {
+                return true;
+            }
+            context.iteration(false);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        condition()
+    }
+
+    fn pump_for(duration: Duration) {
+        pump_until(|| false, duration);
+    }
+
+    fn write_duration_for(resume_grace_ms: u64) -> Duration {
+        Duration::from_millis(300u64.saturating_sub(resume_grace_ms / 4))
+    }
+
+    type RecordedQueue = (ApplyQueue, Rc<RefCell<WriteLog>>, Rc<RefCell<Vec<String>>>);
+
+    fn recording_queue(fail: bool) -> RecordedQueue {
+        let log = Rc::new(RefCell::new(WriteLog::default()));
+        let errors = Rc::new(RefCell::new(Vec::new()));
+
+        let queue = new_apply_queue(
+            Rc::new({
+                let log = log.clone();
+                move |cfg: Config| {
+                    let log = log.clone();
+                    Box::pin(async move {
+                        {
+                            let mut log = log.borrow_mut();
+                            log.in_flight += 1;
+                            log.max_in_flight = log.max_in_flight.max(log.in_flight);
+                        }
+                        glib::timeout_future(write_duration_for(cfg.auth.resume_grace_ms)).await;
+                        {
+                            let mut log = log.borrow_mut();
+                            log.in_flight -= 1;
+                            log.applied.push(cfg.auth.resume_grace_ms);
+                        }
+                        if fail {
+                            anyhow::bail!("daemon rejected the config");
+                        }
+                        Ok(())
+                    }) as ConfigWriteFuture
+                }
+            }),
+            Rc::new({
+                let errors = errors.clone();
+                move |message: String| errors.borrow_mut().push(message)
+            }),
+        );
+
+        (queue, log, errors)
+    }
+
+    #[test]
+    fn config_applies_are_debounced_and_serialized() {
+        let (queue, log, errors) = recording_queue(false);
+
+        for value in [100, 200, 300, 400, 500] {
+            schedule_config_apply(&queue, config_with_grace(value));
+        }
+
+        assert!(
+            pump_until(|| log.borrow().applied.len() == 1, Duration::from_secs(5)),
+            "a burst of edits should produce exactly one write"
+        );
+        assert_eq!(
+            log.borrow().applied,
+            vec![500],
+            "the write should carry the final value, not an intermediate one"
+        );
+
+        pump_for(Duration::from_millis(600));
+        assert_eq!(log.borrow().applied.len(), 1, "no trailing duplicate write");
+
+        schedule_config_apply(&queue, config_with_grace(600));
+        let flushed_at = Instant::now();
+        flush_config_apply(&queue);
+        assert!(
+            pump_until(|| log.borrow().in_flight == 1, Duration::from_millis(200)),
+            "flush should start the write without waiting out the debounce"
+        );
+        assert!(flushed_at.elapsed() < CONFIG_APPLY_DEBOUNCE);
+
+        schedule_config_apply(&queue, config_with_grace(700));
+        schedule_config_apply(&queue, config_with_grace(800));
+
+        assert!(
+            pump_until(|| log.borrow().applied.len() == 3, Duration::from_secs(5)),
+            "edits made during an in-flight write should be applied afterwards"
+        );
+        assert_eq!(
+            log.borrow().applied,
+            vec![500, 600, 800],
+            "queued edits collapse to the latest value"
+        );
+        assert_eq!(
+            log.borrow().max_in_flight,
+            1,
+            "writes must never overlap, or the daemon can persist them out of order"
+        );
+        assert!(errors.borrow().is_empty());
+
+        let (queue, log, errors) = recording_queue(true);
+        schedule_config_apply(&queue, config_with_grace(900));
+        flush_config_apply(&queue);
+        assert!(
+            pump_until(|| !errors.borrow().is_empty(), Duration::from_secs(5)),
+            "a failed write should be reported"
+        );
+        assert!(errors.borrow()[0].starts_with("Failed to apply config"));
+
+        schedule_config_apply(&queue, config_with_grace(1000));
+        flush_config_apply(&queue);
+        assert!(
+            pump_until(|| log.borrow().applied.len() == 2, Duration::from_secs(5)),
+            "the queue should keep accepting writes after a failure"
+        );
+    }
 }
