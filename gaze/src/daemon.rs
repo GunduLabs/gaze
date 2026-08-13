@@ -132,6 +132,9 @@ async fn release_claim_epoch(
         return false;
     }
     *state = None;
+    // A running pipeline keeps its own reference to the socket, so dropping the daemon's does
+    // not cut capture short; it only stops the next claim from inheriting this one's session.
+    clear_pipewire_session();
     let mut cancel = active_cancel.lock().await;
     if let Some(tx) = cancel.take() {
         let _ = tx.send(());
@@ -713,8 +716,9 @@ impl AuthDaemon {
 mod tests {
     use super::{
         AuthDaemon, CameraBinding, ClaimState, ClaimStateHandle, and_policy_unsatisfiable,
-        auth_streams, claim_has_epoch, eyes_from_kpss, hybrid_auth_passed, is_vanish_of,
-        pipewire_runtime_update, release_claim_epoch, should_yield_rgb_to_ir,
+        auth_streams, bind_pipewire_session_for_uid, claim_has_epoch, clear_pipewire_session,
+        eyes_from_kpss, hybrid_auth_passed, is_vanish_of, release_claim_epoch,
+        should_yield_rgb_to_ir,
     };
     use gaze_core::config::AuthSurface;
     use gaze_core::dbus::{ActiveSession, CaptureStatus};
@@ -796,16 +800,10 @@ mod tests {
     }
 
     #[test]
-    fn pipewire_runtime_update_only_changes_on_a_new_uid() {
-        assert_eq!(pipewire_runtime_update(Some("/run/user/1000"), 1000), None);
-        assert_eq!(
-            pipewire_runtime_update(Some("/run/user/1000"), 1001),
-            Some("/run/user/1001".to_string())
-        );
-        assert_eq!(
-            pipewire_runtime_update(None, 1000),
-            Some("/run/user/1000".to_string())
-        );
+    fn binding_a_missing_pipewire_session_leaves_capture_on_v4l2() {
+        // Greeters without a user manager have no socket; that must not fail the claim.
+        bind_pipewire_session_for_uid(u32::MAX);
+        clear_pipewire_session();
     }
 
     #[test]
@@ -1601,34 +1599,14 @@ fn gdm_override_error(action: &str, path: &std::path::Path, err: std::io::Error)
     fdo::Error::Failed(format!("Failed to {action} {}: {err}", path.display()))
 }
 
-static PIPEWIRE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn pipewire_runtime_update(current: Option<&str>, uid: u32) -> Option<String> {
-    let target = format!("/run/user/{uid}");
-    match current {
-        Some(existing) if existing == target => None,
-        _ => Some(target),
-    }
+/// Point capture at `uid`'s PipeWire session for the life of the claim. Each pipeline opens its
+/// own socket, so nothing is connected here and a missing socket is handled at open time.
+pub fn bind_pipewire_session_for_uid(uid: u32) {
+    gaze_core::camera::set_pipewire_uid(Some(uid));
 }
 
-pub fn set_pipewire_runtime_for_uid(uid: u32) {
-    let _guard = PIPEWIRE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let current = std::env::var("XDG_RUNTIME_DIR").ok();
-    if let Some(target) = pipewire_runtime_update(current.as_deref(), uid) {
-        unsafe {
-            std::env::set_var("XDG_RUNTIME_DIR", target);
-        }
-    }
-}
-
-/// A stale `XDG_RUNTIME_DIR` makes `pipewiresrc` block on a dead socket (#300).
-pub fn clear_pipewire_runtime() {
-    let _guard = PIPEWIRE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    if std::env::var_os("XDG_RUNTIME_DIR").is_some() {
-        unsafe {
-            std::env::remove_var("XDG_RUNTIME_DIR");
-        }
-    }
+pub fn clear_pipewire_session() {
+    gaze_core::camera::set_pipewire_uid(None);
 }
 
 async fn prepare_for_sleep_stream(conn: &zbus::Connection) -> zbus::Result<zbus::MessageStream> {
@@ -2207,8 +2185,8 @@ impl AuthDaemon {
             "Claimed daemon"
         );
         match binding {
-            CameraBinding::Session(camera_uid) => set_pipewire_runtime_for_uid(camera_uid),
-            CameraBinding::SeatDevice => clear_pipewire_runtime(),
+            CameraBinding::Session(camera_uid) => bind_pipewire_session_for_uid(camera_uid),
+            CameraBinding::SeatDevice => clear_pipewire_session(),
         }
         let epoch = CLAIM_EPOCH.fetch_add(1, Ordering::Relaxed);
         *state = Some(ClaimState {
@@ -2302,6 +2280,7 @@ impl AuthDaemon {
 
             self.cancel_active_tasks().await;
             *state = None;
+            clear_pipewire_session();
             info!(sender = %sender, "Released daemon");
             Ok(())
         } else {

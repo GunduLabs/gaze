@@ -79,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Initializing Gaze Daemon...");
 
     if let Ok(uid) = daemon::get_active_session_uid().await {
-        daemon::set_pipewire_runtime_for_uid(uid);
+        daemon::bind_pipewire_session_for_uid(uid);
     }
 
     let t_load = std::time::Instant::now();
