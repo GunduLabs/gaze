@@ -4,6 +4,9 @@
 use gstreamer::prelude::*;
 use opencv::core::Mat;
 use opencv::prelude::*;
+use std::os::fd::{AsRawFd, RawFd};
+use std::os::unix::net::UnixStream;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{info, warn};
 
@@ -291,9 +294,59 @@ enum FramePoll {
     Ended,
 }
 
+/// An open connection to one user's PipeWire socket, handed to `pipewiresrc` as `fd=`.
+///
+/// A system daemon cannot reach a user's PipeWire session by pointing `XDG_RUNTIME_DIR` at it:
+/// writing the process environment races every `getenv` in the process, and `pipewiresrc`
+/// caches its `pw_core` process-wide keyed on the `fd` property, whose default `-1` is shared
+/// by every element. Two overlapping pipelines would then quietly share one connection, and the
+/// second user's capture would come from the first user's session. Connecting here and passing
+/// the descriptor gives each claim its own core and touches no global state.
+pub struct PipeWireSession(UnixStream);
+
+impl PipeWireSession {
+    pub fn connect_for_uid(uid: u32) -> std::io::Result<Self> {
+        UnixStream::connect(format!("/run/user/{uid}/pipewire-0")).map(Self)
+    }
+
+    fn raw_fd(&self) -> RawFd {
+        self.0.as_raw_fd()
+    }
+}
+
+/// The uid whose PipeWire session capture should attach to, or `None` to let `pipewiresrc`
+/// resolve a socket from the environment as it does inside a user's own session.
+///
+/// Only the uid is shared. Each pipeline opens its own socket at open time, so two captures
+/// never collide on one cached `pw_core`, and no connection is held open between them.
+static PIPEWIRE_UID: Mutex<Option<u32>> = Mutex::new(None);
+
+pub fn set_pipewire_uid(uid: Option<u32>) {
+    let mut slot = PIPEWIRE_UID.lock().unwrap_or_else(|e| e.into_inner());
+    *slot = uid;
+}
+
+fn current_pipewire_uid() -> Option<u32> {
+    *PIPEWIRE_UID.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Attach `fd=` to a `pipewiresrc` element so it connects to `session` instead of resolving a
+/// socket from the environment. Anything else is passed through untouched.
+fn bind_pipewire_fd(element: &str, fd: RawFd) -> String {
+    if element == "pipewiresrc" || element.starts_with("pipewiresrc ") {
+        format!("{element} fd={fd}")
+    } else {
+        element.to_string()
+    }
+}
+
 pub struct Camera {
     pipeline: gstreamer::Pipeline,
     appsink: gstreamer_app::AppSink,
+    /// Keeps the socket open for as long as the pipeline can use it. GStreamer caches its
+    /// `pw_core` keyed on the raw fd number, so recycling the number early could hand a later
+    /// capture this pipeline's cached core.
+    _pipewire: Option<PipeWireSession>,
 }
 
 impl Drop for Camera {
@@ -370,9 +423,29 @@ impl Camera {
             }
         };
 
-        match Self::open_source_element(&src_element, camera_source, force_ir_yuy2) {
+        // A claim binds capture to one user's PipeWire session; without one, `pipewiresrc`
+        // resolves the socket from the environment as it does inside a user's own session.
+        let is_pipewire = src_element == "pipewiresrc" || src_element.starts_with("pipewiresrc ");
+        let session = match (is_pipewire, current_pipewire_uid()) {
+            (true, Some(uid)) => match PipeWireSession::connect_for_uid(uid) {
+                Ok(session) => Some(session),
+                Err(err) => {
+                    // Greeters without a user manager have no socket. Carry on unbound so the
+                    // V4L2 fallback below still gets its turn.
+                    warn!("No PipeWire socket for uid {uid} ({err}); capture will use V4L2");
+                    None
+                }
+            },
+            _ => None,
+        };
+        let bound = match &session {
+            Some(session) => bind_pipewire_fd(&src_element, session.raw_fd()),
+            None => src_element.clone(),
+        };
+
+        match Self::open_source_element(&bound, camera_source, force_ir_yuy2, session) {
             Ok(camera) => Ok(camera),
-            Err(err) if src_element == "pipewiresrc" => {
+            Err(err) if is_pipewire => {
                 warn!("Opening the PipeWire camera failed ({err:#}); trying a direct V4L2 device");
                 let node = first_v4l2_node(want_color).ok_or_else(|| {
                     anyhow::anyhow!(
@@ -385,6 +458,7 @@ impl Camera {
                     &format!("v4l2src device={node}"),
                     camera_source,
                     force_ir_yuy2,
+                    None,
                 )
             }
             Err(err) => Err(err),
@@ -395,6 +469,7 @@ impl Camera {
         src_element: &str,
         camera_source: &str,
         force_ir_yuy2: bool,
+        pipewire: Option<PipeWireSession>,
     ) -> anyhow::Result<Self> {
         let pipeline_str = camera_pipeline(src_element, force_ir_yuy2);
         info!("Attempting to open GStreamer camera: {}", pipeline_str);
@@ -425,7 +500,11 @@ impl Camera {
             .set_state(gstreamer::State::Playing)
             .map_err(|e| anyhow::anyhow!("Failed to start pipeline for {camera_source}: {e}"))?;
 
-        Ok(Self { pipeline, appsink })
+        Ok(Self {
+            pipeline,
+            appsink,
+            _pipewire: pipewire,
+        })
     }
 
     fn sample_to_mat(&self, sample: &gstreamer::Sample) -> anyhow::Result<Mat> {
@@ -752,6 +831,33 @@ fn is_mono_format(format: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pipewire_elements_take_the_bound_descriptor() {
+        assert_eq!(bind_pipewire_fd("pipewiresrc", 7), "pipewiresrc fd=7");
+        assert_eq!(
+            bind_pipewire_fd("pipewiresrc target-object=cam1", 7),
+            "pipewiresrc target-object=cam1 fd=7"
+        );
+    }
+
+    #[test]
+    fn non_pipewire_elements_are_left_alone() {
+        // A V4L2 node has no PipeWire connection to inherit, and `fd=` means something else
+        // entirely on other elements.
+        assert_eq!(
+            bind_pipewire_fd("v4l2src device=/dev/video0", 7),
+            "v4l2src device=/dev/video0"
+        );
+        assert_eq!(bind_pipewire_fd("videotestsrc", 7), "videotestsrc");
+        // Guard against matching an element that merely starts with the same letters.
+        assert_eq!(bind_pipewire_fd("pipewiresrcfoo", 7), "pipewiresrcfoo");
+    }
+
+    #[test]
+    fn a_missing_socket_is_reported_rather_than_bound() {
+        assert!(PipeWireSession::connect_for_uid(u32::MAX).is_err());
+    }
 
     fn entry(display_name: &str, target: &str, node: Option<&str>) -> CameraEntry {
         CameraEntry {
