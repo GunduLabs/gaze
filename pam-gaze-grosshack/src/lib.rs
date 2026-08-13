@@ -168,6 +168,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
             if !require_confirmation {
                 retire_prompt(&state, prompt_thread);
+                unsafe { report_face_verified(pamh) };
                 return PAM_SUCCESS;
             }
 

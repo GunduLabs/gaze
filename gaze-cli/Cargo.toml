@@ -29,7 +29,7 @@ clap_complete = { version = "4.6.9", features = ["unstable-dynamic"] }
 console = "0.16.4"
 crossterm = "0.29"
 dialoguer = "0.12"
-futures = "0.3.33"
+futures = "0.3.34"
 gaze-core = { path = "../gaze-core", default-features = false }
 libc = "0.2.189"
 ratatui = "0.30.2"
