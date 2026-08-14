@@ -301,7 +301,16 @@ fn unblock_terminal() -> PromptUnblock {
 mod tests {
     use super::*;
     use std::sync::mpsc;
+    use std::sync::{Mutex, MutexGuard};
     use std::time::Instant;
+
+    static PROCESS_WIDE_SIGNAL_DISPOSITION: Mutex<()> = Mutex::new(());
+
+    fn exclusive_signals() -> MutexGuard<'static, ()> {
+        PROCESS_WIDE_SIGNAL_DISPOSITION
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     fn mark_finished(state: &SharedAuthState) {
         let (lock, condvar) = &**state;
@@ -317,6 +326,7 @@ mod tests {
 
     #[test]
     fn a_finished_prompt_is_retired_without_signalling() {
+        let _signals = exclusive_signals();
         let state = new_auth_state();
         mark_finished(&state);
         let (handle, tx) = parked_thread();
@@ -339,6 +349,7 @@ mod tests {
 
     #[test]
     fn an_unanswerable_prompt_is_abandoned_at_the_deadline() {
+        let _signals = exclusive_signals();
         let state = new_auth_state();
         let (handle, tx) = parked_thread();
         let deadline = Duration::from_millis(250);
@@ -368,6 +379,7 @@ mod tests {
         // no-op handler would silently disarm whatever the host uses it for.
         extern "C" fn host_handler(_sig: c_int) {}
 
+        let _signals = exclusive_signals();
         let mut host: libc::sigaction = unsafe { std::mem::zeroed() };
         host.sa_sigaction = host_handler as *const () as usize;
         let mut original: libc::sigaction = unsafe { std::mem::zeroed() };
@@ -396,6 +408,7 @@ mod tests {
 
     #[test]
     fn an_answered_prompt_is_retired_without_touching_the_terminal() {
+        let _signals = exclusive_signals();
         let state = new_auth_state();
         mark_finished(&state);
         let (handle, tx) = parked_thread();
@@ -436,6 +449,7 @@ mod tests {
     fn a_prompt_that_finishes_late_is_still_retired() {
         // The unblock attempt times out, then the conversation returns. `retire_prompt` must
         // notice and join rather than keep signalling.
+        let _signals = exclusive_signals();
         let state = new_auth_state();
         let (handle, tx) = parked_thread();
 
