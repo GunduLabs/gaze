@@ -117,7 +117,9 @@ pub fn resolve_node(source: &str) -> Option<String> {
         }
     }
 
-    None
+    // Without a PipeWire session the target names no device the monitor saw, but udev still
+    // links the node it was named after.
+    node_from_pipewire_target(target, false)
 }
 
 /// A GStreamer source element, or a request to resolve a USB VID:PID to a
@@ -250,17 +252,27 @@ fn resolve_usb_video_node(vid: u16, pid: u16, want_color: bool) -> Option<String
 }
 
 fn first_v4l2_node(want_color: bool) -> Option<String> {
-    gstreamer::init().ok()?;
+    v4l2_nodes_with_color(want_color).into_iter().next()
+}
+
+/// Every V4L2 node with the requested color-ness, lowest-numbered first. Enumeration goes through
+/// the plain V4L2 provider, so it still answers in a greeter that has no PipeWire session.
+fn v4l2_nodes_with_color(want_color: bool) -> Vec<String> {
+    if gstreamer::init().is_err() {
+        return Vec::new();
+    }
     let monitor = gstreamer::DeviceMonitor::new();
     let caps = gstreamer::Caps::builder("video/x-raw").build();
     monitor.add_filter(Some("Video/Source"), Some(&caps));
-    monitor.start().ok()?;
+    if monitor.start().is_err() {
+        return Vec::new();
+    }
     wait_for_device_updates(&monitor);
     let devices = monitor.devices();
     monitor.stop();
 
     let mut seen = std::collections::HashSet::new();
-    devices
+    let mut nodes: Vec<String> = devices
         .iter()
         .filter_map(|device| {
             let node = device_video_node(device)?;
@@ -269,7 +281,9 @@ fn first_v4l2_node(want_color: bool) -> Option<String> {
             }
             (has_color_caps(device) == want_color).then_some(node)
         })
-        .min_by_key(|node| video_node_index(node).unwrap_or(u32::MAX))
+        .collect();
+    nodes.sort_by_key(|node| video_node_index(node).unwrap_or(u32::MAX));
+    nodes
 }
 
 fn device_video_node(device: &gstreamer::Device) -> Option<String> {
@@ -356,10 +370,84 @@ fn bus_error_detail(pipeline: &gstreamer::Pipeline) -> Option<String> {
     None
 }
 
-/// Only the bare element, which is what `primary` resolves to, means "any camera you can
-/// reach". A named target means one camera, and substituting another is not a fallback.
-fn may_fall_back_to_v4l2(src_element: &str) -> bool {
-    src_element == "pipewiresrc"
+/// What a failed PipeWire open may retry through. Only the bare element, which is what `primary`
+/// resolves to, means "any camera you can reach". A named target means one camera, so it may only
+/// retry through that same camera's own V4L2 node; substituting another camera is not a fallback.
+#[derive(Debug, PartialEq, Eq)]
+enum V4l2Fallback {
+    AnyDevice,
+    SameNode(String),
+    None,
+}
+
+fn v4l2_fallback_for(src_element: &str) -> V4l2Fallback {
+    if src_element == "pipewiresrc" {
+        return V4l2Fallback::AnyDevice;
+    }
+    let Some(fields) = src_element.strip_prefix("pipewiresrc ") else {
+        return V4l2Fallback::None;
+    };
+    fields
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("target-object="))
+        .map(|target| target.trim_matches(|c| c == '"' || c == '\''))
+        .filter(|target| !target.is_empty())
+        .map_or(V4l2Fallback::None, |target| {
+            V4l2Fallback::SameNode(target.to_string())
+        })
+}
+
+const V4L2_BY_PATH_DIR: &str = "/dev/v4l/by-path";
+
+/// PipeWire names a V4L2 camera `v4l2_input.<udev ID_PATH>` with `:` rewritten as `_`, and udev
+/// links that same path under `/dev/v4l/by-path`, so a pinned target names a node the kernel can
+/// still reach with no PipeWire session to ask.
+fn v4l2_by_path_for_target(target: &str) -> Option<String> {
+    let by_path = target.strip_prefix("v4l2_input.")?;
+    (!by_path.is_empty()).then(|| by_path.replace('_', ":"))
+}
+
+/// The nodes udev links for one `by-path`, lowest `video-index` first.
+fn nodes_for_by_path(by_path: &str) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(V4L2_BY_PATH_DIR) else {
+        return Vec::new();
+    };
+
+    let mut indexed: Vec<(u32, String)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let link = entry.file_name().into_string().ok()?;
+            let index = link
+                .strip_prefix(by_path)?
+                .strip_prefix("-video-index")?
+                .parse()
+                .ok()?;
+            let node = std::fs::canonicalize(entry.path()).ok()?;
+            Some((index, node.to_str()?.to_string()))
+        })
+        .collect();
+    indexed.sort();
+
+    let mut seen = std::collections::HashSet::new();
+    indexed
+        .into_iter()
+        .filter_map(|(_, node)| seen.insert(node.clone()).then_some(node))
+        .collect()
+}
+
+/// The V4L2 node behind a pinned PipeWire target. A device that links several nodes also links
+/// ones that cannot be captured from, such as a metadata node, so the caps decide between them.
+fn node_from_pipewire_target(target: &str, want_color: bool) -> Option<String> {
+    let nodes = nodes_for_by_path(&v4l2_by_path_for_target(target)?);
+    if let [only] = nodes.as_slice() {
+        return Some(only.clone());
+    }
+    let capturable = v4l2_nodes_with_color(want_color);
+    nodes
+        .iter()
+        .find(|node| capturable.contains(node))
+        .or_else(|| nodes.first())
+        .cloned()
 }
 
 /// Attach `fd=` to a `pipewiresrc` element so it connects to the caller's session instead of
@@ -483,11 +571,17 @@ impl Camera {
             None => src_element.clone(),
         };
 
+        let fallback = v4l2_fallback_for(&src_element);
         match Self::open_source_element(&bound, camera_source, force_ir_yuy2, session) {
             Ok(camera) => Ok(camera),
-            Err(err) if may_fall_back_to_v4l2(&src_element) => {
+            Err(err) if fallback != V4l2Fallback::None => {
                 warn!("Opening the PipeWire camera failed ({err:#}); trying a direct V4L2 device");
-                let node = first_v4l2_node(want_color).ok_or_else(|| {
+                let node = match &fallback {
+                    V4l2Fallback::AnyDevice => first_v4l2_node(want_color),
+                    V4l2Fallback::SameNode(target) => node_from_pipewire_target(target, want_color),
+                    V4l2Fallback::None => None,
+                }
+                .ok_or_else(|| {
                     anyhow::anyhow!(
                         "PipeWire camera failed and no V4L2 fallback device was found: {err}"
                     )
@@ -964,11 +1058,49 @@ mod tests {
     }
 
     #[test]
-    fn only_an_untargeted_pipewire_source_falls_back_to_v4l2() {
-        assert!(may_fall_back_to_v4l2("pipewiresrc"));
-        assert!(!may_fall_back_to_v4l2("pipewiresrc target-object=cam1"));
-        assert!(!may_fall_back_to_v4l2("v4l2src device=/dev/video0"));
-        assert!(!may_fall_back_to_v4l2("pipewiresrcfoo"));
+    fn only_an_untargeted_pipewire_source_falls_back_to_any_camera() {
+        assert_eq!(v4l2_fallback_for("pipewiresrc"), V4l2Fallback::AnyDevice);
+        assert_eq!(
+            v4l2_fallback_for("v4l2src device=/dev/video0"),
+            V4l2Fallback::None
+        );
+        assert_eq!(v4l2_fallback_for("pipewiresrcfoo"), V4l2Fallback::None);
+        // A PipeWire source with no target still means "any camera", but it is not the bare
+        // element, so it takes the field-parsing path.
+        assert_eq!(v4l2_fallback_for("pipewiresrc fd=7"), V4l2Fallback::None);
+    }
+
+    #[test]
+    fn a_pinned_target_falls_back_only_to_its_own_node() {
+        assert_eq!(
+            v4l2_fallback_for("pipewiresrc target-object=cam1"),
+            V4l2Fallback::SameNode("cam1".to_string())
+        );
+        // The quoting and the trailing fields belong to the element, not to the target name.
+        assert_eq!(
+            v4l2_fallback_for("pipewiresrc target-object=\"cam1\" fd=7"),
+            V4l2Fallback::SameNode("cam1".to_string())
+        );
+        assert_eq!(
+            v4l2_fallback_for("pipewiresrc target-object=v4l2_input.pci-0000_00_14.0-usb-0_7_1.0"),
+            V4l2Fallback::SameNode("v4l2_input.pci-0000_00_14.0-usb-0_7_1.0".to_string())
+        );
+        assert_eq!(
+            v4l2_fallback_for("pipewiresrc target-object="),
+            V4l2Fallback::None
+        );
+    }
+
+    #[test]
+    fn a_pipewire_target_names_the_udev_path_of_its_node() {
+        assert_eq!(
+            v4l2_by_path_for_target("v4l2_input.pci-0000_00_14.0-usb-0_7_1.0").as_deref(),
+            Some("pci-0000:00:14.0-usb-0:7:1.0")
+        );
+        // Only V4L2 nodes are linked by path; anything else has no node to fall back to.
+        assert_eq!(v4l2_by_path_for_target("alsa_input.pci-0000_00_1f.3"), None);
+        assert_eq!(v4l2_by_path_for_target("51"), None);
+        assert_eq!(v4l2_by_path_for_target("v4l2_input."), None);
     }
 
     #[test]
