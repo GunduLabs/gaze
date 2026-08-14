@@ -21,7 +21,7 @@ crate-type = ["cdylib"]
 pam-gaze-core = { path = "../pam-gaze-core" }
 gaze-core = { path = "../gaze-core", default-features = false }
 tokio = { version = "1.53.1", features = ["full"] }
-futures = "0.3.33"
+futures = "0.3.34"
 
 [dev-dependencies]
 tokio = { version = "1.53.1", features = ["full", "test-util"] }
