@@ -11,7 +11,6 @@ updates:
       cronjob: "0 */6 * * *"
       timezone: "America/New_York"
     open-pull-requests-limit: 10
-    versioning-strategy: "increase"
     labels:
       - "dependencies"
       - "rust"
