@@ -68,7 +68,6 @@ updates:
       prefix: "chore(deps)"
     cooldown:
       default-days: 3
-      semver-major-days: 7
     groups:
       github-actions:
         applies-to: "version-updates"
@@ -91,4 +90,3 @@ updates:
       prefix: "chore(deps)"
     cooldown:
       default-days: 3
-      semver-major-days: 7
