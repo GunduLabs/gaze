@@ -63,11 +63,55 @@ impl CaptureStatus {
         self.priority() >= Self::Clipped.priority()
     }
 
+    /// Stable numeric code for the observer channel (`auth_phase` signal).
+    /// The mapping is part of the D-Bus contract; keep it in sync with the
+    /// helper binaries that consume it.
+    pub fn code(self) -> u8 {
+        match self {
+            Self::Unused => 0,
+            Self::NoFace => 1,
+            Self::TooDark => 2,
+            Self::Clipped => 3,
+            Self::NotCentered => 4,
+            Self::TooFar => 5,
+            Self::TooClose => 6,
+            Self::Ready => 7,
+            Self::Usable => 8,
+        }
+    }
+
     pub fn is_framing_hint(self) -> bool {
         matches!(
             self,
             Self::Clipped | Self::NotCentered | Self::TooFar | Self::TooClose
         )
+    }
+}
+
+/// Machine-readable phase of an in-flight face authentication, broadcast to
+/// registered observers. Observers receive process state only: phase and
+/// camera status codes plus the surface class — never face names or match
+/// scores, which stay claim-owner-only via `verify_status`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum AuthPhase {
+    /// Scanning is in progress (or about to start).
+    Waiting = 0,
+    /// A face matched and the attempt is being resolved.
+    Matched = 1,
+    /// The attempt ended without a match (no face, too dark, liveness gate).
+    NotRecognized = 2,
+    /// The attempt broke off without deciding (error, cancellation, no cameras).
+    Unavailable = 3,
+    /// The claim ended (verdict delivered, cancelled, or superseded). Observers
+    /// use this to retire their UI; the claim owner's `verify_status` carries
+    /// the actual verdict.
+    Idle = 4,
+}
+
+impl AuthPhase {
+    pub fn code(self) -> u8 {
+        self as u8
     }
 }
 
@@ -387,6 +431,14 @@ pub trait Gaze {
     async fn register_extension(&self, active: bool) -> zbus::Result<()>;
     async fn is_extension_active(&self, uid: u32) -> zbus::Result<bool>;
 
+    /// Register the caller as an auth-phase observer. Observers receive the
+    /// scrubbed `auth_phase` signal (phase + camera status codes + surface
+    /// class) but never biometric data; `verify_status` remains
+    /// claim-owner-only. Registration is per-uid, derived from the caller's
+    /// bus credentials, and fan-out supports multiple observers per uid.
+    async fn register_observer(&self) -> zbus::Result<()>;
+    async fn unregister_observer(&self) -> zbus::Result<()>;
+
     async fn verify_start(&self, face_name: &str) -> zbus::Result<()>;
     async fn verify_start_for(&self, face_name: &str, pam_service: &str) -> zbus::Result<()>;
     async fn verify_stop(&self) -> zbus::Result<()>;
@@ -419,6 +471,20 @@ pub trait Gaze {
 
     #[zbus(signal)]
     fn face_status(&self, status: CaptureStatus) -> zbus::Result<()>;
+
+    /// Scrubbed phase broadcast to registered observers. `phase` and the
+    /// status codes use the stable numeric mappings from `AuthPhase` and
+    /// `CaptureStatus::code()`; `surface` is the surface class
+    /// (`screen_lock`, `elevation`, `login`, `direct`), not the raw PAM
+    /// service name.
+    #[zbus(signal)]
+    fn auth_phase(
+        &self,
+        phase: u8,
+        rgb_status: u8,
+        ir_status: u8,
+        surface: &str,
+    ) -> zbus::Result<()>;
 
     #[zbus(signal)]
     fn verify_status(

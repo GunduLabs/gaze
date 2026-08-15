@@ -190,6 +190,7 @@ async fn main() -> anyhow::Result<()> {
         claim_state: claim_state.clone(),
         active_cancel: active_cancel.clone(),
         active_extensions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        observers: Arc::new(Mutex::new(std::collections::HashMap::new())),
         resume_pending: resume_pending.clone(),
         lock_epochs: lock_epochs.clone(),
         benchmark_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -198,6 +199,8 @@ async fn main() -> anyhow::Result<()> {
     };
 
     info!(elapsed = ?t_load.elapsed(), "Models & user DB loaded");
+
+    let observers = daemon.observers.clone();
 
     let conn = Builder::system()?
         .serve_at("/com/gundulabs/Gaze", daemon)?
@@ -214,6 +217,7 @@ async fn main() -> anyhow::Result<()> {
         claim_owners,
         claim_state,
         active_cancel,
+        observers,
     ));
 
     conn.request_name("com.gundulabs.Gaze").await?;

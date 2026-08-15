@@ -20,8 +20,8 @@ use crate::liveness::LivenessDetector;
 use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
 use gaze_core::camera::{Camera, CameraKind, resolve_configured_sources};
-use gaze_core::config::Config;
-use gaze_core::dbus::{CaptureStatus, EnrollPrompt, VerifyResult};
+use gaze_core::config::{AuthSurface, Config};
+use gaze_core::dbus::{AuthPhase, CaptureStatus, EnrollPrompt, VerifyResult};
 use gaze_core::detect::FaceDetector;
 use gaze_core::face::{
     EnrollmentPoseStability, FaceChecker, IrDarkFrameGate, IrFrameKind, Spectrum,
@@ -239,6 +239,9 @@ pub struct AuthDaemon {
     pub claim_state: ClaimStateHandle,
     pub active_cancel: ActiveCancelHandle,
     pub active_extensions: Arc<Mutex<std::collections::HashMap<u32, bool>>>,
+    /// Registered auth-phase observers, keyed by uid. Each value is the list
+    /// of live unique bus names; phase broadcasts fan out to every entry.
+    pub observers: Arc<Mutex<std::collections::HashMap<u32, Vec<zbus::names::OwnedBusName>>>>,
     pub resume_pending: Arc<AtomicBool>,
     pub lock_epochs: LockEpochs,
     pub benchmark_running: Arc<AtomicBool>,
@@ -318,6 +321,39 @@ impl AuthDaemon {
         if last_emitted_status.as_ref() != Some(&effective_status) {
             let _ = Self::face_status(ctxt, effective_status).await;
             *last_emitted_status = Some(effective_status);
+        }
+    }
+
+    /// Fan a scrubbed auth phase out to every registered observer. Observers
+    /// get process state only: phase codes, camera status codes, and the
+    /// surface class — never face names or match scores.
+    async fn broadcast_auth_phase(
+        conn: &zbus::Connection,
+        path: &zbus::zvariant::OwnedObjectPath,
+        observers: &Arc<Mutex<std::collections::HashMap<u32, Vec<zbus::names::OwnedBusName>>>>,
+        phase: AuthPhase,
+        rgb_status: CaptureStatus,
+        ir_status: CaptureStatus,
+        surface: AuthSurface,
+    ) {
+        let observers = observers.lock().await;
+        for names in observers.values() {
+            for name in names {
+                let Ok(ctxt) = SignalEmitter::new(conn, path.clone()) else {
+                    continue;
+                };
+                let Ok(ctxt) = ctxt.set_destination(name.clone().into()) else {
+                    continue;
+                };
+                let _ = Self::auth_phase(
+                    &ctxt,
+                    phase.code(),
+                    rgb_status.code(),
+                    ir_status.code(),
+                    surface.as_str().to_string(),
+                )
+                .await;
+            }
         }
     }
 
@@ -1756,6 +1792,7 @@ pub async fn watch_claim_owner(
     mut stream: fdo::NameOwnerChangedStream,
     claim_state: ClaimStateHandle,
     active_cancel: ActiveCancelHandle,
+    observers: Arc<Mutex<std::collections::HashMap<u32, Vec<zbus::names::OwnedBusName>>>>,
 ) {
     while let Some(signal) = stream.next().await {
         let Ok(args) = signal.args() else {
@@ -1763,6 +1800,18 @@ pub async fn watch_claim_owner(
         };
 
         let name = args.name().as_str();
+
+        // Prune vanished observer connections so a respawned helper does not
+        // accumulate stale unicast destinations.
+        if args.new_owner().is_none() {
+            let vanished = name.to_string();
+            let mut obs = observers.lock().await;
+            for list in obs.values_mut() {
+                list.retain(|n| n.as_str() != vanished);
+            }
+            obs.retain(|_, list| !list.is_empty());
+        }
+
         let epoch = {
             let state = claim_state.lock().await;
             match &*state {
@@ -2235,6 +2284,52 @@ impl AuthDaemon {
         let extensions = self.active_extensions.lock().await;
         let is_active = extensions.get(&uid).copied().unwrap_or(false);
         Ok(is_active)
+    }
+
+    /// Register the caller as an auth-phase observer. The uid is taken from
+    /// the bus connection's credentials, never from arguments, so observers
+    /// cannot impersonate another user. Multiple observers per uid are
+    /// supported; dead unique names are pruned by the NameOwnerChanged
+    /// watcher (`watch_claim_owner`).
+    async fn register_observer(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
+        let caller_uid = Self::caller_uid(&header)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        let sender = header
+            .sender()
+            .map(|s| s.to_owned())
+            .ok_or_else(|| fdo::Error::AccessDenied("Missing DBus sender".into()))?;
+        let mut observers = self.observers.lock().await;
+        let list = observers.entry(caller_uid).or_default();
+        if !list.contains(&sender) {
+            list.push(sender);
+            // Bound the list: observers are short-lived helper processes and
+            // the bus reclaims their unique names on exit, so a hard cap only
+            // guards against a misbehaving client that re-registers forever.
+            if list.len() > 8 {
+                list.drain(..list.len() - 8);
+            }
+        }
+        info!(caller_uid, "Registered auth-phase observer");
+        Ok(())
+    }
+
+    async fn unregister_observer(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
+        let caller_uid = Self::caller_uid(&header)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        let sender = header
+            .sender()
+            .map(|s| s.to_owned())
+            .ok_or_else(|| fdo::Error::AccessDenied("Missing DBus sender".into()))?;
+        let mut observers = self.observers.lock().await;
+        if let Some(list) = observers.get_mut(&caller_uid) {
+            list.retain(|name| name != &sender);
+            if list.is_empty() {
+                observers.remove(&caller_uid);
+            }
+        }
+        Ok(())
     }
 
     async fn claim(
@@ -3374,6 +3469,17 @@ impl AuthDaemon {
     #[zbus(signal)]
     async fn face_status(ctxt: &SignalEmitter<'_>, status: CaptureStatus) -> zbus::Result<()>;
 
+    /// Scrubbed phase broadcast to registered observers. See the proxy-side
+    /// declaration in `gaze_core::dbus` for the payload contract.
+    #[zbus(signal)]
+    async fn auth_phase(
+        ctxt: &SignalEmitter<'_>,
+        phase: u8,
+        rgb_status: u8,
+        ir_status: u8,
+        surface: String,
+    ) -> zbus::Result<()>;
+
     #[zbus(signal)]
     async fn enroll_status(
         ctxt: &SignalEmitter<'_>,
@@ -3448,6 +3554,7 @@ impl AuthDaemon {
         let hybrid_policy = self.hybrid_policy.lock().await.clone();
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
+        let observers = self.observers.clone();
 
         self.rt_handle.spawn(async move {
             let ctxt = match SignalEmitter::new(&conn, path) {
@@ -3457,6 +3564,19 @@ impl AuthDaemon {
                     return;
                 }
             };
+
+            // Observers learn about the attempt as soon as it starts, even
+            // while the start delay is pending.
+            Self::broadcast_auth_phase(
+                &conn,
+                &ctxt.path().to_owned(),
+                &observers,
+                AuthPhase::Waiting,
+                CaptureStatus::Unused,
+                CaptureStatus::Unused,
+                surface,
+            )
+            .await;
 
             let db = db_arc.lock().await;
             let faces_list = db.list_faces(&username).unwrap_or_default();
@@ -3481,6 +3601,16 @@ impl AuthDaemon {
 
             if !run_rgb && !run_ir {
                 error!("No matching templates or cameras configured for auth");
+                Self::broadcast_auth_phase(
+                    &conn,
+                    &ctxt.path().to_owned(),
+                    &observers,
+                    AuthPhase::Unavailable,
+                    CaptureStatus::NoFace,
+                    CaptureStatus::NoFace,
+                    surface,
+                )
+                .await;
                 let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
                 return;
             }
@@ -3496,6 +3626,16 @@ impl AuthDaemon {
                     username,
                     if has_rgb_templates { "IR" } else { "RGB" }
                 );
+                Self::broadcast_auth_phase(
+                    &conn,
+                    &ctxt.path().to_owned(),
+                    &observers,
+                    AuthPhase::Unavailable,
+                    CaptureStatus::NoFace,
+                    CaptureStatus::NoFace,
+                    surface,
+                )
+                .await;
                 let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
                 return;
             }
@@ -3504,11 +3644,31 @@ impl AuthDaemon {
                 info!(?delay, resumed, ?surface, "Delaying face auth before capture");
                 if tokio::time::timeout(delay, &mut rx).await.is_ok() {
                     info!("VerifyStart: cancelled during start delay");
+                    Self::broadcast_auth_phase(
+                        &conn,
+                        &ctxt.path().to_owned(),
+                        &observers,
+                        AuthPhase::Unavailable,
+                        CaptureStatus::NoFace,
+                        CaptureStatus::NoFace,
+                        surface,
+                    )
+                    .await;
                     let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
                     return;
                 }
                 if abort_if_lid_closed && Self::is_lid_closed().await {
                     warn!("Laptop lid is closed, aborting face auth");
+                    Self::broadcast_auth_phase(
+                        &conn,
+                        &ctxt.path().to_owned(),
+                        &observers,
+                        AuthPhase::Unavailable,
+                        CaptureStatus::NoFace,
+                        CaptureStatus::NoFace,
+                        surface,
+                    )
+                    .await;
                     let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
                     return;
                 }
@@ -3852,6 +4012,7 @@ impl AuthDaemon {
             drop(result_tx);
 
             let mut last_emitted_status: Option<CaptureStatus> = None;
+            let mut last_emitted_phase: Option<(AuthPhase, CaptureStatus, CaptureStatus)> = None;
             let mut rgb_status = CaptureStatus::Unused;
             let mut ir_status = CaptureStatus::Unused;
             let mut rgb_attempted = false;
@@ -3864,8 +4025,29 @@ impl AuthDaemon {
             let mut rgb_latest_embed = None;
             let mut ir_latest_embed = None;
 
+            // Observers only care about phase transitions; status frames arrive
+            // at camera rate, so dedupe before fanning out.
+            macro_rules! emit_auth_phase {
+                ($phase:expr, $rgb:expr, $ir:expr) => {{
+                    let key = ($phase, $rgb, $ir);
+                    if last_emitted_phase != Some(key) {
+                        Self::broadcast_auth_phase(
+                            &conn,
+                            &ctxt.path().to_owned(),
+                            &observers,
+                            $phase,
+                            $rgb,
+                            $ir,
+                            surface,
+                        )
+                        .await;
+                        last_emitted_phase = Some(key);
+                    }
+                }};
+            }
+
             macro_rules! emit_verify_with_scores {
-                ($result:expr) => {{
+                ($result:expr, $phase:expr) => {{
                     let rgb_threshold = *rgb_threshold_arc.lock().await;
                     let ir_threshold = *ir_threshold_arc.lock().await;
                     let db = db_arc.lock().await;
@@ -3879,6 +4061,7 @@ impl AuthDaemon {
                     );
                     drop(db);
                     let _ = Self::verify_status(&ctxt, $result, final_scores, rgb_status, ir_status).await;
+                    emit_auth_phase!($phase, rgb_status, ir_status);
                 }};
             }
 
@@ -3894,7 +4077,7 @@ impl AuthDaemon {
                         ir_success_embed.is_some(),
                     ) {
                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                        emit_verify_with_scores!(VerifyResult::VerifyMatch);
+                        emit_verify_with_scores!(VerifyResult::VerifyMatch, AuthPhase::Matched);
                         true
                     } else {
                         false
@@ -3909,6 +4092,7 @@ impl AuthDaemon {
                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                         // Report the camera as idle, not as a rejection: a cancelled attempt
                         // never decided anything, and a rejection counts toward lockout.
+                        emit_auth_phase!(AuthPhase::Idle, CaptureStatus::Unused, CaptureStatus::Unused);
                         let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
                         break;
                     }
@@ -3919,6 +4103,7 @@ impl AuthDaemon {
                                 VERIFY_NO_FACE_TIMEOUT.as_secs()
                             );
                             stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            emit_auth_phase!(AuthPhase::NotRecognized, rgb_status, ir_status);
                             let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
                             break;
                         }
@@ -3927,6 +4112,7 @@ impl AuthDaemon {
                         let Some(msg) = msg_opt else {
                             warn!("VerifyStart: all capture threads exited without a result");
                             stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            emit_auth_phase!(AuthPhase::Unavailable, rgb_status, ir_status);
                             let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
                             break;
                         };
@@ -3968,7 +4154,7 @@ impl AuthDaemon {
                                     if frames_seen > liveness_cfg.effective_max_frames() {
                                         info!("VerifyStart: liveness gate timed out");
                                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                        emit_verify_with_scores!(VerifyResult::VerifyNoMatch);
+                                        emit_verify_with_scores!(VerifyResult::VerifyNoMatch, AuthPhase::NotRecognized);
                                         break;
                                     }
                                 }
@@ -3979,6 +4165,7 @@ impl AuthDaemon {
                                     rgb_status,
                                     ir_status,
                                 ).await;
+                                emit_auth_phase!(AuthPhase::Waiting, rgb_status, ir_status);
 
                                 let both_dark = match (run_rgb, run_ir) {
                                     (true, true) => rgb_status == CaptureStatus::TooDark && ir_status == CaptureStatus::TooDark,
@@ -3995,6 +4182,7 @@ impl AuthDaemon {
                                             VERIFY_TOO_DARK_TIMEOUT.as_millis()
                                         );
                                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                        emit_auth_phase!(AuthPhase::NotRecognized, rgb_status, ir_status);
                                         let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
                                         break;
                                     }
@@ -4008,6 +4196,7 @@ impl AuthDaemon {
                                         VERIFY_NO_FACE_TIMEOUT.as_secs()
                                     );
                                     stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                    emit_auth_phase!(AuthPhase::NotRecognized, rgb_status, ir_status);
                                     let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
                                     break;
                                 }
@@ -4025,6 +4214,9 @@ impl AuthDaemon {
                                     Spectrum::Ir => ir_success_embed = Some(embedding),
                                 }
 
+                                // A lone success (hybrid "and" waiting on the second spectrum)
+                                // keeps scanning; keep observers on Waiting.
+                                emit_auth_phase!(AuthPhase::Waiting, rgb_status, ir_status);
                                 if finish_if_auth_passed!() {
                                     break;
                                 }
@@ -4036,6 +4228,7 @@ impl AuthDaemon {
                                 let _ = Self::verify_diagnostic(&ctxt, &e).await;
                                 // Idle, not rejected: the run broke off instead of deciding, and
                                 // a hardware failure must not count against the lockout budget.
+                                emit_auth_phase!(AuthPhase::Unavailable, CaptureStatus::Unused, CaptureStatus::Unused);
                                 let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
                                 break;
                             }
@@ -4043,6 +4236,11 @@ impl AuthDaemon {
                     }
                 }
             }
+
+            // The claim is over: every path above has decided or broken off.
+            // Observers retire their UI on Idle; the verdict itself went out
+            // through the claim-owner channel.
+            emit_auth_phase!(AuthPhase::Idle, rgb_status, ir_status);
 
             if let Some(t) = rgb_thread {
                 let _ = t.join();
