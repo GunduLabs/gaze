@@ -787,6 +787,15 @@ pub fn service_cannot_be_prompted(service: Option<&str>) -> bool {
     is_unpromptable_slot(service)
 }
 
+/// Graphical agents that answer the password prompt through their own
+/// conversation. The grosshack module races face auth against that response,
+/// so these services get the race even without a controlling terminal.
+const PROMPT_ANSWERING_SERVICES: [&str; 1] = ["dankshell-gaze-grosshack"];
+
+pub fn service_answers_its_own_prompt(service: Option<&str>) -> bool {
+    service.is_some_and(|name| PROMPT_ANSWERING_SERVICES.contains(&name))
+}
+
 /// The lock screen renders `PAM_ERROR_MSG` but discards `PAM_TEXT_INFO`.
 pub fn service_shows_only_error_messages(service: Option<&str>) -> bool {
     is_kde_noninteractive_service(service)

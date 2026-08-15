@@ -186,7 +186,9 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
     // Without a terminal a prompt can only be retired by signalling, and graphical conversations
     // resume their own read on EINTR. Polkit is exempt: it consumes the prompt for confirmation.
-    if !prompt_is_retirable() && !is_polkit {
+    // Known prompt-answering agents (e.g. DMS's lock service) run the race regardless, because
+    // they answer the conversation prompt from their own password field while the scan runs.
+    if !prompt_is_retirable() && !is_polkit && !service_answers_its_own_prompt(service.as_deref()) {
         let bio = rt.block_on(authenticate_biometric_with_timeout(
             &username,
             service.as_deref(),
