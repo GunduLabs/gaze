@@ -25,13 +25,6 @@ yay -S gaze-kde-bin
 
 :::
 
-::: warning Not in a release yet
-`gaze-kde` ships in the first release after `v0.2.9`. Until that release is out, these
-commands report that the package cannot be found, and the one-line installer says
-"KDE Plasma lock screen face unlock: gaze-kde not installed" and continues. Everything
-else on this page describes how it behaves once installed.
-:::
-
 `gaze-kde` wires up the lock screen and adds a System Settings entry. The one-line
 installer installs it when it detects a KDE Plasma session.
 
