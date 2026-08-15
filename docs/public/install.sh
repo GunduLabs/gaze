@@ -511,7 +511,7 @@ is_arch() {
 
 supported_deb_suite() {
     case "$1" in
-    noble | questing | resolute | trixie) return 0 ;;
+    noble | questing | resolute | trixie | forky) return 0 ;;
     esac
     return 1
 }
@@ -525,7 +525,7 @@ supported_fedora_compatible_version() {
 
 if ! is_rpm && ! is_deb && ! is_arch; then
     fail "Unsupported distribution: $DISTRO_ID"
-    say "Supported: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora-compatible 42/43/44 systems (including rpm-ostree image-based distros like Silverblue, Bazzite, and Kinoite), Arch Linux, and Arch-compatible AUR distros"
+    say "Supported: Ubuntu 24.04/25.10/26.04, Debian 13 and 14 (forky/testing), Fedora-compatible 42/43/44 systems (including rpm-ostree image-based distros like Silverblue, Bazzite, and Kinoite), Arch Linux, and Arch-compatible AUR distros"
     exit 1
 fi
 
@@ -540,7 +540,7 @@ fi
 
 if is_deb && ! supported_deb_suite "$DISTRO_CODENAME"; then
     fail "Unsupported Debian/Ubuntu release: ${DISTRO_CODENAME:-unknown}"
-    say "Supported apt suites: noble, questing, resolute, trixie"
+    say "Supported apt suites: noble, questing, resolute, trixie, forky"
     exit 1
 fi
 

@@ -126,6 +126,28 @@ jobs:
             rpm_distro: ""
             rpm_version: ""
             package_release: "1~debian13"
+          - id: debian-forky-amd64
+            name: deb (Debian 14 forky, amd64)
+            runner: ubuntu-latest
+            container: debian:forky
+            format: deb
+            distro: debian
+            distro_version: "14"
+            deb_suite: forky
+            rpm_distro: ""
+            rpm_version: ""
+            package_release: "1~debian14"
+          - id: debian-forky-arm64
+            name: deb (Debian 14 forky, arm64)
+            runner: ubuntu-24.04-arm
+            container: debian:forky
+            format: deb
+            distro: debian
+            distro_version: "14"
+            deb_suite: forky
+            rpm_distro: ""
+            rpm_version: ""
+            package_release: "1~debian14"
           - id: fedora-42-amd64
             name: rpm (Fedora 42, amd64)
             runner: ubuntu-latest

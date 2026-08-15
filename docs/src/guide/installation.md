@@ -5,7 +5,7 @@
 
 Use one of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible, installs the KDE packages on KDE Plasma, and skips GNOME-specific packages on non-GNOME desktops. Manual GNOME package installs still need GNOME settings commands afterward.
 
-Supported installer targets on x86_64 and arm64: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44 and compatible distributions (including image-based OSTree distros such as Fedora Silverblue, Kinoite, and Bazzite), Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS.
+Supported installer targets on x86_64 and arm64: Ubuntu 24.04/25.10/26.04, Debian 13 and 14 (forky, currently testing), Fedora 42/43/44 and compatible distributions (including image-based OSTree distros such as Fedora Silverblue, Kinoite, and Bazzite), Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS.
 
 ## Path A: one-line installer (recommended)
 
@@ -38,7 +38,9 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
 
 Use this if you prefer to configure package sources yourself. Debian/Ubuntu and Fedora-compatible systems with standard DNF or rpm-ostree package installation use Gundu Labs repositories. Arch Linux and Arch-compatible distributions such as Manjaro and CachyOS use the AUR packages.
 
-Debian/Ubuntu packages are built per release, and each apt suite carries only the builds for that release: `noble` (Ubuntu 24.04), `questing` (Ubuntu 25.10), `resolute` (Ubuntu 26.04), and `trixie` (Debian 13). The snippet below picks the suite matching your system; installing another release's package leaves `gazed` unable to load its OpenCV libraries.
+Debian/Ubuntu packages are built per release, and each apt suite carries only the builds for that release: `noble` (Ubuntu 24.04), `questing` (Ubuntu 25.10), `resolute` (Ubuntu 26.04), `trixie` (Debian 13), and `forky` (Debian 14). The snippet below picks the suite matching your system; installing another release's package leaves `gazed` unable to load its OpenCV libraries.
+
+Debian 14 (forky) is still testing, so its libraries keep moving. The `forky` packages are built against whatever OpenCV and GTK sonames testing carried at release time, and a soname bump in testing can leave `gazed` unable to start until the next Gaze release rebuilds against it. Reinstalling from the `forky` suite after such a bump picks up the rebuilt package.
 
 If you are replacing an existing manual repository configuration, remove the current repo files first:
 
