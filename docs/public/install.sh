@@ -290,18 +290,50 @@ explain_gnome_extension_skipped() {
 }
 
 # Non-fatal: a package missing from the repo must not fail the whole install.
+#
+# Output stays visible. On Arch this call hands off to an AUR helper that builds from
+# source and escalates through sudo, so silencing it turns a normal multi-minute build
+# into what looks like a hung installer.
 install_kde_packages() {
     if [ "$#" -eq 0 ]; then
         return 0
     fi
-    if "$@" >/dev/null 2>&1; then
+    if "$@"; then
         KDE_PACKAGES_INSTALLED=1
         return 0
     fi
     KDE_PACKAGES_INSTALLED=0
+    echo ""
     warn "Could not install the KDE Plasma packages ($KDE_PKGS)."
-    say "  The rest of Gaze is installed. Retry once they are available:"
+    say "  The rest of Gaze is installed and working; only the KDE lock screen"
+    say "  integration is missing. This is expected if your distribution's Gaze"
+    say "  packages predate the KDE package. Retry once it is available:"
     link "$KDE_DOCS_URL"
+}
+
+# Something is already installed under the bare name `gaze`. That is either our own
+# release artifact installed with `pacman -U` (unsupported: an AUR helper later
+# "upgrades" it to the unrelated package below) or the unrelated AUR `gaze`, a file
+# watcher. The wrapper declares conflicts=('gaze'), so pacman replaces either one
+# cleanly, but which one it was changes what the user should do about it.
+warn_replacing_bare_gaze_package() {
+    command -v pacman >/dev/null 2>&1 || return 0
+    pacman -Qq gaze >/dev/null 2>&1 || return 0
+
+    installed_url="$(pacman -Qi gaze 2>/dev/null | awk -F ': ' '/^URL/ { print $2; exit }')"
+
+    case "$installed_url" in
+    *gundulabs*)
+        warn "Gaze is installed under the bare name 'gaze' (from a release artifact)."
+        say "  That name is not safe on Arch: an AUR helper treats the unrelated 'gaze'"
+        say "  package as an upgrade for it. Switching you to gaze-bin, which is."
+        ;;
+    *)
+        warn "A package named 'gaze' is already installed and is not Gaze face unlock."
+        say "  That is an unrelated AUR package (a file watcher) using the same name."
+        say "  Installing gaze-bin replaces it. Reinstall it afterwards if you use it."
+        ;;
+    esac
 }
 
 enable_kde() {
@@ -741,6 +773,7 @@ elif is_arch; then
     ok "Found AUR helper: $AUR_HELPER"
 
     step "Installing packages from AUR"
+    warn_replacing_bare_gaze_package
     AUR_PKGS="gaze-bin gaze-gui-bin"
     if want_gnome_extension_package; then
         AUR_PKGS="$AUR_PKGS gaze-gnome-extension-bin"
@@ -748,10 +781,14 @@ elif is_arch; then
     if want_hyprlock_setup; then
         AUR_PKGS="$AUR_PKGS gaze-hyprlock-bin"
     fi
-    "$AUR_HELPER" -S --noconfirm $AUR_PKGS
+    # --needed skips anything already at this version, so re-running the installer does
+    # not rebuild from source. stdin is the piped installer itself, so close it the way
+    # the apt/dnf paths do: a helper that reads a prompt from there would eat the rest of
+    # this script. sudo still reads its password from the terminal.
+    "$AUR_HELPER" -S --needed --noconfirm $AUR_PKGS </dev/null
     if is_kde_session; then
         KDE_PKGS="gaze-kde-bin"
-        install_kde_packages "$AUR_HELPER" -S --noconfirm $KDE_PKGS
+        install_kde_packages "$AUR_HELPER" -S --needed --noconfirm $KDE_PKGS </dev/null
     fi
 
     step "Configuring PAM"
