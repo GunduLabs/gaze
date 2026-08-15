@@ -43,7 +43,7 @@ gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 
 **Debian / Ubuntu**
 
-Each apt suite carries only the builds for that release: `noble` (Ubuntu 24.04), `questing` (Ubuntu 25.10), `resolute` (Ubuntu 26.04), `trixie` (Debian 13).
+Each apt suite carries only the builds for that release: `noble` (Ubuntu 24.04), `questing` (Ubuntu 25.10), `resolute` (Ubuntu 26.04), `trixie` (Debian 13), `forky` (Debian 14, testing).
 
 ```bash
 sudo mkdir -p --mode=0755 /usr/share/keyrings
