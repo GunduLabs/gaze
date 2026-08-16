@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Documentation
+description: Something in the docs is wrong, missing, outdated, or unclear.
+labels:
+  - documentation
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Docs bugs are real bugs. A command that does not work as written, a distro
+        difference we never mention, or a warning that is missing from a step that
+        can lock you out all belong here.
+
+        Small fixes are welcome as a pull request directly. The source lives under
+        `docs/src/guide/`.
+
+  - type: input
+    id: page
+    attributes:
+      label: Which page?
+      description: The URL, or the path under `docs/src/`.
+      placeholder: https://gaze.gundulabs.com/guide/kde or docs/src/guide/kde.md
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of problem?
+      options:
+        - A documented command or config value does not work
+        - Instructions are correct on some distributions but not mine
+        - Something is missing entirely
+        - Content is outdated relative to the current release
+        - Wording is confusing or ambiguous
+        - A broken link, bad formatting, or a typo
+        - A warning is missing from a step that can lock you out
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong
+      description: Quote the passage and say what actually happens instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: What should it say
+      description: Your suggested replacement wording, if you have one. A rough draft is fine, we will edit it.
+
+  - type: input
+    id: environment
+    attributes:
+      label: Your environment
+      description: Only if the problem is distro or desktop specific.
+      placeholder: Fedora 44, KDE Plasma with plasma-login-manager

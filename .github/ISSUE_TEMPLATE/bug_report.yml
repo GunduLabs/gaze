@@ -1,0 +1,273 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Bug report
+description: Face auth, the camera, the daemon, the GUI, or a desktop integration is not behaving correctly.
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        Nearly every question we end up asking is on this form. Filling it in now
+        saves a round trip and gets you a real answer instead of a request for logs.
+
+        **Before you paste anything:** logs can contain usernames, hostnames, camera
+        serial numbers, and network details. Redact what you do not want public.
+        Gaze never logs face templates or embeddings, so those are not a concern.
+
+        If this is a security vulnerability in authentication, PAM, or template
+        storage, close this and [report it privately](https://github.com/GunduLabs/gaze/security/advisories/new) instead.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched [existing issues](https://github.com/GunduLabs/gaze/issues?q=is%3Aissue) and this is not a duplicate.
+          required: true
+        - label: I worked through the [troubleshooting guide](https://gaze.gundulabs.com/guide/troubleshooting) and my problem is not covered there.
+          required: true
+        - label: I am on the latest release, or I have said below which version I am on and why I cannot upgrade.
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you observe, and what did you expect instead?
+      placeholder: |
+        Enrollment stops after 3 captures instead of taking 10, and the IR badge stays red.
+        I expected all 10 captures to complete with IR going green, which is what happened
+        on my previous install.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands or UI actions, in order. Include the command output if there was any.
+      placeholder: |
+        1. `gaze add-face default`
+        2. Look at the camera and follow the prompts
+        3. Capture counter stops at 3 and the dialog closes
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: consistency
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time
+        - Most of the time
+        - Intermittently, no pattern I can see
+        - Once, and I have not reproduced it since
+        - Only after a reboot, suspend, or resume
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: surface
+    attributes:
+      label: Which surfaces are affected?
+      description: Check every one you have actually tried. Which ones *work* is as diagnostic as which ones fail, because the same face match can succeed on the CLI and fail at a greeter, and that narrows things down fast.
+      options:
+        - label: "`gaze auth` on the command line"
+        - label: "`gaze add-face` / `gaze refine-face` enrollment"
+        - label: "`gaze-gui` (the desktop app)"
+        - label: "`sudo` or another terminal elevation"
+        - label: polkit / graphical password prompts
+        - label: GNOME lock screen
+        - label: GDM login screen
+        - label: KDE Plasma lock screen
+        - label: KDE login greeter (SDDM or plasma-login-manager)
+        - label: hyprlock
+        - label: LightDM
+        - label: TTY / console login
+        - label: "`gazed` daemon startup, crash, or core dump"
+        - label: Install, upgrade, or uninstall (consider the Installation & packaging template instead)
+
+  - type: input
+    id: version
+    attributes:
+      label: Gaze version
+      description: Output of `gaze --version`.
+      placeholder: gaze 0.2.10
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How did you install Gaze?
+      description: If you have switched methods, pick the one currently in use and say so in the notes at the bottom. Mixing repositories is a real cause of breakage.
+      options:
+        - One-line installer (install.sh)
+        - Gundu Labs apt repository (Debian / Ubuntu)
+        - Gundu Labs dnf repository (Fedora and compatible)
+        - rpm-ostree (Silverblue / Bazzite / Kinoite)
+        - Fedora Copr (@gundulabs/gaze)
+        - AUR (gaze-bin, gaze-gui-bin, gaze-kde-bin, gaze-gnome-extension-bin)
+        - Nix / NixOS module
+        - Flatpak (GUI only)
+        - Built from source
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and version
+      description: From `cat /etc/os-release`. The `PRETTY_NAME` line is enough.
+      placeholder: Fedora Linux 44 (Workstation Edition)
+    validations:
+      required: true
+
+  - type: input
+    id: desktop
+    attributes:
+      label: Desktop environment, version, and session type
+      description: Include Wayland or X11. GNOME and KDE version numbers matter a lot here, since several bugs are specific to one Shell or Plasma release.
+      placeholder: GNOME 50.3, Wayland
+    validations:
+      required: true
+
+  - type: input
+    id: display-manager
+    attributes:
+      label: Display manager
+      description: Required if a login or lock screen is involved, otherwise leave blank.
+      placeholder: GDM 50.1 / SDDM 6.4 / plasma-login-manager 6.7.4 / LightDM 1.32 / none (TTY)
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`gaze doctor` output"
+      description: |
+        Run this as your normal desktop user from inside a graphical session, not over SSH and not with `sudo`, because it inspects that user's PipeWire session and desktop integration. Paste the complete output, including the parts that pass.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: journal
+    attributes:
+      label: Daemon log
+      description: |
+        Reproduce the problem, then immediately run:
+
+        ```bash
+        journalctl -u gazed -b --no-pager | tail -300
+        ```
+
+        Paste the whole thing. The lines just *before* the failure are usually the ones that explain it.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: "`gaze config --show` output"
+      description: Or the contents of `/etc/gaze/config.toml`. Needed for anything involving cameras, thresholds, liveness, confirmation, or encrypted templates.
+      render: toml
+
+  - type: textarea
+    id: camera
+    attributes:
+      label: Camera details
+      description: |
+        Fill this in for anything camera, IR, enrollment, or recognition related. Substitute your own node numbers.
+
+        ```bash
+        v4l2-ctl --list-devices
+        v4l2-ctl -d /dev/video0 --list-formats-ext
+        udevadm info -q property -n /dev/video0 | grep -E 'ID_VENDOR_ID|ID_MODEL_ID|ID_V4L_PRODUCT'
+        ```
+
+        The vendor and model IDs are what tell us whether your camera needs a dedicated IR-emitter profile. Redact serial numbers.
+      render: text
+
+  - type: textarea
+    id: auth-verbose
+    attributes:
+      label: "`gaze auth --verbose` output"
+      description: For recognition, scoring, liveness, or IR-vs-RGB problems. Shows the per-face, per-spectrum scores and the pass/fail for each.
+      render: text
+
+  - type: textarea
+    id: kde
+    attributes:
+      label: KDE Plasma details
+      description: |
+        KDE only. Paste the output of `gaze-kde-pam status` and the contents of your login and lock stacks:
+
+        ```bash
+        gaze-kde-pam status
+        cat /etc/pam.d/kde-fingerprint
+        cat /etc/pam.d/plasmalogin /etc/pam.d/sddm 2>/dev/null
+        ls /usr/lib/pam.d/plasmalogin /usr/lib/pam.d/sddm 2>/dev/null
+        ```
+
+        On Fedora the vendor stack lives under `/usr/lib/pam.d` and only appears in `/etc/pam.d` once something has customized it, so please include both paths.
+      render: text
+
+  - type: dropdown
+    id: pam-module
+    attributes:
+      label: Which PAM module is in your stack?
+      description: "`pam_gaze.so` waits for the camera before falling through to the password prompt. `pam_gaze_grosshack.so` races both at once. They fail differently, so we need to know which one you are on."
+      options:
+        - "pam_gaze.so (sequential, the default)"
+        - "pam_gaze_grosshack.so (simultaneous)"
+        - Both, on different services
+        - Not sure
+        - Not applicable, this is not a PAM problem
+
+  - type: dropdown
+    id: regression
+    attributes:
+      label: Did this ever work?
+      options:
+        - Never worked, this is a fresh install
+        - Worked before, broke after a Gaze update
+        - Worked before, broke after a system or kernel update
+        - Worked before, broke after I changed the config
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: last-good
+    attributes:
+      label: Last known good version
+      description: If this is a regression, which Gaze version was the last one that worked?
+      placeholder: 0.2.9
+
+  - type: dropdown
+    id: reinstall
+    attributes:
+      label: Have you run `gaze uninstall` at any point?
+      description: "`gaze uninstall` deliberately removes `/etc/gaze/config.toml`, including your camera and IR settings. Reinstalling afterwards gives you a default config, which looks exactly like a bug that lost your settings."
+      options:
+        - "No"
+        - "Yes, and I reinstalled afterwards"
+        - "Yes, and I restored or recreated my config afterwards"
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, screen recordings, hardware model, things you already tried, workarounds you found, related issues. Drag files in to attach them.
