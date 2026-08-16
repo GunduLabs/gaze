@@ -6,6 +6,7 @@ mod crypto;
 mod daemon;
 mod liveness;
 pub mod models;
+mod preview;
 mod recognize;
 mod tpm;
 pub mod users;

@@ -17,6 +17,7 @@ use zbus::{fdo, interface, message::Header, object_server::SignalEmitter};
 
 use crate::align::{align_face, mat_to_rgb};
 use crate::liveness::LivenessDetector;
+use crate::preview::PreviewStream;
 use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
 use gaze_core::camera::{Camera, CameraKind, resolve_configured_sources};
@@ -2494,6 +2495,8 @@ impl AuthDaemon {
             let max_steps = 5u32;
 
             let (enroll_tx, mut enroll_rx) = tokio::sync::mpsc::channel::<EnrollMsg>(10);
+            let (preview_tx, mut preview_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(1);
+            let stream_preview = !gaze_core::camera::preview_can_be_shared(&config.cameras);
             let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let completed_steps_atomic = Arc::new(std::sync::atomic::AtomicU32::new(0));
             let rgb_captured_for_step = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -2508,10 +2511,16 @@ impl AuthDaemon {
                 let completed_steps_clone = completed_steps_atomic.clone();
                 let rgb_device_clone = rgb_device.clone();
                 let rgb_captured_for_step_clone = rgb_captured_for_step.clone();
+                let preview_tx_clone = preview_tx.clone();
 
                 rgb_thread = Some(std::thread::spawn(move || {
                     gaze_core::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, true);
+                    let mut preview = if stream_preview {
+                        PreviewStream::new(preview_tx_clone)
+                    } else {
+                        PreviewStream::disabled()
+                    };
                     let mut pose_baseline = None;
 
                     // Cameras like the Logitech Brio 4K cannot stream RGB and IR at once, so
@@ -2557,6 +2566,8 @@ impl AuthDaemon {
                                 if current_step != step {
                                     continue 'steps;
                                 }
+
+                                preview.offer(&frame);
 
                                 let prompt = prompts[current_step];
 
@@ -2636,6 +2647,8 @@ impl AuthDaemon {
                             continue;
                         }
 
+                        preview.offer(&frame);
+
                         let prompt = prompts[current_step];
 
                         let (status, result_opt) = {
@@ -2690,11 +2703,17 @@ impl AuthDaemon {
                 let ir_device_clone = ir_device.clone();
                 let ir_node_clone = ir_node.clone();
                 let rgb_captured_for_step_clone = rgb_captured_for_step.clone();
+                let preview_tx_clone = preview_tx.clone();
 
                 ir_thread = Some(std::thread::spawn(move || {
                     gaze_core::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, true);
                     let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
+                    let mut preview = if stream_preview {
+                        PreviewStream::new(preview_tx_clone)
+                    } else {
+                        PreviewStream::disabled()
+                    };
 
                     // Dual-spectrum mode waits for RGB to capture and release the camera, then
                     // holds IR just long enough for one lit frame; RGB already checked the pose.
@@ -2756,6 +2775,8 @@ impl AuthDaemon {
                                         continue;
                                     }
                                 }
+
+                                preview.offer(&frame);
 
                                 let (status, result_opt) = {
                                     let mut recognizer = recognizer_ir_arc.blocking_lock();
@@ -2833,6 +2854,8 @@ impl AuthDaemon {
                             }
                         }
 
+                        preview.offer(&frame);
+
                         let prompt = prompts[current_step];
 
                         let (status, result_opt) = {
@@ -2877,6 +2900,7 @@ impl AuthDaemon {
             }
 
             drop(enroll_tx);
+            drop(preview_tx);
 
             let mut completed_steps = 0;
             let mut has_rgb_for_step = false;
@@ -2904,6 +2928,9 @@ impl AuthDaemon {
                         let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::Cancelled, -1.0).await;
                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                         return;
+                    }
+                    Some(jpeg) = preview_rx.recv() => {
+                        let _ = Self::preview_frame(&ctxt, &jpeg).await;
                     }
                     msg_opt = enroll_rx.recv() => {
                         let Some(msg) = msg_opt else {
@@ -3373,6 +3400,9 @@ impl AuthDaemon {
 
     #[zbus(signal)]
     async fn face_status(ctxt: &SignalEmitter<'_>, status: CaptureStatus) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn preview_frame(ctxt: &SignalEmitter<'_>, jpeg: &[u8]) -> zbus::Result<()>;
 
     #[zbus(signal)]
     async fn enroll_status(

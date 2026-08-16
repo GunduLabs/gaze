@@ -1469,9 +1469,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         return;
                     }
 
-                    let (camera_device, is_ir) = match load_config_from_daemon(&proxy).await {
-                        Ok(cfg) => gaze_core::camera::preferred_capture_source(&cfg.cameras),
-                        Err(_) => (DEFAULT_RGB_CAMERA.to_string(), false),
+                    let camera = match load_config_from_daemon(&proxy).await {
+                        Ok(cfg) => capture_dialog::CameraSetup::from_config(&cfg.cameras),
+                        Err(_) => capture_dialog::CameraSetup::fallback(),
                     };
 
                     capture_dialog::show_capture_dialog(
@@ -1479,8 +1479,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         &username,
                         None,
                         &proxy,
-                        &camera_device,
-                        is_ir,
+                        &camera,
                         glib::clone!(
                             #[strong]
                             refresh,
@@ -1805,18 +1804,17 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                         return;
                                                     }
 
-                                                    let (camera_device, is_ir) = match load_config_from_daemon(&proxy).await {
-                                                          Ok(cfg) => gaze_core::camera::preferred_capture_source(&cfg.cameras),
-                                                          Err(_) => (DEFAULT_RGB_CAMERA.to_string(), false),
-                                                      };
+                                                    let camera = match load_config_from_daemon(&proxy).await {
+    Ok(cfg) => capture_dialog::CameraSetup::from_config(&cfg.cameras),
+    Err(_) => capture_dialog::CameraSetup::fallback(),
+};
 
                                                      capture_dialog::show_capture_dialog(
                                                         &window,
                                                         &username,
                                                         Some(&face_name),
                                                         &proxy,
-                                                        &camera_device,
-                                                        is_ir,
+                                                        &camera,
                                                         glib::clone!(
                                                             #[strong]
                                                             refresh,
