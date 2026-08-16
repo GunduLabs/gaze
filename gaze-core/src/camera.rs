@@ -75,6 +75,22 @@ pub fn preferred_capture_source(cameras: &CameraConfig) -> (String, bool) {
     }
 }
 
+pub fn preview_can_be_shared(cameras: &CameraConfig) -> bool {
+    if !cameras.ir.trim().is_empty() {
+        return false;
+    }
+    let (source, _) = preferred_capture_source(cameras);
+    is_pipewire_source(&source)
+}
+
+fn is_pipewire_source(source: &str) -> bool {
+    matches!(
+        classify_source(source, true),
+        Ok(SourceElement::Element(element))
+            if element == "pipewiresrc" || element.starts_with("pipewiresrc ")
+    )
+}
+
 pub fn resolve_node(source: &str) -> Option<String> {
     let source = source.trim();
     if source.is_empty() {
@@ -1252,6 +1268,43 @@ mod tests {
             preferred_capture_source(&cameras),
             ("primary".to_string(), false)
         );
+    }
+
+    fn cameras_with(rgb: &str, ir: &str) -> CameraConfig {
+        CameraConfig {
+            rgb: rgb.to_string(),
+            ir: ir.to_string(),
+            emitter_enabled: false,
+            dark_luma_threshold: 30,
+        }
+    }
+
+    #[test]
+    fn a_pipewire_camera_can_back_two_previews_at_once() {
+        assert!(preview_can_be_shared(&cameras_with("primary", "")));
+        assert!(preview_can_be_shared(&cameras_with(
+            "pipewiresrc target-object=v4l2_input.pci-0000:00:14.0-usb-0:5:1.0",
+            ""
+        )));
+    }
+
+    #[test]
+    fn a_v4l2_camera_cannot_be_streamed_twice() {
+        assert!(!preview_can_be_shared(&cameras_with("/dev/video0", "")));
+        assert!(!preview_can_be_shared(&cameras_with("usb:04f2:b6d9", "")));
+    }
+
+    #[test]
+    fn a_dual_spectrum_setup_needs_the_rgb_camera_released_between_steps() {
+        assert!(!preview_can_be_shared(&cameras_with(
+            "primary",
+            "/dev/video2"
+        )));
+    }
+
+    #[test]
+    fn an_ir_only_setup_is_not_shareable() {
+        assert!(!preview_can_be_shared(&cameras_with("", "/dev/video2")));
     }
 
     #[test]

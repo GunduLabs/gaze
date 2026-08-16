@@ -33,6 +33,7 @@ pub struct CameraFeed {
     is_active: Rc<RefCell<bool>>,
     frame_aspect: Rc<Cell<f64>>,
     aspect_frame: gtk4::AspectFrame,
+    timer: Rc<RefCell<Option<glib::SourceId>>>,
 }
 
 impl CameraFeed {
@@ -212,6 +213,7 @@ impl CameraFeed {
             is_active,
             frame_aspect,
             aspect_frame,
+            timer: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -227,6 +229,7 @@ impl CameraFeed {
 
     pub fn stop(&self) {
         self.stop_flag.store(true, Ordering::Relaxed);
+        self.stop_pump();
         if let Some(handle) = self.thread_handle.borrow_mut().take() {
             thread::spawn(move || {
                 let _ = handle.join();
@@ -238,8 +241,15 @@ impl CameraFeed {
     /// live preview has proven frames arrive, so the join returns after at most one more frame.
     pub fn stop_and_wait(&self) {
         self.stop_flag.store(true, Ordering::Relaxed);
+        self.stop_pump();
         if let Some(handle) = self.thread_handle.borrow_mut().take() {
             let _ = handle.join();
+        }
+    }
+
+    fn stop_pump(&self) {
+        if let Some(source) = self.timer.borrow_mut().take() {
+            source.remove();
         }
     }
 
@@ -249,7 +259,7 @@ impl CameraFeed {
             return;
         };
 
-        glib::timeout_add_local(
+        let source = glib::timeout_add_local(
             std::time::Duration::from_millis(33),
             glib::clone!(
                 #[strong(rename_to = picture)]
@@ -260,10 +270,20 @@ impl CameraFeed {
                 self.frame_aspect,
                 #[strong(rename_to = aspect_frame)]
                 self.aspect_frame,
+                #[strong(rename_to = timer)]
+                self.timer,
                 move || {
                     let mut newest = None;
-                    while let Ok(frame) = rx.try_recv() {
-                        newest = Some(frame);
+                    let mut ended = false;
+                    loop {
+                        match rx.try_recv() {
+                            Ok(frame) => newest = Some(frame),
+                            Err(mpsc::TryRecvError::Empty) => break,
+                            Err(mpsc::TryRecvError::Disconnected) => {
+                                ended = true;
+                                break;
+                            }
+                        }
                     }
                     if let Some(frame) = newest {
                         let bytes = glib::Bytes::from(&frame.rgb_bytes);
@@ -282,10 +302,38 @@ impl CameraFeed {
                         picture.set_paintable(Some(&texture));
                         *latest_frame.borrow_mut() = Some(frame.mat);
                     }
+                    if ended {
+                        let _ = timer.borrow_mut().take();
+                        return glib::ControlFlow::Break;
+                    }
                     glib::ControlFlow::Continue
                 }
             ),
         );
+        *self.timer.borrow_mut() = Some(source);
+    }
+
+    pub fn show_remote_frame(&self, jpeg: &[u8]) {
+        let texture = match gdk::Texture::from_bytes(&glib::Bytes::from(jpeg)) {
+            Ok(texture) => texture,
+            Err(err) => {
+                error!(%err, "Decoding an enrollment preview frame failed");
+                return;
+            }
+        };
+
+        if texture.height() > 0 {
+            let aspect = texture.width() as f64 / texture.height() as f64;
+            self.frame_aspect.set(aspect);
+            self.aspect_frame.set_ratio(aspect as f32);
+        }
+        self.picture.set_paintable(Some(&texture));
+        self.picture.set_visible(true);
+    }
+
+    pub fn hide_frame(&self) {
+        self.picture.set_paintable(gdk::Paintable::NONE);
+        self.picture.set_visible(false);
     }
 }
 
