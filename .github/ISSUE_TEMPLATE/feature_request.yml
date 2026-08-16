@@ -1,0 +1,105 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Feature request
+description: Propose a new capability, a config key, a desktop integration, or support for a new distribution.
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gaze is authentication software, so every feature is weighed against what it
+        does to the security boundary and to the number of ways a login can fail.
+        The proposals that get built are the ones that describe a concrete problem
+        rather than a solution, because that usually leaves room for a better answer
+        than the one either of us started with.
+
+        Please open this before writing code for anything that changes authentication
+        flow, adds a config key, or changes packaging policy.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched [existing issues](https://github.com/GunduLabs/gaze/issues?q=is%3Aissue) and this has not already been proposed.
+          required: true
+        - label: I checked the [configuration reference](https://gaze.gundulabs.com/guide/configuration) and this is not already possible.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the situation you are actually in, not the feature you want. What do you do today, and what makes it bad?
+      placeholder: |
+        My laptop exposes RGB and IR behind a single V4L2 node with identical labels, so
+        I cannot tell in the GUI which source I am picking, and I have to guess and retry.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Gaze to do?
+      description: Your proposed behavior. Include the CLI flags, config keys, or UI you imagine, if you have specifics in mind.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: area
+    attributes:
+      label: Which part of Gaze does this touch?
+      options:
+        - label: "`gazed` daemon or DBus interface"
+        - label: "`gaze` CLI"
+        - label: "`gaze-gui`"
+        - label: PAM modules
+        - label: GNOME extension or GDM
+        - label: KDE Plasma integration
+        - label: hyprlock, LightDM, or TTY console
+        - label: Camera, IR, or liveness handling
+        - label: Recognition models or thresholds
+        - label: Configuration
+        - label: Packaging or a new distribution
+        - label: Documentation
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What have you tried instead?
+      description: Workarounds, other config keys, other tools. If a workaround exists and is merely inconvenient, say so, because that changes the priority rather than killing the idea.
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security implications
+      description: |
+        Required if this touches authentication, PAM, template storage, or the confirmation flow. Skip it otherwise.
+
+        Consider: does it create a way to authenticate with weaker evidence than today? Does it widen what an unprivileged caller can do over DBus? Does it make a failed match more likely to be treated as a success? Does it affect the fallback to password authentication?
+
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you be willing to implement this?
+      description: Not required, and saying no does not hurt the proposal. It only tells us whether to scope out a design with you or add it to the queue.
+      options:
+        - "Yes, I would like to open a pull request"
+        - "Yes, but I would need guidance on where to start"
+        - "No, I am proposing it for someone else to build"
+    validations:
+      required: true
+
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware and environment
+      description: Fill this in for camera, IR, or desktop integration proposals. Distribution, desktop environment, camera model, and the vendor and model IDs from `udevadm info -q property -n /dev/video0 | grep -E 'ID_VENDOR_ID|ID_MODEL_ID'`.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Links to how other projects solve this, upstream bug reports, screenshots, or prior discussion.
