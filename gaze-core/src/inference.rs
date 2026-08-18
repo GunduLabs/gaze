@@ -69,7 +69,7 @@ fn build_cpu_session(model_path: &str) -> anyhow::Result<Session> {
         .map_err(|error| {
             anyhow::anyhow!("failed to create an ONNX Runtime session builder: {error}")
         })?
-        .with_optimization_level(GraphOptimizationLevel::Level3)
+        .with_optimization_level(GraphOptimizationLevel::All)
         .map_err(|error| {
             anyhow::anyhow!("failed to set the ONNX Runtime graph optimization level: {error}")
         })?
@@ -84,7 +84,7 @@ fn build_openvino_session(model_path: &str, device: &str) -> anyhow::Result<Sess
         .map_err(|error| {
             anyhow::anyhow!("failed to create an ONNX Runtime session builder: {error}")
         })?
-        .with_optimization_level(GraphOptimizationLevel::Level3)
+        .with_optimization_level(GraphOptimizationLevel::All)
         .map_err(|error| {
             anyhow::anyhow!("failed to set the ONNX Runtime graph optimization level: {error}")
         })?
