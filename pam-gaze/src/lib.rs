@@ -120,7 +120,8 @@ where
     }
 }
 
-unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
+unsafe fn do_authenticate(pamh: PamHandle, flags: c_int) -> c_int {
+    let silent = caller_wants_silence(flags);
     let service = unsafe { get_pam_service(pamh) };
     if service_defers_to_face_service(service.as_deref())
         || service_defers_to_face_slot(service.as_deref())
@@ -150,11 +151,17 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
             LOOK_PROMPT
         };
         // KScreenLocker reads an info message as "this unlock had a prompt".
-        unsafe { say(pamh, prompt) };
+        if !silent {
+            unsafe { say(pamh, prompt) };
+        }
 
         let budget = camera_auth_timeout(&config.auth, service.as_deref());
 
-        let tell = |text: &str| unsafe { report(pamh, service.as_deref(), text) };
+        let tell = |text: &str| {
+            if !silent {
+                unsafe { report(pamh, service.as_deref(), text) }
+            }
+        };
 
         let verdict = verify_within(&proxy, &username, service.as_deref(), budget).await;
         match verdict {
@@ -183,7 +190,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     };
 
     if !confirmation_required(Some(&loaded_auth), service.as_deref()) {
-        unsafe { report_face_verified(pamh) };
+        unsafe { report_face_verified(pamh, silent) };
         return PAM_SUCCESS;
     }
 
@@ -196,7 +203,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
         return unsafe { confirm_via_polkit_dialog(pamh, &username, &proxy, &rt) };
     }
 
-    if has_controlling_tty() {
+    if has_interactive_tty() {
         return if unsafe { confirm_authentication(pamh) } {
             PAM_SUCCESS
         } else {
@@ -222,11 +229,11 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pam_sm_authenticate(
     pamh: PamHandle,
-    _flags: c_int,
+    flags: c_int,
     _argc: c_int,
     _argv: *const *const c_char,
 ) -> c_int {
-    unsafe { do_authenticate(pamh) }
+    unsafe { do_authenticate(pamh, flags) }
 }
 
 pam_gaze_core::pam_success_stubs!();

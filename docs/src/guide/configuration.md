@@ -264,6 +264,8 @@ With the standard `pam-gaze` module (e.g. `sudo`, `gdm-face`):
 - In other graphical prompts without a TTY (e.g. the KDE lock screen, `hyprlock`), there is no channel that could answer the prompt, so the face match unlocks on its own. On the KDE lock screen in particular, asking would not reach anybody: the greeter never delivers a response to its biometric slot, so the request would hang that slot for the rest of the lock. If you want the confirmation step enforced on a surface that can show a dialog, use the `pam-gaze-grosshack` module.
 - A **login greeter** is the exception: it never bypasses. GDM always runs GNOME with the Gaze Extension, so confirmation is enforced there or the login is denied.
 
+A "text-based (TTY) environment" means Gaze's own standard input is a terminal. When the caller pipes standard input instead — a script feeding `sudo`, or a management console such as Cockpit that drives PAM over a framed stdio protocol — nobody can press a key, so Gaze neither prints a terminal banner nor waits for one; the face match is refused and the stack falls through to the password. Callers that set the PAM `PAM_SILENT` flag receive no informational messages from either module.
+
 With the `pam-gaze-grosshack` module:
 - The password prompt still comes up immediately so you are never blocked.
 - If face verification succeeds before you finish entering your password:
