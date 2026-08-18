@@ -111,11 +111,7 @@ fn wait_for_prompt_finish_within(state: &SharedAuthState, deadline: Duration) ->
 /// Whether a prompt started now could be unblocked again, rather than parking a thread inside
 /// the caller's conversation with no way back out.
 fn prompt_is_retirable() -> bool {
-    std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")
-        .is_ok()
+    has_interactive_tty()
 }
 
 fn prompt_is_finished(state: &SharedAuthState) -> bool {
@@ -152,7 +148,8 @@ fn retire_prompt(state: &SharedAuthState, prompt_thread: thread::JoinHandle<()>)
     let _ = prompt_thread.join();
 }
 
-unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
+unsafe fn do_authenticate(pamh: PamHandle, flags: c_int) -> c_int {
+    let silent = caller_wants_silence(flags);
     let service = unsafe { get_pam_service(pamh) };
     if service_defers_to_face_service(service.as_deref())
         || service_defers_to_face_slot(service.as_deref())
@@ -180,7 +177,9 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
     let require_confirmation = confirmation_required(loaded_auth.as_ref(), service.as_deref());
     let auth = loaded_auth.unwrap_or_default();
 
-    unsafe { say(pamh, LOOK_OR_PASSWORD_PROMPT) };
+    if !silent {
+        unsafe { say(pamh, LOOK_OR_PASSWORD_PROMPT) };
+    }
 
     let is_polkit = matches!(service, Some(ref s) if s == "polkit-1");
 
@@ -203,7 +202,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
                 PAM_AUTH_ERR
             };
         }
-        unsafe { report_face_verified(pamh) };
+        unsafe { report_face_verified(pamh, silent) };
         return PAM_SUCCESS;
     }
 
@@ -249,7 +248,7 @@ unsafe fn do_authenticate(pamh: PamHandle) -> c_int {
 
             if !require_confirmation {
                 retire_prompt(&state, prompt_thread);
-                unsafe { report_face_verified(pamh) };
+                unsafe { report_face_verified(pamh, silent) };
                 return PAM_SUCCESS;
             }
 
@@ -472,11 +471,11 @@ mod tests {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pam_sm_authenticate(
     pamh: PamHandle,
-    _flags: c_int,
+    flags: c_int,
     _argc: c_int,
     _argv: *const *const c_char,
 ) -> c_int {
-    unsafe { do_authenticate(pamh) }
+    unsafe { do_authenticate(pamh, flags) }
 }
 
 pam_gaze_core::pam_success_stubs!();

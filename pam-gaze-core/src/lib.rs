@@ -28,6 +28,13 @@ pub const PAM_PROMPT_ECHO_ON: c_int = 2;
 pub const PAM_AUTHINFO_UNAVAIL: c_int = 9;
 pub const PAM_IGNORE: c_int = 25;
 
+pub const PAM_DISALLOW_NULL_AUTHTOK: c_int = 0x0001;
+pub const PAM_SILENT: c_int = 0x8000;
+
+pub fn caller_wants_silence(flags: c_int) -> bool {
+    flags & PAM_SILENT != 0
+}
+
 pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
 pub const TTY_CONFIRM_DECISECONDS: libc::cc_t = 200;
 const _: () = assert!(TTY_CONFIRM_DECISECONDS > 0);
@@ -168,11 +175,7 @@ fn replace_previous_line(writer: &mut impl Write, message: &str) -> std::io::Res
 }
 
 fn report_face_verified_to_tty() -> Option<()> {
-    let mut tty = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")
-        .ok()?;
+    let mut tty = open_interactive_tty()?;
     replace_previous_line(&mut tty, FACE_VERIFIED).ok()?;
     writeln!(tty).ok()?;
     tty.flush().ok()
@@ -180,18 +183,17 @@ fn report_face_verified_to_tty() -> Option<()> {
 
 /// Replace the camera prompt with a non-interactive success message when a terminal is available.
 /// Graphical PAM clients receive the same message through their conversation function instead.
-pub unsafe fn report_face_verified(pamh: PamHandle) {
+pub unsafe fn report_face_verified(pamh: PamHandle, silent: bool) {
+    if silent {
+        return;
+    }
     if report_face_verified_to_tty().is_none() {
         unsafe { say(pamh, FACE_VERIFIED) };
     }
 }
 
 fn confirm_from_tty() -> Option<bool> {
-    let mut tty = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")
-        .ok()?;
+    let mut tty = open_interactive_tty()?;
     let fd = tty.as_raw_fd();
 
     let mut original = MaybeUninit::<libc::termios>::uninit();
@@ -223,12 +225,23 @@ fn confirm_from_tty() -> Option<bool> {
         Some(confirmed)
     }
 }
-pub fn has_controlling_tty() -> bool {
+fn stdin_is_terminal() -> bool {
+    unsafe { libc::isatty(libc::STDIN_FILENO) == 1 }
+}
+
+fn open_interactive_tty() -> Option<std::fs::File> {
+    if !stdin_is_terminal() {
+        return None;
+    }
     OpenOptions::new()
         .read(true)
         .write(true)
         .open("/dev/tty")
-        .is_ok()
+        .ok()
+}
+
+pub fn has_interactive_tty() -> bool {
+    open_interactive_tty().is_some()
 }
 
 pub unsafe fn confirm_authentication(pamh: PamHandle) -> bool {
@@ -1273,6 +1286,14 @@ mod tests {
         assert!(!confirmation_accepted(Some("hunter2")));
         assert!(!confirmation_accepted(Some("confirm")));
         assert!(!confirmation_accepted(None));
+    }
+
+    #[test]
+    fn only_the_silent_flag_silences_the_module() {
+        assert!(caller_wants_silence(PAM_SILENT));
+        assert!(caller_wants_silence(PAM_SILENT | PAM_DISALLOW_NULL_AUTHTOK));
+        assert!(!caller_wants_silence(0));
+        assert!(!caller_wants_silence(PAM_DISALLOW_NULL_AUTHTOK));
     }
 
     #[test]
