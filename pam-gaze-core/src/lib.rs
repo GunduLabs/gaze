@@ -170,13 +170,23 @@ impl Drop for TermiosGuard {
     }
 }
 
-fn replace_previous_line(writer: &mut impl Write, message: &str) -> std::io::Result<()> {
-    write!(writer, "\x1B[1A\x1B[2K\r{message}")
+/// Under `PAM_SILENT` no camera prompt was printed, so clearing the line above would erase
+/// unrelated terminal output instead of the line this message replaces.
+fn line_prefix(silent: bool) -> &'static str {
+    if silent { "\r" } else { "\x1B[1A\x1B[2K\r" }
+}
+
+fn replace_previous_line(
+    writer: &mut impl Write,
+    silent: bool,
+    message: &str,
+) -> std::io::Result<()> {
+    write!(writer, "{}{message}", line_prefix(silent))
 }
 
 fn report_face_verified_to_tty() -> Option<()> {
     let mut tty = open_interactive_tty()?;
-    replace_previous_line(&mut tty, FACE_VERIFIED).ok()?;
+    replace_previous_line(&mut tty, false, FACE_VERIFIED).ok()?;
     writeln!(tty).ok()?;
     tty.flush().ok()
 }
@@ -192,7 +202,7 @@ pub unsafe fn report_face_verified(pamh: PamHandle, silent: bool) {
     }
 }
 
-fn confirm_from_tty() -> Option<bool> {
+fn confirm_from_tty(silent: bool) -> Option<bool> {
     let mut tty = open_interactive_tty()?;
     let fd = tty.as_raw_fd();
 
@@ -211,19 +221,20 @@ fn confirm_from_tty() -> Option<bool> {
         }
 
         let _guard = TermiosGuard { fd, original };
-        replace_previous_line(&mut tty, CONFIRMATION_PROMPT).ok()?;
+        replace_previous_line(&mut tty, silent, CONFIRMATION_PROMPT).ok()?;
         tty.flush().ok()?;
 
         let mut key = [0_u8; 1];
         let read = tty.read(&mut key).ok()?;
         writeln!(tty).ok()?;
-        if read == 0 {
-            return None;
-        }
-
-        let confirmed = matches!(key[0], b'\n' | b'\r');
-        Some(confirmed)
+        Some(tty_confirmation(read, key[0]))
     }
+}
+
+/// A zero-length read is `VTIME` expiring, which is the user declining to confirm. Reporting it as
+/// "no terminal" instead would re-prompt through PAM and wait for an answer with no deadline left.
+fn tty_confirmation(read: usize, key: u8) -> bool {
+    read != 0 && matches!(key, b'\n' | b'\r')
 }
 fn stdin_is_terminal() -> bool {
     unsafe { libc::isatty(libc::STDIN_FILENO) == 1 }
@@ -244,8 +255,8 @@ pub fn has_interactive_tty() -> bool {
     open_interactive_tty().is_some()
 }
 
-pub unsafe fn confirm_authentication(pamh: PamHandle) -> bool {
-    if let Some(confirmed) = confirm_from_tty() {
+pub unsafe fn confirm_authentication(pamh: PamHandle, silent: bool) -> bool {
+    if let Some(confirmed) = confirm_from_tty(silent) {
         return confirmed;
     }
 
@@ -925,6 +936,52 @@ mod tests {
         list.iter().map(|s| s.to_string()).collect()
     }
 
+    // The escape moves up a line and clears it, so it must only run when a line was printed.
+    #[test]
+    fn a_silent_prompt_does_not_clear_the_line_above_it() {
+        assert_eq!(line_prefix(false), "\x1B[1A\x1B[2K\r");
+        assert_eq!(line_prefix(true), "\r");
+    }
+
+    #[test]
+    fn a_silent_confirmation_prompt_is_still_written() {
+        let mut out = Vec::new();
+        replace_previous_line(&mut out, true, CONFIRMATION_PROMPT).unwrap();
+        let written = String::from_utf8(out).unwrap();
+        assert!(written.contains(CONFIRMATION_PROMPT));
+        assert!(!written.contains("\x1B["));
+    }
+
+    #[test]
+    fn enter_confirms_and_any_other_key_declines() {
+        assert!(tty_confirmation(1, b'\n'));
+        assert!(tty_confirmation(1, b'\r'));
+        assert!(!tty_confirmation(1, 0x1b));
+        assert!(!tty_confirmation(1, b'x'));
+    }
+
+    // A timeout must decline outright; treating it as an absent terminal re-prompted unbounded.
+    #[test]
+    fn an_unanswered_prompt_declines_rather_than_reprompting() {
+        assert!(!tty_confirmation(0, b'\n'));
+        assert!(!tty_confirmation(0, 0));
+    }
+
+    #[test]
+    fn enter_confirms_and_any_other_key_declines() {
+        assert!(tty_confirmation(1, b'\n'));
+        assert!(tty_confirmation(1, b'\r'));
+        assert!(!tty_confirmation(1, 0x1b));
+        assert!(!tty_confirmation(1, b'x'));
+    }
+
+    // A timeout must decline outright; treating it as an absent terminal re-prompted unbounded.
+    #[test]
+    fn an_unanswered_prompt_declines_rather_than_reprompting() {
+        assert!(!tty_confirmation(0, b'\n'));
+        assert!(!tty_confirmation(0, 0));
+    }
+
     #[test]
     fn only_root_owned_unwritable_binaries_are_trusted() {
         assert!(binary_is_trusted(0, 0o755));
@@ -1300,7 +1357,7 @@ mod tests {
     fn face_verified_replaces_the_previous_terminal_prompt() {
         let mut output = Vec::new();
 
-        replace_previous_line(&mut output, FACE_VERIFIED).unwrap();
+        replace_previous_line(&mut output, false, FACE_VERIFIED).unwrap();
 
         assert_eq!(
             String::from_utf8(output).unwrap(),

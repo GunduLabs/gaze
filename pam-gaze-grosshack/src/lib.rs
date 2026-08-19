@@ -196,7 +196,7 @@ unsafe fn do_authenticate(pamh: PamHandle, flags: c_int) -> c_int {
         }
         if require_confirmation {
             // Its own conversation, on this thread, so there is nothing left to unblock.
-            return if unsafe { confirm_authentication(pamh) } {
+            return if unsafe { confirm_authentication(pamh, silent) } {
                 PAM_SUCCESS
             } else {
                 PAM_AUTH_ERR
@@ -254,7 +254,7 @@ unsafe fn do_authenticate(pamh: PamHandle, flags: c_int) -> c_int {
 
             if !is_polkit {
                 retire_prompt(&state, prompt_thread);
-                if unsafe { confirm_authentication(pamh) } {
+                if unsafe { confirm_authentication(pamh, silent) } {
                     PAM_SUCCESS
                 } else {
                     PAM_AUTH_ERR
