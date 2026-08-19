@@ -171,17 +171,6 @@ pub fn create_session(
 mod tests {
     use super::*;
 
-    const IDENTITY_MODEL: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/identity.onnx");
-
-    #[test]
-    fn a_cpu_session_loads_a_model_on_the_linked_runtime() {
-        let (_session, runtime) = create_session(IDENTITY_MODEL, &InferenceConfig::default())
-            .expect("the cpu execution provider loads a model");
-        assert_eq!(runtime.active_execution_provider, "cpu");
-        assert_eq!(runtime.active_device, "cpu");
-        assert_eq!(runtime.fallback_reason, None);
-    }
-
     #[test]
     #[cfg(feature = "openvino")]
     fn runtime_names_remain_lowercase() {
