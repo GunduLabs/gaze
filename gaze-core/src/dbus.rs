@@ -170,6 +170,10 @@ pub fn dbus_is_not_activatable(err: &zbus::Error) -> bool {
     s.contains("not activatable") || s.contains("ServiceUnknown")
 }
 
+/// Backstop for a client awaiting one verify verdict. The daemon bounds its own run well inside
+/// this, so reaching it means the daemon stopped answering rather than that the face was rejected.
+pub const VERIFY_CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
 pub async fn connect_gaze() -> zbus::Result<GazeProxy<'static>> {
     let connection = zbus::Connection::system().await?;
     GazeProxy::new(&connection).await
