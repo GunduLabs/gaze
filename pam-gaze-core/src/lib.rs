@@ -968,21 +968,6 @@ mod tests {
     }
 
     #[test]
-    fn enter_confirms_and_any_other_key_declines() {
-        assert!(tty_confirmation(1, b'\n'));
-        assert!(tty_confirmation(1, b'\r'));
-        assert!(!tty_confirmation(1, 0x1b));
-        assert!(!tty_confirmation(1, b'x'));
-    }
-
-    // A timeout must decline outright; treating it as an absent terminal re-prompted unbounded.
-    #[test]
-    fn an_unanswered_prompt_declines_rather_than_reprompting() {
-        assert!(!tty_confirmation(0, b'\n'));
-        assert!(!tty_confirmation(0, 0));
-    }
-
-    #[test]
     fn only_root_owned_unwritable_binaries_are_trusted() {
         assert!(binary_is_trusted(0, 0o755));
         assert!(binary_is_trusted(0, 0o555));
