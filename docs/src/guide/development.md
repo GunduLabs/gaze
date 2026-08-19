@@ -147,16 +147,27 @@ just build-rust-openvino
 The `openvino` Cargo feature is explicit. The build fails when that feature is
 enabled without a matching ONNX Runtime library.
 
-::: warning Keep the `api-22` feature on the `ort` dependency
+::: warning Keep the `api-21` feature on the `ort` dependency
 `gaze` and `gaze-core` depend on `ort` with `default-features = false` and
-`api-22`, which pins the ONNX Runtime C API version the binaries ask for. `ort`
+`api-21`, which pins the ONNX Runtime C API version the binaries ask for. `ort`
 defaults to the newest API its release targets, and a runtime older than that
 makes ONNX Runtime hand back a null API pointer, which `ort` turns into a panic
 during process teardown and a core dump. Anything that links a system runtime
-(Nix, Flatpak, RPM source builds, `ORT_STRATEGY=system` in CI) uses ONNX Runtime
-1.22, so an `ort` upgrade must keep the `api-22` feature rather than inherit the
-new default. `gazed` also checks the loaded runtime before touching `ort`, and
-`gaze-core`'s `inference::` tests fail against a runtime that is too old.
+(Nix, Flatpak, RPM source builds, `ORT_STRATEGY=system` in CI) can be as old as
+ONNX Runtime 1.21, so an `ort` upgrade must keep the `api-21` feature rather than
+inherit the new default. `gazed` also checks the loaded runtime before touching
+`ort`, and `gaze-core`'s `inference::` tests fail against a runtime that is too
+old.
+
+`api-21` is also the newest API level Gaze can ask for safely. From `api-22` on,
+`ort`'s session builder sets an automatic execution-provider selection policy on
+every session, which makes ONNX Runtime pick execution providers from the
+platform's hardware device list instead of installing the built-in CPU provider.
+ONNX Runtime 1.22 has no device discovery on Linux, so that list is empty and the
+selection code dereferences it unchecked and aborts the process, even though Gaze
+only ever asked for CPU inference. Gaze uses nothing that needs API 22 or newer,
+so staying on `api-21` keeps session creation on the path that installs the CPU
+provider directly.
 :::
 
 The OpenVINO-enabled binary supports Intel CPU, GPU, and NPU devices. The

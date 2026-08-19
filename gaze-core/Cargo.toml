@@ -33,7 +33,7 @@ ort = { version = "2.0.0-rc.13", optional = true, default-features = false, feat
     "download-binaries",
     "copy-dylibs",
     "tls-native",
-    "api-22",
+    "api-21",
 ] }
 zbus = "5.19.0"
 zvariant = "5.14.0"

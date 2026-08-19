@@ -35,7 +35,7 @@ ort = { version = "2.0.0-rc.13", default-features = false, features = [
     "download-binaries",
     "copy-dylibs",
     "tls-native",
-    "api-22",
+    "api-21",
 ] }
 sha2 = "0.11"
 tokio = { version = "1.53.1", features = ["full", "rt-multi-thread"] }
