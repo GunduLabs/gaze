@@ -3,7 +3,7 @@
 
 [package]
 name = "pam-gaze-grosshack"
-version = "0.2.10"
+version = "0.2.11"
 edition = "2024"
 description = "Simultaneous face and password authentication PAM module for Gaze"
 categories.workspace = true

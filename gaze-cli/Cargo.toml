@@ -3,7 +3,7 @@
 
 [package]
 name = "gaze-cli"
-version = "0.2.10"
+version = "0.2.11"
 edition = "2024"
 description = "Command-line facial authentication client for Gaze"
 categories.workspace = true
