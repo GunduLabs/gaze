@@ -43,6 +43,9 @@ const GDM_DCONF_FACE_AUTH_KEY: &str = "/org/gnome/shell/extensions/gaze/enable-f
 const CLAIM_TIMEOUT_SECS: u64 = 300;
 const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
 const VERIFY_NO_FACE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Bounds a face that stays badly framed: it refreshes the no-face deadline without ever
+/// yielding an embedding. Kept under `pam_gaze_core::CAMERA_AUTH_TIMEOUT_SECS`.
+const VERIFY_NO_USABLE_TIMEOUT: Duration = Duration::from_secs(8);
 /// Hybrid verify runs one camera at a time for single-function UVC devices (e.g. Logitech
 /// Brio). Caps the RGB phase so it yields to IR even without a match. See `verify_start`.
 const VERIFY_SERIAL_RGB_BUDGET: Duration = Duration::from_secs(4);
@@ -794,11 +797,66 @@ mod tests {
 
     #[test]
     fn watchdog_polls_faster_than_the_timeouts_it_guards() {
-        use super::{VERIFY_NO_FACE_TIMEOUT, VERIFY_TOO_DARK_TIMEOUT, VERIFY_WATCHDOG_POLL};
+        use super::{
+            VERIFY_NO_FACE_TIMEOUT, VERIFY_NO_USABLE_TIMEOUT, VERIFY_TOO_DARK_TIMEOUT,
+            VERIFY_WATCHDOG_POLL,
+        };
 
         assert!(VERIFY_WATCHDOG_POLL < VERIFY_NO_FACE_TIMEOUT);
         assert!(VERIFY_WATCHDOG_POLL < VERIFY_TOO_DARK_TIMEOUT);
+        assert!(VERIFY_WATCHDOG_POLL < VERIFY_NO_USABLE_TIMEOUT);
         assert!(!VERIFY_WATCHDOG_POLL.is_zero());
+    }
+
+    // Before the usable deadline existed this case ran forever.
+    #[test]
+    fn a_face_that_never_becomes_usable_still_hits_a_deadline() {
+        use super::{VERIFY_NO_USABLE_TIMEOUT, VerifyGiveUp, verify_give_up};
+
+        let never_stale = std::time::Duration::ZERO;
+        assert_eq!(verify_give_up(never_stale, never_stale), None);
+        assert_eq!(
+            verify_give_up(never_stale, VERIFY_NO_USABLE_TIMEOUT),
+            Some(VerifyGiveUp::NoUsableFrame)
+        );
+    }
+
+    #[test]
+    fn a_vanished_face_still_reports_the_no_face_deadline_first() {
+        use super::{
+            VERIFY_NO_FACE_TIMEOUT, VERIFY_NO_USABLE_TIMEOUT, VerifyGiveUp, verify_give_up,
+        };
+
+        assert_eq!(
+            verify_give_up(VERIFY_NO_FACE_TIMEOUT, VERIFY_NO_USABLE_TIMEOUT),
+            Some(VerifyGiveUp::NoFace)
+        );
+        assert_eq!(
+            verify_give_up(VERIFY_NO_FACE_TIMEOUT, std::time::Duration::ZERO),
+            Some(VerifyGiveUp::NoFace)
+        );
+    }
+
+    // Every status that counts as a face but carries no embedding relies on the usable deadline.
+    #[test]
+    fn framing_hints_and_ready_count_as_a_face_without_being_usable() {
+        for status in [
+            CaptureStatus::Clipped,
+            CaptureStatus::NotCentered,
+            CaptureStatus::TooFar,
+            CaptureStatus::TooClose,
+            CaptureStatus::Ready,
+        ] {
+            assert!(
+                status.indicates_face(),
+                "{status:?} refreshes the no-face deadline"
+            );
+            assert_ne!(
+                status,
+                CaptureStatus::Usable,
+                "{status:?} never reaches the embedding path in process_frame_sync"
+            );
+        }
     }
 
     #[test]
@@ -1859,6 +1917,39 @@ enum VerifyMsg {
 
 fn should_yield_rgb_to_ir(policy: &str, run_ir: bool, status: CaptureStatus) -> bool {
     run_ir && !matches!(policy, "or" | "and") && matches!(status, CaptureStatus::TooDark)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VerifyGiveUp {
+    NoFace,
+    NoUsableFrame,
+}
+
+impl VerifyGiveUp {
+    fn reason(self) -> String {
+        match self {
+            Self::NoFace => format!(
+                "giving up after {}s without a detected face",
+                VERIFY_NO_FACE_TIMEOUT.as_secs()
+            ),
+            Self::NoUsableFrame => format!(
+                "giving up after {}s without a usable frame",
+                VERIFY_NO_USABLE_TIMEOUT.as_secs()
+            ),
+        }
+    }
+}
+
+/// Whether a verify run has spent either deadline. Both are needed: `Clipped` and `Ready` refresh
+/// `since_face` and never `since_usable`, so alone they keep a run alive with nothing to decide it.
+fn verify_give_up(since_face: Duration, since_usable: Duration) -> Option<VerifyGiveUp> {
+    if since_face >= VERIFY_NO_FACE_TIMEOUT {
+        return Some(VerifyGiveUp::NoFace);
+    }
+    if since_usable >= VERIFY_NO_USABLE_TIMEOUT {
+        return Some(VerifyGiveUp::NoUsableFrame);
+    }
+    None
 }
 
 fn hybrid_auth_passed(
@@ -3887,6 +3978,7 @@ impl AuthDaemon {
             let mut rgb_attempted = false;
             let mut dark_since: Option<Instant> = None;
             let mut last_face_at = Instant::now();
+            let mut last_usable_at = Instant::now();
             let mut frames_seen: u32 = 0;
 
             let mut rgb_success_embed = None;
@@ -3943,11 +4035,8 @@ impl AuthDaemon {
                         break;
                     }
                     _ = tokio::time::sleep(VERIFY_WATCHDOG_POLL) => {
-                        if last_face_at.elapsed() >= VERIFY_NO_FACE_TIMEOUT {
-                            info!(
-                                "VerifyStart: giving up after {}s without a detected face",
-                                VERIFY_NO_FACE_TIMEOUT.as_secs()
-                            );
+                        if let Some(give_up) = verify_give_up(last_face_at.elapsed(), last_usable_at.elapsed()) {
+                            info!("VerifyStart: {}", give_up.reason());
                             stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                             let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
                             break;
@@ -3965,6 +4054,7 @@ impl AuthDaemon {
                                 // RGB and IR run serially on single-function cameras. Give
                                 // IR a fresh no-face window after RGB releases the device.
                                 last_face_at = Instant::now();
+                                last_usable_at = Instant::now();
                                 dark_since = None;
                             }
                             VerifyMsg::PhaseStarted(_) => {}
@@ -3994,6 +4084,7 @@ impl AuthDaemon {
                                 }
 
                                 if has_face {
+                                    last_usable_at = Instant::now();
                                     frames_seen += 1;
                                     if frames_seen > liveness_cfg.effective_max_frames() {
                                         info!("VerifyStart: liveness gate timed out");
@@ -4032,11 +4123,8 @@ impl AuthDaemon {
                                     dark_since = None;
                                 }
 
-                                if last_face_at.elapsed() >= VERIFY_NO_FACE_TIMEOUT {
-                                    info!(
-                                        "VerifyStart: giving up after {}s without a detected face",
-                                        VERIFY_NO_FACE_TIMEOUT.as_secs()
-                                    );
+                                if let Some(give_up) = verify_give_up(last_face_at.elapsed(), last_usable_at.elapsed()) {
+                                    info!("VerifyStart: {}", give_up.reason());
                                     stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                                     let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
                                     break;
