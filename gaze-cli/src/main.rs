@@ -769,8 +769,10 @@ async fn handle_auth(
     let mut status_tone = Tone::Info;
     let mut tick = 0_u64;
     let mut cancelled = false;
+    let mut timed_out = false;
     let mut verify_result = None;
     let mut diagnostics = Vec::new();
+    let deadline = tokio::time::Instant::now() + gaze_core::dbus::VERIFY_CLIENT_TIMEOUT;
 
     loop {
         if let Some(ref mut terminal) = terminal {
@@ -814,6 +816,10 @@ async fn handle_auth(
                     diagnostics.push(args.message().to_string());
                 }
             }
+            _ = tokio::time::sleep_until(deadline) => {
+                timed_out = true;
+                break;
+            }
             _ = tokio::time::sleep(Duration::from_millis(80)) => {
                 tick = tick.wrapping_add(1);
             }
@@ -836,6 +842,19 @@ async fn handle_auth(
         let _ = proxy.verify_stop().await;
         let _ = proxy.release().await;
         std::process::exit(130);
+    }
+
+    if timed_out {
+        let _ = proxy.verify_stop().await;
+        let _ = proxy.release().await;
+        if !silent {
+            term.write_line(&format!(
+                "{} Timed out waiting for the daemon to decide ({}ms)",
+                style("✗").red().bold(),
+                start.elapsed().as_millis()
+            ))?;
+        }
+        std::process::exit(1);
     }
 
     let mut authenticated = false;
