@@ -334,15 +334,15 @@ build asks for. It only affects builds that link a system ONNX Runtime
 (`ORT_STRATEGY=system`), such as the Nix package, the Flatpak, and RPM source
 builds; the released `.deb`, `.rpm`, and Arch packages bundle their own runtime.
 
-Gaze requires ONNX Runtime 1.22 or newer. Current builds report the mismatch and
+Gaze requires ONNX Runtime 1.21 or newer. Current builds report the mismatch and
 exit with an error instead of aborting:
 
 ```
-the ONNX Runtime library loaded at startup is version 1.21.0, which is older than the 1.22.x this build of Gaze requires
+the ONNX Runtime library loaded at startup is version 1.20.0, which is older than the 1.21.x this build of Gaze requires
 ```
 
 Update `gazed` to a current release, or build it against an ONNX Runtime that is
-at least 1.22.
+at least 1.21.
 
 ## 12. Collect useful logs before asking for help
 

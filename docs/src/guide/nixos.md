@@ -82,8 +82,8 @@ first use, exactly as on other distros.
 
 ::: warning ONNX Runtime version
 `gazed` links the `onnxruntime` package from the nixpkgs revision the flake is
-built with, and needs ONNX Runtime 1.22 or newer. Newer runtimes are fine, since
-`gazed` asks for the 1.22 API. If your nixpkgs ships something older, the daemon
+built with, and needs ONNX Runtime 1.21 or newer. Newer runtimes are fine, since
+`gazed` asks for the 1.21 API. If your nixpkgs ships something older, the daemon
 exits at startup with a message naming both versions; pin the flake's `nixpkgs`
 input to a revision with a newer `onnxruntime` instead of overriding `follows`.
 :::
