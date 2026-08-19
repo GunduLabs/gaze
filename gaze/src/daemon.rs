@@ -808,6 +808,24 @@ mod tests {
         assert!(!VERIFY_WATCHDOG_POLL.is_zero());
     }
 
+    // A backstop that fired first would report a timeout for a run the daemon had already decided.
+    #[test]
+    fn every_daemon_deadline_lands_inside_the_client_backstop() {
+        use super::{VERIFY_NO_FACE_TIMEOUT, VERIFY_NO_USABLE_TIMEOUT, VERIFY_TOO_DARK_TIMEOUT};
+
+        let backstop = gaze_core::dbus::VERIFY_CLIENT_TIMEOUT;
+        for deadline in [
+            VERIFY_NO_FACE_TIMEOUT,
+            VERIFY_NO_USABLE_TIMEOUT,
+            VERIFY_TOO_DARK_TIMEOUT,
+        ] {
+            assert!(
+                deadline < backstop,
+                "{deadline:?} must fire before {backstop:?}"
+            );
+        }
+    }
+
     // Before the usable deadline existed this case ran forever.
     #[test]
     fn a_face_that_never_becomes_usable_still_hits_a_deadline() {

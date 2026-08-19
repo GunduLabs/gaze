@@ -1390,20 +1390,33 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                     let mut text = "✗ Verification failed".to_string();
                     let mut matched_face: Option<String> = None;
 
-                    while let Some(signal) = stream.next().await {
-                        if let Ok(args) = signal.args() {
-                            let res = *args.result();
-                            if res == gaze_core::dbus::VerifyResult::VerifyMatch {
-                                text = "✓ Authentication successful".to_string();
-                                let faces = args.faces();
-                                matched_face = faces
-                                    .iter()
-                                    .find(|(_, _, _, rgb_p, _, _, ir_p)| *rgb_p || *ir_p)
-                                    .map(|(n, _, _, _, _, _, _)| n.clone());
-                            } else {
-                                text = "✗ Authentication failed".to_string();
+                    // Without a deadline of its own the button stays stuck for as long as the
+                    // daemon withholds a verdict.
+                    let deadline = glib::timeout_future(gaze_core::dbus::VERIFY_CLIENT_TIMEOUT);
+                    let mut deadline = std::pin::pin!(deadline);
+                    loop {
+                        match futures::future::select(stream.next(), deadline.as_mut()).await {
+                            futures::future::Either::Left((Some(signal), _)) => {
+                                let Ok(args) = signal.args() else { continue };
+                                let res = *args.result();
+                                if res == gaze_core::dbus::VerifyResult::VerifyMatch {
+                                    text = "✓ Authentication successful".to_string();
+                                    let faces = args.faces();
+                                    matched_face = faces
+                                        .iter()
+                                        .find(|(_, _, _, rgb_p, _, _, ir_p)| *rgb_p || *ir_p)
+                                        .map(|(n, _, _, _, _, _, _)| n.clone());
+                                } else {
+                                    text = "✗ Authentication failed".to_string();
+                                }
+                                break;
                             }
-                            break;
+                            futures::future::Either::Left((None, _)) => break,
+                            futures::future::Either::Right(_) => {
+                                let _ = proxy.verify_stop().await;
+                                text = "✗ Verification timed out".to_string();
+                                break;
+                            }
                         }
                     }
 
