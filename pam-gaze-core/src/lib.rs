@@ -217,13 +217,14 @@ fn confirm_from_tty() -> Option<bool> {
         let mut key = [0_u8; 1];
         let read = tty.read(&mut key).ok()?;
         writeln!(tty).ok()?;
-        if read == 0 {
-            return None;
-        }
-
-        let confirmed = matches!(key[0], b'\n' | b'\r');
-        Some(confirmed)
+        Some(tty_confirmation(read, key[0]))
     }
+}
+
+/// A zero-length read is `VTIME` expiring, which is the user declining to confirm. Reporting it as
+/// "no terminal" instead would re-prompt through PAM and wait for an answer with no deadline left.
+fn tty_confirmation(read: usize, key: u8) -> bool {
+    read != 0 && matches!(key, b'\n' | b'\r')
 }
 fn stdin_is_terminal() -> bool {
     unsafe { libc::isatty(libc::STDIN_FILENO) == 1 }
@@ -923,6 +924,21 @@ mod tests {
 
     fn names(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn enter_confirms_and_any_other_key_declines() {
+        assert!(tty_confirmation(1, b'\n'));
+        assert!(tty_confirmation(1, b'\r'));
+        assert!(!tty_confirmation(1, 0x1b));
+        assert!(!tty_confirmation(1, b'x'));
+    }
+
+    // A timeout must decline outright; treating it as an absent terminal re-prompted unbounded.
+    #[test]
+    fn an_unanswered_prompt_declines_rather_than_reprompting() {
+        assert!(!tty_confirmation(0, b'\n'));
+        assert!(!tty_confirmation(0, 0));
     }
 
     #[test]
