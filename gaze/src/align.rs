@@ -116,18 +116,32 @@ pub fn warp_affine(img: &RgbImage, transform: &Matrix3<f32>, width: u32, height:
     out
 }
 
-pub fn mat_to_rgb(mat: &opencv::core::Mat) -> anyhow::Result<image::RgbImage> {
-    use opencv::prelude::*;
-    let mut img_bytes = Vec::new();
+/// Rejects anything that is not a tightly packed 8-bit 3-channel buffer. A strided or
+/// narrower `Mat` would otherwise be read past its allocation.
+pub fn mat_to_rgb(
+    mat: &impl opencv::prelude::MatTraitConstManual,
+) -> anyhow::Result<image::RgbImage> {
     let sz = mat.size()?;
-    let total_bytes = (sz.width * sz.height * 3) as usize;
-    img_bytes.resize(total_bytes, 0);
-    unsafe {
-        std::ptr::copy_nonoverlapping(mat.data(), img_bytes.as_mut_ptr(), total_bytes);
-    }
-    let img = image::RgbImage::from_raw(sz.width as u32, sz.height as u32, img_bytes)
-        .ok_or_else(|| anyhow::anyhow!("Failed to create RgbImage from Mat raw bytes"))?;
-    Ok(img)
+    anyhow::ensure!(
+        mat.typ() == opencv::core::CV_8UC3,
+        "expected an 8-bit 3-channel Mat, got type {}",
+        mat.typ()
+    );
+    anyhow::ensure!(mat.is_continuous(), "Mat rows are not tightly packed");
+
+    let bytes = mat.data_bytes()?;
+    let expected = (sz.width as usize)
+        .checked_mul(sz.height as usize)
+        .and_then(|pixels| pixels.checked_mul(3))
+        .ok_or_else(|| anyhow::anyhow!("Mat dimensions overflow a byte count"))?;
+    anyhow::ensure!(
+        bytes.len() == expected,
+        "Mat holds {} bytes, expected {expected}",
+        bytes.len()
+    );
+
+    image::RgbImage::from_raw(sz.width as u32, sz.height as u32, bytes.to_vec())
+        .ok_or_else(|| anyhow::anyhow!("Failed to create RgbImage from Mat raw bytes"))
 }
 
 pub fn align_face(
@@ -149,6 +163,38 @@ mod tests {
     use super::*;
     use image::Rgb;
     use nalgebra::Matrix3;
+    use opencv::core::{CV_8UC1, CV_8UC3, Mat, Rect, Scalar};
+    use opencv::prelude::*;
+
+    #[test]
+    fn a_packed_bgr_mat_converts_to_an_image_of_the_same_size() {
+        let mat = Mat::new_rows_cols_with_default(4, 6, CV_8UC3, Scalar::all(200.0)).unwrap();
+        let img = mat_to_rgb(&mat).unwrap();
+        assert_eq!((img.width(), img.height()), (6, 4));
+        assert!(img.pixels().all(|p| p.0 == [200, 200, 200]));
+    }
+
+    // A region of interest keeps the parent's stride, so a packed read would run off the end.
+    #[test]
+    fn a_strided_region_of_interest_is_refused() {
+        let parent = Mat::new_rows_cols_with_default(40, 40, CV_8UC3, Scalar::all(0.0)).unwrap();
+        let roi = Mat::roi(&parent, Rect::new(0, 0, 8, 8)).unwrap();
+        assert!(!roi.is_continuous());
+        assert!(mat_to_rgb(&roi).is_err());
+        // The same pixels, copied into their own packed buffer, are accepted.
+        assert!(mat_to_rgb(&roi.clone_pointee()).is_ok());
+    }
+
+    #[test]
+    fn a_single_channel_mat_is_refused() {
+        let gray = Mat::new_rows_cols_with_default(4, 6, CV_8UC1, Scalar::all(120.0)).unwrap();
+        assert!(mat_to_rgb(&gray).is_err());
+    }
+
+    #[test]
+    fn an_empty_mat_is_refused() {
+        assert!(mat_to_rgb(&Mat::default()).is_err());
+    }
 
     fn assert_close(actual: f32, expected: f32) {
         assert!(
