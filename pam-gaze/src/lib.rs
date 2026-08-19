@@ -204,7 +204,7 @@ unsafe fn do_authenticate(pamh: PamHandle, flags: c_int) -> c_int {
     }
 
     if has_interactive_tty() {
-        return if unsafe { confirm_authentication(pamh) } {
+        return if unsafe { confirm_authentication(pamh, silent) } {
             PAM_SUCCESS
         } else {
             PAM_AUTH_ERR
