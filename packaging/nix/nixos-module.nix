@@ -241,17 +241,24 @@ in
           config.rules.auth.gaze = lib.mkIf config.gaze.enable (
             let
               authRules = config.rules.auth;
-              # Ahead of both fingerprint and password: nixpkgs auto-assigns
-              # these orders, so offset from them instead of hardcoding a value.
-              fallbackOrder = lib.min authRules.unix.order (
-                authRules.fprintd.order or authRules.unix.order
-              );
+              # Neither rule is guaranteed to exist for every PAM service (e.g.
+              # plasmalogin defines neither), so `or null` avoids a missing-attribute error.
+              presentOrders = lib.filter (order: order != null) [
+                (authRules.unix.order or null)
+                (authRules.fprintd.order or null)
+              ];
+              fallbackOrder =
+                if presentOrders == [ ] then
+                  null
+                else
+                  (lib.foldl' lib.min (lib.head presentOrders) presentOrders) - 10;
+              resolvedOrder = if config.gaze.order != null then config.gaze.order else fallbackOrder;
             in
             {
               control = config.gaze.control;
               modulePath = pamModuleFor config.gaze;
-              order = if config.gaze.order != null then config.gaze.order else fallbackOrder - 10;
             }
+            // lib.optionalAttrs (resolvedOrder != null) { order = resolvedOrder; }
           );
         }
       )
