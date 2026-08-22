@@ -240,7 +240,11 @@ fn tty_confirmation(read: usize, key: u8) -> bool {
 // redirected, e.g. `echo 1 | sudo tee /tmp/1`; opening /dev/tty directly is how
 // sudo itself finds the terminal to prompt on.
 fn open_interactive_tty() -> Option<std::fs::File> {
-    OpenOptions::new().read(true).write(true).open("/dev/tty").ok()
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .ok()
 }
 
 pub fn has_interactive_tty() -> bool {
