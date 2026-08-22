@@ -243,22 +243,21 @@ in
               authRules = config.rules.auth;
               # Neither rule is guaranteed to exist for every PAM service (e.g.
               # plasmalogin defines neither), so `or null` avoids a missing-attribute error.
-              presentOrders = lib.filter (order: order != null) [
-                (authRules.unix.order or null)
-                (authRules.fprintd.order or null)
-              ];
+              unixOrder = authRules.unix.order or null;
+              fprintdOrder = authRules.fprintd.order or null;
               fallbackOrder =
-                if presentOrders == [ ] then
-                  null
+                if unixOrder == null then
+                  (if fprintdOrder == null then 0 else fprintdOrder)
+                else if fprintdOrder == null then
+                  unixOrder
                 else
-                  (lib.foldl' lib.min (lib.head presentOrders) presentOrders) - 10;
-              resolvedOrder = if config.gaze.order != null then config.gaze.order else fallbackOrder;
+                  lib.min unixOrder fprintdOrder;
             in
             {
               control = config.gaze.control;
               modulePath = pamModuleFor config.gaze;
+              order = if config.gaze.order != null then config.gaze.order else fallbackOrder - 10;
             }
-            // lib.optionalAttrs (resolvedOrder != null) { order = resolvedOrder; }
           );
         }
       )
