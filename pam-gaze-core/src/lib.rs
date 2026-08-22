@@ -236,19 +236,11 @@ fn confirm_from_tty(silent: bool) -> Option<bool> {
 fn tty_confirmation(read: usize, key: u8) -> bool {
     read != 0 && matches!(key, b'\n' | b'\r')
 }
-fn stdin_is_terminal() -> bool {
-    unsafe { libc::isatty(libc::STDIN_FILENO) == 1 }
-}
-
+// isatty(STDIN_FILENO) would miss a real controlling terminal whenever stdin is
+// redirected, e.g. `echo 1 | sudo tee /tmp/1`; opening /dev/tty directly is how
+// sudo itself finds the terminal to prompt on.
 fn open_interactive_tty() -> Option<std::fs::File> {
-    if !stdin_is_terminal() {
-        return None;
-    }
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")
-        .ok()
+    OpenOptions::new().read(true).write(true).open("/dev/tty").ok()
 }
 
 pub fn has_interactive_tty() -> bool {
