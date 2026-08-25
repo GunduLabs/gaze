@@ -457,6 +457,11 @@ async fn run_config_wizard(
         .default(config.auth.abort_if_lid_closed)
         .interact()?;
 
+    config.auth.abort_before_first_resume = Confirm::with_theme(&theme)
+        .with_prompt("Abort face auth until the system has suspended and resumed once")
+        .default(config.auth.abort_before_first_resume)
+        .interact()?;
+
     config.auth.require_confirmation_lock_screen = Confirm::with_theme(&theme)
         .with_prompt(
             "Require confirmation (press Enter/Authenticate/OK) on the lock screen after face matches",
@@ -1687,6 +1692,11 @@ async fn run() -> anyhow::Result<()> {
                     "{} {}",
                     style("auth.abort_if_lid_closed:").bold(),
                     config.auth.abort_if_lid_closed
+                );
+                println!(
+                    "{} {}",
+                    style("auth.abort_before_first_resume:").bold(),
+                    config.auth.abort_before_first_resume
                 );
                 println!(
                     "{} {}",

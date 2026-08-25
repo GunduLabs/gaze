@@ -50,6 +50,11 @@ dark_luma_threshold = 20
 [auth]
 abort_if_ssh = true
 abort_if_lid_closed = true
+# Skip face auth until the machine has suspended and resumed at least once. The first
+# unlock after boot then falls through to the password, which is what unlocks the
+# session keyring on GNOME; every unlock after a suspend uses your face. Reset whenever
+# gazed restarts.
+abort_before_first_resume = false
 require_confirmation_lock_screen = false
 require_confirmation_elevation = false
 # Delay face auth by this many milliseconds on the first unlock after resuming from

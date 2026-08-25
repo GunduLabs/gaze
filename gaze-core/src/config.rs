@@ -732,6 +732,7 @@ fn default_start_delay_scope() -> String {
 pub struct AuthConfig {
     pub abort_if_ssh: bool,
     pub abort_if_lid_closed: bool,
+    pub abort_before_first_resume: bool,
     pub require_confirmation_lock_screen: bool,
     pub require_confirmation_elevation: bool,
     pub resume_grace_ms: u64,
@@ -745,6 +746,8 @@ struct AuthConfigFile {
     abort_if_ssh: bool,
     #[serde(default = "default_true")]
     abort_if_lid_closed: bool,
+    #[serde(default = "default_false")]
+    abort_before_first_resume: bool,
     #[serde(default)]
     require_confirmation: Option<bool>,
     #[serde(default)]
@@ -770,6 +773,7 @@ impl<'de> Deserialize<'de> for AuthConfig {
         Ok(Self {
             abort_if_ssh: file.abort_if_ssh,
             abort_if_lid_closed: file.abort_if_lid_closed,
+            abort_before_first_resume: file.abort_before_first_resume,
             require_confirmation_lock_screen: file
                 .require_confirmation_lock_screen
                 .unwrap_or(legacy),
@@ -918,6 +922,7 @@ impl Default for AuthConfig {
         Self {
             abort_if_ssh: true,
             abort_if_lid_closed: true,
+            abort_before_first_resume: false,
             require_confirmation_lock_screen: false,
             require_confirmation_elevation: false,
             resume_grace_ms: default_resume_grace_ms(),
@@ -1632,10 +1637,10 @@ mod tests {
     #[test]
     fn the_dbus_signature_is_unchanged() {
         use zvariant::Type;
-        assert_eq!(AuthConfig::SIGNATURE.to_string(), "(bbbbtts)");
+        assert_eq!(AuthConfig::SIGNATURE.to_string(), "(bbbbbtts)");
         assert_eq!(
             Config::SIGNATURE.to_string(),
-            "((ss)(sssdds)(ssby)(bbbbtts)(ud)(bdu)(b))"
+            "((ss)(sssdds)(ssbys)(bbbbbtts)(ud)(bdu)(b))"
         );
     }
 
@@ -1780,6 +1785,7 @@ mod tests {
         assert_eq!(config.cameras.parallel_capture(), "never");
         assert!(config.auth.abort_if_ssh);
         assert!(config.auth.abort_if_lid_closed);
+        assert!(!config.auth.abort_before_first_resume);
         assert_eq!(config.enrollment.max_templates, 2);
         assert_eq!(
             config.enrollment.min_face_size_ratio,
@@ -1808,6 +1814,7 @@ mod tests {
             auth: AuthConfig {
                 abort_if_ssh: true,
                 abort_if_lid_closed: false,
+                abort_before_first_resume: true,
                 require_confirmation_lock_screen: true,
                 require_confirmation_elevation: true,
                 resume_grace_ms: 3000,
@@ -1848,6 +1855,7 @@ mod tests {
         assert_eq!(loaded.cameras.parallel_capture(), "auto");
         assert!(loaded.auth.abort_if_ssh);
         assert!(!loaded.auth.abort_if_lid_closed);
+        assert!(loaded.auth.abort_before_first_resume);
         assert!(loaded.auth.require_confirmation_lock_screen);
         assert!(loaded.auth.require_confirmation_elevation);
         assert_eq!(loaded.auth.resume_grace_ms, 3000);
@@ -1909,6 +1917,7 @@ mod tests {
         assert_eq!(config.cameras.parallel_capture(), "never");
         assert!(config.auth.abort_if_ssh);
         assert!(config.auth.abort_if_lid_closed);
+        assert!(!config.auth.abort_before_first_resume);
         assert!(!config.auth.require_confirmation_lock_screen);
         assert!(!config.auth.require_confirmation_elevation);
         assert_eq!(config.auth.start_delay_ms, 0);

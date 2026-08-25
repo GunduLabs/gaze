@@ -242,10 +242,12 @@ pub struct AuthDaemon {
     pub hybrid_policy: Arc<Mutex<String>>,
     pub abort_if_ssh: Arc<Mutex<bool>>,
     pub abort_if_lid_closed: Arc<Mutex<bool>>,
+    pub abort_before_first_resume: Arc<Mutex<bool>>,
     pub claim_state: ClaimStateHandle,
     pub active_cancel: ActiveCancelHandle,
     pub active_extensions: Arc<Mutex<std::collections::HashMap<u32, bool>>>,
     pub resume_pending: Arc<AtomicBool>,
+    pub resume_seen: Arc<AtomicBool>,
     pub lock_epochs: LockEpochs,
     pub benchmark_running: Arc<AtomicBool>,
     pub last_good_config: Arc<Mutex<Config>>,
@@ -479,7 +481,20 @@ impl AuthDaemon {
         Self::is_lid_closed_at(std::path::Path::new("/proc/acpi/button/lid"))
     }
 
+    fn resume_gate_blocks(abort_before_first_resume: bool, resume_seen: bool) -> bool {
+        abort_before_first_resume && !resume_seen
+    }
+
     async fn ensure_auth_not_aborted(&self, header: &Header<'_>) -> fdo::Result<()> {
+        let abort_before_first_resume = *self.abort_before_first_resume.lock().await;
+        if Self::resume_gate_blocks(
+            abort_before_first_resume,
+            self.resume_seen.load(Ordering::SeqCst),
+        ) {
+            warn!("No suspend/resume since boot, aborting face auth");
+            return Err(fdo::Error::Failed("no suspend/resume since boot".into()));
+        }
+
         let abort_if_ssh = *self.abort_if_ssh.lock().await;
         if abort_if_ssh {
             let caller_pid = Self::caller_pid(header).await.ok();
@@ -771,6 +786,14 @@ mod tests {
             class: class.to_string(),
             path: "/org/freedesktop/login1/session/_32".to_string(),
         }
+    }
+
+    #[test]
+    fn the_resume_gate_only_blocks_before_the_first_resume() {
+        assert!(AuthDaemon::resume_gate_blocks(true, false));
+        assert!(!AuthDaemon::resume_gate_blocks(true, true));
+        assert!(!AuthDaemon::resume_gate_blocks(false, false));
+        assert!(!AuthDaemon::resume_gate_blocks(false, true));
     }
 
     #[test]
@@ -1870,7 +1893,11 @@ async fn prepare_for_sleep_stream(conn: &zbus::Connection) -> zbus::Result<zbus:
     zbus::MessageStream::for_match_rule(rule, conn, None).await
 }
 
-pub async fn watch_resume(conn: zbus::Connection, resume_pending: Arc<AtomicBool>) {
+pub async fn watch_resume(
+    conn: zbus::Connection,
+    resume_pending: Arc<AtomicBool>,
+    resume_seen: Arc<AtomicBool>,
+) {
     let mut stream = match prepare_for_sleep_stream(&conn).await {
         Ok(stream) => stream,
         Err(e) => {
@@ -1882,6 +1909,7 @@ pub async fn watch_resume(conn: zbus::Connection, resume_pending: Arc<AtomicBool
     while let Some(Ok(msg)) = stream.next().await {
         if let Ok(false) = msg.body().deserialize::<bool>() {
             resume_pending.store(true, Ordering::SeqCst);
+            resume_seen.store(true, Ordering::SeqCst);
         }
     }
 }
@@ -3409,6 +3437,9 @@ impl AuthDaemon {
 
         let mut abort_if_lid_closed = self.abort_if_lid_closed.lock().await;
         *abort_if_lid_closed = new_config.auth.abort_if_lid_closed;
+
+        let mut abort_before_first_resume = self.abort_before_first_resume.lock().await;
+        *abort_before_first_resume = new_config.auth.abort_before_first_resume;
 
         {
             let mut db = self.db.lock().await;

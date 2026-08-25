@@ -168,6 +168,7 @@ async fn main() -> anyhow::Result<()> {
     let sources = gaze_core::camera::resolve_configured_sources(&config.cameras);
 
     let resume_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let resume_seen = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let lock_epochs: daemon::LockEpochs = Arc::new(Mutex::new(std::collections::HashMap::new()));
     let claim_state: daemon::ClaimStateHandle = Arc::new(Mutex::new(None));
     let active_cancel: daemon::ActiveCancelHandle = Arc::new(Mutex::new(None));
@@ -189,10 +190,12 @@ async fn main() -> anyhow::Result<()> {
         hybrid_policy: Arc::new(Mutex::new(security.hybrid_policy().to_string())),
         abort_if_ssh: Arc::new(Mutex::new(config.auth.abort_if_ssh)),
         abort_if_lid_closed: Arc::new(Mutex::new(config.auth.abort_if_lid_closed)),
+        abort_before_first_resume: Arc::new(Mutex::new(config.auth.abort_before_first_resume)),
         claim_state: claim_state.clone(),
         active_cancel: active_cancel.clone(),
         active_extensions: Arc::new(Mutex::new(std::collections::HashMap::new())),
         resume_pending: resume_pending.clone(),
+        resume_seen: resume_seen.clone(),
         lock_epochs: lock_epochs.clone(),
         benchmark_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         last_good_config: Arc::new(Mutex::new(config.clone())),
@@ -206,7 +209,11 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .await?;
 
-    tokio::spawn(daemon::watch_resume(conn.clone(), resume_pending));
+    tokio::spawn(daemon::watch_resume(
+        conn.clone(),
+        resume_pending,
+        resume_seen,
+    ));
     tokio::spawn(daemon::watch_session_locks(conn.clone(), lock_epochs));
 
     // No client can claim before the well-known name exists, so subscribing here is what makes
