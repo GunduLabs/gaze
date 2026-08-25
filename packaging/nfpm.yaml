@@ -31,21 +31,33 @@ contents:
   - src: "packaging/config/com.gundulabs.Gaze.conf"
     dst: "/etc/dbus-1/system.d/com.gundulabs.Gaze.conf"
     type: "config|noreplace"
+    file_info:
+      mode: 0644
   - src: "packaging/config/com.gundulabs.gaze.policy"
     dst: "/usr/share/polkit-1/actions/com.gundulabs.gaze.policy"
+    file_info:
+      mode: 0644
   - src: "packaging/config/gazed.service"
     dst: "/usr/lib/systemd/system/gazed.service"
+    file_info:
+      mode: 0644
   # Lets a greeter running as xdm_t open the camera; both the GNOME and KDE
   # packages load it, so the base package is the one place that ships it.
   - src: "dist/selinux/gaze-gdm-camera.pp"
     dst: "/usr/share/gaze/gaze-gdm-camera.pp"
     packager: rpm
+    file_info:
+      mode: 0644
   - src: "target/release/libpam_gaze.so"
     dst: "/lib/${MULTIARCH}/security/pam_gaze.so"
     packager: deb
+    file_info:
+      mode: 0755
   - src: "target/release/libpam_gaze_grosshack.so"
     dst: "/lib/${MULTIARCH}/security/pam_gaze_grosshack.so"
     packager: deb
+    file_info:
+      mode: 0755
   # Ubuntu 26.04's libpam searches /usr/lib/security instead of the
   # multiarch directory used by older suites, so expose both paths.
   - src: "/lib/${MULTIARCH}/security/pam_gaze.so"
@@ -59,24 +71,38 @@ contents:
   - src: "target/release/libpam_gaze.so"
     dst: "/usr/lib64/security/pam_gaze.so"
     packager: rpm
+    file_info:
+      mode: 0755
   - src: "target/release/libpam_gaze_grosshack.so"
     dst: "/usr/lib64/security/pam_gaze_grosshack.so"
     packager: rpm
+    file_info:
+      mode: 0755
   - src: "target/release/libpam_gaze.so"
     dst: "/usr/lib/security/pam_gaze.so"
     packager: archlinux
+    file_info:
+      mode: 0755
   - src: "target/release/libpam_gaze_grosshack.so"
     dst: "/usr/lib/security/pam_gaze_grosshack.so"
     packager: archlinux
+    file_info:
+      mode: 0755
   - src: "packaging/pam/gaze"
     dst: "/usr/share/pam-configs/"
     packager: deb
+    file_info:
+      mode: 0644
   - src: "packaging/pam/gaze-simultaneous"
     dst: "/usr/share/pam-configs/"
     packager: deb
+    file_info:
+      mode: 0644
   - src: "packaging/authselect/custom/gaze/"
     dst: "/usr/share/authselect/vendor/gaze/"
     packager: rpm
+    file_info:
+      mode: 0644
 
 deb:
   signature:

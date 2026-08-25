@@ -21,10 +21,16 @@ contents:
       mode: 0755
   - src: "packaging/gui/com.gundulabs.Gaze.desktop"
     dst: "/usr/share/applications/com.gundulabs.Gaze.desktop"
+    file_info:
+      mode: 0644
   - src: "packaging/gui/com.gundulabs.Gaze.svg"
     dst: "/usr/share/icons/hicolor/scalable/apps/com.gundulabs.Gaze.svg"
+    file_info:
+      mode: 0644
   - src: "packaging/gui/com.gundulabs.Gaze.metainfo.xml"
     dst: "/usr/share/metainfo/com.gundulabs.Gaze.metainfo.xml"
+    file_info:
+      mode: 0644
 
 deb:
   signature:

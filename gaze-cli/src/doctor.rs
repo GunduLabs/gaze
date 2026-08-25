@@ -49,6 +49,15 @@ const SELINUX_ENFORCE_PATH: &str = "/sys/fs/selinux/enforce";
 const GDM_SELINUX_MODULE: &str = "gaze-gdm-camera";
 const GDM_SELINUX_POLICY_PATH: &str = "/usr/share/gaze/gaze-gdm-camera.pp";
 const TPM_DEVICES: [&str; 2] = ["/dev/tpmrm0", "/dev/tpm0"];
+/// Files that decide what runs as root or who may talk to the daemon. A writable entry here
+/// is a path to root, so they are held to the same ownership rule as the PAM stack.
+const PRIVILEGED_FILES: [&str; 5] = [
+    "/usr/lib/systemd/system/gazed.service",
+    "/lib/systemd/system/gazed.service",
+    "/etc/dbus-1/system.d/com.gundulabs.Gaze.conf",
+    "/usr/share/dbus-1/system.d/com.gundulabs.Gaze.conf",
+    "/usr/share/polkit-1/actions/com.gundulabs.gaze.policy",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Level {
@@ -148,6 +157,7 @@ pub async fn run(username: &str, benchmark: bool) -> anyhow::Result<bool> {
     check_systemd(&mut report);
     let config = check_config(&mut report);
     check_pam(&mut report);
+    check_privileged_files(&mut report);
     check_desktop_integration(&mut report);
     check_tpm(&mut report, config.as_ref());
     check_daemon(&mut report, username, config.as_ref(), benchmark).await;
@@ -761,15 +771,65 @@ fn pam_files() -> Vec<(PathBuf, String)> {
         .collect()
 }
 
+fn ownership_is_unsafe(uid: u32, mode: u32) -> bool {
+    uid != 0 || mode & 0o022 != 0
+}
+
 fn insecurely_owned<'a>(paths: impl IntoIterator<Item = &'a PathBuf>) -> Vec<String> {
     paths
         .into_iter()
         .filter_map(|path| {
             let metadata = fs::metadata(path).ok()?;
-            (metadata.uid() != 0 || metadata.mode() & 0o022 != 0)
-                .then(|| path.display().to_string())
+            ownership_is_unsafe(metadata.uid(), metadata.mode()).then(|| path.display().to_string())
         })
         .collect()
+}
+
+/// `/lib` is a symlink to `/usr/lib` on merged-usr systems, so the same unit file appears
+/// under both prefixes; report it once, under the name it was first listed with.
+fn dedup_by_target(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen = std::collections::BTreeSet::new();
+    paths
+        .into_iter()
+        .filter(|path| {
+            let target = fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+            seen.insert(target)
+        })
+        .collect()
+}
+
+fn installed_privileged_files() -> Vec<PathBuf> {
+    dedup_by_target(
+        PRIVILEGED_FILES
+            .iter()
+            .map(PathBuf::from)
+            .filter(|path| path.exists())
+            .collect(),
+    )
+}
+
+fn check_privileged_files(report: &mut Report) {
+    let files = installed_privileged_files();
+    if files.is_empty() {
+        return;
+    }
+
+    let writable = insecurely_owned(&files);
+    if writable.is_empty() {
+        report.pass(
+            "Service file permissions",
+            "the systemd unit, DBus policy, and polkit action are root-owned and not writable by group or others",
+        );
+    } else {
+        report.error(
+            "Service file permissions",
+            format!(
+                "anyone in the owning group can make gazed run their code or grant themselves access: {}",
+                writable.join(", ")
+            ),
+            "Run `sudo chown root:root <file>` and `sudo chmod 644 <file>` on each, or restore them from the package manager.",
+        );
+    }
 }
 
 fn find_pam_references() -> Vec<PathBuf> {
@@ -1829,6 +1889,70 @@ mod tests {
         assert!(
             !extensions_include("['gaze-clock-diag@gundulabs.com']", uuid),
             "a different extension sharing the domain must not match"
+        );
+    }
+
+    #[test]
+    fn root_owned_and_unwritable_is_the_only_safe_ownership() {
+        assert!(!ownership_is_unsafe(0, 0o644));
+        assert!(!ownership_is_unsafe(0, 0o755));
+        assert!(!ownership_is_unsafe(0, 0o600));
+    }
+
+    #[test]
+    fn group_or_world_writable_privileged_files_are_rejected() {
+        assert!(ownership_is_unsafe(0, 0o664), "group-writable");
+        assert!(ownership_is_unsafe(0, 0o666), "world-writable");
+        assert!(ownership_is_unsafe(0, 0o646), "other-writable");
+        assert!(ownership_is_unsafe(1000, 0o644), "not owned by root");
+    }
+
+    #[test]
+    fn the_privileged_file_list_covers_every_route_to_root() {
+        for needle in [
+            "systemd/system/gazed.service",
+            "dbus-1/system.d/com.gundulabs.Gaze.conf",
+            "polkit-1/actions/com.gundulabs.gaze.policy",
+        ] {
+            assert!(
+                PRIVILEGED_FILES.iter().any(|path| path.contains(needle)),
+                "{needle} is not checked"
+            );
+        }
+    }
+
+    #[test]
+    fn absent_privileged_files_are_not_reported() {
+        assert!(
+            installed_privileged_files()
+                .iter()
+                .all(|path| path.exists())
+        );
+    }
+
+    #[test]
+    fn two_spellings_of_one_directory_collapse_to_the_first() {
+        let aliased = dedup_by_target(vec![
+            PathBuf::from("/usr/lib"),
+            PathBuf::from("/usr/./lib"),
+            PathBuf::from("/usr/lib/../lib"),
+        ]);
+        assert_eq!(aliased, vec![PathBuf::from("/usr/lib")]);
+    }
+
+    #[test]
+    fn paths_that_do_not_resolve_are_deduplicated_literally() {
+        let distinct = dedup_by_target(vec![
+            PathBuf::from("/gaze-doctor-absent-a"),
+            PathBuf::from("/gaze-doctor-absent-b"),
+            PathBuf::from("/gaze-doctor-absent-a"),
+        ]);
+        assert_eq!(
+            distinct,
+            vec![
+                PathBuf::from("/gaze-doctor-absent-a"),
+                PathBuf::from("/gaze-doctor-absent-b")
+            ]
         );
     }
 
