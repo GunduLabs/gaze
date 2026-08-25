@@ -61,7 +61,7 @@ impl CameraFeed {
                 // GTK's R8g8b8 texture format expects RGB, so swap each pixel.
 
                 let mut rgb = bytes;
-                for chunk in rgb.chunks_exact_mut(3) {
+                for chunk in rgb.as_chunks_mut::<3>().0 {
                     chunk.swap(0, 2);
                 }
 

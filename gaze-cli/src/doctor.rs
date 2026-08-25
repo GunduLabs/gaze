@@ -741,9 +741,9 @@ fn pam_files() -> Vec<(PathBuf, String)> {
         .collect()
 }
 
-fn insecurely_owned(paths: &[PathBuf]) -> Vec<String> {
+fn insecurely_owned<'a>(paths: impl IntoIterator<Item = &'a PathBuf>) -> Vec<String> {
     paths
-        .iter()
+        .into_iter()
         .filter_map(|path| {
             let metadata = fs::metadata(path).ok()?;
             (metadata.uid() != 0 || metadata.mode() & 0o022 != 0)
