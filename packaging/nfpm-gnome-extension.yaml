@@ -17,29 +17,47 @@ license: "GPL-3.0-or-later"
 contents:
   - src: "gnome-shell-extension/metadata.json"
     dst: "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/metadata.json"
+    file_info:
+      mode: 0644
   - src: "gnome-shell-extension/extension.js"
     dst: "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/extension.js"
+    file_info:
+      mode: 0644
   - src: "gnome-shell-extension/prefs.js"
     dst: "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/prefs.js"
+    file_info:
+      mode: 0644
   - src: "packaging/config/org.gnome.shell.extensions.gaze.gschema.xml"
     dst: "/usr/share/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml"
+    file_info:
+      mode: 0644
   - src: "packaging/gdm/00-gaze-defaults"
     dst: "/etc/dconf/db/gdm.d/00-gaze-defaults"
     type: "config|noreplace"
+    file_info:
+      mode: 0644
   - src: "packaging/gdm/profile"
     dst: "/usr/share/gaze/dconf-profile-gdm"
+    file_info:
+      mode: 0644
   - src: "packaging/pam/gdm-face"
     dst: "/etc/pam.d/gdm-face"
     type: "config|noreplace"
     packager: rpm
+    file_info:
+      mode: 0644
   - src: "packaging/pam/gdm-face.arch"
     dst: "/etc/pam.d/gdm-face"
     type: "config|noreplace"
     packager: archlinux
+    file_info:
+      mode: 0644
   - src: "packaging/pam/gdm-face.deb"
     dst: "/etc/pam.d/gdm-face"
     type: "config|noreplace"
     packager: deb
+    file_info:
+      mode: 0644
 
 deb:
   signature:

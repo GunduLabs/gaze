@@ -20,6 +20,8 @@ contents:
   # System Settings scans this directory and launches the entry's Exec.
   - src: "packaging/kde/gaze-face-unlock.desktop"
     dst: "/usr/share/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop"
+    file_info:
+      mode: 0644
 
 deb:
   signature:
