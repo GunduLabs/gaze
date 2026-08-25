@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{info, warn};
 
 use crate::config::{CameraConfig, DEFAULT_RGB_CAMERA};
-use crate::ir::devices::{find_device, usb_ids_of};
+use crate::ir::devices::{camera_function_of, find_device, usb_ids_of};
 
 const REALTEK_IR_YUY2_WIDTH: u32 = 640;
 const REALTEK_IR_YUY2_HEIGHT: u32 = 480;
@@ -38,6 +38,7 @@ pub struct ConfiguredCameraSources {
     pub rgb: String,
     pub ir: String,
     pub ir_node: String,
+    pub serial_capture: bool,
 }
 
 pub fn resolve_ir_source(cameras: &CameraConfig) -> Option<(String, String)> {
@@ -62,7 +63,62 @@ pub fn resolve_rgb_source(cameras: &CameraConfig) -> Option<String> {
 pub fn resolve_configured_sources(cameras: &CameraConfig) -> ConfiguredCameraSources {
     let rgb = resolve_rgb_source(cameras).unwrap_or_default();
     let (ir, ir_node) = resolve_ir_source(cameras).unwrap_or_default();
-    ConfiguredCameraSources { rgb, ir, ir_node }
+    let serial_capture = match cameras.parallel_capture() {
+        "always" => false,
+        "auto" => {
+            let rgb_node = resolve_node_for(&rgb, true);
+            capture_must_serialize(rgb_node.as_deref(), non_empty(&ir_node))
+        }
+        _ => true,
+    };
+    ConfiguredCameraSources {
+        rgb,
+        ir,
+        ir_node,
+        serial_capture,
+    }
+}
+
+fn non_empty(value: &str) -> Option<&str> {
+    (!value.is_empty()).then_some(value)
+}
+
+fn capture_must_serialize(rgb_node: Option<&str>, ir_node: Option<&str>) -> bool {
+    let Some(ir) = ir_node else {
+        return true;
+    };
+    match rgb_node {
+        Some(rgb) if rgb == ir => true,
+        Some(rgb) => functions_must_serialize(camera_function_of(rgb), camera_function_of(ir)),
+        None => serialize_for_unresolved_rgb(
+            &color_camera_functions(),
+            camera_function_of(ir).as_deref(),
+        ),
+    }
+}
+
+fn functions_must_serialize(rgb_function: Option<String>, ir_function: Option<String>) -> bool {
+    match (rgb_function, ir_function) {
+        (Some(rgb), Some(ir)) => rgb == ir,
+        _ => true,
+    }
+}
+
+fn color_camera_functions() -> Vec<String> {
+    v4l2_nodes_with_color(true)
+        .iter()
+        .filter_map(|node| camera_function_of(node))
+        .collect()
+}
+
+fn serialize_for_unresolved_rgb(color_functions: &[String], ir_function: Option<&str>) -> bool {
+    let Some(ir_function) = ir_function else {
+        return true;
+    };
+    color_functions.is_empty()
+        || color_functions
+            .iter()
+            .any(|function| function == ir_function)
 }
 
 pub fn preferred_capture_source(cameras: &CameraConfig) -> (String, bool) {
@@ -92,13 +148,17 @@ fn is_pipewire_source(source: &str) -> bool {
 }
 
 pub fn resolve_node(source: &str) -> Option<String> {
+    resolve_node_for(source, false)
+}
+
+pub fn resolve_node_for(source: &str, want_color: bool) -> Option<String> {
     let source = source.trim();
     if source.is_empty() {
         return None;
     }
 
     if let Some((vid, pid)) = parse_usb_spec(source) {
-        return resolve_usb_video_node(vid, pid, false);
+        return resolve_usb_video_node(vid, pid, want_color);
     }
 
     if let Some(pos) = source.find("/dev/video") {
@@ -135,7 +195,7 @@ pub fn resolve_node(source: &str) -> Option<String> {
 
     // Without a PipeWire session the target names no device the monitor saw, but udev still
     // links the node it was named after.
-    node_from_pipewire_target(target, false)
+    node_from_pipewire_target(target, want_color)
 }
 
 /// A GStreamer source element, or a request to resolve a USB VID:PID to a
@@ -1259,6 +1319,7 @@ mod tests {
             ir: String::new(),
             emitter_enabled: false,
             dark_luma_threshold: 30,
+            parallel_capture: "never".to_string(),
         };
         let sources = resolve_configured_sources(&cameras);
         assert_eq!(sources.rgb, "primary");
@@ -1276,7 +1337,96 @@ mod tests {
             ir: ir.to_string(),
             emitter_enabled: false,
             dark_luma_threshold: 30,
+            parallel_capture: "never".to_string(),
         }
+    }
+
+    #[test]
+    fn two_nodes_on_one_hardware_function_must_capture_one_at_a_time() {
+        assert!(functions_must_serialize(
+            Some("/sys/devices/pci0000:00/usb1/1-5/1-5:1.0".to_string()),
+            Some("/sys/devices/pci0000:00/usb1/1-5/1-5:1.0".to_string()),
+        ));
+    }
+
+    #[test]
+    fn separate_hardware_functions_may_stream_concurrently() {
+        assert!(!functions_must_serialize(
+            Some("/sys/devices/pci0000:00/usb1/1-5/1-5:1.0".to_string()),
+            Some("/sys/devices/pci0000:00/usb1/1-5/1-5:1.2".to_string()),
+        ));
+    }
+
+    #[test]
+    fn an_unreadable_hardware_function_keeps_the_serial_path() {
+        let known = || Some("/sys/devices/pci0000:00/usb1/1-5/1-5:1.0".to_string());
+        assert!(functions_must_serialize(None, known()));
+        assert!(functions_must_serialize(known(), None));
+        assert!(functions_must_serialize(None, None));
+    }
+
+    #[test]
+    fn a_single_node_rgb_ir_module_never_captures_in_parallel() {
+        assert!(capture_must_serialize(
+            Some("/dev/video0"),
+            Some("/dev/video0")
+        ));
+    }
+
+    #[test]
+    fn an_unresolvable_capture_node_falls_back_to_serial() {
+        assert!(capture_must_serialize(Some("/dev/video0"), None));
+        assert!(capture_must_serialize(None, None));
+        assert!(capture_must_serialize(
+            Some("/dev/video-absent-rgb"),
+            Some("/dev/video-absent-ir")
+        ));
+    }
+
+    #[test]
+    fn a_primary_rgb_source_serializes_against_a_dual_sensor_ir_function() {
+        let ir_function = "/sys/devices/pci0000:00/usb1/1-5/1-5:1.0";
+        assert!(serialize_for_unresolved_rgb(
+            &[ir_function.to_string()],
+            Some(ir_function)
+        ));
+    }
+
+    #[test]
+    fn a_primary_rgb_source_streams_beside_an_ir_only_function() {
+        assert!(!serialize_for_unresolved_rgb(
+            &["/sys/devices/pci0000:00/usb1/1-3/1-3:1.0".to_string()],
+            Some("/sys/devices/pci0000:00/usb1/1-5/1-5:1.0")
+        ));
+    }
+
+    #[test]
+    fn a_primary_rgb_source_stays_serial_when_nothing_enumerates() {
+        let ir_function = "/sys/devices/pci0000:00/usb1/1-5/1-5:1.0";
+        assert!(serialize_for_unresolved_rgb(&[], Some(ir_function)));
+        assert!(serialize_for_unresolved_rgb(
+            &[ir_function.to_string()],
+            None
+        ));
+        assert!(serialize_for_unresolved_rgb(&[], None));
+    }
+
+    #[test]
+    fn always_and_never_skip_hardware_detection_entirely() {
+        let mut cameras = cameras_with("primary", "/dev/video2");
+
+        cameras.parallel_capture = "never".to_string();
+        assert!(resolve_configured_sources(&cameras).serial_capture);
+
+        cameras.parallel_capture = "always".to_string();
+        assert!(!resolve_configured_sources(&cameras).serial_capture);
+    }
+
+    #[test]
+    fn an_unrecognised_capture_mode_stays_serial() {
+        let mut cameras = cameras_with("primary", "/dev/video2");
+        cameras.parallel_capture = "sometimes".to_string();
+        assert!(resolve_configured_sources(&cameras).serial_capture);
     }
 
     #[test]
@@ -1314,6 +1464,7 @@ mod tests {
             ir: "/dev/video2".to_string(),
             emitter_enabled: true,
             dark_luma_threshold: 30,
+            parallel_capture: "never".to_string(),
         };
         let sources = resolve_configured_sources(&cameras);
         assert_eq!(sources.rgb, "primary");
@@ -1328,6 +1479,7 @@ mod tests {
             ir: "/dev/video2".to_string(),
             emitter_enabled: true,
             dark_luma_threshold: 30,
+            parallel_capture: "never".to_string(),
         };
         assert_eq!(
             preferred_capture_source(&cameras),
@@ -1541,10 +1693,15 @@ mod tests {
             ir: "pipewiresrc target-object=device-name".to_string(),
             emitter_enabled: true,
             dark_luma_threshold: 30,
+            parallel_capture: "auto".to_string(),
         };
         let sources = resolve_configured_sources(&cameras);
         assert_eq!(sources.ir, "pipewiresrc target-object=device-name");
         assert_eq!(sources.ir_node, "");
+        assert!(
+            sources.serial_capture,
+            "an unresolvable node must keep the safe serial capture path"
+        );
     }
 
     #[test]

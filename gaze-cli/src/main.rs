@@ -431,11 +431,20 @@ async fn run_config_wizard(
 
     if config.cameras.ir.is_empty() {
         config.cameras.emitter_enabled = false;
+        config.cameras.parallel_capture = "never".to_string();
     } else {
         config.cameras.emitter_enabled = Confirm::with_theme(&theme)
             .with_prompt("Force IR emitter override (only use if emitter stays off automatically)")
             .default(config.cameras.emitter_enabled)
             .interact()?;
+
+        let capture_idx = Select::with_theme(&theme)
+            .with_prompt("Capture RGB and IR at the same time (faster, but some webcams cannot)")
+            .items(gaze_core::config::PARALLEL_CAPTURE_LABELS.as_slice())
+            .default(config.cameras.parallel_capture_index() as usize)
+            .interact()?;
+        config.cameras.parallel_capture =
+            gaze_core::config::CameraConfig::parallel_capture_from_index(capture_idx);
     }
 
     config.auth.abort_if_ssh = Confirm::with_theme(&theme)
@@ -1663,6 +1672,11 @@ async fn run() -> anyhow::Result<()> {
                     "{} {}",
                     style("cameras.dark_luma_threshold:").bold(),
                     config.cameras.dark_luma_threshold
+                );
+                println!(
+                    "{} {}",
+                    style("cameras.parallel_capture:").bold(),
+                    config.cameras.parallel_capture()
                 );
                 println!(
                     "{} {}",

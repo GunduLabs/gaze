@@ -183,6 +183,7 @@ async fn main() -> anyhow::Result<()> {
         rgb_device: Arc::new(Mutex::new(sources.rgb)),
         ir_device: Arc::new(Mutex::new(sources.ir)),
         ir_node: Arc::new(Mutex::new(sources.ir_node)),
+        serial_capture: Arc::new(Mutex::new(sources.serial_capture)),
         emitter_enabled: Arc::new(Mutex::new(config.cameras.emitter_enabled)),
         liveness_config: Arc::new(Mutex::new(config.liveness.clone())),
         hybrid_policy: Arc::new(Mutex::new(security.hybrid_policy().to_string())),

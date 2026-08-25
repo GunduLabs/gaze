@@ -59,6 +59,12 @@ pub fn camera_bus(node: &str) -> CameraBus {
     }
 }
 
+pub fn camera_function_of(node: &str) -> Option<String> {
+    let dir = sysfs_device_dir(node)?;
+    let canonical = fs::canonicalize(dir).ok()?;
+    Some(canonical.to_str()?.to_string())
+}
+
 fn sysfs_device_dir(node: &str) -> Option<String> {
     let name = Path::new(node).file_name()?.to_str()?;
     Some(format!("/sys/class/video4linux/{name}/device"))

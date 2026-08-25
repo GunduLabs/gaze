@@ -18,6 +18,12 @@ pub const MODEL_QUALITY_OPTIONS: [&str; 2] = ["standard", "accurate"];
 pub const MODEL_QUALITY_LABELS: [&str; 2] = ["Standard", "Accurate"];
 pub const HYBRID_POLICY_OPTIONS: [&str; 4] = ["default", "or", "fallback_on_dark", "and"];
 pub const HYBRID_POLICY_LABELS: [&str; 4] = ["Default", "Or", "Fallback on Dark", "And"];
+pub const PARALLEL_CAPTURE_OPTIONS: [&str; 3] = ["never", "auto", "always"];
+pub const PARALLEL_CAPTURE_LABELS: [&str; 3] = [
+    "Never (capture RGB, then IR)",
+    "Auto (parallel when the camera allows it)",
+    "Always (capture RGB and IR at once)",
+];
 pub const START_DELAY_SCOPE_OPTIONS: [&str; 2] = ["all", "screen_lock"];
 pub const START_DELAY_SCOPE_LABELS: [&str; 2] =
     ["Every face auth (including sudo)", "Screen lockers only"];
@@ -633,6 +639,8 @@ pub struct CameraConfig {
     pub emitter_enabled: bool,
     #[serde(default = "default_dark_luma_threshold")]
     pub dark_luma_threshold: u8,
+    #[serde(default = "default_parallel_capture")]
+    pub parallel_capture: String,
 }
 
 fn default_rgb_device() -> String {
@@ -641,6 +649,39 @@ fn default_rgb_device() -> String {
 
 fn default_dark_luma_threshold() -> u8 {
     20
+}
+
+fn default_parallel_capture() -> String {
+    "never".to_string()
+}
+
+impl CameraConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if !PARALLEL_CAPTURE_OPTIONS.contains(&self.parallel_capture.as_str()) {
+            anyhow::bail!(
+                "invalid cameras.parallel_capture {:?}: expected one of {:?}",
+                self.parallel_capture,
+                PARALLEL_CAPTURE_OPTIONS
+            );
+        }
+        Ok(())
+    }
+
+    pub fn parallel_capture(&self) -> &str {
+        if PARALLEL_CAPTURE_OPTIONS.contains(&self.parallel_capture.as_str()) {
+            &self.parallel_capture
+        } else {
+            "never"
+        }
+    }
+
+    pub fn parallel_capture_index(&self) -> u32 {
+        index_of(&PARALLEL_CAPTURE_OPTIONS, self.parallel_capture(), 0)
+    }
+
+    pub fn parallel_capture_from_index(index: usize) -> String {
+        value_at(&PARALLEL_CAPTURE_OPTIONS, index, "never").to_string()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -893,6 +934,7 @@ impl Default for CameraConfig {
             ir: String::new(),
             emitter_enabled: false,
             dark_luma_threshold: default_dark_luma_threshold(),
+            parallel_capture: default_parallel_capture(),
         }
     }
 }
@@ -953,6 +995,9 @@ impl Config {
             }
             if let Err(e) = config.liveness.validate() {
                 tracing::warn!("{e}; using the default liveness settings");
+            }
+            if let Err(e) = config.cameras.validate() {
+                tracing::warn!("{e}; capturing RGB and IR one at a time");
             }
             Ok(config)
         } else {
@@ -1350,6 +1395,44 @@ mod tests {
     }
 
     #[test]
+    fn validate_rejects_unknown_parallel_capture_mode() {
+        let bad = CameraConfig {
+            parallel_capture: "sometimes".to_string(),
+            ..CameraConfig::default()
+        };
+        assert!(bad.validate().is_err());
+        assert_eq!(bad.parallel_capture(), "never");
+
+        for mode in PARALLEL_CAPTURE_OPTIONS {
+            let cameras = CameraConfig {
+                parallel_capture: mode.to_string(),
+                ..CameraConfig::default()
+            };
+            cameras.validate().unwrap();
+            assert_eq!(cameras.parallel_capture(), mode);
+        }
+    }
+
+    #[test]
+    fn parallel_capture_indices_round_trip() {
+        for (index, mode) in PARALLEL_CAPTURE_OPTIONS.iter().enumerate() {
+            let cameras = CameraConfig {
+                parallel_capture: (*mode).to_string(),
+                ..CameraConfig::default()
+            };
+            assert_eq!(cameras.parallel_capture_index(), index as u32);
+            assert_eq!(
+                CameraConfig::parallel_capture_from_index(index),
+                (*mode).to_string()
+            );
+        }
+        assert_eq!(
+            CameraConfig::parallel_capture_from_index(PARALLEL_CAPTURE_OPTIONS.len()),
+            "never".to_string()
+        );
+    }
+
+    #[test]
     fn preset_levels_ignore_a_stored_custom_threshold() {
         for preset in ["low", "medium", "high", "maximum"] {
             let mut level = SecurityLevel::medium();
@@ -1694,6 +1777,7 @@ mod tests {
         assert_eq!(config.inference.device, "cpu");
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
         assert_eq!(config.cameras.dark_luma_threshold, 20);
+        assert_eq!(config.cameras.parallel_capture(), "never");
         assert!(config.auth.abort_if_ssh);
         assert!(config.auth.abort_if_lid_closed);
         assert_eq!(config.enrollment.max_templates, 2);
@@ -1719,6 +1803,7 @@ mod tests {
                 ir: "pipewiresrc target-object=some-ir-camera".to_string(),
                 emitter_enabled: true,
                 dark_luma_threshold: 55,
+                parallel_capture: "auto".to_string(),
             },
             auth: AuthConfig {
                 abort_if_ssh: true,
@@ -1760,6 +1845,7 @@ mod tests {
         );
         assert!(loaded.cameras.emitter_enabled);
         assert_eq!(loaded.cameras.dark_luma_threshold, 55);
+        assert_eq!(loaded.cameras.parallel_capture(), "auto");
         assert!(loaded.auth.abort_if_ssh);
         assert!(!loaded.auth.abort_if_lid_closed);
         assert!(loaded.auth.require_confirmation_lock_screen);
@@ -1820,6 +1906,7 @@ mod tests {
         );
         assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
         assert_eq!(config.cameras.dark_luma_threshold, 20);
+        assert_eq!(config.cameras.parallel_capture(), "never");
         assert!(config.auth.abort_if_ssh);
         assert!(config.auth.abort_if_lid_closed);
         assert!(!config.auth.require_confirmation_lock_screen);

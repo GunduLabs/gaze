@@ -567,6 +567,12 @@ fn config_findings(config: &Config) -> Vec<Check> {
             "Set enrollment.min_face_size_ratio to a value from 0.10 through 0.75.",
         );
     }
+    if let Err(err) = config.cameras.validate() {
+        error(
+            err.to_string(),
+            "Use never, auto, or always for cameras.parallel_capture.",
+        );
+    }
     if let Err(err) = config.inference.validate() {
         let fix = if cfg!(feature = "openvino") {
             "Use cpu/cpu, openvino/cpu, openvino/gpu, or openvino/npu in the [inference] table."
@@ -635,6 +641,20 @@ fn config_findings(config: &Config) -> Vec<Check> {
             name: "IR emitter",
             message: "cameras.emitter_enabled is true but cameras.ir is empty".to_string(),
             fix: Some("Configure cameras.ir or disable emitter_enabled.".to_string()),
+        });
+    }
+    if config.cameras.parallel_capture() == "always" && !ir.is_empty() {
+        findings.push(Check {
+            level: Level::Warning,
+            name: "Parallel capture",
+            message: "cameras.parallel_capture is \"always\", which streams RGB and IR at once \
+                      without checking that the camera supports it"
+                .to_string(),
+            fix: Some(
+                "If hybrid auth starts failing with \"IR camera stream stopped unexpectedly\", \
+                 use \"auto\" or \"never\"."
+                    .to_string(),
+            ),
         });
     }
     if !config.liveness.enabled {
@@ -2229,6 +2249,34 @@ mod tests {
             messages
                 .iter()
                 .any(|message| message.contains("max_frames"))
+        );
+    }
+
+    #[test]
+    fn config_checks_the_parallel_capture_mode() {
+        let mut config = Config::default();
+        config.cameras.parallel_capture = "sometimes".to_string();
+        assert!(
+            config_findings(&config)
+                .iter()
+                .any(|check| check.level == Level::Error
+                    && check.message.contains("cameras.parallel_capture"))
+        );
+
+        let mut forced = Config::default();
+        forced.cameras.ir = "/dev/video2".to_string();
+        forced.cameras.parallel_capture = "always".to_string();
+        assert!(config_findings(&forced).iter().any(
+            |check| check.level == Level::Warning && check.message.contains("parallel_capture")
+        ));
+
+        let mut detected = Config::default();
+        detected.cameras.ir = "/dev/video2".to_string();
+        detected.cameras.parallel_capture = "auto".to_string();
+        assert!(
+            !config_findings(&detected)
+                .iter()
+                .any(|check| check.message.contains("parallel_capture"))
         );
     }
 

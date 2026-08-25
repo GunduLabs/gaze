@@ -4,10 +4,11 @@
 use crate::capture_dialog;
 use gaze_core::camera::{is_listed_source, source_index};
 use gaze_core::config::{
-    AuthConfig, Config, DEFAULT_RGB_CAMERA, HYBRID_POLICY_LABELS, INFERENCE_DEVICE_OPTIONS,
-    INFERENCE_EXECUTION_PROVIDER_OPTIONS, InferenceConfig, MAX_ENROLLMENT_FACE_SIZE_RATIO,
-    MIN_ENROLLMENT_FACE_SIZE_RATIO, MIN_LIVENESS_MAX_FRAMES, MODEL_QUALITY_LABELS,
-    SECURITY_LEVEL_LABELS, START_DELAY_SCOPE_LABELS, SecurityLevel,
+    AuthConfig, CameraConfig, Config, DEFAULT_RGB_CAMERA, HYBRID_POLICY_LABELS,
+    INFERENCE_DEVICE_OPTIONS, INFERENCE_EXECUTION_PROVIDER_OPTIONS, InferenceConfig,
+    MAX_ENROLLMENT_FACE_SIZE_RATIO, MIN_ENROLLMENT_FACE_SIZE_RATIO, MIN_LIVENESS_MAX_FRAMES,
+    MODEL_QUALITY_LABELS, PARALLEL_CAPTURE_LABELS, SECURITY_LEVEL_LABELS, START_DELAY_SCOPE_LABELS,
+    SecurityLevel,
 };
 use gaze_core::dbus::{
     GazeProxy, apply_config_to_daemon, connect_gaze, dbus_error_message, dbus_is_file_not_found,
@@ -221,6 +222,7 @@ struct ConfigRows {
     camera: libadwaita::ComboRow,
     ir: libadwaita::ComboRow,
     emitter: gtk4::Switch,
+    parallel_capture: libadwaita::ComboRow,
     dark_luma_threshold: libadwaita::SpinRow,
     templates: libadwaita::SpinRow,
     min_face_size_ratio: libadwaita::SpinRow,
@@ -321,6 +323,8 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
     rows.ir.set_selected(ir_idx as u32);
     set_camera_row_subtitle(&rows.ir, choices.ir_options, &cfg.cameras.ir);
     rows.emitter.set_active(cfg.cameras.emitter_enabled);
+    rows.parallel_capture
+        .set_selected(cfg.cameras.parallel_capture_index());
     rows.dark_luma_threshold
         .set_value(cfg.cameras.dark_luma_threshold as f64);
     rows.templates
@@ -487,6 +491,14 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     emitter_switch.set_valign(gtk4::Align::Center);
     emitter_row.add_suffix(&emitter_switch);
     hardware_group.add(&emitter_row);
+
+    let parallel_capture_row = libadwaita::ComboRow::new();
+    parallel_capture_row.set_title("Parallel RGB + IR Capture");
+    parallel_capture_row
+        .set_subtitle("Faster hybrid auth, but some webcams cannot stream both sensors at once");
+    let parallel_capture_model = gtk4::StringList::new(&PARALLEL_CAPTURE_LABELS);
+    parallel_capture_row.set_model(Some(&parallel_capture_model));
+    hardware_group.add(&parallel_capture_row);
 
     let dark_luma_threshold_row = libadwaita::SpinRow::with_range(0.0, 255.0, 1.0);
     dark_luma_threshold_row.set_digits(0);
@@ -745,6 +757,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         emitter_switch,
         #[weak]
+        parallel_capture_row,
+        #[weak]
         dark_luma_threshold_row,
         #[weak]
         templates_row,
@@ -837,6 +851,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 }
             }
             cfg.cameras.emitter_enabled = emitter_switch.is_active();
+            cfg.cameras.parallel_capture =
+                CameraConfig::parallel_capture_from_index(parallel_capture_row.selected() as usize);
             cfg.cameras.dark_luma_threshold = dark_luma_threshold_row.value() as u8;
             cfg.enrollment.max_templates = templates_row.value() as u32;
             cfg.enrollment.min_face_size_ratio = min_face_size_ratio_row.value();
@@ -935,6 +951,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         &detector_row,
         &recognizer_row,
         &hybrid_row,
+        &parallel_capture_row,
         &start_delay_scope_row,
     ] {
         row.connect_selected_notify(glib::clone!(
@@ -988,6 +1005,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         camera: camera_row.clone(),
         ir: ir_row.clone(),
         emitter: emitter_switch.clone(),
+        parallel_capture: parallel_capture_row.clone(),
         dark_luma_threshold: dark_luma_threshold_row.clone(),
         templates: templates_row.clone(),
         min_face_size_ratio: min_face_size_ratio_row.clone(),
