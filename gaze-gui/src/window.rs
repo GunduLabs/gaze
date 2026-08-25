@@ -234,6 +234,7 @@ struct ConfigRows {
     hybrid: libadwaita::ComboRow,
     abort_ssh: gtk4::Switch,
     abort_lid: gtk4::Switch,
+    abort_first_resume: gtk4::Switch,
     resume_grace: libadwaita::SpinRow,
     start_delay: libadwaita::SpinRow,
     start_delay_scope: libadwaita::ComboRow,
@@ -345,6 +346,8 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
         ));
     rows.abort_ssh.set_active(cfg.auth.abort_if_ssh);
     rows.abort_lid.set_active(cfg.auth.abort_if_lid_closed);
+    rows.abort_first_resume
+        .set_active(cfg.auth.abort_before_first_resume);
     rows.resume_grace.set_value(cfg.auth.resume_grace_ms as f64);
     rows.start_delay.set_value(cfg.auth.start_delay_ms as f64);
     rows.start_delay_scope
@@ -575,6 +578,15 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     abort_lid_row.add_suffix(&abort_lid_switch);
     auth_group.add(&abort_lid_row);
 
+    let abort_first_resume_row = libadwaita::ActionRow::new();
+    abort_first_resume_row.set_title("Require a Suspend First");
+    abort_first_resume_row
+        .set_subtitle("Prevent authentication until the system has suspended and resumed once");
+    let abort_first_resume_switch = gtk4::Switch::new();
+    abort_first_resume_switch.set_valign(gtk4::Align::Center);
+    abort_first_resume_row.add_suffix(&abort_first_resume_switch);
+    auth_group.add(&abort_first_resume_row);
+
     let require_confirm_lock_screen_row = libadwaita::ActionRow::new();
     require_confirm_lock_screen_row.set_title("Require Confirmation on Lock Screen");
     require_confirm_lock_screen_row.set_subtitle(
@@ -781,6 +793,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         abort_lid_switch,
         #[weak]
+        abort_first_resume_switch,
+        #[weak]
         resume_grace_row,
         #[weak]
         start_delay_row,
@@ -864,6 +878,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             cfg.auth.require_confirmation_elevation = require_confirm_elevation_switch.is_active();
             cfg.auth.abort_if_ssh = abort_ssh_switch.is_active();
             cfg.auth.abort_if_lid_closed = abort_lid_switch.is_active();
+            cfg.auth.abort_before_first_resume = abort_first_resume_switch.is_active();
             cfg.auth.resume_grace_ms = resume_grace_row.value() as u64;
             cfg.auth.start_delay_ms = start_delay_row.value() as u64;
             cfg.auth.start_delay_scope =
@@ -983,6 +998,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         &liveness_enabled_switch,
         &abort_ssh_switch,
         &abort_lid_switch,
+        &abort_first_resume_switch,
         &require_confirm_lock_screen_switch,
         &require_confirm_elevation_switch,
         &encrypt_templates_switch,
@@ -1017,6 +1033,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         hybrid: hybrid_row.clone(),
         abort_ssh: abort_ssh_switch.clone(),
         abort_lid: abort_lid_switch.clone(),
+        abort_first_resume: abort_first_resume_switch.clone(),
         resume_grace: resume_grace_row.clone(),
         start_delay: start_delay_row.clone(),
         start_delay_scope: start_delay_scope_row.clone(),
