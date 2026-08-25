@@ -29,6 +29,7 @@ level = "medium"
 rgb = "primary"
 # ir = "/dev/video2"        # optional infrared camera (direct /dev/video* node or usb:VVVV:PPPP)
 # emitter_enabled = false   # drive the IR emitter (requires ir)
+# parallel_capture = "never" # "never", "auto", or "always" (requires ir)
 dark_luma_threshold = 20
 
 [auth]
@@ -221,9 +222,33 @@ ir = "usb:046d:085e"
 # ir = "pipewiresrc target-object=<pipewire-target>"
 ```
 
-When `ir` is configured, Gaze captures from both the RGB and IR cameras. During enrollment, both cameras capture templates. During verification, Gaze captures from the two cameras one at a time (RGB, then IR) and combines the results according to the configured `hybrid_policy`. Capturing sequentially rather than concurrently lets single-function webcams that cannot stream their RGB and IR sensors at once (for example the Logitech BRIO 4K, `046d:085e`) still use hybrid authentication.
+When `ir` is configured, Gaze captures from both the RGB and IR cameras. During enrollment, both cameras capture templates. During verification, Gaze combines the results according to the configured `hybrid_policy`.
 
-Some Windows Hello webcams expose their RGB and IR sensors as a single USB Video Class function and can't stream both at once. Enrollment still works since it only needs short bursts, but parallel RGB+IR verification drops the IR stream mid-loop (`IR camera stream stopped unexpectedly`) and auth falls back to password. If you hit this, run IR-only: leave `rgb` unset (`rgb = ""`) and configure `ir` alone.
+### Parallel RGB + IR capture
+
+By default, verification captures the two cameras one at a time (RGB, then IR). Capturing sequentially rather than concurrently lets single-function webcams that cannot stream their RGB and IR sensors at once (for example the Logitech BRIO 4K, `046d:085e`) still use hybrid authentication, at the cost of latency: with `hybrid_policy = "and"` both spectra always run, so the two capture phases add up.
+
+If your camera can stream both sensors at once, `parallel_capture` restores the concurrent behavior:
+
+```toml
+[cameras]
+ir = "/dev/video2"
+parallel_capture = "auto"
+```
+
+| Value | Behavior |
+| --- | --- |
+| `never` (default) | Always capture RGB, then IR. Works on every camera. |
+| `auto` | Capture in parallel only when RGB and IR are separate hardware functions. |
+| `always` | Always capture in parallel. Use only if you know your camera supports it. |
+
+`auto` resolves each configured source to its `/dev/video*` node and compares the hardware function behind it (for USB cameras, the sysfs USB interface the node hangs off). Two nodes on the same function are substreams of one device that only streams one mode at a time, so they stay serial even though their node numbers differ — this is the BRIO case, where `/dev/video0` and `/dev/video2` share a single UVC function.
+
+The default `rgb = "primary"` names no node of its own: it means "whatever camera PipeWire hands out". Rather than guess which one that is, `auto` asks the question from the IR side — does the IR camera's own function also expose a colour node? If it does, the IR camera is a dual-sensor device that `primary` may well resolve to, so capture stays serial. If the IR function is infrared-only, it cannot be whatever `primary` turns out to be, and the two stream at once. A hand-written GStreamer pipeline in `rgb` is treated the same way. If nothing can be enumerated at all, `auto` keeps the serial path.
+
+Parallel capture only changes *when* each spectrum is captured, never whether both have to pass. `hybrid_policy` behaves identically in both modes. The speedup is also bounded by face detection, which both spectra share, so expect a real improvement rather than a halving.
+
+Some Windows Hello webcams expose their RGB and IR sensors as a single USB Video Class function and can't stream both at once. Enrollment still works since it only needs short bursts, but parallel RGB+IR verification drops the IR stream mid-loop (`IR camera stream stopped unexpectedly`) and auth falls back to password. If you hit this after setting `parallel_capture`, set it back to `never`. Enrollment always captures one camera at a time regardless of this setting.
 
 The Logitech BRIO 4K (`046d:085e`) is a known example. That's the original BRIO, not the newer Brio 300/500/100, which use different product IDs.
 

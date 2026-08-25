@@ -236,6 +236,7 @@ pub struct AuthDaemon {
     pub rgb_device: Arc<Mutex<String>>,
     pub ir_device: Arc<Mutex<String>>,
     pub ir_node: Arc<Mutex<String>>,
+    pub serial_capture: Arc<Mutex<bool>>,
     pub emitter_enabled: Arc<Mutex<bool>>,
     pub liveness_config: Arc<Mutex<gaze_core::config::LivenessConfig>>,
     pub hybrid_policy: Arc<Mutex<String>>,
@@ -755,8 +756,8 @@ mod tests {
     use super::{
         AuthDaemon, CameraBinding, ClaimState, ClaimStateHandle, and_policy_unsatisfiable,
         auth_streams, bind_pipewire_session_for_uid, claim_has_epoch, clear_pipewire_session,
-        eyes_from_kpss, hybrid_auth_passed, is_vanish_of, release_claim_epoch,
-        should_yield_rgb_to_ir,
+        eyes_from_kpss, hybrid_auth_passed, ir_waits_for_rgb, is_vanish_of, release_claim_epoch,
+        rgb_yields_camera_on_budget, should_yield_rgb_to_ir,
     };
     use gaze_core::config::AuthSurface;
     use gaze_core::dbus::{ActiveSession, CaptureStatus};
@@ -1573,6 +1574,74 @@ mod tests {
     }
 
     #[test]
+    fn independent_camera_functions_capture_both_spectra_at_once() {
+        assert!(!ir_waits_for_rgb(true, false));
+        assert!(!rgb_yields_camera_on_budget(true, false));
+    }
+
+    #[test]
+    fn a_shared_camera_function_still_serializes_the_two_phases() {
+        assert!(ir_waits_for_rgb(true, true));
+        assert!(rgb_yields_camera_on_budget(true, true));
+    }
+
+    #[test]
+    fn a_lone_spectrum_never_waits_on_the_other() {
+        for serial_capture in [true, false] {
+            assert!(!ir_waits_for_rgb(false, serial_capture), "{serial_capture}");
+            assert!(
+                !rgb_yields_camera_on_budget(false, serial_capture),
+                "{serial_capture}"
+            );
+        }
+    }
+
+    #[test]
+    fn parallel_capture_does_not_weaken_the_and_policy() {
+        for (rgb_success, ir_success) in [(true, false), (false, true), (false, false)] {
+            assert!(
+                !hybrid_auth_passed(
+                    "and",
+                    true,
+                    true,
+                    true,
+                    CaptureStatus::Usable,
+                    rgb_success,
+                    ir_success
+                ),
+                "{rgb_success} {ir_success}"
+            );
+        }
+        assert!(hybrid_auth_passed(
+            "and",
+            true,
+            true,
+            true,
+            CaptureStatus::Usable,
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    fn parallel_capture_keeps_rgb_latching_on_dark_for_the_fallback_policy() {
+        assert!(should_yield_rgb_to_ir(
+            "fallback_on_dark",
+            true,
+            CaptureStatus::TooDark
+        ));
+        assert!(hybrid_auth_passed(
+            "fallback_on_dark",
+            true,
+            true,
+            true,
+            CaptureStatus::TooDark,
+            false,
+            true
+        ));
+    }
+
+    #[test]
     fn and_policy_refuses_to_degrade_to_one_spectrum() {
         let (run_rgb, run_ir) = auth_streams("primary", "/dev/video2", true, false);
         assert!(and_policy_unsatisfiable(
@@ -1969,6 +2038,14 @@ fn verify_give_up(since_face: Duration, since_usable: Duration) -> Option<Verify
         return Some(VerifyGiveUp::NoUsableFrame);
     }
     None
+}
+
+fn ir_waits_for_rgb(run_rgb: bool, serial_capture: bool) -> bool {
+    run_rgb && serial_capture
+}
+
+fn rgb_yields_camera_on_budget(run_ir: bool, serial_capture: bool) -> bool {
+    run_ir && serial_capture
 }
 
 fn hybrid_auth_passed(
@@ -3316,6 +3393,7 @@ impl AuthDaemon {
         *self.rgb_device.lock().await = sources.rgb;
         *self.ir_device.lock().await = sources.ir;
         *self.ir_node.lock().await = sources.ir_node;
+        *self.serial_capture.lock().await = sources.serial_capture;
         *self.emitter_enabled.lock().await = new_config.cameras.emitter_enabled;
 
         let mut live_cfg = self.liveness_config.lock().await;
@@ -3586,6 +3664,7 @@ impl AuthDaemon {
         }
         let liveness_cfg = self.liveness_config.lock().await.clone();
         let hybrid_policy = self.hybrid_policy.lock().await.clone();
+        let serial_capture = *self.serial_capture.lock().await;
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
 
@@ -3661,6 +3740,7 @@ impl AuthDaemon {
                 liveness_threshold = liveness_cfg.effective_threshold(),
                 run_rgb = run_rgb,
                 run_ir = run_ir,
+                serial_capture = serial_capture,
                 "VerifyStart: sensing faces for user {}",
                 username
             );
@@ -3701,7 +3781,8 @@ impl AuthDaemon {
                     let _rgb_phase_guard = RgbPhaseGuard(rgb_phase_done_clone);
                     // In serial mode (IR also runs) yield the camera after a budget even
                     // without a match, so the IR spectrum can still be captured.
-                    let rgb_deadline = run_ir.then(|| Instant::now() + VERIFY_SERIAL_RGB_BUDGET);
+                    let rgb_deadline = rgb_yields_camera_on_budget(run_ir, serial_capture)
+                        .then(|| Instant::now() + VERIFY_SERIAL_RGB_BUDGET);
                     let mut yielded_to_ir = false;
 
                     let mut cam = match Camera::open(&rgb_device_clone) {
@@ -3855,13 +3936,14 @@ impl AuthDaemon {
                 let ir_device_clone = ir_device.clone();
                 let ir_node_clone = ir_node.clone();
                 let emitter_enabled = emitter_enabled;
+                let serial_capture = serial_capture;
                 let rgb_phase_done_clone = rgb_phase_done.clone();
 
                 ir_thread = Some(std::thread::spawn(move || {
                     gaze_core::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     // Wait for RGB to release its camera before opening IR and firing the emitter,
                     // so single-function devices keep one live stream. Bail if verify passed.
-                    if run_rgb {
+                    if ir_waits_for_rgb(run_rgb, serial_capture) {
                         while !rgb_phase_done_clone.load(std::sync::atomic::Ordering::Relaxed)
                             && !stop_clone.load(std::sync::atomic::Ordering::Relaxed)
                         {
@@ -4080,7 +4162,7 @@ impl AuthDaemon {
                             break;
                         };
                         match msg {
-                            VerifyMsg::PhaseStarted(Spectrum::Ir) => {
+                            VerifyMsg::PhaseStarted(Spectrum::Ir) if serial_capture => {
                                 // RGB and IR run serially on single-function cameras. Give
                                 // IR a fresh no-face window after RGB releases the device.
                                 last_face_at = Instant::now();

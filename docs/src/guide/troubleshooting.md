@@ -237,9 +237,20 @@ entirely, at the cost of accepting a photograph.
 Some single-function Windows Hello webcams can't stream their RGB and IR sensors
 at the same time. The Logitech BRIO 4K (`046d:085e`, not the newer Brio
 300/500/100, which use different product IDs) is a known example. Enrollment
-works fine, but parallel RGB+IR verification drops the IR substream and the
-attempt falls back to your password. Configure the IR camera on its own and
-leave `rgb` empty so Gaze runs IR-only:
+works fine, but capturing RGB and IR in parallel drops the IR substream and the
+attempt falls back to your password.
+
+Gaze captures one camera at a time by default, so first check whether
+`cameras.parallel_capture` has been set:
+
+```bash
+gaze config --show | grep parallel_capture
+```
+
+If it is `always`, set it to `auto` (which serializes cameras whose sensors share
+one hardware function) or `never`. If you see this on `never`, the two sensors
+cannot coexist even sequentially — configure the IR camera on its own and leave
+`rgb` empty so Gaze runs IR-only:
 
 ```toml
 [cameras]

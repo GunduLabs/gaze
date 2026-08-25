@@ -42,6 +42,10 @@ rgb = "primary"
 # emitter_enabled = false
 # Reject frames whose mean brightness (0-255) is below this value as too dark.
 dark_luma_threshold = 20
+# Capture RGB and IR at the same time during hybrid auth. "never" (default) captures
+# RGB then IR, which every camera supports; "auto" goes parallel only when the two
+# sensors are separate hardware functions; "always" forces it. Requires `ir`.
+# parallel_capture = "never"
 
 [auth]
 abort_if_ssh = true
