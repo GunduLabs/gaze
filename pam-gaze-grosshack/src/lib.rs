@@ -177,9 +177,7 @@ unsafe fn do_authenticate(pamh: PamHandle, flags: c_int) -> c_int {
     let require_confirmation = confirmation_required(loaded_auth.as_ref(), service.as_deref());
     let auth = loaded_auth.unwrap_or_default();
 
-    if !silent {
-        unsafe { say(pamh, LOOK_OR_PASSWORD_PROMPT) };
-    }
+    let prompt_line = unsafe { announce_prompt(pamh, silent, LOOK_OR_PASSWORD_PROMPT) };
 
     let is_polkit = matches!(service, Some(ref s) if s == "polkit-1");
 
@@ -196,13 +194,13 @@ unsafe fn do_authenticate(pamh: PamHandle, flags: c_int) -> c_int {
         }
         if require_confirmation {
             // Its own conversation, on this thread, so there is nothing left to unblock.
-            return if unsafe { confirm_authentication(pamh, silent) } {
+            return if unsafe { confirm_authentication(pamh, prompt_line) } {
                 PAM_SUCCESS
             } else {
                 PAM_AUTH_ERR
             };
         }
-        unsafe { report_face_verified(pamh, silent) };
+        unsafe { report_face_verified(pamh, silent, prompt_line) };
         return PAM_SUCCESS;
     }
 
@@ -248,13 +246,13 @@ unsafe fn do_authenticate(pamh: PamHandle, flags: c_int) -> c_int {
 
             if !require_confirmation {
                 retire_prompt(&state, prompt_thread);
-                unsafe { report_face_verified(pamh, silent) };
+                unsafe { report_face_verified(pamh, silent, PromptLine::Printed) };
                 return PAM_SUCCESS;
             }
 
             if !is_polkit {
                 retire_prompt(&state, prompt_thread);
-                if unsafe { confirm_authentication(pamh, silent) } {
+                if unsafe { confirm_authentication(pamh, PromptLine::Printed) } {
                     PAM_SUCCESS
                 } else {
                     PAM_AUTH_ERR

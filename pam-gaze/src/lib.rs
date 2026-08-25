@@ -151,21 +151,15 @@ unsafe fn do_authenticate(pamh: PamHandle, flags: c_int) -> c_int {
             LOOK_PROMPT
         };
         // KScreenLocker reads an info message as "this unlock had a prompt".
-        if !silent {
-            unsafe { say(pamh, prompt) };
-        }
+        let prompt_line = unsafe { announce_prompt(pamh, silent, prompt) };
 
         let budget = camera_auth_timeout(&config.auth, service.as_deref());
 
-        let tell = |text: &str| {
-            if !silent {
-                unsafe { report(pamh, service.as_deref(), text) }
-            }
-        };
+        let tell = |text: &str| unsafe { report_outcome(pamh, service.as_deref(), silent, text) };
 
         let verdict = verify_within(&proxy, &username, service.as_deref(), budget).await;
         match verdict {
-            Verdict::Reached(AuthOutcome::Match, _) => Ok((config.auth, proxy)),
+            Verdict::Reached(AuthOutcome::Match, _) => Ok((config.auth, proxy, prompt_line)),
             Verdict::Reached(AuthOutcome::NoMatch, _) => {
                 tell(FACE_NOT_RECOGNIZED);
                 Err(PAM_AUTH_ERR)
@@ -184,13 +178,13 @@ unsafe fn do_authenticate(pamh: PamHandle, flags: c_int) -> c_int {
             }
         }
     });
-    let (loaded_auth, proxy) = match matched {
+    let (loaded_auth, proxy, prompt_line) = match matched {
         Ok(session) => session,
         Err(code) => return code,
     };
 
     if !confirmation_required(Some(&loaded_auth), service.as_deref()) {
-        unsafe { report_face_verified(pamh, silent) };
+        unsafe { report_face_verified(pamh, silent, prompt_line) };
         return PAM_SUCCESS;
     }
 
@@ -204,7 +198,7 @@ unsafe fn do_authenticate(pamh: PamHandle, flags: c_int) -> c_int {
     }
 
     if has_interactive_tty() {
-        return if unsafe { confirm_authentication(pamh, silent) } {
+        return if unsafe { confirm_authentication(pamh, prompt_line) } {
             PAM_SUCCESS
         } else {
             PAM_AUTH_ERR
