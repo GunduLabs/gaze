@@ -42,6 +42,7 @@ const GDM_DCONF_PROFILE_PATH: &str = "/etc/dconf/profile/gdm";
 const GDM_DCONF_FACE_AUTH_KEY: &str = "/org/gnome/shell/extensions/gaze/enable-face-authentication";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
 const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
+const LIVENESS_GATE_DIAGNOSTIC: &str = "Face matched, but the liveness check did not pass. Move slightly and try again, or lower liveness.threshold.";
 const VERIFY_NO_FACE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Bounds a face that stays badly framed: it refreshes the no-face deadline without ever
 /// yielding an embedding. Kept under `pam_gaze_core::CAMERA_AUTH_TIMEOUT_SECS`.
@@ -3789,13 +3790,17 @@ impl AuthDaemon {
                                     };
                                     let mut live_guard = liveness_arc.blocking_lock();
                                     let Some(detector) = live_guard.as_mut() else {
-                                        error!("Liveness is enabled but detector is unavailable");
+                                        let _ = tx.blocking_send(VerifyMsg::Error(
+                                            "Liveness is enabled but the anti-spoof model is unavailable".to_string(),
+                                        ));
                                         return;
                                     };
                                     let live_score = match detector.live_score(&liveness_face) {
                                         Ok(score) => score,
                                         Err(e) => {
-                                            error!("Liveness inference failed: {e}");
+                                            let _ = tx.blocking_send(VerifyMsg::Error(format!(
+                                                "Liveness inference failed: {e}"
+                                            )));
                                             return;
                                         }
                                     };
@@ -4004,8 +4009,8 @@ impl AuthDaemon {
             let mut rgb_latest_embed = None;
             let mut ir_latest_embed = None;
 
-            macro_rules! emit_verify_with_scores {
-                ($result:expr) => {{
+            macro_rules! hybrid_scores {
+                () => {{
                     let rgb_threshold = *rgb_threshold_arc.lock().await;
                     let ir_threshold = *ir_threshold_arc.lock().await;
                     let db = db_arc.lock().await;
@@ -4018,6 +4023,13 @@ impl AuthDaemon {
                         ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
                     );
                     drop(db);
+                    final_scores
+                }};
+            }
+
+            macro_rules! emit_verify_with_scores {
+                ($result:expr) => {{
+                    let final_scores = hybrid_scores!();
                     let _ = Self::verify_status(&ctxt, $result, final_scores, rgb_status, ir_status).await;
                 }};
             }
@@ -4073,6 +4085,7 @@ impl AuthDaemon {
                                 // IR a fresh no-face window after RGB releases the device.
                                 last_face_at = Instant::now();
                                 last_usable_at = Instant::now();
+                                frames_seen = 0;
                                 dark_since = None;
                             }
                             VerifyMsg::PhaseStarted(_) => {}
@@ -4105,9 +4118,16 @@ impl AuthDaemon {
                                     last_usable_at = Instant::now();
                                     frames_seen += 1;
                                     if frames_seen > liveness_cfg.effective_max_frames() {
-                                        info!("VerifyStart: liveness gate timed out");
                                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                        emit_verify_with_scores!(VerifyResult::VerifyNoMatch);
+                                        let final_scores = hybrid_scores!();
+                                        let matched = final_scores
+                                            .iter()
+                                            .any(|face| face.3 || face.6);
+                                        info!(matched, "VerifyStart: frame budget spent");
+                                        if matched {
+                                            let _ = Self::verify_diagnostic(&ctxt, LIVENESS_GATE_DIAGNOSTIC).await;
+                                        }
+                                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, final_scores, rgb_status, ir_status).await;
                                         break;
                                     }
                                 }
