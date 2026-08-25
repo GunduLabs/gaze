@@ -17,8 +17,8 @@ updates:
     commit-message:
       prefix: "fix(deps)"
     cooldown:
-      default-days: 3
-      semver-major-days: 7
+      default-days: 1
+      semver-major-days: 1
     groups:
       rust-non-major:
         applies-to: "version-updates"
@@ -42,8 +42,8 @@ updates:
       prefix: "fix(deps)"
       prefix-development: "chore(deps)"
     cooldown:
-      default-days: 3
-      semver-major-days: 7
+      default-days: 1
+      semver-major-days: 1
     groups:
       docs-non-major:
         applies-to: "version-updates"
@@ -67,7 +67,7 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     cooldown:
-      default-days: 3
+      default-days: 1
     groups:
       github-actions:
         applies-to: "version-updates"
@@ -89,4 +89,4 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     cooldown:
-      default-days: 3
+      default-days: 1

@@ -4,8 +4,8 @@
   "workspaces": {
     "": {
       "devDependencies": {
-        "@viteplus/versions": "^2.0.7",
-        "esbuild": "^0.28.1",
+        "@viteplus/versions": "^2.0.8",
+        "esbuild": "^0.28.2",
         "vitepress": "2.0.0-alpha.19",
       },
     },
