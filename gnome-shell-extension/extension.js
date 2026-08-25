@@ -608,6 +608,7 @@ export default class GazeFaceAuthExtension extends Extension {
     this._injectionManager.overrideMethod(proto, "_onReset", (original) => {
       return function () {
         this._faceFailCounter = 0;
+        this._faceAuthFailed = false;
         this._faceStartPending = false;
         this._faceConfirmPending = false;
         this._faceConfirmService = null;

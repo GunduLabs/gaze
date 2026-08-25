@@ -35,6 +35,18 @@ pub fn caller_wants_silence(flags: c_int) -> bool {
     flags & PAM_SILENT != 0
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PromptLine {
+    Printed,
+    Absent,
+}
+
+impl PromptLine {
+    fn keeps_previous_line(self) -> bool {
+        matches!(self, Self::Absent)
+    }
+}
+
 pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
 pub const TTY_CONFIRM_DECISECONDS: libc::cc_t = 200;
 const _: () = assert!(TTY_CONFIRM_DECISECONDS > 0);
@@ -170,39 +182,66 @@ impl Drop for TermiosGuard {
     }
 }
 
-/// Under `PAM_SILENT` no camera prompt was printed, so clearing the line above would erase
-/// unrelated terminal output instead of the line this message replaces.
-fn line_prefix(silent: bool) -> &'static str {
-    if silent { "\r" } else { "\x1B[1A\x1B[2K\r" }
+fn line_prefix(prompt: PromptLine) -> &'static str {
+    if prompt.keeps_previous_line() {
+        "\r"
+    } else {
+        "\x1B[1A\x1B[2K\r"
+    }
 }
 
 fn replace_previous_line(
     writer: &mut impl Write,
-    silent: bool,
+    prompt: PromptLine,
     message: &str,
 ) -> std::io::Result<()> {
-    write!(writer, "{}{message}", line_prefix(silent))
+    write!(writer, "{}{message}", line_prefix(prompt))
 }
 
-fn report_face_verified_to_tty() -> Option<()> {
+fn write_tty_line(message: &str) -> Option<()> {
     let mut tty = open_interactive_tty()?;
-    replace_previous_line(&mut tty, false, FACE_VERIFIED).ok()?;
+    writeln!(tty, "{message}").ok()?;
+    tty.flush().ok()
+}
+
+pub unsafe fn announce_prompt(pamh: PamHandle, silent: bool, prompt: &str) -> PromptLine {
+    if !silent {
+        unsafe { say(pamh, prompt) };
+        return PromptLine::Printed;
+    }
+    match write_tty_line(prompt) {
+        Some(()) => PromptLine::Printed,
+        None => PromptLine::Absent,
+    }
+}
+
+fn report_face_verified_to_tty(prompt: PromptLine) -> Option<()> {
+    let mut tty = open_interactive_tty()?;
+    replace_previous_line(&mut tty, prompt, FACE_VERIFIED).ok()?;
     writeln!(tty).ok()?;
     tty.flush().ok()
 }
 
 /// Replace the camera prompt with a non-interactive success message when a terminal is available.
 /// Graphical PAM clients receive the same message through their conversation function instead.
-pub unsafe fn report_face_verified(pamh: PamHandle, silent: bool) {
-    if silent {
+pub unsafe fn report_face_verified(pamh: PamHandle, silent: bool, prompt: PromptLine) {
+    if report_face_verified_to_tty(prompt).is_some() {
         return;
     }
-    if report_face_verified_to_tty().is_none() {
+    if !silent {
         unsafe { say(pamh, FACE_VERIFIED) };
     }
 }
 
-fn confirm_from_tty(silent: bool) -> Option<bool> {
+pub unsafe fn report_outcome(pamh: PamHandle, service: Option<&str>, silent: bool, text: &str) {
+    if silent {
+        let _ = write_tty_line(text);
+        return;
+    }
+    unsafe { report(pamh, service, text) }
+}
+
+fn confirm_from_tty(prompt: PromptLine) -> Option<bool> {
     let mut tty = open_interactive_tty()?;
     let fd = tty.as_raw_fd();
 
@@ -221,7 +260,7 @@ fn confirm_from_tty(silent: bool) -> Option<bool> {
         }
 
         let _guard = TermiosGuard { fd, original };
-        replace_previous_line(&mut tty, silent, CONFIRMATION_PROMPT).ok()?;
+        replace_previous_line(&mut tty, prompt, CONFIRMATION_PROMPT).ok()?;
         tty.flush().ok()?;
 
         let mut key = [0_u8; 1];
@@ -251,8 +290,8 @@ pub fn has_interactive_tty() -> bool {
     open_interactive_tty().is_some()
 }
 
-pub unsafe fn confirm_authentication(pamh: PamHandle, silent: bool) -> bool {
-    if let Some(confirmed) = confirm_from_tty(silent) {
+pub unsafe fn confirm_authentication(pamh: PamHandle, prompt: PromptLine) -> bool {
+    if let Some(confirmed) = confirm_from_tty(prompt) {
         return confirmed;
     }
 
@@ -934,15 +973,15 @@ mod tests {
 
     // The escape moves up a line and clears it, so it must only run when a line was printed.
     #[test]
-    fn a_silent_prompt_does_not_clear_the_line_above_it() {
-        assert_eq!(line_prefix(false), "\x1B[1A\x1B[2K\r");
-        assert_eq!(line_prefix(true), "\r");
+    fn a_missing_prompt_line_is_not_cleared() {
+        assert_eq!(line_prefix(PromptLine::Printed), "\x1B[1A\x1B[2K\r");
+        assert_eq!(line_prefix(PromptLine::Absent), "\r");
     }
 
     #[test]
-    fn a_silent_confirmation_prompt_is_still_written() {
+    fn a_confirmation_prompt_is_still_written_without_a_prompt_line() {
         let mut out = Vec::new();
-        replace_previous_line(&mut out, true, CONFIRMATION_PROMPT).unwrap();
+        replace_previous_line(&mut out, PromptLine::Absent, CONFIRMATION_PROMPT).unwrap();
         let written = String::from_utf8(out).unwrap();
         assert!(written.contains(CONFIRMATION_PROMPT));
         assert!(!written.contains("\x1B["));
@@ -1338,13 +1377,28 @@ mod tests {
     fn face_verified_replaces_the_previous_terminal_prompt() {
         let mut output = Vec::new();
 
-        replace_previous_line(&mut output, false, FACE_VERIFIED).unwrap();
+        replace_previous_line(&mut output, PromptLine::Printed, FACE_VERIFIED).unwrap();
 
         assert_eq!(
             String::from_utf8(output).unwrap(),
             "\x1B[1A\x1B[2K\rFace Verified."
         );
         assert!(!FACE_VERIFIED.contains("confirm"));
+    }
+
+    #[test]
+    fn a_silenced_conversation_still_leaves_a_terminal_verdict() {
+        let mut output = Vec::new();
+
+        replace_previous_line(&mut output, PromptLine::Absent, FACE_VERIFIED).unwrap();
+
+        assert_eq!(String::from_utf8(output).unwrap(), "\rFace Verified.");
+    }
+
+    #[test]
+    fn a_silenced_prompt_reported_on_the_tty_still_owns_a_line() {
+        assert!(!PromptLine::Printed.keeps_previous_line());
+        assert!(PromptLine::Absent.keeps_previous_line());
     }
 
     #[test]

@@ -45,6 +45,9 @@ const GDM_DCONF_FACE_AUTH_KEY: &str = "/org/gnome/shell/extensions/gaze/enable-f
 const GDM_ENABLED_EXTENSIONS_KEY: &str = "/org/gnome/shell/enabled-extensions";
 const GDM_COMPILED_DB_PATH: &str = "/etc/dconf/db/gdm";
 const GDM_FACE_PAM_SERVICE: &str = "gdm-face";
+const SELINUX_ENFORCE_PATH: &str = "/sys/fs/selinux/enforce";
+const GDM_SELINUX_MODULE: &str = "gaze-gdm-camera";
+const GDM_SELINUX_POLICY_PATH: &str = "/usr/share/gaze/gaze-gdm-camera.pp";
 const TPM_DEVICES: [&str; 2] = ["/dev/tpmrm0", "/dev/tpm0"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -329,6 +332,71 @@ fn gdm_greeter_readiness() -> GdmGreeterReadiness {
         Some(_) => GdmGreeterReadiness::ExtensionNotEnabled,
         None => GdmGreeterReadiness::Unverifiable(
             "`dconf read` against the GDM database failed".to_string(),
+        ),
+    }
+}
+
+fn selinux_is_enforcing() -> bool {
+    fs::read_to_string(SELINUX_ENFORCE_PATH).is_ok_and(|value| value.trim() == "1")
+}
+
+fn semodule_lists(output: &str, module: &str) -> bool {
+    output
+        .lines()
+        .any(|line| line.split_whitespace().next() == Some(module))
+}
+
+enum GdmCameraPolicy {
+    Loaded,
+    NotLoaded,
+    Unverifiable(String),
+}
+
+fn gdm_camera_policy() -> GdmCameraPolicy {
+    match command_output("semodule", &["-l"]) {
+        Ok((true, output)) if semodule_lists(&output, GDM_SELINUX_MODULE) => {
+            GdmCameraPolicy::Loaded
+        }
+        Ok((true, _)) => GdmCameraPolicy::NotLoaded,
+        Ok((false, message)) => GdmCameraPolicy::Unverifiable(message),
+        Err(err) => GdmCameraPolicy::Unverifiable(err.to_string()),
+    }
+}
+
+fn gdm_selinux_fix() -> String {
+    if Path::new(GDM_SELINUX_POLICY_PATH).exists() {
+        format!("Run `sudo semodule -i {GDM_SELINUX_POLICY_PATH}`, then reboot.")
+    } else {
+        format!(
+            "Reinstall the Gaze GNOME extension package to restore {GDM_SELINUX_POLICY_PATH}, then reboot."
+        )
+    }
+}
+
+fn check_gdm_selinux(report: &mut Report) {
+    if !selinux_is_enforcing() {
+        return;
+    }
+
+    match gdm_camera_policy() {
+        GdmCameraPolicy::Loaded => report.pass(
+            "GDM camera SELinux policy",
+            format!("{GDM_SELINUX_MODULE} is loaded, so the greeter can open the camera"),
+        ),
+        GdmCameraPolicy::NotLoaded => report.error(
+            "GDM camera SELinux policy",
+            format!(
+                "SELinux is enforcing and {GDM_SELINUX_MODULE} is not loaded, so the GDM greeter is denied the camera and the login screen never scans"
+            ),
+            gdm_selinux_fix(),
+        ),
+        GdmCameraPolicy::Unverifiable(why) => report.warning(
+            "GDM camera SELinux policy",
+            format!("SELinux is enforcing, but the loaded module list could not be read: {why}"),
+            format!(
+                "Run `sudo semodule -l | grep {GDM_SELINUX_MODULE}`; if it prints nothing, {}",
+                gdm_selinux_fix()
+            ),
         ),
     }
 }
@@ -673,6 +741,17 @@ fn pam_files() -> Vec<(PathBuf, String)> {
         .collect()
 }
 
+fn insecurely_owned(paths: &[PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .filter_map(|path| {
+            let metadata = fs::metadata(path).ok()?;
+            (metadata.uid() != 0 || metadata.mode() & 0o022 != 0)
+                .then(|| path.display().to_string())
+        })
+        .collect()
+}
+
 fn find_pam_references() -> Vec<PathBuf> {
     pam_files()
         .into_iter()
@@ -733,14 +812,7 @@ fn check_pam(report: &mut Report) {
         );
     }
 
-    let insecure: Vec<String> = modules
-        .iter()
-        .filter_map(|path| {
-            let metadata = fs::metadata(path).ok()?;
-            (metadata.uid() != 0 || metadata.mode() & 0o022 != 0)
-                .then(|| path.display().to_string())
-        })
-        .collect();
+    let insecure = insecurely_owned(&modules);
     if !modules.is_empty() {
         if insecure.is_empty() {
             report.pass(
@@ -774,6 +846,23 @@ fn check_pam(report: &mut Report) {
             .collect::<Vec<_>>()
             .join(", ");
         report.pass("PAM stack", format!("Gaze is referenced by: {names}"));
+
+        let writable = insecurely_owned(&references);
+        if writable.is_empty() {
+            report.pass(
+                "PAM stack permissions",
+                "the service files referencing Gaze are root-owned and not writable by group or others",
+            );
+        } else {
+            report.error(
+                "PAM stack permissions",
+                format!(
+                    "anyone in the owning group can rewrite the auth stack: {}",
+                    writable.join(", ")
+                ),
+                "Run `sudo chown root:root <file>` and `sudo chmod 644 <file>` on each, or restore them from the package manager.",
+            );
+        }
 
         for path in &references {
             let Ok(contents) = fs::read_to_string(path) else {
@@ -898,7 +987,8 @@ fn check_desktop_integration(report: &mut Report) {
         }
 
         let override_exists = Path::new(GDM_FACE_OVERRIDE_PATH).exists();
-        match (gdm_face_auth_from_dconf(), override_exists) {
+        let dconf_face_auth = gdm_face_auth_from_dconf();
+        match (dconf_face_auth, override_exists) {
             (Some(false), true) => report.warning(
                 "GDM login face auth",
                 format!(
@@ -949,6 +1039,10 @@ fn check_desktop_integration(report: &mut Report) {
                 ),
             },
             (_, false) => report.pass("GDM login face auth", "disabled"),
+        }
+
+        if dconf_face_auth == Some(true) || override_exists {
+            check_gdm_selinux(report);
         }
     }
 
@@ -1715,6 +1809,21 @@ mod tests {
         assert!(
             !extensions_include("['gaze-clock-diag@gundulabs.com']", uuid),
             "a different extension sharing the domain must not match"
+        );
+    }
+
+    #[test]
+    fn a_loaded_selinux_module_is_matched_on_the_name_column() {
+        let listing = "gaze-gdm-camera\t1.0\nzoneminder\t1.0\n";
+        assert!(semodule_lists(listing, GDM_SELINUX_MODULE));
+        assert!(!semodule_lists("zoneminder\t1.0\n", GDM_SELINUX_MODULE));
+        assert!(
+            !semodule_lists("gaze-gdm-camera-extra\t1.0\n", GDM_SELINUX_MODULE),
+            "a longer module name sharing the prefix must not match"
+        );
+        assert!(
+            !semodule_lists("something gaze-gdm-camera\n", GDM_SELINUX_MODULE),
+            "only the first column names the module"
         );
     }
 

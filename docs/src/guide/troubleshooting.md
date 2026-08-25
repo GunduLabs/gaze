@@ -210,6 +210,28 @@ widescreen (16:9) camera, re-enroll your faces once: older releases stretched
 widescreen frames to 4:3, so templates enrolled before the fix will not match
 undistorted frames as well as freshly enrolled ones.
 
+### `gaze auth --verbose` shows a passing score but still fails
+
+A face that clears the similarity threshold is only half the decision: the
+anti-spoof check has to pass as well. When it does not, the run ends with
+
+```
+Face matched, but the liveness check did not pass.
+```
+
+and `journalctl -u gazed -b` records `VerifyStart: frame budget spent` with
+`matched=true`. Move slightly during the scan, raise the light on your face, or lower
+`liveness.threshold` in `/etc/gaze/config.toml` if your camera consistently
+scores below it:
+
+```toml
+[liveness]
+threshold = 0.7
+```
+
+Setting `enabled = false` in the same section turns the anti-spoof model off
+entirely, at the cost of accepting a photograph.
+
 ### Auth aborts with "IR camera stream stopped unexpectedly"
 
 Some single-function Windows Hello webcams can't stream their RGB and IR sensors
@@ -246,6 +268,28 @@ journalctl -u gazed -b
 ```
 
 Older Gaze builds could try to use the selected user's PipeWire runtime before that user session existed. Update Gaze if you see this behavior.
+
+#### GDM never scans on Fedora and other SELinux distributions
+
+If face auth works in your desktop session (`sudo`, the lock screen, `gaze auth`)
+but the GDM login screen never opens the camera, SELinux is probably denying the
+greeter the camera device. Gaze ships a policy module for this and the extension
+package loads it on install, but that step cannot fail the package transaction,
+so a rejected policy leaves no trace beyond the greeter silently not scanning.
+
+`gaze doctor` reports this as **GDM camera SELinux policy**. To check by hand:
+
+```bash
+sudo semodule -l | grep gaze-gdm-camera
+sudo ausearch -m avc -ts today | grep xdm_t
+```
+
+If the module is not listed, load it and reboot:
+
+```bash
+sudo semodule -i /usr/share/gaze/gaze-gdm-camera.pp
+sudo reboot
+```
 
 ### KDE Plasma
 

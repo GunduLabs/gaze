@@ -179,7 +179,7 @@ pub fn eye_motion_is_live(landmarks: &[[(f32, f32); 5]], min_ratio: Option<f32>)
     if pairs == 0 {
         return neutral;
     }
-    let motion_ratio = ratios.iter().sum::<f32>() / pairs as f32;
+    let motion_ratio = ratios.iter().copied().fold(0.0_f32, f32::max);
 
     EyeMotion {
         live: motion_ratio >= threshold,
@@ -189,7 +189,7 @@ pub fn eye_motion_is_live(landmarks: &[[(f32, f32); 5]], min_ratio: Option<f32>)
 }
 
 pub fn confirmed_static(motion: &EyeMotion) -> bool {
-    motion.pairs >= 1 && !motion.live
+    motion.pairs >= MIN_MOTION_PAIRS && !motion.live
 }
 
 pub const MIN_MOTION_PAIRS: usize = 2;
@@ -260,11 +260,16 @@ mod tests {
     }
 
     #[test]
-    fn confirmed_static_requires_a_measured_still_pair() {
+    fn confirmed_static_requires_accumulated_still_pairs() {
         assert!(!confirmed_static(&EyeMotion {
             live: true,
             motion_ratio: 0.0,
             pairs: 0
+        }));
+        assert!(!confirmed_static(&EyeMotion {
+            live: false,
+            motion_ratio: 0.0,
+            pairs: 1
         }));
         assert!(!confirmed_static(&EyeMotion {
             live: true,
@@ -378,6 +383,23 @@ mod tests {
         ];
         let motion = eye_motion_is_live(&seq, None);
         assert!((motion.motion_ratio - 0.0601).abs() < 1e-3);
+    }
+
+    #[test]
+    fn motion_already_seen_survives_a_later_still_stretch() {
+        let frame = eyes((100.0, 50.0), (140.0, 50.0));
+        let seq = vec![
+            frame,
+            eyes((101.2, 50.8), (141.0, 50.6)),
+            frame,
+            frame,
+            frame,
+            frame,
+            frame,
+        ];
+        let motion = eye_motion_is_live(&seq, None);
+        assert!(motion.live);
+        assert!(!confirmed_static(&motion));
     }
 
     #[test]
