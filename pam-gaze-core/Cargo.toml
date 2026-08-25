@@ -3,7 +3,7 @@
 
 [package]
 name = "pam-gaze-core"
-version = "0.2.11"
+version = "0.2.12"
 edition = "2024"
 description = "Shared PAM authentication and FFI implementation for Gaze"
 categories.workspace = true
