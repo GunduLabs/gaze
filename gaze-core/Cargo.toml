@@ -36,7 +36,7 @@ ort = { version = "2.0.0-rc.13", optional = true, default-features = false, feat
     "api-21",
 ] }
 zbus = "5.19.0"
-zvariant = "5.14.0"
+zvariant = "5.15.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_plain = "1.0.2"
 tracing = "0.1.44"

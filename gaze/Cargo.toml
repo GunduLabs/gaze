@@ -19,7 +19,7 @@ default = []
 openvino = ["gaze-core/openvino", "ort/openvino"]
 
 [dependencies]
-aes-gcm = "0.11.0"
+aes-gcm = "0.11.1"
 anyhow = "1.0.104"
 gaze-core = { path = "../gaze-core" }
 getrandom = "0.4.3"
@@ -40,7 +40,7 @@ ort = { version = "2.0.0-rc.13", default-features = false, features = [
 sha2 = "0.11"
 tokio = { version = "1.53.1", features = ["full", "rt-multi-thread"] }
 ureq = "3.4.0"
-uuid = { version = "1.24.0", features = ["v4"] }
+uuid = { version = "1.25.0", features = ["v4"] }
 zbus = "5.19.0"
 zip = "8.6"
 tracing = "0.1.44"
