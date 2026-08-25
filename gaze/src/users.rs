@@ -173,8 +173,10 @@ impl UserDatabase {
             anyhow::bail!("invalid embedding length in {}", path.display());
         }
         let embed_vec = bytes
-            .chunks_exact(std::mem::size_of::<f32>())
-            .map(|chunk| f32::from_ne_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<{ std::mem::size_of::<f32>() }>()
+            .0
+            .iter()
+            .map(|chunk| f32::from_ne_bytes(*chunk))
             .collect();
         Ok(Array1::from_vec(embed_vec))
     }
