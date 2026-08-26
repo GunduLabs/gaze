@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgdk-pixbuf-2.0-dev \
         libgstreamer1.0-dev \
         libgstreamer-plugins-base1.0-dev \
+        gstreamer1.0-plugins-good \
         libpango1.0-dev \
         libgraphene-1.0-dev \
         libopencv-dev \
