@@ -55,6 +55,7 @@ BuildRequires:  gtk4-devel
 BuildRequires:  libadwaita-devel
 BuildRequires:  gstreamer1-devel
 BuildRequires:  gstreamer1-plugins-base-devel
+BuildRequires:  gstreamer1-plugins-good
 BuildRequires:  openssl-devel
 BuildRequires:  checkpolicy
 BuildRequires:  policycoreutils

@@ -249,6 +249,7 @@ jobs:
             libgdk-pixbuf-2.0-dev \
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-good \
             libpango1.0-dev \
             libgraphene-1.0-dev \
             libopencv-dev \
@@ -264,7 +265,7 @@ jobs:
             pkg-config
 
       - name: Install Fedora dependencies
-        if: ${{ matrix.distro == 'fedora' }}
+        if: ${{ matrix.format == 'rpm' }}
         run: |
           dnf install -y \
             git \
@@ -282,6 +283,7 @@ jobs:
             libadwaita-devel \
             gstreamer1-devel \
             gstreamer1-plugins-base-devel \
+            gstreamer1-plugins-good \
             openssl-devel \
             gnupg2 \
             rpm-sign \
@@ -294,6 +296,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm \
+            base-devel \
             git \
             ca-certificates \
             curl \
@@ -307,6 +310,7 @@ jobs:
             libadwaita \
             gstreamer \
             gst-plugins-base \
+            gst-plugins-good \
             openssl \
             gnupg \
             pkgconf \

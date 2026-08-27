@@ -53,7 +53,7 @@ sudo apt install build-essential pkg-config clang libclang-dev \
   libgtk-4-dev libadwaita-1-dev \
   libcairo2-dev libglib2.0-dev libgdk-pixbuf-2.0-dev \
   libpango1.0-dev libgraphene-1.0-dev \
-  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good \
   gettext-base \
   flatpak flatpak-builder elfutils
 ```
@@ -62,7 +62,7 @@ sudo apt install build-essential pkg-config clang libclang-dev \
 sudo dnf install @development-tools pkg-config clang clang-devel \
   opencv-devel libv4l-devel pam-devel tpm2-tss-devel openssl-devel \
   gtk4-devel libadwaita-devel \
-  gstreamer1-devel gstreamer1-plugins-base-devel \
+  gstreamer1-devel gstreamer1-plugins-base-devel gstreamer1-plugins-good \
   checkpolicy policycoreutils \
   gettext \
   flatpak flatpak-builder elfutils
@@ -72,7 +72,7 @@ sudo dnf install @development-tools pkg-config clang clang-devel \
 sudo pacman -S base-devel pkgconf clang llvm \
   opencv v4l-utils pam tpm2-tss openssl \
   gtk4 libadwaita \
-  gstreamer gst-plugins-base \
+  gstreamer gst-plugins-base gst-plugins-good \
   gettext \
   flatpak flatpak-builder elfutils
 ```
