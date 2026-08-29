@@ -360,12 +360,31 @@ jobs:
             gcc
 
       - name: Install Rust toolchain
+        if: ${{ matrix.distro != 'opensuse' }}
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install just
+        if: ${{ matrix.distro != 'opensuse' }}
         uses: extractions/setup-just@v4
         with:
           just-version: ${{ env.JUST_VERSION }}
+
+      - name: Install Rust toolchain and just on openSUSE
+        if: ${{ matrix.distro == 'opensuse' }}
+        run: |
+          case "$(uname -m)" in
+            x86_64) just_target="x86_64-unknown-linux-musl" ;;
+            aarch64|arm64) just_target="aarch64-unknown-linux-musl" ;;
+            *) echo "Unsupported just install architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
+            | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
+          curl -fsSL "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${just_target}.tar.gz" \
+            -o /tmp/just.tar.gz
+          tar -xzf /tmp/just.tar.gz -C /usr/local/bin just
+          echo "PATH=$HOME/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" >>"$GITHUB_ENV"
+          "$HOME/.cargo/bin/rustc" --version
+          just --version
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
