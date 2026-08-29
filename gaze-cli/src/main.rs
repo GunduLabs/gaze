@@ -1304,6 +1304,15 @@ fn remove_arch_pam_configuration_cmd() -> String {
     .join(" ")
 }
 
+fn remove_rpm_ostree_packages_cmd() -> String {
+    "sudo rpm-ostree uninstall gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde \
+      2>/dev/null || \
+      for pkg in gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde; do \
+      sudo rpm-ostree uninstall \"$pkg\" 2>/dev/null || true; \
+      done"
+        .into()
+}
+
 fn remove_pacman_packages_cmd() -> String {
     // AUR builds split off `-debug` packages; remove those first since they can
     // depend on the base package.
@@ -1362,6 +1371,7 @@ enum PackageManager {
     Apt,
     Zypper,
     Dnf,
+    RpmOstree,
     Pacman,
 }
 
@@ -1404,6 +1414,17 @@ fn append_package_manager_uninstall_steps(
                 "sudo rm -f /etc/yum.repos.d/gundulabs.repo".into(),
             ));
         }
+        PackageManager::RpmOstree => {
+            plan.push(("Remove layered packages", remove_rpm_ostree_packages_cmd()));
+            plan.push((
+                "Remove dnf repo",
+                "sudo rm -f /etc/yum.repos.d/gundulabs.repo".into(),
+            ));
+            plan.push((
+                "Reboot to finalize removal",
+                "echo 'Layered package removal takes effect after the next reboot.'".into(),
+            ));
+        }
         PackageManager::Pacman => {
             plan.push(("Remove pacman packages", remove_pacman_packages_cmd()));
             plan.push((
@@ -1421,12 +1442,15 @@ fn package_manager_from_availability(
     zypper: bool,
     dnf: bool,
     pacman: bool,
+    rpm_ostree: bool,
 ) -> Option<PackageManager> {
     // Prefer zypper when optional apt or dnf tools are also installed.
     if zypper {
         Some(PackageManager::Zypper)
     } else if apt {
         Some(PackageManager::Apt)
+    } else if rpm_ostree {
+        Some(PackageManager::RpmOstree)
     } else if dnf {
         Some(PackageManager::Dnf)
     } else if pacman {
@@ -1442,6 +1466,7 @@ fn detect_package_manager() -> Option<PackageManager> {
         which("zypper"),
         which("dnf"),
         which("pacman"),
+        which("rpm-ostree") && std::path::Path::new("/run/ostree-booted").exists(),
     )
 }
 
@@ -2161,12 +2186,40 @@ mod tests {
     #[test]
     fn open_suse_package_manager_precedes_dnf_when_both_are_available() {
         assert_eq!(
-            package_manager_from_availability(false, true, true, false),
+            package_manager_from_availability(false, true, true, false, false),
             Some(PackageManager::Zypper)
         );
         assert_eq!(
-            package_manager_from_availability(true, true, true, false),
+            package_manager_from_availability(true, true, true, false, false),
             Some(PackageManager::Zypper)
+        );
+    }
+
+    #[test]
+    fn rpm_ostree_package_manager_precedes_dnf_when_both_are_available() {
+        assert_eq!(
+            package_manager_from_availability(false, false, true, false, true),
+            Some(PackageManager::RpmOstree)
+        );
+        assert_eq!(
+            package_manager_from_availability(false, false, true, false, false),
+            Some(PackageManager::Dnf)
+        );
+    }
+
+    #[test]
+    fn rpm_ostree_package_cleanup_is_valid_shell() {
+        let command = remove_rpm_ostree_packages_cmd();
+        let output = std::process::Command::new("sh")
+            .arg("-n")
+            .arg("-c")
+            .arg(&command)
+            .output()
+            .expect("failed to run sh -n");
+        assert!(
+            output.status.success(),
+            "invalid rpm-ostree cleanup shell command: {}",
+            String::from_utf8_lossy(&output.stderr)
         );
     }
 
