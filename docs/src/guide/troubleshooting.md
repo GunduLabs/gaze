@@ -334,6 +334,24 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 
 This reapplies package-managed PAM integration.
 
+### Bitwarden browser extension never starts face authentication
+
+Bitwarden browser unlock reaches Gaze indirectly: the extension talks to the
+Bitwarden desktop app through native messaging, and the desktop app requests a
+Polkit authorization. First verify that the `polkit-1` PAM path starts Gaze:
+
+```bash
+gaze doctor
+pkexec /usr/bin/true
+```
+
+If that works but clicking **Unlock with biometrics** in the extension opens no
+Polkit prompt, troubleshoot Bitwarden's desktop app and native-messaging
+connection rather than adding another PAM rule. If the Polkit test does not use
+Gaze, fix the distribution-specific `polkit-1` setup. See
+[Browser extensions through Polkit](/guide/pam#browser-extensions-through-polkit-bitwarden)
+for the complete setup and diagnostic split.
+
 ## 6. First run is slow
 
 This is normal when models are downloaded initially.

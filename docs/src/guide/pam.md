@@ -254,6 +254,53 @@ auth    sufficient    pam_unix.so try_first_pass nullok
 
 Then test with `sudo -v`.
 
+## Browser extensions through Polkit (Bitwarden)
+
+A browser extension cannot call PAM directly. Bitwarden's browser extension
+hands an unlock request to the running Bitwarden desktop app through native
+messaging. On Linux, the desktop app asks Polkit to authorize the
+`com.bitwarden.Bitwarden.unlock` action, and the graphical Polkit agent runs the
+normal `polkit-1` PAM service. Gaze therefore needs no Firefox-, Chromium-, or
+Zen-specific hook: if Gaze is in the `polkit-1` stack, the request follows the
+same path as any other graphical authentication prompt.
+
+Set up and test the layers in order:
+
+1. Follow the Polkit setup for your distribution above, then check that a plain
+   Polkit request starts Gaze:
+
+   ```bash
+   gaze doctor
+   pkexec /usr/bin/true
+   ```
+
+2. In the Bitwarden desktop app, enable **Unlock with system authentication**
+   and **Allow browser integration**. Keep the desktop app running, logged in,
+   and unlocked while setting up the extension.
+3. In the browser extension, open **Settings → Account security**, enable
+   **Unlock with biometrics**, and approve the connection in the desktop app.
+   See [Bitwarden's biometric unlock guide](https://bitwarden.com/help/biometrics/)
+   for browser and package-specific requirements.
+
+If desktop unlock already uses Gaze but the browser extension never opens a
+Polkit dialog, the request has not reached PAM. Check the native-messaging setup,
+whether the desktop app is running and logged in, and whether Bitwarden supports
+that browser and installation method. Adding another Gaze PAM entry cannot fix a
+native-messaging failure.
+
+If a Polkit prompt appears but Gaze does not run, return to the distribution's
+Polkit setup above. `pkexec /usr/bin/true` must use Gaze first. To confirm that a
+Bitwarden attempt reached the daemon through the expected service, check:
+
+```bash
+sudo journalctl -u gazed -b --no-pager | grep 'service="polkit-1"'
+```
+
+Do not add a Polkit rule that automatically authorizes Bitwarden or a browser.
+That would bypass authentication rather than route it to Gaze. Bitwarden owns
+the desktop/native-messaging trust boundary; Gaze only supplies face
+authentication when Polkit invokes PAM.
+
 ## Safety notes
 
 - Keep password auth enabled while testing.
