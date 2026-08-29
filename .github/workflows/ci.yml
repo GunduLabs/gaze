@@ -223,8 +223,23 @@ jobs:
       - name: Install openSUSE Tumbleweed dependencies
         if: ${{ matrix.distro == 'opensuse' }}
         run: |
-          zypper --non-interactive refresh
-          zypper --non-interactive install --no-recommends \
+          export ZYPP_MEDIA_CURL_IPRESOLVE=4
+          zypper --non-interactive modifyrepo --disable repo-openh264 || true
+          retry() {
+            for attempt in 1 2 3; do
+              if "$@"; then
+                return 0
+              fi
+              echo "::warning::'$*' failed (attempt $attempt/3)"
+              if [ "$attempt" -lt 3 ]; then
+                sleep $((attempt * 15))
+              fi
+            done
+            echo "::error::'$*' failed after 3 attempts"
+            return 1
+          }
+          retry zypper --non-interactive refresh
+          retry zypper --non-interactive install --no-recommends \
             git \
             ca-certificates \
             curl \
