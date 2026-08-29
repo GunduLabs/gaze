@@ -39,6 +39,106 @@ const FACE_AUTHENTICATION_KEY = "enable-face-authentication";
 const MAX_TRIES_KEY = "max-face-tries";
 const RETRY_MODE_KEY = "face-retry-mode";
 
+const replyBoolean = (result) =>
+  Array.isArray(result) && typeof result[0] === "boolean" ? result[0] : null;
+
+// These D-Bus calls only avoid starting PAM for an unenrolled user or a
+// missing camera. If a probe fails, let pam_gaze make the authoritative
+// decision instead of silently disabling face authentication.
+const probeFaceEligibility = ({
+  proxy,
+  userName,
+  onEnrolled,
+  onCameraAvailable,
+  onEligible,
+  onSettled,
+  onProbeError,
+}) => {
+  let settled = false;
+  let enrollmentHandled = false;
+  let cameraHandled = false;
+
+  const settle = (eligible) => {
+    if (settled) return;
+    settled = true;
+    try {
+      if (eligible) onEligible();
+    } finally {
+      onSettled();
+    }
+  };
+
+  const deferToPam = (error, operation) => {
+    onProbeError(error, operation);
+    settle(true);
+  };
+
+  if (!proxy) {
+    deferToPam(
+      new Error("Gaze D-Bus proxy is unavailable"),
+      "check face authentication prerequisites",
+    );
+    return;
+  }
+
+  try {
+    proxy.HasEnrolledFacesRemote(userName, (result, error) => {
+      if (settled || enrollmentHandled) return;
+      enrollmentHandled = true;
+
+      if (error) {
+        deferToPam(error, "check enrolled faces");
+        return;
+      }
+
+      const enrolled = replyBoolean(result);
+      if (enrolled === null) {
+        deferToPam(
+          new Error("HasEnrolledFaces returned an invalid reply"),
+          "check enrolled faces",
+        );
+        return;
+      }
+      if (!enrolled) {
+        settle(false);
+        return;
+      }
+      onEnrolled();
+
+      try {
+        proxy.IsCameraAvailableRemote((cameraResult, cameraError) => {
+          if (settled || cameraHandled) return;
+          cameraHandled = true;
+
+          if (cameraError) {
+            deferToPam(cameraError, "check camera availability");
+            return;
+          }
+
+          const cameraAvailable = replyBoolean(cameraResult);
+          if (cameraAvailable === null) {
+            deferToPam(
+              new Error("IsCameraAvailable returned an invalid reply"),
+              "check camera availability",
+            );
+            return;
+          }
+          if (cameraAvailable) {
+            onCameraAvailable();
+            settle(true);
+          } else {
+            settle(false);
+          }
+        });
+      } catch (error) {
+        deferToPam(error, "check camera availability");
+      }
+    });
+  } catch (error) {
+    deferToPam(error, "check enrolled faces");
+  }
+};
+
 const recreatePolkitAgent = () => {
   const manager = Main.componentManager;
   if (!manager || Main.sessionMode.isLocked) return;
@@ -139,6 +239,8 @@ export default class GazeFaceAuthExtension extends Extension {
   enable() {
     this._injectionManager = new InjectionManager();
     this._extensionSettings = this.getSettings();
+    const enableToken = {};
+    this._gazeEnableToken = enableToken;
 
     const ext = this;
     const faceCache = { enrolled: new Map(), camera: null };
@@ -344,6 +446,8 @@ export default class GazeFaceAuthExtension extends Extension {
       return function (userName, hold) {
         if (this._userName !== userName) {
           this._faceAuthFailed = false;
+          this._faceStartPending = false;
+          this._faceStartProbe = null;
         }
         primeFaceCache(userName);
         original.call(this, userName, hold);
@@ -384,27 +488,35 @@ export default class GazeFaceAuthExtension extends Extension {
           }
 
           this._faceStartPending = true;
-          const clearFaceStartPending = () => {
-            self._faceStartPending = false;
-          };
-          if (dbusProxy) {
-            dbusProxy.HasEnrolledFacesRemote(userName, (result, err) => {
-              if (!err && result[0] === true) {
-                faceCache.enrolled.set(userName, true);
-                dbusProxy.IsCameraAvailableRemote((camResult, camErr) => {
-                  if (!camErr && camResult[0] === true) {
-                    faceCache.camera = true;
-                    startFace(self);
-                  }
-                  clearFaceStartPending();
-                });
-              } else {
-                clearFaceStartPending();
-              }
-            });
-          } else {
-            clearFaceStartPending();
-          }
+          const probe = {};
+          this._faceStartProbe = probe;
+
+          probeFaceEligibility({
+            proxy: dbusProxy,
+            userName,
+            onEnrolled: () => faceCache.enrolled.set(userName, true),
+            onCameraAvailable: () => {
+              faceCache.camera = true;
+            },
+            onEligible: () => {
+              if (
+                extension._gazeEnableToken === enableToken &&
+                self._faceStartProbe === probe &&
+                self._userName === userName
+              )
+                startFace(self);
+            },
+            onSettled: () => {
+              if (self._faceStartProbe !== probe) return;
+              self._faceStartPending = false;
+              self._faceStartProbe = null;
+            },
+            onProbeError: (error, operation) =>
+              logError(
+                error,
+                `[gaze] Failed to ${operation}; deferring the decision to ${FACE_SERVICE_NAME} PAM`,
+              ),
+          });
         };
       },
     );
@@ -584,6 +696,7 @@ export default class GazeFaceAuthExtension extends Extension {
         this._faceFailCounter = 0;
         this._faceAuthFailed = false;
         this._faceStartPending = false;
+        this._faceStartProbe = null;
         this._faceConfirmPending = false;
         this._faceConfirmService = null;
         original.call(this);
@@ -609,6 +722,7 @@ export default class GazeFaceAuthExtension extends Extension {
   }
 
   disable() {
+    this._gazeEnableToken = null;
     if (this._dbusProxy) {
       try {
         this._dbusProxy.RegisterExtensionRemote(false);
