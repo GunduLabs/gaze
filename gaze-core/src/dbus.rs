@@ -9,7 +9,6 @@ use zbus::zvariant::{OwnedValue, Type, Value};
 
 use strum_macros::{AsRefStr, Display, EnumString, VariantNames};
 
-#[allow(unreachable_patterns)]
 #[derive(
     Clone,
     Copy,

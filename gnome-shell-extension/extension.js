@@ -39,11 +39,6 @@ const FACE_AUTHENTICATION_KEY = "enable-face-authentication";
 const MAX_TRIES_KEY = "max-face-tries";
 const RETRY_MODE_KEY = "face-retry-mode";
 
-const gazeTiming = (tag, extra) =>
-  console.log(
-    `GAZE_TIMING ${tag} t=${GLib.get_monotonic_time()}us${extra ? " " + extra : ""}`,
-  );
-
 const recreatePolkitAgent = () => {
   const manager = Main.componentManager;
   if (!manager || Main.sessionMode.isLocked) return;
@@ -97,8 +92,7 @@ const keepPasswordEntryVisible = (dialog) => {
   cancelDelayedReset(dialog);
 };
 
-const enterConfirmMode = (dialog, path) => {
-  gazeTiming("CONFIRM_SHOWN", `path=${path}`);
+const enterConfirmMode = (dialog) => {
   cancelDelayedReset(dialog);
   dialog._passwordEntry?.set_text("");
   if (dialog._passwordEntry) {
@@ -275,7 +269,7 @@ export default class GazeFaceAuthExtension extends Extension {
           if (dialog._session) {
             dialog._session.connect("show-info", (session, text) => {
               if (text && text.trim() === CONFIRMATION_REQUEST)
-                enterConfirmMode(dialog, "showInfo");
+                enterConfirmMode(dialog);
             });
           }
 
@@ -296,7 +290,7 @@ export default class GazeFaceAuthExtension extends Extension {
             extension._originalDialogShowInfo = originalShowInfo;
             klass.prototype._onSessionShowInfo = function (session, text) {
               if (text && text.trim() === CONFIRMATION_REQUEST) {
-                enterConfirmMode(this, "onSessionShowInfo");
+                enterConfirmMode(this);
               } else {
                 originalShowInfo.call(this, session, text);
               }
@@ -385,7 +379,6 @@ export default class GazeFaceAuthExtension extends Extension {
             faceCache.enrolled.get(userName) === true &&
             faceCache.camera === true
           ) {
-            gazeTiming("FACE_START", "path=cached");
             startFace(self);
             return;
           }
@@ -401,7 +394,6 @@ export default class GazeFaceAuthExtension extends Extension {
                 dbusProxy.IsCameraAvailableRemote((camResult, camErr) => {
                   if (!camErr && camResult[0] === true) {
                     faceCache.camera = true;
-                    gazeTiming("FACE_START", "path=probe");
                     startFace(self);
                   }
                   clearFaceStartPending();
@@ -413,19 +405,6 @@ export default class GazeFaceAuthExtension extends Extension {
           } else {
             clearFaceStartPending();
           }
-        };
-      },
-    );
-
-    this._injectionManager.overrideMethod(
-      proto,
-      "_filterServiceMessages",
-      (original) => {
-        return function (serviceName, messageType) {
-          if (messageType === Util.MessageType.HINT) {
-            gazeTiming("HINT_FILTER", `svc=${serviceName}`);
-          }
-          return original.call(this, serviceName, messageType);
         };
       },
     );
@@ -518,14 +497,10 @@ export default class GazeFaceAuthExtension extends Extension {
           // pam_gaze defers to gdm-face on every other GDM service, but other
           // stacks can still route the token here, so match it on any service.
           if (secretQuestion?.trim() === CONFIRMATION_REQUEST) {
-            gazeTiming("CONFIRM_SHOWN", `svc=${serviceName} path=secretInfoQuery`);
             // _filterServiceMessages only force-clears when another message is queued behind
             // the current one, so a lone hint rides out its full ~1s interval unless cleared.
             if (typeof this._clearMessageQueue === "function") {
               this._clearMessageQueue();
-              gazeTiming("CLEAR_QUEUE_CALLED");
-            } else {
-              gazeTiming("CLEAR_QUEUE_MISSING");
             }
             this._filterServiceMessages(serviceName, Util.MessageType.HINT);
             // Enter must send the ack token, not the empty typed answer.
@@ -574,7 +549,6 @@ export default class GazeFaceAuthExtension extends Extension {
       (original) => {
         return function (client, serviceName) {
           if (serviceName === FACE_SERVICE_NAME) {
-            gazeTiming("FACE_CONV_STOPPED", `svc=${serviceName}`);
             this._faceFailCounter = (this._faceFailCounter || 0) + 1;
           }
           if (serviceName === this._faceConfirmService) {
