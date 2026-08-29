@@ -29,7 +29,7 @@ Facial authentication for Linux with on-device face recognition, PAM integration
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 ```
 
-The installer installs the Gaze daemon, CLI, and GUI. It installs the GNOME Shell extension only when it detects a GNOME desktop session; on KDE Plasma it installs `gaze-kde` instead, and on other non-GNOME desktops it skips GNOME-specific packages so it does not pull in GNOME Shell. If you installed the GNOME extension manually or automatic enablement was not possible, reboot (so GNOME Shell scans the new extension) and then run from GNOME:
+The installer installs the Gaze daemon, CLI, and GUI. It supports openSUSE Tumbleweed on x86_64 through its native `zypper` package manager and a Tumbleweed-specific RPM repository. It installs the GNOME Shell extension only when it detects a GNOME desktop session; on KDE Plasma it installs `gaze-kde` instead, and on other non-GNOME desktops it skips GNOME-specific packages so it does not pull in GNOME Shell. If you installed the GNOME extension manually or automatic enablement was not possible, reboot (so GNOME Shell scans the new extension) and then run from GNOME:
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
@@ -39,7 +39,7 @@ gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 > Running `gnome-extensions enable` before rebooting will return `Extension "gaze@gundulabs.com" does not exist`. Shell only rescans extension directories at session start.
 
 <details>
-<summary>Manual install (Debian/Ubuntu, Fedora and compatible DNF systems, Arch/Manjaro/CachyOS)</summary>
+<summary>Manual install (Debian/Ubuntu, Fedora/openSUSE RPM systems, Arch/Manjaro/CachyOS)</summary>
 
 **Debian / Ubuntu**
 
@@ -96,6 +96,24 @@ sudo dnf copr enable @gundulabs/gaze
 sudo dnf install gaze gaze-gui
 ```
 
+**openSUSE Tumbleweed (x86_64)**
+
+```bash
+sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
+sudo tee /etc/zypp/repos.d/gundulabs.repo >/dev/null <<'EOF'
+[gundulabs]
+name=Gundu Labs
+baseurl=https://packages.gundulabs.com/rpm/opensuse/tumbleweed/$basearch
+enabled=1
+autorefresh=1
+type=rpm-md
+gpgcheck=1
+gpgkey=https://packages.gundulabs.com/keys/gundulabs-repo.asc
+EOF
+sudo zypper refresh
+sudo zypper install gaze gaze-gui
+```
+
 **Arch / Manjaro / CachyOS**
 
 ```bash
@@ -109,7 +127,7 @@ yay -S --needed gaze-bin gaze-gui-bin
 flatpak install --from https://packages.gundulabs.com/flatpak/com.gundulabs.Gaze.flatpakref
 ```
 
-For GNOME lock screen face unlock after manual package installation, also install `gaze-gnome-extension` (`gaze-gnome-extension-bin` on Arch), reboot, then from your GNOME session run `gnome-extensions enable gaze@gundulabs.com` and `gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true`. On KDE Plasma, install `gaze-kde` (`gaze-kde-bin` on Arch) for hands-free lock screen face unlock and a Face Unlock entry in System Settings; see the [KDE guide](https://gaze.gundulabs.com/guide/kde).
+On openSUSE Tumbleweed, the RPM post-install script enables the shared PAM stack; reapply it manually with `sudo pam-config --add --gaze && sudo pam-config --update` if needed. For GNOME lock screen face unlock after manual package installation, also install `gaze-gnome-extension` (`gaze-gnome-extension-bin` on Arch), reboot, then from your GNOME session run `gnome-extensions enable gaze@gundulabs.com` and `gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true`. On KDE Plasma, install `gaze-kde` (`gaze-kde-bin` on Arch) for hands-free lock screen face unlock and a Face Unlock entry in System Settings; see the [KDE guide](https://gaze.gundulabs.com/guide/kde).
 
 </details>
 

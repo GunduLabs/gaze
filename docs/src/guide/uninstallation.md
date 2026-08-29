@@ -11,7 +11,14 @@ This guide covers completely removing Gaze and all its components from your syst
 gaze uninstall
 ```
 
-This runs the full cleanup sequence: reset GNOME/GDM lock and login settings, remove system and per-user copies of the GNOME extension, revert PAM, stop the daemon, remove packages (including AUR `-debug` split packages) and the repo, delete `gazed` core dumps, and wipe `/etc/gaze`, `/var/cache/gaze`, and `/var/lib/gaze`. It prints the plan and asks for confirmation first. Useful flags:
+This runs the full cleanup sequence on supported Debian/Ubuntu, Fedora,
+openSUSE, and Arch package-manager installs: reset GNOME/GDM lock and login settings, remove
+system and per-user copies of the GNOME extension, revert PAM, stop the daemon,
+remove packages (including AUR `-debug` split packages) and the repo, delete
+`gazed` core dumps, and wipe `/etc/gaze`, `/var/cache/gaze`, and
+`/var/lib/gaze`. On openSUSE it also removes the `pam-config` entries, native
+packages, Tumbleweed repository, and repository signing key.
+It prints the plan and asks for confirmation first. Useful flags:
 
 - `--keep-data`: preserve `/var/lib/gaze` (enrolled faces)
 - `--dry-run`: print the plan without running anything
@@ -78,14 +85,20 @@ else
 fi
 ```
 
+```bash [openSUSE Tumbleweed]
+sudo pam-config --delete --gaze --gaze_grosshack 2>/dev/null || true
+sudo pam-config --update 2>/dev/null || true
+```
+
 ```bash [Arch Linux]
 sudo sed -i '/pam_gaze/d' /etc/pam.d/sudo
 ```
 
 ```bash [Manual PAM setup]
-# Remove any pam_gaze.so or pam_gaze_grosshack.so lines
-# from /etc/pam.d/system-auth or wherever you added them.
-sudo nano /etc/pam.d/system-auth
+# Remove Gaze lines from the stack where you added them.
+# Use common-auth-pc on openSUSE or system-auth on Fedora/Arch.
+sudo nano /etc/pam.d/common-auth-pc  # openSUSE
+# sudo nano /etc/pam.d/system-auth   # Fedora/Arch
 ```
 
 :::
@@ -108,6 +121,10 @@ sudo apt autoremove
 
 ```bash [Fedora and compatible]
 sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde
+```
+
+```bash [openSUSE Tumbleweed]
+sudo zypper remove gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde
 ```
 
 ```bash [Arch Linux / Manjaro]
@@ -136,6 +153,14 @@ sudo apt update
 sudo rm /etc/yum.repos.d/gundulabs.repo
 sudo rpm -e gpg-pubkey-$(rpm -qa gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n' | grep -i gundulabs | awk '{print $1}' | sed 's/gpg-pubkey-//')
 sudo dnf makecache
+```
+
+```bash [openSUSE Tumbleweed]
+sudo zypper removerepo gundulabs 2>/dev/null || true
+sudo rm -f /etc/zypp/repos.d/gundulabs.repo
+sudo rm -f /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+sudo rpm -e gpg-pubkey-$(rpm -qa gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n' | grep -i gundulabs | awk '{print $1}' | sed 's/gpg-pubkey-//') 2>/dev/null || true
+sudo zypper refresh
 ```
 
 ```bash [Fedora via Copr]
@@ -202,10 +227,12 @@ If `gazed` ever crashed, systemd may have saved core dumps. These can contain de
 sudo find /var/lib/systemd/coredump \( -name 'core.gazed.*' -o -name 'core.gaze.*' -o -name 'core.gaze-gui.*' \) -delete
 ```
 
-### SELinux policy (Fedora/RPM systems only)
+### SELinux policy (RPM installs with SELinux enabled)
 
 ```bash
-sudo semodule -r gaze-gdm-camera
+if command -v semodule >/dev/null 2>&1; then
+  sudo semodule -r gaze-gdm-camera
+fi
 ```
 
 ## Step 5: Reload system services

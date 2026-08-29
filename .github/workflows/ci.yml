@@ -183,7 +183,12 @@ jobs:
             cache_key: ci-package-v1
           - format: rpm
             container: fedora:45
+            distro: fedora
             cache_key: ci-package-rpm-v1
+          - format: rpm
+            container: opensuse/tumbleweed:latest
+            distro: opensuse
+            cache_key: ci-package-opensuse-v1
           - format: srpm
             build_deps: "false"
             apt_packages: rpm zstd gettext-base
@@ -191,7 +196,7 @@ jobs:
 
     steps:
       - name: Install Fedora dependencies
-        if: ${{ matrix.format == 'rpm' }}
+        if: ${{ matrix.distro == 'fedora' }}
         run: |
           dnf install -y \
             git \
@@ -214,6 +219,34 @@ jobs:
             pkg-config \
             gettext \
             gcc
+
+      - name: Install openSUSE Tumbleweed dependencies
+        if: ${{ matrix.distro == 'opensuse' }}
+        run: |
+          zypper --non-interactive refresh
+          zypper --non-interactive install --no-recommends \
+            git \
+            ca-certificates \
+            curl \
+            clang \
+            clang-devel \
+            opencv-devel \
+            libv4l-devel \
+            pam-devel \
+            tpm2-0-tss-devel \
+            checkpolicy \
+            policycoreutils \
+            gtk4-devel \
+            libadwaita-devel \
+            gstreamer-devel \
+            gstreamer-plugins-base-devel \
+            gstreamer-plugins-good \
+            libopenssl-devel \
+            pkgconf-pkg-config \
+            envsubst \
+            gcc \
+            gcc-c++ \
+            binutils
 
       - name: Checkout source
         uses: actions/checkout@v7

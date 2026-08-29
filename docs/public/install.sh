@@ -432,6 +432,50 @@ configure_authselect() {
     fi
 }
 
+configure_pam_opensuse() {
+    if ! command -v pam-config >/dev/null 2>&1; then
+        warn "pam-config is not installed; skipping openSUSE PAM configuration."
+        say "Install pam-config and re-run this installer, or configure the Gaze PAM module manually."
+        link "$PAM_DOCS_URL"
+        return 0
+    fi
+
+    # Query output contains auth: only when a module is active. Preserve the
+    # user's selected mode when the installer runs again.
+    gaze_config="$(sudo pam-config -q --gaze </dev/null 2>/dev/null || true)"
+    grosshack_config="$(sudo pam-config -q --gaze_grosshack </dev/null 2>/dev/null || true)"
+    gaze_active=0
+    grosshack_active=0
+    if printf '%s\n' "$gaze_config" | grep -qE '^[[:space:]]*auth:'; then
+        gaze_active=1
+    fi
+    if printf '%s\n' "$grosshack_config" | grep -qE '^[[:space:]]*auth:'; then
+        grosshack_active=1
+    fi
+
+    if [ "$gaze_active" -eq 1 ] || [ "$grosshack_active" -eq 1 ]; then
+        if [ "$gaze_active" -eq 1 ] && [ "$grosshack_active" -eq 1 ]; then
+            ok "Gaze PAM sequential and grosshack modules are already enabled through pam-config."
+        elif [ "$grosshack_active" -eq 1 ]; then
+            ok "Gaze PAM grosshack module is already enabled through pam-config."
+        else
+            ok "Gaze PAM module is already enabled through pam-config."
+        fi
+        return 0
+    fi
+
+    # Enable the default mode and regenerate common-*.
+    if sudo pam-config --add --gaze </dev/null && sudo pam-config --update </dev/null; then
+        ok "Enabled the Gaze PAM module through pam-config."
+    else
+        warn "Could not enable the Gaze PAM module through pam-config."
+        say "After installation, run:"
+        cmd "sudo pam-config --add --gaze"
+        cmd "sudo pam-config --update"
+        link "$PAM_DOCS_URL"
+    fi
+}
+
 need curl
 need grep
 need uname
@@ -441,8 +485,24 @@ need gpg
 
 fetch_repo_key() {
     key_path="$TMP/gundulabs-repo.asc"
-    curl -fsSL "${PKG_BASE_URL}/keys/gundulabs-repo.asc" -o "$key_path"
-    actual_fpr="$(gpg --show-keys --with-colons "$key_path" | awk -F: '$1 == "fpr" { print $10; exit }')"
+    if ! curl -fsSL "${PKG_BASE_URL}/keys/gundulabs-repo.asc" -o "$key_path"; then
+        die "Could not download the repository signing key."
+    fi
+    key_info="$TMP/gundulabs-repo.key-info"
+    if ! gpg --batch --show-keys --with-colons "$key_path" >"$key_info"; then
+        die "Could not read the repository signing key."
+    fi
+    # Validate the sole primary key while allowing its subkeys.
+    # The `if` preserves the mismatch error under `set -e`.
+    if actual_fpr="$(awk -F: '
+        $1 == "pub" { pubs++; primary = 1; next }
+        primary && $1 == "fpr" { print $10; primary = 0 }
+        END { if (pubs != 1) exit 1 }
+    ' "$key_info")"; then
+        :
+    else
+        actual_fpr=""
+    fi
     if [ "$actual_fpr" != "$REPO_KEY_FPR" ]; then
         fail "Repository signing key fingerprint mismatch."
         fail "Expected: $REPO_KEY_FPR"
@@ -488,7 +548,15 @@ is_ostree_system() {
     [ -e /run/ostree-booted ]
 }
 
+is_opensuse_tumbleweed() {
+    case "$DISTRO_ID" in
+    opensuse-tumbleweed | opensuse_tumbleweed | tumbleweed) return 0 ;;
+    esac
+    return 1
+}
+
 is_rpm() {
+    is_opensuse_tumbleweed && return 0
     case "$DISTRO_ID $DISTRO_LIKE" in
     *fedora* | *rhel* | *centos* | *rocky* | *alma*) return 0 ;;
     esac
@@ -525,7 +593,7 @@ supported_fedora_compatible_version() {
 
 if ! is_rpm && ! is_deb && ! is_arch; then
     fail "Unsupported distribution: $DISTRO_ID"
-    say "Supported: Ubuntu 24.04/25.10/26.04, Debian 13 and 14 (forky/testing), Fedora-compatible 42/43/44 systems (including rpm-ostree image-based distros like Silverblue, Bazzite, and Kinoite), Arch Linux, and Arch-compatible AUR distros"
+    say "Supported: Ubuntu 24.04/25.10/26.04, Debian 13 and 14 (forky/testing), Fedora-compatible 42/43/44 systems (including rpm-ostree image-based distros like Silverblue, Bazzite, and Kinoite), openSUSE Tumbleweed, Arch Linux, and Arch-compatible AUR distros"
     exit 1
 fi
 
@@ -544,15 +612,21 @@ if is_deb && ! supported_deb_suite "$DISTRO_CODENAME"; then
     exit 1
 fi
 
-if is_rpm && ! is_fedora_compatible; then
+if is_rpm && ! is_fedora_compatible && ! is_opensuse_tumbleweed; then
     fail "Unsupported RPM distribution: ${NAME:-$DISTRO_ID}"
-    say "This installer supports RPM distributions that identify as Fedora-compatible in /etc/os-release."
+    say "This installer supports Fedora-compatible RPM distributions and openSUSE Tumbleweed."
     exit 1
 fi
 
 if is_fedora_compatible && ! supported_fedora_compatible_version; then
     fail "Unsupported ${NAME:-Fedora-compatible distribution} version: ${DISTRO_VERSION_ID:-unknown}"
     say "Fedora-compatible packages are currently available for versions 42, 43, and 44."
+    exit 1
+fi
+
+if is_opensuse_tumbleweed && [ "$ARCH" != "x86_64" ]; then
+    fail "Unsupported openSUSE Tumbleweed architecture: $ARCH"
+    say "openSUSE Tumbleweed packages are currently available for x86_64 only."
     exit 1
 fi
 
@@ -580,14 +654,18 @@ if is_deb; then
     plan "Set up the PAM modules through pam-auth-update if available"
     plan "Enable the Gaze daemon"
 elif is_rpm; then
-    if is_ostree_system && command -v rpm-ostree >/dev/null 2>&1; then
+    if is_opensuse_tumbleweed; then
+        need zypper
+        need rpm
+        RPM_TOOL="zypper"
+    elif is_ostree_system && command -v rpm-ostree >/dev/null 2>&1; then
         RPM_TOOL="rpm-ostree"
     elif command -v dnf >/dev/null 2>&1; then
         RPM_TOOL="dnf"
     else
         RPM_TOOL="yum"
     fi
-    say "Detected platform: ${BOLD}${NAME:-Fedora} ${DISTRO_VERSION_ID}${RESET} (${PKG_ARCH}), package manager: ${RPM_TOOL}"
+    say "Detected platform: ${BOLD}${NAME:-RPM-compatible distribution} ${DISTRO_VERSION_ID}${RESET} (${PKG_ARCH}), package manager: ${RPM_TOOL}"
     STEP_TOTAL=6
     echo ""
     title "This will:"
@@ -603,7 +681,11 @@ elif is_rpm; then
     if want_hyprlock_setup; then
         plan "Install gaze-hyprlock and configure hyprlock"
     fi
-    plan "Enable the Gaze PAM profile through authselect if available"
+    if is_opensuse_tumbleweed; then
+        plan "Enable the Gaze PAM module through pam-config if available"
+    else
+        plan "Enable the Gaze PAM profile through authselect if available"
+    fi
     plan "Enable the Gaze daemon"
 elif is_arch; then
     say "Detected platform: ${BOLD}Arch-compatible${RESET} (${PKG_ARCH}), package manager: AUR helper (yay/paru)"
@@ -634,9 +716,11 @@ if is_deb; then
         sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
     fi
 elif is_rpm; then
-    if [ -f /etc/yum.repos.d/gundulabs.repo ] || [ -f /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs ]; then
+    if [ -f /etc/yum.repos.d/gundulabs.repo ] ||
+        [ -f /etc/zypp/repos.d/gundulabs.repo ] ||
+        [ -f /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs ]; then
         say "Refreshing repository configuration..."
-        sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+        sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/zypp/repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
     fi
 fi
 
@@ -682,7 +766,34 @@ if is_deb; then
 
 elif is_rpm; then
     step "Configuring repository"
-    sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
+    # Verify and install the key before configuring the repository.
+    KEY_PATH="$(fetch_repo_key)"
+    if [ "$RPM_TOOL" != "rpm-ostree" ]; then
+        if is_opensuse_tumbleweed; then
+            sudo mkdir -p /etc/pki/rpm-gpg
+            sudo cp "$KEY_PATH" /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+            sudo chmod 0644 /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+            sudo rpm --import "$KEY_PATH"
+        else
+            sudo rpm --import "$KEY_PATH" 2>/dev/null || true
+        fi
+    fi
+    if is_opensuse_tumbleweed; then
+        # Stock zypper reads repositories from /etc/zypp/repos.d.
+        sudo mkdir -p /etc/zypp/repos.d
+        sudo tee /etc/zypp/repos.d/gundulabs.repo >/dev/null <<EOF
+[gundulabs]
+name=Gundu Labs
+baseurl=${PKG_BASE_URL}/rpm/opensuse/tumbleweed/\$basearch
+enabled=1
+autorefresh=1
+type=rpm-md
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+EOF
+    else
+        sudo mkdir -p /etc/yum.repos.d
+        sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
 [gundulabs]
 name=Gundu Labs
 baseurl=${PKG_BASE_URL}/rpm/fedora/\$releasever/\$basearch
@@ -691,16 +802,12 @@ gpgcheck=1
 repo_gpgcheck=1
 gpgkey=${PKG_BASE_URL}/keys/gundulabs-repo.asc
 EOF
-
-    # Import the key up front so repo_gpgcheck never opens an interactive import prompt that
-    # would read the piped script. OSTree systems skip it, /usr/share/rpm being read-only.
-    KEY_PATH="$(fetch_repo_key)"
-    if [ "$RPM_TOOL" != "rpm-ostree" ]; then
-        sudo rpm --import "$KEY_PATH" 2>/dev/null || true
     fi
 
     step "Refreshing repository metadata"
-    if [ "$RPM_TOOL" = "rpm-ostree" ]; then
+    if [ "$RPM_TOOL" = "zypper" ]; then
+        sudo zypper --non-interactive refresh gundulabs </dev/null
+    elif [ "$RPM_TOOL" = "rpm-ostree" ]; then
         sudo rpm-ostree refresh-md </dev/null 2>/dev/null || true
     elif command -v dnf >/dev/null 2>&1; then
         sudo dnf makecache </dev/null
@@ -710,6 +817,10 @@ EOF
 
     step "Installing packages"
     RPM_PKGS="gaze gaze-gui"
+    if is_opensuse_tumbleweed; then
+        # Minimal Tumbleweed installations may not include pam-config.
+        RPM_PKGS="$RPM_PKGS pam-config"
+    fi
     if want_gnome_extension_package; then
         RPM_PKGS="$RPM_PKGS gaze-gnome-extension"
     fi
@@ -723,6 +834,8 @@ EOF
             sudo rpm-ostree install --idempotent $RPM_PKGS </dev/null
             ok "Layered packages via rpm-ostree (system reboot required to activate)."
         fi
+    elif [ "$RPM_TOOL" = "zypper" ]; then
+        sudo zypper --non-interactive install $RPM_PKGS </dev/null
     elif command -v dnf >/dev/null 2>&1; then
         sudo dnf install -y $RPM_PKGS </dev/null
     else
@@ -730,7 +843,9 @@ EOF
     fi
     if is_kde_session; then
         KDE_PKGS="gaze-kde"
-        if command -v dnf >/dev/null 2>&1; then
+        if [ "$RPM_TOOL" = "zypper" ]; then
+            install_kde_packages sudo zypper --non-interactive install $KDE_PKGS </dev/null
+        elif command -v dnf >/dev/null 2>&1; then
             install_kde_packages sudo dnf install -y $KDE_PKGS </dev/null
         else
             install_kde_packages sudo yum install -y $KDE_PKGS </dev/null
@@ -738,7 +853,11 @@ EOF
     fi
 
     step "Configuring PAM"
-    configure_authselect
+    if is_opensuse_tumbleweed; then
+        configure_pam_opensuse
+    else
+        configure_authselect
+    fi
 
     step "Desktop integration"
     enable_desktop_integrations

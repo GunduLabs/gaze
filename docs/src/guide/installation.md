@@ -5,7 +5,7 @@
 
 Use one of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible, installs the KDE packages on KDE Plasma, and skips GNOME-specific packages on non-GNOME desktops. Manual GNOME package installs still need GNOME settings commands afterward.
 
-Supported installer targets on x86_64 and arm64: Ubuntu 24.04/25.10/26.04, Debian 13 and 14 (forky, currently testing), Fedora 42/43/44 and compatible distributions (including image-based OSTree distros such as Fedora Silverblue, Kinoite, and Bazzite), Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS.
+Supported installer targets on x86_64 and arm64: Ubuntu 24.04/25.10/26.04, Debian 13 and 14 (forky, currently testing), Fedora 42/43/44 and compatible distributions (including image-based OSTree distros such as Fedora Silverblue, Kinoite, and Bazzite), openSUSE Tumbleweed (x86_64), Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS.
 
 ## Path A: one-line installer (recommended)
 
@@ -19,7 +19,7 @@ This installs:
 - `gaze-gui`
 - the GNOME Shell extension package only when a GNOME desktop session is detected
 
-It also configures package updates where needed, enables the `gazed` daemon, and tries to enable lock screen face unlock for the current GNOME user when applicable. On KDE Plasma it installs `gaze-kde` instead, which wires up the lock screen. On other non-GNOME desktops it skips the GNOME extension package so it does not pull in GNOME Shell. On OSTree systems (Silverblue, Bazzite, Kinoite), the installer automatically uses `rpm-ostree` layering.
+It also configures package updates where needed, enables the `gazed` daemon, and tries to enable lock screen face unlock for the current GNOME user when applicable. On KDE Plasma it installs `gaze-kde` instead, which wires up the lock screen. On other non-GNOME desktops it skips the GNOME extension package so it does not pull in GNOME Shell. On OSTree systems (Silverblue, Bazzite, Kinoite), the installer automatically uses `rpm-ostree` layering. On openSUSE Tumbleweed, it uses `zypper` and the Tumbleweed-specific Gundu Labs RPM repository.
 
 Desktop behavior:
 
@@ -36,7 +36,7 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
 
 ## Path B: manual package install
 
-Use this if you prefer to configure package sources yourself. Debian/Ubuntu and Fedora-compatible systems with standard DNF or rpm-ostree package installation use Gundu Labs repositories. Arch Linux and Arch-compatible distributions such as Manjaro and CachyOS use the AUR packages.
+Use this if you prefer to configure package sources yourself. Debian/Ubuntu, Fedora-compatible systems, and openSUSE Tumbleweed use Gundu Labs repositories. Arch Linux and Arch-compatible distributions such as Manjaro and CachyOS use the AUR packages.
 
 Debian/Ubuntu packages are built per release, and each apt suite carries only the builds for that release: `noble` (Ubuntu 24.04), `questing` (Ubuntu 25.10), `resolute` (Ubuntu 26.04), `trixie` (Debian 13), and `forky` (Debian 14). The snippet below picks the suite matching your system; installing another release's package leaves `gazed` unable to load its OpenCV libraries.
 
@@ -52,6 +52,12 @@ sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-
 **Fedora and compatible DNF/rpm-ostree systems:**
 ```bash
 sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+```
+
+**openSUSE Tumbleweed:**
+
+```bash
+sudo rm -f /etc/zypp/repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
 ```
 
 ::: code-group
@@ -103,6 +109,34 @@ sudo dnf copr enable @gundulabs/gaze
 sudo dnf install gaze gaze-gui
 ```
 
+```bash [openSUSE Tumbleweed]
+sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
+sudo tee /etc/zypp/repos.d/gundulabs.repo >/dev/null <<'EOF'
+[gundulabs]
+name=Gundu Labs
+baseurl=https://packages.gundulabs.com/rpm/opensuse/tumbleweed/$basearch
+enabled=1
+autorefresh=1
+type=rpm-md
+gpgcheck=1
+gpgkey=https://packages.gundulabs.com/keys/gundulabs-repo.asc
+EOF
+sudo zypper refresh
+sudo zypper install gaze gaze-gui
+```
+
+The openSUSE RPM ships a `pam-config` definition and enables Gaze for `sudo`,
+GDM, and other services that include `common-auth` in its post-install script.
+To reapply the setting manually after changing PAM modules, run:
+
+```bash
+sudo pam-config --add --gaze
+sudo pam-config --update
+```
+
+The one-line installer also reapplies this setting after the package install
+when `pam-config` is available.
+
 ```bash [Arch Linux / Manjaro / CachyOS]
 # Requires an AUR helper such as yay or paru. yay shown here.
 yay -S --needed gaze-bin gaze-gui-bin
@@ -146,6 +180,10 @@ sudo apt install gaze-gnome-extension
 
 ```bash [Fedora and compatible]
 sudo dnf install gaze-gnome-extension
+```
+
+```bash [openSUSE Tumbleweed]
+sudo zypper install gaze-gnome-extension
 ```
 
 ```bash [Arch Linux / Manjaro / CachyOS]
