@@ -164,7 +164,7 @@ jobs:
         run: just build-rust-openvino
 
   package:
-    name: Package (${{ matrix.format }})
+    name: Package (${{ matrix.format }}${{ matrix.distro && format(', {0}', matrix.distro) || '' }})
     runs-on: ubuntu-latest
     container: ${{ matrix.container }}
     env:
