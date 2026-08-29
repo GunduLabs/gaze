@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# pam-config requires one module group per vendor definition file.
+[pam_gaze_grosshack.so]
+Auth: auth	sufficient	pam_gaze_grosshack.so
+Auth-Priority: 801

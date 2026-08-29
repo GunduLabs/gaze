@@ -186,6 +186,46 @@ sudo authselect current
 sudo -v
 ```
 
+## openSUSE Tumbleweed
+
+The openSUSE package ships a `pam-config` definition for Gaze and enables it
+in its post-install script. This adds Gaze to the managed `common-auth` stack,
+covering `sudo`, GDM, the GNOME lock screen, and other PAM services that include
+`common-auth`. To apply it again after changing PAM modules, run:
+
+```bash
+sudo pam-config --add --gaze
+sudo pam-config --update
+```
+
+The `--gaze` option is provided by the Gaze package's definition under
+`/usr/lib/pam-config.d`. If `pam-config` reports an unknown option, confirm
+that the base `gaze` package (not only `gaze-gui` or the GNOME extension) is
+installed.
+
+For simultaneous face and password authentication, enable
+`pam_gaze_grosshack.so` instead (do not enable both modules):
+
+```bash
+sudo pam-config --delete --gaze
+sudo pam-config --add --gaze_grosshack
+sudo pam-config --update
+```
+
+Check that the managed file contains Gaze and that the common-auth link still
+points at the generated file:
+
+```bash
+grep pam_gaze /etc/pam.d/common-auth-pc
+readlink -f /etc/pam.d/common-auth
+gaze doctor
+```
+
+Keep a root shell open while testing changes to the shared authentication
+stack. If `common-auth` is not managed by `pam-config` on your installation,
+follow [Other distros (manual)](#other-distros-manual) and add
+`pam_gaze.so` to the service-specific PAM files instead.
+
 ## Arch Linux / Manjaro
 
 The one-liner installer and the AUR package post-install script both configure `/etc/pam.d/sudo` automatically, inserting `pam_gaze.so` before the existing `auth include system-auth` line.
@@ -236,7 +276,9 @@ Debian/Ubuntu and Fedora ship their own `polkit-1` PAM service and do not use `s
 
 ## Other distros (manual)
 
-Edit your shared auth stack (for example `/etc/pam.d/system-auth`) and place Gaze before `pam_unix.so`.
+Edit your shared auth stack (for example `/etc/pam.d/system-auth` on Fedora or
+Arch, or `/etc/pam.d/common-auth-pc` on openSUSE when `pam-config` is not
+available) and place Gaze before `pam_unix.so`.
 
 Sequential:
 

@@ -221,6 +221,9 @@ _nfpm config format:
         fi
     fi
 
+    # Keep unused dependency placeholders valid YAML after envsubst.
+    export DEB_LIB_DEPENDS="      # unused for {{ format }}"
+    export RPM_LIB_DEPENDS="      # unused for {{ format }}"
     case "{{ format }}" in
     deb) export DEB_LIB_DEPENDS="$lib_depends" ;;
     rpm) export RPM_LIB_DEPENDS="$lib_depends" ;;
@@ -321,8 +324,25 @@ package format: build-rust build-selinux && (package-prebuilt format)
 # Package already-built artifacts for a given packager
 [arg("format", pattern="deb|rpm|archlinux")]
 [group("package")]
-package-prebuilt format: _dist-packages (_nfpm "packaging/nfpm.yaml" format) (_nfpm "packaging/nfpm-gui.yaml" format) (_nfpm "packaging/nfpm-gnome-extension.yaml" format) (_nfpm "packaging/nfpm-hyprlock.yaml" format) (_nfpm "packaging/nfpm-kde.yaml" format) && (_verify-package format)
-    @echo "Packages written to dist/packages/"
+package-prebuilt format: _dist-packages
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Use SUSE manifests together so packages do not mix PAM stack formats.
+    # Other RPM hosts keep the existing manifests.
+
+    configs=(packaging/nfpm.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension.yaml packaging/nfpm-hyprlock.yaml packaging/nfpm-kde.yaml)
+    if [ "{{ format }}" = rpm ] && [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    case "${ID:-} ${ID_LIKE:-}" in
+    *opensuse*|*suse*) configs=(packaging/nfpm-opensuse.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension-opensuse.yaml packaging/nfpm-hyprlock-opensuse.yaml packaging/nfpm-kde.yaml) ;;
+    esac
+    fi
+
+    for config in "${configs[@]}"; do {{ quote(just_executable()) }} _nfpm "$config" "{{ format }}"; done
+    {{ quote(just_executable()) }} _verify-package "{{ format }}"
+    echo "Packages written to dist/packages/"
 
 # ── srpm ──────────────────────────────────────────────────────────────────────
 

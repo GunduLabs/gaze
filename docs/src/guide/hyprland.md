@@ -23,6 +23,10 @@ sudo apt-get install gaze-hyprlock
 sudo dnf install gaze-hyprlock
 ```
 
+```bash [openSUSE Tumbleweed]
+sudo zypper install gaze-hyprlock
+```
+
 ```bash [Arch]
 yay -S gaze-hyprlock-bin
 ```
@@ -59,7 +63,9 @@ This uses `pam_gaze_grosshack.so`, a PAM shim that lets Gaze run alongside the p
 
 ## How it works
 
-`hyprlock-gaze` is a PAM service that stacks `pam_gaze.so` on top of your system password stack (`system-auth` on RPM/Arch, `common-auth` on Debian/Ubuntu). The auth flow:
+`hyprlock-gaze` is a PAM service that stacks `pam_gaze.so` on top of your
+system password stack (`system-auth` on Fedora/RHEL and Arch, `common-auth` on
+Debian/Ubuntu and openSUSE). The auth flow:
 
 1. hyprlock calls PAM with service name `hyprlock-gaze`
 2. `pam_gaze.so` runs as the logged-in user, claims the camera via the `gazed` DBus service, and runs face verification
@@ -87,6 +93,10 @@ sudo apt-get remove gaze-hyprlock
 
 ```bash [Fedora and compatible]
 sudo dnf remove gaze-hyprlock
+```
+
+```bash [openSUSE Tumbleweed]
+sudo zypper remove gaze-hyprlock
 ```
 
 ```bash [Arch]

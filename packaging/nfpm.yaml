@@ -128,6 +128,7 @@ ${DEB_LIB_DEPENDS}
   rpm:
     scripts:
       postinstall: "packaging/postinst-rpm.sh"
+      preremove: "packaging/prerm-rpm.sh"
     depends:
       - pam
 ${RPM_LIB_DEPENDS}

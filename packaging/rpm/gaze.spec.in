@@ -46,31 +46,44 @@ BuildRequires:  gcc
 BuildRequires:  gcc-c++
 BuildRequires:  clang
 BuildRequires:  clang-devel
-BuildRequires:  pkgconfig
 BuildRequires:  opencv-devel
 BuildRequires:  libv4l-devel
 BuildRequires:  pam-devel
-BuildRequires:  tpm2-tss-devel
 BuildRequires:  gtk4-devel
 BuildRequires:  libadwaita-devel
-BuildRequires:  gstreamer1-devel
-BuildRequires:  gstreamer1-plugins-base-devel
-BuildRequires:  gstreamer1-plugins-good
-BuildRequires:  openssl-devel
 BuildRequires:  checkpolicy
 BuildRequires:  policycoreutils
 BuildRequires:  desktop-file-utils
 BuildRequires:  systemd-rpm-macros
 BuildRequires:  zstd
 
-Requires:       pam
+# Keep distro-specific dependency names in one portable source RPM.
+%if 0%{?suse_version}
+BuildRequires:  pkgconf-pkg-config
+BuildRequires:  tpm2-0-tss-devel
+BuildRequires:  gstreamer-devel
+BuildRequires:  gstreamer-plugins-base-devel
+BuildRequires:  gstreamer-plugins-good
+BuildRequires:  libopenssl-devel
+Requires:       pam-config
+%else
+BuildRequires:  pkgconfig
+BuildRequires:  tpm2-tss-devel
+BuildRequires:  gstreamer1-devel
+BuildRequires:  gstreamer1-plugins-base-devel
+BuildRequires:  gstreamer1-plugins-good
+BuildRequires:  openssl-devel
 Recommends:     authselect
+%endif
+
+Requires:       pam
 Provides:       bundled(onnxruntime) = %{ort_version}
 
 %description
 Gaze is a face authentication system for Linux. This package contains the
 gazed daemon, the gaze command line client, the PAM modules, and the
-authselect profile used to wire face authentication into system-auth.
+distribution-specific PAM integration used to wire face authentication into
+the system authentication stack.
 
 %package gui
 Summary:        GTK4/Adwaita GUI for Gaze
@@ -148,8 +161,14 @@ install -Dpm 0644 packaging/config/gazed.service %{buildroot}%{_unitdir}/gazed.s
 install -Dpm 0755 target/release/libpam_gaze.so %{buildroot}%{_libdir}/security/pam_gaze.so
 install -Dpm 0755 target/release/libpam_gaze_grosshack.so %{buildroot}%{_libdir}/security/pam_gaze_grosshack.so
 
+%if 0%{?suse_version}
+# Tumbleweed uses pam-config; Fedora uses the authselect files below.
+install -Dpm 0644 packaging/pam/gaze.conf.suse %{buildroot}%{_prefix}/lib/pam-config.d/gaze.conf
+install -Dpm 0644 packaging/pam/gaze-grosshack.conf.suse %{buildroot}%{_prefix}/lib/pam-config.d/gaze-grosshack.conf
+%else
 install -dm 0755 %{buildroot}%{_datadir}/authselect/vendor/gaze
 cp -p packaging/authselect/custom/gaze/* %{buildroot}%{_datadir}/authselect/vendor/gaze/
+%endif
 
 install -dm 0755 %{buildroot}%{ort_libdir}
 cp -aP ort/lib/libonnxruntime.so* %{buildroot}%{ort_libdir}/
@@ -165,14 +184,23 @@ install -Dpm 0644 gnome-shell-extension/prefs.js %{buildroot}%{_datadir}/gnome-s
 install -Dpm 0644 packaging/config/org.gnome.shell.extensions.gaze.gschema.xml %{buildroot}%{_datadir}/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml
 install -Dpm 0644 packaging/gdm/00-gaze-defaults %{buildroot}%{_sysconfdir}/dconf/db/gdm.d/00-gaze-defaults
 install -Dpm 0644 packaging/gdm/profile %{buildroot}%{_datadir}/gaze/dconf-profile-gdm
+%if 0%{?suse_version}
+install -Dpm 0644 packaging/pam/gdm-face.suse %{buildroot}%{_sysconfdir}/pam.d/gdm-face
+%else
 install -Dpm 0644 packaging/pam/gdm-face %{buildroot}%{_sysconfdir}/pam.d/gdm-face
+%endif
 install -Dpm 0644 gaze-gdm-camera.pp %{buildroot}%{_datadir}/gaze/gaze-gdm-camera.pp
 
 install -Dpm 0755 packaging/kde/gaze-kde-pam %{buildroot}%{_bindir}/gaze-kde-pam
 install -Dpm 0644 packaging/kde/gaze-face-unlock.desktop %{buildroot}%{_datadir}/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop
 
+%if 0%{?suse_version}
+install -Dpm 0644 packaging/pam/hyprlock-gaze.suse %{buildroot}%{_sysconfdir}/pam.d/hyprlock-gaze
+install -Dpm 0644 packaging/pam/hyprlock-gaze-simultaneous.suse %{buildroot}%{_sysconfdir}/pam.d/hyprlock-gaze-simultaneous
+%else
 install -Dpm 0644 packaging/pam/hyprlock-gaze %{buildroot}%{_sysconfdir}/pam.d/hyprlock-gaze
 install -Dpm 0644 packaging/pam/hyprlock-gaze-simultaneous %{buildroot}%{_sysconfdir}/pam.d/hyprlock-gaze-simultaneous
+%endif
 
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/com.gundulabs.Gaze.desktop
@@ -183,6 +211,14 @@ ${SCRIPTLET_MAIN_POST}
 
 %preun
 %systemd_preun gazed.service
+%if 0%{?suse_version}
+# Remove enabled modules before definitions disappear on erase.
+# Upgrades must preserve the user's PAM mode.
+if [ "$1" -eq 0 ] && command -v pam-config >/dev/null 2>&1; then
+	pam-config -d --gaze >/dev/null 2>&1 || true
+	pam-config -d --gaze_grosshack >/dev/null 2>&1 || true
+fi
+%endif
 
 %postun
 %systemd_postun gazed.service
@@ -217,7 +253,12 @@ ${SCRIPTLET_HYPRLOCK_POSTUN}
 %{_unitdir}/gazed.service
 %{_libdir}/security/pam_gaze.so
 %{_libdir}/security/pam_gaze_grosshack.so
+%if 0%{?suse_version}
+%{_prefix}/lib/pam-config.d/gaze.conf
+%{_prefix}/lib/pam-config.d/gaze-grosshack.conf
+%else
 %{_datadir}/authselect/vendor/gaze/
+%endif
 %dir %{_datadir}/gaze
 %{_datadir}/gaze/gaze-gdm-camera.pp
 %dir %{ort_libdir}

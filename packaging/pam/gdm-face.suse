@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+#%PAM-1.0
+# Face-only GNOME Shell service using Tumbleweed's PAM stack names.
+auth        required                                     pam_env.so
+auth        [success=done ignore=ignore default=bad]   pam_gaze.so
+auth        optional                                     pam_gnome_keyring.so only_if=login auto_start
+auth        required                                     pam_deny.so
+auth        include                                      postlogin-auth
+
+account     required                                     pam_nologin.so
+account     substack                                     common-account
+account     include                                      postlogin-account
+
+password    required                                     pam_deny.so
+
+session     required                                     pam_loginuid.so
+session     optional                                     pam_keyinit.so force revoke
+session     substack                                     common-session
+session     include                                      postlogin-session

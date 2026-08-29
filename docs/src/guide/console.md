@@ -25,10 +25,16 @@ sudo pam-auth-update --package
 sudo authselect select gaze with-silent-lastlog --force
 ```
 
+```bash [openSUSE Tumbleweed]
+sudo pam-config --add --gaze
+sudo pam-config --update
+```
+
 :::
 
-Debian's `/etc/pam.d/login` includes `common-auth` and Fedora's includes
-`system-auth`, so the profile you enable for `sudo` reaches the console too.
+Debian's `/etc/pam.d/login` includes `common-auth`, Fedora's includes
+`system-auth`, and openSUSE's includes `common-auth`, so the profile or module
+you enable for `sudo` reaches the console too.
 
 ### Arch Linux
 
@@ -137,3 +143,5 @@ sudo pam-auth-update --disable gaze gaze-simultaneous
 Then follow
 [Selective setup](/guide/pam#selective-setup-password-at-gdm-face-authentication-for-sudo-and-polkit).
 On Arch, remove the `pam_gaze.so` line you added to `/etc/pam.d/login`.
+On openSUSE, remove the module from the managed stack with
+`sudo pam-config --delete --gaze --gaze_grosshack && sudo pam-config --update`.

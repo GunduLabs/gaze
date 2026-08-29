@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+#%PAM-1.0
+auth        [success=done default=ignore]                pam_gaze.so
+auth        include                                      common-auth
+account     include                                      common-account
+password    include                                      common-password
+session     include                                      common-session
