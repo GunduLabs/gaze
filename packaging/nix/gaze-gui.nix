@@ -40,6 +40,7 @@ rustPlatform.buildRustPackage {
       ../../gaze-core
       ../../gaze-gui
       ../../pam-gaze
+      ../../pam-gaze-grosshack
       ../../packaging/gui
     ];
   };

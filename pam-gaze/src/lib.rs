@@ -554,6 +554,7 @@ pub unsafe fn do_authenticate(pamh: PamHandle, flags: c_int, mode: PamMode) -> c
     }
 }
 
+#[cfg(not(feature = "shim-dep"))]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pam_sm_authenticate(
     pamh: PamHandle,
@@ -565,6 +566,7 @@ pub unsafe extern "C" fn pam_sm_authenticate(
     unsafe { do_authenticate(pamh, flags, mode) }
 }
 
+#[cfg(not(feature = "shim-dep"))]
 pam_success_stubs!();
 
 #[cfg(test)]

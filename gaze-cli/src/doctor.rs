@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
 const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(25);
 const BENCHMARK_TIMEOUT: Duration = Duration::from_secs(30);
-const PAM_MODULES: [&str; 1] = ["pam_gaze.so"];
+const PAM_MODULES: [&str; 2] = ["pam_gaze.so", "pam_gaze_grosshack.so"];
 const GNOME_EXTENSION_ID: &str = "gaze@gundulabs.com";
 const GNOME_EXTENSION_SCHEMA: &str = "org.gnome.shell.extensions.gaze";
 const GDM_FACE_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
@@ -934,10 +934,37 @@ fn check_pam(report: &mut Report) {
             report.error(
                 "PAM stack permissions",
                 format!(
-                    "anyone in the owning group can rewrite the auth stack: {}",
+                    "anyone in the owning group can make Gaze run their code: {}",
                     writable.join(", ")
                 ),
-                "Run `sudo chown root:root <file>` and `sudo chmod 644 <file>` on each, or restore them from the package manager.",
+                "Restore these files from the package manager; do not use writable PAM configuration.",
+            );
+        }
+
+        let deprecated_refs: Vec<_> = pam_files()
+            .into_iter()
+            .filter(|(_, contents)| {
+                contents.lines().any(|line| {
+                    let line = line.split('#').next().unwrap_or_default().trim();
+                    line.split_ascii_whitespace().any(|token| {
+                        token == "pam_gaze_grosshack.so"
+                            || token.ends_with("/pam_gaze_grosshack.so")
+                    })
+                })
+            })
+            .map(|(path, _)| path)
+            .collect();
+
+        if !deprecated_refs.is_empty() {
+            let paths = deprecated_refs
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            report.warning(
+                "Deprecated PAM module",
+                format!("pam_gaze_grosshack.so is referenced in: {paths}"),
+                "Replace 'pam_gaze_grosshack.so' with 'pam_gaze.so simultaneous' in those files. pam_gaze_grosshack.so will be removed in a future release.",
             );
         }
 
@@ -2256,6 +2283,14 @@ mod tests {
                 "/nix/store/abc-gaze/lib/security/pam_gaze.so"
             )]
         );
+        assert_eq!(
+            pam_line_module_paths(
+                "auth sufficient /nix/store/abc-gaze/lib/security/pam_gaze_grosshack.so"
+            ),
+            vec![PathBuf::from(
+                "/nix/store/abc-gaze/lib/security/pam_gaze_grosshack.so"
+            )]
+        );
 
         assert!(
             pam_line_module_paths("auth sufficient pam_gaze.so").is_empty(),
@@ -2464,6 +2499,9 @@ mod tests {
             "auth sufficient /usr/lib/security/pam_gaze.so simultaneous"
         ));
         assert!(pam_line_has_reference(
+            "auth sufficient /usr/lib/security/pam_gaze_grosshack.so debug"
+        ));
+        assert!(pam_line_has_reference(
             "auth sufficient /usr/lib/security/pam_gaze.so debug"
         ));
         assert!(!pam_line_has_reference(
@@ -2496,5 +2534,20 @@ mod tests {
         assert!(report.is_healthy());
         report.error("test", "broken", "fix");
         assert!(!report.is_healthy());
+    }
+
+    #[test]
+    fn deprecated_pam_line_detects_grosshack() {
+        let has_grosshack = |line: &str| {
+            let line = line.split('#').next().unwrap_or_default().trim();
+            line.split_ascii_whitespace().any(|token| {
+                token == "pam_gaze_grosshack.so" || token.ends_with("/pam_gaze_grosshack.so")
+            })
+        };
+
+        assert!(has_grosshack("auth sufficient pam_gaze_grosshack.so"));
+        assert!(has_grosshack("auth sufficient /lib/security/pam_gaze_grosshack.so"));
+        assert!(!has_grosshack("# auth sufficient pam_gaze_grosshack.so"));
+        assert!(!has_grosshack("auth sufficient pam_gaze.so simultaneous"));
     }
 }

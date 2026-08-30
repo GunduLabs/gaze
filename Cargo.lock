@@ -2549,6 +2549,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pam-gaze-grosshack"
+version = "0.2.12"
+dependencies = [
+ "libc",
+ "pam-gaze",
+]
+
+[[package]]
 name = "pango"
 version = "0.22.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -15,7 +15,10 @@ readme.workspace = true
 repository.workspace = true
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+shim-dep = []
 
 [dependencies]
 gaze-core = { path = "../gaze-core", default-features = false }

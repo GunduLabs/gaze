@@ -40,6 +40,7 @@ rustPlatform.buildRustPackage {
       ../../gaze-core
       ../../gaze-gui
       ../../pam-gaze
+      ../../pam-gaze-grosshack
       ../../packaging/config
     ];
   };
@@ -75,7 +76,7 @@ rustPlatform.buildRustPackage {
   buildPhase = ''
     runHook preBuild
     cargo build --release --offline -p gaze
-    cargo build --release --offline -p gaze-cli -p pam-gaze
+    cargo build --release --offline -p gaze-cli -p pam-gaze -p pam-gaze-grosshack
     runHook postBuild
   '';
 
@@ -87,6 +88,7 @@ rustPlatform.buildRustPackage {
     install -Dm755 target/release/gazed $out/bin/gazed
     install -Dm755 target/release/gaze $out/bin/gaze
     install -Dm755 target/release/libpam_gaze.so $out/lib/security/pam_gaze.so
+    install -Dm755 target/release/libpam_gaze_grosshack.so $out/lib/security/pam_gaze_grosshack.so
     install -Dm644 packaging/config/config.toml $out/share/gaze/config.toml
     install -Dm644 packaging/config/com.gundulabs.Gaze.conf $out/share/dbus-1/system.d/com.gundulabs.Gaze.conf
     install -Dm644 packaging/config/com.gundulabs.gaze.policy $out/share/polkit-1/actions/com.gundulabs.gaze.policy
