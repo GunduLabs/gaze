@@ -37,12 +37,8 @@ pub unsafe fn parse_raw_pam_mode(argc: c_int, argv: *const *const c_char) -> Pam
     }
     for i in 0..argc as isize {
         let arg_ptr = unsafe { *argv.offset(i) };
-        if !arg_ptr.is_null() {
-            if let Ok(arg) = unsafe { CStr::from_ptr(arg_ptr) }.to_str() {
-                if arg == "simultaneous" {
-                    return PamMode::Simultaneous;
-                }
-            }
+        if !arg_ptr.is_null() && unsafe { CStr::from_ptr(arg_ptr) }.to_str() == Ok("simultaneous") {
+            return PamMode::Simultaneous;
         }
     }
     PamMode::Sequential
@@ -551,8 +547,6 @@ pub unsafe fn do_authenticate(pamh: PamHandle, flags: c_int, mode: PamMode) -> c
         PamMode::Simultaneous => unsafe { do_authenticate_simultaneous(pamh, flags) },
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {

@@ -2546,7 +2546,9 @@ mod tests {
         };
 
         assert!(has_grosshack("auth sufficient pam_gaze_grosshack.so"));
-        assert!(has_grosshack("auth sufficient /lib/security/pam_gaze_grosshack.so"));
+        assert!(has_grosshack(
+            "auth sufficient /lib/security/pam_gaze_grosshack.so"
+        ));
         assert!(!has_grosshack("# auth sufficient pam_gaze_grosshack.so"));
         assert!(!has_grosshack("auth sufficient pam_gaze.so simultaneous"));
     }
