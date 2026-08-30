@@ -1082,7 +1082,8 @@ impl Config {
         let encoded = self
             .rewrite_preserving_comments(existing.as_deref())
             .unwrap_or_else(|| {
-                toml_edit::ser::to_string_pretty(self).unwrap_or_else(|_| String::from("# unwritable\n"))
+                toml_edit::ser::to_string_pretty(self)
+                    .unwrap_or_else(|_| String::from("# unwritable\n"))
             });
         let parent = path
             .parent()
@@ -1148,18 +1149,16 @@ fn merge_table_like(target: &mut toml_edit::Table, key: &str, val: &toml_edit::V
                 }
             }
         }
-        scalar => {
-            match target.get_mut(key).and_then(|item| item.as_value_mut()) {
-                Some(slot) => {
-                    let decor = slot.decor().clone();
-                    *slot = scalar.clone();
-                    *slot.decor_mut() = decor;
-                }
-                None => {
-                    target.insert(key, toml_edit::value(scalar.clone()));
-                }
+        scalar => match target.get_mut(key).and_then(|item| item.as_value_mut()) {
+            Some(slot) => {
+                let decor = slot.decor().clone();
+                *slot = scalar.clone();
+                *slot.decor_mut() = decor;
             }
-        }
+            None => {
+                target.insert(key, toml_edit::value(scalar.clone()));
+            }
+        },
     }
     true
 }
@@ -1171,7 +1170,8 @@ fn merge_into_toml_table(target: &mut toml_edit::Table, desired: &toml_edit::Tab
                 if !target.contains_key(key) {
                     target.insert(key, toml_edit::Item::Table(toml_edit::Table::new()));
                 }
-                let Some(sub_target) = target.get_mut(key).and_then(|item| item.as_table_mut()) else {
+                let Some(sub_target) = target.get_mut(key).and_then(|item| item.as_table_mut())
+                else {
                     return false;
                 };
                 if !merge_into_toml_table(sub_target, sub_table) {
@@ -1781,9 +1781,10 @@ mod tests {
 
     #[test]
     fn an_explicit_split_key_overrides_the_legacy_key() {
-        let auth: AuthConfig =
-            toml_edit::de::from_str("require_confirmation = true\nrequire_confirmation_elevation = false\n")
-                .unwrap();
+        let auth: AuthConfig = toml_edit::de::from_str(
+            "require_confirmation = true\nrequire_confirmation_elevation = false\n",
+        )
+        .unwrap();
         assert!(auth.require_confirmation_lock_screen);
         assert!(!auth.require_confirmation_elevation);
     }
