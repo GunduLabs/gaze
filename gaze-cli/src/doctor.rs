@@ -21,11 +21,11 @@ use std::time::{Duration, Instant};
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
 const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(25);
 const BENCHMARK_TIMEOUT: Duration = Duration::from_secs(30);
-const PAM_MODULES: [&str; 2] = ["pam_gaze.so", "pam_gaze_grosshack.so"];
+const PAM_MODULES: [&str; 1] = ["pam_gaze.so"];
 const GNOME_EXTENSION_ID: &str = "gaze@gundulabs.com";
 const GNOME_EXTENSION_SCHEMA: &str = "org.gnome.shell.extensions.gaze";
 const GDM_FACE_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
-/// Mirror `pam_gaze_core`'s paths for the slots Plasma starts up front.
+/// Mirror `pam-gaze`'s paths for the slots Plasma starts up front.
 const KDE_FACE_PAM_FILE: &str = "/etc/pam.d/kde-fingerprint";
 const KDE_SMARTCARD_PAM_FILE: &str = "/etc/pam.d/kde-smartcard";
 const PLASMALOGIN_FACE_PAM_FILE: &str = "/etc/pam.d/plasmalogin-fingerprint";
@@ -875,26 +875,17 @@ fn find_pam_ordering_conflicts(contents: &str) -> Vec<&'static str> {
 
 fn check_pam(report: &mut Report) {
     let modules = find_pam_modules();
-    let sequential = modules
+    let installed = modules
         .iter()
         .any(|path| path.file_name().is_some_and(|name| name == PAM_MODULES[0]));
-    let simultaneous = modules
-        .iter()
-        .any(|path| path.file_name().is_some_and(|name| name == PAM_MODULES[1]));
 
-    if sequential && simultaneous {
-        report.pass("PAM modules", "both modules are installed");
-    } else if !sequential {
+    if installed {
+        report.pass("PAM module", "pam_gaze.so is installed");
+    } else {
         report.error(
-            "PAM modules",
+            "PAM module",
             "pam_gaze.so is not installed where PAM can load it",
             "Reinstall the base Gaze package before enabling PAM authentication.",
-        );
-    } else {
-        report.warning(
-            "PAM modules",
-            "pam_gaze_grosshack.so is missing",
-            "Reinstall the base Gaze package if you use simultaneous face/password prompts.",
         );
     }
 
@@ -996,7 +987,7 @@ fn owning_uid() -> u32 {
 }
 
 /// Names only, joined like the environment variables above so the callers'
-/// `contains` checks are unchanged. The CLI does not link `pam-gaze-core`.
+/// `contains` checks are unchanged. The CLI does not link `pam-gaze`.
 fn desktop_from_processes(uid: u32) -> String {
     use std::os::unix::fs::MetadataExt;
 
@@ -1193,7 +1184,11 @@ fn slot_status(slot: Option<&str>) -> KdeLockStatus {
             )
         })
     };
-    if auth_lines().any(|line| line.contains("pam_gaze_grosshack.so")) {
+    if auth_lines().any(|line| {
+        line.contains("pam_gaze_grosshack.so")
+            || (pam_line_has_reference(line)
+                && line.split_whitespace().any(|tok| tok == "simultaneous"))
+    }) {
         return KdeLockStatus::Grosshack;
     }
     if auth_lines().any(pam_line_has_reference) {
@@ -1241,8 +1236,8 @@ fn check_kde_lock_screen(
         ),
         KdeLockStatus::Grosshack => report.warning(
             NAME,
-            format!("{slot} runs pam_gaze_grosshack.so, which waits for a password prompt that KScreenLocker can never answer"),
-            format!("Use the plain module there: replace it with `-auth [success=done default=ignore] pam_gaze.so` in {file}, or reinstall gaze-kde."),
+            format!("{slot} runs pam_gaze.so in simultaneous mode, which waits for a password prompt that KScreenLocker can never answer"),
+            format!("Use sequential mode there: replace it with `-auth [success=done default=ignore] pam_gaze.so` in {file}, or reinstall gaze-kde."),
         ),
         KdeLockStatus::NotWired => report.warning(
             NAME,
@@ -2093,6 +2088,10 @@ mod tests {
             KdeLockStatus::Wired
         );
         assert_eq!(
+            slot_status(Some("auth sufficient pam_gaze.so simultaneous")),
+            KdeLockStatus::Grosshack
+        );
+        assert_eq!(
             slot_status(Some("auth sufficient pam_gaze_grosshack.so")),
             KdeLockStatus::Grosshack
         );
@@ -2176,6 +2175,10 @@ mod tests {
             Level::Pass
         );
         assert_eq!(
+            level(Some("auth sufficient pam_gaze.so simultaneous"), None),
+            Level::Warning
+        );
+        assert_eq!(
             level(Some("auth sufficient pam_gaze_grosshack.so"), None),
             Level::Warning
         );
@@ -2247,10 +2250,10 @@ mod tests {
         );
         assert_eq!(
             pam_line_module_paths(
-                "auth sufficient /nix/store/abc-gaze/lib/security/pam_gaze_grosshack.so"
+                "auth sufficient /nix/store/abc-gaze/lib/security/pam_gaze.so simultaneous"
             ),
             vec![PathBuf::from(
-                "/nix/store/abc-gaze/lib/security/pam_gaze_grosshack.so"
+                "/nix/store/abc-gaze/lib/security/pam_gaze.so"
             )]
         );
 
@@ -2458,7 +2461,10 @@ mod tests {
         assert!(!pam_line_has_reference("auth include system-auth"));
         assert!(pam_line_has_reference("auth sufficient pam_gaze.so"));
         assert!(pam_line_has_reference(
-            "auth sufficient /usr/lib/security/pam_gaze_grosshack.so debug"
+            "auth sufficient /usr/lib/security/pam_gaze.so simultaneous"
+        ));
+        assert!(pam_line_has_reference(
+            "auth sufficient /usr/lib/security/pam_gaze.so debug"
         ));
         assert!(!pam_line_has_reference(
             "auth sufficient pam_gaze.so.disabled"

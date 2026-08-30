@@ -2539,16 +2539,6 @@ dependencies = [
 name = "pam-gaze"
 version = "0.2.12"
 dependencies = [
- "futures",
- "gaze-core",
- "pam-gaze-core",
- "tokio",
-]
-
-[[package]]
-name = "pam-gaze-core"
-version = "0.2.12"
-dependencies = [
  "anyhow",
  "futures",
  "gaze-core",
@@ -2556,15 +2546,6 @@ dependencies = [
  "parking_lot",
  "tokio",
  "zbus",
-]
-
-[[package]]
-name = "pam-gaze-grosshack"
-version = "0.2.12"
-dependencies = [
- "libc",
- "pam-gaze-core",
- "tokio",
 ]
 
 [[package]]

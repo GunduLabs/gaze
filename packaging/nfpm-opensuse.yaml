@@ -52,18 +52,8 @@ contents:
     packager: rpm
     file_info:
       mode: 0755
-  - src: "target/release/libpam_gaze_grosshack.so"
-    dst: "/usr/lib64/security/pam_gaze_grosshack.so"
-    packager: rpm
-    file_info:
-      mode: 0755
   - src: "packaging/pam/gaze.conf.suse"
     dst: "/usr/lib/pam-config.d/gaze.conf"
-    packager: rpm
-    file_info:
-      mode: 0644
-  - src: "packaging/pam/gaze-grosshack.conf.suse"
-    dst: "/usr/lib/pam-config.d/gaze-grosshack.conf"
     packager: rpm
     file_info:
       mode: 0644

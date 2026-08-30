@@ -50,13 +50,13 @@ default:
 [group("build")]
 build-rust:
     {{ opencv_env }} cargo build -p gaze --release
-    {{ opencv_env }} cargo build -p gaze-cli {{ gui_pkg }} -p pam-gaze -p pam-gaze-grosshack --release
+    {{ opencv_env }} cargo build -p gaze-cli {{ gui_pkg }} -p pam-gaze --release
 
 # Build all Rust workspace binaries with OpenVINO configuration and runtime support.
 [group("build")]
 build-rust-openvino:
     {{ opencv_env }} cargo build -p gaze --release --features gaze/openvino
-    {{ opencv_env }} cargo build -p gaze-cli {{ gui_pkg }} -p pam-gaze -p pam-gaze-grosshack --release --features gaze-cli/openvino{{ gui_feature }}
+    {{ opencv_env }} cargo build -p gaze-cli {{ gui_pkg }} -p pam-gaze --release --features gaze-cli/openvino{{ gui_feature }}
 
 # Compile the SELinux policy module
 [group("build")]

@@ -99,7 +99,7 @@ input to a revision with a newer `onnxruntime` instead of overriding `follows`.
 | `services.gaze.pam.defaultServices` | `[ "sudo" "polkit-1" ]` | PAM services that get face auth without further configuration |
 | `security.pam.services.<name>.gaze.enable` | true for `pam.defaultServices` | Attempt face auth for this PAM service |
 | `security.pam.services.<name>.gaze.control` | `"sufficient"` | PAM control field for the rule |
-| `security.pam.services.<name>.gaze.simultaneous` | `false` | Use `pam_gaze_grosshack.so` (face and password prompt at the same time) instead of sequential `pam_gaze.so` |
+| `security.pam.services.<name>.gaze.simultaneous` | `false` | Pass `simultaneous` to `pam_gaze.so` (face and password prompt at the same time) instead of sequential authentication |
 | `security.pam.services.<name>.gaze.order` | `null` | Explicit rule `order`; `null` places gaze ahead of `pam_fprintd` and `pam_unix` |
 | `services.gaze.gui.enable` | `false` | Install `gaze-gui` |
 | `services.gaze.gui.package` | flake's `gaze-gui` | GUI package |

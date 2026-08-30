@@ -11,11 +11,10 @@ If you specifically want GNOME lock screen or GDM login behavior, use the [GNOME
 
 ## What Gaze installs
 
-- `pam_gaze.so` (sequential mode, recommended)
-- `pam_gaze_grosshack.so` (simultaneous mode)
+- `pam_gaze.so` (supports sequential and simultaneous modes)
 
-Sequential means face auth runs first, then password fallback.
-Simultaneous means face auth and password prompt run in parallel.
+Sequential (the default) means face auth runs first, then password fallback.
+Simultaneous (enabled via the `simultaneous` option, e.g. `pam_gaze.so simultaneous`) means face auth and password prompt run in parallel.
 
 ## Debian / Ubuntu
 
@@ -290,7 +289,7 @@ auth    sufficient    pam_unix.so try_first_pass nullok
 Simultaneous:
 
 ```text
-auth    sufficient    pam_gaze_grosshack.so
+auth    sufficient    pam_gaze.so simultaneous
 auth    sufficient    pam_unix.so try_first_pass nullok
 ```
 

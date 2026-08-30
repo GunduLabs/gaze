@@ -6,18 +6,14 @@ members = [
     "gaze",
     "gaze-cli",
     "gaze-core",
-    "pam-gaze-core",
     "pam-gaze",
-    "pam-gaze-grosshack",
     "gaze-gui",
 ]
 default-members = [
     "gaze",
     "gaze-cli",
     "gaze-core",
-    "pam-gaze-core",
     "pam-gaze",
-    "pam-gaze-grosshack",
     "gaze-gui",
 ]
 resolver = "3"

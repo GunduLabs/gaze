@@ -317,8 +317,8 @@ The lock screen only starts face auth on its own when `/etc/pam.d/kde-fingerprin
 runs `pam_gaze.so`. Without it, KScreenLocker has no biometric slot to start and
 face auth waits until you submit the password field.
 
-If `gaze doctor` warns that the slot runs `pam_gaze_grosshack.so`, replace it with
-the plain module: the simultaneous one waits for a password prompt the greeter can
+If `gaze doctor` warns that the slot runs `pam_gaze.so` in simultaneous mode, replace it with
+the plain module without `simultaneous`: the simultaneous mode waits for a password prompt the greeter can
 never answer, which wedges the slot for the rest of the lock.
 
 At the **login greeter** (Plasma Login Manager or SDDM), face auth is opt-in and,

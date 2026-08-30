@@ -7,7 +7,7 @@ auth        required                                     pam_faillock.so preauth
 auth        sufficient                                   pam_fprintd.so                                         {include if "with-fingerprint"}
 auth        sufficient                                   pam_u2f.so cue                                         {include if "with-pam-u2f"}
 auth        required                                     pam_u2f.so cue {if not "without-pam-u2f-nouserok":nouserok} {include if "with-pam-u2f-2fa"}
-auth        sufficient                                   pam_gaze_grosshack.so                                  {include if "with-face-simultaneous"}
+auth        sufficient                                   pam_gaze.so simultaneous                               {include if "with-face-simultaneous"}
 auth        sufficient                                   pam_gaze.so                                            {exclude if "with-face-simultaneous"}
 auth        sufficient                                   pam_unix.so {if not "without-nullok":nullok} try_first_pass
 auth        sufficient                                   pam_systemd_home.so                                    {include if "with-systemd-homed"}

@@ -99,8 +99,7 @@ require_artifacts() {
     for file in \
         "$(artifact gazed)" \
         "$(artifact gaze)" \
-        "$(artifact libpam_gaze.so)" \
-        "$(artifact libpam_gaze_grosshack.so)"
+        "$(artifact libpam_gaze.so)"
     do
         if [ ! -e "$file" ]; then
             printf 'Missing build artifact: %s\n' "$file" >&2
@@ -225,7 +224,6 @@ link_pam_dir() {
     dir=$1
     [ -d "$dir" ] || return 1
     backup_and_install "$(artifact libpam_gaze.so)" "$dir/pam_gaze.so" 0755
-    backup_and_install "$(artifact libpam_gaze_grosshack.so)" "$dir/pam_gaze_grosshack.so" 0755
     return 0
 }
 
