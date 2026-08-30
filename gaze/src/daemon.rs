@@ -45,7 +45,7 @@ const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
 const LIVENESS_GATE_DIAGNOSTIC: &str = "Face matched, but the liveness check did not pass. Move slightly and try again, or lower liveness.threshold.";
 const VERIFY_NO_FACE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Bounds a face that stays badly framed: it refreshes the no-face deadline without ever
-/// yielding an embedding. Kept under `pam_gaze_core::CAMERA_AUTH_TIMEOUT_SECS`.
+/// yielding an embedding. Kept under `CAMERA_AUTH_TIMEOUT_SECS` in `pam-gaze`.
 const VERIFY_NO_USABLE_TIMEOUT: Duration = Duration::from_secs(8);
 /// Hybrid verify runs one camera at a time for single-function UVC devices (e.g. Logitech
 /// Brio). Caps the RGB phase so it yields to IR even without a match. See `verify_start`.

@@ -224,11 +224,11 @@ body:
   - type: dropdown
     id: pam-module
     attributes:
-      label: Which PAM module is in your stack?
-      description: "`pam_gaze.so` waits for the camera before falling through to the password prompt. `pam_gaze_grosshack.so` races both at once. They fail differently, so we need to know which one you are on."
+      label: Which PAM mode is in your stack?
+      description: "`pam_gaze.so` (sequential, default) waits for the camera before falling through to the password prompt. `pam_gaze.so simultaneous` races both at once. They fail differently, so we need to know which one you are on."
       options:
         - "pam_gaze.so (sequential, the default)"
-        - "pam_gaze_grosshack.so (simultaneous)"
+        - "pam_gaze.so simultaneous (simultaneous)"
         - Both, on different services
         - Not sure
         - Not applicable, this is not a PAM problem

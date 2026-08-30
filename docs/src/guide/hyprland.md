@@ -59,7 +59,7 @@ auth {
 }
 ```
 
-This uses `pam_gaze_grosshack.so`, a PAM shim that lets Gaze run alongside the password prompt instead of blocking it.
+This uses `pam_gaze.so simultaneous`, running Gaze alongside the password prompt instead of blocking it.
 
 ## How it works
 

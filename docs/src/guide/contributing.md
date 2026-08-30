@@ -134,7 +134,7 @@ PAM changes can lock you out of authentication flows.
 
 - Keep a second terminal open with an active root shell before editing PAM files.
 - Test with a non-critical PAM service first, not `sudo`, `system-auth`, or your graphical login.
-- Be careful with unsafe FFI in `pam-gaze` and `pam-gaze-grosshack`.
+- Be careful with unsafe FFI in `pam-gaze`.
 - Include exact manual test steps in the pull request.
 
 ## Docs style

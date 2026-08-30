@@ -31,8 +31,7 @@ let
     lib.recursiveUpdate defaultSettings normalizedSettings
   );
 
-  pamModuleFor =
-    svc: "${cfg.package}/lib/security/pam_gaze${lib.optionalString svc.simultaneous "_grosshack"}.so";
+  pamModule = "${cfg.package}/lib/security/pam_gaze.so";
 
   gnomeExtensionUuid = cfg.gnome.extensionPackage.passthru.extensionUuid;
 in
@@ -215,9 +214,9 @@ in
               type = lib.types.bool;
               default = false;
               description = ''
-                Use pam_gaze_grosshack.so, which runs face authentication and
-                the password prompt simultaneously, instead of the sequential
-                pam_gaze.so.
+                Pass the simultaneous option to pam_gaze.so, which runs face
+                authentication and the password prompt simultaneously, instead
+                of sequential authentication.
               '';
             };
 
@@ -255,7 +254,8 @@ in
             in
             {
               control = config.gaze.control;
-              modulePath = pamModuleFor config.gaze;
+              modulePath = pamModule;
+              args = lib.optional config.gaze.simultaneous "simultaneous";
               order = if config.gaze.order != null then config.gaze.order else fallbackOrder - 10;
             }
           );
@@ -366,7 +366,7 @@ in
         in
         {
           # A face-only stack, because a noninteractive slot must never reach a
-          # module that prompts. Never pam_gaze_grosshack.so here for that reason.
+          # module that prompts. Never the simultaneous option here for that reason.
           security.pam.services.${slot}.text = ''
             auth       [success=done default=ignore]  ${cfg.package}/lib/security/pam_gaze.so
           ''

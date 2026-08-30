@@ -289,17 +289,17 @@ Gaze arms the gate from logind's `PrepareForSleep` signal, the same signal `resu
 
 When confirmation is disabled, a successful match replaces the camera prompt with "Face Verified." and authentication continues immediately without waiting for input.
 
-With the standard `pam-gaze` module (e.g. `sudo`, `gdm-face`):
+With the standard sequential `pam_gaze` mode (e.g. `sudo`, `gdm-face`):
 - In a text-based (TTY) environment such as `sudo` in a terminal, it asks for text confirmation after the face match ("Press Enter to confirm, Esc to cancel").
 - On the GNOME lock screen and GDM login screen (with the Gaze Extension active), it shows "Face Verified. Press Enter to confirm." below the password field; press Enter with the field empty to confirm. If the extension is inactive, the login is denied, because the extension is the expected confirmation channel on GNOME and Gaze will not silently skip the confirmation you asked for.
-- In other graphical prompts without a TTY (e.g. the KDE lock screen, `hyprlock`), there is no channel that could answer the prompt, so the face match unlocks on its own. On the KDE lock screen in particular, asking would not reach anybody: the greeter never delivers a response to its biometric slot, so the request would hang that slot for the rest of the lock. If you want the confirmation step enforced on a surface that can show a dialog, use the `pam-gaze-grosshack` module.
+- In other graphical prompts without a TTY (e.g. the KDE lock screen, `hyprlock`), there is no channel that could answer the prompt, so the face match unlocks on its own. On the KDE lock screen in particular, asking would not reach anybody: the greeter never delivers a response to its biometric slot, so the request would hang that slot for the rest of the lock. If you want the confirmation step enforced on a surface that can show a dialog, use simultaneous mode (`pam_gaze.so simultaneous`).
 - A **login greeter** is the exception: it never bypasses. GDM always runs GNOME with the Gaze Extension, so confirmation is enforced there or the login is denied.
 
 A "text-based (TTY) environment" means Gaze can open the process's controlling terminal (`/dev/tty`), which is how `sudo` itself finds the terminal to prompt on. Redirected standard input does not change that, so `echo 1 | sudo tee /tmp/1` still confirms from the keyboard. When there is no controlling terminal at all (a management console such as Cockpit that drives PAM over a framed stdio protocol, or a service started without one), nobody can press a key, so Gaze neither prints a terminal banner nor waits for one; the face match is refused and the stack falls through to the password.
 
 Callers that set the PAM `PAM_SILENT` flag, `sudo` among them, receive no messages through their own conversation. Gaze still writes the camera prompt and the verdict to the controlling terminal when there is one, so a terminal user keeps the "Please look at the camera" / "Face Verified." feedback; graphical callers with no terminal stay silent.
 
-With the `pam-gaze-grosshack` module:
+With simultaneous mode (`pam_gaze.so simultaneous`):
 - The password prompt still comes up immediately so you are never blocked.
 - If face verification succeeds before you finish entering your password:
   - In a text-based (TTY) environment, it cancels the password prompt and asks for text confirmation ("Press Enter to confirm, Esc to cancel").

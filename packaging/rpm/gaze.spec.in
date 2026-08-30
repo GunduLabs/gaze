@@ -164,7 +164,6 @@ install -Dpm 0755 target/release/libpam_gaze_grosshack.so %{buildroot}%{_libdir}
 %if 0%{?suse_version}
 # Tumbleweed uses pam-config; Fedora uses the authselect files below.
 install -Dpm 0644 packaging/pam/gaze.conf.suse %{buildroot}%{_prefix}/lib/pam-config.d/gaze.conf
-install -Dpm 0644 packaging/pam/gaze-grosshack.conf.suse %{buildroot}%{_prefix}/lib/pam-config.d/gaze-grosshack.conf
 %else
 install -dm 0755 %{buildroot}%{_datadir}/authselect/vendor/gaze
 cp -p packaging/authselect/custom/gaze/* %{buildroot}%{_datadir}/authselect/vendor/gaze/
@@ -255,7 +254,6 @@ ${SCRIPTLET_HYPRLOCK_POSTUN}
 %{_libdir}/security/pam_gaze_grosshack.so
 %if 0%{?suse_version}
 %{_prefix}/lib/pam-config.d/gaze.conf
-%{_prefix}/lib/pam-config.d/gaze-grosshack.conf
 %else
 %{_datadir}/authselect/vendor/gaze/
 %endif
