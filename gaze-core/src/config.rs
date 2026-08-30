@@ -947,29 +947,35 @@ impl Default for CameraConfig {
 const LEGACY_CONFIG_KEYS: [&str; 2] = ["security.threshold", "auth.require_confirmation"];
 
 pub fn unknown_config_keys(contents: &str) -> Vec<String> {
-    let Ok(toml::Value::Table(known)) = toml::Value::try_from(Config::default()) else {
+    let Ok(known_doc) = toml_edit::ser::to_document(&Config::default()) else {
         return Vec::new();
     };
-    let Ok(actual) = contents.parse::<toml::Table>() else {
+    let Ok(actual_doc) = contents.parse::<toml_edit::DocumentMut>() else {
         return Vec::new();
     };
 
     let mut unknown = Vec::new();
-    for (table_name, table_value) in &actual {
-        let Some(toml::Value::Table(known_table)) = known.get(table_name) else {
-            unknown.push(table_name.clone());
+    for (table_name, table_item) in actual_doc.as_table().iter() {
+        let Some(known_sub_item) = known_doc.as_table().get(table_name) else {
+            unknown.push(table_name.to_string());
             continue;
         };
-        let Some(actual_table) = table_value.as_table() else {
+        let Some(actual_table) = table_item.as_table() else {
             continue;
         };
-        for key in actual_table.keys() {
+        for (key, _) in actual_table.iter() {
+            let is_known = match known_sub_item {
+                toml_edit::Item::Table(t) => t.contains_key(key),
+                toml_edit::Item::Value(toml_edit::Value::InlineTable(t)) => t.contains_key(key),
+                _ => false,
+            };
             let path = format!("{table_name}.{key}");
-            if !known_table.contains_key(key) && !LEGACY_CONFIG_KEYS.contains(&path.as_str()) {
+            if !is_known && !LEGACY_CONFIG_KEYS.contains(&path.as_str()) {
                 unknown.push(path);
             }
         }
     }
+    unknown.sort();
     unknown
 }
 
@@ -981,7 +987,7 @@ impl Config {
     pub fn load_from(path: &str) -> anyhow::Result<Self> {
         if Path::new(path).exists() {
             let contents = std::fs::read_to_string(path)?;
-            let config: Config = toml::from_str(&contents)?;
+            let config: Config = toml_edit::de::from_str(&contents)?;
             for key in unknown_config_keys(&contents) {
                 tracing::warn!(
                     "{path} sets {key}, which Gaze does not read; it has no effect and is probably a typo"
@@ -1024,7 +1030,7 @@ impl Config {
         let encoded = self
             .rewrite_preserving_comments(existing.as_deref())
             .unwrap_or_else(|| {
-                toml::to_string_pretty(self).unwrap_or_else(|_| String::from("# unwritable\n"))
+                toml_edit::ser::to_string_pretty(self).unwrap_or_else(|_| String::from("# unwritable\n"))
             });
         let parent = path
             .parent()
@@ -1070,53 +1076,62 @@ impl Config {
 
     fn rewrite_preserving_comments(&self, existing: Option<&str>) -> Option<String> {
         let mut doc = existing?.parse::<toml_edit::DocumentMut>().ok()?;
-        let toml::Value::Table(desired) = toml::Value::try_from(self).ok()? else {
-            return None;
-        };
-        merge_into_toml_table(doc.as_table_mut(), &desired).then(|| doc.to_string())
+        let desired_doc = toml_edit::ser::to_document(self).ok()?;
+        merge_into_toml_table(doc.as_table_mut(), desired_doc.as_table()).then(|| doc.to_string())
     }
 }
 
-fn toml_value_to_edit(value: &toml::Value) -> Option<toml_edit::Value> {
-    Some(match value {
-        toml::Value::String(v) => v.clone().into(),
-        toml::Value::Integer(v) => (*v).into(),
-        toml::Value::Float(v) => (*v).into(),
-        toml::Value::Boolean(v) => (*v).into(),
-        _ => return None,
-    })
+fn merge_table_like(target: &mut toml_edit::Table, key: &str, val: &toml_edit::Value) -> bool {
+    match val {
+        toml_edit::Value::InlineTable(sub_inline) => {
+            if !target.contains_key(key) {
+                target.insert(key, toml_edit::Item::Table(toml_edit::Table::new()));
+            }
+            let Some(sub_target) = target.get_mut(key).and_then(|item| item.as_table_mut()) else {
+                return false;
+            };
+            for (sub_key, sub_val) in sub_inline.iter() {
+                if !merge_table_like(sub_target, sub_key, sub_val) {
+                    return false;
+                }
+            }
+        }
+        scalar => {
+            match target.get_mut(key).and_then(|item| item.as_value_mut()) {
+                Some(slot) => {
+                    let decor = slot.decor().clone();
+                    *slot = scalar.clone();
+                    *slot.decor_mut() = decor;
+                }
+                None => {
+                    target.insert(key, toml_edit::value(scalar.clone()));
+                }
+            }
+        }
+    }
+    true
 }
 
-fn merge_into_toml_table(target: &mut toml_edit::Table, desired: &toml::Table) -> bool {
-    for (key, value) in desired {
+fn merge_into_toml_table(target: &mut toml_edit::Table, desired: &toml_edit::Table) -> bool {
+    for (key, value) in desired.iter() {
         match value {
-            toml::Value::Table(sub) => {
+            toml_edit::Item::Table(sub_table) => {
                 if !target.contains_key(key) {
                     target.insert(key, toml_edit::Item::Table(toml_edit::Table::new()));
                 }
-                let Some(sub_target) = target.get_mut(key).and_then(|item| item.as_table_mut())
-                else {
+                let Some(sub_target) = target.get_mut(key).and_then(|item| item.as_table_mut()) else {
                     return false;
                 };
-                if !merge_into_toml_table(sub_target, sub) {
+                if !merge_into_toml_table(sub_target, sub_table) {
                     return false;
                 }
             }
-            scalar => {
-                let Some(new_value) = toml_value_to_edit(scalar) else {
+            toml_edit::Item::Value(val) => {
+                if !merge_table_like(target, key, val) {
                     return false;
-                };
-                match target.get_mut(key).and_then(|item| item.as_value_mut()) {
-                    Some(slot) => {
-                        let decor = slot.decor().clone();
-                        *slot = new_value;
-                        *slot.decor_mut() = decor;
-                    }
-                    None => {
-                        target.insert(key, toml_edit::value(new_value));
-                    }
                 }
             }
+            _ => return false,
         }
     }
     true
@@ -1317,7 +1332,7 @@ mod tests {
 
     #[test]
     fn legacy_security_threshold_applies_to_both_spectra() {
-        let config: Config = toml::from_str(
+        let config: Config = toml_edit::de::from_str(
             r#"
             [security]
             level = "custom"
@@ -1331,7 +1346,7 @@ mod tests {
         assert!((config.security.rgb_threshold() - 0.47).abs() < f32::EPSILON);
         assert!((config.security.ir_threshold() - 0.47).abs() < f32::EPSILON);
 
-        let migrated = toml::to_string(&config).unwrap();
+        let migrated = toml_edit::ser::to_string(&config).unwrap();
         assert!(migrated.contains("rgb_threshold = 0.47"));
         assert!(migrated.contains("ir_threshold = 0.47"));
 
@@ -1350,7 +1365,7 @@ mod tests {
 
     #[test]
     fn setting_one_spectrum_threshold_does_not_leak_into_the_other() {
-        let config: Config = toml::from_str(
+        let config: Config = toml_edit::de::from_str(
             r#"
             [security]
             level = "custom"
@@ -1646,7 +1661,7 @@ mod tests {
 
     #[test]
     fn legacy_require_confirmation_applies_to_both_surfaces() {
-        let auth: AuthConfig = toml::from_str("require_confirmation = true\n").unwrap();
+        let auth: AuthConfig = toml_edit::de::from_str("require_confirmation = true\n").unwrap();
         assert!(auth.require_confirmation_lock_screen);
         assert!(auth.require_confirmation_elevation);
         assert!(auth.requires_confirmation(AuthSurface::Elevation));
@@ -1656,7 +1671,7 @@ mod tests {
     #[test]
     fn an_explicit_split_key_overrides_the_legacy_key() {
         let auth: AuthConfig =
-            toml::from_str("require_confirmation = true\nrequire_confirmation_elevation = false\n")
+            toml_edit::de::from_str("require_confirmation = true\nrequire_confirmation_elevation = false\n")
                 .unwrap();
         assert!(auth.require_confirmation_lock_screen);
         assert!(!auth.require_confirmation_elevation);
@@ -1664,7 +1679,7 @@ mod tests {
 
     #[test]
     fn confirmation_defaults_to_off_without_any_key() {
-        let auth: AuthConfig = toml::from_str("").unwrap();
+        let auth: AuthConfig = toml_edit::de::from_str("").unwrap();
         assert!(!auth.require_confirmation_lock_screen);
         assert!(!auth.require_confirmation_elevation);
     }
@@ -1871,7 +1886,7 @@ mod tests {
 
     #[test]
     fn ir_camera_fields_default_empty_and_disabled() {
-        let config: Config = toml::from_str(
+        let config: Config = toml_edit::de::from_str(
             r#"
             [cameras]
             rgb = "primary"
@@ -1885,7 +1900,7 @@ mod tests {
 
     #[test]
     fn partial_toml_uses_liveness_serde_defaults() {
-        let config: Config = toml::from_str(
+        let config: Config = toml_edit::de::from_str(
             r#"
             [liveness]
             enabled = true
@@ -1900,7 +1915,7 @@ mod tests {
 
     #[test]
     fn partial_toml_uses_serde_defaults() {
-        let config: Config = toml::from_str(
+        let config: Config = toml_edit::de::from_str(
             r#"
             [security]
             level = "maximum"
@@ -2211,7 +2226,7 @@ mod tests {
 
     #[test]
     fn storage_encrypt_templates_parses_and_defaults_false() {
-        let enabled: Config = toml::from_str(
+        let enabled: Config = toml_edit::de::from_str(
             r#"
             [storage]
             encrypt_templates = true
@@ -2225,7 +2240,7 @@ mod tests {
         cfg.security = SecurityLevel::high();
         assert!(cfg.storage.encrypt_templates);
 
-        let absent: Config = toml::from_str(
+        let absent: Config = toml_edit::de::from_str(
             r#"[security]
 level = "low""#,
         )
