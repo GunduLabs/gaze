@@ -43,7 +43,12 @@ pub const MIN_SECURITY_THRESHOLD: f64 = 0.10;
 pub const MAX_SECURITY_THRESHOLD: f64 = 0.99;
 pub const MIN_LIVENESS_THRESHOLD: f64 = 0.10;
 pub const MAX_LIVENESS_THRESHOLD: f64 = 1.0;
-pub const MIN_LIVENESS_MAX_FRAMES: u32 = 6;
+pub const MIN_LIVENESS_MAX_SECONDS: f64 = 0.2;
+pub const MAX_LIVENESS_MAX_SECONDS: f64 = 30.0;
+pub const DEFAULT_LIVENESS_MAX_SECONDS: f64 = 2.0;
+pub const MIN_LIVENESS_FRAMES: u32 = 6;
+pub const MIN_LIVENESS_MAX_FRAMES: u32 = MIN_LIVENESS_FRAMES;
+pub const DEFAULT_CAMERA_FPS: f64 = 30.0;
 const DEFAULT_CONFIG_MODE: u32 = 0o644;
 
 fn default_level() -> String {
@@ -557,14 +562,14 @@ pub struct StorageConfig {
     pub encrypt_templates: bool,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
+#[derive(Serialize, Deserialize, Clone, Debug, Value, OwnedValue, Type)]
 pub struct LivenessConfig {
     #[serde(default = "default_liveness_enabled")]
     pub enabled: bool,
     #[serde(default = "default_liveness_threshold")]
     pub threshold: f64,
-    #[serde(default = "default_max_frames")]
-    pub max_frames: u32,
+    #[serde(default = "default_max_seconds")]
+    pub max_seconds: f64,
 }
 
 fn default_liveness_enabled() -> bool {
@@ -573,8 +578,8 @@ fn default_liveness_enabled() -> bool {
 fn default_liveness_threshold() -> f64 {
     0.8
 }
-fn default_max_frames() -> u32 {
-    40
+fn default_max_seconds() -> f64 {
+    DEFAULT_LIVENESS_MAX_SECONDS
 }
 
 impl Default for LivenessConfig {
@@ -582,7 +587,7 @@ impl Default for LivenessConfig {
         Self {
             enabled: default_liveness_enabled(),
             threshold: default_liveness_threshold(),
-            max_frames: default_max_frames(),
+            max_seconds: default_max_seconds(),
         }
     }
 }
@@ -597,11 +602,15 @@ impl LivenessConfig {
                 self.threshold
             );
         }
-        if self.max_frames < MIN_LIVENESS_MAX_FRAMES {
+        if !self.max_seconds.is_finite()
+            || self.max_seconds < MIN_LIVENESS_MAX_SECONDS
+            || self.max_seconds > MAX_LIVENESS_MAX_SECONDS
+        {
             anyhow::bail!(
-                "liveness.max_frames must be at least {}, got {}",
-                MIN_LIVENESS_MAX_FRAMES,
-                self.max_frames
+                "liveness.max_seconds must be between {} and {}, got {}",
+                MIN_LIVENESS_MAX_SECONDS,
+                MAX_LIVENESS_MAX_SECONDS,
+                self.max_seconds
             );
         }
         Ok(())
@@ -620,12 +629,24 @@ impl LivenessConfig {
         }
     }
 
-    pub fn effective_max_frames(&self) -> u32 {
-        if self.max_frames >= MIN_LIVENESS_MAX_FRAMES {
-            self.max_frames
+    pub fn effective_max_seconds(&self) -> f64 {
+        if self.max_seconds.is_finite()
+            && (MIN_LIVENESS_MAX_SECONDS..=MAX_LIVENESS_MAX_SECONDS).contains(&self.max_seconds)
+        {
+            self.max_seconds
         } else {
-            default_max_frames()
+            default_max_seconds()
         }
+    }
+
+    pub fn effective_max_frames(&self, fps: f64) -> u32 {
+        let fps = if fps > 0.0 && fps.is_finite() {
+            fps
+        } else {
+            DEFAULT_CAMERA_FPS
+        };
+        let frames = (self.effective_max_seconds() * fps).round() as u32;
+        frames.max(MIN_LIVENESS_FRAMES)
     }
 }
 
@@ -944,7 +965,28 @@ impl Default for CameraConfig {
     }
 }
 
-const LEGACY_CONFIG_KEYS: [&str; 2] = ["security.threshold", "auth.require_confirmation"];
+const LEGACY_CONFIG_KEYS: [&str; 3] = [
+    "security.threshold",
+    "auth.require_confirmation",
+    "liveness.max_frames",
+];
+
+pub fn migrate_legacy_config_contents(contents: &str) -> Option<String> {
+    let mut doc: toml_edit::DocumentMut = contents.parse().ok()?;
+    let liveness = doc.get_mut("liveness")?.as_table_mut()?;
+    if let Some(val) = liveness.remove("max_frames") {
+        let frames = val.as_value()?.as_integer()?;
+        let seconds = if frames == 40 {
+            DEFAULT_LIVENESS_MAX_SECONDS
+        } else {
+            ((frames as f64 / DEFAULT_CAMERA_FPS) * 100.0).round() / 100.0
+        };
+        liveness.insert("max_seconds", toml_edit::value(seconds));
+        Some(doc.to_string())
+    } else {
+        None
+    }
+}
 
 pub fn unknown_config_keys(contents: &str) -> Vec<String> {
     let Ok(known_doc) = toml_edit::ser::to_document(&Config::default()) else {
@@ -987,6 +1029,16 @@ impl Config {
     pub fn load_from(path: &str) -> anyhow::Result<Self> {
         if Path::new(path).exists() {
             let contents = std::fs::read_to_string(path)?;
+            let contents = if let Some(migrated) = migrate_legacy_config_contents(&contents) {
+                if let Err(e) = std::fs::write(path, &migrated) {
+                    tracing::warn!("Failed to write migrated config to {path}: {e}");
+                } else {
+                    tracing::info!("Migrated legacy configuration in {path}");
+                }
+                migrated
+            } else {
+                contents
+            };
             let config: Config = toml_edit::de::from_str(&contents)?;
             for key in unknown_config_keys(&contents) {
                 tracing::warn!(
@@ -1266,26 +1318,46 @@ mod tests {
     }
 
     #[test]
-    fn an_existing_config_below_the_new_frame_minimum_falls_back_to_the_default() {
-        for stale in 1..MIN_LIVENESS_MAX_FRAMES {
+    fn an_existing_config_below_the_minimum_seconds_falls_back_to_the_default() {
+        for stale in [0.0, 0.05, 0.1, 0.19] {
             let liveness = LivenessConfig {
-                max_frames: stale,
+                max_seconds: stale,
                 ..LivenessConfig::default()
             };
             assert!(liveness.validate().is_err(), "{stale} must be rejected");
             assert_eq!(
-                liveness.effective_max_frames(),
-                LivenessConfig::default().max_frames,
+                liveness.effective_max_seconds(),
+                DEFAULT_LIVENESS_MAX_SECONDS,
                 "{stale} must fall back to the default rather than gate auth"
             );
         }
     }
 
     #[test]
+    fn effective_max_frames_scales_with_camera_fps() {
+        let liveness = LivenessConfig {
+            max_seconds: 2.0,
+            ..LivenessConfig::default()
+        };
+        assert_eq!(liveness.effective_max_frames(30.0), 60);
+        assert_eq!(liveness.effective_max_frames(60.0), 120);
+        assert_eq!(liveness.effective_max_frames(15.0), 30);
+        // Minimum frame floor
+        let short_liveness = LivenessConfig {
+            max_seconds: 0.2,
+            ..LivenessConfig::default()
+        };
+        assert_eq!(
+            short_liveness.effective_max_frames(10.0),
+            MIN_LIVENESS_FRAMES
+        );
+    }
+
+    #[test]
     fn the_smallest_allowed_frame_budget_can_reach_sustained_liveness() {
         const {
             assert!(
-                MIN_LIVENESS_MAX_FRAMES > 5,
+                MIN_LIVENESS_FRAMES > 5,
                 "liveness needs 5 scored frames before its sustained path triggers"
             )
         };
@@ -1479,13 +1551,13 @@ mod tests {
         cfg.threshold = 0.9;
         assert_eq!(cfg.effective_threshold(), 0.9);
 
-        cfg.max_frames = 0;
+        cfg.max_seconds = 0.0;
         assert!(cfg.validate().is_err());
-        assert_eq!(cfg.effective_max_frames(), default_max_frames());
+        assert_eq!(cfg.effective_max_seconds(), DEFAULT_LIVENESS_MAX_SECONDS);
 
-        cfg.max_frames = 25;
+        cfg.max_seconds = 2.5;
         cfg.validate().unwrap();
-        assert_eq!(cfg.effective_max_frames(), 25);
+        assert_eq!(cfg.effective_max_seconds(), 2.5);
     }
 
     #[test]
@@ -1494,7 +1566,7 @@ mod tests {
         let path = temp.path().join("config.toml");
         std::fs::write(
             &path,
-            "[security]\nlevel = \"custom\"\nthreshold = 0.0\n\n[liveness]\nthreshold = 0.0\nmax_frames = 0\n",
+            "[security]\nlevel = \"custom\"\nthreshold = 0.0\n\n[liveness]\nthreshold = 0.0\nmax_seconds = 0.0\n",
         )
         .unwrap();
 
@@ -1511,7 +1583,46 @@ mod tests {
             config.liveness.effective_threshold(),
             default_liveness_threshold()
         );
-        assert_eq!(config.liveness.effective_max_frames(), default_max_frames());
+        assert_eq!(
+            config.liveness.effective_max_seconds(),
+            DEFAULT_LIVENESS_MAX_SECONDS
+        );
+    }
+
+    #[test]
+    fn load_from_migrates_legacy_max_frames() {
+        // Case 1: default 40 frames migrates to 2.0s
+        let temp = TempDir::new("legacy-max-frames-40");
+        let path = temp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[liveness]\nenabled = true\nthreshold = 0.85\nmax_frames = 40\n",
+        )
+        .unwrap();
+
+        let config = Config::load_from(path.to_str().unwrap()).unwrap();
+        assert_eq!(config.liveness.max_seconds, 2.0);
+        assert_eq!(config.liveness.threshold, 0.85);
+
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(on_disk.contains("max_seconds = 2.0"));
+        assert!(!on_disk.contains("max_frames"));
+
+        // Case 2: custom non-40 frames migrates faithfully (e.g. 25 frames -> 0.83s)
+        let temp2 = TempDir::new("legacy-max-frames-custom");
+        let path2 = temp2.path().join("config.toml");
+        std::fs::write(
+            &path2,
+            "[liveness]\nenabled = true\nthreshold = 0.8\nmax_frames = 25\n",
+        )
+        .unwrap();
+
+        let config2 = Config::load_from(path2.to_str().unwrap()).unwrap();
+        assert_eq!(config2.liveness.max_seconds, 0.83);
+
+        let on_disk2 = std::fs::read_to_string(&path2).unwrap();
+        assert!(on_disk2.contains("max_seconds = 0.83"));
+        assert!(!on_disk2.contains("max_frames"));
     }
 
     #[test]
@@ -1655,7 +1766,7 @@ mod tests {
         assert_eq!(AuthConfig::SIGNATURE.to_string(), "(bbbbbtts)");
         assert_eq!(
             Config::SIGNATURE.to_string(),
-            "((ss)(sssdds)(ssbys)(bbbbbtts)(ud)(bdu)(b))"
+            "((ss)(sssdds)(ssbys)(bbbbbtts)(ud)(bdd)(b))"
         );
     }
 
@@ -1843,7 +1954,7 @@ mod tests {
             liveness: LivenessConfig {
                 enabled: true,
                 threshold: 0.9,
-                max_frames: 25,
+                max_seconds: 2.5,
             },
             storage: StorageConfig {
                 encrypt_templates: true,
@@ -1880,7 +1991,7 @@ mod tests {
         assert_eq!(loaded.enrollment.min_face_size_ratio, 0.20);
         assert!(loaded.liveness.enabled);
         assert_eq!(loaded.liveness.threshold, 0.9);
-        assert_eq!(loaded.liveness.max_frames, 25);
+        assert_eq!(loaded.liveness.max_seconds, 2.5);
         assert!(loaded.storage.encrypt_templates);
     }
 
@@ -1910,7 +2021,7 @@ mod tests {
 
         assert!(config.liveness.enabled);
         assert!((config.liveness.threshold - 0.8).abs() < f64::EPSILON);
-        assert_eq!(config.liveness.max_frames, 40);
+        assert_eq!(config.liveness.max_seconds, DEFAULT_LIVENESS_MAX_SECONDS);
     }
 
     #[test]
