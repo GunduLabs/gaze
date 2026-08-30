@@ -112,7 +112,7 @@ fn parse_profile(path: &Path) -> ProcessedProfile {
     });
 
     let text = fs::read_to_string(path).unwrap();
-    let p: ProfileFile = toml::from_str(&text)
+    let p: ProfileFile = toml_edit::de::from_str(&text)
         .unwrap_or_else(|e| panic!("failed to parse TOML in {}: {e}", path.display()));
 
     if (p.device.vendor_id, p.device.product_id) != (file_vid, file_pid) {
