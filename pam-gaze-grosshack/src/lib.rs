@@ -2,8 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #![allow(clippy::missing_safety_doc)]
-use pam_gaze::core::PamHandle;
-use pam_gaze::{PamMode, do_authenticate};
+#[path = "../../pam-gaze/src/core.rs"]
+pub mod core;
+pub use core::*;
+
+#[path = "../../pam-gaze/src/auth.rs"]
+pub mod auth;
+pub use auth::*;
+
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::raw::{c_char, c_int};
@@ -31,7 +37,7 @@ pub unsafe extern "C" fn pam_sm_authenticate(
     unsafe { do_authenticate(pamh, flags, PamMode::Simultaneous) }
 }
 
-pam_gaze::pam_success_stubs!();
+pam_success_stubs!();
 
 #[cfg(test)]
 mod tests {
