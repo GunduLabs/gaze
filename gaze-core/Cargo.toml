@@ -40,8 +40,7 @@ zvariant = "5.15.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_plain = "1.0.2"
 tracing = "0.1.44"
-toml = "1.1.4"
-toml_edit = "0.25.13"
+toml_edit = { version = "0.25.13", features = ["serde"] }
 gstreamer = "0.25.3"
 gstreamer-app = "0.25.2"
 gstreamer-video = "0.25.3"
@@ -49,5 +48,5 @@ strum = "0.28"
 strum_macros = "0.28"
 
 [build-dependencies]
-toml = "1.1.4"
+toml_edit = { version = "0.25.13", features = ["serde"] }
 serde = { version = "1.0.229", features = ["derive"] }
