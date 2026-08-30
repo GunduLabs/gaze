@@ -3,8 +3,8 @@
 
 use console::{Term, style};
 use gaze_core::config::{
-    CONFIG_PATH, Config, MAX_LIVENESS_THRESHOLD, MIN_LIVENESS_MAX_FRAMES, MIN_LIVENESS_THRESHOLD,
-    SecurityField, unknown_config_keys,
+    CONFIG_PATH, Config, MAX_LIVENESS_MAX_SECONDS, MAX_LIVENESS_THRESHOLD,
+    MIN_LIVENESS_MAX_SECONDS, MIN_LIVENESS_THRESHOLD, SecurityField, unknown_config_keys,
 };
 use gaze_core::dbus::{
     GazeProxy, dbus_error_message, dbus_is_file_not_found, dbus_is_not_activatable,
@@ -627,10 +627,16 @@ fn config_findings(config: &Config) -> Vec<Check> {
                 "Set liveness.threshold to a value between 0.10 and 1.0.",
             );
         }
-        if config.liveness.max_frames < MIN_LIVENESS_MAX_FRAMES {
+        if !config.liveness.max_seconds.is_finite()
+            || !(MIN_LIVENESS_MAX_SECONDS..=MAX_LIVENESS_MAX_SECONDS)
+                .contains(&config.liveness.max_seconds)
+        {
             error(
-                "liveness.max_frames is zero".to_string(),
-                "Set liveness.max_frames to a positive value (the default is 40).",
+                format!(
+                    "liveness.max_seconds must be between {MIN_LIVENESS_MAX_SECONDS} and {MAX_LIVENESS_MAX_SECONDS}, got {}",
+                    config.liveness.max_seconds
+                ),
+                "Set liveness.max_seconds to a value between 0.2 and 30.0 (the default is 2.0).",
             );
         }
     }
@@ -2332,7 +2338,7 @@ mod tests {
         config.cameras.rgb = "/dev/videoX".to_string();
         config.enrollment.min_face_size_ratio = 0.05;
         config.liveness.threshold = f64::NAN;
-        config.liveness.max_frames = 0;
+        config.liveness.max_seconds = 0.0;
 
         let findings = config_findings(&config);
         let messages = findings
@@ -2372,7 +2378,7 @@ mod tests {
         assert!(
             messages
                 .iter()
-                .any(|message| message.contains("max_frames"))
+                .any(|message| message.contains("max_seconds"))
         );
     }
 

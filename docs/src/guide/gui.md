@@ -57,7 +57,7 @@ compiled with the `openvino-config` Cargo feature. See
 
 **Liveness Anti-Spoofing**
 
-- Enable liveness spoof prevention, liveness threshold, liveness max frames
+- Enable liveness spoof prevention, liveness threshold, liveness max seconds
 
 **Auth**
 

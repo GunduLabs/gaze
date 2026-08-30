@@ -551,6 +551,7 @@ pub struct Camera {
     /// Why the stream ended, when the pipeline said. A frame loop that just stops looks the same
     /// as one that never saw a face, which is the wrong thing to tell the user.
     stream_error: Option<String>,
+    fps: Mutex<Option<f64>>,
 }
 
 impl Drop for Camera {
@@ -750,6 +751,7 @@ impl Camera {
             appsink,
             _pipewire: pipewire,
             stream_error: None,
+            fps: Mutex::new(None),
         })
     }
 
@@ -763,6 +765,17 @@ impl Camera {
 
         let video_info = gstreamer_video::VideoInfo::from_caps(caps)
             .map_err(|e| anyhow::anyhow!("Failed to parse video info: {e}"))?;
+
+        let fraction = video_info.fps();
+        let (num, denom) = (fraction.numer(), fraction.denom());
+        if num > 0 && denom > 0 {
+            let fps_val = num as f64 / denom as f64;
+            if let Ok(mut guard) = self.fps.lock()
+                && guard.is_none()
+            {
+                *guard = Some(fps_val);
+            }
+        }
 
         anyhow::ensure!(
             video_info.format() == gstreamer_video::VideoFormat::Bgr,
@@ -856,6 +869,33 @@ impl Camera {
 
     pub fn take_stream_error(&mut self) -> Option<String> {
         self.stream_error.take()
+    }
+
+    pub fn fps(&self) -> f64 {
+        if let Ok(guard) = self.fps.lock()
+            && let Some(fps) = *guard
+            && fps > 0.0
+            && fps.is_finite()
+        {
+            return fps;
+        }
+        if let Some(caps) = self
+            .appsink
+            .static_pad("sink")
+            .and_then(|p| p.current_caps())
+            && let Ok(video_info) = gstreamer_video::VideoInfo::from_caps(&caps)
+        {
+            let fraction = video_info.fps();
+            let (num, denom) = (fraction.numer(), fraction.denom());
+            if num > 0 && denom > 0 {
+                let fps_val = num as f64 / denom as f64;
+                if let Ok(mut guard) = self.fps.lock() {
+                    *guard = Some(fps_val);
+                }
+                return fps_val;
+            }
+        }
+        crate::config::DEFAULT_CAMERA_FPS
     }
 
     /// Wait for the next frame while checking `stop` between short polling intervals.
