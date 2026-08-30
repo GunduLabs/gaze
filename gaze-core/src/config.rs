@@ -562,7 +562,7 @@ pub struct StorageConfig {
     pub encrypt_templates: bool,
 }
 
-#[derive(Serialize, Clone, Debug, Value, OwnedValue, Type)]
+#[derive(Serialize, Deserialize, Clone, Debug, Value, OwnedValue, Type)]
 pub struct LivenessConfig {
     #[serde(default = "default_liveness_enabled")]
     pub enabled: bool,
@@ -570,40 +570,6 @@ pub struct LivenessConfig {
     pub threshold: f64,
     #[serde(default = "default_max_seconds")]
     pub max_seconds: f64,
-}
-
-#[derive(Deserialize)]
-struct LivenessConfigFile {
-    #[serde(default = "default_liveness_enabled")]
-    enabled: bool,
-    #[serde(default = "default_liveness_threshold")]
-    threshold: f64,
-    #[serde(default)]
-    max_seconds: Option<f64>,
-    #[serde(default)]
-    max_frames: Option<u32>,
-}
-
-impl<'de> Deserialize<'de> for LivenessConfig {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let file = LivenessConfigFile::deserialize(deserializer)?;
-        let max_seconds = file.max_seconds.unwrap_or_else(|| {
-            if let Some(frames) = file.max_frames {
-                ((frames as f64 / DEFAULT_CAMERA_FPS) * 100.0).round() / 100.0
-            } else {
-                default_max_seconds()
-            }
-        });
-
-        Ok(Self {
-            enabled: file.enabled,
-            threshold: file.threshold,
-            max_seconds,
-        })
-    }
 }
 
 fn default_liveness_enabled() -> bool {
@@ -1006,46 +972,17 @@ const LEGACY_CONFIG_KEYS: [&str; 3] = [
 ];
 
 pub fn migrate_legacy_config_contents(contents: &str) -> Option<String> {
-    let mut in_liveness = false;
-    let mut modified = false;
-    let mut new_lines = Vec::new();
-    for line in contents.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            in_liveness = trimmed == "[liveness]";
-            new_lines.push(line.to_string());
-            continue;
-        }
-        if in_liveness && trimmed.starts_with("max_frames") && trimmed.contains('=') {
-            if let Some((_, val_str)) = trimmed.split_once('=') {
-                let val_part = val_str.split('#').next().unwrap_or(val_str).trim();
-                if let Ok(frames) = val_part.parse::<u32>() {
-                    let seconds = ((frames as f64 / DEFAULT_CAMERA_FPS) * 100.0).round() / 100.0;
-                    let formatted_sec = if seconds.fract() == 0.0 {
-                        format!("{:.1}", seconds)
-                    } else {
-                        format!("{}", seconds)
-                    };
-                    let prefix = &line[..line.find("max_frames").unwrap_or(0)];
-                    let comment = if let Some(idx) = line.find('#') {
-                        format!(" {}", &line[idx..])
-                    } else {
-                        String::new()
-                    };
-                    new_lines.push(format!("{prefix}max_seconds = {formatted_sec}{comment}"));
-                    modified = true;
-                    continue;
-                }
-            }
-        }
-        new_lines.push(line.to_string());
-    }
-    if modified {
-        let mut result = new_lines.join("\n");
-        if contents.ends_with('\n') {
-            result.push('\n');
-        }
-        Some(result)
+    let mut table: toml::Table = contents.parse().ok()?;
+    let liveness = table.get_mut("liveness")?.as_table_mut()?;
+    if let Some(val) = liveness.remove("max_frames") {
+        let frames = val.as_integer()?;
+        let seconds = if frames == 40 {
+            DEFAULT_LIVENESS_MAX_SECONDS
+        } else {
+            ((frames as f64 / DEFAULT_CAMERA_FPS) * 100.0).round() / 100.0
+        };
+        liveness.insert("max_seconds".to_string(), toml::Value::Float(seconds));
+        toml::to_string_pretty(&table).ok()
     } else {
         None
     }
@@ -1639,11 +1576,12 @@ mod tests {
 
     #[test]
     fn load_from_migrates_legacy_max_frames() {
-        let temp = TempDir::new("legacy-max-frames");
+        // Case 1: default 40 frames migrates to 2.0s
+        let temp = TempDir::new("legacy-max-frames-40");
         let path = temp.path().join("config.toml");
         std::fs::write(
             &path,
-            "# Comment\n[liveness]\nenabled = true\nthreshold = 0.85\nmax_frames = 60 # 2 seconds\n",
+            "[liveness]\nenabled = true\nthreshold = 0.85\nmax_frames = 40\n",
         )
         .unwrap();
 
@@ -1651,11 +1589,25 @@ mod tests {
         assert_eq!(config.liveness.max_seconds, 2.0);
         assert_eq!(config.liveness.threshold, 0.85);
 
-        // Check that the file on disk was migrated to max_seconds and comments preserved
         let on_disk = std::fs::read_to_string(&path).unwrap();
-        assert!(on_disk.contains("max_seconds = 2.0 # 2 seconds"));
+        assert!(on_disk.contains("max_seconds = 2.0"));
         assert!(!on_disk.contains("max_frames"));
-        assert!(on_disk.contains("# Comment"));
+
+        // Case 2: custom non-40 frames migrates faithfully (e.g. 25 frames -> 0.83s)
+        let temp2 = TempDir::new("legacy-max-frames-custom");
+        let path2 = temp2.path().join("config.toml");
+        std::fs::write(
+            &path2,
+            "[liveness]\nenabled = true\nthreshold = 0.8\nmax_frames = 25\n",
+        )
+        .unwrap();
+
+        let config2 = Config::load_from(path2.to_str().unwrap()).unwrap();
+        assert_eq!(config2.liveness.max_seconds, 0.83);
+
+        let on_disk2 = std::fs::read_to_string(&path2).unwrap();
+        assert!(on_disk2.contains("max_seconds = 0.83"));
+        assert!(!on_disk2.contains("max_frames"));
     }
 
     #[test]
@@ -2054,10 +2006,7 @@ mod tests {
 
         assert!(config.liveness.enabled);
         assert!((config.liveness.threshold - 0.8).abs() < f64::EPSILON);
-        assert_eq!(
-            config.liveness.max_seconds,
-            DEFAULT_LIVENESS_MAX_SECONDS
-        );
+        assert_eq!(config.liveness.max_seconds, DEFAULT_LIVENESS_MAX_SECONDS);
     }
 
     #[test]

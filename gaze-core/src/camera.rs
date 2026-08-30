@@ -770,10 +770,10 @@ impl Camera {
         let (num, denom) = (fraction.numer(), fraction.denom());
         if num > 0 && denom > 0 {
             let fps_val = num as f64 / denom as f64;
-            if let Ok(mut guard) = self.fps.lock() {
-                if guard.is_none() {
-                    *guard = Some(fps_val);
-                }
+            if let Ok(mut guard) = self.fps.lock()
+                && guard.is_none()
+            {
+                *guard = Some(fps_val);
             }
         }
 
@@ -872,24 +872,27 @@ impl Camera {
     }
 
     pub fn fps(&self) -> f64 {
-        if let Ok(guard) = self.fps.lock() {
-            if let Some(fps) = *guard {
-                if fps > 0.0 && fps.is_finite() {
-                    return fps;
-                }
-            }
+        if let Ok(guard) = self.fps.lock()
+            && let Some(fps) = *guard
+            && fps > 0.0
+            && fps.is_finite()
+        {
+            return fps;
         }
-        if let Some(caps) = self.appsink.static_pad("sink").and_then(|p| p.current_caps()) {
-            if let Ok(video_info) = gstreamer_video::VideoInfo::from_caps(&caps) {
-                let fraction = video_info.fps();
-                let (num, denom) = (fraction.numer(), fraction.denom());
-                if num > 0 && denom > 0 {
-                    let fps_val = num as f64 / denom as f64;
-                    if let Ok(mut guard) = self.fps.lock() {
-                        *guard = Some(fps_val);
-                    }
-                    return fps_val;
+        if let Some(caps) = self
+            .appsink
+            .static_pad("sink")
+            .and_then(|p| p.current_caps())
+            && let Ok(video_info) = gstreamer_video::VideoInfo::from_caps(&caps)
+        {
+            let fraction = video_info.fps();
+            let (num, denom) = (fraction.numer(), fraction.denom());
+            if num > 0 && denom > 0 {
+                let fps_val = num as f64 / denom as f64;
+                if let Ok(mut guard) = self.fps.lock() {
+                    *guard = Some(fps_val);
                 }
+                return fps_val;
             }
         }
         crate::config::DEFAULT_CAMERA_FPS

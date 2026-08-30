@@ -7,8 +7,8 @@ use gaze_core::config::{
     AuthConfig, CameraConfig, Config, DEFAULT_RGB_CAMERA, HYBRID_POLICY_LABELS,
     INFERENCE_DEVICE_OPTIONS, INFERENCE_EXECUTION_PROVIDER_OPTIONS, InferenceConfig,
     MAX_ENROLLMENT_FACE_SIZE_RATIO, MAX_LIVENESS_MAX_SECONDS, MIN_ENROLLMENT_FACE_SIZE_RATIO,
-    MIN_LIVENESS_MAX_SECONDS, MODEL_QUALITY_LABELS, PARALLEL_CAPTURE_LABELS,
-    SECURITY_LEVEL_LABELS, START_DELAY_SCOPE_LABELS, SecurityLevel,
+    MIN_LIVENESS_MAX_SECONDS, MODEL_QUALITY_LABELS, PARALLEL_CAPTURE_LABELS, SECURITY_LEVEL_LABELS,
+    START_DELAY_SCOPE_LABELS, SecurityLevel,
 };
 use gaze_core::dbus::{
     GazeProxy, apply_config_to_daemon, connect_gaze, dbus_error_message, dbus_is_file_not_found,
@@ -550,11 +550,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     liveness_threshold_row.set_subtitle("Minimum spoof prevention confidence");
     liveness_group.add(&liveness_threshold_row);
 
-    let liveness_max_seconds_row = libadwaita::SpinRow::with_range(
-        MIN_LIVENESS_MAX_SECONDS,
-        MAX_LIVENESS_MAX_SECONDS,
-        0.1,
-    );
+    let liveness_max_seconds_row =
+        libadwaita::SpinRow::with_range(MIN_LIVENESS_MAX_SECONDS, MAX_LIVENESS_MAX_SECONDS, 0.1);
     liveness_max_seconds_row.set_digits(1);
     liveness_max_seconds_row.set_title("Liveness Max Seconds");
     liveness_max_seconds_row.set_subtitle("Maximum seconds analyzed for liveness verification");
@@ -653,7 +650,11 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         liveness_max_seconds_row,
         move |sw| {
-            set_liveness_config_rows_visible(sw, &liveness_threshold_row, &liveness_max_seconds_row);
+            set_liveness_config_rows_visible(
+                sw,
+                &liveness_threshold_row,
+                &liveness_max_seconds_row,
+            );
         }
     ));
 

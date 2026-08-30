@@ -2024,7 +2024,7 @@ pub async fn watch_session_locks(conn: zbus::Connection, lock_epochs: LockEpochs
 }
 
 enum VerifyMsg {
-    PhaseStarted(Spectrum, f64),
+    PhaseStarted(Spectrum),
     Diagnostic(String),
     Status(Spectrum, CaptureStatus, Option<ndarray::Array1<f32>>, f64),
     Success(Spectrum, ndarray::Array1<f32>),
@@ -4002,7 +4002,7 @@ impl AuthDaemon {
                     };
                     tracing::debug!("IR camera opened successfully at: {}", ir_device_clone);
 
-                    let _ = tx.blocking_send(VerifyMsg::PhaseStarted(Spectrum::Ir, cam.fps()));
+                    let _ = tx.blocking_send(VerifyMsg::PhaseStarted(Spectrum::Ir));
 
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, false);
                     let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
@@ -4167,8 +4167,6 @@ impl AuthDaemon {
                 }};
             }
 
-            let mut current_cam_fps = gaze_core::config::DEFAULT_CAMERA_FPS;
-
             loop {
                 tokio::select! {
                     _ = &mut rx => {
@@ -4195,8 +4193,7 @@ impl AuthDaemon {
                             break;
                         };
                         match msg {
-                            VerifyMsg::PhaseStarted(Spectrum::Ir, fps) if serial_capture => {
-                                current_cam_fps = fps;
+                            VerifyMsg::PhaseStarted(Spectrum::Ir) if serial_capture => {
                                 // RGB and IR run serially on single-function cameras. Give
                                 // IR a fresh no-face window after RGB releases the device.
                                 last_face_at = Instant::now();
@@ -4204,14 +4201,11 @@ impl AuthDaemon {
                                 frames_seen = 0;
                                 dark_since = None;
                             }
-                            VerifyMsg::PhaseStarted(_, fps) => {
-                                current_cam_fps = fps;
-                            }
+                            VerifyMsg::PhaseStarted(_) => {}
                             VerifyMsg::Diagnostic(message) => {
                                 let _ = Self::verify_diagnostic(&ctxt, &message).await;
                             }
                             VerifyMsg::Status(spectrum, status, embed_opt, fps) => {
-                                current_cam_fps = fps;
                                 let has_face = embed_opt.is_some();
                                 match spectrum {
                                     Spectrum::Rgb => {
@@ -4236,7 +4230,7 @@ impl AuthDaemon {
                                 if has_face {
                                     last_usable_at = Instant::now();
                                     frames_seen += 1;
-                                    if frames_seen > liveness_cfg.effective_max_frames(current_cam_fps) {
+                                    if frames_seen > liveness_cfg.effective_max_frames(fps) {
                                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                                         let final_scores = hybrid_scores!();
                                         let matched = final_scores
