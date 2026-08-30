@@ -6,9 +6,9 @@ use gaze_core::camera::{is_listed_source, source_index};
 use gaze_core::config::{
     AuthConfig, CameraConfig, Config, DEFAULT_RGB_CAMERA, HYBRID_POLICY_LABELS,
     INFERENCE_DEVICE_OPTIONS, INFERENCE_EXECUTION_PROVIDER_OPTIONS, InferenceConfig,
-    MAX_ENROLLMENT_FACE_SIZE_RATIO, MIN_ENROLLMENT_FACE_SIZE_RATIO, MIN_LIVENESS_MAX_FRAMES,
-    MODEL_QUALITY_LABELS, PARALLEL_CAPTURE_LABELS, SECURITY_LEVEL_LABELS, START_DELAY_SCOPE_LABELS,
-    SecurityLevel,
+    MAX_ENROLLMENT_FACE_SIZE_RATIO, MAX_LIVENESS_MAX_SECONDS, MIN_ENROLLMENT_FACE_SIZE_RATIO,
+    MIN_LIVENESS_MAX_SECONDS, MODEL_QUALITY_LABELS, PARALLEL_CAPTURE_LABELS,
+    SECURITY_LEVEL_LABELS, START_DELAY_SCOPE_LABELS, SecurityLevel,
 };
 use gaze_core::dbus::{
     GazeProxy, apply_config_to_daemon, connect_gaze, dbus_error_message, dbus_is_file_not_found,
@@ -102,11 +102,11 @@ fn set_start_delay_scope_row_visible(
 fn set_liveness_config_rows_visible(
     enabled_switch: &gtk4::Switch,
     threshold_row: &libadwaita::SpinRow,
-    max_frames_row: &libadwaita::SpinRow,
+    max_seconds_row: &libadwaita::SpinRow,
 ) {
     let active = enabled_switch.is_active();
     threshold_row.set_visible(active);
-    max_frames_row.set_visible(active);
+    max_seconds_row.set_visible(active);
 }
 
 fn set_inference_device_row_visible(
@@ -228,7 +228,7 @@ struct ConfigRows {
     min_face_size_ratio: libadwaita::SpinRow,
     liveness_enabled: gtk4::Switch,
     liveness_threshold: libadwaita::SpinRow,
-    liveness_max_frames: libadwaita::SpinRow,
+    liveness_max_seconds: libadwaita::SpinRow,
     require_confirm_lock_screen: gtk4::Switch,
     require_confirm_elevation: gtk4::Switch,
     hybrid: libadwaita::ComboRow,
@@ -253,7 +253,7 @@ fn commit_focused_spin_row(window: &libadwaita::Window, rows: &ConfigRows) {
         &rows.templates,
         &rows.min_face_size_ratio,
         &rows.liveness_threshold,
-        &rows.liveness_max_frames,
+        &rows.liveness_max_seconds,
         &rows.resume_grace,
         &rows.start_delay,
     ] {
@@ -334,8 +334,8 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
         .set_value(cfg.enrollment.min_face_size_ratio);
     rows.liveness_enabled.set_active(cfg.liveness.enabled);
     rows.liveness_threshold.set_value(cfg.liveness.threshold);
-    rows.liveness_max_frames
-        .set_value(cfg.liveness.max_frames as f64);
+    rows.liveness_max_seconds
+        .set_value(cfg.liveness.max_seconds);
     rows.require_confirm_lock_screen
         .set_active(cfg.auth.require_confirmation_lock_screen);
     rows.require_confirm_elevation
@@ -361,7 +361,7 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
     set_liveness_config_rows_visible(
         &rows.liveness_enabled,
         &rows.liveness_threshold,
-        &rows.liveness_max_frames,
+        &rows.liveness_max_seconds,
     );
 }
 
@@ -550,12 +550,15 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     liveness_threshold_row.set_subtitle("Minimum spoof prevention confidence");
     liveness_group.add(&liveness_threshold_row);
 
-    let liveness_max_frames_row =
-        libadwaita::SpinRow::with_range(MIN_LIVENESS_MAX_FRAMES as f64, 500.0, 1.0);
-    liveness_max_frames_row.set_digits(0);
-    liveness_max_frames_row.set_title("Liveness Max Frames");
-    liveness_max_frames_row.set_subtitle("Maximum frames analyzed for liveness verification");
-    liveness_group.add(&liveness_max_frames_row);
+    let liveness_max_seconds_row = libadwaita::SpinRow::with_range(
+        MIN_LIVENESS_MAX_SECONDS,
+        MAX_LIVENESS_MAX_SECONDS,
+        0.1,
+    );
+    liveness_max_seconds_row.set_digits(1);
+    liveness_max_seconds_row.set_title("Liveness Max Seconds");
+    liveness_max_seconds_row.set_subtitle("Maximum seconds analyzed for liveness verification");
+    liveness_group.add(&liveness_max_seconds_row);
 
     let auth_group = libadwaita::PreferencesGroup::new();
     auth_group.set_title("Auth");
@@ -648,9 +651,9 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         liveness_threshold_row,
         #[weak]
-        liveness_max_frames_row,
+        liveness_max_seconds_row,
         move |sw| {
-            set_liveness_config_rows_visible(sw, &liveness_threshold_row, &liveness_max_frames_row);
+            set_liveness_config_rows_visible(sw, &liveness_threshold_row, &liveness_max_seconds_row);
         }
     ));
 
@@ -780,7 +783,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         liveness_threshold_row,
         #[weak]
-        liveness_max_frames_row,
+        liveness_max_seconds_row,
         #[weak]
         hybrid_row,
         #[weak]
@@ -871,7 +874,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             cfg.enrollment.min_face_size_ratio = min_face_size_ratio_row.value();
             cfg.liveness.enabled = liveness_enabled_switch.is_active();
             cfg.liveness.threshold = liveness_threshold_row.value();
-            cfg.liveness.max_frames = liveness_max_frames_row.value() as u32;
+            cfg.liveness.max_seconds = liveness_max_seconds_row.value();
             cfg.auth.require_confirmation_lock_screen =
                 require_confirm_lock_screen_switch.is_active();
             cfg.auth.require_confirmation_elevation = require_confirm_elevation_switch.is_active();
@@ -983,7 +986,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         &dark_luma_threshold_row,
         &resume_grace_row,
         &liveness_threshold_row,
-        &liveness_max_frames_row,
+        &liveness_max_seconds_row,
     ] {
         row.connect_value_notify(glib::clone!(
             #[strong]
@@ -1026,7 +1029,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         min_face_size_ratio: min_face_size_ratio_row.clone(),
         liveness_enabled: liveness_enabled_switch.clone(),
         liveness_threshold: liveness_threshold_row.clone(),
-        liveness_max_frames: liveness_max_frames_row.clone(),
+        liveness_max_seconds: liveness_max_seconds_row.clone(),
         require_confirm_lock_screen: require_confirm_lock_screen_switch.clone(),
         require_confirm_elevation: require_confirm_elevation_switch.clone(),
         hybrid: hybrid_row.clone(),

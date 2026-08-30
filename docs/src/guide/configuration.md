@@ -49,7 +49,7 @@ min_face_size_ratio = 0.25
 [liveness]
 enabled = true
 threshold = 0.8
-max_frames = 40
+max_seconds = 2.0
 
 [storage]
 encrypt_templates = false
@@ -450,14 +450,14 @@ If you connect or configure an IR camera after you have already enrolled a face,
 [liveness]
 enabled = true
 threshold = 0.8
-max_frames = 40
+max_seconds = 2.0
 ```
 
 When enabled, Gaze runs a local MiniFASNet-V2 anti-spoofing model on the detected face crop after a recognition match. Authentication succeeds only when the face matches and either one frame reaches `threshold` or the best few frames show sustained near-threshold liveness.
 
 Alongside the model, Gaze watches how far your eyes travel between frames, measured against the distance between them so it does not depend on how close you sit. A run that has accumulated several frame pairs and never seen movement above that floor is treated as a still object and refused even when the model is confident. Moving normally (breathing, blinking, small head shifts) clears it; once any pair shows movement, holding still afterwards does not undo it. On IR cameras this movement check is the whole liveness test, since the anti-spoof model is trained on colour frames.
 
-`max_frames` caps how many valid face frames Gaze examines before giving up and falling back to your password. It bounds the whole attempt, not just the liveness stage: an unrecognised face spends the same budget. Frames only count while a usable face is in view, and the RGB and IR phases each get the full budget, so 40 frames is roughly one to two seconds of looking at the camera on a typical 30fps webcam. Raise it if authentication gives up before you are ready; `gaze auth --verbose` reports when a run ends this way.
+`max_seconds` caps how long (in seconds of usable face frames) Gaze examines the camera before giving up and falling back to your password. It bounds the whole attempt, not just the liveness stage: an unrecognised face spends the same budget. Gaze calculates the frame budget dynamically using your camera's actual frame rate (e.g. 2.0 seconds corresponds to 60 frames on a 30fps webcam, or 120 frames on a 60fps camera). Frames only count while a usable face is in view, and the RGB and IR phases each get the full budget. Raise it if authentication gives up before you are ready; `gaze auth --verbose` reports when a run ends this way.
 
 ## Recommended tuning workflow
 
