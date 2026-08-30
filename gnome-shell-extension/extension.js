@@ -3,12 +3,17 @@
 
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
+import St from "gi://St";
+import Clutter from "gi://Clutter";
 import {
   Extension,
   InjectionManager,
+  gettext as _,
 } from "resource:///org/gnome/shell/extensions/extension.js";
+import * as Animation from "resource:///org/gnome/shell/ui/animation.js";
 import * as Batch from "resource:///org/gnome/shell/gdm/batch.js";
 import * as Util from "resource:///org/gnome/shell/gdm/util.js";
+import * as AuthPrompt from "resource:///org/gnome/shell/gdm/authPrompt.js";
 import * as PolkitAgent from "resource:///org/gnome/shell/ui/components/polkitAgent.js";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 
@@ -131,6 +136,195 @@ const respondToConfirm = (dialog) => {
   if (dialog._okButton) dialog._okButton.reactive = false;
 };
 
+const ensureAuthPromptConfirmButton = (authPrompt, extension) => {
+  if (authPrompt._confirmButton) return authPrompt._confirmButton;
+
+  const button = new St.Button({
+    style_class: "button modal-dialog-button default",
+    style: "padding: 9px 24px; border-radius: 12px;",
+    label: _("Confirm Face Unlock") || "Confirm Face Unlock",
+    can_focus: true,
+    reactive: true,
+    x_align: Clutter.ActorAlign.FILL,
+    x_expand: true,
+    y_align: Clutter.ActorAlign.CENTER,
+    visible: false,
+  });
+
+  button.connect("clicked", () => {
+    if (authPrompt._confirmMode) {
+      respondToAuthPromptConfirm(authPrompt);
+    }
+  });
+
+  authPrompt._confirmButton = button;
+  if (extension?._activeConfirmWidgets) {
+    extension._activeConfirmWidgets.add(button);
+  }
+
+  const spinnerBin = new St.Bin({
+    x_align: Clutter.ActorAlign.CENTER,
+    y_align: Clutter.ActorAlign.CENTER,
+    x_expand: true,
+    visible: false,
+  });
+  const spinner = new Animation.Spinner(16);
+  spinnerBin.set_child(spinner);
+  authPrompt._confirmSpinnerBin = spinnerBin;
+  authPrompt._confirmSpinner = spinner;
+  if (extension?._activeConfirmWidgets) {
+    extension._activeConfirmWidgets.add(spinnerBin);
+  }
+
+  if (authPrompt._mainBox) {
+    if (authPrompt._defaultButtonWell) {
+      authPrompt._mainBox.insert_child_below(
+        button,
+        authPrompt._defaultButtonWell,
+      );
+      authPrompt._mainBox.insert_child_below(
+        spinnerBin,
+        authPrompt._defaultButtonWell,
+      );
+    } else {
+      authPrompt._mainBox.add_child(button);
+      authPrompt._mainBox.add_child(spinnerBin);
+    }
+  }
+
+  return button;
+};
+
+const enterAuthPromptConfirmMode = (authPrompt, serviceName, extension) => {
+  try {
+    gazeTiming("CONFIRM_SHOWN", `svc=${serviceName} path=authPrompt`);
+    authPrompt._queryingService = serviceName;
+    authPrompt._confirmMode = true;
+
+    if (authPrompt._passwordEntry) {
+      authPrompt._passwordEntry.set_text("");
+      authPrompt._passwordEntry.hide();
+      authPrompt._passwordEntry.reactive = false;
+    }
+    if (authPrompt._textEntry) {
+      authPrompt._textEntry.set_text("");
+      authPrompt._textEntry.hide();
+      authPrompt._textEntry.reactive = false;
+    }
+    if (authPrompt._entry) {
+      authPrompt._entry.hide();
+      authPrompt._entry.reactive = false;
+    }
+    if (authPrompt._capsLockWarningLabel) {
+      authPrompt._capsLockWarningLabel.hide();
+    }
+    if (authPrompt._authList) {
+      authPrompt._authList.hide();
+    }
+
+    authPrompt.setMessage(null);
+    if (authPrompt._message) {
+      authPrompt._message.text = "";
+      authPrompt._message.opacity = 0;
+      authPrompt._message.hide();
+    }
+
+    if (authPrompt._confirmSpinner) {
+      authPrompt._confirmSpinner.stop();
+    }
+    if (authPrompt._confirmSpinnerBin) {
+      authPrompt._confirmSpinnerBin.hide();
+    }
+
+    const button = ensureAuthPromptConfirmButton(authPrompt, extension);
+    button.show();
+    button.reactive = true;
+    button.can_focus = true;
+    button.grab_key_focus();
+
+    authPrompt.emit("prompted");
+  } catch (e) {
+    logError(e, "[gaze] Failed to enter confirm mode");
+    exitAuthPromptConfirmMode(authPrompt);
+    authPrompt.setMessage(
+      _("Failed to show confirmation prompt") ||
+        "Failed to show confirmation prompt",
+      Util.MessageType.ERROR,
+    );
+  }
+};
+
+const respondToAuthPromptConfirm = (authPrompt) => {
+  if (!authPrompt._confirmMode) return;
+  authPrompt._confirmMode = false;
+  authPrompt._confirmSucceeded = false;
+
+  if (authPrompt._confirmButton) {
+    authPrompt._confirmButton.reactive = false;
+    authPrompt._confirmButton.hide();
+  }
+
+  if (authPrompt._confirmSpinnerBin && authPrompt._confirmSpinner) {
+    authPrompt._confirmSpinnerBin.show();
+    authPrompt._confirmSpinner.play();
+  } else {
+    authPrompt.startSpinning();
+  }
+
+  authPrompt.verificationStatus =
+    AuthPrompt.AuthPromptStatus.VERIFICATION_IN_PROGRESS;
+  authPrompt.updateSensitivity(false);
+
+  const serviceName = authPrompt._queryingService;
+  if (serviceName && authPrompt._userVerifier) {
+    authPrompt._userVerifier.answerQuery(serviceName, CONFIRMATION_ACK);
+  }
+
+  authPrompt.emit("next");
+};
+
+const exitAuthPromptConfirmMode = (authPrompt) => {
+  if (
+    !authPrompt._confirmMode &&
+    !authPrompt._confirmButton?.visible &&
+    !authPrompt._confirmSpinnerBin?.visible
+  )
+    return;
+  authPrompt._confirmMode = false;
+
+  if (authPrompt._confirmSpinner) {
+    authPrompt._confirmSpinner.stop();
+  }
+  if (authPrompt._confirmSpinnerBin) {
+    authPrompt._confirmSpinnerBin.hide();
+  }
+  if (authPrompt._confirmButton) {
+    authPrompt._confirmButton.reactive = false;
+    authPrompt._confirmButton.hide();
+  }
+
+  if (authPrompt._userVerifier) {
+    authPrompt._userVerifier._faceConfirmPending = false;
+    authPrompt._userVerifier._faceConfirmService = null;
+  }
+
+  if (
+    authPrompt.verificationStatus ===
+      AuthPrompt.AuthPromptStatus.VERIFICATION_SUCCEEDED ||
+    authPrompt._confirmSucceeded
+  ) {
+    if (authPrompt._entry) authPrompt._entry.hide();
+    if (authPrompt._passwordEntry) authPrompt._passwordEntry.hide();
+    if (authPrompt._textEntry) authPrompt._textEntry.hide();
+    return;
+  }
+
+  if (authPrompt._entry) {
+    authPrompt._entry.show();
+    authPrompt._entry.reactive = true;
+  }
+};
+
 const FACE_STATUS_UPDATES = new Set([
   "Please look at the camera...",
   "Need more light...",
@@ -145,6 +339,7 @@ export default class GazeFaceAuthExtension extends Extension {
   enable() {
     this._injectionManager = new InjectionManager();
     this._extensionSettings = this.getSettings();
+    this._activeConfirmWidgets = new Set();
 
     const ext = this;
     const faceCache = { enrolled: new Map(), camera: null };
@@ -632,6 +827,184 @@ export default class GazeFaceAuthExtension extends Extension {
         };
       },
     );
+
+    const authPromptProto = AuthPrompt.AuthPrompt.prototype;
+
+    this._injectionManager.overrideMethod(
+      authPromptProto,
+      "_onAskQuestion",
+      (original) => {
+        return function (serviceName, question, secret) {
+          if (
+            question?.trim() === CONFIRMATION_REQUEST ||
+            question?.trim() === CONFIRMATION_QUESTION ||
+            (this._userVerifier?._faceConfirmPending &&
+              serviceName === this._userVerifier?._faceConfirmService)
+          ) {
+            enterAuthPromptConfirmMode(this, serviceName, extension);
+            return;
+          }
+          exitAuthPromptConfirmMode(this);
+          original.call(this, serviceName, question, secret);
+        };
+      },
+    );
+
+    this._injectionManager.overrideMethod(
+      authPromptProto,
+      "on_key_press_event",
+      (original) => {
+        return function (event) {
+          const symbol = event.get_key_symbol();
+          if (this._confirmMode) {
+            if (
+              symbol === Clutter.KEY_Return ||
+              symbol === Clutter.KEY_KP_Enter ||
+              symbol === Clutter.KEY_ISO_Enter
+            ) {
+              respondToAuthPromptConfirm(this);
+              return Clutter.EVENT_STOP;
+            }
+            if (symbol === Clutter.KEY_Escape) {
+              exitAuthPromptConfirmMode(this);
+              this.cancel();
+              return Clutter.EVENT_STOP;
+            }
+          }
+          return original.call(this, event);
+        };
+      },
+    );
+
+    this._injectionManager.overrideMethod(
+      authPromptProto,
+      "reset",
+      (original) => {
+        return function () {
+          if (
+            this.verificationStatus ===
+              AuthPrompt.AuthPromptStatus.VERIFICATION_SUCCEEDED ||
+            this._confirmSucceeded
+          ) {
+            original.call(this);
+            if (this._entry) this._entry.hide();
+            if (this._passwordEntry) this._passwordEntry.hide();
+            if (this._textEntry) this._textEntry.hide();
+            return;
+          }
+          exitAuthPromptConfirmMode(this);
+          original.call(this);
+        };
+      },
+    );
+
+    this._injectionManager.overrideMethod(
+      authPromptProto,
+      "clear",
+      (original) => {
+        return function () {
+          if (
+            this.verificationStatus ===
+              AuthPrompt.AuthPromptStatus.VERIFICATION_SUCCEEDED ||
+            this._confirmSucceeded
+          ) {
+            original.call(this);
+            if (this._entry) this._entry.hide();
+            if (this._passwordEntry) this._passwordEntry.hide();
+            if (this._textEntry) this._textEntry.hide();
+            return;
+          }
+          exitAuthPromptConfirmMode(this);
+          original.call(this);
+        };
+      },
+    );
+
+    this._injectionManager.overrideMethod(
+      authPromptProto,
+      "_onVerificationFailed",
+      (original) => {
+        return function (serviceName, canRetry) {
+          this._confirmSucceeded = false;
+          exitAuthPromptConfirmMode(this);
+          original.call(this, serviceName, canRetry);
+        };
+      },
+    );
+
+    this._injectionManager.overrideMethod(
+      authPromptProto,
+      "updateSensitivity",
+      (original) => {
+        return function (sensitive) {
+          if (this._confirmMode && this._confirmButton?.visible) {
+            if (this._confirmButton.reactive === sensitive) return;
+            this._confirmButton.reactive = sensitive;
+            if (sensitive) {
+              this._confirmButton.grab_key_focus();
+            } else {
+              this.grab_key_focus();
+            }
+            return;
+          }
+          original.call(this, sensitive);
+        };
+      },
+    );
+
+    this._injectionManager.overrideMethod(
+      authPromptProto,
+      "_onVerificationComplete",
+      (original) => {
+        return function () {
+          this._confirmSucceeded = true;
+          if (this._confirmSpinner) {
+            this._confirmSpinner.stop();
+          }
+          if (this._confirmSpinnerBin) {
+            this._confirmSpinnerBin.hide();
+          }
+          if (this._entry) {
+            this._entry.hide();
+          }
+          if (this._passwordEntry) {
+            this._passwordEntry.hide();
+          }
+          if (this._textEntry) {
+            this._textEntry.hide();
+          }
+          original.call(this);
+        };
+      },
+    );
+
+    this._injectionManager.overrideMethod(
+      authPromptProto,
+      "_onDestroy",
+      (original) => {
+        return function () {
+          if (this._confirmSpinner) {
+            this._confirmSpinner.stop();
+            this._confirmSpinner = null;
+          }
+          if (this._confirmSpinnerBin) {
+            if (extension?._activeConfirmWidgets) {
+              extension._activeConfirmWidgets.delete(this._confirmSpinnerBin);
+            }
+            this._confirmSpinnerBin.destroy();
+            this._confirmSpinnerBin = null;
+          }
+          if (this._confirmButton) {
+            if (extension?._activeConfirmWidgets) {
+              extension._activeConfirmWidgets.delete(this._confirmButton);
+            }
+            this._confirmButton.destroy();
+            this._confirmButton = null;
+          }
+          original.call(this);
+        };
+      },
+    );
   }
 
   disable() {
@@ -642,6 +1015,16 @@ export default class GazeFaceAuthExtension extends Extension {
         logError(e, "[gaze] Failed to unregister extension");
       }
       this._dbusProxy = null;
+    }
+
+    if (this._activeConfirmWidgets) {
+      for (const widget of this._activeConfirmWidgets) {
+        try {
+          widget.destroy();
+        } catch (e) {}
+      }
+      this._activeConfirmWidgets.clear();
+      this._activeConfirmWidgets = null;
     }
 
     const proto = Util.ShellUserVerifier.prototype;
