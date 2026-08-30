@@ -249,7 +249,7 @@ gaze config --show | grep parallel_capture
 
 If it is `always`, set it to `auto` (which serializes cameras whose sensors share
 one hardware function) or `never`. If you see this on `never`, the two sensors
-cannot coexist even sequentially — configure the IR camera on its own and leave
+cannot coexist even sequentially. Configure the IR camera on its own and leave
 `rgb` empty so Gaze runs IR-only:
 
 ```toml
@@ -280,13 +280,15 @@ journalctl -u gazed -b
 
 Older Gaze builds could try to use the selected user's PipeWire runtime before that user session existed. Update Gaze if you see this behavior.
 
-#### GDM never scans on Fedora and other SELinux distributions
+#### GDM never scans on Fedora or SELinux-enabled systems
 
 If face auth works in your desktop session (`sudo`, the lock screen, `gaze auth`)
-but the GDM login screen never opens the camera, SELinux is probably denying the
-greeter the camera device. Gaze ships a policy module for this and the extension
-package loads it on install, but that step cannot fail the package transaction,
-so a rejected policy leaves no trace beyond the greeter silently not scanning.
+but the GDM login screen never opens the camera, SELinux may be denying the
+greeter the camera device. Gaze ships a policy module for this and the
+extension package loads it on install, but that step cannot fail the package
+transaction, so a rejected policy leaves no trace beyond the greeter silently
+not scanning. openSUSE normally uses AppArmor; use this check there only if you
+have explicitly enabled SELinux.
 
 `gaze doctor` reports this as **GDM camera SELinux policy**. To check by hand:
 
@@ -334,6 +336,24 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 
 This reapplies package-managed PAM integration.
 
+### Bitwarden browser extension never starts face authentication
+
+Bitwarden browser unlock reaches Gaze indirectly: the extension talks to the
+Bitwarden desktop app through native messaging, and the desktop app requests a
+Polkit authorization. First verify that the `polkit-1` PAM path starts Gaze:
+
+```bash
+gaze doctor
+pkexec /usr/bin/true
+```
+
+If that works but clicking **Unlock with biometrics** in the extension opens no
+Polkit prompt, troubleshoot Bitwarden's desktop app and native-messaging
+connection rather than adding another PAM rule. If the Polkit test does not use
+Gaze, fix the distribution-specific `polkit-1` setup. See
+[Browser extensions through Polkit](/guide/pam#browser-extensions-through-polkit-bitwarden)
+for the complete setup and diagnostic split.
+
 ## 6. First run is slow
 
 This is normal when models are downloaded initially.
@@ -356,7 +376,7 @@ What these do:
 
 ## 8. Package repository is not loading or signatures mismatch
 
-If you see errors like repository connection failures, metadata hash mismatches, or repository GPG signature failures when running `apt update` or `dnf makecache`, reinstall the current package source configuration from the [Installation guide](/guide/installation).
+If you see errors like repository connection failures, metadata hash mismatches, or repository GPG signature failures when running `apt update`, `dnf makecache`, or `zypper refresh`, reinstall the current package source configuration from the [Installation guide](/guide/installation). On openSUSE Tumbleweed, confirm that the repository URL is the Tumbleweed repository and that its architecture is `x86_64`; Fedora repositories are not compatible with Tumbleweed's rolling-library ABI.
 
 ## 9. PAM module fails to load on Ubuntu 26.04+
 

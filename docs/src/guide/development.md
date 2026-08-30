@@ -68,6 +68,15 @@ sudo dnf install @development-tools pkg-config clang clang-devel \
   flatpak flatpak-builder elfutils
 ```
 
+```bash [openSUSE Tumbleweed]
+sudo zypper install --no-recommends \
+  clang clang-devel opencv-devel libv4l-devel pam-devel tpm2-0-tss-devel \
+  libopenssl-devel gtk4-devel libadwaita-devel \
+  gstreamer-devel gstreamer-plugins-base-devel gstreamer-plugins-good \
+  checkpolicy policycoreutils pkgconf-pkg-config envsubst gcc gcc-c++ \
+  flatpak flatpak-builder elfutils
+```
+
 ```bash [Arch Linux / Manjaro]
 sudo pacman -S base-devel pkgconf clang llvm \
   opencv v4l-utils pam tpm2-tss openssl \
@@ -79,9 +88,9 @@ sudo pacman -S base-devel pkgconf clang llvm \
 
 :::
 
-`libtss2-dev`/`tpm2-tss-devel`/`tpm2-tss` and `libssl-dev`/`openssl-devel`/`openssl` back the
+`libtss2-dev`/`tpm2-tss-devel`/`tpm2-tss`/`tpm2-0-tss-devel` and `libssl-dev`/`openssl-devel`/`openssl`/`libopenssl-devel` back the
 `tss-esapi` and `openssl-sys` crates (the daemon seals the face-template key to the TPM);
-`gettext-base`/`gettext` provides `envsubst`, which the `package` recipe below needs.
+`gettext-base`/`gettext`/`envsubst` provides `envsubst`, which the `package` recipe below needs.
 
 Both OpenCV 4 and 5 work. On distros that ship OpenCV 5 (such as Arch Linux),
 the `just` recipes automatically point the `opencv` crate at the `opencv5`

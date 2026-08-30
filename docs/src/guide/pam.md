@@ -186,6 +186,46 @@ sudo authselect current
 sudo -v
 ```
 
+## openSUSE Tumbleweed
+
+The openSUSE package ships a `pam-config` definition for Gaze and enables it
+in its post-install script. This adds Gaze to the managed `common-auth` stack,
+covering `sudo`, GDM, the GNOME lock screen, and other PAM services that include
+`common-auth`. To apply it again after changing PAM modules, run:
+
+```bash
+sudo pam-config --add --gaze
+sudo pam-config --update
+```
+
+The `--gaze` option is provided by the Gaze package's definition under
+`/usr/lib/pam-config.d`. If `pam-config` reports an unknown option, confirm
+that the base `gaze` package (not only `gaze-gui` or the GNOME extension) is
+installed.
+
+For simultaneous face and password authentication, enable
+`pam_gaze_grosshack.so` instead (do not enable both modules):
+
+```bash
+sudo pam-config --delete --gaze
+sudo pam-config --add --gaze_grosshack
+sudo pam-config --update
+```
+
+Check that the managed file contains Gaze and that the common-auth link still
+points at the generated file:
+
+```bash
+grep pam_gaze /etc/pam.d/common-auth-pc
+readlink -f /etc/pam.d/common-auth
+gaze doctor
+```
+
+Keep a root shell open while testing changes to the shared authentication
+stack. If `common-auth` is not managed by `pam-config` on your installation,
+follow [Other distros (manual)](#other-distros-manual) and add
+`pam_gaze.so` to the service-specific PAM files instead.
+
 ## Arch Linux / Manjaro
 
 The one-liner installer and the AUR package post-install script both configure `/etc/pam.d/sudo` automatically, inserting `pam_gaze.so` before the existing `auth include system-auth` line.
@@ -236,7 +276,9 @@ Debian/Ubuntu and Fedora ship their own `polkit-1` PAM service and do not use `s
 
 ## Other distros (manual)
 
-Edit your shared auth stack (for example `/etc/pam.d/system-auth`) and place Gaze before `pam_unix.so`.
+Edit your shared auth stack (for example `/etc/pam.d/system-auth` on Fedora or
+Arch, or `/etc/pam.d/common-auth-pc` on openSUSE when `pam-config` is not
+available) and place Gaze before `pam_unix.so`.
 
 Sequential:
 
@@ -253,6 +295,53 @@ auth    sufficient    pam_unix.so try_first_pass nullok
 ```
 
 Then test with `sudo -v`.
+
+## Browser extensions through Polkit (Bitwarden)
+
+A browser extension cannot call PAM directly. Bitwarden's browser extension
+hands an unlock request to the running Bitwarden desktop app through native
+messaging. On Linux, the desktop app asks Polkit to authorize the
+`com.bitwarden.Bitwarden.unlock` action, and the graphical Polkit agent runs the
+normal `polkit-1` PAM service. Gaze therefore needs no Firefox-, Chromium-, or
+Zen-specific hook: if Gaze is in the `polkit-1` stack, the request follows the
+same path as any other graphical authentication prompt.
+
+Set up and test the layers in order:
+
+1. Follow the Polkit setup for your distribution above, then check that a plain
+   Polkit request starts Gaze:
+
+   ```bash
+   gaze doctor
+   pkexec /usr/bin/true
+   ```
+
+2. In the Bitwarden desktop app, enable **Unlock with system authentication**
+   and **Allow browser integration**. Keep the desktop app running, logged in,
+   and unlocked while setting up the extension.
+3. In the browser extension, open **Settings → Account security**, enable
+   **Unlock with biometrics**, and approve the connection in the desktop app.
+   See [Bitwarden's biometric unlock guide](https://bitwarden.com/help/biometrics/)
+   for browser and package-specific requirements.
+
+If desktop unlock already uses Gaze but the browser extension never opens a
+Polkit dialog, the request has not reached PAM. Check the native-messaging setup,
+whether the desktop app is running and logged in, and whether Bitwarden supports
+that browser and installation method. Adding another Gaze PAM entry cannot fix a
+native-messaging failure.
+
+If a Polkit prompt appears but Gaze does not run, return to the distribution's
+Polkit setup above. `pkexec /usr/bin/true` must use Gaze first. To confirm that a
+Bitwarden attempt reached the daemon through the expected service, check:
+
+```bash
+sudo journalctl -u gazed -b --no-pager | grep 'service="polkit-1"'
+```
+
+Do not add a Polkit rule that automatically authorizes Bitwarden or a browser.
+That would bypass authentication rather than route it to Gaze. Bitwarden owns
+the desktop/native-messaging trust boundary; Gaze only supplies face
+authentication when Polkit invokes PAM.
 
 ## Safety notes
 

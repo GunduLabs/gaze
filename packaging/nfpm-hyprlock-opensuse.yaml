@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Use Tumbleweed's common-* PAM includes instead of system-auth.
+name: "gaze-hyprlock"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+release: "${PACKAGE_RELEASE}"
+section: "admin"
+priority: "optional"
+maintainer: "Gundu Labs <maintainers@gundulabs.com>"
+description: "Hyprlock PAM integration for Gaze"
+vendor: "Gundu Labs"
+homepage: "https://gaze.gundulabs.com"
+license: "GPL-3.0-or-later"
+
+contents:
+  - src: "packaging/pam/hyprlock-gaze.suse"
+    dst: "/etc/pam.d/hyprlock-gaze"
+    type: "config|noreplace"
+    packager: rpm
+    file_info:
+      mode: 0644
+  - src: "packaging/pam/hyprlock-gaze-simultaneous.suse"
+    dst: "/etc/pam.d/hyprlock-gaze-simultaneous"
+    type: "config|noreplace"
+    packager: rpm
+    file_info:
+      mode: 0644
+
+rpm:
+  signature:
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+scripts:
+  postinstall: "packaging/postinst-hyprlock.sh"
+  postremove: "packaging/postrm-hyprlock.sh"
+
+recommends:
+  - gaze

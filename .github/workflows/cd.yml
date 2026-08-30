@@ -214,6 +214,17 @@ jobs:
             rpm_distro: fedora
             rpm_version: "44"
             package_release: "1.fc44"
+          - id: opensuse-tumbleweed-amd64
+            name: rpm (openSUSE Tumbleweed, amd64)
+            runner: ubuntu-latest
+            container: opensuse/tumbleweed:latest
+            format: rpm
+            distro: opensuse
+            distro_version: tumbleweed
+            deb_suite: ""
+            rpm_distro: opensuse
+            rpm_version: tumbleweed
+            package_release: "1.opensuse.tumbleweed"
           - id: arch
             name: archlinux (Arch Linux)
             runner: ubuntu-latest
@@ -265,7 +276,7 @@ jobs:
             pkg-config
 
       - name: Install Fedora dependencies
-        if: ${{ matrix.format == 'rpm' }}
+        if: ${{ matrix.distro == 'fedora' }}
         run: |
           dnf install -y \
             git \
@@ -290,6 +301,52 @@ jobs:
             pkg-config \
             gettext \
             gcc
+
+      - name: Install openSUSE Tumbleweed dependencies
+        if: ${{ matrix.distro == 'opensuse' }}
+        run: |
+          export ZYPP_MEDIA_CURL_IPRESOLVE=4
+          zypper --non-interactive modifyrepo --disable repo-openh264 || true
+          retry() {
+            for attempt in 1 2 3; do
+              if "$@"; then
+                return 0
+              fi
+              echo "::warning::'$*' failed (attempt $attempt/3)"
+              if [ "$attempt" -lt 3 ]; then
+                sleep $((attempt * 15))
+              fi
+            done
+            echo "::error::'$*' failed after 3 attempts"
+            return 1
+          }
+          retry zypper --non-interactive refresh
+          retry zypper --non-interactive install --no-recommends \
+            git \
+            ca-certificates \
+            curl \
+            clang \
+            clang-devel \
+            opencv-devel \
+            libv4l-devel \
+            pam-devel \
+            tpm2-0-tss-devel \
+            checkpolicy \
+            policycoreutils \
+            gtk4-devel \
+            libadwaita-devel \
+            gstreamer-devel \
+            gstreamer-plugins-base-devel \
+            gstreamer-plugins-good \
+            libopenssl-devel \
+            gpg2 \
+            pkgconf-pkg-config \
+            envsubst \
+            gcc \
+            gcc-c++ \
+            binutils \
+            bash
+          echo "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" >>"$GITHUB_ENV"
 
       - name: Install Arch dependencies
         if: ${{ matrix.format == 'archlinux' }}
@@ -318,12 +375,31 @@ jobs:
             gcc
 
       - name: Install Rust toolchain
+        if: ${{ matrix.distro != 'opensuse' }}
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install just
+        if: ${{ matrix.distro != 'opensuse' }}
         uses: extractions/setup-just@v4
         with:
           just-version: ${{ env.JUST_VERSION }}
+
+      - name: Install Rust toolchain and just on openSUSE
+        if: ${{ matrix.distro == 'opensuse' }}
+        run: |
+          case "$(uname -m)" in
+            x86_64) just_target="x86_64-unknown-linux-musl" ;;
+            aarch64|arm64) just_target="aarch64-unknown-linux-musl" ;;
+            *) echo "Unsupported just install architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
+            | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
+          curl -fsSL "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${just_target}.tar.gz" \
+            -o /tmp/just.tar.gz
+          tar -xzf /tmp/just.tar.gz -C /usr/local/bin just
+          echo "PATH=$HOME/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" >>"$GITHUB_ENV"
+          "$HOME/.cargo/bin/rustc" --version
+          just --version
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2

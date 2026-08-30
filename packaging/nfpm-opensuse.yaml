@@ -1,0 +1,83 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Keep openSUSE pam-config contents separate from Fedora authselect files.
+name: "gaze"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+release: "${PACKAGE_RELEASE}"
+section: "admin"
+priority: "optional"
+maintainer: "Gundu Labs <maintainers@gundulabs.com>"
+description: "Daemon, CLI, and PAM integration for Gaze"
+vendor: "Gundu Labs"
+homepage: "https://gaze.gundulabs.com"
+license: "GPL-3.0-or-later"
+
+contents:
+  - src: "target/release/gazed"
+    dst: "/usr/bin/gazed"
+    file_info:
+      mode: 0755
+  - src: "target/release/gaze"
+    dst: "/usr/bin/gaze"
+    file_info:
+      mode: 0755
+  - src: "packaging/config/config.toml"
+    dst: "/etc/gaze/config.toml"
+    type: "config|noreplace"
+    file_info:
+      mode: 0644
+  - src: "packaging/config/com.gundulabs.Gaze.conf"
+    dst: "/etc/dbus-1/system.d/com.gundulabs.Gaze.conf"
+    type: "config|noreplace"
+    file_info:
+      mode: 0644
+  - src: "packaging/config/com.gundulabs.gaze.policy"
+    dst: "/usr/share/polkit-1/actions/com.gundulabs.gaze.policy"
+    file_info:
+      mode: 0644
+  - src: "packaging/config/gazed.service"
+    dst: "/usr/lib/systemd/system/gazed.service"
+    file_info:
+      mode: 0644
+  - src: "dist/selinux/gaze-gdm-camera.pp"
+    dst: "/usr/share/gaze/gaze-gdm-camera.pp"
+    packager: rpm
+    file_info:
+      mode: 0644
+  - src: "target/release/libpam_gaze.so"
+    dst: "/usr/lib64/security/pam_gaze.so"
+    packager: rpm
+    file_info:
+      mode: 0755
+  - src: "target/release/libpam_gaze_grosshack.so"
+    dst: "/usr/lib64/security/pam_gaze_grosshack.so"
+    packager: rpm
+    file_info:
+      mode: 0755
+  - src: "packaging/pam/gaze.conf.suse"
+    dst: "/usr/lib/pam-config.d/gaze.conf"
+    packager: rpm
+    file_info:
+      mode: 0644
+  - src: "packaging/pam/gaze-grosshack.conf.suse"
+    dst: "/usr/lib/pam-config.d/gaze-grosshack.conf"
+    packager: rpm
+    file_info:
+      mode: 0644
+
+rpm:
+  signature:
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+overrides:
+  rpm:
+    scripts:
+      postinstall: "packaging/postinst-rpm.sh"
+      preremove: "packaging/prerm-rpm.sh"
+    depends:
+      - pam
+      - pam-config
+${RPM_LIB_DEPENDS}

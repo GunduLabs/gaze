@@ -1304,6 +1304,15 @@ fn remove_arch_pam_configuration_cmd() -> String {
     .join(" ")
 }
 
+fn remove_rpm_ostree_packages_cmd() -> String {
+    "sudo rpm-ostree uninstall gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde \
+      2>/dev/null || \
+      for pkg in gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde; do \
+      sudo rpm-ostree uninstall \"$pkg\" 2>/dev/null || true; \
+      done"
+        .into()
+}
+
 fn remove_pacman_packages_cmd() -> String {
     // AUR builds split off `-debug` packages; remove those first since they can
     // depend on the base package.
@@ -1316,6 +1325,149 @@ fn remove_pacman_packages_cmd() -> String {
       done; \
       done"
         .into()
+}
+
+fn remove_zypper_packages_cmd() -> String {
+    // Include every optional openSUSE integration package.
+    "sudo zypper --non-interactive remove --no-confirm gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
+        .into()
+}
+
+fn remove_suse_pam_configuration_cmd() -> String {
+    // Remove both managed PAM modes independently.
+    "if command -v pam-config >/dev/null 2>&1; then \
+      sudo pam-config --delete --gaze 2>/dev/null || true; \
+      sudo pam-config --delete --gaze_grosshack 2>/dev/null || true; \
+      sudo pam-config --update 2>/dev/null || true; \
+      fi"
+    .into()
+}
+
+const GUNDULABS_REPO_KEY_FINGERPRINT: &str = "505AC1C71AFEDBD5555235F6CB4FA24E5C1C7C98";
+// RPM key package versions use the final eight fingerprint characters.
+
+fn remove_zypper_repo_and_key_cmd() -> String {
+    // Match only the RPM key package derived from the Gundu Labs fingerprint.
+    let key_id = GUNDULABS_REPO_KEY_FINGERPRINT
+        .get(GUNDULABS_REPO_KEY_FINGERPRINT.len() - 8..)
+        .expect("Gundu Labs fingerprint must contain a key ID")
+        .to_ascii_lowercase();
+    format!(
+        "sudo rm -f /etc/zypp/repos.d/gundulabs.repo \\
+          /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs; \\
+          if command -v rpm >/dev/null 2>&1; then \\
+            rpm -qa 'gpg-pubkey*' --qf '%{{NAME}}-%{{VERSION}}-%{{RELEASE}}\\n' 2>/dev/null | \\
+            while IFS= read -r key_package; do \\
+              case \"$key_package\" in \\
+                gpg-pubkey-{key_id}-*) sudo rpm -e \"$key_package\" 2>/dev/null || true ;; \\
+              esac; \\
+            done; \\
+          fi"
+    )
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PackageManager {
+    Apt,
+    Zypper,
+    Dnf,
+    RpmOstree,
+    Pacman,
+}
+
+fn append_package_manager_uninstall_steps(
+    plan: &mut Vec<(&'static str, String)>,
+    package_manager: PackageManager,
+) {
+    match package_manager {
+        PackageManager::Apt => {
+            plan.push((
+                "Remove apt packages",
+                "sudo apt-get remove --purge -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
+                    .into(),
+            ));
+            plan.push((
+                "Remove apt repo + keyring",
+                "sudo rm -f /etc/apt/sources.list.d/gundulabs.list \\
+                  /usr/share/keyrings/gundulabs-archive-keyring.gpg && \\
+                  sudo apt-get update 2>/dev/null || true"
+                    .into(),
+            ));
+        }
+        // Prefer Tumbleweed's native package manager.
+        PackageManager::Zypper => {
+            plan.push((
+                "Remove openSUSE PAM configuration",
+                remove_suse_pam_configuration_cmd(),
+            ));
+            plan.push(("Remove zypper packages", remove_zypper_packages_cmd()));
+            plan.push(("Remove zypper repo + key", remove_zypper_repo_and_key_cmd()));
+        }
+        PackageManager::Dnf => {
+            plan.push((
+                "Remove dnf packages",
+                "sudo dnf remove -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
+                    .into(),
+            ));
+            plan.push((
+                "Remove dnf repo",
+                "sudo rm -f /etc/yum.repos.d/gundulabs.repo".into(),
+            ));
+        }
+        PackageManager::RpmOstree => {
+            plan.push(("Remove layered packages", remove_rpm_ostree_packages_cmd()));
+            plan.push((
+                "Remove dnf repo",
+                "sudo rm -f /etc/yum.repos.d/gundulabs.repo".into(),
+            ));
+            plan.push((
+                "Reboot to finalize removal",
+                "echo 'Layered package removal takes effect after the next reboot.'".into(),
+            ));
+        }
+        PackageManager::Pacman => {
+            plan.push(("Remove pacman packages", remove_pacman_packages_cmd()));
+            plan.push((
+                "Remove old pacman repo entry",
+                "sudo sed -i '/^\\[gaze\\]/,/^$/d' /etc/pacman.conf && \\
+                  sudo rm -f /etc/pacman.d/gaze-mirrorlist"
+                    .into(),
+            ));
+        }
+    }
+}
+
+fn package_manager_from_availability(
+    apt: bool,
+    zypper: bool,
+    dnf: bool,
+    pacman: bool,
+    rpm_ostree: bool,
+) -> Option<PackageManager> {
+    // Prefer zypper when optional apt or dnf tools are also installed.
+    if zypper {
+        Some(PackageManager::Zypper)
+    } else if apt {
+        Some(PackageManager::Apt)
+    } else if rpm_ostree {
+        Some(PackageManager::RpmOstree)
+    } else if dnf {
+        Some(PackageManager::Dnf)
+    } else if pacman {
+        Some(PackageManager::Pacman)
+    } else {
+        None
+    }
+}
+
+fn detect_package_manager() -> Option<PackageManager> {
+    package_manager_from_availability(
+        which("apt-get"),
+        which("zypper"),
+        which("dnf"),
+        which("pacman"),
+        which("rpm-ostree") && std::path::Path::new("/run/ostree-booted").exists(),
+    )
 }
 
 fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
@@ -1380,36 +1532,8 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
         "sudo systemctl disable --now gazed 2>/dev/null || true".into(),
     ));
 
-    if which("apt-get") {
-        plan.push((
-            "Remove apt packages",
-            "sudo apt-get remove --purge -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
-                .into(),
-        ));
-        plan.push((
-            "Remove apt repo + keyring",
-            "sudo rm -f /etc/apt/sources.list.d/gundulabs.list \
-              /usr/share/keyrings/gundulabs-archive-keyring.gpg && \
-              sudo apt-get update 2>/dev/null || true"
-                .into(),
-        ));
-    } else if which("dnf") {
-        plan.push((
-            "Remove dnf packages",
-            "sudo dnf remove -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true".into(),
-        ));
-        plan.push((
-            "Remove dnf repo",
-            "sudo rm -f /etc/yum.repos.d/gundulabs.repo".into(),
-        ));
-    } else if which("pacman") {
-        plan.push(("Remove pacman packages", remove_pacman_packages_cmd()));
-        plan.push((
-            "Remove old pacman repo entry",
-            "sudo sed -i '/^\\[gaze\\]/,/^$/d' /etc/pacman.conf && \
-              sudo rm -f /etc/pacman.d/gaze-mirrorlist"
-                .into(),
-        ));
+    if let Some(package_manager) = detect_package_manager() {
+        append_package_manager_uninstall_steps(&mut plan, package_manager);
     }
 
     if which("semodule") {
@@ -1971,6 +2095,130 @@ mod tests {
         assert!(
             output.status.success(),
             "invalid pacman removal shell command: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn zypper_removal_covers_all_native_packages() {
+        let command = remove_zypper_packages_cmd();
+        for package in [
+            "gaze",
+            "gaze-gui",
+            "gaze-gnome-extension",
+            "gaze-hyprlock",
+            "gaze-kde",
+        ] {
+            assert!(
+                command.contains(package),
+                "missing zypper removal for {package}"
+            );
+        }
+        assert!(command.contains("zypper --non-interactive remove --no-confirm"));
+
+        let output = std::process::Command::new("sh")
+            .arg("-n")
+            .arg("-c")
+            .arg(&command)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "invalid zypper removal shell command: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn suse_uninstall_removes_both_pam_config_definitions() {
+        let command = remove_suse_pam_configuration_cmd();
+        assert!(command.contains("pam-config --delete --gaze"));
+        assert!(command.contains("pam-config --delete --gaze_grosshack"));
+        assert!(command.contains("pam-config --update"));
+
+        let output = std::process::Command::new("sh")
+            .arg("-n")
+            .arg("-c")
+            .arg(&command)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "invalid openSUSE PAM cleanup shell command: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn suse_uninstall_branch_removes_packages_pam_repo_and_imported_key() {
+        let mut plan = Vec::new();
+        append_package_manager_uninstall_steps(&mut plan, PackageManager::Zypper);
+
+        assert_eq!(plan.len(), 3);
+        assert_eq!(plan[0].0, "Remove openSUSE PAM configuration");
+        assert_eq!(plan[1].0, "Remove zypper packages");
+        assert_eq!(plan[2].0, "Remove zypper repo + key");
+
+        let command = &plan[2].1;
+        assert!(command.contains("/etc/zypp/repos.d/gundulabs.repo"));
+        assert!(command.contains("/etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs"));
+        assert!(command.contains("gpg-pubkey-5c1c7c98-*)"));
+        assert!(command.contains("sudo rpm -e \"$key_package\""));
+        assert_eq!(
+            GUNDULABS_REPO_KEY_FINGERPRINT,
+            "505AC1C71AFEDBD5555235F6CB4FA24E5C1C7C98"
+        );
+        assert!(!command.contains("rpm -e gpg-pubkey*"));
+
+        let output = std::process::Command::new("sh")
+            .arg("-n")
+            .arg("-c")
+            .arg(command)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "invalid openSUSE repo/key cleanup shell command: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn open_suse_package_manager_precedes_dnf_when_both_are_available() {
+        assert_eq!(
+            package_manager_from_availability(false, true, true, false, false),
+            Some(PackageManager::Zypper)
+        );
+        assert_eq!(
+            package_manager_from_availability(true, true, true, false, false),
+            Some(PackageManager::Zypper)
+        );
+    }
+
+    #[test]
+    fn rpm_ostree_package_manager_precedes_dnf_when_both_are_available() {
+        assert_eq!(
+            package_manager_from_availability(false, false, true, false, true),
+            Some(PackageManager::RpmOstree)
+        );
+        assert_eq!(
+            package_manager_from_availability(false, false, true, false, false),
+            Some(PackageManager::Dnf)
+        );
+    }
+
+    #[test]
+    fn rpm_ostree_package_cleanup_is_valid_shell() {
+        let command = remove_rpm_ostree_packages_cmd();
+        let output = std::process::Command::new("sh")
+            .arg("-n")
+            .arg("-c")
+            .arg(&command)
+            .output()
+            .expect("failed to run sh -n");
+        assert!(
+            output.status.success(),
+            "invalid rpm-ostree cleanup shell command: {}",
             String::from_utf8_lossy(&output.stderr)
         );
     }

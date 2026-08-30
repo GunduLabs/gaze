@@ -19,6 +19,10 @@ sudo apt-get install gaze-kde
 sudo dnf install gaze-kde
 ```
 
+```bash [openSUSE Tumbleweed]
+sudo zypper install gaze-kde
+```
+
 ```bash [Arch]
 yay -S gaze-kde-bin
 ```
@@ -121,8 +125,8 @@ instead of going straight to the desktop
 
 ### Only one Gaze per unlock
 
-On Fedora and Debian, Gaze installs into the shared authentication stack
-(`password-auth`, `common-auth`) that `/etc/pam.d/kde` also includes. Once a
+On Fedora, Debian, and openSUSE, Gaze installs into the shared authentication
+stack (`password-auth` or `common-auth`) that `/etc/pam.d/kde` also includes. Once a
 biometric slot runs Gaze, the module stands down in the services that reach it
 that way, so a single lock screen does not run face auth two or three times over
 and have those clients fight for one camera. `kde` yields to either slot, and
@@ -204,9 +208,9 @@ vendor copy meanwhile. `enable-login` reads whichever of the two the greeter wou
 really use, so it neither reports a missing login stack on those systems nor
 writes an `/etc` file where there is no block to add.
 
-On Fedora and Debian it will report that the stack **already reaches Gaze** and
+On Fedora, Debian, and openSUSE it will report that the stack **already reaches Gaze** and
 change nothing. That is correct: those login stacks include the shared
-authentication stack Gaze installs into (`password-auth`, `common-auth`), so face
+authentication stack Gaze installs into (`password-auth` or `common-auth`), so face
 auth already runs at the greeter on submit. Inserting a second line would make a
 failed scan run the camera twice over before the password prompt appeared. In
 practice `enable-login` only has work to do on Arch, where Gaze is wired into
@@ -324,6 +328,10 @@ sudo apt-get remove gaze-kde
 
 ```bash [Fedora and compatible]
 sudo dnf remove gaze-kde
+```
+
+```bash [openSUSE Tumbleweed]
+sudo zypper remove gaze-kde
 ```
 
 ```bash [Arch]

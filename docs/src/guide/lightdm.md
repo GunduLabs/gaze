@@ -26,6 +26,11 @@ sudo pam-auth-update --package
 sudo authselect select gaze with-silent-lastlog --force
 ```
 
+```bash [openSUSE Tumbleweed]
+sudo pam-config --add --gaze
+sudo pam-config --update
+```
+
 ```bash [Arch]
 # /etc/pam.d/lightdm includes system-login, which includes system-auth
 ```
@@ -33,8 +38,9 @@ sudo authselect select gaze with-silent-lastlog --force
 :::
 
 Debian's `/etc/pam.d/lightdm` is patched to `@include common-auth`, Fedora's is
-`auth substack system-auth`, and Arch's is `auth include system-login`. In every
-case the profile you enable for `sudo` reaches the login screen too.
+`auth substack system-auth`, openSUSE's is `auth include common-auth`, and
+Arch's is `auth include system-login`. In every case the profile or module you
+enable for `sudo` reaches the login screen too.
 
 Confirm with `gaze doctor`, then log out and select your user.
 
@@ -130,6 +136,13 @@ Remove Gaze from the shared stack, or keep it for elevation only:
 
 ```bash
 sudo pam-auth-update --disable gaze gaze-simultaneous
+```
+
+On openSUSE Tumbleweed, use `pam-config` instead:
+
+```bash
+sudo pam-config --delete --gaze --gaze_grosshack
+sudo pam-config --update
 ```
 
 Then follow

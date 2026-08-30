@@ -44,10 +44,105 @@ const FACE_AUTHENTICATION_KEY = "enable-face-authentication";
 const MAX_TRIES_KEY = "max-face-tries";
 const RETRY_MODE_KEY = "face-retry-mode";
 
-const gazeTiming = (tag, extra) =>
-  console.log(
-    `GAZE_TIMING ${tag} t=${GLib.get_monotonic_time()}us${extra ? " " + extra : ""}`,
-  );
+const replyBoolean = (result) =>
+  Array.isArray(result) && typeof result[0] === "boolean" ? result[0] : null;
+
+// These D-Bus calls only avoid starting PAM for an unenrolled user or a
+// missing camera. If a probe fails, let pam_gaze make the authoritative
+// decision instead of silently disabling face authentication.
+const probeFaceEligibility = ({
+  proxy,
+  userName,
+  onEnrolled,
+  onCameraAvailable,
+  onEligible,
+  onSettled,
+  onProbeError,
+}) => {
+  let settled = false;
+  let enrollmentHandled = false;
+  let cameraHandled = false;
+
+  const settle = (eligible) => {
+    if (settled) return;
+    settled = true;
+    try {
+      if (eligible) onEligible();
+    } finally {
+      onSettled();
+    }
+  };
+
+  const deferToPam = (error, operation) => {
+    onProbeError(error, operation);
+    settle(true);
+  };
+
+  if (!proxy) {
+    deferToPam(
+      new Error("Gaze D-Bus proxy is unavailable"),
+      "check face authentication prerequisites",
+    );
+    return;
+  }
+
+  try {
+    proxy.HasEnrolledFacesRemote(userName, (result, error) => {
+      if (settled || enrollmentHandled) return;
+      enrollmentHandled = true;
+
+      if (error) {
+        deferToPam(error, "check enrolled faces");
+        return;
+      }
+
+      const enrolled = replyBoolean(result);
+      if (enrolled === null) {
+        deferToPam(
+          new Error("HasEnrolledFaces returned an invalid reply"),
+          "check enrolled faces",
+        );
+        return;
+      }
+      if (!enrolled) {
+        settle(false);
+        return;
+      }
+      onEnrolled();
+
+      try {
+        proxy.IsCameraAvailableRemote((cameraResult, cameraError) => {
+          if (settled || cameraHandled) return;
+          cameraHandled = true;
+
+          if (cameraError) {
+            deferToPam(cameraError, "check camera availability");
+            return;
+          }
+
+          const cameraAvailable = replyBoolean(cameraResult);
+          if (cameraAvailable === null) {
+            deferToPam(
+              new Error("IsCameraAvailable returned an invalid reply"),
+              "check camera availability",
+            );
+            return;
+          }
+          if (cameraAvailable) {
+            onCameraAvailable();
+            settle(true);
+          } else {
+            settle(false);
+          }
+        });
+      } catch (error) {
+        deferToPam(error, "check camera availability");
+      }
+    });
+  } catch (error) {
+    deferToPam(error, "check enrolled faces");
+  }
+};
 
 const recreatePolkitAgent = () => {
   const manager = Main.componentManager;
@@ -102,8 +197,7 @@ const keepPasswordEntryVisible = (dialog) => {
   cancelDelayedReset(dialog);
 };
 
-const enterConfirmMode = (dialog, path) => {
-  gazeTiming("CONFIRM_SHOWN", `path=${path}`);
+const enterConfirmMode = (dialog) => {
   cancelDelayedReset(dialog);
   dialog._passwordEntry?.set_text("");
   if (dialog._passwordEntry) {
@@ -340,6 +434,8 @@ export default class GazeFaceAuthExtension extends Extension {
     this._injectionManager = new InjectionManager();
     this._extensionSettings = this.getSettings();
     this._activeConfirmWidgets = new Set();
+    const enableToken = {};
+    this._gazeEnableToken = enableToken;
 
     const ext = this;
     const faceCache = { enrolled: new Map(), camera: null };
@@ -470,7 +566,7 @@ export default class GazeFaceAuthExtension extends Extension {
           if (dialog._session) {
             dialog._session.connect("show-info", (session, text) => {
               if (text && text.trim() === CONFIRMATION_REQUEST)
-                enterConfirmMode(dialog, "showInfo");
+                enterConfirmMode(dialog);
             });
           }
 
@@ -491,7 +587,7 @@ export default class GazeFaceAuthExtension extends Extension {
             extension._originalDialogShowInfo = originalShowInfo;
             klass.prototype._onSessionShowInfo = function (session, text) {
               if (text && text.trim() === CONFIRMATION_REQUEST) {
-                enterConfirmMode(this, "onSessionShowInfo");
+                enterConfirmMode(this);
               } else {
                 originalShowInfo.call(this, session, text);
               }
@@ -545,6 +641,8 @@ export default class GazeFaceAuthExtension extends Extension {
       return function (userName, hold) {
         if (this._userName !== userName) {
           this._faceAuthFailed = false;
+          this._faceStartPending = false;
+          this._faceStartProbe = null;
         }
         primeFaceCache(userName);
         original.call(this, userName, hold);
@@ -580,47 +678,40 @@ export default class GazeFaceAuthExtension extends Extension {
             faceCache.enrolled.get(userName) === true &&
             faceCache.camera === true
           ) {
-            gazeTiming("FACE_START", "path=cached");
             startFace(self);
             return;
           }
 
           this._faceStartPending = true;
-          const clearFaceStartPending = () => {
-            self._faceStartPending = false;
-          };
-          if (dbusProxy) {
-            dbusProxy.HasEnrolledFacesRemote(userName, (result, err) => {
-              if (!err && result[0] === true) {
-                faceCache.enrolled.set(userName, true);
-                dbusProxy.IsCameraAvailableRemote((camResult, camErr) => {
-                  if (!camErr && camResult[0] === true) {
-                    faceCache.camera = true;
-                    gazeTiming("FACE_START", "path=probe");
-                    startFace(self);
-                  }
-                  clearFaceStartPending();
-                });
-              } else {
-                clearFaceStartPending();
-              }
-            });
-          } else {
-            clearFaceStartPending();
-          }
-        };
-      },
-    );
+          const probe = {};
+          this._faceStartProbe = probe;
 
-    this._injectionManager.overrideMethod(
-      proto,
-      "_filterServiceMessages",
-      (original) => {
-        return function (serviceName, messageType) {
-          if (messageType === Util.MessageType.HINT) {
-            gazeTiming("HINT_FILTER", `svc=${serviceName}`);
-          }
-          return original.call(this, serviceName, messageType);
+          probeFaceEligibility({
+            proxy: dbusProxy,
+            userName,
+            onEnrolled: () => faceCache.enrolled.set(userName, true),
+            onCameraAvailable: () => {
+              faceCache.camera = true;
+            },
+            onEligible: () => {
+              if (
+                extension._gazeEnableToken === enableToken &&
+                self._faceStartProbe === probe &&
+                self._userName === userName
+              )
+                startFace(self);
+            },
+            onSettled: () => {
+              if (self._faceStartProbe !== probe) return;
+              self._faceStartPending = false;
+              self._faceStartProbe = null;
+            },
+            onProbeError: (error, operation) =>
+              logError(
+                error,
+                `[gaze] Failed to ${operation}; deferring the decision to ${FACE_SERVICE_NAME} PAM`,
+              ),
+          });
         };
       },
     );
@@ -713,14 +804,10 @@ export default class GazeFaceAuthExtension extends Extension {
           // pam_gaze defers to gdm-face on every other GDM service, but other
           // stacks can still route the token here, so match it on any service.
           if (secretQuestion?.trim() === CONFIRMATION_REQUEST) {
-            gazeTiming("CONFIRM_SHOWN", `svc=${serviceName} path=secretInfoQuery`);
             // _filterServiceMessages only force-clears when another message is queued behind
             // the current one, so a lone hint rides out its full ~1s interval unless cleared.
             if (typeof this._clearMessageQueue === "function") {
               this._clearMessageQueue();
-              gazeTiming("CLEAR_QUEUE_CALLED");
-            } else {
-              gazeTiming("CLEAR_QUEUE_MISSING");
             }
             this._filterServiceMessages(serviceName, Util.MessageType.HINT);
             // Enter must send the ack token, not the empty typed answer.
@@ -769,7 +856,6 @@ export default class GazeFaceAuthExtension extends Extension {
       (original) => {
         return function (client, serviceName) {
           if (serviceName === FACE_SERVICE_NAME) {
-            gazeTiming("FACE_CONV_STOPPED", `svc=${serviceName}`);
             this._faceFailCounter = (this._faceFailCounter || 0) + 1;
           }
           if (serviceName === this._faceConfirmService) {
@@ -805,6 +891,7 @@ export default class GazeFaceAuthExtension extends Extension {
         this._faceFailCounter = 0;
         this._faceAuthFailed = false;
         this._faceStartPending = false;
+        this._faceStartProbe = null;
         this._faceConfirmPending = false;
         this._faceConfirmService = null;
         original.call(this);
@@ -1008,6 +1095,7 @@ export default class GazeFaceAuthExtension extends Extension {
   }
 
   disable() {
+    this._gazeEnableToken = null;
     if (this._dbusProxy) {
       try {
         this._dbusProxy.RegisterExtensionRemote(false);

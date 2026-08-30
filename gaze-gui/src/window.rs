@@ -365,7 +365,6 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
     );
 }
 
-#[allow(deprecated)]
 fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwaita::ToastOverlay) {
     let config = Rc::new(RefCell::new(Config::default()));
 

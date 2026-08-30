@@ -128,12 +128,14 @@ ${DEB_LIB_DEPENDS}
   rpm:
     scripts:
       postinstall: "packaging/postinst-rpm.sh"
+      preremove: "packaging/prerm-rpm.sh"
     depends:
       - pam
 ${RPM_LIB_DEPENDS}
   archlinux:
     scripts:
       postinstall: "packaging/postinst-arch.sh"
+      preremove: "packaging/prerm-arch.sh"
     depends:
       # The Justfile `_nfpm` recipe computes these from the libopencv_core soversion gazed
       # linked; Arch bumps that every minor release, so an unbounded dep dies on `pacman -Syu`.

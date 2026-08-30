@@ -164,7 +164,7 @@ jobs:
         run: just build-rust-openvino
 
   package:
-    name: Package (${{ matrix.format }})
+    name: Package (${{ matrix.format }}${{ matrix.distro && format(', {0}', matrix.distro) || '' }})
     runs-on: ubuntu-latest
     container: ${{ matrix.container }}
     env:
@@ -183,7 +183,12 @@ jobs:
             cache_key: ci-package-v1
           - format: rpm
             container: fedora:45
+            distro: fedora
             cache_key: ci-package-rpm-v1
+          - format: rpm
+            container: opensuse/tumbleweed:latest
+            distro: opensuse
+            cache_key: ci-package-opensuse-v1
           - format: srpm
             build_deps: "false"
             apt_packages: rpm zstd gettext-base
@@ -191,7 +196,7 @@ jobs:
 
     steps:
       - name: Install Fedora dependencies
-        if: ${{ matrix.format == 'rpm' }}
+        if: ${{ matrix.distro == 'fedora' }}
         run: |
           dnf install -y \
             git \
@@ -215,6 +220,51 @@ jobs:
             gettext \
             gcc
 
+      - name: Install openSUSE Tumbleweed dependencies
+        if: ${{ matrix.distro == 'opensuse' }}
+        run: |
+          export ZYPP_MEDIA_CURL_IPRESOLVE=4
+          zypper --non-interactive modifyrepo --disable repo-openh264 || true
+          retry() {
+            for attempt in 1 2 3; do
+              if "$@"; then
+                return 0
+              fi
+              echo "::warning::'$*' failed (attempt $attempt/3)"
+              if [ "$attempt" -lt 3 ]; then
+                sleep $((attempt * 15))
+              fi
+            done
+            echo "::error::'$*' failed after 3 attempts"
+            return 1
+          }
+          retry zypper --non-interactive refresh
+          retry zypper --non-interactive install --no-recommends \
+            git \
+            ca-certificates \
+            curl \
+            clang \
+            clang-devel \
+            opencv-devel \
+            libv4l-devel \
+            pam-devel \
+            tpm2-0-tss-devel \
+            checkpolicy \
+            policycoreutils \
+            gtk4-devel \
+            libadwaita-devel \
+            gstreamer-devel \
+            gstreamer-plugins-base-devel \
+            gstreamer-plugins-good \
+            libopenssl-devel \
+            pkgconf-pkg-config \
+            envsubst \
+            gcc \
+            gcc-c++ \
+            binutils \
+            bash
+          echo "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" >>"$GITHUB_ENV"
+
       - name: Checkout source
         uses: actions/checkout@v7
         with:
@@ -225,14 +275,26 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install Rust toolchain
-        if: ${{ matrix.format == 'rpm' }}
+        if: ${{ matrix.format == 'rpm' && matrix.distro != 'opensuse' }}
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install just
-        if: ${{ matrix.format == 'rpm' }}
+        if: ${{ matrix.format == 'rpm' && matrix.distro != 'opensuse' }}
         uses: extractions/setup-just@v4
         with:
           just-version: ${{ env.JUST_VERSION }}
+
+      - name: Install Rust toolchain and just on openSUSE
+        if: ${{ matrix.distro == 'opensuse' }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
+            | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
+          curl -fsSL "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            -o /tmp/just.tar.gz
+          tar -xzf /tmp/just.tar.gz -C /usr/local/bin just
+          echo "PATH=$HOME/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" >>"$GITHUB_ENV"
+          "$HOME/.cargo/bin/rustc" --version
+          just --version
 
       - name: Restore Rust cache
         if: ${{ matrix.format == 'rpm' }}
