@@ -124,6 +124,9 @@ overrides:
       preremove: "packaging/prerm-deb.sh"
     depends:
       - libpam0g
+      - gstreamer1.0-plugins-base
+      - gstreamer1.0-plugins-good
+      - gstreamer1.0-pipewire
 ${DEB_LIB_DEPENDS}
   rpm:
     scripts:
@@ -131,6 +134,9 @@ ${DEB_LIB_DEPENDS}
       preremove: "packaging/prerm-rpm.sh"
     depends:
       - pam
+      - gstreamer1-plugins-base
+      - gstreamer1-plugins-good
+      - pipewire-gstreamer
 ${RPM_LIB_DEPENDS}
   archlinux:
     scripts:
@@ -143,3 +149,6 @@ ${RPM_LIB_DEPENDS}
       - "opencv<${OPENCV_NEXT}"
       - pam
       - tpm2-tss
+      - gst-plugins-base
+      - gst-plugins-good
+      - gst-plugin-pipewire

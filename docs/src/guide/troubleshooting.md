@@ -158,6 +158,39 @@ corrupt data later.
 
 ## 2. Camera is not detected
 
+First check that the GStreamer plugins Gaze loads at runtime are installed. They
+are loaded dynamically, so a missing one shows up as `no element "jpegdec"`,
+`no element "v4l2src"`, or `no element "pipewiresrc"` rather than a link error:
+
+```bash
+gaze doctor
+```
+
+If the `GStreamer plugins` check fails, install the base, good, and PipeWire
+plugin packages for your distribution:
+
+::: code-group
+
+```bash [Debian/Ubuntu]
+sudo apt install gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire
+```
+
+```bash [Fedora/RHEL]
+sudo dnf install gstreamer1-plugins-base gstreamer1-plugins-good pipewire-gstreamer
+```
+
+```bash [openSUSE Tumbleweed]
+sudo zypper install gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugin-pipewire
+```
+
+```bash [Arch Linux / Manjaro]
+sudo pacman -S gst-plugins-base gst-plugins-good gst-plugin-pipewire
+```
+
+:::
+
+Then restart the daemon with `sudo systemctl restart gazed`.
+
 Use the primary GStreamer camera source first:
 
 ```toml

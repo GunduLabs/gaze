@@ -44,11 +44,17 @@ rpm:
 overrides:
   deb:
     depends:
+      - gstreamer1.0-plugins-base
+      - gstreamer1.0-plugins-good
+      - gstreamer1.0-pipewire
 ${DEB_LIB_DEPENDS}
     recommends:
       - gaze
   rpm:
     depends:
+      - "${RPM_GSTREAMER_BASE}"
+      - "${RPM_GSTREAMER_GOOD}"
+      - "${RPM_GSTREAMER_PIPEWIRE}"
 ${RPM_LIB_DEPENDS}
     recommends:
       - gaze
@@ -58,3 +64,6 @@ ${RPM_LIB_DEPENDS}
       - "opencv<${OPENCV_NEXT}"
       - gtk4
       - libadwaita
+      - gst-plugins-base
+      - gst-plugins-good
+      - gst-plugin-pipewire

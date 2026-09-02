@@ -15,6 +15,27 @@ use crate::ir::devices::{camera_function_of, find_device, usb_ids_of};
 
 const REALTEK_IR_YUY2_WIDTH: u32 = 640;
 const REALTEK_IR_YUY2_HEIGHT: u32 = 480;
+const REQUIRED_CAMERA_ELEMENTS: [&str; 7] = [
+    "appsink",
+    "decodebin",
+    "videoconvert",
+    "videoscale",
+    "jpegdec",
+    "v4l2src",
+    "pipewiresrc",
+];
+
+/// Return the dynamically loaded GStreamer elements Gaze's supported camera paths require but
+/// the current plugin registry cannot provide. Linker-based package dependency scanners cannot
+/// discover these, so packaging checks and `gaze doctor` both use this runtime view.
+pub fn missing_camera_elements() -> anyhow::Result<Vec<&'static str>> {
+    gstreamer::init()?;
+    Ok(REQUIRED_CAMERA_ELEMENTS
+        .iter()
+        .copied()
+        .filter(|element| gstreamer::ElementFactory::find(element).is_none())
+        .collect())
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CameraKind {

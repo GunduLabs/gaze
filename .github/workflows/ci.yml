@@ -214,7 +214,9 @@ jobs:
             libadwaita-devel \
             gstreamer1-devel \
             gstreamer1-plugins-base-devel \
+            gstreamer1-plugins-base \
             gstreamer1-plugins-good \
+            pipewire-gstreamer \
             openssl-devel \
             pkg-config \
             gettext \
@@ -255,7 +257,9 @@ jobs:
             libadwaita-devel \
             gstreamer-devel \
             gstreamer-plugins-base-devel \
+            gstreamer-plugins-base \
             gstreamer-plugins-good \
+            gstreamer-plugin-pipewire \
             libopenssl-devel \
             pkgconf-pkg-config \
             envsubst \

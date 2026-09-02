@@ -260,7 +260,9 @@ jobs:
             libgdk-pixbuf-2.0-dev \
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base \
             gstreamer1.0-plugins-good \
+            gstreamer1.0-pipewire \
             libpango1.0-dev \
             libgraphene-1.0-dev \
             libopencv-dev \
@@ -294,7 +296,9 @@ jobs:
             libadwaita-devel \
             gstreamer1-devel \
             gstreamer1-plugins-base-devel \
+            gstreamer1-plugins-base \
             gstreamer1-plugins-good \
+            pipewire-gstreamer \
             openssl-devel \
             gnupg2 \
             rpm-sign \
@@ -337,7 +341,9 @@ jobs:
             libadwaita-devel \
             gstreamer-devel \
             gstreamer-plugins-base-devel \
+            gstreamer-plugins-base \
             gstreamer-plugins-good \
+            gstreamer-plugin-pipewire \
             libopenssl-devel \
             gpg2 \
             pkgconf-pkg-config \
@@ -368,6 +374,7 @@ jobs:
             gstreamer \
             gst-plugins-base \
             gst-plugins-good \
+            gst-plugin-pipewire \
             openssl \
             gnupg \
             pkgconf \
