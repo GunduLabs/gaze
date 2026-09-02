@@ -1726,7 +1726,71 @@ fn detected_source_remedy(
     )
 }
 
+fn gstreamer_package_hint_for(os_release: &str) -> &'static str {
+    let os_release = os_release.to_ascii_lowercase();
+    if ["arch", "manjaro", "omarchy"]
+        .iter()
+        .any(|family| os_release.contains(family))
+    {
+        "Install them with `sudo pacman -S gst-plugins-base gst-plugins-good gst-plugin-pipewire`."
+    } else if ["debian", "ubuntu"]
+        .iter()
+        .any(|family| os_release.contains(family))
+    {
+        "Install them with `sudo apt install gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire`."
+    } else if ["fedora", "rhel", "centos"]
+        .iter()
+        .any(|family| os_release.contains(family))
+    {
+        "Install them with `sudo dnf install gstreamer1-plugins-base gstreamer1-plugins-good pipewire-gstreamer`."
+    } else if os_release.contains("suse") {
+        "Install them with `sudo zypper install gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugin-pipewire`."
+    } else {
+        "Install the GStreamer base, good, and PipeWire plugin packages for this distribution."
+    }
+}
+
+fn gstreamer_package_hint() -> &'static str {
+    let os_release = fs::read_to_string("/etc/os-release").unwrap_or_default();
+    gstreamer_package_hint_for(&os_release)
+}
+
+fn check_gstreamer_plugins(report: &mut Report) -> bool {
+    match gaze_core::camera::missing_camera_elements() {
+        Ok(missing) if missing.is_empty() => {
+            report.pass(
+                "GStreamer plugins",
+                "base, JPEG/V4L2, and PipeWire camera elements are available",
+            );
+            true
+        }
+        Ok(missing) => {
+            report.error(
+                "GStreamer plugins",
+                format!(
+                    "required camera elements are missing: {}",
+                    missing.join(", ")
+                ),
+                gstreamer_package_hint(),
+            );
+            false
+        }
+        Err(err) => {
+            report.error(
+                "GStreamer plugins",
+                format!("the plugin registry could not be initialized: {err}"),
+                gstreamer_package_hint(),
+            );
+            false
+        }
+    }
+}
+
 fn check_cameras(report: &mut Report, config: Option<&Config>) {
+    if !check_gstreamer_plugins(report) {
+        return;
+    }
+
     let Some(config) = config else {
         return;
     };
@@ -1856,6 +1920,49 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gstreamer_plugin_remedies_use_distro_package_names() {
+        for (os_release, packages) in [
+            (
+                "ID=omarchy\nID_LIKE=arch\n",
+                [
+                    "gst-plugins-base",
+                    "gst-plugins-good",
+                    "gst-plugin-pipewire",
+                ],
+            ),
+            (
+                "ID=ubuntu\nID_LIKE=debian\n",
+                [
+                    "gstreamer1.0-plugins-base",
+                    "gstreamer1.0-plugins-good",
+                    "gstreamer1.0-pipewire",
+                ],
+            ),
+            (
+                "ID=fedora\n",
+                [
+                    "gstreamer1-plugins-base",
+                    "gstreamer1-plugins-good",
+                    "pipewire-gstreamer",
+                ],
+            ),
+            (
+                "ID=opensuse-tumbleweed\nID_LIKE=suse\n",
+                [
+                    "gstreamer-plugins-base",
+                    "gstreamer-plugins-good",
+                    "gstreamer-plugin-pipewire",
+                ],
+            ),
+        ] {
+            let hint = gstreamer_package_hint_for(os_release);
+            for package in packages {
+                assert!(hint.contains(package), "{hint:?} does not name {package}");
+            }
+        }
+    }
 
     #[test]
     fn a_gdm_profile_without_the_system_db_is_detected() {

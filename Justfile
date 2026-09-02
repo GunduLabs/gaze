@@ -224,13 +224,27 @@ _nfpm config format:
     # Keep unused dependency placeholders valid YAML after envsubst.
     export DEB_LIB_DEPENDS="      # unused for {{ format }}"
     export RPM_LIB_DEPENDS="      # unused for {{ format }}"
+    export RPM_GSTREAMER_BASE="gstreamer1-plugins-base"
+    export RPM_GSTREAMER_GOOD="gstreamer1-plugins-good"
+    export RPM_GSTREAMER_PIPEWIRE="pipewire-gstreamer"
+    if [ "{{ format }}" = rpm ] && [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        case "${ID:-} ${ID_LIKE:-}" in
+        *opensuse*|*suse*)
+            export RPM_GSTREAMER_BASE="gstreamer-plugins-base"
+            export RPM_GSTREAMER_GOOD="gstreamer-plugins-good"
+            export RPM_GSTREAMER_PIPEWIRE="gstreamer-plugin-pipewire"
+            ;;
+        esac
+    fi
     case "{{ format }}" in
     deb) export DEB_LIB_DEPENDS="$lib_depends" ;;
     rpm) export RPM_LIB_DEPENDS="$lib_depends" ;;
     esac
 
     tmp_config=$(mktemp)
-    envsubst '$MULTIARCH $OPENCV_MIN $OPENCV_NEXT $DEB_LIB_DEPENDS $RPM_LIB_DEPENDS' < {{ quote(config) }} > "$tmp_config"
+    envsubst '$MULTIARCH $OPENCV_MIN $OPENCV_NEXT $DEB_LIB_DEPENDS $RPM_LIB_DEPENDS $RPM_GSTREAMER_BASE $RPM_GSTREAMER_GOOD $RPM_GSTREAMER_PIPEWIRE' < {{ quote(config) }} > "$tmp_config"
     {{ quote(nfpm) }} pkg -f "$tmp_config" --packager {{ format }} --target dist/packages
     rm -f "$tmp_config"
 
@@ -260,6 +274,13 @@ _verify-package format:
                 exit 1
                 ;;
             esac
+            declared=$(tr ',' '\n' <<< "$depends" | sed -E 's/^[[:space:]]+//; s/[[:space:]]*\(.*$//')
+            for dep in gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire; do
+                if ! grep -Fxq "$dep" <<< "$declared"; then
+                    echo "verify: FAIL: $(basename "$pkg") lacks GStreamer runtime dependency $dep: $depends" >&2
+                    exit 1
+                fi
+            done
             if grep -Eq 'libopencv-core[0-9]' <<< "$depends"; then
                 echo "verify: $(basename "$pkg") pins opencv ($(grep -oE 'libopencv-[a-z]+[0-9]+[a-z0-9]*' <<< "$depends" | tr '\n' ' ')) ✔"
             elif [ "$name" = "gaze" ]; then
@@ -271,15 +292,34 @@ _verify-package format:
         done
         ;;
     rpm)
-        pkg=$(newest "dist/packages/gaze-[0-9]*.rpm")
-        [ -n "$pkg" ] || { echo "verify: no gaze rpm in dist/packages" >&2; exit 1; }
-        requires=$(rpm -qp --requires "$pkg" 2>/dev/null)
-        if grep -Eq 'libopencv_core\.so\.[0-9]+' <<< "$requires"; then
-            echo "verify: $(basename "$pkg") pins opencv ($(grep -oE 'libopencv_[a-z0-9]+\.so\.[0-9]+' <<< "$requires" | tr '\n' ' ')) ✔"
-        else
-            echo "verify: FAIL: $(basename "$pkg") lacks a soname opencv requirement" >&2
-            exit 1
+        gst_deps=(gstreamer1-plugins-base gstreamer1-plugins-good pipewire-gstreamer)
+        if [ -r /etc/os-release ]; then
+            # shellcheck disable=SC1091
+            . /etc/os-release
+            case "${ID:-} ${ID_LIKE:-}" in
+            *opensuse*|*suse*) gst_deps=(gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugin-pipewire) ;;
+            esac
         fi
+        for name in gaze gaze-gui; do
+            pkg=$(newest "dist/packages/${name}-[0-9]*.rpm")
+            [ -n "$pkg" ] || { echo "verify: no $name rpm in dist/packages" >&2; exit 1; }
+            requires=$(rpm -qp --requires "$pkg" 2>/dev/null)
+            for dep in "${gst_deps[@]}"; do
+                if ! grep -Fxq "$dep" <<< "$requires"; then
+                    echo "verify: FAIL: $(basename "$pkg") lacks GStreamer runtime dependency $dep" >&2
+                    exit 1
+                fi
+            done
+            if [ "$name" = gaze ]; then
+                if grep -Eq 'libopencv_core\.so\.[0-9]+' <<< "$requires"; then
+                    echo "verify: $(basename "$pkg") pins opencv ($(grep -oE 'libopencv_[a-z0-9]+\.so\.[0-9]+' <<< "$requires" | tr '\n' ' ')) ✔"
+                else
+                    echo "verify: FAIL: $(basename "$pkg") lacks a soname opencv requirement" >&2
+                    exit 1
+                fi
+            fi
+            echo "verify: $(basename "$pkg") declares GStreamer runtime plugins ✔"
+        done
         ;;
     archlinux)
         pkg=$(newest "dist/packages/gaze-[0-9]*.pkg.tar.*")
@@ -311,6 +351,13 @@ _verify-package format:
                 echo "verify: FAIL: $(basename "$pkg") lacks a version-bounded opencv dependency; an opencv soname bump will crash-loop it" >&2
                 exit 1
             fi
+            for dep in gst-plugins-base gst-plugins-good gst-plugin-pipewire; do
+                if ! grep -Fxq "depend = $dep" <<< "$pkginfo"; then
+                    echo "verify: FAIL: $(basename "$pkg") lacks GStreamer runtime dependency $dep" >&2
+                    exit 1
+                fi
+            done
+            echo "verify: $(basename "$pkg") declares GStreamer runtime plugins ✔"
         done
         ;;
     esac

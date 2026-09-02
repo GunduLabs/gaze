@@ -53,7 +53,8 @@ sudo apt install build-essential pkg-config clang libclang-dev \
   libgtk-4-dev libadwaita-1-dev \
   libcairo2-dev libglib2.0-dev libgdk-pixbuf-2.0-dev \
   libpango1.0-dev libgraphene-1.0-dev \
-  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+  gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire \
   gettext-base \
   flatpak flatpak-builder elfutils
 ```
@@ -62,7 +63,8 @@ sudo apt install build-essential pkg-config clang libclang-dev \
 sudo dnf install @development-tools pkg-config clang clang-devel \
   opencv-devel libv4l-devel pam-devel tpm2-tss-devel openssl-devel \
   gtk4-devel libadwaita-devel \
-  gstreamer1-devel gstreamer1-plugins-base-devel gstreamer1-plugins-good \
+  gstreamer1-devel gstreamer1-plugins-base-devel \
+  gstreamer1-plugins-base gstreamer1-plugins-good pipewire-gstreamer \
   checkpolicy policycoreutils \
   gettext \
   flatpak flatpak-builder elfutils
@@ -72,7 +74,8 @@ sudo dnf install @development-tools pkg-config clang clang-devel \
 sudo zypper install --no-recommends \
   clang clang-devel opencv-devel libv4l-devel pam-devel tpm2-0-tss-devel \
   libopenssl-devel gtk4-devel libadwaita-devel \
-  gstreamer-devel gstreamer-plugins-base-devel gstreamer-plugins-good \
+  gstreamer-devel gstreamer-plugins-base-devel \
+  gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugin-pipewire \
   checkpolicy policycoreutils pkgconf-pkg-config envsubst gcc gcc-c++ \
   flatpak flatpak-builder elfutils
 ```
@@ -81,7 +84,7 @@ sudo zypper install --no-recommends \
 sudo pacman -S base-devel pkgconf clang llvm \
   opencv v4l-utils pam tpm2-tss openssl \
   gtk4 libadwaita \
-  gstreamer gst-plugins-base gst-plugins-good \
+  gstreamer gst-plugins-base gst-plugins-good gst-plugin-pipewire \
   gettext \
   flatpak flatpak-builder elfutils
 ```
