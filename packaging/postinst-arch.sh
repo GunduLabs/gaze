@@ -4,9 +4,15 @@
 
 set -e
 
-configure_pam_sudo() {
-	pam_file=/etc/pam.d/sudo
-	[ -f "$pam_file" ] || return 0
+record_edited_pam_file() {
+	mkdir -p /etc/gaze
+	flag=/etc/gaze/pam-arch.configured
+	grep -qxF "$1" "$flag" 2>/dev/null && return 0
+	printf '%s\n' "$1" >> "$flag"
+}
+
+insert_pam_gaze() {
+	pam_file=$1
 	grep -q "pam_gaze" "$pam_file" 2>/dev/null && return 0
 
 	tmp=$(mktemp)
@@ -19,13 +25,31 @@ configure_pam_sudo() {
 	' "$pam_file" > "$tmp" && install -m 644 "$tmp" "$pam_file"
 	rm -f "$tmp"
 
-	mkdir -p /etc/gaze
-	printf '%s\n' "$pam_file" > /etc/gaze/pam-arch.configured
+	if grep -q "pam_gaze" "$pam_file" 2>/dev/null; then
+		record_edited_pam_file "$pam_file"
+		return 0
+	fi
+
+	printf '\n\033[1;33m[Gaze Notice]\033[0m %s has no auth line, so pam_gaze.so was not added.\n' "$pam_file" >&2
+	printf 'Add "auth        sufficient    pam_gaze.so" to it by hand, then restart polkit.\n' >&2
+	printf 'See https://gaze.gundulabs.com/guide/pam for the full stack.\n\n' >&2
+}
+
+configure_pam_sudo() {
+	pam_file=/etc/pam.d/sudo
+	[ -f "$pam_file" ] || return 0
+	insert_pam_gaze "$pam_file"
 }
 
 configure_pam_polkit() {
 	pam_file=/etc/pam.d/polkit-1
-	[ -f "$pam_file" ] && return 0
+	if [ -f "$pam_file" ]; then
+		grep -q "pam_gaze" "$pam_file" 2>/dev/null && return 0
+		mkdir -p /etc/gaze
+		[ -f /etc/gaze/polkit-1.pam.bak ] || cp -p "$pam_file" /etc/gaze/polkit-1.pam.bak
+		insert_pam_gaze "$pam_file"
+		return 0
+	fi
 
 	cat > "$pam_file" <<-EOF
 	#%PAM-1.0

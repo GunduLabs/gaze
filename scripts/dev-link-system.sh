@@ -266,9 +266,15 @@ link_pam_modules() {
     [ "$linked" -eq 1 ] || die "Could not find a PAM security module directory."
 }
 
-link_pam_config() {
-    pam_file=/etc/pam.d/sudo
-    [ -f "$pam_file" ] || return 0
+record_edited_pam_file() {
+    mkdir -p /etc/gaze
+    flag=/etc/gaze/pam-arch.dev-configured
+    grep -qxF "$1" "$flag" 2>/dev/null && return 0
+    printf '%s\n' "$1" >> "$flag"
+}
+
+insert_pam_gaze() {
+    pam_file=$1
     grep -q "pam_gaze" "$pam_file" 2>/dev/null && { printf 'PAM already configured: %s\n' "$pam_file"; return 0; }
 
     tmp=$(mktemp)
@@ -278,12 +284,22 @@ link_pam_config() {
             done = 1
         }
         { print }
-    ' "$pam_file" > "$tmp" && install -m 644 "$tmp" "$pam_file" && \
-        printf 'configured PAM: %s\n' "$pam_file"
+    ' "$pam_file" > "$tmp" && install -m 644 "$tmp" "$pam_file"
     rm -f "$tmp"
 
-    mkdir -p /etc/gaze
-    printf '%s\n' "$pam_file" > /etc/gaze/pam-arch.dev-configured
+    if grep -q "pam_gaze" "$pam_file" 2>/dev/null; then
+        record_edited_pam_file "$pam_file"
+        printf 'configured PAM: %s\n' "$pam_file"
+        return 0
+    fi
+
+    printf 'WARNING: %s has no auth line, so pam_gaze.so was not added\n' "$pam_file" >&2
+}
+
+link_pam_config() {
+    pam_file=/etc/pam.d/sudo
+    [ -f "$pam_file" ] || return 0
+    insert_pam_gaze "$pam_file"
 }
 
 restore_pam_config() {
@@ -315,7 +331,12 @@ link_polkit_pam_config() {
         printf 'skipping %s: Arch-only override, this distro ships its own polkit PAM stack\n' "$pam_file"
         return 0
     fi
-    [ -f "$pam_file" ] && { printf 'PAM already configured: %s\n' "$pam_file"; return 0; }
+    if [ -f "$pam_file" ]; then
+        mkdir -p /etc/gaze
+        [ -f /etc/gaze/polkit-1.pam.dev.bak ] || cp -p "$pam_file" /etc/gaze/polkit-1.pam.dev.bak
+        insert_pam_gaze "$pam_file"
+        return 0
+    fi
 
     cat > "$pam_file" <<-EOF
 	#%PAM-1.0
@@ -333,6 +354,8 @@ link_polkit_pam_config() {
 }
 
 restore_polkit_pam_config() {
+    rm -f /etc/gaze/polkit-1.pam.dev.bak
+
     flag=/etc/gaze/pam-arch.polkit-dev-configured
     [ -f "$flag" ] || return 0
 
