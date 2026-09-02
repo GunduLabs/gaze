@@ -32,6 +32,7 @@ const PLASMALOGIN_FACE_PAM_FILE: &str = "/etc/pam.d/plasmalogin-fingerprint";
 /// PAM falls back here when `/etc/pam.d` has no such service, and Arch, Debian and
 /// openSUSE ship these slots only there, so reading `/etc` alone sees nothing.
 const VENDOR_PAM_DIR: &str = "/usr/lib/pam.d";
+const POLKIT_PAM_FILE: &str = "/etc/pam.d/polkit-1";
 
 fn read_pam_service(path: &str) -> Option<String> {
     fs::read_to_string(path).ok().or_else(|| {
@@ -748,6 +749,39 @@ fn pam_line_has_reference(line: &str) -> bool {
     })
 }
 
+const PAM_INCLUDE_DIRECTIVES: [&str; 2] = ["include", "substack"];
+
+fn pam_include_target(line: &str) -> Option<&str> {
+    let line = line.split('#').next().unwrap_or_default();
+    let mut tokens = line.split_ascii_whitespace();
+    let first = tokens.next()?;
+    if first == "@include" {
+        return tokens.next();
+    }
+    let control = tokens.next()?;
+    if PAM_INCLUDE_DIRECTIVES.contains(&control) {
+        tokens.next()
+    } else {
+        None
+    }
+}
+
+/// Whether a service ends up loading a Gaze module, following `include`/`substack` into the
+/// shared stacks Debian and Fedora wire Gaze into rather than naming it per service.
+fn pam_service_reaches_gaze(service: &str, depth: u8) -> bool {
+    let Some(contents) = read_pam_service(&format!("/etc/pam.d/{service}")) else {
+        return false;
+    };
+    if contents.lines().any(pam_line_has_reference) {
+        return true;
+    }
+    depth > 0
+        && contents
+            .lines()
+            .filter_map(pam_include_target)
+            .any(|target| pam_service_reaches_gaze(target, depth - 1))
+}
+
 fn pam_line_module_paths(line: &str) -> Vec<PathBuf> {
     line.split('#')
         .next()
@@ -986,6 +1020,25 @@ fn check_pam(report: &mut Report) {
                 );
             }
         }
+
+        check_polkit_pam(report);
+    }
+}
+
+fn check_polkit_pam(report: &mut Report) {
+    if read_pam_service(POLKIT_PAM_FILE).is_none() {
+        return;
+    }
+    if pam_service_reaches_gaze("polkit-1", 2) {
+        report.pass("Polkit PAM", "the polkit-1 service reaches a Gaze module");
+    } else {
+        report.warning(
+            "Polkit PAM",
+            "the polkit-1 service reaches no Gaze module, so graphical authentication prompts fall straight through to the password stack",
+            format!(
+                "Add 'auth        sufficient    pam_gaze.so' above the first auth line of {POLKIT_PAM_FILE}, copying {VENDOR_PAM_DIR}/polkit-1 there first if it does not exist, then restart polkit. See https://gaze.gundulabs.com/guide/pam"
+            ),
+        );
     }
 }
 
@@ -1754,7 +1807,71 @@ fn detected_source_remedy(
     )
 }
 
+fn gstreamer_package_hint_for(os_release: &str) -> &'static str {
+    let os_release = os_release.to_ascii_lowercase();
+    if ["arch", "manjaro", "omarchy"]
+        .iter()
+        .any(|family| os_release.contains(family))
+    {
+        "Install them with `sudo pacman -S gst-plugins-base gst-plugins-good gst-plugin-pipewire`."
+    } else if ["debian", "ubuntu"]
+        .iter()
+        .any(|family| os_release.contains(family))
+    {
+        "Install them with `sudo apt install gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire`."
+    } else if ["fedora", "rhel", "centos"]
+        .iter()
+        .any(|family| os_release.contains(family))
+    {
+        "Install them with `sudo dnf install gstreamer1-plugins-base gstreamer1-plugins-good pipewire-gstreamer`."
+    } else if os_release.contains("suse") {
+        "Install them with `sudo zypper install gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugin-pipewire`."
+    } else {
+        "Install the GStreamer base, good, and PipeWire plugin packages for this distribution."
+    }
+}
+
+fn gstreamer_package_hint() -> &'static str {
+    let os_release = fs::read_to_string("/etc/os-release").unwrap_or_default();
+    gstreamer_package_hint_for(&os_release)
+}
+
+fn check_gstreamer_plugins(report: &mut Report) -> bool {
+    match gaze_core::camera::missing_camera_elements() {
+        Ok(missing) if missing.is_empty() => {
+            report.pass(
+                "GStreamer plugins",
+                "base, JPEG/V4L2, and PipeWire camera elements are available",
+            );
+            true
+        }
+        Ok(missing) => {
+            report.error(
+                "GStreamer plugins",
+                format!(
+                    "required camera elements are missing: {}",
+                    missing.join(", ")
+                ),
+                gstreamer_package_hint(),
+            );
+            false
+        }
+        Err(err) => {
+            report.error(
+                "GStreamer plugins",
+                format!("the plugin registry could not be initialized: {err}"),
+                gstreamer_package_hint(),
+            );
+            false
+        }
+    }
+}
+
 fn check_cameras(report: &mut Report, config: Option<&Config>) {
+    if !check_gstreamer_plugins(report) {
+        return;
+    }
+
     let Some(config) = config else {
         return;
     };
@@ -1884,6 +2001,71 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pam_include_targets_are_read_from_both_include_forms() {
+        assert_eq!(
+            pam_include_target("auth       include      system-auth"),
+            Some("system-auth")
+        );
+        assert_eq!(
+            pam_include_target("auth       substack     password-auth"),
+            Some("password-auth")
+        );
+        assert_eq!(
+            pam_include_target("@include common-auth"),
+            Some("common-auth")
+        );
+        assert_eq!(
+            pam_include_target("auth        sufficient    pam_gaze.so"),
+            None
+        );
+        assert_eq!(pam_include_target("# auth include system-auth"), None);
+        assert_eq!(pam_include_target(""), None);
+    }
+
+    #[test]
+    fn gstreamer_plugin_remedies_use_distro_package_names() {
+        for (os_release, packages) in [
+            (
+                "ID=omarchy\nID_LIKE=arch\n",
+                [
+                    "gst-plugins-base",
+                    "gst-plugins-good",
+                    "gst-plugin-pipewire",
+                ],
+            ),
+            (
+                "ID=ubuntu\nID_LIKE=debian\n",
+                [
+                    "gstreamer1.0-plugins-base",
+                    "gstreamer1.0-plugins-good",
+                    "gstreamer1.0-pipewire",
+                ],
+            ),
+            (
+                "ID=fedora\n",
+                [
+                    "gstreamer1-plugins-base",
+                    "gstreamer1-plugins-good",
+                    "pipewire-gstreamer",
+                ],
+            ),
+            (
+                "ID=opensuse-tumbleweed\nID_LIKE=suse\n",
+                [
+                    "gstreamer-plugins-base",
+                    "gstreamer-plugins-good",
+                    "gstreamer-plugin-pipewire",
+                ],
+            ),
+        ] {
+            let hint = gstreamer_package_hint_for(os_release);
+            for package in packages {
+                assert!(hint.contains(package), "{hint:?} does not name {package}");
+            }
+        }
+    }
 
     #[test]
     fn a_gdm_profile_without_the_system_db_is_detected() {

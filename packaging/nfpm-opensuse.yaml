@@ -75,4 +75,7 @@ overrides:
     depends:
       - pam
       - pam-config
+      - gstreamer-plugins-base
+      - gstreamer-plugins-good
+      - gstreamer-plugin-pipewire
 ${RPM_LIB_DEPENDS}

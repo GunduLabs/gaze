@@ -63,17 +63,27 @@ BuildRequires:  pkgconf-pkg-config
 BuildRequires:  tpm2-0-tss-devel
 BuildRequires:  gstreamer-devel
 BuildRequires:  gstreamer-plugins-base-devel
+BuildRequires:  gstreamer-plugins-base
 BuildRequires:  gstreamer-plugins-good
+BuildRequires:  gstreamer-plugin-pipewire
 BuildRequires:  libopenssl-devel
 Requires:       pam-config
+Requires:       gstreamer-plugins-base
+Requires:       gstreamer-plugins-good
+Requires:       gstreamer-plugin-pipewire
 %else
 BuildRequires:  pkgconfig
 BuildRequires:  tpm2-tss-devel
 BuildRequires:  gstreamer1-devel
 BuildRequires:  gstreamer1-plugins-base-devel
+BuildRequires:  gstreamer1-plugins-base
 BuildRequires:  gstreamer1-plugins-good
+BuildRequires:  pipewire-gstreamer
 BuildRequires:  openssl-devel
 Recommends:     authselect
+Requires:       gstreamer1-plugins-base
+Requires:       gstreamer1-plugins-good
+Requires:       pipewire-gstreamer
 %endif
 
 Requires:       pam
@@ -88,6 +98,15 @@ the system authentication stack.
 %package gui
 Summary:        GTK4/Adwaita GUI for Gaze
 Recommends:     %{name}%{?_isa} = %{version}-%{release}
+%if 0%{?suse_version}
+Requires:       gstreamer-plugins-base
+Requires:       gstreamer-plugins-good
+Requires:       gstreamer-plugin-pipewire
+%else
+Requires:       gstreamer1-plugins-base
+Requires:       gstreamer1-plugins-good
+Requires:       pipewire-gstreamer
+%endif
 
 %description gui
 Graphical enrollment and configuration front end for Gaze. It talks to gazed
