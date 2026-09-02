@@ -3,7 +3,7 @@
 
 #%PAM-1.0
 auth        required                                     pam_env.so
-auth        [success=done ignore=ignore default=bad]   pam_gaze.so
+auth        [success=done ignore=ignore default=bad]     pam_gaze.so
 auth        optional                                     pam_gnome_keyring.so only_if=login auto_start
 auth        required                                     pam_deny.so
 
