@@ -16,8 +16,8 @@ pub unsafe extern "C" fn pam_sm_authenticate(
     argc: c_int,
     argv: *const *const c_char,
 ) -> c_int {
-    let mode = unsafe { parse_raw_pam_mode(argc, argv) };
-    unsafe { do_authenticate(pamh, flags, mode) }
+    let options = unsafe { parse_raw_pam_options(argc, argv) };
+    unsafe { do_authenticate(pamh, flags, options) }
 }
 
 pam_success_stubs!();

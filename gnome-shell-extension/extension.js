@@ -176,11 +176,11 @@ const GENERIC_ERROR_MAP = new Map([
   ],
 ]);
 
-const CONFIRMATION_REQUEST = "GAZE_CONFIRMATION_REQUEST";
-const CONFIRMATION_ACK = "CONFIRM";
 const CONFIRMATION_QUESTION = "Face Verified. Press Enter to confirm.";
 const CONFIRMATION_DIALOG_LABEL =
   "Face verified. Press Enter or click Authenticate to confirm.";
+
+const isConfirmationMessage = (text) => text?.trim() === CONFIRMATION_QUESTION;
 
 const cancelDelayedReset = (dialog) => {
   if (!dialog._sessionRequestTimeoutId) return;
@@ -224,7 +224,7 @@ const enterConfirmMode = (dialog) => {
 
 const respondToConfirm = (dialog) => {
   dialog._confirmMode = false;
-  dialog._session.response(CONFIRMATION_ACK);
+  dialog._session.response("");
   dialog._passwordEntry?.set_text("");
   if (dialog._passwordEntry) dialog._passwordEntry.reactive = false;
   if (dialog._okButton) dialog._okButton.reactive = false;
@@ -371,7 +371,7 @@ const respondToAuthPromptConfirm = (authPrompt) => {
 
   const serviceName = authPrompt._queryingService;
   if (serviceName && authPrompt._userVerifier) {
-    authPrompt._userVerifier.answerQuery(serviceName, CONFIRMATION_ACK);
+    authPrompt._userVerifier.answerQuery(serviceName, "");
   }
 
   authPrompt.emit("next");
@@ -565,7 +565,7 @@ export default class GazeFaceAuthExtension extends Extension {
 
           if (dialog._session) {
             dialog._session.connect("show-info", (session, text) => {
-              if (text && text.trim() === CONFIRMATION_REQUEST)
+              if (isConfirmationMessage(text))
                 enterConfirmMode(dialog);
             });
           }
@@ -586,7 +586,7 @@ export default class GazeFaceAuthExtension extends Extension {
             const originalShowInfo = klass.prototype._onSessionShowInfo;
             extension._originalDialogShowInfo = originalShowInfo;
             klass.prototype._onSessionShowInfo = function (session, text) {
-              if (text && text.trim() === CONFIRMATION_REQUEST) {
+              if (isConfirmationMessage(text)) {
                 enterConfirmMode(this);
               } else {
                 originalShowInfo.call(this, session, text);
@@ -783,11 +783,13 @@ export default class GazeFaceAuthExtension extends Extension {
       return function (client, serviceName, info) {
         if (this.serviceIsFace(serviceName)) {
           const text = info?.trim();
-          if (!text || !FACE_STATUS_UPDATES.has(text)) return;
+          if (!text) return;
 
-          this._filterServiceMessages(serviceName, Util.MessageType.HINT);
-          this._queueMessage(serviceName, text, Util.MessageType.HINT);
-          return;
+          if (FACE_STATUS_UPDATES.has(text)) {
+            this._filterServiceMessages(serviceName, Util.MessageType.HINT);
+            this._queueMessage(serviceName, text, Util.MessageType.HINT);
+            return;
+          }
         }
 
         if (this.serviceIsBiometric(serviceName)) return;
@@ -801,16 +803,14 @@ export default class GazeFaceAuthExtension extends Extension {
       "_onSecretInfoQuery",
       (original) => {
         return function (client, serviceName, secretQuestion) {
-          // pam_gaze defers to gdm-face on every other GDM service, but other
-          // stacks can still route the token here, so match it on any service.
-          if (secretQuestion?.trim() === CONFIRMATION_REQUEST) {
+          if (isConfirmationMessage(secretQuestion)) {
             // _filterServiceMessages only force-clears when another message is queued behind
             // the current one, so a lone hint rides out its full ~1s interval unless cleared.
             if (typeof this._clearMessageQueue === "function") {
               this._clearMessageQueue();
             }
             this._filterServiceMessages(serviceName, Util.MessageType.HINT);
-            // Enter must send the ack token, not the empty typed answer.
+            // Enter must send confirmation, not the typed answer.
             this._faceConfirmPending = true;
             this._faceConfirmService = serviceName;
             this.emit("ask-question", serviceName, CONFIRMATION_QUESTION, true);
@@ -827,7 +827,7 @@ export default class GazeFaceAuthExtension extends Extension {
         if (this._faceConfirmPending && serviceName === this._faceConfirmService) {
           this._faceConfirmPending = false;
           this._faceConfirmService = null;
-          original.call(this, serviceName, CONFIRMATION_ACK);
+          original.call(this, serviceName, "");
           return;
         }
         original.call(this, serviceName, answer);
@@ -923,8 +923,7 @@ export default class GazeFaceAuthExtension extends Extension {
       (original) => {
         return function (serviceName, question, secret) {
           if (
-            question?.trim() === CONFIRMATION_REQUEST ||
-            question?.trim() === CONFIRMATION_QUESTION ||
+            isConfirmationMessage(question) ||
             (this._userVerifier?._faceConfirmPending &&
               serviceName === this._userVerifier?._faceConfirmService)
           ) {

@@ -30,11 +30,13 @@ pub fn emit_deprecation_notice() {
 pub unsafe extern "C" fn pam_sm_authenticate(
     pamh: PamHandle,
     flags: c_int,
-    _argc: c_int,
-    _argv: *const *const c_char,
+    argc: c_int,
+    argv: *const *const c_char,
 ) -> c_int {
     emit_deprecation_notice();
-    unsafe { do_authenticate(pamh, flags, PamMode::Simultaneous) }
+    let mut options = unsafe { parse_raw_pam_options(argc, argv) };
+    options.mode = PamMode::Simultaneous;
+    unsafe { do_authenticate(pamh, flags, options) }
 }
 
 pam_success_stubs!();

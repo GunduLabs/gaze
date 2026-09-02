@@ -62,9 +62,7 @@ pub fn camera_auth_timeout(
     std::time::Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS)
         + std::time::Duration::from_millis(auth.effective_start_delay_ms(true, surface))
 }
-const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to cancel.";
-pub const CONFIRMATION_REQUEST: &str = "GAZE_CONFIRMATION_REQUEST";
-pub const CONFIRMATION_ACK: &str = "CONFIRM";
+pub const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to cancel.";
 
 pub const LOOK_PROMPT: &str = "Please look at the camera";
 pub const LOOK_OR_PASSWORD_PROMPT: &str = "Please look at the camera or enter password";
@@ -301,7 +299,7 @@ pub unsafe fn confirm_authentication(pamh: PamHandle, prompt: PromptLine) -> boo
 }
 
 pub fn confirmation_accepted(response: Option<&str>) -> bool {
-    matches!(response, Some(CONFIRMATION_ACK))
+    matches!(response, Some(""))
 }
 
 pub fn confirmation_required(
@@ -418,31 +416,14 @@ pub fn give_up_message(status: Option<gaze_core::dbus::CaptureStatus>) -> &'stat
     }
 }
 
-pub fn polkit_confirm_message(de: &str) -> &'static str {
-    match de {
-        "GNOME" => CONFIRMATION_REQUEST,
-        "KDE" | "LXQt" => "Face Verified. Press OK to confirm.",
-        "Hyprland" => "Face Verified. Press Authenticate to confirm.",
-        _ => "Face Verified. Press Enter to confirm.",
-    }
-}
-
 // Confirm a face match through a graphical polkit dialog; the caller must
 // already have a pending password prompt on `state` for the agent to answer.
 pub unsafe fn confirm_graphical_polkit(
     pamh: PamHandle,
-    de: &str,
-    extension_active: bool,
     state: &SharedAuthState,
     prompt_thread: thread::JoinHandle<()>,
 ) -> c_int {
-    if de == "GNOME" && !extension_active {
-        let fallback = unsafe { wait_for_password_and_fallback(pamh, state) };
-        let _ = prompt_thread.join();
-        return fallback;
-    }
-
-    unsafe { say(pamh, polkit_confirm_message(de)) };
+    unsafe { say(pamh, "Face Verified. Press Enter to confirm.") };
 
     let response = wait_for_prompt_response(state);
     let _ = prompt_thread.join();
@@ -450,48 +431,10 @@ pub unsafe fn confirm_graphical_polkit(
     let Some(resp) = response else {
         return PAM_AUTH_ERR;
     };
-    let confirmed = if de == "GNOME" {
-        resp == CONFIRMATION_ACK
-    } else {
-        resp.is_empty()
-    };
-    if confirmed {
+    if confirmation_accepted(Some(&resp)) {
         PAM_SUCCESS
     } else {
         unsafe { stash_password_and_fallback(pamh, &resp) }
-    }
-}
-
-pub async fn active_or_user_uid(username: &str) -> Option<u32> {
-    match gaze_core::dbus::get_active_session_uid().await {
-        Ok(uid) => Some(uid),
-        Err(_) => get_user_uid(username),
-    }
-}
-
-// Like `active_or_user_uid`, but also flags a login greeter (e.g. GDM). A greeter always runs
-// GNOME, yet its transient processes defeat `/proc` DE detection, so callers gate on this.
-pub async fn active_confirm_target(username: &str) -> (Option<u32>, bool) {
-    match gaze_core::dbus::get_active_session_uid_and_class().await {
-        Ok((uid, class)) => (Some(uid), class == "greeter"),
-        Err(_) => (get_user_uid(username), false),
-    }
-}
-
-pub async fn gnome_extension_active_on(proxy: &GazeProxy<'_>, uid: Option<u32>) -> bool {
-    let Some(uid) = uid else {
-        return false;
-    };
-    proxy.is_extension_active(uid).await.unwrap_or(false)
-}
-
-pub async fn gnome_extension_active(uid: Option<u32>) -> bool {
-    if uid.is_none() {
-        return false;
-    }
-    match setup_auth_env().await {
-        Ok((_config, proxy)) => gnome_extension_active_on(&proxy, uid).await,
-        Err(_) => false,
     }
 }
 
@@ -687,11 +630,15 @@ pub async fn authenticate_biometric_with_status(
     authenticate_biometric_with_status_on(&proxy, username, service).await
 }
 
-pub async fn authenticate_biometric_with_status_on(
+pub async fn authenticate_biometric_with_status_on_and_notify<F>(
     proxy: &GazeProxy<'static>,
     username: &str,
     service: Option<&str>,
-) -> anyhow::Result<(AuthOutcome, Option<gaze_core::dbus::CaptureStatus>)> {
+    on_status: F,
+) -> anyhow::Result<(AuthOutcome, Option<gaze_core::dbus::CaptureStatus>)>
+where
+    F: Fn(gaze_core::dbus::CaptureStatus),
+{
     proxy
         .claim(username)
         .await
@@ -724,7 +671,9 @@ pub async fn authenticate_biometric_with_status_on(
             }
             Some(signal) = face_stream.next() => {
                 if let Ok(args) = signal.args() {
-                    last_status = Some(*args.status());
+                    let status = *args.status();
+                    last_status = Some(status);
+                    on_status(status);
                 }
             }
             // Both streams ended (bus connection lost): without this branch
@@ -736,6 +685,14 @@ pub async fn authenticate_biometric_with_status_on(
     guard.active = false;
     let _ = proxy.release().await;
     Ok((outcome, last_status))
+}
+
+pub async fn authenticate_biometric_with_status_on(
+    proxy: &GazeProxy<'static>,
+    username: &str,
+    service: Option<&str>,
+) -> anyhow::Result<(AuthOutcome, Option<gaze_core::dbus::CaptureStatus>)> {
+    authenticate_biometric_with_status_on_and_notify(proxy, username, service, |_| {}).await
 }
 
 pub fn get_user_uid(username: &str) -> Option<u32> {
@@ -856,120 +813,9 @@ pub fn service_retries_transient_give_up(service: Option<&str>) -> bool {
     is_unpromptable_slot(service)
 }
 
-const GNOME_BINARIES: [&str; 1] = ["gnome-shell"];
-const KDE_BINARIES: [&str; 5] = [
-    "plasmashell",
-    "kwin_wayland",
-    "kwin_x11",
-    "lxqt-policykit-agent",
-    "lxqt-policykit",
-];
-const HYPRLAND_BINARIES: [&str; 2] = ["hyprland", "Hyprland"];
-
-pub fn binary_is_trusted(owner_uid: u32, mode: u32) -> bool {
-    owner_uid == 0 && mode & 0o022 == 0
-}
-
-pub fn system_binary_path(link: &str) -> &str {
-    link.strip_suffix(" (deleted)").unwrap_or(link)
-}
-
-pub fn desktop_from_binaries<I: IntoIterator<Item = String>>(names: I) -> String {
-    let mut is_gnome = false;
-    let mut is_kde = false;
-    let mut is_hyprland = false;
-
-    for name in names {
-        let name = name.as_str();
-        if GNOME_BINARIES.contains(&name) {
-            is_gnome = true;
-        } else if KDE_BINARIES.contains(&name) {
-            is_kde = true;
-        } else if HYPRLAND_BINARIES.contains(&name) {
-            is_hyprland = true;
-        }
-    }
-
-    if is_gnome {
-        "GNOME".to_string()
-    } else if is_kde {
-        "KDE".to_string()
-    } else if is_hyprland {
-        "Hyprland".to_string()
-    } else {
-        "Other".to_string()
-    }
-}
-
-fn trusted_binary_name(proc_entry: &std::path::Path) -> Option<String> {
-    use std::os::unix::fs::MetadataExt;
-
-    let link = std::fs::read_link(proc_entry.join("exe")).ok()?;
-    let exe = std::path::Path::new(system_binary_path(link.to_str()?));
-    let metadata = std::fs::metadata(exe).ok()?;
-    if !binary_is_trusted(metadata.uid(), metadata.mode()) {
-        return None;
-    }
-    Some(exe.file_name()?.to_str()?.to_string())
-}
-
-pub fn detect_desktop_environment(uid: u32) -> String {
-    use std::os::unix::fs::MetadataExt;
-
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return "Other".to_string();
-    };
-
-    let names = entries.flatten().filter_map(|entry| {
-        let metadata = entry.metadata().ok()?;
-        if !metadata.is_dir() || metadata.uid() != uid {
-            return None;
-        }
-        let path = entry.path();
-        let pid = path.file_name()?.to_str()?;
-        if !pid.chars().all(|c| c.is_ascii_digit()) {
-            return None;
-        }
-        trusted_binary_name(&path)
-    });
-
-    desktop_from_binaries(names)
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum GraphicalConfirm {
-    GnomeExtension,
-    FailClosed,
-}
-
-/// No channel to confirm through means the match is refused, not granted.
-pub fn graphical_confirm_decision(
-    de: &str,
-    extension_active: bool,
-    is_greeter: bool,
-) -> GraphicalConfirm {
-    if is_greeter {
-        return if extension_active {
-            GraphicalConfirm::GnomeExtension
-        } else {
-            GraphicalConfirm::FailClosed
-        };
-    }
-    // Not Bypass: slots that genuinely cannot answer a prompt are handled by
-    // `service_cannot_be_prompted` first, so bypassing would only weaken hyprlock and friends.
-    match de {
-        "GNOME" if extension_active => GraphicalConfirm::GnomeExtension,
-        _ => GraphicalConfirm::FailClosed,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn names(list: &[&str]) -> Vec<String> {
-        list.iter().map(|s| s.to_string()).collect()
-    }
 
     // The escape moves up a line and clears it, so it must only run when a line was printed.
     #[test]
@@ -1000,55 +846,6 @@ mod tests {
     fn an_unanswered_prompt_declines_rather_than_reprompting() {
         assert!(!tty_confirmation(0, b'\n'));
         assert!(!tty_confirmation(0, 0));
-    }
-
-    #[test]
-    fn only_root_owned_unwritable_binaries_are_trusted() {
-        assert!(binary_is_trusted(0, 0o755));
-        assert!(binary_is_trusted(0, 0o555));
-        assert!(!binary_is_trusted(1000, 0o755));
-        assert!(!binary_is_trusted(0, 0o775));
-        assert!(!binary_is_trusted(0, 0o777));
-    }
-
-    #[test]
-    fn a_replaced_binary_still_resolves_to_its_path() {
-        assert_eq!(
-            system_binary_path("/usr/bin/gnome-shell (deleted)"),
-            "/usr/bin/gnome-shell"
-        );
-        assert_eq!(
-            system_binary_path("/usr/bin/gnome-shell"),
-            "/usr/bin/gnome-shell"
-        );
-    }
-
-    #[test]
-    fn each_desktop_is_recognised_by_its_binary() {
-        assert_eq!(desktop_from_binaries(names(&["gnome-shell"])), "GNOME");
-        assert_eq!(desktop_from_binaries(names(&["plasmashell"])), "KDE");
-        assert_eq!(desktop_from_binaries(names(&["Hyprland"])), "Hyprland");
-        assert_eq!(desktop_from_binaries(names(&["sleep", "bash"])), "Other");
-    }
-
-    #[test]
-    fn a_long_binary_name_is_no_longer_truncated_away() {
-        assert_eq!(
-            desktop_from_binaries(names(&["lxqt-policykit-agent"])),
-            "KDE"
-        );
-    }
-
-    #[test]
-    fn an_ambiguous_session_takes_the_strictest_desktop() {
-        assert_eq!(
-            desktop_from_binaries(names(&["plasmashell", "gnome-shell"])),
-            "GNOME"
-        );
-        assert_eq!(
-            desktop_from_binaries(names(&["Hyprland", "gnome-shell"])),
-            "GNOME"
-        );
     }
 
     #[test]
@@ -1150,53 +947,6 @@ mod tests {
         assert!(!service_cannot_be_prompted(None));
         assert!(!service_shows_only_error_messages(None));
         assert!(!service_retries_transient_give_up(None));
-    }
-
-    #[test]
-    fn other_desktops_fail_closed_without_a_channel() {
-        assert_eq!(
-            graphical_confirm_decision("GNOME", true, false),
-            GraphicalConfirm::GnomeExtension
-        );
-        assert_eq!(
-            graphical_confirm_decision("GNOME", false, false),
-            GraphicalConfirm::FailClosed
-        );
-        for de in ["KDE", "Hyprland", "LXQt", "Other"] {
-            assert_eq!(
-                graphical_confirm_decision(de, false, false),
-                GraphicalConfirm::FailClosed,
-                "{de} has no confirm channel and must fail closed, not bypass"
-            );
-        }
-    }
-
-    #[test]
-    fn an_unpromptable_slot_never_reaches_the_graphical_decision() {
-        // Why failing closed above is safe: the KDE lock screen slots return
-        // before a confirmation is ever attempted.
-        for slot in [
-            KDE_FACE_PAM_SERVICE,
-            KDE_SMARTCARD_PAM_SERVICE,
-            PLASMALOGIN_FACE_PAM_SERVICE,
-        ] {
-            assert!(service_cannot_be_prompted(Some(slot)), "{slot}");
-        }
-    }
-
-    #[test]
-    fn a_greeter_never_bypasses_confirmation() {
-        assert_eq!(
-            graphical_confirm_decision("Other", true, true),
-            GraphicalConfirm::GnomeExtension
-        );
-        for de in ["GNOME", "KDE", "Hyprland", "Other"] {
-            assert_eq!(
-                graphical_confirm_decision(de, false, true),
-                GraphicalConfirm::FailClosed,
-                "a greeter ({de}) must fail closed rather than bypass"
-            );
-        }
     }
 
     #[test]
@@ -1357,9 +1107,8 @@ mod tests {
     }
 
     #[test]
-    fn confirmation_accepts_only_the_ack_token() {
-        assert!(confirmation_accepted(Some("CONFIRM")));
-        assert!(!confirmation_accepted(Some("")));
+    fn confirmation_accepts_empty_string_on_enter() {
+        assert!(confirmation_accepted(Some("")));
         assert!(!confirmation_accepted(Some("hunter2")));
         assert!(!confirmation_accepted(Some("confirm")));
         assert!(!confirmation_accepted(None));
@@ -1399,23 +1148,6 @@ mod tests {
     fn a_silenced_prompt_reported_on_the_tty_still_owns_a_line() {
         assert!(!PromptLine::Printed.keeps_previous_line());
         assert!(PromptLine::Absent.keeps_previous_line());
-    }
-
-    #[test]
-    fn polkit_confirm_message_uses_extension_token_only_on_gnome() {
-        assert_eq!(polkit_confirm_message("GNOME"), CONFIRMATION_REQUEST);
-        assert_eq!(
-            polkit_confirm_message("KDE"),
-            "Face Verified. Press OK to confirm."
-        );
-        assert_eq!(
-            polkit_confirm_message("Hyprland"),
-            "Face Verified. Press Authenticate to confirm."
-        );
-        assert_eq!(
-            polkit_confirm_message("Other"),
-            "Face Verified. Press Enter to confirm."
-        );
     }
 
     #[test]
