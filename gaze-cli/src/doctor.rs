@@ -32,6 +32,7 @@ const PLASMALOGIN_FACE_PAM_FILE: &str = "/etc/pam.d/plasmalogin-fingerprint";
 /// PAM falls back here when `/etc/pam.d` has no such service, and Arch, Debian and
 /// openSUSE ship these slots only there, so reading `/etc` alone sees nothing.
 const VENDOR_PAM_DIR: &str = "/usr/lib/pam.d";
+const POLKIT_PAM_FILE: &str = "/etc/pam.d/polkit-1";
 
 fn read_pam_service(path: &str) -> Option<String> {
     fs::read_to_string(path).ok().or_else(|| {
@@ -748,6 +749,39 @@ fn pam_line_has_reference(line: &str) -> bool {
     })
 }
 
+const PAM_INCLUDE_DIRECTIVES: [&str; 2] = ["include", "substack"];
+
+fn pam_include_target(line: &str) -> Option<&str> {
+    let line = line.split('#').next().unwrap_or_default();
+    let mut tokens = line.split_ascii_whitespace();
+    let first = tokens.next()?;
+    if first == "@include" {
+        return tokens.next();
+    }
+    let control = tokens.next()?;
+    if PAM_INCLUDE_DIRECTIVES.contains(&control) {
+        tokens.next()
+    } else {
+        None
+    }
+}
+
+/// Whether a service ends up loading a Gaze module, following `include`/`substack` into the
+/// shared stacks Debian and Fedora wire Gaze into rather than naming it per service.
+fn pam_service_reaches_gaze(service: &str, depth: u8) -> bool {
+    let Some(contents) = read_pam_service(&format!("/etc/pam.d/{service}")) else {
+        return false;
+    };
+    if contents.lines().any(pam_line_has_reference) {
+        return true;
+    }
+    depth > 0
+        && contents
+            .lines()
+            .filter_map(pam_include_target)
+            .any(|target| pam_service_reaches_gaze(target, depth - 1))
+}
+
 fn pam_line_module_paths(line: &str) -> Vec<PathBuf> {
     line.split('#')
         .next()
@@ -986,6 +1020,25 @@ fn check_pam(report: &mut Report) {
                 );
             }
         }
+
+        check_polkit_pam(report);
+    }
+}
+
+fn check_polkit_pam(report: &mut Report) {
+    if read_pam_service(POLKIT_PAM_FILE).is_none() {
+        return;
+    }
+    if pam_service_reaches_gaze("polkit-1", 2) {
+        report.pass("Polkit PAM", "the polkit-1 service reaches a Gaze module");
+    } else {
+        report.warning(
+            "Polkit PAM",
+            "the polkit-1 service reaches no Gaze module, so graphical authentication prompts fall straight through to the password stack",
+            format!(
+                "Add 'auth        sufficient    pam_gaze.so' above the first auth line of {POLKIT_PAM_FILE}, copying {VENDOR_PAM_DIR}/polkit-1 there first if it does not exist, then restart polkit. See https://gaze.gundulabs.com/guide/pam"
+            ),
+        );
     }
 }
 
@@ -1948,6 +2001,28 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pam_include_targets_are_read_from_both_include_forms() {
+        assert_eq!(
+            pam_include_target("auth       include      system-auth"),
+            Some("system-auth")
+        );
+        assert_eq!(
+            pam_include_target("auth       substack     password-auth"),
+            Some("password-auth")
+        );
+        assert_eq!(
+            pam_include_target("@include common-auth"),
+            Some("common-auth")
+        );
+        assert_eq!(
+            pam_include_target("auth        sufficient    pam_gaze.so"),
+            None
+        );
+        assert_eq!(pam_include_target("# auth include system-auth"), None);
+        assert_eq!(pam_include_target(""), None);
+    }
 
     #[test]
     fn gstreamer_plugin_remedies_use_distro_package_names() {

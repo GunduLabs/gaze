@@ -23,6 +23,8 @@ if [ -f "$flag" ]; then
     rm -f "$flag" || true
 fi
 
+rm -f /etc/gaze/polkit-1.pam.bak || true
+
 if [ -d /run/systemd/system ]; then
     systemctl restart polkit >/dev/null 2>&1 || true
 fi
