@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 #%PAM-1.0
-auth        [success=done default=ignore]                pam_gaze_grosshack.so
+auth        [success=done default=ignore]                pam_gaze.so simultaneous
 auth        include                                      system-auth
 account     include                                      system-auth
 password    include                                      system-auth

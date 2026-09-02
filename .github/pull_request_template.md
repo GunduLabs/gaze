@@ -44,7 +44,7 @@ Delete for features and refactors.
 - [ ] `gazed` daemon or DBus interface
 - [ ] `gaze` CLI
 - [ ] `gaze-gui`
-- [ ] PAM modules (`pam-gaze`, `pam-gaze-grosshack`)
+- [ ] PAM module (`pam-gaze`)
 - [ ] GNOME extension or GDM
 - [ ] KDE Plasma integration
 - [ ] hyprlock, LightDM, or TTY console

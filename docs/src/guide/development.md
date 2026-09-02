@@ -131,7 +131,7 @@ Git hooks are local to each clone. `just setup-hooks` points Git at the tracked 
 - `gaze`: the `gazed` daemon, ML pipeline, and user database.
 - `gaze-cli`: the `gaze` CLI binary. It lives in its own crate so the client binary does not statically link ONNX Runtime (see warning below).
 - `gaze-core`: shared camera/config/DBus library. Face detection sits behind the `detection` cargo feature (on by default); client crates opt out with `default-features = false`.
-- `pam-gaze`, `pam-gaze-grosshack`: `cdylib` PAM modules; shared FFI/auth logic lives in `pam-gaze-core`.
+- `pam-gaze`: `cdylib` PAM module.
 - `gaze-gui`: GTK4/libadwaita app. `gnome-shell-extension/` is packaged separately.
 
 ## Build and test rust components
@@ -274,10 +274,9 @@ The CLI and GUI need no special setup; they talk to whichever `gazed` currently 
 
 ## Iterating on the PAM module
 
-`pam-gaze` and `pam-gaze-grosshack` build as `cdylib`s. After `just build-rust` you'll have:
+`pam-gaze` builds as a `cdylib`. After `just build-rust` you'll have:
 
 - `target/release/libpam_gaze.so`
-- `target/release/libpam_gaze_grosshack.so`
 
 To exercise them through real PAM, copy into the system PAM library directory (path is distro-specific):
 

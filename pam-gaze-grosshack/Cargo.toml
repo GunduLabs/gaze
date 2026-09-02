@@ -5,7 +5,7 @@
 name = "pam-gaze-grosshack"
 version = "0.2.12"
 edition = "2024"
-description = "Simultaneous face and password authentication PAM module for Gaze"
+description = "Deprecated compatibility shim for Gaze simultaneous PAM module"
 categories.workspace = true
 homepage.workspace = true
 keywords.workspace = true
@@ -18,6 +18,13 @@ repository.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-pam-gaze-core = { path = "../pam-gaze-core" }
+gaze-core = { path = "../gaze-core", default-features = false }
 libc = "0.2.189"
+zbus = "5.19.0"
 tokio = { version = "1.53.1", features = ["full"] }
+parking_lot = "0.12.5"
+anyhow = "1.0.104"
+futures = "0.3.34"
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["full", "test-util"] }

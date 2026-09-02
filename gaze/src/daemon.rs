@@ -45,7 +45,7 @@ const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
 const LIVENESS_GATE_DIAGNOSTIC: &str = "Face matched, but the liveness check did not pass. Move slightly and try again, or lower liveness.threshold.";
 const VERIFY_NO_FACE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Bounds a face that stays badly framed: it refreshes the no-face deadline without ever
-/// yielding an embedding. Kept under `pam_gaze_core::CAMERA_AUTH_TIMEOUT_SECS`.
+/// yielding an embedding. Kept under `CAMERA_AUTH_TIMEOUT_SECS` in `pam-gaze`.
 const VERIFY_NO_USABLE_TIMEOUT: Duration = Duration::from_secs(8);
 /// Hybrid verify runs one camera at a time for single-function UVC devices (e.g. Logitech
 /// Brio). Caps the RGB phase so it yields to IR even without a match. See `verify_start`.
@@ -2026,7 +2026,7 @@ pub async fn watch_session_locks(conn: zbus::Connection, lock_epochs: LockEpochs
 enum VerifyMsg {
     PhaseStarted(Spectrum),
     Diagnostic(String),
-    Status(Spectrum, CaptureStatus, Option<ndarray::Array1<f32>>),
+    Status(Spectrum, CaptureStatus, Option<ndarray::Array1<f32>>, f64),
     Success(Spectrum, ndarray::Array1<f32>),
     Error(String),
 }
@@ -3865,7 +3865,7 @@ impl AuthDaemon {
                         }
 
                         let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
-                        let _ = tx.try_send(VerifyMsg::Status(Spectrum::Rgb, status, latest_embed));
+                        let _ = tx.try_send(VerifyMsg::Status(Spectrum::Rgb, status, latest_embed, cam.fps()));
 
                         if should_yield_rgb_to_ir(&hybrid_policy_clone, run_ir, status) {
                             yielded_to_ir = true;
@@ -3985,8 +3985,6 @@ impl AuthDaemon {
                         }
                     }
 
-                    let _ = tx.blocking_send(VerifyMsg::PhaseStarted(Spectrum::Ir));
-
                     let emitter = EmitterGuard::engage(
                         &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                         emitter_enabled
@@ -4003,6 +4001,8 @@ impl AuthDaemon {
                         }
                     };
                     tracing::debug!("IR camera opened successfully at: {}", ir_device_clone);
+
+                    let _ = tx.blocking_send(VerifyMsg::PhaseStarted(Spectrum::Ir));
 
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, false);
                     let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
@@ -4038,7 +4038,7 @@ impl AuthDaemon {
                                     let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
                                     logged_dark_luma = true;
                                 }
-                                let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, CaptureStatus::TooDark, None));
+                                let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, CaptureStatus::TooDark, None, cam.fps()));
                                 continue;
                             }
                         }
@@ -4053,7 +4053,7 @@ impl AuthDaemon {
                         tracing::debug!("Processed IR frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
 
                         let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
-                        let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, status, latest_embed));
+                        let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, status, latest_embed, cam.fps()));
 
                         if status == CaptureStatus::Usable && let Some(data) = embed_opt {
                             let threshold = *ir_threshold_arc.blocking_lock();
@@ -4205,7 +4205,7 @@ impl AuthDaemon {
                             VerifyMsg::Diagnostic(message) => {
                                 let _ = Self::verify_diagnostic(&ctxt, &message).await;
                             }
-                            VerifyMsg::Status(spectrum, status, embed_opt) => {
+                            VerifyMsg::Status(spectrum, status, embed_opt, fps) => {
                                 let has_face = embed_opt.is_some();
                                 match spectrum {
                                     Spectrum::Rgb => {
@@ -4230,7 +4230,7 @@ impl AuthDaemon {
                                 if has_face {
                                     last_usable_at = Instant::now();
                                     frames_seen += 1;
-                                    if frames_seen > liveness_cfg.effective_max_frames() {
+                                    if frames_seen > liveness_cfg.effective_max_frames(fps) {
                                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                                         let final_scores = hybrid_scores!();
                                         let matched = final_scores

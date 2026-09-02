@@ -171,7 +171,7 @@ delivers a response to a noninteractive slot, so asking would hang that slot for
 the rest of the lock rather than ask anybody anything. Denying the match instead
 would just mean no face unlock at all on KDE.
 
-If you want a real confirmation step on KDE, use `pam-gaze-grosshack` on a
+If you want a real confirmation step on KDE, use simultaneous mode (`pam_gaze.so simultaneous`) on a
 surface that can show a dialog, such as polkit prompts. It refuses to run in the
 lock screen's biometric slot for the reason above.
 
@@ -345,8 +345,8 @@ yay -R gaze-kde-bin
 - **Face unlock still waits for a password submit.** `kde-fingerprint` is not
   running Gaze. Check the "KDE lock screen" line in `gaze doctor`, then run
   `sudo gaze-kde-pam enable`.
-- **`gaze doctor` warns that `kde-fingerprint` runs `pam_gaze_grosshack.so`.**
-  That module waits for a password prompt the greeter can never answer. Use the
+- **`gaze doctor` warns that `kde-fingerprint` runs `pam_gaze.so` in simultaneous mode.**
+  That mode waits for a password prompt the greeter can never answer. Use the
   plain `pam_gaze.so` line there instead; reinstalling `gaze-kde` fixes it.
 - **Falls back to the password every time.** Check `systemctl status gazed` and
   `gaze list-faces`. Most often the daemon is not running or the current user

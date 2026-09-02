@@ -14,9 +14,10 @@ use futures::StreamExt;
 use gaze_core::config::{
     AuthConfig, Config, DEFAULT_SECURITY_THRESHOLD, HYBRID_POLICY_OPTIONS,
     INFERENCE_DEVICE_OPTIONS, INFERENCE_EXECUTION_PROVIDER_OPTIONS, MAX_ENROLLMENT_FACE_SIZE_RATIO,
-    MAX_LIVENESS_THRESHOLD, MAX_SECURITY_THRESHOLD, MIN_ENROLLMENT_FACE_SIZE_RATIO,
-    MIN_LIVENESS_MAX_FRAMES, MIN_LIVENESS_THRESHOLD, MIN_SECURITY_THRESHOLD, MODEL_QUALITY_OPTIONS,
-    SECURITY_LEVEL_OPTIONS, START_DELAY_SCOPE_LABELS, SecurityLevel,
+    MAX_LIVENESS_MAX_SECONDS, MAX_LIVENESS_THRESHOLD, MAX_SECURITY_THRESHOLD,
+    MIN_ENROLLMENT_FACE_SIZE_RATIO, MIN_LIVENESS_MAX_SECONDS, MIN_LIVENESS_THRESHOLD,
+    MIN_SECURITY_THRESHOLD, MODEL_QUALITY_OPTIONS, SECURITY_LEVEL_OPTIONS,
+    START_DELAY_SCOPE_LABELS, SecurityLevel,
 };
 use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon, connect_gaze,
@@ -543,16 +544,18 @@ async fn run_config_wizard(
             .trim()
             .parse::<f64>()
             .unwrap_or(0.8);
-        config.liveness.max_frames = Input::with_theme(&theme)
+        config.liveness.max_seconds = Input::with_theme(&theme)
             .with_prompt(format!(
-                "Liveness max frames (min {MIN_LIVENESS_MAX_FRAMES})"
+                "Liveness max seconds ({MIN_LIVENESS_MAX_SECONDS}..={MAX_LIVENESS_MAX_SECONDS})"
             ))
-            .default(config.liveness.max_frames)
-            .validate_with(|value: &u32| {
-                if *value >= MIN_LIVENESS_MAX_FRAMES {
+            .default(config.liveness.max_seconds)
+            .validate_with(|value: &f64| {
+                if *value >= MIN_LIVENESS_MAX_SECONDS && *value <= MAX_LIVENESS_MAX_SECONDS {
                     Ok(())
                 } else {
-                    Err(format!("must be at least {MIN_LIVENESS_MAX_FRAMES}"))
+                    Err(format!(
+                        "must be between {MIN_LIVENESS_MAX_SECONDS} and {MAX_LIVENESS_MAX_SECONDS}"
+                    ))
                 }
             })
             .interact_text()?;
@@ -1869,9 +1872,9 @@ async fn run() -> anyhow::Result<()> {
                     config.liveness.threshold
                 );
                 println!(
-                    "{} {}",
-                    style("liveness.max_frames:").bold(),
-                    config.liveness.max_frames
+                    "{} {:.1}s",
+                    style("liveness.max_seconds:").bold(),
+                    config.liveness.max_seconds
                 );
                 println!(
                     "{} {}",

@@ -3,8 +3,8 @@
 
 use console::{Term, style};
 use gaze_core::config::{
-    CONFIG_PATH, Config, MAX_LIVENESS_THRESHOLD, MIN_LIVENESS_MAX_FRAMES, MIN_LIVENESS_THRESHOLD,
-    SecurityField, unknown_config_keys,
+    CONFIG_PATH, Config, MAX_LIVENESS_MAX_SECONDS, MAX_LIVENESS_THRESHOLD,
+    MIN_LIVENESS_MAX_SECONDS, MIN_LIVENESS_THRESHOLD, SecurityField, unknown_config_keys,
 };
 use gaze_core::dbus::{
     GazeProxy, dbus_error_message, dbus_is_file_not_found, dbus_is_not_activatable,
@@ -25,7 +25,7 @@ const PAM_MODULES: [&str; 2] = ["pam_gaze.so", "pam_gaze_grosshack.so"];
 const GNOME_EXTENSION_ID: &str = "gaze@gundulabs.com";
 const GNOME_EXTENSION_SCHEMA: &str = "org.gnome.shell.extensions.gaze";
 const GDM_FACE_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
-/// Mirror `pam_gaze_core`'s paths for the slots Plasma starts up front.
+/// Mirror `pam-gaze`'s paths for the slots Plasma starts up front.
 const KDE_FACE_PAM_FILE: &str = "/etc/pam.d/kde-fingerprint";
 const KDE_SMARTCARD_PAM_FILE: &str = "/etc/pam.d/kde-smartcard";
 const PLASMALOGIN_FACE_PAM_FILE: &str = "/etc/pam.d/plasmalogin-fingerprint";
@@ -627,10 +627,16 @@ fn config_findings(config: &Config) -> Vec<Check> {
                 "Set liveness.threshold to a value between 0.10 and 1.0.",
             );
         }
-        if config.liveness.max_frames < MIN_LIVENESS_MAX_FRAMES {
+        if !config.liveness.max_seconds.is_finite()
+            || !(MIN_LIVENESS_MAX_SECONDS..=MAX_LIVENESS_MAX_SECONDS)
+                .contains(&config.liveness.max_seconds)
+        {
             error(
-                "liveness.max_frames is zero".to_string(),
-                "Set liveness.max_frames to a positive value (the default is 40).",
+                format!(
+                    "liveness.max_seconds must be between {MIN_LIVENESS_MAX_SECONDS} and {MAX_LIVENESS_MAX_SECONDS}, got {}",
+                    config.liveness.max_seconds
+                ),
+                "Set liveness.max_seconds to a value between 0.2 and 30.0 (the default is 2.0).",
             );
         }
     }
@@ -869,26 +875,17 @@ fn find_pam_ordering_conflicts(contents: &str) -> Vec<&'static str> {
 
 fn check_pam(report: &mut Report) {
     let modules = find_pam_modules();
-    let sequential = modules
+    let installed = modules
         .iter()
         .any(|path| path.file_name().is_some_and(|name| name == PAM_MODULES[0]));
-    let simultaneous = modules
-        .iter()
-        .any(|path| path.file_name().is_some_and(|name| name == PAM_MODULES[1]));
 
-    if sequential && simultaneous {
-        report.pass("PAM modules", "both modules are installed");
-    } else if !sequential {
+    if installed {
+        report.pass("PAM module", "pam_gaze.so is installed");
+    } else {
         report.error(
-            "PAM modules",
+            "PAM module",
             "pam_gaze.so is not installed where PAM can load it",
             "Reinstall the base Gaze package before enabling PAM authentication.",
-        );
-    } else {
-        report.warning(
-            "PAM modules",
-            "pam_gaze_grosshack.so is missing",
-            "Reinstall the base Gaze package if you use simultaneous face/password prompts.",
         );
     }
 
@@ -937,10 +934,37 @@ fn check_pam(report: &mut Report) {
             report.error(
                 "PAM stack permissions",
                 format!(
-                    "anyone in the owning group can rewrite the auth stack: {}",
+                    "anyone in the owning group can make Gaze run their code: {}",
                     writable.join(", ")
                 ),
-                "Run `sudo chown root:root <file>` and `sudo chmod 644 <file>` on each, or restore them from the package manager.",
+                "Restore these files from the package manager; do not use writable PAM configuration.",
+            );
+        }
+
+        let deprecated_refs: Vec<_> = pam_files()
+            .into_iter()
+            .filter(|(_, contents)| {
+                contents.lines().any(|line| {
+                    let line = line.split('#').next().unwrap_or_default().trim();
+                    line.split_ascii_whitespace().any(|token| {
+                        token == "pam_gaze_grosshack.so"
+                            || token.ends_with("/pam_gaze_grosshack.so")
+                    })
+                })
+            })
+            .map(|(path, _)| path)
+            .collect();
+
+        if !deprecated_refs.is_empty() {
+            let paths = deprecated_refs
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            report.warning(
+                "Deprecated PAM module",
+                format!("pam_gaze_grosshack.so is referenced in: {paths}"),
+                "Replace 'pam_gaze_grosshack.so' with 'pam_gaze.so simultaneous' in those files. pam_gaze_grosshack.so will be removed in a future release.",
             );
         }
 
@@ -990,7 +1014,7 @@ fn owning_uid() -> u32 {
 }
 
 /// Names only, joined like the environment variables above so the callers'
-/// `contains` checks are unchanged. The CLI does not link `pam-gaze-core`.
+/// `contains` checks are unchanged. The CLI does not link `pam-gaze`.
 fn desktop_from_processes(uid: u32) -> String {
     use std::os::unix::fs::MetadataExt;
 
@@ -1187,7 +1211,11 @@ fn slot_status(slot: Option<&str>) -> KdeLockStatus {
             )
         })
     };
-    if auth_lines().any(|line| line.contains("pam_gaze_grosshack.so")) {
+    if auth_lines().any(|line| {
+        line.contains("pam_gaze_grosshack.so")
+            || (pam_line_has_reference(line)
+                && line.split_whitespace().any(|tok| tok == "simultaneous"))
+    }) {
         return KdeLockStatus::Grosshack;
     }
     if auth_lines().any(pam_line_has_reference) {
@@ -1235,8 +1263,8 @@ fn check_kde_lock_screen(
         ),
         KdeLockStatus::Grosshack => report.warning(
             NAME,
-            format!("{slot} runs pam_gaze_grosshack.so, which waits for a password prompt that KScreenLocker can never answer"),
-            format!("Use the plain module there: replace it with `-auth [success=done default=ignore] pam_gaze.so` in {file}, or reinstall gaze-kde."),
+            format!("{slot} runs pam_gaze.so in simultaneous mode, which waits for a password prompt that KScreenLocker can never answer"),
+            format!("Use sequential mode there: replace it with `-auth [success=done default=ignore] pam_gaze.so` in {file}, or reinstall gaze-kde."),
         ),
         KdeLockStatus::NotWired => report.warning(
             NAME,
@@ -2194,6 +2222,10 @@ mod tests {
             KdeLockStatus::Wired
         );
         assert_eq!(
+            slot_status(Some("auth sufficient pam_gaze.so simultaneous")),
+            KdeLockStatus::Grosshack
+        );
+        assert_eq!(
             slot_status(Some("auth sufficient pam_gaze_grosshack.so")),
             KdeLockStatus::Grosshack
         );
@@ -2277,6 +2309,10 @@ mod tests {
             Level::Pass
         );
         assert_eq!(
+            level(Some("auth sufficient pam_gaze.so simultaneous"), None),
+            Level::Warning
+        );
+        assert_eq!(
             level(Some("auth sufficient pam_gaze_grosshack.so"), None),
             Level::Warning
         );
@@ -2344,6 +2380,14 @@ mod tests {
             ),
             vec![PathBuf::from(
                 "/nix/store/abc-gaze-0.2.7/lib/security/pam_gaze.so"
+            )]
+        );
+        assert_eq!(
+            pam_line_module_paths(
+                "auth sufficient /nix/store/abc-gaze/lib/security/pam_gaze.so simultaneous"
+            ),
+            vec![PathBuf::from(
+                "/nix/store/abc-gaze/lib/security/pam_gaze.so"
             )]
         );
         assert_eq!(
@@ -2439,7 +2483,7 @@ mod tests {
         config.cameras.rgb = "/dev/videoX".to_string();
         config.enrollment.min_face_size_ratio = 0.05;
         config.liveness.threshold = f64::NAN;
-        config.liveness.max_frames = 0;
+        config.liveness.max_seconds = 0.0;
 
         let findings = config_findings(&config);
         let messages = findings
@@ -2479,7 +2523,7 @@ mod tests {
         assert!(
             messages
                 .iter()
-                .any(|message| message.contains("max_frames"))
+                .any(|message| message.contains("max_seconds"))
         );
     }
 
@@ -2559,7 +2603,13 @@ mod tests {
         assert!(!pam_line_has_reference("auth include system-auth"));
         assert!(pam_line_has_reference("auth sufficient pam_gaze.so"));
         assert!(pam_line_has_reference(
+            "auth sufficient /usr/lib/security/pam_gaze.so simultaneous"
+        ));
+        assert!(pam_line_has_reference(
             "auth sufficient /usr/lib/security/pam_gaze_grosshack.so debug"
+        ));
+        assert!(pam_line_has_reference(
+            "auth sufficient /usr/lib/security/pam_gaze.so debug"
         ));
         assert!(!pam_line_has_reference(
             "auth sufficient pam_gaze.so.disabled"
@@ -2591,5 +2641,22 @@ mod tests {
         assert!(report.is_healthy());
         report.error("test", "broken", "fix");
         assert!(!report.is_healthy());
+    }
+
+    #[test]
+    fn deprecated_pam_line_detects_grosshack() {
+        let has_grosshack = |line: &str| {
+            let line = line.split('#').next().unwrap_or_default().trim();
+            line.split_ascii_whitespace().any(|token| {
+                token == "pam_gaze_grosshack.so" || token.ends_with("/pam_gaze_grosshack.so")
+            })
+        };
+
+        assert!(has_grosshack("auth sufficient pam_gaze_grosshack.so"));
+        assert!(has_grosshack(
+            "auth sufficient /lib/security/pam_gaze_grosshack.so"
+        ));
+        assert!(!has_grosshack("# auth sufficient pam_gaze_grosshack.so"));
+        assert!(!has_grosshack("auth sufficient pam_gaze.so simultaneous"));
     }
 }

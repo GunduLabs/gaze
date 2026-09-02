@@ -90,7 +90,7 @@ min_face_size_ratio = 0.25
 [liveness]
 enabled = true
 threshold = 0.8
-max_frames = 40
+max_seconds = 2.0
 
 [storage]
 # Encrypt face templates at rest with a TPM-sealed key (requires a TPM 2.0). See docs.

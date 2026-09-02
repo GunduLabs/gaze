@@ -62,11 +62,6 @@ contents:
     packager: rpm
     file_info:
       mode: 0644
-  - src: "packaging/pam/gaze-grosshack.conf.suse"
-    dst: "/usr/lib/pam-config.d/gaze-grosshack.conf"
-    packager: rpm
-    file_info:
-      mode: 0644
 
 rpm:
   signature:
