@@ -19,61 +19,57 @@ pub enum PamMode {
     Simultaneous,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PamOptions {
+    pub mode: PamMode,
+}
+
+pub fn parse_pam_options<'a, I>(args: I) -> PamOptions
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut options = PamOptions::default();
+    for arg in args {
+        if arg == "simultaneous" {
+            options.mode = PamMode::Simultaneous;
+        }
+    }
+    options
+}
+
 pub fn parse_pam_mode<'a, I>(args: I) -> PamMode
 where
     I: IntoIterator<Item = &'a str>,
 {
-    for arg in args {
-        if arg == "simultaneous" {
-            return PamMode::Simultaneous;
+    parse_pam_options(args).mode
+}
+
+pub unsafe fn parse_raw_pam_options(argc: c_int, argv: *const *const c_char) -> PamOptions {
+    if argc <= 0 || argv.is_null() {
+        return PamOptions::default();
+    }
+    let mut options = PamOptions::default();
+    for i in 0..argc as isize {
+        let arg_ptr = unsafe { *argv.offset(i) };
+        if !arg_ptr.is_null()
+            && matches!(
+                unsafe { CStr::from_ptr(arg_ptr) }.to_str(),
+                Ok("simultaneous")
+            )
+        {
+            options.mode = PamMode::Simultaneous;
         }
     }
-    PamMode::Sequential
+    options
 }
 
 pub unsafe fn parse_raw_pam_mode(argc: c_int, argv: *const *const c_char) -> PamMode {
-    if argc <= 0 || argv.is_null() {
-        return PamMode::Sequential;
-    }
-    for i in 0..argc as isize {
-        let arg_ptr = unsafe { *argv.offset(i) };
-        if !arg_ptr.is_null() && unsafe { CStr::from_ptr(arg_ptr) }.to_str() == Ok("simultaneous") {
-            return PamMode::Simultaneous;
-        }
-    }
-    PamMode::Sequential
-}
-
-fn confirm_via_gnome_extension(pamh: PamHandle) -> c_int {
-    let response = unsafe { converse(pamh, PAM_PROMPT_ECHO_OFF, CONFIRMATION_REQUEST) };
-    if confirmation_accepted(response.as_deref()) {
-        PAM_SUCCESS
-    } else {
-        PAM_AUTH_ERR
-    }
+    unsafe { parse_raw_pam_options(argc, argv).mode }
 }
 
 // Polkit dialogs ignore echo-off confirmation prompts, so keep a password request pending
 // for the agent to answer and flip the dialog into confirm mode via the info-message token.
-unsafe fn confirm_via_polkit_dialog(
-    pamh: PamHandle,
-    username: &str,
-    proxy: &GazeProxy<'static>,
-    rt: &tokio::runtime::Runtime,
-) -> c_int {
-    let active_uid = rt.block_on(active_or_user_uid(username));
-    let de = active_uid
-        .map(detect_desktop_environment)
-        .unwrap_or_else(|| "Other".to_string());
-    let extension_active =
-        de == "GNOME" && rt.block_on(gnome_extension_active_on(proxy, active_uid));
-
-    // No confirm channel without the extension; let the stack fall
-    // through to password auth.
-    if de == "GNOME" && !extension_active {
-        return PAM_AUTH_ERR;
-    }
-
+unsafe fn confirm_via_polkit_dialog(pamh: PamHandle) -> c_int {
     let state = new_auth_state();
     let prompt_thread = spawn_prompt_thread(pamh, &state, || {});
     wait_for_prompt_started(&state);
@@ -81,7 +77,7 @@ unsafe fn confirm_via_polkit_dialog(
     // or the dialog re-shows the password entry.
     std::thread::sleep(Duration::from_millis(150));
 
-    unsafe { confirm_graphical_polkit(pamh, &de, extension_active, &state, prompt_thread) }
+    unsafe { confirm_graphical_polkit(pamh, &state, prompt_thread) }
 }
 
 const RETRY_BACKOFF: Duration = Duration::from_millis(500);
@@ -156,14 +152,15 @@ where
     }
 }
 
-unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int) -> c_int {
-    let silent = caller_wants_silence(flags);
+unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, _options: PamOptions) -> c_int {
     let service = unsafe { get_pam_service(pamh) };
     if service_defers_to_face_service(service.as_deref())
         || service_defers_to_face_slot(service.as_deref())
     {
         return PAM_IGNORE;
     }
+
+    let silent = caller_wants_silence(flags);
 
     let (username, rt) = match unsafe { username_and_runtime(pamh) } {
         Ok(ctx) => ctx,
@@ -191,7 +188,9 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int) -> c_int {
 
         let budget = camera_auth_timeout(&config.auth, service.as_deref());
 
-        let tell = |text: &str| unsafe { report_outcome(pamh, service.as_deref(), silent, text) };
+        let tell = |text: &str| {
+            unsafe { report_outcome(pamh, service.as_deref(), silent, text) };
+        };
 
         let verdict = verify_within(&proxy, &username, service.as_deref(), budget).await;
         match verdict {
@@ -214,7 +213,7 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int) -> c_int {
             }
         }
     });
-    let (loaded_auth, proxy, prompt_line) = match matched {
+    let (loaded_auth, _proxy, prompt_line) = match matched {
         Ok(session) => session,
         Err(code) => return code,
     };
@@ -230,7 +229,7 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int) -> c_int {
     }
 
     if is_polkit {
-        return unsafe { confirm_via_polkit_dialog(pamh, &username, &proxy, &rt) };
+        return unsafe { confirm_via_polkit_dialog(pamh) };
     }
 
     if has_interactive_tty() {
@@ -241,18 +240,10 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int) -> c_int {
         };
     }
 
-    let (uid, is_greeter) = rt.block_on(active_confirm_target(&username));
-    let de = uid
-        .map(detect_desktop_environment)
-        .unwrap_or_else(|| "Other".to_string());
-    // The greeter always runs GNOME + the extension, so query it directly rather than trusting
-    // DE detection on transient processes; otherwise GDM silently bypasses Require Confirmation.
-    let extension_active =
-        (is_greeter || de == "GNOME") && rt.block_on(gnome_extension_active_on(&proxy, uid));
-
-    match graphical_confirm_decision(&de, extension_active, is_greeter) {
-        GraphicalConfirm::GnomeExtension => confirm_via_gnome_extension(pamh),
-        GraphicalConfirm::FailClosed => PAM_AUTH_ERR,
+    if unsafe { confirm_authentication(pamh, prompt_line) } {
+        PAM_SUCCESS
+    } else {
+        PAM_AUTH_ERR
     }
 }
 
@@ -264,14 +255,20 @@ async fn authenticate_biometric_with_timeout(
     service: Option<&str>,
     timeout_duration: Duration,
 ) -> Option<c_int> {
-    let auth_future = authenticate_biometric(username, service);
+    let auth_future = async {
+        let (_config, proxy) = setup_auth_env().await.ok()?;
+        authenticate_biometric_with_status_on(&proxy, username, service)
+            .await
+            .ok()
+            .map(|(outcome, _)| outcome)
+    };
 
     tokio::select! {
         res = auth_future => {
             match res {
-                Ok(AuthOutcome::Match) => Some(PAM_SUCCESS),
-                Ok(AuthOutcome::NoMatch) | Ok(AuthOutcome::Unavailable) => Some(PAM_AUTH_ERR),
-                Err(_) => None,
+                Some(AuthOutcome::Match) => Some(PAM_SUCCESS),
+                Some(AuthOutcome::NoMatch) | Some(AuthOutcome::Unavailable) => Some(PAM_AUTH_ERR),
+                None => None,
             }
         }
         _ = tokio::time::sleep(timeout_duration) => None,
@@ -414,14 +411,19 @@ fn unblock_terminal() -> PromptUnblock {
     }
 }
 
-unsafe fn do_authenticate_simultaneous(pamh: PamHandle, flags: c_int) -> c_int {
-    let silent = caller_wants_silence(flags);
+unsafe fn do_authenticate_simultaneous(
+    pamh: PamHandle,
+    flags: c_int,
+    _options: PamOptions,
+) -> c_int {
     let service = unsafe { get_pam_service(pamh) };
     if service_defers_to_face_service(service.as_deref())
         || service_defers_to_face_slot(service.as_deref())
     {
         return PAM_IGNORE;
     }
+
+    let silent = caller_wants_silence(flags);
 
     // Racing a prompt nobody answers is a deadlock, not a race.
     if service_cannot_be_prompted(service.as_deref()) {
@@ -524,27 +526,16 @@ unsafe fn do_authenticate_simultaneous(pamh: PamHandle, flags: c_int) -> c_int {
                     PAM_AUTH_ERR
                 }
             } else {
-                let active_uid = rt.block_on(active_or_user_uid(&username));
-
-                let de = active_uid
-                    .map(detect_desktop_environment)
-                    .unwrap_or_else(|| "Other".to_string());
-
-                let extension_active =
-                    de == "GNOME" && rt.block_on(gnome_extension_active(active_uid));
-
-                unsafe {
-                    confirm_graphical_polkit(pamh, &de, extension_active, &state, prompt_thread)
-                }
+                unsafe { confirm_graphical_polkit(pamh, &state, prompt_thread) }
             }
         }
     }
 }
 
-pub unsafe fn do_authenticate(pamh: PamHandle, flags: c_int, mode: PamMode) -> c_int {
-    match mode {
-        PamMode::Sequential => unsafe { do_authenticate_sequential(pamh, flags) },
-        PamMode::Simultaneous => unsafe { do_authenticate_simultaneous(pamh, flags) },
+pub unsafe fn do_authenticate(pamh: PamHandle, flags: c_int, options: PamOptions) -> c_int {
+    match options.mode {
+        PamMode::Sequential => unsafe { do_authenticate_sequential(pamh, flags, options) },
+        PamMode::Simultaneous => unsafe { do_authenticate_simultaneous(pamh, flags, options) },
     }
 }
 
@@ -571,6 +562,28 @@ mod tests {
             PamMode::Simultaneous
         );
         assert_eq!(parse_pam_mode(["grosshack"]), PamMode::Sequential);
+    }
+
+    #[test]
+    fn options_parsing_detects_modes() {
+        assert_eq!(
+            parse_pam_options(Vec::<&str>::new()),
+            PamOptions {
+                mode: PamMode::Sequential,
+            }
+        );
+        assert_eq!(
+            parse_pam_options(["simultaneous"]),
+            PamOptions {
+                mode: PamMode::Simultaneous,
+            }
+        );
+        assert_eq!(
+            parse_pam_options(["other", "simultaneous"]),
+            PamOptions {
+                mode: PamMode::Simultaneous,
+            }
+        );
     }
 
     type Unreachable = &'static str;
