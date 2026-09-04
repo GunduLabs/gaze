@@ -159,7 +159,13 @@ async fn main() -> anyhow::Result<()> {
                 );
                 db.load_all()?;
             }
-            Err(e) => warn!("Could not migrate some plaintext templates to encrypted: {e}"),
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "template encryption is enabled ([storage] encrypt_templates) but the \
+                     existing templates could not be encrypted, so the daemon is refusing to \
+                     start on a database it would only be able to read in part: {e}"
+                ));
+            }
         }
     }
 
