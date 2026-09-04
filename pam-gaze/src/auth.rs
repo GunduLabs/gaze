@@ -228,14 +228,6 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, _options: Pa
         return unsafe { confirm_via_polkit_dialog(pamh) };
     }
 
-    if has_interactive_tty() {
-        return if unsafe { confirm_authentication(pamh, prompt_line) } {
-            PAM_SUCCESS
-        } else {
-            PAM_AUTH_ERR
-        };
-    }
-
     if unsafe { confirm_authentication(pamh, prompt_line) } {
         PAM_SUCCESS
     } else {
