@@ -254,8 +254,19 @@ impl UserDatabase {
                             walk_stack.push(path);
                         } else if file_type.is_file()
                             && path.extension().and_then(|e| e.to_str()) == Some("bin")
-                            && let Ok(embed) = self.read_embedding(&path)
                         {
+                            let embed = match self.read_embedding(&path) {
+                                Ok(embed) => embed,
+                                Err(err) => {
+                                    tracing::warn!(
+                                        path = %path.display(),
+                                        %err,
+                                        "ignoring an unreadable template; it will not be matched \
+                                         against and the face may appear unenrolled"
+                                    );
+                                    continue;
+                                }
+                            };
                             let stem = path.file_stem().unwrap().to_string_lossy();
                             let (uuid, spectrum) = if stem.ends_with("_ir") {
                                 (stem.strip_suffix("_ir").unwrap().to_string(), Spectrum::Ir)
@@ -310,7 +321,7 @@ impl UserDatabase {
         Ok(false)
     }
 
-    fn replace_file_bytes(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    fn stage_file_bytes(path: &Path, bytes: &[u8]) -> anyhow::Result<PathBuf> {
         let parent = path
             .parent()
             .ok_or_else(|| anyhow::anyhow!("embedding path has no parent: {}", path.display()))?;
@@ -328,39 +339,59 @@ impl UserDatabase {
             return Err(e.into());
         }
         drop(file);
-        fs::rename(&tmp, path)?;
-        Ok(())
+        Ok(tmp)
+    }
+
+    fn recode_all_templates(
+        &self,
+        recode: impl Fn(&[u8]) -> anyhow::Result<Option<Vec<u8>>>,
+    ) -> anyhow::Result<usize> {
+        let mut staged: Vec<(PathBuf, PathBuf)> = Vec::new();
+
+        let staging = (|| -> anyhow::Result<()> {
+            for path in self.collect_bin_files()? {
+                let Some(bytes) = recode(&fs::read(&path)?)? else {
+                    continue;
+                };
+                staged.push((Self::stage_file_bytes(&path, &bytes)?, path));
+            }
+            Ok(())
+        })();
+
+        if let Err(e) = staging {
+            for (tmp, _) in &staged {
+                let _ = fs::remove_file(tmp);
+            }
+            return Err(e);
+        }
+
+        for (tmp, path) in &staged {
+            fs::rename(tmp, path)?;
+        }
+        Ok(staged.len())
     }
 
     pub fn migrate_plaintext_to_encrypted(&self) -> anyhow::Result<usize> {
         let Some(cipher) = self.cipher.as_ref() else {
             return Ok(0);
         };
-        let mut migrated = 0;
-        for path in self.collect_bin_files()? {
-            let raw = fs::read(&path)?;
-            if crypto::is_encrypted(&raw) {
-                continue;
+        self.recode_all_templates(|raw| {
+            if crypto::is_encrypted(raw) {
+                Ok(None)
+            } else {
+                cipher.encrypt(raw).map(Some)
             }
-            let blob = cipher.encrypt(&raw)?;
-            Self::replace_file_bytes(&path, &blob)?;
-            migrated += 1;
-        }
-        Ok(migrated)
+        })
     }
 
     pub fn decrypt_all_with(&self, cipher: &EmbeddingCipher) -> anyhow::Result<usize> {
-        let mut converted = 0;
-        for path in self.collect_bin_files()? {
-            let raw = fs::read(&path)?;
-            if !crypto::is_encrypted(&raw) {
-                continue;
+        self.recode_all_templates(|raw| {
+            if crypto::is_encrypted(raw) {
+                cipher.decrypt(raw).map(Some)
+            } else {
+                Ok(None)
             }
-            let plain = cipher.decrypt(&raw)?;
-            Self::replace_file_bytes(&path, &plain)?;
-            converted += 1;
-        }
-        Ok(converted)
+        })
     }
 
     pub fn add_template(
