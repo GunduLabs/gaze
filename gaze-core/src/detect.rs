@@ -197,6 +197,20 @@ impl FaceDetector {
                 None
             };
 
+            let points = grid_h * grid_w * num_anchors;
+            if score_data.len() < points
+                || bbox_data.len() < points * 4
+                || kps_data.is_some_and(|data| data.len() < points * 10)
+            {
+                return Err(DetectError::InferenceFailed(format!(
+                    "detector heads for stride {stride} are too small for a {grid_w}x{grid_h} \
+                     grid with {num_anchors} anchors: scores {}, boxes {}, keypoints {:?}",
+                    score_data.len(),
+                    bbox_data.len(),
+                    kps_data.map(<[f32]>::len)
+                )));
+            }
+
             for y in 0..grid_h {
                 for x in 0..grid_w {
                     let anchor_x = (x * stride) as f32;
