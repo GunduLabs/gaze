@@ -2014,7 +2014,12 @@ pub async fn watch_session_locks(conn: zbus::Connection, lock_epochs: LockEpochs
             continue;
         };
 
+        let live = gaze_core::dbus::session_paths_on(&conn).await.ok();
+
         let mut epochs = lock_epochs.lock().await;
+        if let Some(live) = live {
+            epochs.retain(|session, _| live.iter().any(|path| path == session));
+        }
         if locked {
             epochs.entry(path).or_insert_with(std::time::Instant::now);
         } else {
@@ -3129,6 +3134,7 @@ impl AuthDaemon {
             let mut last_emitted_status = None;
 
             let mut last_sent_prompt = None;
+            let mut aborted = false;
 
             while completed_steps < max_steps as usize {
                 let prompt = prompts[completed_steps];
@@ -3141,8 +3147,8 @@ impl AuthDaemon {
                     _ = &mut rx => {
                         info!("EnrollStart: cancelled");
                         let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::Cancelled, -1.0).await;
-                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                        return;
+                        aborted = true;
+                        break;
                     }
                     Some(jpeg) = preview_rx.recv() => {
                         let _ = Self::preview_frame(&ctxt, &jpeg).await;
@@ -3151,8 +3157,8 @@ impl AuthDaemon {
                         let Some(msg) = msg_opt else {
                             warn!("EnrollStart: all capture threads exited before enrollment finished");
                             let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::CameraFailed, -1.0).await;
-                            stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                            return;
+                            aborted = true;
+                            break;
                         };
                         match msg {
                             EnrollMsg::Status(step, spectrum, status) => {
@@ -3227,8 +3233,8 @@ impl AuthDaemon {
                             EnrollMsg::Error(e) => {
                                 error!("Enrollment error: {e}");
                                 let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::CameraFailed, -1.0).await;
-                                stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                return;
+                                aborted = true;
+                                break;
                             }
                         }
                     }
@@ -3236,15 +3242,17 @@ impl AuthDaemon {
             }
 
             stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-            let mut db = db_arc.lock().await;
-            match db.add_template(&username, &face_name, &template_id, captured_embeddings) {
-                Ok(_) => {
-                    info!("Template saved successfully!");
-                    let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::Completed, 0.0).await;
-                }
-                Err(e) => {
-                    error!("DB error saving template: {}", e);
-                    let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::DbFailed, -1.0).await;
+            if !aborted {
+                let mut db = db_arc.lock().await;
+                match db.add_template(&username, &face_name, &template_id, captured_embeddings) {
+                    Ok(_) => {
+                        info!("Template saved successfully!");
+                        let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::Completed, 0.0).await;
+                    }
+                    Err(e) => {
+                        error!("DB error saving template: {}", e);
+                        let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::DbFailed, -1.0).await;
+                    }
                 }
             }
 
@@ -3395,6 +3403,10 @@ impl AuthDaemon {
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
         new_config
             .liveness
+            .validate()
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        new_config
+            .cameras
             .validate()
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
 
