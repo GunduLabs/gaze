@@ -196,22 +196,20 @@ static PROBE_CACHE: OnceLock<Mutex<HashMap<String, Option<IrProfile>>>> = OnceLo
 
 fn cached_face_auth_profile(node: &str, vid: u16, pid: u16) -> Option<IrProfile> {
     let cache = PROBE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let lock = || cache.lock().unwrap_or_else(|err| err.into_inner());
 
-    if let Some(cached) = cache.lock().unwrap().get(node) {
+    if let Some(cached) = lock().get(node) {
         return cached.clone();
     }
 
     if camera_bus(node) == CameraBus::Ipu6 {
-        cache.lock().unwrap().insert(node.to_string(), None);
+        lock().insert(node.to_string(), None);
         return None;
     }
 
     match probe_face_auth_profile(node, vid, pid) {
         Ok(result) => {
-            cache
-                .lock()
-                .unwrap()
-                .insert(node.to_string(), result.clone());
+            lock().insert(node.to_string(), result.clone());
             result
         }
         Err(_) => None,
