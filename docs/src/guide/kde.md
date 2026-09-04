@@ -163,9 +163,9 @@ fingerprint readers exactly as much as to Gaze. `faillock --user "$USER"` shows
 what has been recorded, and `faillock --reset` clears it.
 :::
 
-## require_confirmation
+## require_confirmation_lock_screen
 
-With `require_confirmation = true`, the face match unlocks the KDE lock screen on
+With `require_confirmation_lock_screen = true`, the face match unlocks the KDE lock screen on
 its own. There is no way to present a confirmation there: the greeter never
 delivers a response to a noninteractive slot, so asking would hang that slot for
 the rest of the lock rather than ask anybody anything. Denying the match instead
