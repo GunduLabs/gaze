@@ -357,6 +357,24 @@ pub async fn seat0_session_uids_on(connection: &zbus::Connection) -> anyhow::Res
     Ok(uids)
 }
 
+/// The object path of every session logind currently knows about, on any seat.
+pub async fn session_paths_on(connection: &zbus::Connection) -> anyhow::Result<Vec<String>> {
+    let proxy = zbus::Proxy::new(
+        connection,
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1",
+        "org.freedesktop.login1.Manager",
+    )
+    .await?;
+    let sessions: Vec<(String, u32, String, String, zbus::zvariant::OwnedObjectPath)> =
+        proxy.call("ListSessions", &()).await?;
+
+    Ok(sessions
+        .into_iter()
+        .map(|(_, _, _, _, path)| path.to_string())
+        .collect())
+}
+
 /// Treats an unreadable session as live, so a failed lookup keeps the seat looking occupied.
 async fn session_is_closing(
     connection: &zbus::Connection,
