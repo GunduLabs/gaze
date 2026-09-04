@@ -611,25 +611,6 @@ async fn request_verify_start(
     }
 }
 
-pub async fn authenticate_biometric(
-    username: &str,
-    service: Option<&str>,
-) -> anyhow::Result<AuthOutcome> {
-    Ok(authenticate_biometric_with_status(username, service)
-        .await?
-        .0)
-}
-
-pub async fn authenticate_biometric_with_status(
-    username: &str,
-    service: Option<&str>,
-) -> anyhow::Result<(AuthOutcome, Option<gaze_core::dbus::CaptureStatus>)> {
-    let (_config, proxy) = setup_auth_env()
-        .await
-        .map_err(|e| anyhow::anyhow!("PAM error: {}", e))?;
-    authenticate_biometric_with_status_on(&proxy, username, service).await
-}
-
 pub async fn authenticate_biometric_with_status_on_and_notify<F>(
     proxy: &GazeProxy<'static>,
     username: &str,
