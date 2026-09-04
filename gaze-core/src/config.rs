@@ -1021,6 +1021,36 @@ pub fn unknown_config_keys(contents: &str) -> Vec<String> {
     unknown
 }
 
+fn replace_file_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("config path must have a parent directory"))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| std::io::Error::other("config path must have a valid file name"))?;
+    let mode = std::fs::metadata(path)
+        .map(|meta| meta.permissions().mode() & 0o777)
+        .unwrap_or(DEFAULT_CONFIG_MODE);
+
+    let tmp = parent.join(format!(".{file_name}.{}.tmp", std::process::id()));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp)?;
+    if let Err(e) = file.write_all(contents.as_bytes()).and_then(|_| file.flush()) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    drop(file);
+    if let Err(e) = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    std::fs::rename(&tmp, path)
+}
+
 impl Config {
     pub fn load() -> anyhow::Result<Self> {
         Self::load_from(CONFIG_PATH)
@@ -1030,7 +1060,7 @@ impl Config {
         if Path::new(path).exists() {
             let contents = std::fs::read_to_string(path)?;
             let contents = if let Some(migrated) = migrate_legacy_config_contents(&contents) {
-                if let Err(e) = std::fs::write(path, &migrated) {
+                if let Err(e) = replace_file_atomically(Path::new(path), &migrated) {
                     tracing::warn!("Failed to write migrated config to {path}: {e}");
                 } else {
                     tracing::info!("Migrated legacy configuration in {path}");
