@@ -1038,7 +1038,10 @@ fn replace_file_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
         .create_new(true)
         .mode(0o600)
         .open(&tmp)?;
-    if let Err(e) = file.write_all(contents.as_bytes()).and_then(|_| file.flush()) {
+    if let Err(e) = file
+        .write_all(contents.as_bytes())
+        .and_then(|_| file.flush())
+    {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
