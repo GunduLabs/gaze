@@ -385,7 +385,7 @@ impl UserDatabase {
             let mut templates = self.list_template_ids(username, face_name)?;
             while templates.len() >= self.max_templates && self.max_templates > 0 {
                 let oldest_id = templates.remove(0);
-                self.remove_face_template(username, face_name, &oldest_id)
+                self.remove_template_dir(username, face_name, &oldest_id)
                     .map_err(|e| UserDbError::Io(std::io::Error::other(e.to_string())))?;
             }
         }
@@ -449,21 +449,21 @@ impl UserDatabase {
         Ok(templates)
     }
 
-    pub fn remove_face_template(
-        &mut self,
+    fn remove_template_dir(
+        &self,
         username: &str,
         face_name: &str,
         template_id: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         Self::validate_username(username).map_err(|e| anyhow::anyhow!(e.to_string()))?;
         Self::validate_face_name(face_name).map_err(|e| anyhow::anyhow!(e.to_string()))?;
         Self::validate_template_id(template_id).map_err(|e| anyhow::anyhow!(e.to_string()))?;
         let template_dir = self.face_dir(username, face_name).join(template_id);
-        if template_dir.exists() {
-            Self::remove_private_dir_all(&template_dir)?;
-            self.load_all()?;
+        if !template_dir.exists() {
+            return Ok(false);
         }
-        Ok(())
+        Self::remove_private_dir_all(&template_dir)?;
+        Ok(true)
     }
 
     pub fn remove_face(&mut self, username: &str, face_name: &str) -> Result<(), UserDbError> {
