@@ -2014,7 +2014,12 @@ pub async fn watch_session_locks(conn: zbus::Connection, lock_epochs: LockEpochs
             continue;
         };
 
+        let live = gaze_core::dbus::session_paths_on(&conn).await.ok();
+
         let mut epochs = lock_epochs.lock().await;
+        if let Some(live) = live {
+            epochs.retain(|session, _| live.iter().any(|path| path == session));
+        }
         if locked {
             epochs.entry(path).or_insert_with(std::time::Instant::now);
         } else {
