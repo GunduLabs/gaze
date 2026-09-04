@@ -63,10 +63,6 @@ pub unsafe fn parse_raw_pam_options(argc: c_int, argv: *const *const c_char) -> 
     options
 }
 
-pub unsafe fn parse_raw_pam_mode(argc: c_int, argv: *const *const c_char) -> PamMode {
-    unsafe { parse_raw_pam_options(argc, argv).mode }
-}
-
 // Polkit dialogs ignore echo-off confirmation prompts, so keep a password request pending
 // for the agent to answer and flip the dialog into confirm mode via the info-message token.
 unsafe fn confirm_via_polkit_dialog(pamh: PamHandle) -> c_int {
@@ -230,14 +226,6 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, _options: Pa
 
     if is_polkit {
         return unsafe { confirm_via_polkit_dialog(pamh) };
-    }
-
-    if has_interactive_tty() {
-        return if unsafe { confirm_authentication(pamh, prompt_line) } {
-            PAM_SUCCESS
-        } else {
-            PAM_AUTH_ERR
-        };
     }
 
     if unsafe { confirm_authentication(pamh, prompt_line) } {
