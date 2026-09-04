@@ -603,12 +603,25 @@ impl Drop for Camera {
 
 pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
     let sz = frame.size()?;
-    let total = (sz.width * sz.height * 3) as usize;
-    let mut bytes = vec![0u8; total];
-    unsafe {
-        std::ptr::copy_nonoverlapping(frame.data(), bytes.as_mut_ptr(), total);
-    }
-    Ok(bytes)
+    anyhow::ensure!(
+        frame.typ() == opencv::core::CV_8UC3,
+        "expected an 8-bit 3-channel Mat, got type {}",
+        frame.typ()
+    );
+    anyhow::ensure!(frame.is_continuous(), "Mat rows are not tightly packed");
+
+    let expected = (sz.width.max(0) as usize)
+        .checked_mul(sz.height.max(0) as usize)
+        .and_then(|pixels| pixels.checked_mul(3))
+        .ok_or_else(|| anyhow::anyhow!("Mat dimensions overflow a byte count"))?;
+    let bytes = frame.data_bytes()?;
+    anyhow::ensure!(
+        bytes.len() == expected,
+        "Mat holds {} bytes, expected {expected}",
+        bytes.len()
+    );
+
+    Ok(bytes.to_vec())
 }
 
 impl Camera {
