@@ -3400,6 +3400,10 @@ impl AuthDaemon {
             .liveness
             .validate()
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        new_config
+            .cameras
+            .validate()
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
 
         self.cancel_active_tasks().await;
 
