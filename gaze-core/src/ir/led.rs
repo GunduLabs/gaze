@@ -321,4 +321,171 @@ mod tests {
         assert!(!looks_like_face_auth_control(&[1, 3, 4, 0, 0, 0, 0, 0, 0]));
         assert!(!looks_like_face_auth_control(&[1, 3, 2, 0, 0, 0, 0, 0, 1]));
     }
+
+    fn led_with(node: &str, on: Vec<RuntimeControl>, off: Vec<RuntimeControl>) -> IrLed {
+        IrLed {
+            node: node.to_string(),
+            profile: IrProfile {
+                name: "Test".to_string(),
+                on_sequence: on,
+                off_sequence: off,
+                source: "unit test".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn the_query_code_matches_the_kernels_iowr_encoding() {
+        // _IOWR('u', 0x21, struct uvc_xu_control_query): dir=3, size=16, type='u', nr=0x21.
+        let expected = (3 << 30)
+            | ((std::mem::size_of::<XuCtrlQuery>() as libc::c_ulong) << 16)
+            | ((b'u' as libc::c_ulong) << 8)
+            | 0x21;
+        assert_eq!(UVC_CTRL_QUERY, expected);
+        assert_eq!(UVC_CTRL_QUERY, 0xC010_7521);
+    }
+
+    #[test]
+    fn the_uvc_query_codes_are_the_ones_the_spec_defines() {
+        assert_eq!(SET_CUR, 0x01);
+        assert_eq!(GET_CUR, 0x81);
+    }
+
+    #[test]
+    fn the_face_auth_payloads_differ_only_in_the_emitter_mode() {
+        assert_eq!(FACE_AUTH_ON_ALT_FRAME.len(), FACE_AUTH_LEN);
+        assert_eq!(FACE_AUTH_OFF_DISABLED.len(), FACE_AUTH_LEN);
+
+        for (index, (on, off)) in FACE_AUTH_ON_ALT_FRAME
+            .iter()
+            .zip(FACE_AUTH_OFF_DISABLED.iter())
+            .enumerate()
+        {
+            if index == 2 {
+                assert_ne!(on, off, "byte 2 carries the emitter mode");
+            } else {
+                assert_eq!(on, off, "byte {index} is shared by both payloads");
+            }
+        }
+        assert_eq!(
+            FACE_AUTH_ON_ALT_FRAME[2], 2,
+            "2 strobes on alternate frames"
+        );
+        assert_eq!(FACE_AUTH_OFF_DISABLED[2], 1, "1 disables the emitter");
+    }
+
+    #[test]
+    fn a_face_auth_probe_rejects_payloads_from_unrelated_controls() {
+        assert!(!looks_like_face_auth_control(&[0, 3, 2, 0, 0, 0, 0, 0, 0]));
+        assert!(!looks_like_face_auth_control(&[1, 2, 2, 0, 0, 0, 0, 0, 0]));
+        assert!(!looks_like_face_auth_control(&[1, 3, 0, 0, 0, 0, 0, 0, 0]));
+        assert!(!looks_like_face_auth_control(&[0; FACE_AUTH_LEN]));
+        assert!(!looks_like_face_auth_control(&[0xff; FACE_AUTH_LEN]));
+    }
+
+    #[test]
+    fn a_face_auth_probe_only_walks_units_the_spec_allows() {
+        assert!(FACE_AUTH_PROBE_MAX_UNIT >= 1);
+        assert!(
+            FACE_AUTH_PROBE_MAX_UNIT <= 31,
+            "UVC entity ids are 5 bits wide"
+        );
+        assert_eq!(FACE_AUTH_SELECTOR, 0x06);
+    }
+
+    #[test]
+    fn a_runtime_control_keeps_everything_the_static_control_carried() {
+        let converted = RuntimeControl::from_static(&TEST_ON[0]);
+
+        assert_eq!(converted, RuntimeControl::set(3, 2, &[1, 2, 3, 4]));
+        assert_eq!(converted.query, IrQuery::SetCur);
+        assert_eq!(converted.payload, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn a_get_cur_step_does_not_silently_become_a_set_cur() {
+        static PROBE_BYTES: &[u8] = &[0; 9];
+        static PROBE: IrControl = IrControl {
+            unit: 7,
+            selector: 6,
+            query: IrQuery::GetCur,
+            payload: PROBE_BYTES,
+        };
+
+        let converted = RuntimeControl::from_static(&PROBE);
+
+        assert_eq!(converted.query, IrQuery::GetCur);
+        assert_ne!(converted, RuntimeControl::set(7, 6, PROBE_BYTES));
+    }
+
+    #[test]
+    fn a_profile_carries_both_sequences_over_from_its_static_device() {
+        let profile = IrProfile::from_static(&TEST_DEVICE);
+
+        assert_eq!(profile.name, "Sample IR Camera");
+        assert_eq!(profile.source, "unit test");
+        assert_eq!(profile.on_sequence.len(), 1);
+        assert_eq!(profile.off_sequence.len(), 1);
+        assert_eq!(profile.on_sequence[0].unit, 3);
+        assert_eq!(profile.on_sequence[0].selector, 2);
+    }
+
+    #[test]
+    fn an_empty_sequence_short_circuits_before_the_device_is_opened() {
+        // A profile with nothing to send must not fail just because its node is gone.
+        let led = led_with("/dev/gaze-no-such-node", Vec::new(), Vec::new());
+
+        led.set(true).expect("an empty on-sequence is a no-op");
+        led.set(false).expect("an empty off-sequence is a no-op");
+    }
+
+    #[test]
+    fn a_sequence_against_a_missing_node_reports_the_open_failure() {
+        let led = led_with(
+            "/dev/gaze-no-such-node",
+            vec![RuntimeControl::set(3, 2, &[1])],
+            vec![RuntimeControl::set(3, 2, &[0])],
+        );
+
+        assert!(led.set(true).is_err());
+        assert!(led.set(false).is_err());
+    }
+
+    #[test]
+    fn an_ioctl_against_a_non_uvc_node_fails_instead_of_reporting_success() {
+        let file = std::fs::File::open("/dev/null").unwrap();
+        let mut payload = [0_u8; FACE_AUTH_LEN];
+
+        let result = xu_ioctl(
+            file.as_raw_fd(),
+            1,
+            FACE_AUTH_SELECTOR,
+            GET_CUR,
+            &mut payload,
+        );
+
+        assert!(result.is_err(), "/dev/null cannot answer a UVC XU query");
+    }
+
+    #[test]
+    fn an_ioctl_failure_names_the_node_and_the_control_that_failed() {
+        let led = led_with("/dev/null", Vec::new(), Vec::new());
+        let file = std::fs::File::open("/dev/null").unwrap();
+
+        let err = led
+            .write_control(file.as_raw_fd(), &RuntimeControl::set(0x0c, 0x06, &[0; 9]))
+            .expect_err("/dev/null cannot answer a UVC XU query");
+        let message = err.to_string();
+
+        assert!(message.contains("/dev/null"), "{message}");
+        assert!(message.contains("unit=0x0c"), "{message}");
+        assert!(message.contains("selector=0x06"), "{message}");
+        assert!(message.contains("size=9"), "{message}");
+    }
+
+    #[test]
+    fn for_path_ignores_a_path_that_is_not_a_video_node() {
+        assert!(IrLed::for_path("/dev/null").is_none());
+        assert!(IrLed::for_path("").is_none());
+    }
 }

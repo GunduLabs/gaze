@@ -356,6 +356,11 @@ fn iou(box1: &[f32; 4], box2: &[f32; 4]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opencv::core::{CV_8UC3, Scalar};
+
+    fn filled(cols: i32, rows: i32, value: f64) -> Mat {
+        Mat::new_rows_cols_with_default(rows, cols, CV_8UC3, Scalar::all(value)).unwrap()
+    }
 
     #[test]
     fn test_iou() {
@@ -392,5 +397,144 @@ mod tests {
         let keep = nms(&boxes, &scores, 0.4);
         assert_eq!(keep.len(), 3);
         assert!(keep.contains(&1));
+    }
+
+    #[test]
+    fn iou_of_a_box_with_itself_is_one() {
+        let square = [10.0, 10.0, 20.0, 20.0];
+        assert!((iou(&square, &square) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn iou_is_symmetric() {
+        let a = [0.0, 0.0, 10.0, 10.0];
+        let b = [5.0, 5.0, 15.0, 15.0];
+        assert_eq!(iou(&a, &b), iou(&b, &a));
+    }
+
+    #[test]
+    fn iou_of_a_fully_contained_box_is_the_area_ratio() {
+        let outer = [0.0, 0.0, 10.0, 10.0];
+        let inner = [0.0, 0.0, 5.0, 5.0];
+        assert!((iou(&outer, &inner) - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn boxes_that_only_touch_along_an_edge_do_not_overlap() {
+        let left = [0.0, 0.0, 10.0, 10.0];
+        let right = [10.0, 0.0, 20.0, 10.0];
+        assert_eq!(iou(&left, &right), 0.0);
+    }
+
+    #[test]
+    fn degenerate_boxes_score_zero_instead_of_dividing_by_zero() {
+        let point = [5.0, 5.0, 5.0, 5.0];
+        assert_eq!(iou(&point, &point), 0.0);
+        assert!(iou(&point, &[0.0, 0.0, 10.0, 10.0]).is_finite());
+    }
+
+    #[test]
+    fn nms_on_no_candidates_keeps_nothing() {
+        assert!(nms(&[], &[], 0.4).is_empty());
+    }
+
+    #[test]
+    fn nms_keeps_a_lone_candidate() {
+        assert_eq!(nms(&[[0.0, 0.0, 10.0, 10.0]], &[0.5], 0.4), vec![0]);
+    }
+
+    #[test]
+    fn nms_returns_survivors_in_descending_score_order() {
+        let boxes = vec![
+            [0.0, 0.0, 10.0, 10.0],
+            [100.0, 100.0, 110.0, 110.0],
+            [200.0, 200.0, 210.0, 210.0],
+        ];
+        let scores = vec![0.1, 0.9, 0.5];
+
+        let keep = nms(&boxes, &scores, 0.4);
+
+        assert_eq!(keep, vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn nms_suppresses_an_overlap_that_exactly_reaches_the_threshold() {
+        // Half of the taller box is covered by the shorter one, so their IoU is exactly 0.5.
+        let boxes = vec![[0.0, 0.0, 10.0, 10.0], [0.0, 0.0, 10.0, 5.0]];
+        let scores = vec![0.9, 0.8];
+
+        assert_eq!(iou(&boxes[0], &boxes[1]), 0.5);
+        assert_eq!(nms(&boxes, &scores, 0.5), vec![0]);
+        assert_eq!(nms(&boxes, &scores, 0.51), vec![0, 1]);
+    }
+
+    #[test]
+    fn pad_to_square_centres_a_wide_frame_between_top_and_bottom_bars() {
+        let padded = FaceDetector::pad_to_square(&filled(4, 2, 200.0)).unwrap();
+
+        assert_eq!((padded.cols(), padded.rows()), (4, 4));
+        let bytes = padded.data_bytes().unwrap();
+        let row = 4 * 3;
+        assert!(
+            bytes[..row].iter().all(|b| *b == 0),
+            "top bar must be black"
+        );
+        assert!(bytes[row..row * 2].iter().all(|b| *b == 200));
+        assert!(bytes[row * 2..row * 3].iter().all(|b| *b == 200));
+        assert!(
+            bytes[row * 3..].iter().all(|b| *b == 0),
+            "bottom bar must be black"
+        );
+    }
+
+    #[test]
+    fn pad_to_square_gives_an_odd_remainder_to_the_bottom_and_right() {
+        let padded = FaceDetector::pad_to_square(&filled(5, 2, 200.0)).unwrap();
+        assert_eq!((padded.cols(), padded.rows()), (5, 5));
+
+        let bytes = padded.data_bytes().unwrap();
+        let row = 5 * 3;
+        // top = (5 - 2) / 2 = 1, bottom = 5 - 2 - 1 = 2.
+        assert!(bytes[..row].iter().all(|b| *b == 0));
+        assert!(bytes[row..row * 3].iter().all(|b| *b == 200));
+        assert!(bytes[row * 3..].iter().all(|b| *b == 0));
+    }
+
+    #[test]
+    fn pad_to_square_widens_a_tall_frame() {
+        let padded = FaceDetector::pad_to_square(&filled(2, 5, 200.0)).unwrap();
+        assert_eq!((padded.cols(), padded.rows()), (5, 5));
+    }
+
+    #[test]
+    fn pad_to_square_leaves_an_already_square_frame_alone() {
+        let padded = FaceDetector::pad_to_square(&filled(3, 3, 200.0)).unwrap();
+
+        assert_eq!((padded.cols(), padded.rows()), (3, 3));
+        assert!(padded.data_bytes().unwrap().iter().all(|b| *b == 200));
+    }
+
+    #[test]
+    fn detect_errors_describe_themselves() {
+        assert_eq!(
+            DetectError::InitFailed("no model".to_string()).to_string(),
+            "detector init failed: no model"
+        );
+        assert_eq!(
+            DetectError::NoFacesDetected.to_string(),
+            "no faces detected"
+        );
+        assert_eq!(
+            DetectError::InferenceFailed("bad shape".to_string()).to_string(),
+            "inference failed: bad shape"
+        );
+        let io = DetectError::Io(std::io::Error::from(std::io::ErrorKind::NotFound));
+        assert!(io.to_string().starts_with("IO: "));
+    }
+
+    #[test]
+    fn an_io_failure_converts_into_the_io_variant() {
+        let err: DetectError = std::io::Error::from(std::io::ErrorKind::PermissionDenied).into();
+        assert!(matches!(err, DetectError::Io(_)));
     }
 }
