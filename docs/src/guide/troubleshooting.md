@@ -13,6 +13,11 @@ gaze doctor
 
 This checks the service, config, DBus, PipeWire camera visibility, enrollments, PAM setup, desktop integration, and TPM requirements without capturing camera frames or changing the system. Follow the suggested fix printed below each warning or error. A result with errors exits with status `1`, which also makes the command suitable for support scripts.
 
+If an attempt is ending sooner than you expect, or you want to know which deadline a message
+came from, [One authentication attempt](/guide/how-it-works#one-authentication-attempt) walks
+through the whole flow, and [Timeouts and budgets](/guide/how-it-works#timeouts-and-budgets)
+lists every deadline with the log line it produces.
+
 ## 1. Daemon is not running
 
 Check the daemon:

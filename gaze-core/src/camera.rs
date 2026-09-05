@@ -563,6 +563,12 @@ fn bind_pipewire_fd(element: &str, fd: RawFd) -> String {
     }
 }
 
+struct V4l2Retry {
+    fallback: V4l2Fallback,
+    camera_source: String,
+    want_color: bool,
+}
+
 pub struct Camera {
     pipeline: gstreamer::Pipeline,
     appsink: gstreamer_app::AppSink,
@@ -573,6 +579,7 @@ pub struct Camera {
     /// as one that never saw a face, which is the wrong thing to tell the user.
     stream_error: Option<String>,
     fps: Mutex<Option<f64>>,
+    v4l2_retry: Option<V4l2Retry>,
 }
 
 impl Drop for Camera {
@@ -684,7 +691,16 @@ impl Camera {
 
         let fallback = v4l2_fallback_for(&src_element);
         match Self::open_source_element(&bound, camera_source, force_ir_yuy2, session) {
-            Ok(camera) => Ok(camera),
+            Ok(mut camera) => {
+                if fallback != V4l2Fallback::None {
+                    camera.v4l2_retry = Some(V4l2Retry {
+                        fallback,
+                        camera_source: camera_source.to_string(),
+                        want_color,
+                    });
+                }
+                Ok(camera)
+            }
             Err(err) if fallback != V4l2Fallback::None => {
                 warn!("Opening the PipeWire camera failed ({err:#}); trying a direct V4L2 device");
                 let node = match &fallback {
@@ -786,6 +802,7 @@ impl Camera {
             _pipewire: pipewire,
             stream_error: None,
             fps: Mutex::new(None),
+            v4l2_retry: None,
         })
     }
 
@@ -903,6 +920,45 @@ impl Camera {
 
     pub fn take_stream_error(&mut self) -> Option<String> {
         self.stream_error.take()
+    }
+
+    pub fn fall_back_to_v4l2(&mut self) -> Option<String> {
+        let retry = self.v4l2_retry.take()?;
+        let node = match &retry.fallback {
+            V4l2Fallback::AnyDevice => first_v4l2_node(retry.want_color),
+            V4l2Fallback::SameNode(target) => node_from_pipewire_target(target, retry.want_color),
+            V4l2Fallback::None => None,
+        }?;
+
+        if let Err(err) = self.pipeline.set_state(gstreamer::State::Null) {
+            warn!("Failed to stop the PipeWire pipeline before the V4L2 retry: {err}");
+            return None;
+        }
+        let _ = self
+            .pipeline
+            .state(Some(gstreamer::ClockTime::from_seconds(2)));
+        self._pipewire = None;
+
+        let force_ir_yuy2 = node_requires_forced_ir_yuy2(&node, retry.want_color);
+        match Self::open_source_element(
+            &format!("v4l2src device={node}"),
+            &retry.camera_source,
+            force_ir_yuy2,
+            None,
+        ) {
+            Ok(camera) => {
+                info!("Retrying the dark PipeWire stream on V4L2 camera node {node}");
+                *self = camera;
+                Some(node)
+            }
+            Err(err) => {
+                warn!("V4L2 retry for {} failed: {err:#}", retry.camera_source);
+                self.stream_error = Some(format!(
+                    "The camera streamed only dark frames and its V4L2 node could not be opened: {err}"
+                ));
+                None
+            }
+        }
     }
 
     pub fn fps(&self) -> f64 {
