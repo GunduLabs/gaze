@@ -630,6 +630,42 @@ if is_opensuse_tumbleweed && [ "$ARCH" != "x86_64" ]; then
     exit 1
 fi
 
+# ── repository availability ───────────────────────────────────────────────────
+
+repo_metadata_url() {
+    if is_deb; then
+        printf '%s\n' "${PKG_BASE_URL}/deb/dists/${DISTRO_CODENAME}/Release"
+    elif is_opensuse_tumbleweed; then
+        printf '%s\n' "${PKG_BASE_URL}/rpm/opensuse/tumbleweed/${PKG_ARCH}/repodata/repomd.xml"
+    elif is_rpm; then
+        printf '%s\n' "${PKG_BASE_URL}/rpm/fedora/${DISTRO_VERSION_ID}/${PKG_ARCH}/repodata/repomd.xml"
+    fi
+}
+
+require_published_repository() {
+    metadata_url="$(repo_metadata_url)"
+    if [ -z "$metadata_url" ]; then
+        return 0
+    fi
+
+    metadata_status="$(curl -sS -I -o /dev/null -w '%{http_code}' --max-time 20 "$metadata_url" 2>/dev/null || true)"
+    case "$metadata_status" in
+    404 | 403)
+        fail "No Gaze package repository has been published for this platform yet."
+        say "Expected repository metadata at:"
+        link "$metadata_url"
+        say ""
+        say "This platform is supported by the installer, but its packages have not"
+        say "shipped in a release yet. Nothing has been changed on this system."
+        say "Please report it so a release can be cut:"
+        link "https://github.com/GunduLabs/gaze/issues"
+        exit 1
+        ;;
+    esac
+}
+
+require_published_repository
+
 # ── plan ──────────────────────────────────────────────────────────────────────
 
 plan() { printf '  %s\n' "• $*"; }

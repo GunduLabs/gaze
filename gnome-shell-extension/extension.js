@@ -291,7 +291,6 @@ const ensureAuthPromptConfirmButton = (authPrompt, extension) => {
 
 const enterAuthPromptConfirmMode = (authPrompt, serviceName, extension) => {
   try {
-    gazeTiming("CONFIRM_SHOWN", `svc=${serviceName} path=authPrompt`);
     authPrompt._queryingService = serviceName;
     authPrompt._confirmMode = true;
 
@@ -645,7 +644,7 @@ export default class GazeFaceAuthExtension extends Extension {
           this._faceStartProbe = null;
         }
         primeFaceCache(userName);
-        original.call(this, userName, hold);
+        return original.call(this, userName, hold);
       };
     });
 
@@ -827,10 +826,9 @@ export default class GazeFaceAuthExtension extends Extension {
         if (this._faceConfirmPending && serviceName === this._faceConfirmService) {
           this._faceConfirmPending = false;
           this._faceConfirmService = null;
-          original.call(this, serviceName, "");
-          return;
+          return original.call(this, serviceName, "");
         }
-        original.call(this, serviceName, answer);
+        return original.call(this, serviceName, answer);
       };
     });
 
