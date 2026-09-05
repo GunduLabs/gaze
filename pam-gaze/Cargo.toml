@@ -3,7 +3,7 @@
 
 [package]
 name = "pam-gaze"
-version = "0.2.12"
+version = "0.2.13"
 edition = "2024"
 description = "Facial authentication PAM module for Gaze"
 categories.workspace = true
