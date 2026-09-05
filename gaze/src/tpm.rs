@@ -367,4 +367,177 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "gaze-tpm-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn mode_of(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::symlink_metadata(path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777
+    }
+
+    #[test]
+    fn the_state_directory_is_created_private() {
+        let dir = scratch("mkdir");
+
+        ensure_private_dir(&dir).unwrap();
+
+        assert!(dir.is_dir());
+        assert_eq!(
+            mode_of(&dir),
+            0o700,
+            "the sealed DEK must not be world-readable"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_loosened_state_directory_is_tightened_again() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("relax");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        ensure_private_dir(&dir).unwrap();
+
+        assert_eq!(mode_of(&dir), 0o700);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_symlinked_state_directory_is_refused() {
+        let root = scratch("symlink");
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        let link = root.join("link");
+        std::os::unix::fs::symlink(root.join("real"), &link).unwrap();
+
+        let err = ensure_private_dir(&link).expect_err("a symlink could point anywhere");
+
+        assert!(err.to_string().contains("not a private directory"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_state_path_that_is_a_file_is_refused() {
+        let root = scratch("file");
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("dek");
+        std::fs::write(&file, b"not a directory").unwrap();
+
+        assert!(ensure_private_dir(&file).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_sealed_blob_is_written_owner_only_and_leaves_no_temporary_behind() {
+        let dir = scratch("write");
+        ensure_private_dir(&dir).unwrap();
+        let path = dir.join(PRIV_FILE);
+
+        write_private_file(&path, b"sealed").unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"sealed");
+        assert_eq!(mode_of(&path), 0o600);
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| name.to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "staging files left behind: {leftovers:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rewriting_a_sealed_blob_replaces_it_rather_than_failing() {
+        let dir = scratch("replace");
+        ensure_private_dir(&dir).unwrap();
+        let path = dir.join(PUB_FILE);
+
+        write_private_file(&path, b"first").unwrap();
+        write_private_file(&path, b"second").unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        assert_eq!(mode_of(&path), 0o600);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn writing_into_a_missing_directory_reports_the_path_it_could_not_create() {
+        let path = scratch("absent").join("nested").join(PRIV_FILE);
+
+        let err = write_private_file(&path, b"sealed").expect_err("the parent does not exist");
+
+        assert!(err.to_string().contains("failed to create"), "{err}");
+    }
+
+    #[test]
+    fn the_sealed_object_template_is_a_marshallable_keyed_hash() {
+        let public = sealed_object_public().expect("the template needs no TPM to build");
+
+        assert!(
+            matches!(&public, Public::KeyedHash { .. }),
+            "sealing needs a keyed-hash object, not a key"
+        );
+        assert!(
+            !public.marshall().unwrap().is_empty(),
+            "the template has to survive a round trip through disk"
+        );
+    }
+
+    #[test]
+    fn a_sealed_object_template_round_trips_through_its_on_disk_form() {
+        let public = sealed_object_public().unwrap();
+
+        let bytes = public.marshall().unwrap();
+        let parsed = Public::unmarshall(&bytes).unwrap();
+
+        assert_eq!(parsed.marshall().unwrap(), bytes);
+    }
+
+    #[test]
+    fn the_key_length_the_tpm_seals_matches_the_cipher_that_uses_it() {
+        assert_eq!(
+            KEY_LEN, 32,
+            "sealing a DEK of a different size would break unseal"
+        );
+    }
+
+    #[test]
+    fn the_state_directory_lives_under_var_lib() {
+        assert_eq!(STATE_DIR, "/var/lib/gaze/tpm");
+        assert!(Path::new(STATE_DIR).is_absolute());
+    }
+
+    #[test]
+    fn a_host_without_a_tpm_says_so_instead_of_failing_obscurely() {
+        if !present_devices().is_empty() || tcti_override_present() {
+            return;
+        }
+        let dir = scratch("no-tpm");
+
+        let err = load_or_create_dek(&dir).expect_err("there is no TPM to seal against");
+        let message = err.to_string();
+
+        assert!(message.contains("no TPM device found"), "{message}");
+        assert!(message.contains(TPM_RM_DEVICE), "{message}");
+        assert!(message.contains(TPM_RAW_DEVICE), "{message}");
+        assert!(
+            !dir.exists(),
+            "the state directory should not be created when there is no TPM"
+        );
+    }
 }

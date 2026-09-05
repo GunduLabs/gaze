@@ -98,3 +98,84 @@ fn wait_for_registration(read_fd: OwnedFd) {
     let mut buf = [0u8; 16];
     while matches!(file.read(&mut buf), Ok(n) if n > 0) {}
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::time::Instant;
+
+    fn is_cloexec(fd: RawFd) -> bool {
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        assert_ne!(flags, -1, "F_GETFD failed on fd {fd}");
+        flags & libc::FD_CLOEXEC != 0
+    }
+
+    #[test]
+    fn the_notify_fd_does_not_collide_with_the_standard_streams() {
+        assert_eq!(NOTIFY_FD, 3);
+        assert!(NOTIFY_FD > libc::STDERR_FILENO);
+    }
+
+    #[test]
+    fn pipe_cloexec_hands_back_a_connected_pair() {
+        let (read_fd, write_fd) = pipe_cloexec().unwrap();
+
+        let mut writer = std::fs::File::from(write_fd);
+        writer.write_all(b"registered").unwrap();
+        drop(writer);
+
+        let mut reader = std::fs::File::from(read_fd);
+        let mut got = String::new();
+        reader.read_to_string(&mut got).unwrap();
+        assert_eq!(got, "registered");
+    }
+
+    #[test]
+    fn pipe_cloexec_marks_both_ends_close_on_exec() {
+        let (read_fd, write_fd) = pipe_cloexec().unwrap();
+
+        assert!(
+            is_cloexec(read_fd.as_raw_fd()),
+            "the read end must not leak into pkttyagent"
+        );
+        assert!(
+            is_cloexec(write_fd.as_raw_fd()),
+            "the write end is duplicated onto fd 3 by pre_exec, so it must start close-on-exec"
+        );
+    }
+
+    #[test]
+    fn waiting_for_registration_returns_as_soon_as_the_agent_closes_the_fd() {
+        let (read_fd, write_fd) = pipe_cloexec().unwrap();
+        drop(write_fd);
+
+        let started = Instant::now();
+        wait_for_registration(read_fd);
+
+        assert!(
+            started.elapsed().as_millis() < u128::try_from(REGISTER_TIMEOUT_MS).unwrap(),
+            "EOF should end the wait well before the {REGISTER_TIMEOUT_MS}ms timeout"
+        );
+    }
+
+    #[test]
+    fn waiting_for_registration_drains_a_chatty_agent_before_returning() {
+        let (read_fd, write_fd) = pipe_cloexec().unwrap();
+        let mut writer = std::fs::File::from(write_fd);
+        // More than the 16-byte read buffer, so the drain loop has to go round more than once.
+        writer.write_all(&[b'x'; 64]).unwrap();
+        drop(writer);
+
+        let started = Instant::now();
+        wait_for_registration(read_fd);
+
+        assert!(started.elapsed().as_millis() < u128::try_from(REGISTER_TIMEOUT_MS).unwrap());
+    }
+
+    #[test]
+    fn an_agent_that_never_started_drops_without_reaping_anything() {
+        let agent = PolkitAgent { child: None };
+        drop(agent);
+    }
+}
