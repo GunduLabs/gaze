@@ -39,12 +39,37 @@ gsettings set org.gnome.shell enabled-extensions \
 gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
+### The extension disappears again after a logout
+
+Adding the UUID by hand names an extension the running GNOME Shell has never scanned. Shell drops UUIDs it does not recognise the next time it rewrites `enabled-extensions`, which it does when the session ends or when you toggle any other extension. So the setting can look correct right after install and be gone after the first logout, without anything having failed.
+
+Reboot rather than log out after installing, so Shell scans the extension before it rewrites the list.
+
+If it has already vanished, run the two commands under [Enable the extension](#enable-the-extension) from a GNOME session that started **after** the package was installed. `gaze doctor` reports this case as `GNOME extension: installed, but not enabled for the current user` and prints the same steps.
+
+The one-line installer also leaves a one-shot autostart entry, `~/.config/autostart/gaze-gnome-enable.desktop`, that re-applies the enable at your next GNOME login and then deletes itself along with its helper at `~/.local/share/gaze/gnome-enable.sh`. Both are safe to delete by hand if you would rather do it yourself.
+
+## Open the extension preferences
+
+```bash
+gnome-extensions prefs gaze@gundulabs.com
+```
+
+Or open the **Extensions** app (Extension Manager works too), find **Gaze**, and open its settings from the row.
+
+The window has a single **Behavior** page with two groups:
+
+| Group | Contains |
+|---|---|
+| **Face authentication** | `Enable face authentication (lock screen)`, `Face retry mode`, `Maximum face tries`. Applies to this session's lock screen only. |
+| **GDM login screen** | `Enable face auth at GDM login`. Applies to the login screen and asks for admin authorization. |
+
 ## Retry behavior
 
 The extension decides how many times face authentication is retried within one
-authentication cycle. Both settings live in the extension preferences under
-**Behavior**, and both are per dconf profile, so GDM and your desktop session can
-differ.
+authentication cycle. Both settings live under **Behavior → Face authentication**
+in the extension preferences, and both are per dconf profile, so GDM and your
+desktop session can differ.
 
 | Setting | dconf key | Values | Default |
 |---|---|---|---|
@@ -72,9 +97,14 @@ To set these for the GDM login screen, write them into the same
 
 ## Create a face profile
 
-Open the Gaze extension settings from GNOME Extensions or Extension Manager, then use **Face profiles** to create or refine a profile for your current user. The profile name defaults to `default`, matching the CLI quick-start flow.
+Enrollment does not live in the extension preferences. Use the Gaze settings app or the CLI:
 
-Keep the settings window open while enrollment is running. Follow the camera prompts until the profile is saved, or press **Cancel** to stop enrollment.
+```bash
+gaze-gui             # Faces list, press + to enroll
+gaze add-face default
+```
+
+The profile name defaults to `default`, matching the CLI quick-start flow. Follow the camera prompts until the profile is saved.
 
 ## Login warning (GNOME keyring)
 
@@ -86,7 +116,7 @@ When that happens, apps that read saved secrets (browser credentials, git creden
 
 ## Optional: enable face at GDM login
 
-The easiest way is the **Enable face auth at GDM login** switch in the Gaze extension preferences (Extensions app → Gaze → cog icon). Toggling it triggers a polkit prompt, then the daemon writes `/etc/dconf/db/gdm.d/99-gaze` and runs `dconf update` for you.
+The easiest way is the **Enable face auth at GDM login** switch, under **Behavior → GDM login screen** in the [extension preferences](#open-the-extension-preferences). Toggling it triggers a polkit prompt, then the daemon writes `/etc/dconf/db/gdm.d/99-gaze` and runs `dconf update` for you.
 
 Reboot to apply. Restarting GDM also works, but it immediately logs out active desktop sessions.
 
@@ -110,7 +140,7 @@ At the GDM login screen, Gaze still matches against the selected user's enrolled
 
 ## Disable face at GDM login
 
-Flip the **Enable face auth at GDM login** switch back off in the extension preferences, or remove the override manually:
+Flip the **Enable face auth at GDM login** switch back off under **Behavior → GDM login screen**, or remove the override manually:
 
 ```bash
 sudo rm -f /etc/dconf/db/gdm.d/99-gaze*

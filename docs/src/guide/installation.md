@@ -197,7 +197,9 @@ gnome-extensions enable gaze@gundulabs.com
 gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
-Log out and back in once after installing or updating the extension if the lock screen does not pick it up immediately. GDM login face auth stays disabled unless you explicitly enable it; see the [GNOME Extension guide](/guide/gnome) before doing that.
+Reboot once after installing or updating the extension if the lock screen does not pick it up immediately. Run the two commands above from a session that started **after** the package was installed: GNOME Shell drops extension IDs it has not scanned yet, so enabling one from the session you installed in can look right and then be gone after the next logout. See [The extension disappears again after a logout](/guide/gnome#the-extension-disappears-again-after-a-logout).
+
+GDM login face auth stays disabled unless you explicitly enable it; see the [GNOME Extension guide](/guide/gnome) before doing that.
 
 ### KDE Plasma and other PAM-based desktops
 

@@ -437,7 +437,7 @@ Gaze supports enrolling face profiles for both RGB and IR cameras. Depending on 
 ### Upgrading Existing Profiles
 
 If you connect or configure an IR camera after you have already enrolled a face, your existing face profiles will only contain RGB captures. 
-- You can see which capture types exist for each face profile in the CLI (`gaze list-faces`) and the GUI settings window, which display `[RGB]` and `[IR]` status badges.
+- You can see which capture types exist for each face profile in the CLI (`gaze list-faces`) and the GUI settings window, which display `[RGB]` and `[IR]` badges: green when the profile covers that spectrum, amber when a camera is configured for it but the profile has no captures from it, and grey when no camera is configured for that spectrum at all.
 - To add the missing IR captures to an existing profile, ensure your IR camera is configured, and run:
   ```bash
   gaze refine-face <profile-name>

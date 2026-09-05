@@ -22,6 +22,7 @@ use gaze_core::config::{
 use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon, connect_gaze,
     dbus_error_message, dbus_is_file_not_found, load_config_from_daemon,
+    try_load_config_from_daemon,
 };
 use std::{future::Future, time::Duration};
 use tui::{AuthScreen, BusyScreen, EnrollScreen, Tone, TuiAction, TuiTerminal};
@@ -983,8 +984,48 @@ async fn handle_auth(
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SpectrumBadge {
+    /// The profile holds captures for this spectrum.
+    Enrolled,
+    /// A camera is configured for it, but this profile never captured it.
+    Missing,
+    /// No camera for this spectrum, so there is nothing to enroll.
+    Unused,
+}
+
+/// A spectrum you never configured a camera for is not a gap in the profile, so
+/// it must not read like one.
+fn spectrum_badge_state(enrolled: bool, configured: bool) -> SpectrumBadge {
+    match (enrolled, configured) {
+        (true, _) => SpectrumBadge::Enrolled,
+        (false, true) => SpectrumBadge::Missing,
+        (false, false) => SpectrumBadge::Unused,
+    }
+}
+
+fn spectrum_badge(label: &str, enrolled: bool, configured: bool) -> String {
+    let badge = format!("[{label}]");
+    match spectrum_badge_state(enrolled, configured) {
+        SpectrumBadge::Enrolled => style(badge).green().bold().to_string(),
+        SpectrumBadge::Missing => style(badge).yellow().bold().to_string(),
+        SpectrumBadge::Unused => style(badge).dim().to_string(),
+    }
+}
+
 async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<()> {
     let term = Term::stdout();
+    let cameras = try_load_config_from_daemon(proxy)
+        .await
+        .ok()
+        .flatten()
+        .map(|config| {
+            (
+                !config.cameras.rgb.trim().is_empty(),
+                !config.cameras.ir.trim().is_empty(),
+            )
+        });
+    let (rgb_configured, ir_configured) = cameras.unwrap_or((true, true));
     let result = run_busy(
         "Face database",
         format!("Fetching faces for {user}..."),
@@ -1009,16 +1050,8 @@ async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
                     style(user).bold()
                 ))?;
                 for (face, count, has_rgb, has_ir) in faces {
-                    let rgb_badge = if has_rgb {
-                        style("[RGB]").green().bold().to_string()
-                    } else {
-                        style("[RGB]").red().bold().to_string()
-                    };
-                    let ir_badge = if has_ir {
-                        style("[IR]").green().bold().to_string()
-                    } else {
-                        style("[IR]").red().bold().to_string()
-                    };
+                    let rgb_badge = spectrum_badge("RGB", has_rgb, rgb_configured);
+                    let ir_badge = spectrum_badge("IR", has_ir, ir_configured);
                     term.write_line(&format!(
                         "  {} {} {} {} ({} capture{})",
                         style("•").cyan(),
@@ -1498,6 +1531,13 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
             .into(),
     ));
     plan.push((
+        "Remove the installer's one-shot GNOME enable",
+        "for h in /home/* /root; do \
+          sudo rm -f \"$h/.config/autostart/gaze-gnome-enable.desktop\" \"$h/.local/share/gaze/gnome-enable.sh\"; \
+          done"
+            .into(),
+    ));
+    plan.push((
         "Remove GDM dconf overrides",
         remove_gdm_dconf_overrides_cmd(),
     ));
@@ -1900,6 +1940,27 @@ mod tests {
 
     fn plan_has(plan: &[(&'static str, String)], label: &str) -> bool {
         plan.iter().any(|(candidate, _)| *candidate == label)
+    }
+
+    #[test]
+    fn an_unconfigured_spectrum_reads_as_unlit_not_as_a_failure() {
+        assert_eq!(spectrum_badge_state(true, true), SpectrumBadge::Enrolled);
+        assert_eq!(
+            spectrum_badge_state(true, false),
+            SpectrumBadge::Enrolled,
+            "captures already taken stay green even after the camera is unset"
+        );
+        assert_eq!(
+            spectrum_badge_state(false, true),
+            SpectrumBadge::Missing,
+            "a configured camera the profile never captured is a real gap"
+        );
+        assert_eq!(
+            spectrum_badge_state(false, false),
+            SpectrumBadge::Unused,
+            "an RGB-only machine has nothing to enroll for IR, so IR is not a failure"
+        );
+        assert!(spectrum_badge("RGB", true, true).contains("[RGB]"));
     }
 
     #[test]

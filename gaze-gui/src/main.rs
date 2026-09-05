@@ -35,9 +35,17 @@ fn main() {
                 font-weight: bold;
                 font-size: 0.75rem;
             }
-            .badge-error {
-                background-color: #e01b24;
+            .badge-warning {
+                background-color: #e5a50a;
                 color: white;
+                border-radius: 6px;
+                padding: 1px 6px;
+                font-weight: bold;
+                font-size: 0.75rem;
+            }
+            .badge-muted {
+                background-color: alpha(currentColor, 0.12);
+                color: alpha(currentColor, 0.45);
                 border-radius: 6px;
                 padding: 1px 6px;
                 font-weight: bold;

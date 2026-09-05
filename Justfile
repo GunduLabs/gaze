@@ -297,7 +297,9 @@ _verify-package format:
             local scriptlet status
             scriptlet=$(tar -xOf "$1" .INSTALL 2>&1) && status=0 || status=$?
             [ "$status" -eq 0 ] || fail "cannot read .INSTALL from $(basename "$1"): $scriptlet"
-            sed -n 's/^\([a-z_]*\) *().*/\1/p' <<< "$scriptlet"
+            # nfpm >= 2.47 wraps each hook as `function post_install() {`; older
+            # releases emitted a bare `post_install() {`. Accept both.
+            sed -nE 's/^(function[[:space:]]+)?([a-z_]+)[[:space:]]*\(\).*/\2/p' <<< "$scriptlet"
             ;;
         esac
     }

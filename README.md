@@ -36,7 +36,7 @@ gnome-extensions enable gaze@gundulabs.com
 gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
-> Running `gnome-extensions enable` before rebooting will return `Extension "gaze@gundulabs.com" does not exist`. Shell only rescans extension directories at session start.
+> Running `gnome-extensions enable` before rebooting will return `Extension "gaze@gundulabs.com" does not exist`. Shell only rescans extension directories at session start, and it drops extension IDs it has not scanned, so an enable applied before the reboot can vanish at the next logout. Reboot first, then run the commands. `gaze doctor` reports this case and prints the steps.
 
 <details>
 <summary>Manual install (Debian/Ubuntu, Fedora/openSUSE RPM systems, Arch/Manjaro/CachyOS)</summary>

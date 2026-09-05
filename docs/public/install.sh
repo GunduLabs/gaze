@@ -247,6 +247,76 @@ _gsettings_enable_face_auth() {
     gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 }
 
+GNOME_ENABLE_HELPER="${XDG_DATA_HOME:-$HOME/.local/share}/gaze/gnome-enable.sh"
+GNOME_ENABLE_AUTOSTART="${XDG_CONFIG_HOME:-$HOME/.config}/autostart/gaze-gnome-enable.desktop"
+
+# GNOME Shell only scans extension directories at session start, so the dconf write above
+# names a UUID this session has never seen. Shell drops unknown UUIDs the next time it
+# rewrites enabled-extensions, which is why a fresh install can look enabled right up
+# until the first logout. This one-shot autostart re-runs the enable from inside the next
+# session, where Shell does know the extension, and then deletes itself.
+arm_gnome_first_login_enable() {
+    mkdir -p "$(dirname "$GNOME_ENABLE_HELPER")" "$(dirname "$GNOME_ENABLE_AUTOSTART")" || return 1
+
+    cat >"$GNOME_ENABLE_HELPER" <<'HELPER' || return 1
+#!/bin/sh
+# Written by the Gaze installer. Runs at the first GNOME login after install to
+# finish enabling the Gaze extension, then removes itself. Safe to delete.
+EXT_ID="gaze@gundulabs.com"
+autostart="$1"
+
+retire() {
+    rm -f "$autostart" "$0"
+    exit 0
+}
+
+case "${XDG_CURRENT_DESKTOP:-}" in
+*GNOME*) ;;
+*) exit 0 ;;
+esac
+
+# The package is gone; stop trying.
+installed=0
+for dir in "${XDG_DATA_HOME:-$HOME/.local/share}" /usr/local/share /usr/share; do
+    if [ -f "$dir/gnome-shell/extensions/$EXT_ID/metadata.json" ]; then
+        installed=1
+        break
+    fi
+done
+[ "$installed" -eq 1 ] || retire
+
+command -v gnome-extensions >/dev/null 2>&1 || exit 0
+
+# Shell answers queries a little after the session starts.
+i=0
+while [ "$i" -lt 20 ]; do
+    gnome-extensions info "$EXT_ID" >/dev/null 2>&1 && break
+    sleep 1
+    i=$((i + 1))
+done
+
+# Still unscanned: leave the autostart in place and retry next login.
+gnome-extensions info "$EXT_ID" >/dev/null 2>&1 || exit 0
+
+gnome-extensions enable "$EXT_ID" >/dev/null 2>&1 || exit 0
+gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true >/dev/null 2>&1 || true
+
+retire
+HELPER
+    chmod +x "$GNOME_ENABLE_HELPER" || return 1
+
+    cat >"$GNOME_ENABLE_AUTOSTART" <<EOF || return 1
+[Desktop Entry]
+Type=Application
+Name=Gaze face unlock setup
+Comment=Finishes enabling the Gaze GNOME Shell extension after installation
+Exec="$GNOME_ENABLE_HELPER" "$GNOME_ENABLE_AUTOSTART"
+OnlyShowIn=GNOME;
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+EOF
+}
+
 enable_gnome_extension() {
     if [ "$(id -u)" -eq 0 ]; then
         warn "Running as root; not changing per-user GNOME extension settings."
@@ -275,6 +345,12 @@ enable_gnome_extension() {
         warn "Could not enable the GNOME extension automatically."
         say "Reboot, then from your GNOME session run:"
         print_manual_gnome_enable
+    fi
+
+    if arm_gnome_first_login_enable; then
+        say "${DIM}GNOME Shell forgets extensions it has not scanned yet, so a logout before the${RESET}"
+        say "${DIM}first reboot can undo the step above. A one-shot autostart entry re-applies it${RESET}"
+        say "${DIM}at your next GNOME login and then deletes itself.${RESET}"
     fi
 }
 
@@ -983,13 +1059,16 @@ fi
 title "Next steps"
 say "  1. ${BOLD}gaze config${RESET}            ${DIM}configure your camera and security settings${RESET}"
 say "  2. ${BOLD}gaze add-face <name>${RESET}   ${DIM}enroll your face${RESET}"
+say "  3. ${BOLD}gaze auth${RESET}              ${DIM}test it in the terminal${RESET}"
 if want_gnome_extension_package; then
-    say "  3. ${BOLD}Reboot${RESET}                 ${DIM}GNOME Shell and GDM only pick up the new extension at startup${RESET}"
+    say "  4. ${BOLD}Reboot${RESET}                 ${DIM}GNOME Shell and GDM only pick up the new extension at startup${RESET}"
 fi
 say ""
 title "Try it"
-say "  ${BOLD}gaze auth${RESET}              ${DIM}test face authentication in the terminal${RESET}"
 say "  ${BOLD}gaze-gui${RESET}               ${DIM}open the settings app${RESET}"
+if want_gnome_extension_package || is_kde_session || want_hyprlock_setup; then
+    say "  ${BOLD}Lock your screen${RESET}       ${DIM}then look at the camera${RESET}"
+fi
 say ""
 title "Desktop integration"
 if want_gnome_extension_package; then
@@ -1011,6 +1090,16 @@ else
 fi
 if want_hyprlock_setup; then
     ok "hyprlock: configured (auth.pam.module = hyprlock-gaze)"
+fi
+say ""
+title "If something does not work"
+say "  ${BOLD}gaze doctor${RESET}            ${DIM}checks every part of the setup and prints the fix for each${RESET}"
+say "  ${DIM}A '○' there marks a feature that is off on purpose; the line below it turns it on.${RESET}"
+if want_gnome_extension_package; then
+    say ""
+    say "  ${DIM}If lock screen face unlock is still missing after the reboot, run from GNOME:${RESET}"
+    print_manual_gnome_enable
+    say "  ${DIM}\"Extension does not exist\" means GNOME Shell has not rescanned yet: reboot and retry.${RESET}"
 fi
 say ""
 say "Docs:   ${CYAN}https://gaze.gundulabs.com${RESET}"

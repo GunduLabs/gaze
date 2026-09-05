@@ -145,7 +145,15 @@ gaze rename-face <old> <new>
 gaze remove-face <name>
 ```
 
-`gaze list-faces` prints all enrolled face profiles for the user, showing how many template captures each face has, and displaying `[RGB]` and `[IR]` status badges in green/red to indicate which camera spectrums are enrolled for that profile.
+`gaze list-faces` prints all enrolled face profiles for the user, showing how many template captures each face has, and displaying `[RGB]` and `[IR]` badges for the camera spectra enrolled in that profile:
+
+| Badge | Meaning |
+|---|---|
+| Green | The profile has captures for that spectrum. |
+| Amber | A camera is configured for that spectrum, but this profile has no captures from it. Run `gaze refine-face <name>`. |
+| Grey | No camera is configured for that spectrum, so there is nothing to enrol. |
+
+An RGB-only machine therefore shows a green `[RGB]` and a grey `[IR]`, not a failure.
 
 ## Delete all faces for current user
 

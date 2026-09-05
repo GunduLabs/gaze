@@ -13,6 +13,15 @@ gaze doctor
 
 This checks the service, config, DBus, PipeWire camera visibility, enrollments, PAM setup, desktop integration, and TPM requirements without capturing camera frames or changing the system. Follow the suggested fix printed below each warning or error. A result with errors exits with status `1`, which also makes the command suitable for support scripts.
 
+Each line is marked with what it found:
+
+| Mark | Meaning |
+|---|---|
+| `✓` | Working. |
+| `○` | A working feature you have switched off, such as GDM login face auth or template encryption. Not a problem. The dim line underneath is the recipe that switches it on. |
+| `!` | Warning: Gaze still works, but something is degraded or not wired up. |
+| `✗` | Error: this part will not work until you fix it. `gaze doctor` exits `1`. |
+
 If an attempt is ending sooner than you expect, or you want to know which deadline a message
 came from, [One authentication attempt](/guide/how-it-works#one-authentication-attempt) walks
 through the whole flow, and [Timeouts and budgets](/guide/how-it-works#timeouts-and-budgets)

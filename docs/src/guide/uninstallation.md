@@ -37,9 +37,10 @@ gnome-extensions disable gaze@gundulabs.com 2>/dev/null || true
 gnome-extensions uninstall gaze@gundulabs.com 2>/dev/null || true
 gsettings reset-recursively org.gnome.shell.extensions.gaze
 rm -rf ~/.local/share/gnome-shell/extensions/gaze@gundulabs.com
+rm -f ~/.config/autostart/gaze-gnome-enable.desktop ~/.local/share/gaze/gnome-enable.sh
 ```
 
-Repeat this for each desktop user who enabled lock screen face unlock. The last command removes any per-user copy of the extension (left by `gnome-extensions install` or a development checkout); without it GNOME keeps listing the extension as disabled.
+Repeat this for each desktop user who enabled lock screen face unlock. The `rm -rf` removes any per-user copy of the extension (left by `gnome-extensions install` or a development checkout); without it GNOME keeps listing the extension as disabled. The last line removes the one-shot autostart entry the installer leaves behind to finish enabling the extension at the next login; it normally deletes itself once it has run.
 
 ### Revert KDE face unlock
 

@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn the_notify_fd_does_not_collide_with_the_standard_streams() {
         assert_eq!(NOTIFY_FD, 3);
-        assert!(NOTIFY_FD > libc::STDERR_FILENO);
+        const { assert!(NOTIFY_FD > libc::STDERR_FILENO) };
     }
 
     #[test]
