@@ -365,6 +365,17 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
     );
 }
 
+/// Green once a profile holds captures for the spectrum, amber when a camera is
+/// configured but the profile never captured it, and unlit when there is no
+/// camera for that spectrum at all.
+fn spectrum_badge_class(enrolled: bool, configured: bool) -> &'static str {
+    match (enrolled, configured) {
+        (true, _) => "badge-success",
+        (false, true) => "badge-warning",
+        (false, false) => "badge-muted",
+    }
+}
+
 fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwaita::ToastOverlay) {
     let config = Rc::new(RefCell::new(Config::default()));
 
@@ -1642,6 +1653,17 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 status_page.set_visible(false);
                                 face_list.set_visible(true);
 
+                                // A spectrum with no camera configured is not a gap
+                                // in the profile, so its badge reads unlit, not failed.
+                                let (rgb_configured, ir_configured) =
+                                    match load_config_from_daemon(&proxy).await {
+                                        Ok(cfg) => (
+                                            !cfg.cameras.rgb.trim().is_empty(),
+                                            !cfg.cameras.ir.trim().is_empty(),
+                                        ),
+                                        Err(_) => (true, true),
+                                    };
+
                                 let existing_face_names: Rc<std::collections::HashSet<String>> =
                                     Rc::new(faces.iter().map(|(name, _, _, _): &(String, u32, bool, bool)| name.clone()).collect());
 
@@ -1656,19 +1678,15 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
                                     let rgb_badge = gtk4::Label::new(Some("RGB"));
                                     rgb_badge.set_valign(gtk4::Align::Center);
-                                    if has_rgb {
-                                        rgb_badge.add_css_class("badge-success");
-                                    } else {
-                                        rgb_badge.add_css_class("badge-error");
-                                    }
+                                    rgb_badge.add_css_class(spectrum_badge_class(
+                                        has_rgb,
+                                        rgb_configured,
+                                    ));
 
                                     let ir_badge = gtk4::Label::new(Some("IR"));
                                     ir_badge.set_valign(gtk4::Align::Center);
-                                    if has_ir {
-                                        ir_badge.add_css_class("badge-success");
-                                    } else {
-                                        ir_badge.add_css_class("badge-error");
-                                    }
+                                    ir_badge
+                                        .add_css_class(spectrum_badge_class(has_ir, ir_configured));
 
                                     let badge_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
                                     badge_box.set_valign(gtk4::Align::Center);

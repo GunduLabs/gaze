@@ -24,6 +24,7 @@ const BENCHMARK_TIMEOUT: Duration = Duration::from_secs(30);
 const PAM_MODULES: [&str; 2] = ["pam_gaze.so", "pam_gaze_grosshack.so"];
 const GNOME_EXTENSION_ID: &str = "gaze@gundulabs.com";
 const GNOME_EXTENSION_SCHEMA: &str = "org.gnome.shell.extensions.gaze";
+const GNOME_DOCS_URL: &str = "https://gaze.gundulabs.com/guide/gnome";
 const GDM_FACE_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
 /// Mirror `pam-gaze`'s paths for the slots Plasma starts up front.
 const KDE_FACE_PAM_FILE: &str = "/etc/pam.d/kde-fingerprint";
@@ -63,6 +64,10 @@ const PRIVILEGED_FILES: [&str; 5] = [
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Level {
     Pass,
+    /// A working feature the user has deliberately left switched off. Not a
+    /// problem, so it must not wear a checkmark, but it still carries the steps
+    /// that switch it on.
+    Off,
     Warning,
     Error,
 }
@@ -100,6 +105,10 @@ impl Report {
         self.push(Level::Pass, name, message, None::<String>);
     }
 
+    fn off(&mut self, name: &'static str, message: impl Into<String>, how: impl Into<String>) {
+        self.push(Level::Off, name, message, Some(how));
+    }
+
     fn warning(&mut self, name: &'static str, message: impl Into<String>, fix: impl Into<String>) {
         self.push(Level::Warning, name, message, Some(fix));
     }
@@ -126,6 +135,7 @@ impl Report {
         for check in &self.checks {
             let (symbol, label) = match check.level {
                 Level::Pass => (style("✓").green().bold(), style(check.name).bold()),
+                Level::Off => (style("○").dim().bold(), style(check.name).dim().bold()),
                 Level::Warning => (
                     style("!").yellow().bold(),
                     style(check.name).yellow().bold(),
@@ -134,19 +144,30 @@ impl Report {
             };
             term.write_line(&format!("  {symbol} {label}: {}", check.message))?;
             if let Some(fix) = &check.fix {
-                term.write_line(&format!("      {}", style(fix).dim()))?;
+                for line in fix.lines() {
+                    term.write_line(&format!("      {}", style(line).dim()))?;
+                }
             }
         }
 
         let passed = self.count(Level::Pass);
+        let off = self.count(Level::Off);
         let warnings = self.count(Level::Warning);
         let errors = self.count(Level::Error);
         term.write_line(&format!(
-            "\n{} {passed} passed, {warnings} warning{}, {errors} error{}\n",
+            "\n{} {passed} passed, {off} off, {warnings} warning{}, {errors} error{}",
             style("Summary:").bold(),
             if warnings == 1 { "" } else { "s" },
             if errors == 1 { "" } else { "s" }
         ))?;
+        if off > 0 {
+            term.write_line(
+                &style("○ marks a working feature you have switched off; the line under it turns it on.")
+                    .dim()
+                    .to_string(),
+            )?;
+        }
+        term.write_line("")?;
         Ok(())
     }
 }
@@ -259,6 +280,22 @@ fn extension_schema_dir_in(data_dirs: &[PathBuf]) -> Option<PathBuf> {
                 .join("schemas")
         })
         .find(|dir| dir.join("gschemas.compiled").exists())
+}
+
+/// Whether the extension files are on disk, which separates "the package is
+/// missing" from "GNOME Shell has not picked the package up yet".
+fn extension_installed() -> bool {
+    extension_installed_in(&xdg_data_dirs())
+}
+
+fn extension_installed_in(data_dirs: &[PathBuf]) -> bool {
+    data_dirs.iter().any(|dir| {
+        dir.join("gnome-shell")
+            .join("extensions")
+            .join(GNOME_EXTENSION_ID)
+            .join("metadata.json")
+            .exists()
+    })
 }
 
 fn extension_setting(key: &str) -> std::io::Result<(bool, String)> {
@@ -1096,6 +1133,28 @@ fn desktop_from_processes(uid: u32) -> String {
     found.join(":")
 }
 
+/// The prefs window has one page, Behavior, with two groups; naming the exact
+/// path beats "the extension preferences", which sends people hunting.
+fn gnome_prefs_path(group: &str, switch: &str) -> String {
+    format!(
+        "Open it with `gnome-extensions prefs {GNOME_EXTENSION_ID}` (or the Extensions app, then Gaze), then Behavior -> {group} -> \"{switch}\""
+    )
+}
+
+/// GNOME Shell only scans extension directories at session start. A running
+/// session asked to enable a UUID it has never scanned drops the entry again the
+/// next time it rewrites `enabled-extensions`, which is why a fresh install can
+/// look enabled right up until the first logout.
+fn gnome_extension_enable_steps() -> String {
+    format!(
+        "1. Reboot, or log out and back in, so GNOME Shell scans the extension.\n\
+         2. Run `gnome-extensions enable {GNOME_EXTENSION_ID}`.\n\
+         3. Run `gsettings set {GNOME_EXTENSION_SCHEMA} enable-face-authentication true`.\n\
+         If step 2 reports that the extension does not exist, Shell has not rescanned yet: reboot and repeat.\n\
+         Details: {GNOME_DOCS_URL}"
+    )
+}
+
 fn check_desktop_integration(report: &mut Report) {
     let desktop = desktop_name();
     if desktop.contains("gnome") {
@@ -1103,10 +1162,17 @@ fn check_desktop_integration(report: &mut Report) {
             Ok((true, output)) if output.lines().any(|line| line.trim() == GNOME_EXTENSION_ID) => {
                 report.pass("GNOME extension", "enabled for the current user");
             }
+            Ok((true, _)) if extension_installed() => report.warning(
+                "GNOME extension",
+                "installed, but not enabled for the current user",
+                gnome_extension_enable_steps(),
+            ),
             Ok((true, _)) => report.warning(
                 "GNOME extension",
-                "not enabled for the current user",
-                format!("Run `gnome-extensions enable {GNOME_EXTENSION_ID}` after logging into GNOME again."),
+                "not installed for the current user",
+                format!(
+                    "Install the Gaze GNOME extension package (`gaze-gnome-extension`), reboot, then run `gnome-extensions enable {GNOME_EXTENSION_ID}`. See {GNOME_DOCS_URL}"
+                ),
             ),
             Ok((false, message)) => report.warning(
                 "GNOME extension",
@@ -1127,9 +1193,15 @@ fn check_desktop_integration(report: &mut Report) {
                     "enabled for the current user",
                 );
             }
-            Ok((true, _)) => report.pass(
+            Ok((true, _)) => report.off(
                 "GNOME lock-screen face auth",
-                "disabled for the current user; enable it in the Gaze extension preferences if you want lock-screen face auth",
+                "off for the current user, so the lock screen only takes your password",
+                format!(
+                    "Turn it on: {}.\n\
+                     From a terminal: `dconf write /org/gnome/shell/extensions/gaze/enable-face-authentication true`.\n\
+                     (`gsettings set {GNOME_EXTENSION_SCHEMA} ...` does the same, but cannot find the schema where it ships inside the extension directory, as on NixOS.)",
+                    gnome_prefs_path("Face authentication", "Enable face authentication (lock screen)")
+                ),
             ),
             Ok((false, message)) => report.warning(
                 "GNOME lock-screen face auth",
@@ -1161,7 +1233,7 @@ fn check_desktop_integration(report: &mut Report) {
                 GdmGreeterReadiness::Ready => report.pass(
                     "GDM login face auth",
                     format!(
-                        "enabled system-wide via {GDM_FACE_OVERRIDE_PATH}; toggle it from the extension preferences \"GDM login screen\" section"
+                        "enabled system-wide via {GDM_FACE_OVERRIDE_PATH}; toggle it under Behavior -> GDM login screen in `gnome-extensions prefs {GNOME_EXTENSION_ID}`"
                     ),
                 ),
                 GdmGreeterReadiness::ProfileMissingSystemDb => report.error(
@@ -1195,7 +1267,16 @@ fn check_desktop_integration(report: &mut Report) {
                     "Install the `dconf` command-line tool and re-run `gaze doctor`.",
                 ),
             },
-            (_, false) => report.pass("GDM login face auth", "disabled"),
+            (_, false) => report.off(
+                "GDM login face auth",
+                "off, so the login screen only takes your password (the lock screen is a separate switch)",
+                format!(
+                    "Turn it on: {}, then reboot. It asks for admin authorization and writes {GDM_FACE_OVERRIDE_PATH} for you.\n\
+                     By hand: put `enable-face-authentication=true` under `[org/gnome/shell/extensions/gaze]` in {GDM_FACE_OVERRIDE_PATH}, run `sudo dconf update`, then reboot.\n\
+                     Details: {GNOME_DOCS_URL}#optional-enable-face-at-gdm-login",
+                    gnome_prefs_path("GDM login screen", "Enable face auth at GDM login")
+                ),
+            ),
         }
 
         if dconf_face_auth == Some(true) || override_exists {
@@ -1368,9 +1449,10 @@ fn check_tpm(report: &mut Report, config: Option<&Config>) {
         return;
     };
     if !config.storage.encrypt_templates {
-        report.pass(
+        report.off(
             "TPM",
-            "template encryption is disabled, so no TPM is required",
+            "template encryption is off, so face templates sit on disk unencrypted and no TPM is required",
+            format!("Turn it on: set `encrypt_templates = true` under [storage] in {CONFIG_PATH}, then restart gazed."),
         );
         return;
     }
@@ -2415,6 +2497,53 @@ mod tests {
         assert_eq!(level(None), Level::Pass);
         assert_eq!(level(Some("auth sufficient pam_gaze.so")), Level::Pass);
         assert_eq!(level(Some("auth required pam_fprintd.so")), Level::Warning);
+    }
+
+    #[test]
+    fn extension_installed_needs_the_metadata_file() {
+        let root =
+            std::env::temp_dir().join(format!("gaze-doctor-installed-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+
+        let share = root.join("usr/share");
+        let extension = share
+            .join("gnome-shell")
+            .join("extensions")
+            .join(GNOME_EXTENSION_ID);
+        fs::create_dir_all(&extension).unwrap();
+
+        let dirs = vec![share.clone()];
+        assert!(
+            !extension_installed_in(&dirs),
+            "a leftover directory is not an installed extension"
+        );
+
+        fs::write(extension.join("metadata.json"), b"{}").unwrap();
+        assert!(extension_installed_in(&dirs));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_feature_switched_off_is_not_a_checkmark_and_still_says_how_to_turn_it_on() {
+        let mut report = Report::default();
+        report.off("GDM login face auth", "off", "Turn it on: flip the switch.");
+
+        let check = &report.checks[0];
+        assert_eq!(check.level, Level::Off);
+        assert_ne!(
+            check.level,
+            Level::Pass,
+            "an off feature must not render as a passing check"
+        );
+        assert!(
+            check.fix.is_some(),
+            "an off feature always carries the steps that turn it on"
+        );
+        assert!(
+            report.is_healthy(),
+            "switching a feature off is a choice, not a failure"
+        );
     }
 
     #[test]
