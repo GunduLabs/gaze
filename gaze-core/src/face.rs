@@ -227,6 +227,73 @@ impl IrDarkFrameGate {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RgbFrameKind {
+    Lit,
+    WarmupDark,
+    SettledDark,
+    SteadyDark,
+}
+
+pub struct RgbWarmupGate {
+    threshold: u8,
+    first_frame_at: Option<std::time::Instant>,
+    baseline: Option<u8>,
+    brightest: u8,
+    frames: u32,
+    lit_once: bool,
+}
+
+impl RgbWarmupGate {
+    pub const WARMUP: std::time::Duration = std::time::Duration::from_secs(2);
+    const TREND_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
+    const TREND_FRAMES: u32 = 8;
+    const RISE_MARGIN: u8 = 2;
+
+    pub fn new(threshold: u8) -> Self {
+        Self {
+            threshold,
+            first_frame_at: None,
+            baseline: None,
+            brightest: 0,
+            frames: 0,
+            lit_once: false,
+        }
+    }
+
+    pub fn classify_with_luma(&mut self, frame: &Mat) -> (RgbFrameKind, u8) {
+        let luma = frame_mean_luma(frame).unwrap_or(0);
+        (self.classify_luma(luma, std::time::Instant::now()), luma)
+    }
+
+    fn classify_luma(&mut self, luma: u8, now: std::time::Instant) -> RgbFrameKind {
+        let first_frame_at = *self.first_frame_at.get_or_insert(now);
+        let baseline = *self.baseline.get_or_insert(luma);
+        self.brightest = self.brightest.max(luma);
+        self.frames = self.frames.saturating_add(1);
+
+        if luma >= self.threshold {
+            self.lit_once = true;
+            return RgbFrameKind::Lit;
+        }
+        if self.lit_once {
+            return RgbFrameKind::SteadyDark;
+        }
+
+        let elapsed = now.duration_since(first_frame_at);
+        if elapsed >= Self::WARMUP {
+            return RgbFrameKind::SettledDark;
+        }
+
+        let rising = self.brightest.saturating_sub(baseline) >= Self::RISE_MARGIN;
+        if !rising && elapsed >= Self::TREND_GRACE && self.frames >= Self::TREND_FRAMES {
+            return RgbFrameKind::SteadyDark;
+        }
+
+        RgbFrameKind::WarmupDark
+    }
+}
+
 pub fn enrollment_pose_matches(
     prompt: EnrollPrompt,
     yaw: f32,
@@ -733,6 +800,108 @@ mod tests {
         assert_eq!(gate.classify(&gate_frame(2.0)), IrFrameKind::EmitterDark);
         assert_eq!(gate.classify(&gate_frame(120.0)), IrFrameKind::Lit);
         assert_eq!(gate.classify(&gate_frame(2.0)), IrFrameKind::StrobeDark);
+    }
+
+    #[test]
+    fn rgb_warmup_gate_passes_lit_frames() {
+        let mut gate = RgbWarmupGate::new(30);
+        assert_eq!(
+            gate.classify_with_luma(&gate_frame(120.0)).0,
+            RgbFrameKind::Lit
+        );
+        assert_eq!(
+            gate.classify_with_luma(&gate_frame(30.0)).0,
+            RgbFrameKind::Lit
+        );
+    }
+
+    fn frame_at(offset_ms: u64) -> std::time::Duration {
+        std::time::Duration::from_millis(offset_ms)
+    }
+
+    #[test]
+    fn rgb_warmup_gate_holds_dark_frames_while_the_sensor_brightens() {
+        let mut gate = RgbWarmupGate::new(30);
+        let start = std::time::Instant::now();
+
+        for step in 0..20u64 {
+            assert_eq!(
+                gate.classify_luma(step as u8, start + frame_at(step * 60)),
+                RgbFrameKind::WarmupDark
+            );
+        }
+        assert_eq!(
+            gate.classify_luma(120, start + frame_at(1300)),
+            RgbFrameKind::Lit
+        );
+    }
+
+    #[test]
+    fn rgb_warmup_gate_gives_a_stream_that_never_brightens_no_grace() {
+        let mut gate = RgbWarmupGate::new(30);
+        let start = std::time::Instant::now();
+
+        for step in 0..16u64 {
+            assert_eq!(
+                gate.classify_luma(0, start + frame_at(step * 60)),
+                RgbFrameKind::WarmupDark
+            );
+        }
+        assert_eq!(
+            gate.classify_luma(0, start + RgbWarmupGate::TREND_GRACE),
+            RgbFrameKind::SteadyDark
+        );
+    }
+
+    #[test]
+    fn rgb_warmup_gate_waits_for_enough_frames_before_calling_a_stream_flat() {
+        let mut gate = RgbWarmupGate::new(30);
+        let start = std::time::Instant::now();
+
+        assert_eq!(gate.classify_luma(0, start), RgbFrameKind::WarmupDark);
+        assert_eq!(
+            gate.classify_luma(0, start + RgbWarmupGate::TREND_GRACE),
+            RgbFrameKind::WarmupDark
+        );
+    }
+
+    #[test]
+    fn rgb_warmup_gate_reports_a_brightening_stream_that_never_arrives() {
+        let mut gate = RgbWarmupGate::new(30);
+        let start = std::time::Instant::now();
+
+        for step in 0..20u64 {
+            assert_eq!(
+                gate.classify_luma(step as u8, start + frame_at(step * 60)),
+                RgbFrameKind::WarmupDark
+            );
+        }
+        assert_eq!(
+            gate.classify_luma(20, start + RgbWarmupGate::WARMUP),
+            RgbFrameKind::SettledDark
+        );
+    }
+
+    #[test]
+    fn rgb_warmup_gate_spends_its_grace_on_the_first_lit_frame() {
+        let mut gate = RgbWarmupGate::new(30);
+        let start = std::time::Instant::now();
+
+        assert_eq!(gate.classify_luma(120, start), RgbFrameKind::Lit);
+        assert_eq!(gate.classify_luma(2, start), RgbFrameKind::SteadyDark);
+    }
+
+    #[test]
+    fn rgb_warmup_gate_times_the_grace_from_the_first_frame() {
+        let mut gate = RgbWarmupGate::new(30);
+        let first_frame = std::time::Instant::now() + frame_at(10_000);
+
+        for step in 0..20u64 {
+            assert_eq!(
+                gate.classify_luma(step as u8, first_frame + frame_at(step * 60)),
+                RgbFrameKind::WarmupDark
+            );
+        }
     }
 
     #[test]

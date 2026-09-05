@@ -25,8 +25,8 @@ use gaze_core::config::Config;
 use gaze_core::dbus::{CaptureStatus, EnrollPrompt, VerifyResult};
 use gaze_core::detect::FaceDetector;
 use gaze_core::face::{
-    EnrollmentPoseStability, FaceChecker, IrDarkFrameGate, IrFrameKind, Spectrum,
-    enrollment_pose_matches,
+    EnrollmentPoseStability, FaceChecker, IrDarkFrameGate, IrFrameKind, RgbFrameKind,
+    RgbWarmupGate, Spectrum, enrollment_pose_matches,
 };
 use gaze_core::ir::led::IrLed;
 
@@ -831,6 +831,13 @@ mod tests {
         assert!(VERIFY_WATCHDOG_POLL < VERIFY_TOO_DARK_TIMEOUT);
         assert!(VERIFY_WATCHDOG_POLL < VERIFY_NO_USABLE_TIMEOUT);
         assert!(!VERIFY_WATCHDOG_POLL.is_zero());
+    }
+
+    #[test]
+    fn a_warming_camera_still_reports_dark_before_the_no_face_deadline() {
+        use super::{RgbWarmupGate, VERIFY_NO_FACE_TIMEOUT, VERIFY_TOO_DARK_TIMEOUT};
+
+        assert!(RgbWarmupGate::WARMUP + VERIFY_TOO_DARK_TIMEOUT < VERIFY_NO_FACE_TIMEOUT);
     }
 
     // A backstop that fired first would report a timeout for a run the daemon had already decided.
@@ -3838,6 +3845,13 @@ impl AuthDaemon {
                     tracing::debug!("RGB camera opened successfully at: {}", rgb_device_clone);
 
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, false);
+                    let dark_hands_over_to_ir = should_yield_rgb_to_ir(
+                        &hybrid_policy_clone,
+                        run_ir,
+                        CaptureStatus::TooDark,
+                    );
+                    let mut warmup = RgbWarmupGate::new(config_clone.cameras.dark_luma_threshold);
+                    let mut logged_dark_stream = false;
                     let mut logged_rgb_luma_statuses = Vec::new();
                     let mut live_scores: Vec<f32> = Vec::new();
                     let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
@@ -3853,6 +3867,44 @@ impl AuthDaemon {
                             // match, so hybrid auth can still capture the IR spectrum.
                             yielded_to_ir = true;
                             break;
+                        }
+
+                        if !dark_hands_over_to_ir {
+                            match warmup.classify_with_luma(&frame) {
+                                (RgbFrameKind::Lit, _) => {}
+                                (RgbFrameKind::WarmupDark, _) => continue,
+                                (RgbFrameKind::SettledDark, luma) => {
+                                    if let Some(node) = cam.fall_back_to_v4l2() {
+                                        let message = format!(
+                                            "RGB stream stayed dark through PipeWire (mean_luma={luma}); retrying on {node}"
+                                        );
+                                        info!("{message}");
+                                        let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
+                                        let _ = tx.blocking_send(VerifyMsg::PhaseStarted(Spectrum::Rgb));
+                                        warmup = RgbWarmupGate::new(config_clone.cameras.dark_luma_threshold);
+                                        logged_dark_stream = false;
+                                        continue;
+                                    }
+                                    if !logged_dark_stream {
+                                        let message = format!(
+                                            "RGB stream remains dark after warmup: mean_luma={luma}"
+                                        );
+                                        info!("{message}");
+                                        let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
+                                        logged_dark_stream = true;
+                                    }
+                                }
+                                (RgbFrameKind::SteadyDark, luma) => {
+                                    if !logged_dark_stream {
+                                        let message = format!(
+                                            "RGB stream never brightened: mean_luma={luma}"
+                                        );
+                                        info!("{message}");
+                                        let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
+                                        logged_dark_stream = true;
+                                    }
+                                }
+                            }
                         }
 
                         let (status, embed_opt) = {
@@ -4208,6 +4260,12 @@ impl AuthDaemon {
                             VerifyMsg::PhaseStarted(Spectrum::Ir) if serial_capture => {
                                 // RGB and IR run serially on single-function cameras. Give
                                 // IR a fresh no-face window after RGB releases the device.
+                                last_face_at = Instant::now();
+                                last_usable_at = Instant::now();
+                                frames_seen = 0;
+                                dark_since = None;
+                            }
+                            VerifyMsg::PhaseStarted(Spectrum::Rgb) => {
                                 last_face_at = Instant::now();
                                 last_usable_at = Instant::now();
                                 frames_seen = 0;
