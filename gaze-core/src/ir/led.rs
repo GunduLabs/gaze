@@ -385,11 +385,13 @@ mod tests {
 
     #[test]
     fn a_face_auth_probe_only_walks_units_the_spec_allows() {
-        assert!(FACE_AUTH_PROBE_MAX_UNIT >= 1);
-        assert!(
-            FACE_AUTH_PROBE_MAX_UNIT <= 31,
-            "UVC entity ids are 5 bits wide"
-        );
+        const { assert!(FACE_AUTH_PROBE_MAX_UNIT >= 1) };
+        const {
+            assert!(
+                FACE_AUTH_PROBE_MAX_UNIT <= 31,
+                "UVC entity ids are 5 bits wide"
+            )
+        };
         assert_eq!(FACE_AUTH_SELECTOR, 0x06);
     }
 
