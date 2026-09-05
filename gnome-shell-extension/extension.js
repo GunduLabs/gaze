@@ -40,6 +40,16 @@ const GAZE_DBUS_INTERFACE = `
 const GazeProxy = Gio.DBusProxy.makeProxyWrapper(GAZE_DBUS_INTERFACE);
 
 const FACE_SERVICE_NAME = "gdm-face";
+// GNOME 50 moved these out of gdm/util.js without leaving a re-export behind.
+// The values are part of the GDM wire protocol, so hardcoding is safe.
+const MESSAGE_TYPE = Util.MessageType ?? {
+  NONE: 0,
+  HINT: 1,
+  INFO: 2,
+  ERROR: 3,
+};
+const FINGERPRINT_SERVICE_NAME =
+  Util.FINGERPRINT_SERVICE_NAME ?? "gdm-fingerprint";
 const FACE_AUTHENTICATION_KEY = "enable-face-authentication";
 const MAX_TRIES_KEY = "max-face-tries";
 const RETRY_MODE_KEY = "face-retry-mode";
@@ -176,6 +186,9 @@ const GENERIC_ERROR_MAP = new Map([
   ],
 ]);
 
+const FACE_HINT_TEXT = "(or look at the camera)";
+const LEGACY_AUTH_SERVICES_ROLE = "fingerprint";
+
 const CONFIRMATION_QUESTION = "Face Verified. Press Enter to confirm.";
 const CONFIRMATION_DIALOG_LABEL =
   "Face verified. Press Enter or click Authenticate to confirm.";
@@ -308,6 +321,8 @@ const enterAuthPromptConfirmMode = (authPrompt, serviceName, extension) => {
       authPrompt._entry.hide();
       authPrompt._entry.reactive = false;
     }
+    // Only present on shells carrying the unified-auth rework.
+    authPrompt._entryArea?.hide();
     if (authPrompt._capsLockWarningLabel) {
       authPrompt._capsLockWarningLabel.hide();
     }
@@ -342,7 +357,7 @@ const enterAuthPromptConfirmMode = (authPrompt, serviceName, extension) => {
     authPrompt.setMessage(
       _("Failed to show confirmation prompt") ||
         "Failed to show confirmation prompt",
-      Util.MessageType.ERROR,
+      MESSAGE_TYPE.ERROR,
     );
   }
 };
@@ -416,6 +431,7 @@ const exitAuthPromptConfirmMode = (authPrompt) => {
     authPrompt._entry.show();
     authPrompt._entry.reactive = true;
   }
+  authPrompt._entryArea?.show();
 };
 
 const FACE_STATUS_UPDATES = new Set([
@@ -433,6 +449,7 @@ export default class GazeFaceAuthExtension extends Extension {
     this._injectionManager = new InjectionManager();
     this._extensionSettings = this.getSettings();
     this._activeConfirmWidgets = new Set();
+    this._verifierProto = null;
     const enableToken = {};
     this._gazeEnableToken = enableToken;
 
@@ -508,7 +525,6 @@ export default class GazeFaceAuthExtension extends Extension {
       });
     } catch (e) {}
 
-    const proto = Util.ShellUserVerifier.prototype;
     const extensionSettings = this._extensionSettings;
     const extension = this;
 
@@ -623,295 +639,628 @@ export default class GazeFaceAuthExtension extends Extension {
 
     recreatePolkitAgent();
 
-    this._injectionManager.overrideMethod(
-      proto,
-      "_updateEnabledServices",
-      (original) => {
-        return function () {
-          original.call(this);
-          this._faceEnabled = getFaceEnabled();
-          this._faceMaxTries = getMaxTries();
-          this._faceRetryMode = getRetryMode();
-        };
-      },
-    );
+    const installVerifierHooks = (proto) => {
+      if (extension._verifierProto) return;
+      extension._verifierProto = proto;
 
-    this._injectionManager.overrideMethod(proto, "begin", (original) => {
-      return function (userName, hold) {
-        if (this._userName !== userName) {
-          this._faceAuthFailed = false;
-          this._faceStartPending = false;
-          this._faceStartProbe = null;
+      // Shells carrying the unified-auth rework (the RHEL 10 backport of
+      // gnome-shell MR !3212, and GNOME 50 upstream) moved the verification
+      // lifecycle off ShellUserVerifier and onto per-architecture AuthServices
+      // objects. The presence of _beginVerification tells the layouts apart.
+      const legacyArch = typeof proto._beginVerification === "function";
+      const injectionManager = this._injectionManager;
+      const patchedAuthServices = new WeakSet();
+
+      const startFaceOnServices = (services) => {
+        if (
+          !services._userVerifier ||
+          services._faceAuthFailed ||
+          services._activeServices?.has(FACE_SERVICE_NAME) ||
+          services._unavailableServices?.has(FACE_SERVICE_NAME)
+        )
+          return;
+
+        try {
+          services
+            ._startService(FACE_SERVICE_NAME, services._cancellable)
+            ?.catch?.((e) => logError(e));
+        } catch (e) {
+          logError(e);
         }
-        primeFaceCache(userName);
-        return original.call(this, userName, hold);
       };
-    });
 
-    this._injectionManager.overrideMethod(
-      proto,
-      "_beginVerification",
-      (original) => {
-        return function () {
-          original.call(this);
+      const canFaceRetryOnServices = (services) => {
+        const mode = services._faceRetryMode ?? "fixed";
+        if (mode === "disabled") return (services._faceFailCounter ?? 0) < 1;
+        if (mode === "infinite") return true;
+        return (services._faceFailCounter ?? 0) < (services._faceMaxTries ?? 1);
+      };
 
-          this._faceEnabled = getFaceEnabled();
-          this._faceMaxTries = getMaxTries();
-          this._faceRetryMode = getRetryMode();
-          this._faceFailCounter = 0;
-
-          if (
-            !this._userName ||
-            !this._faceEnabled ||
-            this._faceAuthFailed ||
-            this._faceStartPending ||
-            this._activeServices.has(FACE_SERVICE_NAME) ||
-            this.serviceIsForeground(FACE_SERVICE_NAME)
-          )
-            return;
-
-          const self = this;
-          const userName = this._userName;
-
-          if (
-            faceCache.enrolled.get(userName) === true &&
-            faceCache.camera === true
-          ) {
-            startFace(self);
-            return;
-          }
-
-          this._faceStartPending = true;
-          const probe = {};
-          this._faceStartProbe = probe;
-
-          probeFaceEligibility({
-            proxy: dbusProxy,
-            userName,
-            onEnrolled: () => faceCache.enrolled.set(userName, true),
-            onCameraAvailable: () => {
-              faceCache.camera = true;
-            },
-            onEligible: () => {
-              if (
-                extension._gazeEnableToken === enableToken &&
-                self._faceStartProbe === probe &&
-                self._userName === userName
-              )
-                startFace(self);
-            },
-            onSettled: () => {
-              if (self._faceStartProbe !== probe) return;
-              self._faceStartPending = false;
-              self._faceStartProbe = null;
-            },
-            onProbeError: (error, operation) =>
-              logError(
-                error,
-                `[gaze] Failed to ${operation}; deferring the decision to ${FACE_SERVICE_NAME} PAM`,
-              ),
-          });
-        };
-      },
-    );
-
-    proto.serviceIsFace = function (serviceName) {
-      return this._faceEnabled && serviceName === FACE_SERVICE_NAME;
-    };
-
-    proto.serviceIsBiometric = function (serviceName) {
-      return (
-        (this.serviceIsFace(serviceName) ||
-          this.serviceIsFingerprint(serviceName)) &&
-        !this.serviceIsForeground(serviceName)
-      );
-    };
-
-    proto._canFaceRetry = function () {
-      if (!this._userName) return false;
-      const mode = this._faceRetryMode ?? "fixed";
-      if (mode === "disabled") {
-        return this._faceFailCounter < 1;
-      } else if (mode === "infinite") {
-        return true;
-      } else {
-        return this._faceFailCounter < (this._faceMaxTries ?? 1);
-      }
-    };
-
-    proto._getHint = function () {
-      const faceActive = this._activeServices.has(FACE_SERVICE_NAME);
-      const fpActive = this._activeServices.has(Util.FINGERPRINT_SERVICE_NAME);
-
-      if (faceActive && fpActive) {
-        return this._fingerprintReaderType === 2
-          ? "(or look at the camera or swipe finger)"
-          : "(or look at the camera or place finger on reader)";
-      }
-
-      if (faceActive) return "(or look at the camera)";
-
-      if (fpActive) {
-        return this._fingerprintReaderType === 2
-          ? "(or swipe finger across reader)"
-          : "(or place finger on reader)";
-      }
-
-      return null;
-    };
-
-    this._injectionManager.overrideMethod(
-      proto,
-      "_onConversationStarted",
-      (original) => {
-        return function (client, serviceName) {
-          original.call(this, client, serviceName);
-
-          if (this.serviceIsBiometric(serviceName)) {
-            const hint = this._getHint();
-            if (hint) {
-              this._filterServiceMessages(serviceName, Util.MessageType.HINT);
-              this._queueMessage(serviceName, hint, Util.MessageType.HINT);
-            }
-          }
-        };
-      },
-    );
-
-    this._injectionManager.overrideMethod(proto, "_onInfo", (original) => {
-      return function (client, serviceName, info) {
-        if (this.serviceIsFace(serviceName)) {
-          const text = info?.trim();
-          if (!text) return;
-
-          if (FACE_STATUS_UPDATES.has(text)) {
-            this._filterServiceMessages(serviceName, Util.MessageType.HINT);
-            this._queueMessage(serviceName, text, Util.MessageType.HINT);
-            return;
-          }
+      const beginFaceOnServices = (services) => {
+        if (services._faceUserName !== services._userName) {
+          services._faceUserName = services._userName;
+          services._faceAuthFailed = false;
+          services._faceFailCounter = 0;
+          services._faceStartPending = false;
+          services._faceStartProbe = null;
         }
 
-        if (this.serviceIsBiometric(serviceName)) return;
+        services._faceEnabled = getFaceEnabled();
+        services._faceMaxTries = getMaxTries();
+        services._faceRetryMode = getRetryMode();
 
-        original.call(this, client, serviceName, info);
-      };
-    });
+        const userName = services._userName;
+        if (
+          !userName ||
+          !services._faceEnabled ||
+          services._faceAuthFailed ||
+          services._faceStartPending ||
+          services._activeServices?.has(FACE_SERVICE_NAME)
+        )
+          return;
 
-    this._injectionManager.overrideMethod(
-      proto,
-      "_onSecretInfoQuery",
-      (original) => {
-        return function (client, serviceName, secretQuestion) {
-          if (isConfirmationMessage(secretQuestion)) {
-            // _filterServiceMessages only force-clears when another message is queued behind
-            // the current one, so a lone hint rides out its full ~1s interval unless cleared.
-            if (typeof this._clearMessageQueue === "function") {
-              this._clearMessageQueue();
-            }
-            this._filterServiceMessages(serviceName, Util.MessageType.HINT);
-            // Enter must send confirmation, not the typed answer.
-            this._faceConfirmPending = true;
-            this._faceConfirmService = serviceName;
-            this.emit("ask-question", serviceName, CONFIRMATION_QUESTION, true);
-            return;
-          }
-
-          original.call(this, client, serviceName, secretQuestion);
-        };
-      },
-    );
-
-    this._injectionManager.overrideMethod(proto, "answerQuery", (original) => {
-      return function (serviceName, answer) {
-        if (this._faceConfirmPending && serviceName === this._faceConfirmService) {
-          this._faceConfirmPending = false;
-          this._faceConfirmService = null;
-          return original.call(this, serviceName, "");
-        }
-        return original.call(this, serviceName, answer);
-      };
-    });
-
-    this._injectionManager.overrideMethod(proto, "_onProblem", (original) => {
-      return function (client, serviceName, problem) {
-        if (this.serviceIsFace(serviceName)) {
-          const mapped = GENERIC_ERROR_MAP.get(problem) ?? problem;
-          this._queuePriorityMessage(
-            serviceName,
-            mapped,
-            Util.MessageType.ERROR,
-          );
+        if (
+          faceCache.enrolled.get(userName) === true &&
+          faceCache.camera === true
+        ) {
+          startFaceOnServices(services);
           return;
         }
 
-        original.call(this, client, serviceName, problem);
+        services._faceStartPending = true;
+        const probe = {};
+        services._faceStartProbe = probe;
+
+        probeFaceEligibility({
+          proxy: dbusProxy,
+          userName,
+          onEnrolled: () => faceCache.enrolled.set(userName, true),
+          onCameraAvailable: () => {
+            faceCache.camera = true;
+          },
+          onEligible: () => {
+            if (
+              extension._gazeEnableToken === enableToken &&
+              services._faceStartProbe === probe &&
+              services._userName === userName
+            )
+              startFaceOnServices(services);
+          },
+          onSettled: () => {
+            if (services._faceStartProbe !== probe) return;
+            services._faceStartPending = false;
+            services._faceStartProbe = null;
+          },
+          onProbeError: (error, operation) =>
+            logError(
+              error,
+              `[gaze] Failed to ${operation}; deferring the decision to ${FACE_SERVICE_NAME} PAM`,
+            ),
+        });
       };
-    });
 
-    this._injectionManager.overrideMethod(
-      proto,
-      "_onConversationStopped",
-      (original) => {
-        return function (client, serviceName) {
-          if (serviceName === FACE_SERVICE_NAME) {
-            this._faceFailCounter = (this._faceFailCounter || 0) + 1;
+      // gdm-face is not a mechanism AuthServicesLegacy knows about, so each
+      // handler below would drop its messages as belonging to an unselected
+      // mechanism. We intercept them and route them ourselves.
+      const patchAuthServicesProto = (authProto) => {
+        if (patchedAuthServices.has(authProto)) return;
+        patchedAuthServices.add(authProto);
+
+        injectionManager.overrideMethod(
+          authProto,
+          "_handleBeginVerification",
+          (original) => {
+            return function (...args) {
+              const result = original.apply(this, args);
+              try {
+                beginFaceOnServices(this);
+              } catch (e) {
+                logError(e, "[gaze] Failed to start face authentication");
+              }
+              return result;
+            };
+          },
+        );
+
+        injectionManager.overrideMethod(
+          authProto,
+          "_handleOnInfo",
+          (original) => {
+            return function (serviceName, info) {
+              if (serviceName === FACE_SERVICE_NAME) {
+                const text = info?.trim();
+                if (!text || !FACE_STATUS_UPDATES.has(text)) return;
+
+                this.emit("filter-messages", {
+                  serviceName,
+                  messageType: MESSAGE_TYPE.HINT,
+                });
+                this.emit("queue-message", {
+                  serviceName,
+                  message: text,
+                  messageType: MESSAGE_TYPE.HINT,
+                });
+                return;
+              }
+
+              return original.call(this, serviceName, info);
+            };
+          },
+        );
+
+        injectionManager.overrideMethod(
+          authProto,
+          "_handleOnProblem",
+          (original) => {
+            return function (serviceName, problem) {
+              if (serviceName === FACE_SERVICE_NAME) {
+                this.emit("queue-priority-message", {
+                  serviceName,
+                  message: GENERIC_ERROR_MAP.get(problem) ?? problem,
+                  messageType: MESSAGE_TYPE.ERROR,
+                });
+                return;
+              }
+
+              return original.call(this, serviceName, problem);
+            };
+          },
+        );
+
+        injectionManager.overrideMethod(
+          authProto,
+          "_handleOnSecretInfoQuery",
+          (original) => {
+            return function (serviceName, secretQuestion) {
+              if (isConfirmationMessage(secretQuestion)) {
+                this.emit("filter-messages", {
+                  serviceName,
+                  messageType: MESSAGE_TYPE.HINT,
+                });
+                this.emit("ask-question", {
+                  serviceName,
+                  question: CONFIRMATION_QUESTION,
+                  secret: true,
+                });
+                return;
+              }
+
+              return original.call(this, serviceName, secretQuestion);
+            };
+          },
+        );
+
+        injectionManager.overrideMethod(
+          authProto,
+          "_handleAnswerQuery",
+          (original) => {
+            return function (serviceName, answer) {
+              // The original drops answers for anything but the selected
+              // mechanism, swallowing the confirmation acknowledgement.
+              if (serviceName === FACE_SERVICE_NAME) {
+                try {
+                  this._userVerifier
+                    ?.call_answer_query(serviceName, answer, this._cancellable)
+                    ?.catch?.((e) => logError(e));
+                } catch (e) {
+                  logError(e);
+                }
+                return;
+              }
+
+              return original.call(this, serviceName, answer);
+            };
+          },
+        );
+
+        injectionManager.overrideMethod(
+          authProto,
+          "_handleOnConversationStarted",
+          (original) => {
+            return function (serviceName) {
+              const result = original.call(this, serviceName);
+
+              if (serviceName === FACE_SERVICE_NAME) {
+                this.emit("filter-messages", {
+                  serviceName,
+                  messageType: MESSAGE_TYPE.HINT,
+                });
+                this.emit("queue-message", {
+                  serviceName,
+                  message: FACE_HINT_TEXT,
+                  messageType: MESSAGE_TYPE.HINT,
+                });
+              }
+
+              return result;
+            };
+          },
+        );
+
+        injectionManager.overrideMethod(
+          authProto,
+          "_handleOnConversationStopped",
+          (original) => {
+            return function (serviceName) {
+              if (serviceName !== FACE_SERVICE_NAME)
+                return original.call(this, serviceName);
+
+              // Deliberately not chaining to the original: face runs in the
+              // background, and failing it must not fail the whole conversation
+              // and take the password prompt down with it.
+              this.emit("filter-messages", {
+                serviceName,
+                messageType: MESSAGE_TYPE.HINT,
+              });
+
+              this._faceFailCounter = (this._faceFailCounter ?? 0) + 1;
+              this._faceStartPending = false;
+              this._faceStartProbe = null;
+
+              if (canFaceRetryOnServices(this)) startFaceOnServices(this);
+              else this._faceAuthFailed = true;
+
+              return undefined;
+            };
+          },
+        );
+
+        injectionManager.overrideMethod(
+          authProto,
+          "_handleReset",
+          (original) => {
+            return function (...args) {
+              this._faceUserName = null;
+              this._faceFailCounter = 0;
+              this._faceAuthFailed = false;
+              this._faceStartPending = false;
+              this._faceStartProbe = null;
+              return original.apply(this, args);
+            };
+          },
+        );
+      };
+
+      // AuthServicesLegacy is the only one claiming the fingerprint role;
+      // AuthServicesSSSDSwitchable maps every role to gdm-switchable-auth.
+      const patchAuthServices = (verifier) => {
+        for (const services of verifier._authServices ?? []) {
+          if (
+            !services?.constructor?.SupportedRoles?.includes(
+              LEGACY_AUTH_SERVICES_ROLE,
+            )
+          )
+            continue;
+          patchAuthServicesProto(Object.getPrototypeOf(services));
+        }
+      };
+
+      this._injectionManager.overrideMethod(proto, "begin", (original) => {
+        return function (userName, hold) {
+          if (this._userName !== userName) {
+            this._faceAuthFailed = false;
+            this._faceStartPending = false;
+            this._faceStartProbe = null;
           }
-          if (serviceName === this._faceConfirmService) {
-            this._faceConfirmPending = false;
-            this._faceConfirmService = null;
+
+          // The auth services exist from the constructor onwards, and begin()
+          // runs before any handler does, so this is the earliest safe hook.
+          if (!legacyArch) {
+            try {
+              patchAuthServices(this);
+            } catch (e) {
+              logError(e, "[gaze] Failed to hook the auth services");
+            }
           }
 
-          original.call(this, client, serviceName);
+          primeFaceCache(userName);
+          return original.call(this, userName, hold);
+        };
+      });
 
-          if (this.serviceIsBiometric(serviceName)) {
-            // Face has stopped, so drop its stale "look at the camera" hint;
-            // otherwise it lingers once face errors out on the lock screen.
-            this._filterServiceMessages(serviceName, Util.MessageType.HINT);
+      if (legacyArch) {
+        this._injectionManager.overrideMethod(
+          proto,
+          "_updateEnabledServices",
+          (original) => {
+            return function () {
+              original.call(this);
+              this._faceEnabled = getFaceEnabled();
+              this._faceMaxTries = getMaxTries();
+              this._faceRetryMode = getRetryMode();
+            };
+          },
+        );
 
-            const hint = this._getHint();
-            if (hint) {
-              const bgSvc = [...this._activeServices].find((s) =>
-                this.serviceIsBiometric(s),
-              );
+        this._injectionManager.overrideMethod(
+          proto,
+          "_beginVerification",
+          (original) => {
+            return function () {
+              original.call(this);
 
-              if (bgSvc) {
-                this._filterServiceMessages(bgSvc, Util.MessageType.HINT);
-                this._queueMessage(bgSvc, hint, Util.MessageType.HINT);
+              this._faceEnabled = getFaceEnabled();
+              this._faceMaxTries = getMaxTries();
+              this._faceRetryMode = getRetryMode();
+              this._faceFailCounter = 0;
+
+              if (
+                !this._userName ||
+                !this._faceEnabled ||
+                this._faceAuthFailed ||
+                this._faceStartPending ||
+                this._activeServices.has(FACE_SERVICE_NAME) ||
+                this.serviceIsForeground(FACE_SERVICE_NAME)
+              )
+                return;
+
+              const self = this;
+              const userName = this._userName;
+
+              if (
+                faceCache.enrolled.get(userName) === true &&
+                faceCache.camera === true
+              ) {
+                startFace(self);
+                return;
+              }
+
+              this._faceStartPending = true;
+              const probe = {};
+              this._faceStartProbe = probe;
+
+              probeFaceEligibility({
+                proxy: dbusProxy,
+                userName,
+                onEnrolled: () => faceCache.enrolled.set(userName, true),
+                onCameraAvailable: () => {
+                  faceCache.camera = true;
+                },
+                onEligible: () => {
+                  if (
+                    extension._gazeEnableToken === enableToken &&
+                    self._faceStartProbe === probe &&
+                    self._userName === userName
+                  )
+                    startFace(self);
+                },
+                onSettled: () => {
+                  if (self._faceStartProbe !== probe) return;
+                  self._faceStartPending = false;
+                  self._faceStartProbe = null;
+                },
+                onProbeError: (error, operation) =>
+                  logError(
+                    error,
+                    `[gaze] Failed to ${operation}; deferring the decision to ${FACE_SERVICE_NAME} PAM`,
+                  ),
+              });
+            };
+          },
+        );
+
+        proto.serviceIsFace = function (serviceName) {
+          return this._faceEnabled && serviceName === FACE_SERVICE_NAME;
+        };
+
+        proto.serviceIsBiometric = function (serviceName) {
+          return (
+            (this.serviceIsFace(serviceName) ||
+              this.serviceIsFingerprint(serviceName)) &&
+            !this.serviceIsForeground(serviceName)
+          );
+        };
+
+        proto._canFaceRetry = function () {
+          if (!this._userName) return false;
+          const mode = this._faceRetryMode ?? "fixed";
+          if (mode === "disabled") {
+            return this._faceFailCounter < 1;
+          } else if (mode === "infinite") {
+            return true;
+          } else {
+            return this._faceFailCounter < (this._faceMaxTries ?? 1);
+          }
+        };
+
+        proto._getHint = function () {
+          const faceActive = this._activeServices.has(FACE_SERVICE_NAME);
+          const fpActive = this._activeServices.has(FINGERPRINT_SERVICE_NAME);
+
+          if (faceActive && fpActive) {
+            return this._fingerprintReaderType === 2
+              ? "(or look at the camera or swipe finger)"
+              : "(or look at the camera or place finger on reader)";
+          }
+
+          if (faceActive) return "(or look at the camera)";
+
+          if (fpActive) {
+            return this._fingerprintReaderType === 2
+              ? "(or swipe finger across reader)"
+              : "(or place finger on reader)";
+          }
+
+          return null;
+        };
+
+        this._injectionManager.overrideMethod(
+          proto,
+          "_onConversationStarted",
+          (original) => {
+            return function (client, serviceName) {
+              original.call(this, client, serviceName);
+
+              if (this.serviceIsBiometric(serviceName)) {
+                const hint = this._getHint();
+                if (hint) {
+                  this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
+                  this._queueMessage(serviceName, hint, MESSAGE_TYPE.HINT);
+                }
+              }
+            };
+          },
+        );
+
+        this._injectionManager.overrideMethod(proto, "_onInfo", (original) => {
+          return function (client, serviceName, info) {
+            if (this.serviceIsFace(serviceName)) {
+              const text = info?.trim();
+              if (!text) return;
+
+              if (FACE_STATUS_UPDATES.has(text)) {
+                this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
+                this._queueMessage(serviceName, text, MESSAGE_TYPE.HINT);
+                return;
               }
             }
-          }
-        };
-      },
-    );
 
-    this._injectionManager.overrideMethod(proto, "_onReset", (original) => {
-      return function () {
-        this._faceFailCounter = 0;
-        this._faceAuthFailed = false;
-        this._faceStartPending = false;
-        this._faceStartProbe = null;
-        this._faceConfirmPending = false;
-        this._faceConfirmService = null;
-        original.call(this);
-      };
-    });
+            if (this.serviceIsBiometric(serviceName)) return;
 
-    this._injectionManager.overrideMethod(
-      proto,
-      "_verificationFailed",
-      (original) => {
-        return async function (serviceName, shouldRetry) {
-          if (serviceName === FACE_SERVICE_NAME) {
-            shouldRetry = this._canFaceRetry();
-            if (!shouldRetry) {
-              this._faceAuthFailed = true;
+            original.call(this, client, serviceName, info);
+          };
+        });
+
+        this._injectionManager.overrideMethod(
+          proto,
+          "_onSecretInfoQuery",
+          (original) => {
+            return function (client, serviceName, secretQuestion) {
+              if (isConfirmationMessage(secretQuestion)) {
+                // _filterServiceMessages only force-clears when another message is queued behind
+                // the current one, so a lone hint rides out its full ~1s interval unless cleared.
+                if (typeof this._clearMessageQueue === "function") {
+                  this._clearMessageQueue();
+                }
+                this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
+                // Enter must send confirmation, not the typed answer.
+                this._faceConfirmPending = true;
+                this._faceConfirmService = serviceName;
+                this.emit("ask-question", serviceName, CONFIRMATION_QUESTION, true);
+                return;
+              }
+
+              original.call(this, client, serviceName, secretQuestion);
+            };
+          },
+        );
+
+        this._injectionManager.overrideMethod(proto, "answerQuery", (original) => {
+          return function (serviceName, answer) {
+            if (this._faceConfirmPending && serviceName === this._faceConfirmService) {
+              this._faceConfirmPending = false;
+              this._faceConfirmService = null;
+              return original.call(this, serviceName, "");
             }
-          }
+            return original.call(this, serviceName, answer);
+          };
+        });
 
-          return original.call(this, serviceName, shouldRetry);
-        };
-      },
-    );
+        this._injectionManager.overrideMethod(proto, "_onProblem", (original) => {
+          return function (client, serviceName, problem) {
+            if (this.serviceIsFace(serviceName)) {
+              const mapped = GENERIC_ERROR_MAP.get(problem) ?? problem;
+              this._queuePriorityMessage(
+                serviceName,
+                mapped,
+                MESSAGE_TYPE.ERROR,
+              );
+              return;
+            }
+
+            original.call(this, client, serviceName, problem);
+          };
+        });
+
+        this._injectionManager.overrideMethod(
+          proto,
+          "_onConversationStopped",
+          (original) => {
+            return function (client, serviceName) {
+              if (serviceName === FACE_SERVICE_NAME) {
+                this._faceFailCounter = (this._faceFailCounter || 0) + 1;
+              }
+              if (serviceName === this._faceConfirmService) {
+                this._faceConfirmPending = false;
+                this._faceConfirmService = null;
+              }
+
+              original.call(this, client, serviceName);
+
+              if (this.serviceIsBiometric(serviceName)) {
+                // Face has stopped, so drop its stale "look at the camera" hint;
+                // otherwise it lingers once face errors out on the lock screen.
+                this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
+
+                const hint = this._getHint();
+                if (hint) {
+                  const bgSvc = [...this._activeServices].find((s) =>
+                    this.serviceIsBiometric(s),
+                  );
+
+                  if (bgSvc) {
+                    this._filterServiceMessages(bgSvc, MESSAGE_TYPE.HINT);
+                    this._queueMessage(bgSvc, hint, MESSAGE_TYPE.HINT);
+                  }
+                }
+              }
+            };
+          },
+        );
+
+        this._injectionManager.overrideMethod(proto, "_onReset", (original) => {
+          return function () {
+            this._faceFailCounter = 0;
+            this._faceAuthFailed = false;
+            this._faceStartPending = false;
+            this._faceStartProbe = null;
+            this._faceConfirmPending = false;
+            this._faceConfirmService = null;
+            original.call(this);
+          };
+        });
+
+        this._injectionManager.overrideMethod(
+          proto,
+          "_verificationFailed",
+          (original) => {
+            return async function (serviceName, shouldRetry) {
+              if (serviceName === FACE_SERVICE_NAME) {
+                shouldRetry = this._canFaceRetry();
+                if (!shouldRetry) {
+                  this._faceAuthFailed = true;
+                }
+              }
+
+              return original.call(this, serviceName, shouldRetry);
+            };
+          },
+        );
+      }
+    };
+
+    // GNOME 50 dropped the ShellUserVerifier re-export from gdm/util.js, so
+    // fall back to the instance AuthPrompt builds instead of failing to enable.
+    if (Util.ShellUserVerifier?.prototype) {
+      installVerifierHooks(Util.ShellUserVerifier.prototype);
+    } else {
+      this._injectionManager.overrideMethod(
+        AuthPrompt.AuthPrompt.prototype,
+        "_createUserVerifier",
+        (original) => {
+          return function (...args) {
+            const verifier = original.apply(this, args);
+            try {
+              installVerifierHooks(Object.getPrototypeOf(verifier));
+            } catch (e) {
+              logError(e, "[gaze] Failed to hook the user verifier");
+            }
+            return verifier;
+          };
+        },
+      );
+    }
+
 
     const authPromptProto = AuthPrompt.AuthPrompt.prototype;
 
@@ -919,7 +1268,15 @@ export default class GazeFaceAuthExtension extends Extension {
       authPromptProto,
       "_onAskQuestion",
       (original) => {
-        return function (serviceName, question, secret) {
+        // Shells with the unified-auth rework pass a single params object
+        // instead of positional arguments.
+        return function (...args) {
+          const [first] = args;
+          const { serviceName, question } =
+            first && typeof first === "object"
+              ? first
+              : { serviceName: args[0], question: args[1] };
+
           if (
             isConfirmationMessage(question) ||
             (this._userVerifier?._faceConfirmPending &&
@@ -929,7 +1286,7 @@ export default class GazeFaceAuthExtension extends Extension {
             return;
           }
           exitAuthPromptConfirmMode(this);
-          original.call(this, serviceName, question, secret);
+          return original.apply(this, args);
         };
       },
     );
@@ -964,20 +1321,20 @@ export default class GazeFaceAuthExtension extends Extension {
       authPromptProto,
       "reset",
       (original) => {
-        return function () {
+        return function (...args) {
           if (
             this.verificationStatus ===
               AuthPrompt.AuthPromptStatus.VERIFICATION_SUCCEEDED ||
             this._confirmSucceeded
           ) {
-            original.call(this);
+            const result = original.apply(this, args);
             if (this._entry) this._entry.hide();
             if (this._passwordEntry) this._passwordEntry.hide();
             if (this._textEntry) this._textEntry.hide();
-            return;
+            return result;
           }
           exitAuthPromptConfirmMode(this);
-          original.call(this);
+          return original.apply(this, args);
         };
       },
     );
@@ -986,20 +1343,20 @@ export default class GazeFaceAuthExtension extends Extension {
       authPromptProto,
       "clear",
       (original) => {
-        return function () {
+        return function (...args) {
           if (
             this.verificationStatus ===
               AuthPrompt.AuthPromptStatus.VERIFICATION_SUCCEEDED ||
             this._confirmSucceeded
           ) {
-            original.call(this);
+            const result = original.apply(this, args);
             if (this._entry) this._entry.hide();
             if (this._passwordEntry) this._passwordEntry.hide();
             if (this._textEntry) this._textEntry.hide();
-            return;
+            return result;
           }
           exitAuthPromptConfirmMode(this);
-          original.call(this);
+          return original.apply(this, args);
         };
       },
     );
@@ -1008,10 +1365,10 @@ export default class GazeFaceAuthExtension extends Extension {
       authPromptProto,
       "_onVerificationFailed",
       (original) => {
-        return function (serviceName, canRetry) {
+        return function (...args) {
           this._confirmSucceeded = false;
           exitAuthPromptConfirmMode(this);
-          original.call(this, serviceName, canRetry);
+          return original.apply(this, args);
         };
       },
     );
@@ -1020,7 +1377,13 @@ export default class GazeFaceAuthExtension extends Extension {
       authPromptProto,
       "updateSensitivity",
       (original) => {
-        return function (sensitive) {
+        // Shells with the unified-auth rework pass {sensitive} instead of a
+        // bare boolean, but still accept the boolean for compatibility.
+        return function (...args) {
+          const [first] = args;
+          const sensitive =
+            first && typeof first === "object" ? first.sensitive : first;
+
           if (this._confirmMode && this._confirmButton?.visible) {
             if (this._confirmButton.reactive === sensitive) return;
             this._confirmButton.reactive = sensitive;
@@ -1031,7 +1394,7 @@ export default class GazeFaceAuthExtension extends Extension {
             }
             return;
           }
-          original.call(this, sensitive);
+          return original.apply(this, args);
         };
       },
     );
@@ -1040,7 +1403,7 @@ export default class GazeFaceAuthExtension extends Extension {
       authPromptProto,
       "_onVerificationComplete",
       (original) => {
-        return function () {
+        return function (...args) {
           this._confirmSucceeded = true;
           if (this._confirmSpinner) {
             this._confirmSpinner.stop();
@@ -1057,7 +1420,7 @@ export default class GazeFaceAuthExtension extends Extension {
           if (this._textEntry) {
             this._textEntry.hide();
           }
-          original.call(this);
+          return original.apply(this, args);
         };
       },
     );
@@ -1066,7 +1429,7 @@ export default class GazeFaceAuthExtension extends Extension {
       authPromptProto,
       "_onDestroy",
       (original) => {
-        return function () {
+        return function (...args) {
           if (this._confirmSpinner) {
             this._confirmSpinner.stop();
             this._confirmSpinner = null;
@@ -1085,7 +1448,7 @@ export default class GazeFaceAuthExtension extends Extension {
             this._confirmButton.destroy();
             this._confirmButton = null;
           }
-          original.call(this);
+          return original.apply(this, args);
         };
       },
     );
@@ -1112,11 +1475,14 @@ export default class GazeFaceAuthExtension extends Extension {
       this._activeConfirmWidgets = null;
     }
 
-    const proto = Util.ShellUserVerifier.prototype;
-    delete proto.serviceIsFace;
-    delete proto.serviceIsBiometric;
-    delete proto._canFaceRetry;
-    delete proto._getHint;
+    const proto = this._verifierProto;
+    if (proto) {
+      delete proto.serviceIsFace;
+      delete proto.serviceIsBiometric;
+      delete proto._canFaceRetry;
+      delete proto._getHint;
+      this._verifierProto = null;
+    }
 
     this._injectionManager.clear();
     this._injectionManager = null;
