@@ -17,7 +17,7 @@ nfpm := require("nfpm")
 # Required by the `srpm` recipe only.
 rpmbuild := require("rpmbuild")
 # ONNX Runtime release bundled into the offline builds (flatpak and srpm).
-ort_version := env("ORT_VERSION", "1.22.0")
+ort_version := env("ORT_VERSION", "1.29.0")
 
 # The opencv crate probes only the `opencv4`/`opencv` pkg-config names, so distros shipping
 # OpenCV 5 (e.g. Arch) need this override. Empty when opencv4/opencv resolve or opencv5 doesn't.
@@ -221,22 +221,32 @@ _nfpm config format:
         fi
     fi
 
+    is_suse() {
+        local os_rel=""
+        for os_rel in /etc/os-release /usr/lib/os-release; do
+            [ -r "$os_rel" ] || continue
+            (
+                # shellcheck disable=SC1091
+                . "$os_rel"
+                case "${ID:-} ${ID_LIKE:-}" in
+                *opensuse*|*suse*) exit 0 ;;
+                *) exit 1 ;;
+                esac
+            ) && return 0 || return 1
+        done
+        return 1
+    }
+
     # Keep unused dependency placeholders valid YAML after envsubst.
     export DEB_LIB_DEPENDS="      # unused for {{ format }}"
     export RPM_LIB_DEPENDS="      # unused for {{ format }}"
     export RPM_GSTREAMER_BASE="gstreamer1-plugins-base"
     export RPM_GSTREAMER_GOOD="gstreamer1-plugins-good"
     export RPM_GSTREAMER_PIPEWIRE="pipewire-gstreamer"
-    if [ "{{ format }}" = rpm ] && [ -r /etc/os-release ]; then
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        case "${ID:-} ${ID_LIKE:-}" in
-        *opensuse*|*suse*)
-            export RPM_GSTREAMER_BASE="gstreamer-plugins-base"
-            export RPM_GSTREAMER_GOOD="gstreamer-plugins-good"
-            export RPM_GSTREAMER_PIPEWIRE="gstreamer-plugin-pipewire"
-            ;;
-        esac
+    if [ "{{ format }}" = rpm ] && is_suse; then
+        export RPM_GSTREAMER_BASE="gstreamer-plugins-base"
+        export RPM_GSTREAMER_GOOD="gstreamer-plugins-good"
+        export RPM_GSTREAMER_PIPEWIRE="gstreamer-plugin-pipewire"
     fi
     case "{{ format }}" in
     deb) export DEB_LIB_DEPENDS="$lib_depends" ;;
@@ -398,13 +408,25 @@ _verify-package format:
         fi
     }
 
+    is_suse() {
+        local os_rel=""
+        for os_rel in /etc/os-release /usr/lib/os-release; do
+            [ -r "$os_rel" ] || continue
+            (
+                # shellcheck disable=SC1091
+                . "$os_rel"
+                case "${ID:-} ${ID_LIKE:-}" in
+                *opensuse*|*suse*) exit 0 ;;
+                *) exit 1 ;;
+                esac
+            ) && return 0 || return 1
+        done
+        return 1
+    }
+
     suse=""
-    if [ "{{ format }}" = rpm ] && [ -r /etc/os-release ]; then
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        case "${ID:-} ${ID_LIKE:-}" in
-        *opensuse*|*suse*) suse=1 ;;
-        esac
+    if [ "{{ format }}" = rpm ] && is_suse; then
+        suse=1
     fi
 
     case "{{ format }}" in
@@ -516,6 +538,13 @@ _verify-package format:
     fi
     ok "$base ships the extension, gschema, gdm defaults and gdm-face stack"
 
+    load gaze-cinnamon-extension
+    want_files /usr/share/cinnamon/extensions/gaze@gundulabs.com/metadata.json \
+        /usr/share/cinnamon/extensions/gaze@gundulabs.com/extension.js \
+        /usr/share/cinnamon/extensions/gaze@gundulabs.com/settings-schema.json
+    want_depends cinnamon
+    ok "$base ships the Cinnamon extension files"
+
     load gaze-hyprlock
     want_files /etc/pam.d/hyprlock-gaze /etc/pam.d/hyprlock-gaze-simultaneous
     want_config /etc/pam.d/hyprlock-gaze /etc/pam.d/hyprlock-gaze-simultaneous
@@ -562,16 +591,28 @@ package-prebuilt format: _dist-packages
     #!/usr/bin/env bash
     set -euo pipefail
 
+    is_suse() {
+        local os_rel=""
+        for os_rel in /etc/os-release /usr/lib/os-release; do
+            [ -r "$os_rel" ] || continue
+            (
+                # shellcheck disable=SC1091
+                . "$os_rel"
+                case "${ID:-} ${ID_LIKE:-}" in
+                *opensuse*|*suse*) exit 0 ;;
+                *) exit 1 ;;
+                esac
+            ) && return 0 || return 1
+        done
+        return 1
+    }
+
     # Use SUSE manifests together so packages do not mix PAM stack formats.
     # Other RPM hosts keep the existing manifests.
 
-    configs=(packaging/nfpm.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension.yaml packaging/nfpm-hyprlock.yaml packaging/nfpm-kde.yaml)
-    if [ "{{ format }}" = rpm ] && [ -r /etc/os-release ]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    case "${ID:-} ${ID_LIKE:-}" in
-    *opensuse*|*suse*) configs=(packaging/nfpm-opensuse.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension-opensuse.yaml packaging/nfpm-hyprlock-opensuse.yaml packaging/nfpm-kde.yaml) ;;
-    esac
+    configs=(packaging/nfpm.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension.yaml packaging/nfpm-cinnamon-extension.yaml packaging/nfpm-hyprlock.yaml packaging/nfpm-kde.yaml)
+    if [ "{{ format }}" = rpm ] && is_suse; then
+        configs=(packaging/nfpm-opensuse.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension-opensuse.yaml packaging/nfpm-cinnamon-extension.yaml packaging/nfpm-hyprlock-opensuse.yaml packaging/nfpm-kde.yaml)
     fi
 
     for config in "${configs[@]}"; do {{ quote(just_executable()) }} _nfpm "$config" "{{ format }}"; done

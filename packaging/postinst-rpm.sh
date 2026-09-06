@@ -20,12 +20,14 @@ check_deprecated_pam_grosshack
 # Keep the shared RPM script valid for both distro families.
 is_suse() {
 	[ -r /etc/os-release ] || return 1
-	# shellcheck disable=SC1091
-	. /etc/os-release
-	case "${ID:-} ${ID_LIKE:-}" in
-		*opensuse*|*suse*) return 0 ;;
-		*) return 1 ;;
-	esac
+	(
+		# shellcheck disable=SC1091
+		. /etc/os-release
+		case "${ID:-} ${ID_LIKE:-}" in
+			*opensuse*|*suse*) exit 0 ;;
+			*) exit 1 ;;
+		esac
+	)
 }
 
 configure_pam_suse() {
