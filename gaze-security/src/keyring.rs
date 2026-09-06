@@ -295,11 +295,10 @@ pub fn load(username: &str) -> anyhow::Result<Option<Secret>> {
         return Ok(None);
     }
     check_directory(dir, 0)?;
-    let uid = Account::uid(username)?;
-    let Some(blob) = read_record(&record_path(dir, uid), 0)? else {
+    let account = Account::lookup(username)?;
+    let Some(blob) = read_record(&record_path(dir, account.uid), 0)? else {
         return Ok(None);
     };
-    let account = Account::lookup(username)?;
     let secret = decrypt_with(&blob, &account, crate::tpm::unseal_credential_key)?;
     ensure!(
         Account::lookup(username)?.binding == account.binding,
