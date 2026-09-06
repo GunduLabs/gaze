@@ -65,7 +65,21 @@ When an administrative application (e.g. `gparted`, Software Sources, or Gaze co
 
 ## Lock Screen Authentication
 
-On Cinnamon 6+ systems utilizing the internal screen shield, Gaze face authentication displays status updates (`Please look at the camera...`, `Hold still...`) directly on the lock screen. When confirmation is required:
-1. A **Confirm Face Unlock** button appears with an active progress indicator.
-2. Pressing **Enter** or clicking the button unlocks the session.
-3. Pressing **Escape** cancels confirmation and returns to the standard password entry.
+How Gaze behaves on the lock screen depends on your Cinnamon desktop version and session type:
+
+### Unified Native Screensaver (Wayland / Cinnamon 6.8+)
+
+On Cinnamon sessions using the integrated native screen shield (introduced in Cinnamon 6.8+ and Wayland sessions), the lock screen runs natively within Cinnamon's window manager process (`imports.ui.screensaver.unlockDialog`). The Gaze Cinnamon Extension hooks directly into this dialog:
+
+1. **Confirmation Button**: When `require_confirmation_lock_screen = true`, a **Confirm Face Unlock** button appears with an active progress spinner.
+2. **Key Navigation**: Pressing **Enter** or clicking the button confirms and unlocks the session. Pressing **Escape** cancels confirmation and returns to the password field.
+3. **Status Feedback**: Interactive camera prompts (`Please look at the camera...`, `Hold still...`, `Need more light...`) display directly on the lock screen label.
+4. **Configurable Retries**: Follows the configured `face-retry-mode` and `max-face-tries` settings.
+
+### Standalone Screensaver (`cinnamon-screensaver` / Linux Mint 22.x on X11)
+
+In Linux Mint 22.x (and standard X11 sessions), screen locking is handled by the standalone `/usr/bin/cinnamon-screensaver` process (written in Python/GTK3), which runs outside Cinnamon's CJS environment.
+
+- **Hands-Free Face Unlock**: When `require_confirmation_lock_screen = false`, Gaze verifies your face via PAM (`/etc/pam.d/cinnamon-screensaver`) and unlocks the screen immediately on match.
+- **Confirmation UI**: Because `/usr/bin/cinnamon-screensaver` is a separate GTK application and does not support CJS Spices extensions, custom button widgets cannot be rendered onto its unlock window. Elevation prompts (PolKit) remain fully supported with the confirmation UI across all Cinnamon versions.
+
