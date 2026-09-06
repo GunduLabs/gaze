@@ -276,8 +276,10 @@ unsafe fn supply_keyring_token(pamh: PamHandle, username: &str) -> Result<(), ()
     if unsafe { pam_get_item(pamh, PAM_AUTHTOK, &mut existing) } != PAM_SUCCESS {
         return Err(());
     }
-    // Never replace a password supplied by another trusted PAM module.
-    if !existing.is_null() {
+    // GDM starts the face service by answering its password query with an empty
+    // string. That placeholder cannot unlock a keyring. Preserve only a real
+    // password supplied by another trusted PAM module.
+    if existing_token_has_password(existing.cast()) {
         return Ok(());
     }
     let secret = gaze_security::keyring::load(username)
@@ -288,6 +290,10 @@ unsafe fn supply_keyring_token(pamh: PamHandle, username: &str) -> Result<(), ()
         return Err(());
     }
     Ok(())
+}
+
+fn existing_token_has_password(token: *const c_char) -> bool {
+    !token.is_null() && !unsafe { CStr::from_ptr(token) }.to_bytes().is_empty()
 }
 
 const PROMPT_RETIRE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -644,6 +650,13 @@ mod tests {
                 PAM_SUCCESS
             );
         }
+    }
+
+    #[test]
+    fn keyring_replaces_gdms_empty_password_placeholder() {
+        assert!(!existing_token_has_password(std::ptr::null()));
+        assert!(!existing_token_has_password(c"".as_ptr()));
+        assert!(existing_token_has_password(c"password".as_ptr()));
     }
 
     #[test]
