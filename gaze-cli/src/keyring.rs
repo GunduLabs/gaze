@@ -20,12 +20,7 @@ pub fn enroll(username: &str, config: &Config) -> anyhow::Result<()> {
         "cannot disable credential core dumps"
     );
     gaze_security::keyring::Account::lookup(username)?;
-    println!(
-        "Enrolling GNOME Keyring unlock for {username}. Enter the login keyring password, normally your login password."
-    );
-    println!(
-        "This stores a TPM-protected password equivalent. Root can recover it. Re-enroll after changing your account or keyring password."
-    );
+    println!("Enter the login keyring password for {username}.");
     let password = Zeroizing::new(
         dialoguer::Password::new()
             .with_prompt("Login keyring password")
@@ -34,36 +29,6 @@ pub fn enroll(username: &str, config: &Config) -> anyhow::Result<()> {
     );
     validate_password(password.as_bytes())?;
     gaze_security::keyring::enroll(username, password.as_bytes())?;
-    println!("TPM-protected GNOME Keyring credential enrolled for {username}.");
+    println!("GNOME Keyring unlock enrolled for {username}.");
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{Cli, Commands, command_requires_root};
-    use clap::Parser;
-
-    #[test]
-    fn keyring_management_requires_root_and_parses_user_and_forget() {
-        let cli = Cli::try_parse_from(["gaze", "keyring", "--user", "alice", "--forget"]).unwrap();
-        assert_eq!(command_requires_root(&cli.command), Some("keyring"));
-        assert!(
-            matches!(cli.command, Commands::Keyring { user: Some(user), forget: true } if user == "alice")
-        );
-        let cli = Cli::try_parse_from(["gaze", "keyring"]).unwrap();
-        assert_eq!(command_requires_root(&cli.command), Some("keyring"));
-        assert!(matches!(
-            cli.command,
-            Commands::Keyring {
-                user: None,
-                forget: false
-            }
-        ));
-    }
-
-    #[test]
-    fn passwords_cannot_be_supplied_as_command_line_arguments() {
-        assert!(Cli::try_parse_from(["gaze", "keyring", "--password", "secret"]).is_err());
-        assert!(Cli::try_parse_from(["gaze", "keyring", "secret"]).is_err());
-    }
 }

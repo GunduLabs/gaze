@@ -5,9 +5,7 @@
 
 Use the `gaze` command for enrollment, testing, and managing face profiles.
 
-Most commands talk to the running `gazed` daemon over DBus. The root-only
-`gaze keyring` command manages the optional TPM-backed GNOME Keyring credential
-locally; see the [GNOME guide](/guide/gnome#optional-tpm-backed-keyring-unlock).
+All commands talk to the running `gazed` daemon over DBus.
 
 ## Commands that need privileges
 

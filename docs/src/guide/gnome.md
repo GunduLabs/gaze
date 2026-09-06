@@ -116,23 +116,18 @@ When that happens, apps that read saved secrets (browser credentials, git creden
 
 ### Optional TPM-backed keyring unlock
 
-Run `gaze config`, enable TPM template encryption, liveness, and GNOME Keyring
-unlock, then enroll the password for the login keyring:
+Enable TPM template encryption, liveness, and GNOME Keyring unlock in `gaze config`.
+Then enroll the login keyring password:
 
 ```bash
-gaze config
-gaze keyring                         # enroll or replace for the current user
-sudo gaze keyring --user alice       # enroll for a specific account
-gaze keyring --forget                # remove your stored credential
+gaze keyring
 ```
 
-Enter the login keyring password, which is normally the account password. The
-prompt is hidden and confirmed. Enrollment does not check the password, so a
-wrong one will leave the keyring locked.
+The password is stored in a root-only TPM-protected record. It is not sent over
+DBus. Re-enroll it after changing the account or keyring password.
 
-Enable [GDM face login](#optional-enable-face-at-gdm-login) separately. Upgrade the
-daemon, CLI, and PAM module together, then restart `gazed`. If you maintain your
-own `gdm-face` file, keep its account and session lines and use this auth order:
+Enable [GDM face login](#optional-enable-face-at-gdm-login) separately. If you
+maintain your own `gdm-face` file, use this auth order:
 
 ```pam
 auth required pam_env.so
@@ -141,21 +136,9 @@ auth requisite pam_deny.so
 auth optional pam_gnome_keyring.so auto_start use_authtok
 ```
 
-`success=1` skips only `pam_deny`; the old `success=done` skipped the keyring
-module too. Gaze puts a password in `PAM_AUTHTOK` only after a normal face and
-liveness success. It does not send the password over DBus or use it for other PAM
-services.
-
-The record is root-only under `/var/lib/gaze/keyring`, encrypted with a separate
-TPM-sealed key, and tied to the account's current password hash. It is still a
-password equivalent: root on the machine can recover it.
-
-If the record is missing, corrupted, or cannot be unsealed, GDM uses the normal
-password path. Changing the account or keyring password means re-running
-`gaze keyring`. Clearing or resetting the TPM in firmware also means re-enrolling.
-If firmware merely disables the TPM, GDM falls back until it is enabled again.
-`gaze keyring --forget` removes the stored record. On SELinux or AppArmor systems,
-test this from the real GDM screen.
+Gaze sets `PAM_AUTHTOK` only after face and liveness authentication succeeds. If
+the TPM, record, or password binding is unavailable, GDM falls back to the normal
+password login. Clearing the TPM also requires re-enrollment.
 
 ## Optional: enable face at GDM login
 

@@ -75,7 +75,7 @@ fn command_requires_root(command: &Commands) -> Option<&'static str> {
         Commands::RenameFace { .. } => Some("rename-face"),
         Commands::ClearUser { .. } => Some("clear-user"),
         Commands::Config { show } => (!show).then_some("config"),
-        Commands::Keyring { .. } => Some("keyring"),
+        Commands::Keyring => Some("keyring"),
         Commands::Auth { .. }
         | Commands::ListFaces { .. }
         | Commands::Doctor { .. }
@@ -252,15 +252,7 @@ enum Commands {
         show: bool,
     },
     /// Enroll or replace a TPM-protected GNOME Keyring password (root only)
-    Keyring {
-        #[arg(short, long)]
-        user: Option<String>,
-        #[arg(
-            long,
-            help = "Remove this user's stored keyring credential; no TPM needed"
-        )]
-        forget: bool,
-    },
+    Keyring,
     /// Check the Gaze installation for configuration and runtime problems
     Doctor {
         #[arg(short, long, help = "Check enrollments for this user")]
@@ -579,18 +571,15 @@ async fn run_config_wizard(
         .default(config.storage.encrypt_templates)
         .interact()?;
 
-    config.storage.unlock_gnome_keyring = if config.storage.encrypt_templates
-        && config.liveness.enabled
-    {
-        term.write_line("Optional GNOME Keyring unlock stores a TPM-protected copy of your keyring password. Root can recover it; password changes require enrollment again.")?;
-        Confirm::with_theme(&theme)
-            .with_prompt("Enable TPM-backed GNOME Keyring unlock for GDM face logins")
-            .default(config.storage.unlock_gnome_keyring)
-            .interact()?
-    } else {
-        term.write_line("GNOME Keyring unlock requires TPM template encryption and liveness; leaving it disabled.")?;
-        false
-    };
+    config.storage.unlock_gnome_keyring =
+        if config.storage.encrypt_templates && config.liveness.enabled {
+            Confirm::with_theme(&theme)
+                .with_prompt("Enable TPM-backed GNOME Keyring unlock for GDM face logins")
+                .default(config.storage.unlock_gnome_keyring)
+                .interact()?
+        } else {
+            false
+        };
 
     apply_config_to_daemon(proxy, &config).await?;
     term.write_line(&format!(
@@ -600,10 +589,7 @@ async fn run_config_wizard(
 
     if config.storage.unlock_gnome_keyring
         && Confirm::with_theme(&theme)
-            .with_prompt(format!(
-                "Enroll or replace the keyring password for {} now",
-                get_current_user()
-            ))
+            .with_prompt("Enroll the login keyring password now")
             .default(false)
             .interact()?
     {
@@ -1768,14 +1754,8 @@ async fn run() -> anyhow::Result<()> {
         (command_may_be_challenged(&cli.command) && !silent_auth).then(polkit::PolkitAgent::spawn);
 
     match &cli.command {
-        Commands::Keyring { user, forget } => {
-            let username = user.clone().unwrap_or_else(get_current_user);
-            if *forget {
-                gaze_security::keyring::forget(&username)?;
-                println!("Stored GNOME Keyring credential removed for {username}.");
-            } else {
-                keyring::enroll(&username, &Config::load()?)?;
-            }
+        Commands::Keyring => {
+            keyring::enroll(&get_current_user(), &Config::load()?)?;
             return Ok(());
         }
         Commands::Uninstall {
@@ -1978,7 +1958,7 @@ async fn run() -> anyhow::Result<()> {
             run_config_wizard(&Term::stdout(), &proxy, config).await?;
         }
 
-        Commands::Doctor { .. } | Commands::Uninstall { .. } | Commands::Keyring { .. } => {
+        Commands::Doctor { .. } | Commands::Uninstall { .. } | Commands::Keyring => {
             unreachable!("handled before DBus connection")
         }
     }

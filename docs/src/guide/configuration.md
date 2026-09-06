@@ -410,14 +410,9 @@ sudo systemctl restart gazed
 
 ## Unlock GNOME Keyring after a GDM face login
 
-`storage.unlock_gnome_keyring` defaults to `false`. It requires
-`storage.encrypt_templates = true` and `liveness.enabled = true`. `gaze config`
-asks about it after TPM template encryption. Each user who wants it must then run
-`gaze keyring`.
-
-This stores a TPM-protected password equivalent. No password goes in the config
-file or over DBus. See [GNOME Keyring setup and recovery](/guide/gnome#optional-tpm-backed-keyring-unlock)
-before enabling it.
+`storage.unlock_gnome_keyring` defaults to `false`. It requires TPM template
+encryption and liveness. Run `gaze keyring` for each user after enabling it. See
+[GNOME Keyring setup](/guide/gnome#optional-tpm-backed-keyring-unlock).
 
 ## Enrollment behavior
 

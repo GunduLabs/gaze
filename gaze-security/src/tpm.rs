@@ -1,10 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
+//! The small TPM operation used only for the keyring credential record.
+//!
+//! It deliberately opens a local device instead of accepting a TCTI from the
+//! PAM process environment.
 
 use anyhow::{Context as _, anyhow};
+use std::path::Path;
+use std::str::FromStr;
 use tss_esapi::attributes::ObjectAttributesBuilder;
 use tss_esapi::interface_types::algorithm::{HashingAlgorithm, PublicAlgorithm};
 use tss_esapi::interface_types::ecc::EccCurve;
@@ -19,212 +23,21 @@ use tss_esapi::tcti_ldr::DeviceConfig;
 use tss_esapi::traits::{Marshall, UnMarshall};
 use tss_esapi::{Context, TctiNameConf};
 
-pub const KEY_LEN: usize = 32;
+const KEY_LEN: usize = 32;
 
-pub const STATE_DIR: &str = "/var/lib/gaze/tpm";
-
-const PUB_FILE: &str = "dek.pub";
-const PRIV_FILE: &str = "dek.priv";
-
-const TPM_RM_DEVICE: &str = "/dev/tpmrm0";
-const TPM_RAW_DEVICE: &str = "/dev/tpm0";
-const TPM_DEVICES: [&str; 2] = [TPM_RM_DEVICE, TPM_RAW_DEVICE];
-
-/// Credential operations never accept environment-selected TPM transports. A PAM host's
-/// environment must not redirect password protection to an attacker-controlled software TPM.
-fn credential_context() -> anyhow::Result<Context> {
-    for device in present_devices() {
-        if let Ok(context) = device_context(device) {
-            return Ok(context);
+fn context() -> anyhow::Result<Context> {
+    for device in ["/dev/tpmrm0", "/dev/tpm0"] {
+        if Path::new(device).exists() {
+            let config = DeviceConfig::from_str(device)?;
+            if let Ok(context) = Context::new(TctiNameConf::Device(config)) {
+                return Ok(context);
+            }
         }
     }
     Err(anyhow!("no usable local TPM 2.0 device"))
 }
 
-pub fn seal_credential_key(key: &[u8; KEY_LEN]) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
-    seal_credential_key_in(&mut credential_context()?, key)
-}
-
-pub fn unseal_credential_key(public: &[u8], private: &[u8]) -> anyhow::Result<[u8; KEY_LEN]> {
-    unseal_credential_key_in(&mut credential_context()?, public, private)
-}
-
-// Reuse the template-encryption parent and sealing format, but salt credential sessions to
-// that parent. Both command and response parameters are encrypted across the TPM transport.
-fn credential_operation<T>(
-    context: &mut Context,
-    operation: impl FnOnce(&mut Context, tss_esapi::handles::KeyHandle) -> anyhow::Result<T>,
-) -> anyhow::Result<T> {
-    use tss_esapi::attributes::SessionAttributesBuilder;
-    use tss_esapi::constants::SessionType;
-    use tss_esapi::handles::SessionHandle;
-    use tss_esapi::structures::SymmetricDefinition;
-
-    let primary = create_primary(context)?;
-    let result = (|| {
-        let session = context
-            .start_auth_session(
-                Some(primary),
-                None,
-                None,
-                SessionType::Hmac,
-                SymmetricDefinition::AES_128_CFB,
-                HashingAlgorithm::Sha256,
-            )?
-            .ok_or_else(|| anyhow!("TPM did not create a credential session"))?;
-        let result = (|| {
-            let (attrs, mask) = SessionAttributesBuilder::new()
-                .with_decrypt(true)
-                .with_encrypt(true)
-                .build();
-            context.tr_sess_set_attributes(session, attrs, mask)?;
-            context.execute_with_session(Some(session), |ctx| operation(ctx, primary))
-        })();
-        let _ = context.flush_context(SessionHandle::from(session).into());
-        result
-    })();
-    let _ = context.flush_context(primary.into());
-    result
-}
-
-pub(crate) fn seal_credential_key_in(
-    context: &mut Context,
-    key: &[u8; KEY_LEN],
-) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
-    credential_operation(context, |ctx, primary| {
-        let sensitive = SensitiveData::try_from(key.to_vec())?;
-        let created = ctx.create(
-            primary,
-            sealed_object_public()?,
-            None,
-            Some(sensitive),
-            None,
-            None,
-        )?;
-        Ok((
-            created.out_public.marshall()?,
-            created.out_private.value().to_vec(),
-        ))
-    })
-}
-
-pub(crate) fn unseal_credential_key_in(
-    context: &mut Context,
-    public: &[u8],
-    private: &[u8],
-) -> anyhow::Result<[u8; KEY_LEN]> {
-    let public = Public::unmarshall(public)?;
-    let private = Private::try_from(private.to_vec())?;
-    credential_operation(context, |ctx, primary| {
-        let object = ctx.load(primary, private, public)?;
-        let result = ctx.unseal(object.into());
-        let _ = ctx.flush_context(object.into());
-        result?
-            .value()
-            .try_into()
-            .map_err(|_| anyhow!("invalid credential key length"))
-    })
-}
-
-pub fn load_or_create_dek(state_dir: &Path) -> anyhow::Result<[u8; KEY_LEN]> {
-    if present_devices().is_empty() && !tcti_override_present() {
-        return Err(anyhow!(
-            "no TPM device found (looked for {TPM_RM_DEVICE} and {TPM_RAW_DEVICE})"
-        ));
-    }
-
-    ensure_private_dir(state_dir).with_context(|| {
-        format!(
-            "failed to prepare TPM state directory {}",
-            state_dir.display()
-        )
-    })?;
-
-    let pub_path = state_dir.join(PUB_FILE);
-    let priv_path = state_dir.join(PRIV_FILE);
-
-    let mut context = build_context().context("failed to initialise TPM ESAPI context")?;
-
-    if pub_path.exists() && priv_path.exists() {
-        let public = Public::unmarshall(&std::fs::read(&pub_path)?)
-            .context("failed to parse sealed TPM public blob")?;
-        let private = Private::try_from(std::fs::read(&priv_path)?)
-            .map_err(|e| anyhow!("failed to parse sealed TPM private blob: {e}"))?;
-        let dek = unseal(&mut context, public, private).context(
-            "could not unseal the template key; if the TPM was cleared, delete the TPM state \
-             directory and re-enrol",
-        )?;
-        return Ok(dek);
-    }
-
-    let mut dek = [0u8; KEY_LEN];
-    getrandom::fill(&mut dek)
-        .map_err(|e| anyhow!("failed to draw a random data-encryption key: {e}"))?;
-
-    let (public, private) = seal(&mut context, &dek).context("failed to seal the template key")?;
-    write_private_file(&pub_path, &public.marshall()?)?;
-    write_private_file(&priv_path, private.value())?;
-    Ok(dek)
-}
-
-fn present_devices() -> Vec<&'static str> {
-    TPM_DEVICES
-        .into_iter()
-        .filter(|device| Path::new(device).exists())
-        .collect()
-}
-
-fn device_is_writable(device: &str) -> Result<(), std::io::Error> {
-    let path = std::ffi::CString::new(device)
-        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
-    if unsafe { libc::access(path.as_ptr(), libc::R_OK | libc::W_OK) } == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error())
-    }
-}
-
-fn tcti_override_present() -> bool {
-    ["TPM2TOOLS_TCTI", "TCTI", "TEST_TCTI"]
-        .iter()
-        .any(|name| std::env::var_os(name).is_some())
-}
-
-fn device_context(device: &str) -> anyhow::Result<Context> {
-    let config = DeviceConfig::from_str(device)
-        .map_err(|e| anyhow!("invalid TPM device path {device}: {e}"))?;
-    Ok(Context::new(TctiNameConf::Device(config))?)
-}
-
-fn build_context() -> anyhow::Result<Context> {
-    if let Ok(tcti) = TctiNameConf::from_environment_variable() {
-        return Ok(Context::new(tcti)?);
-    }
-
-    let mut failures = Vec::new();
-    for device in present_devices() {
-        if let Err(e) = device_is_writable(device) {
-            failures.push(format!("{device}: {e}"));
-            continue;
-        }
-        match device_context(device) {
-            Ok(context) => return Ok(context),
-            Err(e) => failures.push(format!("{device}: {e}")),
-        }
-    }
-
-    if failures.is_empty() {
-        return device_context(TPM_RAW_DEVICE);
-    }
-
-    Err(anyhow!(
-        "could not open any TPM device ({}); gazed needs read/write access to the device node, \
-         which most distributions restrict to the `tss` user and group",
-        failures.join("; ")
-    ))
-}
-
-fn create_primary(context: &mut Context) -> anyhow::Result<tss_esapi::handles::KeyHandle> {
+fn primary(context: &mut Context) -> anyhow::Result<tss_esapi::handles::KeyHandle> {
     let attrs = ObjectAttributesBuilder::new()
         .with_fixed_tpm(true)
         .with_fixed_parent(true)
@@ -233,10 +46,8 @@ fn create_primary(context: &mut Context) -> anyhow::Result<tss_esapi::handles::K
         .with_decrypt(true)
         .with_sign_encrypt(false)
         .with_restricted(true)
-        .build()
-        .context("failed to build primary object attributes")?;
-
-    let ecc_params = PublicEccParametersBuilder::new()
+        .build()?;
+    let params = PublicEccParametersBuilder::new()
         .with_ecc_scheme(EccScheme::Null)
         .with_curve(EccCurve::NistP256)
         .with_is_signing_key(false)
@@ -247,355 +58,80 @@ fn create_primary(context: &mut Context) -> anyhow::Result<tss_esapi::handles::K
             mode: tss_esapi::interface_types::algorithm::SymmetricMode::Cfb,
         })
         .with_key_derivation_function_scheme(KeyDerivationFunctionScheme::Null)
-        .build()
-        .context("failed to build primary ECC parameters")?;
-
-    // Nothing about this parent is stored on disk. CreatePrimary re-derives the identical key
-    // from the owner seed and this exact template, and no PCR policy means updates don't break it.
+        .build()?;
     let public = PublicBuilder::new()
         .with_public_algorithm(PublicAlgorithm::Ecc)
         .with_name_hashing_algorithm(HashingAlgorithm::Sha256)
         .with_object_attributes(attrs)
-        .with_ecc_parameters(ecc_params)
+        .with_ecc_parameters(params)
         .with_ecc_unique_identifier(EccPoint::default())
-        .build()
-        .context("failed to build primary public template")?;
-
-    let primary = context
+        .build()?;
+    Ok(context
         .execute_with_nullauth_session(|ctx| {
             ctx.create_primary(Hierarchy::Owner, public, None, None, None, None)
         })
-        .context("TPM CreatePrimary failed")?;
-    Ok(primary.key_handle)
+        .context("TPM CreatePrimary failed")?
+        .key_handle)
 }
 
-fn sealed_object_public() -> anyhow::Result<Public> {
+fn sealed_public() -> anyhow::Result<Public> {
     let attrs = ObjectAttributesBuilder::new()
         .with_fixed_tpm(true)
         .with_fixed_parent(true)
         .with_user_with_auth(true)
-        // We supply the data, so it must not originate in the TPM.
         .with_sensitive_data_origin(false)
         .with_sign_encrypt(false)
         .with_decrypt(false)
         .with_restricted(false)
-        .build()
-        .context("failed to build sealed-object attributes")?;
-
-    PublicBuilder::new()
+        .build()?;
+    Ok(PublicBuilder::new()
         .with_public_algorithm(PublicAlgorithm::KeyedHash)
         .with_name_hashing_algorithm(HashingAlgorithm::Sha256)
         .with_object_attributes(attrs)
         .with_keyed_hash_parameters(PublicKeyedHashParameters::new(KeyedHashScheme::Null))
         .with_keyed_hash_unique_identifier(Digest::default())
-        .build()
-        .context("failed to build sealed-object public template")
+        .build()?)
 }
 
-fn seal(context: &mut Context, dek: &[u8; KEY_LEN]) -> anyhow::Result<(Public, Private)> {
-    let primary = create_primary(context)?;
-    let public = sealed_object_public()?;
-    let sensitive =
-        SensitiveData::try_from(dek.to_vec()).map_err(|e| anyhow!("invalid DEK length: {e}"))?;
-
+pub fn seal(key: &[u8; KEY_LEN]) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
+    let mut context = context()?;
+    let parent = primary(&mut context)?;
+    let public = sealed_public()?;
     let result = context.execute_with_nullauth_session(|ctx| {
-        ctx.create(primary, public, None, Some(sensitive), None, None)
-    });
-    let _ = context.flush_context(primary.into());
-    let created = result.context("TPM Create (seal) failed")?;
-    Ok((created.out_public, created.out_private))
-}
-
-fn unseal(
-    context: &mut Context,
-    public: Public,
-    private: Private,
-) -> anyhow::Result<[u8; KEY_LEN]> {
-    let primary = create_primary(context)?;
-    let result = context.execute_with_nullauth_session(|ctx| {
-        let object = ctx.load(primary, private, public)?;
-        let data = ctx.unseal(object.into());
-        let _ = ctx.flush_context(object.into());
-        data
-    });
-    let _ = context.flush_context(primary.into());
-
-    let sensitive = result.context("TPM Load/Unseal failed")?;
-    let bytes = sensitive.value();
-    let dek: [u8; KEY_LEN] = bytes.try_into().map_err(|_| {
-        anyhow!(
-            "unsealed key has unexpected length {} (expected {KEY_LEN})",
-            bytes.len()
+        ctx.create(
+            parent,
+            public,
+            None,
+            Some(SensitiveData::try_from(key.to_vec())?),
+            None,
+            None,
         )
-    })?;
-    Ok(dek)
+    });
+    let _ = context.flush_context(parent.into());
+    let created = result.context("TPM Create failed")?;
+    Ok((
+        created.out_public.marshall()?,
+        created.out_private.value().to_vec(),
+    ))
 }
 
-fn ensure_private_dir(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::create_dir_all(path)?;
-    let meta = std::fs::symlink_metadata(path)?;
-    if meta.file_type().is_symlink() || !meta.is_dir() {
-        return Err(std::io::Error::other(format!(
-            "{} is not a private directory",
-            path.display()
-        )));
-    }
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
-    Ok(())
-}
-
-fn write_private_file(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let parent: PathBuf = path
-        .parent()
-        .map(Path::to_path_buf)
-        .context("sealed key path has no parent directory")?;
-    let tmp = parent.join(format!(
-        ".{}.{}.tmp",
-        path.file_name().and_then(|n| n.to_str()).unwrap_or("dek"),
-        std::process::id()
-    ));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&tmp)
-        .with_context(|| format!("failed to create {}", tmp.display()))?;
-    if let Err(e) = file.write_all(bytes).and_then(|_| file.flush()) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e).with_context(|| format!("failed to write {}", tmp.display()));
-    }
-    drop(file);
-    std::fs::rename(&tmp, path).with_context(|| format!("failed to replace {}", path.display()))?;
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Mutex;
-
-    // Serialize TPM tests: they share one TPM with very few transient-object slots.
-    static TPM_LOCK: Mutex<()> = Mutex::new(());
-
-    #[test]
-    fn device_probe_prefers_the_resource_manager() {
-        assert_eq!(TPM_DEVICES, [TPM_RM_DEVICE, TPM_RAW_DEVICE]);
-
-        let present = present_devices();
-        for device in &present {
-            assert!(Path::new(device).exists());
-        }
-        if Path::new(TPM_RM_DEVICE).exists() {
-            assert_eq!(present.first().copied(), Some(TPM_RM_DEVICE));
-        }
-    }
-
-    #[test]
-    fn writability_probe_reports_missing_devices() {
-        let err = device_is_writable("/dev/gaze-does-not-exist").expect_err("must fail");
-        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
-    }
-
-    #[test]
-    fn writability_probe_reports_inaccessible_devices() {
-        if unsafe { libc::geteuid() } == 0 {
-            return;
-        }
-        use std::os::unix::fs::PermissionsExt;
-        let path = std::env::temp_dir().join(format!("gaze-tpm-perm-{}", std::process::id()));
-        std::fs::write(&path, b"").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
-        let err = device_is_writable(path.to_str().unwrap()).expect_err("must fail");
-        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    #[ignore = "requires a usable TPM"]
-    fn seal_unseal_round_trip() {
-        let _guard = TPM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = std::env::temp_dir().join(format!("gaze-tpm-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let first = load_or_create_dek(&dir).expect("seal");
-        let second = load_or_create_dek(&dir).expect("unseal");
-        assert_eq!(first, second, "reloading must yield the same DEK");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "gaze-tpm-{name}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
-    }
-
-    fn mode_of(path: &Path) -> u32 {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::symlink_metadata(path)
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777
-    }
-
-    #[test]
-    fn the_state_directory_is_created_private() {
-        let dir = scratch("mkdir");
-
-        ensure_private_dir(&dir).unwrap();
-
-        assert!(dir.is_dir());
-        assert_eq!(
-            mode_of(&dir),
-            0o700,
-            "the sealed DEK must not be world-readable"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_loosened_state_directory_is_tightened_again() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = scratch("relax");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        ensure_private_dir(&dir).unwrap();
-
-        assert_eq!(mode_of(&dir), 0o700);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_symlinked_state_directory_is_refused() {
-        let root = scratch("symlink");
-        std::fs::create_dir_all(root.join("real")).unwrap();
-        let link = root.join("link");
-        std::os::unix::fs::symlink(root.join("real"), &link).unwrap();
-
-        let err = ensure_private_dir(&link).expect_err("a symlink could point anywhere");
-
-        assert!(err.to_string().contains("not a private directory"), "{err}");
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_state_path_that_is_a_file_is_refused() {
-        let root = scratch("file");
-        std::fs::create_dir_all(&root).unwrap();
-        let file = root.join("dek");
-        std::fs::write(&file, b"not a directory").unwrap();
-
-        assert!(ensure_private_dir(&file).is_err());
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_sealed_blob_is_written_owner_only_and_leaves_no_temporary_behind() {
-        let dir = scratch("write");
-        ensure_private_dir(&dir).unwrap();
-        let path = dir.join(PRIV_FILE);
-
-        write_private_file(&path, b"sealed").unwrap();
-
-        assert_eq!(std::fs::read(&path).unwrap(), b"sealed");
-        assert_eq!(mode_of(&path), 0o600);
-        let leftovers: Vec<_> = std::fs::read_dir(&dir)
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name())
-            .filter(|name| name.to_string_lossy().ends_with(".tmp"))
-            .collect();
-        assert!(
-            leftovers.is_empty(),
-            "staging files left behind: {leftovers:?}"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn rewriting_a_sealed_blob_replaces_it_rather_than_failing() {
-        let dir = scratch("replace");
-        ensure_private_dir(&dir).unwrap();
-        let path = dir.join(PUB_FILE);
-
-        write_private_file(&path, b"first").unwrap();
-        write_private_file(&path, b"second").unwrap();
-
-        assert_eq!(std::fs::read(&path).unwrap(), b"second");
-        assert_eq!(mode_of(&path), 0o600);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn writing_into_a_missing_directory_reports_the_path_it_could_not_create() {
-        let path = scratch("absent").join("nested").join(PRIV_FILE);
-
-        let err = write_private_file(&path, b"sealed").expect_err("the parent does not exist");
-
-        assert!(err.to_string().contains("failed to create"), "{err}");
-    }
-
-    #[test]
-    fn the_sealed_object_template_is_a_marshallable_keyed_hash() {
-        let public = sealed_object_public().expect("the template needs no TPM to build");
-
-        assert!(
-            matches!(&public, Public::KeyedHash { .. }),
-            "sealing needs a keyed-hash object, not a key"
-        );
-        assert!(
-            !public.marshall().unwrap().is_empty(),
-            "the template has to survive a round trip through disk"
-        );
-    }
-
-    #[test]
-    fn a_sealed_object_template_round_trips_through_its_on_disk_form() {
-        let public = sealed_object_public().unwrap();
-
-        let bytes = public.marshall().unwrap();
-        let parsed = Public::unmarshall(&bytes).unwrap();
-
-        assert_eq!(parsed.marshall().unwrap(), bytes);
-    }
-
-    #[test]
-    fn the_key_length_the_tpm_seals_matches_the_cipher_that_uses_it() {
-        assert_eq!(
-            KEY_LEN, 32,
-            "sealing a DEK of a different size would break unseal"
-        );
-    }
-
-    #[test]
-    fn the_state_directory_lives_under_var_lib() {
-        assert_eq!(STATE_DIR, "/var/lib/gaze/tpm");
-        assert!(Path::new(STATE_DIR).is_absolute());
-    }
-
-    #[test]
-    fn a_host_without_a_tpm_says_so_instead_of_failing_obscurely() {
-        if !present_devices().is_empty() || tcti_override_present() {
-            return;
-        }
-        let dir = scratch("no-tpm");
-
-        let err = load_or_create_dek(&dir).expect_err("there is no TPM to seal against");
-        let message = err.to_string();
-
-        assert!(message.contains("no TPM device found"), "{message}");
-        assert!(message.contains(TPM_RM_DEVICE), "{message}");
-        assert!(message.contains(TPM_RAW_DEVICE), "{message}");
-        assert!(
-            !dir.exists(),
-            "the state directory should not be created when there is no TPM"
-        );
-    }
+pub fn unseal(public: &[u8], private: &[u8]) -> anyhow::Result<[u8; KEY_LEN]> {
+    let mut context = context()?;
+    let parent = primary(&mut context)?;
+    let result = context.execute_with_nullauth_session(|ctx| {
+        let object = ctx.load(
+            parent,
+            Private::try_from(private.to_vec())?,
+            Public::unmarshall(public)?,
+        )?;
+        let result = ctx.unseal(object.into());
+        let _ = ctx.flush_context(object.into());
+        result
+    });
+    let _ = context.flush_context(parent.into());
+    result
+        .context("TPM Load/Unseal failed")?
+        .value()
+        .try_into()
+        .map_err(|_| anyhow!("invalid credential key length"))
 }

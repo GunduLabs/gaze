@@ -1199,7 +1199,6 @@ dependencies = [
  "anyhow",
  "futures",
  "gaze-core",
- "gaze-security",
  "getrandom 0.4.3",
  "image",
  "libc",
@@ -1211,6 +1210,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "tss-esapi",
  "ureq",
  "uuid",
  "zbus",
@@ -1288,7 +1288,6 @@ dependencies = [
  "getrandom 0.4.3",
  "libc",
  "sha2 0.11.0",
- "tempfile",
  "tss-esapi",
  "zeroize",
 ]

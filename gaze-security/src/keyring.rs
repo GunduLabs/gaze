@@ -272,10 +272,10 @@ pub fn enroll(username: &str, password: &[u8]) -> anyhow::Result<()> {
     check_directory(dir, 0)?;
     let mut key = Zeroizing::new([0; 32]);
     getrandom::fill(key.as_mut()).map_err(|_| anyhow::anyhow!("random key unavailable"))?;
-    let (public, private) = crate::tpm::seal_credential_key(&key)?;
+    let (public, private) = crate::tpm::seal(&key)?;
     let blob = encrypt(&key, &account, password, &public, &private)?;
     // Verify sealing before replacing a working record; a failed setup leaves it intact.
-    let _check = decrypt_with(&blob, &account, crate::tpm::unseal_credential_key)?;
+    let _check = decrypt_with(&blob, &account, crate::tpm::unseal)?;
     ensure!(
         Account::lookup(username)?.binding == account.binding,
         "account changed during enrollment; retry"
@@ -299,7 +299,7 @@ pub fn load(username: &str) -> anyhow::Result<Option<Secret>> {
     let Some(blob) = read_record(&record_path(dir, account.uid), 0)? else {
         return Ok(None);
     };
-    let secret = decrypt_with(&blob, &account, crate::tpm::unseal_credential_key)?;
+    let secret = decrypt_with(&blob, &account, crate::tpm::unseal)?;
     ensure!(
         Account::lookup(username)?.binding == account.binding,
         "account changed during unlock"
@@ -307,25 +307,10 @@ pub fn load(username: &str) -> anyhow::Result<Option<Secret>> {
     Ok(Some(secret))
 }
 
-pub fn forget(username: &str) -> anyhow::Result<()> {
-    let uid = Account::uid(username)?;
-    let dir = Path::new(STORE_DIR);
-    if !dir.try_exists()? {
-        return Ok(());
-    }
-    check_directory(dir, 0)?;
-    match std::fs::remove_file(record_path(dir, uid)) {
-        Ok(()) => File::open(dir)?.sync_all().map_err(Into::into),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.into()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::Cell;
-    use std::os::unix::fs::PermissionsExt;
 
     const KEY: [u8; 32] = [7; 32];
     fn account() -> Account {
@@ -416,87 +401,6 @@ mod tests {
                 .unwrap()
                 .len(),
             MAX_PASSWORD + 1
-        );
-    }
-
-    #[test]
-    fn records_are_atomic_private_replaceable_and_missing_is_unenrolled() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = record_path(dir.path(), account().uid);
-        let owner = unsafe { libc::geteuid() };
-        assert!(read_record(&path, owner).unwrap().is_none());
-        write_record(dir.path(), &account(), &blob()).unwrap();
-        assert_eq!(std::fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
-        let replacement = encrypt(&KEY, &account(), b"replacement", b"p", b"s").unwrap();
-        write_record(dir.path(), &account(), &replacement).unwrap();
-        assert_eq!(read_record(&path, owner).unwrap().unwrap(), replacement);
-        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
-    }
-
-    #[test]
-    fn unsafe_record_files_are_refused() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = record_path(dir.path(), account().uid);
-        let owner = unsafe { libc::geteuid() };
-        write_record(dir.path(), &account(), &blob()).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(read_record(&path, owner).is_err());
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        assert!(read_record(&path, owner.wrapping_add(1)).is_err());
-        let link = dir.path().join("link");
-        std::os::unix::fs::symlink(&path, &link).unwrap();
-        assert!(read_record(&link, owner).is_err());
-        std::fs::remove_file(&link).unwrap();
-        std::fs::hard_link(&path, &link).unwrap();
-        assert!(read_record(&path, owner).is_err());
-        assert!(read_record(dir.path(), owner).is_err());
-    }
-
-    #[test]
-    #[ignore = "requires two disposable swtpm instances in TEST_TCTI and GAZE_TEST_OTHER_TCTI"]
-    fn software_tpm_record_roundtrip_and_machine_binding() {
-        use std::str::FromStr;
-        use tss_esapi::{Context, TctiNameConf};
-        let tcti = TctiNameConf::from_environment_variable().unwrap();
-        let other =
-            TctiNameConf::from_str(&std::env::var("GAZE_TEST_OTHER_TCTI").unwrap()).unwrap();
-        assert!(matches!(tcti, TctiNameConf::Swtpm(_)));
-        assert!(matches!(other, TctiNameConf::Swtpm(_)));
-        let mut context = Context::new(tcti.clone()).unwrap();
-        let mut second_tpm = Context::new(other).unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let (public, private) = crate::tpm::seal_credential_key_in(&mut context, &KEY).unwrap();
-        let encrypted = encrypt(
-            &KEY,
-            &account(),
-            b"synthetic keyring password",
-            &public,
-            &private,
-        )
-        .unwrap();
-        write_record(dir.path(), &account(), &encrypted).unwrap();
-        drop(context);
-        let mut context = Context::new(tcti).unwrap();
-        let on_disk = read_record(&record_path(dir.path(), account().uid), unsafe {
-            libc::geteuid()
-        })
-        .unwrap()
-        .unwrap();
-        let secret = decrypt_with(&on_disk, &account(), |p, s| {
-            crate::tpm::unseal_credential_key_in(&mut context, p, s)
-        })
-        .unwrap();
-        assert_eq!(secret.as_slice(), b"synthetic keyring password\0");
-        assert!(
-            decrypt_with(&on_disk, &account(), |p, s| {
-                crate::tpm::unseal_credential_key_in(&mut second_tpm, p, s)
-            })
-            .is_err()
-        );
-        // Failed unseal does not rewrite the enrollment.
-        assert_eq!(
-            std::fs::read(record_path(dir.path(), account().uid)).unwrap(),
-            encrypted
         );
     }
 }

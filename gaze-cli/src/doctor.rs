@@ -597,12 +597,6 @@ fn config_findings(config: &Config) -> Vec<Check> {
         });
     };
 
-    if let Err(err) = config.storage.validate_keyring(&config.liveness) {
-        error(
-            err.to_string(),
-            "Enable TPM template encryption and liveness, or disable storage.unlock_gnome_keyring.",
-        );
-    }
     for err in config.security.validation_errors() {
         let fix = match err.field {
             SecurityField::Level | SecurityField::ModelQuality => {

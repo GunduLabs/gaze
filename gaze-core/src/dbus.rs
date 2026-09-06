@@ -643,48 +643,11 @@ mod tests {
 
     #[test]
     fn current_layout_decodes() {
-        let mut config = Config::default();
-        config.storage.unlock_gnome_keyring = true;
-        let raw = OwnedValue::try_from(Value::from(config)).unwrap();
+        let raw = OwnedValue::try_from(Value::from(Config::default())).unwrap();
         let decoded = config_from_property(raw)
             .expect("no error")
             .expect("current layout is readable");
         assert_eq!(decoded.auth.start_delay_scope(), "screen_lock");
-        assert!(decoded.storage.unlock_gnome_keyring);
-    }
-
-    #[test]
-    fn daemon_without_keyring_setting_is_detected_as_legacy() {
-        #[derive(Clone, Debug, Value, OwnedValue, Type)]
-        struct LegacyStorage {
-            encrypt_templates: bool,
-        }
-        #[derive(Clone, Debug, Value, OwnedValue, Type)]
-        struct LegacyConfig {
-            inference: crate::config::InferenceConfig,
-            security: crate::config::SecurityLevel,
-            cameras: crate::config::CameraConfig,
-            auth: crate::config::AuthConfig,
-            enrollment: crate::config::EnrollmentConfig,
-            liveness: crate::config::LivenessConfig,
-            storage: LegacyStorage,
-        }
-        let config = LegacyConfig {
-            inference: Default::default(),
-            security: Default::default(),
-            cameras: Default::default(),
-            auth: Default::default(),
-            enrollment: Default::default(),
-            liveness: Default::default(),
-            storage: LegacyStorage {
-                encrypt_templates: true,
-            },
-        };
-        assert!(
-            config_from_property(OwnedValue::try_from(Value::from(config)).unwrap())
-                .unwrap()
-                .is_none()
-        );
     }
 
     #[test]
