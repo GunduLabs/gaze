@@ -3,6 +3,7 @@
 
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
+import GObject from "gi://GObject";
 import St from "gi://St";
 import Clutter from "gi://Clutter";
 import {
@@ -237,6 +238,115 @@ const INTERNAL_ERROR_MAP = new Map([
       "Face authentication unavailable. Please enter your password.",
   ],
 ]);
+
+// RHEL 10's backport declares the AuthServices signals with positional
+// parameters; GNOME 50 upstream collapsed them into a single params object.
+const authServicesShapes = new WeakMap();
+
+const usesParamsObject = (services) => {
+  const proto = Object.getPrototypeOf(services);
+  const cached = authServicesShapes.get(proto);
+  if (cached !== undefined) return cached;
+
+  const structural = typeof services._handleGetSupportedRoles === "function";
+  let paramsObject;
+  try {
+    const id = GObject.signal_lookup(
+      "queue-message",
+      services.constructor.$gtype,
+    );
+    paramsObject = id ? GObject.signal_query(id).n_params === 1 : structural;
+  } catch (e) {
+    paramsObject = structural;
+  }
+
+  authServicesShapes.set(proto, paramsObject);
+  return paramsObject;
+};
+
+const emitFilterMessages = (services, serviceName, messageType) => {
+  if (usesParamsObject(services))
+    services.emit("filter-messages", { serviceName, messageType });
+  else services.emit("filter-messages", serviceName, messageType);
+};
+
+const emitQueueMessage = (services, serviceName, message, messageType) => {
+  if (usesParamsObject(services))
+    services.emit("queue-message", { serviceName, message, messageType });
+  else services.emit("queue-message", serviceName, message, messageType);
+};
+
+const emitQueuePriorityMessage = (services, serviceName, message, messageType) => {
+  if (usesParamsObject(services))
+    services.emit("queue-priority-message", {
+      serviceName,
+      message,
+      messageType,
+    });
+  else services.emit("queue-priority-message", serviceName, message, messageType);
+};
+
+const emitAskQuestion = (services, serviceName, question, secret) => {
+  if (usesParamsObject(services)) {
+    services.emit("ask-question", {
+      serviceName,
+      question,
+      secret,
+      answerHandler: (answer) => services._handleAnswerQuery(serviceName, answer),
+    });
+  } else {
+    services.emit("ask-question", serviceName, question, secret);
+  }
+};
+
+const isLegacyAuthServices = (services) => {
+  if (!services || typeof services !== "object") return false;
+  if (typeof services._startService !== "function") return false;
+
+  const roles = services.constructor?.SupportedRoles;
+  if (Array.isArray(roles)) return roles.includes(LEGACY_AUTH_SERVICES_ROLE);
+
+  const roleToService = services.constructor?.RoleToService;
+  if (roleToService && typeof roleToService === "object")
+    return LEGACY_AUTH_SERVICES_ROLE in roleToService;
+
+  return /Legacy/.test(services.constructor?.name ?? "");
+};
+
+// RHEL 10 keeps one named property per architecture; GNOME 50 upstream
+// replaced them with a single _authServices array.
+const collectAuthServices = (verifier) => {
+  const collected = [];
+  const add = (candidate) => {
+    if (
+      candidate &&
+      typeof candidate === "object" &&
+      !collected.includes(candidate)
+    )
+      collected.push(candidate);
+  };
+
+  if (Array.isArray(verifier._authServices)) verifier._authServices.forEach(add);
+  else add(verifier._authServices);
+
+  for (const key of Object.keys(verifier)) {
+    if (key !== "_authServices" && key.startsWith("_authServices"))
+      add(verifier[key]);
+  }
+
+  return collected;
+};
+
+// The emitter is the first argument everywhere except GNOME 50 upstream,
+// which passes a lone params object instead.
+const readAskQuestionArgs = (args) => {
+  const [first, second, third] = args;
+  if (first && typeof first === "object" && "serviceName" in first)
+    return { serviceName: first.serviceName, question: first.question };
+  if (typeof first === "string") return { serviceName: first, question: second };
+  return { serviceName: second, question: third };
+};
+
 
 const CONFIRMATION_QUESTION = "Face Verified. Press Enter to confirm.";
 const CONFIRMATION_DIALOG_LABEL =
@@ -843,38 +953,30 @@ export default class GazeFaceAuthExtension extends Extension {
                   text === GAZE_MSG_LOOK_CAMERA ||
                   text === GAZE_MSG_LOOK_OR_PASSWORD
                 ) {
-                  this.emit("filter-messages", {
+                  emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
+                  emitQueueMessage(
+                    this,
                     serviceName,
-                    messageType: MESSAGE_TYPE.HINT,
-                  });
-                  this.emit("queue-message", {
-                    serviceName,
-                    message: FACE_HINT_TEXT,
-                    messageType: MESSAGE_TYPE.HINT,
-                  });
+                    FACE_HINT_TEXT,
+                    MESSAGE_TYPE.HINT,
+                  );
                   return;
                 }
 
                 if (INTERNAL_ERROR_MAP.has(text)) {
-                  this.emit("queue-priority-message", {
+                  emitQueuePriorityMessage(
+                    this,
                     serviceName,
-                    message: INTERNAL_ERROR_MAP.get(text),
-                    messageType: MESSAGE_TYPE.ERROR,
-                  });
+                    INTERNAL_ERROR_MAP.get(text),
+                    MESSAGE_TYPE.ERROR,
+                  );
                   return;
                 }
 
                 if (!FACE_STATUS_UPDATES.has(text)) return;
 
-                this.emit("filter-messages", {
-                  serviceName,
-                  messageType: MESSAGE_TYPE.HINT,
-                });
-                this.emit("queue-message", {
-                  serviceName,
-                  message: text,
-                  messageType: MESSAGE_TYPE.HINT,
-                });
+                emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
+                emitQueueMessage(this, serviceName, text, MESSAGE_TYPE.HINT);
                 return;
               }
 
@@ -893,11 +995,12 @@ export default class GazeFaceAuthExtension extends Extension {
                   INTERNAL_ERROR_MAP.get(problem) ??
                   GENERIC_ERROR_MAP.get(problem) ??
                   problem;
-                this.emit("queue-priority-message", {
+                emitQueuePriorityMessage(
+                  this,
                   serviceName,
-                  message: mapped,
-                  messageType: MESSAGE_TYPE.ERROR,
-                });
+                  mapped,
+                  MESSAGE_TYPE.ERROR,
+                );
                 return;
               }
 
@@ -912,15 +1015,13 @@ export default class GazeFaceAuthExtension extends Extension {
           (original) => {
             return function (serviceName, secretQuestion) {
               if (isConfirmationMessage(secretQuestion)) {
-                this.emit("filter-messages", {
+                emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
+                emitAskQuestion(
+                  this,
                   serviceName,
-                  messageType: MESSAGE_TYPE.HINT,
-                });
-                this.emit("ask-question", {
-                  serviceName,
-                  question: GAZE_REQUIRE_CONFIRMATION,
-                  secret: true,
-                });
+                  GAZE_REQUIRE_CONFIRMATION,
+                  true,
+                );
                 return;
               }
 
@@ -935,15 +1036,13 @@ export default class GazeFaceAuthExtension extends Extension {
           (original) => {
             return function (serviceName, query) {
               if (isConfirmationMessage(query)) {
-                this.emit("filter-messages", {
+                emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
+                emitAskQuestion(
+                  this,
                   serviceName,
-                  messageType: MESSAGE_TYPE.HINT,
-                });
-                this.emit("ask-question", {
-                  serviceName,
-                  question: GAZE_REQUIRE_CONFIRMATION,
-                  secret: false,
-                });
+                  GAZE_REQUIRE_CONFIRMATION,
+                  false,
+                );
                 return;
               }
 
@@ -983,15 +1082,13 @@ export default class GazeFaceAuthExtension extends Extension {
               const result = original.call(this, serviceName);
 
               if (serviceName === FACE_SERVICE_NAME) {
-                this.emit("filter-messages", {
+                emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
+                emitQueueMessage(
+                  this,
                   serviceName,
-                  messageType: MESSAGE_TYPE.HINT,
-                });
-                this.emit("queue-message", {
-                  serviceName,
-                  message: FACE_HINT_TEXT,
-                  messageType: MESSAGE_TYPE.HINT,
-                });
+                  FACE_HINT_TEXT,
+                  MESSAGE_TYPE.HINT,
+                );
               }
 
               return result;
@@ -1010,10 +1107,7 @@ export default class GazeFaceAuthExtension extends Extension {
               // Deliberately not chaining to the original: face runs in the
               // background, and failing it must not fail the whole conversation
               // and take the password prompt down with it.
-              this.emit("filter-messages", {
-                serviceName,
-                messageType: MESSAGE_TYPE.HINT,
-              });
+              emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
 
               this._faceFailCounter = (this._faceFailCounter ?? 0) + 1;
               this._faceStartPending = false;
@@ -1045,16 +1139,22 @@ export default class GazeFaceAuthExtension extends Extension {
 
       // AuthServicesLegacy is the only one claiming the fingerprint role;
       // AuthServicesSSSDSwitchable maps every role to gdm-switchable-auth.
+      let warnedNoAuthServices = false;
       const patchAuthServices = (verifier) => {
-        for (const services of verifier._authServices ?? []) {
-          if (
-            !services?.constructor?.SupportedRoles?.includes(
-              LEGACY_AUTH_SERVICES_ROLE,
-            )
-          )
-            continue;
+        let patched = false;
+        for (const services of collectAuthServices(verifier)) {
+          if (!isLegacyAuthServices(services)) continue;
           patchAuthServicesProto(Object.getPrototypeOf(services));
+          patched = true;
         }
+
+        if (patched || warnedNoAuthServices) return;
+        warnedNoAuthServices = true;
+        console.warn(
+          "[gaze] Found no auth services claiming the " +
+            `${LEGACY_AUTH_SERVICES_ROLE} role; face authentication is ` +
+            "unavailable on this shell",
+        );
       };
 
       this._injectionManager.overrideMethod(proto, "begin", (original) => {
@@ -1432,14 +1532,8 @@ export default class GazeFaceAuthExtension extends Extension {
       authPromptProto,
       "_onAskQuestion",
       (original) => {
-        // Shells with the unified-auth rework pass a single params object
-        // instead of positional arguments.
         return function (...args) {
-          const [first] = args;
-          const { serviceName, question } =
-            first && typeof first === "object"
-              ? first
-              : { serviceName: args[0], question: args[1] };
+          const { serviceName, question } = readAskQuestionArgs(args);
 
           if (
             isConfirmationMessage(question) ||
