@@ -17,7 +17,7 @@ nfpm := require("nfpm")
 # Required by the `srpm` recipe only.
 rpmbuild := require("rpmbuild")
 # ONNX Runtime release bundled into the offline builds (flatpak and srpm).
-ort_version := env("ORT_VERSION", "1.22.0")
+ort_version := env("ORT_VERSION", "1.29.0")
 
 # The opencv crate probes only the `opencv4`/`opencv` pkg-config names, so distros shipping
 # OpenCV 5 (e.g. Arch) need this override. Empty when opencv4/opencv resolve or opencv5 doesn't.
