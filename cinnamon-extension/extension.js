@@ -10,6 +10,14 @@ const Main = imports.ui.main;
 const GAZE_DBUS_INTERFACE = `
 <node>
   <interface name="com.gundulabs.Gaze">
+    <property name="PamInternal" type="as" access="read"/>
+    <method name="AddPamInternal">
+      <arg name="service" type="s" direction="in"/>
+    </method>
+    <method name="RemovePamInternal">
+      <arg name="service" type="s" direction="in"/>
+    </method>
+    <method name="ClearPamInternal"/>
     <method name="RegisterExtension">
       <arg name="active" type="b" direction="in"/>
     </method>
@@ -33,7 +41,50 @@ const CONFIRMATION_QUESTION = "Face Verified. Press Enter to confirm.";
 const CONFIRMATION_DIALOG_LABEL =
   "Face verified. Press Enter or click Authenticate to confirm.";
 
-const isConfirmationMessage = (text) => text?.trim() === CONFIRMATION_QUESTION;
+const GAZE_MSG_LOOK_CAMERA = "GAZE_MSG_LOOK_CAMERA";
+const GAZE_MSG_LOOK_OR_PASSWORD = "GAZE_MSG_LOOK_OR_PASSWORD";
+const GAZE_MSG_FACE_VERIFIED = "GAZE_MSG_FACE_VERIFIED";
+const GAZE_REQUIRE_CONFIRMATION = "GAZE_REQUIRE_CONFIRMATION";
+const GAZE_CONFIRMED = "GAZE_CONFIRMED";
+const GAZE_CANCEL = "GAZE_CANCEL";
+const GAZE_MSG_FACE_NOT_RECOGNIZED = "GAZE_MSG_FACE_NOT_RECOGNIZED";
+const GAZE_MSG_FACE_NOT_DETECTED = "GAZE_MSG_FACE_NOT_DETECTED";
+const GAZE_MSG_FACE_TOO_DARK = "GAZE_MSG_FACE_TOO_DARK";
+const GAZE_MSG_FACE_TIMED_OUT = "GAZE_MSG_FACE_TIMED_OUT";
+const GAZE_MSG_FACE_UNAVAILABLE = "GAZE_MSG_FACE_UNAVAILABLE";
+
+const CINNAMON_PAM_SERVICES = ["polkit-1", "cinnamon"];
+
+const isConfirmationMessage = (text) => {
+  const trimmed = text?.trim();
+  return (
+    trimmed === GAZE_REQUIRE_CONFIRMATION ||
+    trimmed === CONFIRMATION_QUESTION
+  );
+};
+
+const INTERNAL_ERROR_MAP = new Map([
+  [
+    GAZE_MSG_FACE_NOT_RECOGNIZED,
+    "Face not recognized. Please enter your password.",
+  ],
+  [
+    GAZE_MSG_FACE_NOT_DETECTED,
+    "Face not detected. Please enter your password.",
+  ],
+  [
+    GAZE_MSG_FACE_TOO_DARK,
+    "Too dark for face authentication. Please enter your password.",
+  ],
+  [
+    GAZE_MSG_FACE_TIMED_OUT,
+    "Face authentication timed out. Please enter your password.",
+  ],
+  [
+    GAZE_MSG_FACE_UNAVAILABLE,
+    "Face authentication unavailable. Please enter your password.",
+  ],
+]);
 
 const GENERIC_ERROR_MAP = new Map([
   [
@@ -60,6 +111,7 @@ const FACE_STATUS_UPDATES = new Set([
   "Hold still...",
 ]);
 
+
 const cancelDelayedReset = (dialog) => {
   if (!dialog._sessionRequestTimeoutId) return;
   GLib.source_remove(dialog._sessionRequestTimeoutId);
@@ -75,8 +127,9 @@ const keepPasswordEntryVisible = (dialog) => {
   cancelDelayedReset(dialog);
 };
 
-const enterConfirmMode = (dialog) => {
+const enterConfirmMode = (dialog, isInternal = true) => {
   cancelDelayedReset(dialog);
+  dialog._isInternalConfirm = isInternal;
   dialog._passwordEntry?.set_text("");
   if (dialog._passwordEntry) {
     dialog._passwordEntry.reactive = false;
@@ -102,11 +155,13 @@ const enterConfirmMode = (dialog) => {
 
 const respondToConfirm = (dialog) => {
   dialog._confirmMode = false;
-  dialog._session?.response("");
+  const answer = dialog._isInternalConfirm !== false ? GAZE_CONFIRMED : "";
+  dialog._session?.response(answer);
   dialog._passwordEntry?.set_text("");
   if (dialog._passwordEntry) dialog._passwordEntry.reactive = false;
   if (dialog._okButton) dialog._okButton.reactive = false;
 };
+
 
 const ensureUnlockConfirmButton = (unlockDialog, extension) => {
   if (unlockDialog._confirmButton) return unlockDialog._confirmButton;
@@ -172,9 +227,10 @@ const ensureUnlockConfirmButton = (unlockDialog, extension) => {
   return button;
 };
 
-const enterUnlockConfirmMode = (unlockDialog, extension) => {
+const enterUnlockConfirmMode = (unlockDialog, extension, isInternal = true) => {
   try {
     unlockDialog._confirmMode = true;
+    unlockDialog._isInternalConfirm = isInternal;
 
     if (unlockDialog._passwordEntry) {
       unlockDialog._passwordEntry.set_text("");
@@ -233,9 +289,11 @@ const respondToUnlockConfirm = (unlockDialog) => {
     unlockDialog._authClient &&
     typeof unlockDialog._authClient.sendPassword === "function"
   ) {
-    unlockDialog._authClient.sendPassword("");
+    const answer = unlockDialog._isInternalConfirm !== false ? GAZE_CONFIRMED : "";
+    unlockDialog._authClient.sendPassword(answer);
   }
 };
+
 
 const exitUnlockConfirmMode = (unlockDialog) => {
   if (
@@ -337,6 +395,9 @@ class GazeCinnamonExtension {
           if (error) return;
           try {
             proxy.RegisterExtensionRemote(true);
+            for (const service of CINNAMON_PAM_SERVICES) {
+              proxy.AddPamInternalRemote(service);
+            }
           } catch (e) {}
         },
       );
@@ -345,6 +406,9 @@ class GazeCinnamonExtension {
         if (this._dbusProxy?.g_name_owner) {
           try {
             this._dbusProxy.RegisterExtensionRemote(true);
+            for (const service of CINNAMON_PAM_SERVICES) {
+              this._dbusProxy.AddPamInternalRemote(service);
+            }
           } catch (e) {}
         }
       });
@@ -385,6 +449,9 @@ class GazeCinnamonExtension {
         if (ext._dbusProxy) {
           try {
             ext._dbusProxy.RegisterExtensionRemote(true);
+            for (const service of CINNAMON_PAM_SERVICES) {
+              ext._dbusProxy.AddPamInternalRemote(service);
+            }
           } catch (e) {}
         }
 
@@ -405,7 +472,10 @@ class GazeCinnamonExtension {
 
         if (dialog._session) {
           dialog._session.connect("show-info", (session, text) => {
-            if (isConfirmationMessage(text)) enterConfirmMode(dialog);
+            const trimmed = text?.trim();
+            if (isConfirmationMessage(trimmed)) {
+              enterConfirmMode(dialog, trimmed === GAZE_REQUIRE_CONFIRMATION);
+            }
           });
         }
 
@@ -436,12 +506,40 @@ class GazeCinnamonExtension {
 
       dialogProto._gazeOriginalShowInfo = dialogProto._onSessionShowInfo;
       dialogProto._onSessionShowInfo = function (session, text) {
-        if (isConfirmationMessage(text)) {
-          enterConfirmMode(this);
-        } else {
-          dialogProto._gazeOriginalShowInfo.call(this, session, text);
+        const trimmed = text?.trim();
+        if (isConfirmationMessage(trimmed)) {
+          enterConfirmMode(this, trimmed === GAZE_REQUIRE_CONFIRMATION);
+          return;
         }
+        if (
+          trimmed === GAZE_MSG_LOOK_CAMERA ||
+          trimmed === GAZE_MSG_LOOK_OR_PASSWORD ||
+          trimmed === GAZE_MSG_FACE_VERIFIED
+        ) {
+          return;
+        }
+        if (INTERNAL_ERROR_MAP.has(trimmed)) {
+          const mapped = INTERNAL_ERROR_MAP.get(trimmed);
+          dialogProto._gazeOriginalShowInfo.call(this, session, mapped);
+          return;
+        }
+        dialogProto._gazeOriginalShowInfo.call(this, session, text);
       };
+
+      dialogProto._gazeOriginalShowError = dialogProto._onSessionShowError;
+      if (typeof dialogProto._gazeOriginalShowError === "function") {
+        dialogProto._onSessionShowError = function (session, text) {
+          const trimmed = text?.trim();
+          if (INTERNAL_ERROR_MAP.has(trimmed)) {
+            const mapped = INTERNAL_ERROR_MAP.get(trimmed);
+            dialogProto._gazeOriginalShowError.call(this, session, mapped);
+            return;
+          }
+          const mapped = GENERIC_ERROR_MAP.get(trimmed) ?? text;
+          dialogProto._gazeOriginalShowError.call(this, session, mapped);
+        };
+      }
+
 
       dialogProto._gazeOriginalEntryActivate = dialogProto._onEntryActivate;
       dialogProto._onEntryActivate = function () {
@@ -497,13 +595,24 @@ class GazeCinnamonExtension {
 
     proto._gazeOriginalOnAuthInfo = proto._onAuthInfo;
     proto._onAuthInfo = function (authClient, info) {
-      if (isConfirmationMessage(info)) {
-        enterUnlockConfirmMode(this, ext);
+      const trimmed = info?.trim();
+      if (isConfirmationMessage(trimmed)) {
+        enterUnlockConfirmMode(this, ext, trimmed === GAZE_REQUIRE_CONFIRMATION);
         return;
       }
-      const text = info?.trim();
-      if (text && FACE_STATUS_UPDATES.has(text)) {
-        this._infoLabel.text = text;
+      if (
+        trimmed === GAZE_MSG_LOOK_CAMERA ||
+        trimmed === GAZE_MSG_LOOK_OR_PASSWORD ||
+        trimmed === GAZE_MSG_FACE_VERIFIED
+      ) {
+        return;
+      }
+      if (INTERNAL_ERROR_MAP.has(trimmed)) {
+        this._infoLabel.text = INTERNAL_ERROR_MAP.get(trimmed);
+        return;
+      }
+      if (trimmed && FACE_STATUS_UPDATES.has(trimmed)) {
+        this._infoLabel.text = trimmed;
         return;
       }
       exitUnlockConfirmMode(this);
@@ -512,6 +621,11 @@ class GazeCinnamonExtension {
 
     proto._gazeOriginalOnAuthPrompt = proto._onAuthPrompt;
     proto._onAuthPrompt = function (authClient, prompt) {
+      const trimmed = prompt?.trim();
+      if (isConfirmationMessage(trimmed)) {
+        enterUnlockConfirmMode(this, ext, trimmed === GAZE_REQUIRE_CONFIRMATION);
+        return;
+      }
       exitUnlockConfirmMode(this);
       proto._gazeOriginalOnAuthPrompt.call(this, authClient, prompt);
     };
@@ -519,7 +633,11 @@ class GazeCinnamonExtension {
     proto._gazeOriginalOnAuthError = proto._onAuthError;
     proto._onAuthError = function (authClient, error) {
       exitUnlockConfirmMode(this);
-      const mapped = GENERIC_ERROR_MAP.get(error) ?? error;
+      const trimmed = error?.trim();
+      const mapped =
+        INTERNAL_ERROR_MAP.get(trimmed) ??
+        GENERIC_ERROR_MAP.get(trimmed) ??
+        error;
       proto._gazeOriginalOnAuthError.call(this, authClient, mapped);
     };
 
@@ -602,6 +720,9 @@ class GazeCinnamonExtension {
         this._nameOwnerId = 0;
       }
       try {
+        for (const service of CINNAMON_PAM_SERVICES) {
+          this._dbusProxy.RemovePamInternalRemote(service);
+        }
         this._dbusProxy.RegisterExtensionRemote(false);
       } catch (e) {}
       this._dbusProxy = null;
@@ -628,6 +749,8 @@ class GazeCinnamonExtension {
         if (PolkitAgent?.AuthenticationDialog?.prototype?._gazeOverridden) {
           const p = PolkitAgent.AuthenticationDialog.prototype;
           if (p._gazeOriginalShowInfo) p._onSessionShowInfo = p._gazeOriginalShowInfo;
+          if (p._gazeOriginalShowError)
+            p._onSessionShowError = p._gazeOriginalShowError;
           if (p._gazeOriginalEntryActivate)
             p._onEntryActivate = p._gazeOriginalEntryActivate;
           if (p._gazeOriginalAuthButton)
@@ -636,6 +759,7 @@ class GazeCinnamonExtension {
             p._destroySession = p._gazeOriginalDestroySession;
           delete p._gazeOverridden;
           delete p._gazeOriginalShowInfo;
+          delete p._gazeOriginalShowError;
           delete p._gazeOriginalEntryActivate;
           delete p._gazeOriginalAuthButton;
           delete p._gazeOriginalDestroySession;
@@ -643,6 +767,7 @@ class GazeCinnamonExtension {
       } catch (e) {}
       this._polkitPatched = false;
     }
+
 
     if (this._unlockPatched) {
       try {
