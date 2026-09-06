@@ -122,6 +122,15 @@ Recommends:     policycoreutils
 GNOME Shell extension and GDM integration that start face authentication from
 the GNOME lock screen and login screen.
 
+%package cinnamon-extension
+Summary:        Cinnamon Spices extension for Gaze
+Requires:       cinnamon
+Recommends:     %{name}%{?_isa} = %{version}-%{release}
+
+%description cinnamon-extension
+Cinnamon Spices extension that provides PolKit elevation confirmation and lock
+screen authentication integration for Gaze.
+
 %package hyprlock
 Summary:        Hyprlock PAM integration for Gaze
 Recommends:     %{name}%{?_isa} = %{version}-%{release}
@@ -209,6 +218,10 @@ install -Dpm 0644 packaging/pam/gdm-face %{buildroot}%{_sysconfdir}/pam.d/gdm-fa
 %endif
 install -Dpm 0644 gaze-gdm-camera.pp %{buildroot}%{_datadir}/gaze/gaze-gdm-camera.pp
 
+install -Dpm 0644 cinnamon-extension/metadata.json %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/metadata.json
+install -Dpm 0644 cinnamon-extension/extension.js %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/extension.js
+install -Dpm 0644 cinnamon-extension/settings-schema.json %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/settings-schema.json
+
 install -Dpm 0755 packaging/kde/gaze-kde-pam %{buildroot}%{_bindir}/gaze-kde-pam
 install -Dpm 0644 packaging/kde/gaze-face-unlock.desktop %{buildroot}%{_datadir}/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop
 
@@ -295,6 +308,10 @@ ${SCRIPTLET_HYPRLOCK_POSTUN}
 %config(noreplace) %{_sysconfdir}/dconf/db/gdm.d/00-gaze-defaults
 %config(noreplace) %{_sysconfdir}/pam.d/gdm-face
 %{_datadir}/gaze/dconf-profile-gdm
+
+%files cinnamon-extension
+%license LICENSE
+%{_datadir}/cinnamon/extensions/%{extension_uuid}/
 
 %files hyprlock
 %license LICENSE

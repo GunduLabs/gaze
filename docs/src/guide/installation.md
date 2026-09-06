@@ -3,7 +3,7 @@
 
 # Installation
 
-Use one of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible, installs the KDE packages on KDE Plasma, and skips GNOME-specific packages on non-GNOME desktops. Manual GNOME package installs still need GNOME settings commands afterward.
+Use one of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible, enables the Cinnamon extension on Cinnamon desktops, installs the KDE packages on KDE Plasma, and skips desktop-specific packages on other desktops. Manual GNOME/Cinnamon package installs still need extension settings commands afterward.
 
 Supported installer targets on x86_64 and arm64: Ubuntu 24.04/25.10/26.04, Debian 13 and 14 (forky, currently testing), Fedora 42/43/44 and compatible distributions (including image-based OSTree distros such as Fedora Silverblue, Kinoite, and Bazzite), openSUSE Tumbleweed (x86_64), Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS.
 
@@ -18,14 +18,16 @@ This installs:
 - the Gaze daemon and CLI
 - `gaze-gui`
 - the GNOME Shell extension package only when a GNOME desktop session is detected
+- the Cinnamon extension package only when a Cinnamon desktop session is detected
 
-It also configures package updates where needed, enables the `gazed` daemon, and tries to enable lock screen face unlock for the current GNOME user when applicable. On KDE Plasma it installs `gaze-kde` instead, which wires up the lock screen. On other non-GNOME desktops it skips the GNOME extension package so it does not pull in GNOME Shell. On OSTree systems (Silverblue, Bazzite, Kinoite), the installer automatically uses `rpm-ostree` layering. On openSUSE Tumbleweed, it uses `zypper` and the Tumbleweed-specific Gundu Labs RPM repository.
+It also configures package updates where needed, enables the `gazed` daemon, and enables lock screen face unlock or PolKit confirmation for the current user when applicable. On KDE Plasma it installs `gaze-kde` instead, which wires up the lock screen. On Cinnamon it installs `gaze-cinnamon-extension`. On other desktops it skips the desktop extension packages. On OSTree systems (Silverblue, Bazzite, Kinoite), the installer automatically uses `rpm-ostree` layering. On openSUSE Tumbleweed, it uses `zypper` and the Tumbleweed-specific Gundu Labs RPM repository.
 
 Desktop behavior:
 
-- CLI, GUI, and normal PAM prompts work without the GNOME extension.
+- CLI, GUI, and normal PAM prompts work without desktop extensions.
+- If the installer detects Cinnamon, it installs `gaze-cinnamon-extension` and enables it for the session.
 - If the installer detects KDE Plasma, it installs `gaze-kde` alongside the base packages, so the lock screen starts face auth on its own and a Face Unlock entry appears in System Settings.
-- If you later want GNOME lock screen support, install the GNOME extension package manually from a GNOME session.
+- If you later want GNOME or Cinnamon lock screen support, install the appropriate extension package manually from your desktop session.
 - GDM loads the extension from package defaults when the extension package is installed, but GDM login face auth stays disabled unless you explicitly enable it.
 
 For non-interactive installs:
