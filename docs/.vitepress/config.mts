@@ -78,6 +78,7 @@ export default defineVersionedConfig({
             items: [
               { text: "PAM", link: "/guide/pam" },
               { text: "GNOME Extension", link: "/guide/gnome" },
+              { text: "Cinnamon Extension", link: "/guide/cinnamon" },
               { text: "KDE Plasma", link: "/guide/kde" },
               { text: "Hyprland (hyprlock)", link: "/guide/hyprland" },
               { text: "LightDM", link: "/guide/lightdm" },
