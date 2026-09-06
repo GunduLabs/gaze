@@ -130,6 +130,18 @@ pub enum VerifyResult {
     VerifyNoMatch,
 }
 
+pub const GAZE_MSG_LOOK_CAMERA: &str = "GAZE_MSG_LOOK_CAMERA";
+pub const GAZE_MSG_LOOK_OR_PASSWORD: &str = "GAZE_MSG_LOOK_OR_PASSWORD";
+pub const GAZE_MSG_FACE_VERIFIED: &str = "GAZE_MSG_FACE_VERIFIED";
+pub const GAZE_REQUIRE_CONFIRMATION: &str = "GAZE_REQUIRE_CONFIRMATION";
+pub const GAZE_CONFIRMED: &str = "GAZE_CONFIRMED";
+pub const GAZE_CANCEL: &str = "GAZE_CANCEL";
+pub const GAZE_MSG_FACE_NOT_RECOGNIZED: &str = "GAZE_MSG_FACE_NOT_RECOGNIZED";
+pub const GAZE_MSG_FACE_NOT_DETECTED: &str = "GAZE_MSG_FACE_NOT_DETECTED";
+pub const GAZE_MSG_FACE_TOO_DARK: &str = "GAZE_MSG_FACE_TOO_DARK";
+pub const GAZE_MSG_FACE_TIMED_OUT: &str = "GAZE_MSG_FACE_TIMED_OUT";
+pub const GAZE_MSG_FACE_UNAVAILABLE: &str = "GAZE_MSG_FACE_UNAVAILABLE";
+
 #[derive(Clone, Debug, Serialize, Deserialize, Value, OwnedValue, Type)]
 pub struct BenchmarkResult {
     pub component: String,
@@ -248,6 +260,10 @@ pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> a
         .set_config(config.clone())
         .await
         .map_err(|e| anyhow::anyhow!("Failed to set config property: {}", e))
+}
+
+pub async fn get_pam_internal(proxy: &GazeProxy<'_>) -> Vec<String> {
+    proxy.pam_internal().await.unwrap_or_default()
 }
 
 pub const LOGIN_SESSION_PATH_PREFIX: &str = "/org/freedesktop/login1/session";
@@ -433,6 +449,16 @@ pub trait Gaze {
 
     #[zbus(property)]
     fn set_config(&self, value: Config) -> zbus::Result<()>;
+
+    #[zbus(property)]
+    fn pam_internal(&self) -> zbus::Result<Vec<String>>;
+
+    #[zbus(property)]
+    fn set_pam_internal(&self, value: Vec<String>) -> zbus::Result<()>;
+
+    async fn add_pam_internal(&self, service: &str) -> zbus::Result<()>;
+    async fn remove_pam_internal(&self, service: &str) -> zbus::Result<()>;
+    async fn clear_pam_internal(&self) -> zbus::Result<()>;
 
     async fn get_gdm_face_auth(&self) -> zbus::Result<bool>;
     #[zbus(allow_interactive_auth)]

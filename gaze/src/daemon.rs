@@ -246,6 +246,7 @@ pub struct AuthDaemon {
     pub claim_state: ClaimStateHandle,
     pub active_cancel: ActiveCancelHandle,
     pub active_extensions: Arc<Mutex<std::collections::HashMap<u32, bool>>>,
+    pub pam_internal: Arc<Mutex<std::collections::HashSet<String>>>,
     pub resume_pending: Arc<AtomicBool>,
     pub resume_seen: Arc<AtomicBool>,
     pub lock_epochs: LockEpochs,
@@ -291,6 +292,15 @@ impl Drop for BenchmarkSlot {
 }
 
 impl AuthDaemon {
+    pub fn normalize_pam_service(service: &str) -> String {
+        let trimmed = service.trim();
+        std::path::Path::new(trimmed)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(trimmed)
+            .to_string()
+    }
+
     async fn current_config(&self) -> Config {
         let mut last_good = self.last_good_config.lock().await;
         resolve_config(Config::load_from(CONFIG_PATH), &mut last_good)
@@ -1839,6 +1849,71 @@ mod tests {
             true
         ));
     }
+
+    #[test]
+    fn pam_internal_service_normalization() {
+        assert_eq!(AuthDaemon::normalize_pam_service("polkit-1"), "polkit-1");
+        assert_eq!(AuthDaemon::normalize_pam_service("  polkit-1  "), "polkit-1");
+        assert_eq!(
+            AuthDaemon::normalize_pam_service("/etc/pam.d/polkit-1"),
+            "polkit-1"
+        );
+        assert_eq!(
+            AuthDaemon::normalize_pam_service("/etc/pam.d/gdm-face"),
+            "gdm-face"
+        );
+        assert_eq!(AuthDaemon::normalize_pam_service(""), "");
+    }
+
+    #[test]
+    fn pam_internal_set_add_remove_clear_logic() {
+        let set = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+
+        // Add services with normalization
+        {
+            let mut s = set.lock().unwrap();
+            let norm = AuthDaemon::normalize_pam_service("/etc/pam.d/polkit-1");
+            if !norm.is_empty() {
+                s.insert(norm);
+            }
+            let norm2 = AuthDaemon::normalize_pam_service("gdm-face");
+            if !norm2.is_empty() {
+                s.insert(norm2);
+            }
+        }
+
+        {
+            let s = set.lock().unwrap();
+            assert!(s.contains("polkit-1"));
+            assert!(s.contains("gdm-face"));
+            assert_eq!(s.len(), 2);
+        }
+
+        // Remove service
+        {
+            let mut s = set.lock().unwrap();
+            let norm = AuthDaemon::normalize_pam_service("polkit-1");
+            s.remove(&norm);
+        }
+
+        {
+            let s = set.lock().unwrap();
+            assert!(!s.contains("polkit-1"));
+            assert!(s.contains("gdm-face"));
+            assert_eq!(s.len(), 1);
+        }
+
+        // Clear
+        {
+            let mut s = set.lock().unwrap();
+            s.clear();
+        }
+
+        {
+            let s = set.lock().unwrap();
+            assert!(s.is_empty());
+        }
+    }
 }
 
 pub use gaze_core::dbus::get_active_session_uid;
@@ -3376,6 +3451,55 @@ impl AuthDaemon {
         let mut db = self.db.lock().await;
         db.clear_user(&username).map_err(Self::map_user_db_error)?;
         Ok(true)
+    }
+
+    #[zbus(property)]
+    async fn pam_internal(&self) -> fdo::Result<Vec<String>> {
+        let set = self.pam_internal.lock().await;
+        let mut list: Vec<String> = set.iter().cloned().collect();
+        list.sort();
+        Ok(list)
+    }
+
+    #[zbus(property)]
+    async fn set_pam_internal(&self, services: Vec<String>) -> fdo::Result<()> {
+        let mut set = self.pam_internal.lock().await;
+        set.clear();
+        for s in services {
+            let normalized = Self::normalize_pam_service(&s);
+            if !normalized.is_empty() {
+                set.insert(normalized);
+            }
+        }
+        info!(services = ?set, "Updated PAM internal services list");
+        Ok(())
+    }
+
+    async fn add_pam_internal(&self, service: String) -> fdo::Result<()> {
+        let normalized = Self::normalize_pam_service(&service);
+        if !normalized.is_empty() {
+            let mut set = self.pam_internal.lock().await;
+            set.insert(normalized.clone());
+            info!(service = %normalized, "Added to PAM internal services");
+        }
+        Ok(())
+    }
+
+    async fn remove_pam_internal(&self, service: String) -> fdo::Result<()> {
+        let normalized = Self::normalize_pam_service(&service);
+        if !normalized.is_empty() {
+            let mut set = self.pam_internal.lock().await;
+            set.remove(&normalized);
+            info!(service = %normalized, "Removed from PAM internal services");
+        }
+        Ok(())
+    }
+
+    async fn clear_pam_internal(&self) -> fdo::Result<()> {
+        let mut set = self.pam_internal.lock().await;
+        set.clear();
+        info!("Cleared PAM internal services");
+        Ok(())
     }
 
     #[zbus(property(emits_changed_signal = "invalidates"))]
