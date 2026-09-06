@@ -1288,6 +1288,7 @@ dependencies = [
  "getrandom 0.4.3",
  "libc",
  "sha2 0.11.0",
+ "tempfile",
  "tss-esapi",
  "zeroize",
 ]

@@ -258,6 +258,14 @@ fn write_record(dir: &Path, account: &Account, blob: &[u8]) -> anyhow::Result<()
     result
 }
 
+fn remove_record(dir: &Path, uid: u32) -> anyhow::Result<()> {
+    match std::fs::remove_file(record_path(dir, uid)) {
+        Ok(()) => File::open(dir)?.sync_all().map_err(Into::into),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 pub fn enroll(username: &str, password: &[u8]) -> anyhow::Result<()> {
     let account = Account::lookup(username)?;
     validate_password(password)?;
@@ -281,6 +289,17 @@ pub fn enroll(username: &str, password: &[u8]) -> anyhow::Result<()> {
         "account changed during enrollment; retry"
     );
     write_record(dir, &account, &blob)
+}
+
+/// Remove an enrolled credential without reading or unsealing it.
+pub fn forget(username: &str) -> anyhow::Result<()> {
+    let uid = Account::uid(username)?;
+    let dir = Path::new(STORE_DIR);
+    if !dir.try_exists()? {
+        return Ok(());
+    }
+    check_directory(dir, 0)?;
+    remove_record(dir, uid)
 }
 
 /// Call only from trusted PAM code after face, liveness, and confirmation succeed.
@@ -401,6 +420,20 @@ mod tests {
                 .unwrap()
                 .len(),
             MAX_PASSWORD + 1
+        );
+    }
+
+    #[test]
+    fn removing_a_record_leaves_the_user_unenrolled() {
+        let dir = tempfile::tempdir().unwrap();
+        write_record(dir.path(), &account(), &blob()).unwrap();
+        remove_record(dir.path(), account().uid).unwrap();
+        assert!(
+            read_record(&record_path(dir.path(), account().uid), unsafe {
+                libc::geteuid()
+            })
+            .unwrap()
+            .is_none()
         );
     }
 }

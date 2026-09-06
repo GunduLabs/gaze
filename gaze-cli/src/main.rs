@@ -75,7 +75,7 @@ fn command_requires_root(command: &Commands) -> Option<&'static str> {
         Commands::RenameFace { .. } => Some("rename-face"),
         Commands::ClearUser { .. } => Some("clear-user"),
         Commands::Config { show } => (!show).then_some("config"),
-        Commands::Keyring => Some("keyring"),
+        Commands::Keyring { .. } => Some("keyring"),
         Commands::Auth { .. }
         | Commands::ListFaces { .. }
         | Commands::Doctor { .. }
@@ -252,7 +252,11 @@ enum Commands {
         show: bool,
     },
     /// Enroll or replace a TPM-protected GNOME Keyring password (root only)
-    Keyring,
+    Keyring {
+        /// Remove the current user's stored keyring credential
+        #[arg(long)]
+        forget: bool,
+    },
     /// Check the Gaze installation for configuration and runtime problems
     Doctor {
         #[arg(short, long, help = "Check enrollments for this user")]
@@ -1760,8 +1764,14 @@ async fn run() -> anyhow::Result<()> {
         (command_may_be_challenged(&cli.command) && !silent_auth).then(polkit::PolkitAgent::spawn);
 
     match &cli.command {
-        Commands::Keyring => {
-            keyring::enroll(&get_current_user(), &Config::load()?)?;
+        Commands::Keyring { forget } => {
+            let username = get_current_user();
+            if *forget {
+                gaze_security::keyring::forget(&username)?;
+                println!("Stored GNOME Keyring credential removed for {username}.");
+            } else {
+                keyring::enroll(&username, &Config::load()?)?;
+            }
             return Ok(());
         }
         Commands::Uninstall {
@@ -1968,7 +1978,7 @@ async fn run() -> anyhow::Result<()> {
             run_config_wizard(&Term::stdout(), &proxy, config).await?;
         }
 
-        Commands::Doctor { .. } | Commands::Uninstall { .. } | Commands::Keyring => {
+        Commands::Doctor { .. } | Commands::Uninstall { .. } | Commands::Keyring { .. } => {
             unreachable!("handled before DBus connection")
         }
     }
@@ -2086,6 +2096,13 @@ mod tests {
                 "{args:?} must require root"
             );
         }
+    }
+
+    #[test]
+    fn forgetting_a_keyring_credential_requires_root() {
+        let cli = Cli::try_parse_from(["gaze", "keyring", "--forget"]).unwrap();
+        assert!(matches!(cli.command, Commands::Keyring { forget: true }));
+        assert_eq!(command_requires_root(&cli.command), Some("keyring"));
     }
 
     #[test]

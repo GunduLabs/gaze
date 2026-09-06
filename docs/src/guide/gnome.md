@@ -126,6 +126,8 @@ gaze keyring
 The password is stored in a root-only TPM-protected record. It is not sent over
 DBus. Re-enroll it after changing the account or keyring password.
 
+To remove the stored record, run `gaze keyring --forget`.
+
 Enable [GDM face login](#optional-enable-face-at-gdm-login) separately. If you
 maintain your own `gdm-face` file, use this auth order:
 
