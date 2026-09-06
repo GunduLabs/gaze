@@ -440,7 +440,7 @@ in
           auth       required                     pam_env.so
           auth       [success=1 default=ignore]    ${cfg.package}/lib/security/pam_gaze.so
           auth       requisite                    pam_deny.so
-          auth       optional                     ${pkgs.gnome-keyring}/lib/security/pam_gnome_keyring.so auto_start use_authtok
+          auth       optional                     ${pkgs.gnome-keyring}/lib/security/pam_gnome_keyring.so use_authtok
 
           account    required                     pam_nologin.so
           account    required                     pam_unix.so

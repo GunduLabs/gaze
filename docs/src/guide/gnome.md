@@ -135,7 +135,7 @@ maintain your own `gdm-face` file, use this auth order:
 auth required pam_env.so
 auth [success=1 default=ignore] pam_gaze.so
 auth requisite pam_deny.so
-auth optional pam_gnome_keyring.so auto_start use_authtok
+auth optional pam_gnome_keyring.so use_authtok
 ```
 
 Gaze sets `PAM_AUTHTOK` only after face and liveness authentication succeeds. If

@@ -13,6 +13,9 @@ cc -Wall -Wextra -Werror -fPIC -shared -DGAZE_MOCK_MODULE \
 cc -Wall -Wextra -Werror "$repo/scripts/keyring-pam-harness.c" -lpam -o "$test_dir/driver"
 
 for template in "$repo"/packaging/pam/gdm-face{,.arch,.deb,.suse}; do
+    auth_keyring=$(sed -n '/^auth.*pam_gnome_keyring\.so/p' "$template")
+    test "$auth_keyring" = "${auth_keyring//auto_start/}"
+    case "$auth_keyring" in *use_authtok*) ;; *) exit 1 ;; esac
     for result in 0 7 9 25; do
         for token in token absent; do
             marker="$test_dir/called"
