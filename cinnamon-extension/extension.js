@@ -5,6 +5,7 @@ const Gio = imports.gi.Gio;
 const GLib = imports.gi.GLib;
 const St = imports.gi.St;
 const Clutter = imports.gi.Clutter;
+const Pango = imports.gi.Pango;
 const Main = imports.ui.main;
 
 const GAZE_DBUS_INTERFACE = `
@@ -40,6 +41,7 @@ const GazeProxy = Gio.DBusProxy.makeProxyWrapper(GAZE_DBUS_INTERFACE);
 const CONFIRMATION_QUESTION = "Face Verified. Press Enter to confirm.";
 const CONFIRMATION_DIALOG_LABEL =
   "Face verified. Press Enter or click Authenticate to confirm.";
+const FACE_HINT_TEXT = "(or look at the camera)";
 
 const GAZE_MSG_LOOK_CAMERA = "GAZE_MSG_LOOK_CAMERA";
 const GAZE_MSG_LOOK_OR_PASSWORD = "GAZE_MSG_LOOK_OR_PASSWORD";
@@ -55,12 +57,38 @@ const GAZE_MSG_FACE_UNAVAILABLE = "GAZE_MSG_FACE_UNAVAILABLE";
 
 const CINNAMON_PAM_SERVICES = ["polkit-1", "cinnamon"];
 
+const safeGettext = (str) => {
+  if (!str) return str;
+  try {
+    if (typeof _ === "function") return _(str) || str;
+  } catch (e) {}
+  return str;
+};
+
 const isConfirmationMessage = (text) => {
   const trimmed = text?.trim();
   return (
     trimmed === GAZE_REQUIRE_CONFIRMATION ||
     trimmed === CONFIRMATION_QUESTION
   );
+};
+
+const isCameraHintMessage = (text) => {
+  if (!text) return false;
+  const trimmed = text.trim();
+  return (
+    trimmed === GAZE_MSG_LOOK_CAMERA ||
+    trimmed === GAZE_MSG_LOOK_OR_PASSWORD ||
+    trimmed === FACE_HINT_TEXT ||
+    trimmed === "Please look at the camera..." ||
+    trimmed.startsWith("GAZE_MSG_LOOK")
+  );
+};
+
+const isFaceVerifiedMessage = (text) => {
+  if (!text) return false;
+  const trimmed = text.trim();
+  return trimmed === GAZE_MSG_FACE_VERIFIED;
 };
 
 const INTERNAL_ERROR_MAP = new Map([
@@ -101,6 +129,24 @@ const GENERIC_ERROR_MAP = new Map([
   ],
 ]);
 
+const translatePamError = (text) => {
+  if (!text) return text;
+  const trimmed = text.trim();
+  if (INTERNAL_ERROR_MAP.has(trimmed)) {
+    return safeGettext(INTERNAL_ERROR_MAP.get(trimmed));
+  }
+  if (GENERIC_ERROR_MAP.has(trimmed)) {
+    return safeGettext(GENERIC_ERROR_MAP.get(trimmed));
+  }
+  if (trimmed.startsWith("GAZE_MSG_")) {
+    return (
+      safeGettext("Face authentication failed. Please enter your password.") ||
+      "Face authentication failed. Please enter your password."
+    );
+  }
+  return text;
+};
+
 const FACE_STATUS_UPDATES = new Set([
   "Please look at the camera...",
   "Need more light...",
@@ -111,17 +157,70 @@ const FACE_STATUS_UPDATES = new Set([
   "Hold still...",
 ]);
 
-
 const cancelDelayedReset = (dialog) => {
   if (!dialog._sessionRequestTimeoutId) return;
   GLib.source_remove(dialog._sessionRequestTimeoutId);
   dialog._sessionRequestTimeoutId = 0;
 };
 
+const ensureFaceHintLabel = (dialog) => {
+  if (dialog._faceHintLabel) return dialog._faceHintLabel;
+
+  const label = new St.Label({
+    style_class: "login-dialog-message-hint",
+    style:
+      "color: #dedee4; font-weight: 400; font-size: 0.818em; text-align: center; padding: 4px 0; min-height: 1.5em;",
+    text: safeGettext(FACE_HINT_TEXT) || FACE_HINT_TEXT,
+    x_align: Clutter.ActorAlign.CENTER,
+    y_align: Clutter.ActorAlign.START,
+    visible: false,
+  });
+  if (label.clutter_text) {
+    label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+    label.clutter_text.line_wrap = true;
+    if (typeof label.clutter_text.set_line_alignment === "function") {
+      label.clutter_text.set_line_alignment(Pango.Alignment.CENTER);
+    }
+  }
+
+  const warningBox = dialog._errorMessageLabel?.get_parent?.();
+  if (warningBox && typeof warningBox.insert_child_above === "function") {
+    warningBox.insert_child_above(label, dialog._errorMessageLabel);
+  } else if (dialog._passwordEntry?.get_parent?.()) {
+    dialog._passwordEntry.get_parent().add_child(label);
+  }
+
+  dialog._faceHintLabel = label;
+  return label;
+};
+
+const showFaceHint = (dialog, text = FACE_HINT_TEXT) => {
+  const label = ensureFaceHintLabel(dialog);
+  label.text = safeGettext(text) || text;
+  label.show();
+  dialog._infoMessageLabel?.hide();
+  dialog._errorMessageLabel?.hide();
+  dialog._nullMessageLabel?.hide();
+  keepPasswordEntryVisible(dialog);
+  dialog._ensureOpen?.();
+};
+
+const hideFaceHint = (dialog) => {
+  if (dialog._faceHintLabel) {
+    dialog._faceHintLabel.hide();
+  }
+};
+
 const keepPasswordEntryVisible = (dialog) => {
   const entry = dialog._passwordEntry;
   if (!entry || !dialog._session) return;
-  if (!entry.hint_text) entry.hint_text = "Password";
+  if (
+    !entry.hint_text ||
+    entry.hint_text.startsWith("GAZE_MSG_") ||
+    isCameraHintMessage(entry.hint_text)
+  ) {
+    entry.hint_text = safeGettext("Password") || "Password";
+  }
   entry.show();
   entry.reactive = true;
   cancelDelayedReset(dialog);
@@ -129,6 +228,7 @@ const keepPasswordEntryVisible = (dialog) => {
 
 const enterConfirmMode = (dialog, isInternal = true) => {
   cancelDelayedReset(dialog);
+  hideFaceHint(dialog);
   dialog._isInternalConfirm = isInternal;
   dialog._passwordEntry?.set_text("");
   if (dialog._passwordEntry) {
@@ -137,7 +237,8 @@ const enterConfirmMode = (dialog, isInternal = true) => {
   }
 
   if (dialog._infoMessageLabel) {
-    dialog._infoMessageLabel.text = CONFIRMATION_DIALOG_LABEL;
+    dialog._infoMessageLabel.text =
+      safeGettext(CONFIRMATION_DIALOG_LABEL) || CONFIRMATION_DIALOG_LABEL;
     dialog._infoMessageLabel.show();
   }
   dialog._errorMessageLabel?.hide();
@@ -149,8 +250,8 @@ const enterConfirmMode = (dialog, isInternal = true) => {
   }
 
   dialog._confirmMode = true;
-  dialog._ensureOpen();
-  dialog._okButton?.grab_key_focus();
+  dialog._ensureOpen?.();
+  dialog._okButton?.grab_key_focus?.();
 };
 
 const respondToConfirm = (dialog) => {
@@ -438,14 +539,7 @@ class GazeCinnamonExtension {
 
     if (!agentProto._gazeOriginalInitiate) {
       agentProto._gazeOriginalInitiate = agentProto._onInitiate;
-      agentProto._onInitiate = function (
-        nativeAgent,
-        actionId,
-        message,
-        iconName,
-        cookie,
-        userNames,
-      ) {
+      agentProto._onInitiate = function (...args) {
         if (ext._dbusProxy) {
           try {
             ext._dbusProxy.RegisterExtensionRemote(true);
@@ -455,48 +549,40 @@ class GazeCinnamonExtension {
           } catch (e) {}
         }
 
-        agentProto._gazeOriginalInitiate.call(
-          this,
-          nativeAgent,
-          actionId,
-          message,
-          iconName,
-          cookie,
-          userNames,
-        );
+        agentProto._gazeOriginalInitiate.apply(this, args);
 
         const dialog = this._currentDialog;
         if (!dialog) return;
 
-        keepPasswordEntryVisible(dialog);
-
-        if (dialog._session) {
-          dialog._session.connect("show-info", (session, text) => {
-            const trimmed = text?.trim();
-            if (isConfirmationMessage(trimmed)) {
-              enterConfirmMode(dialog, trimmed === GAZE_REQUIRE_CONFIRMATION);
-            }
-          });
-        }
-
-        const origEntryActivate = dialog._onEntryActivate;
-        dialog._onEntryActivate = function () {
-          if (this._confirmMode) {
-            respondToConfirm(this);
-          } else {
-            origEntryActivate.call(this);
+        try {
+          dialog._onSessionShowInfo = dialogProto._onSessionShowInfo;
+          dialog._onSessionShowError = dialogProto._onSessionShowError;
+          dialog._onSessionRequest = dialogProto._onSessionRequest;
+          dialog._onEntryActivate = dialogProto._onEntryActivate;
+          if (dialogProto._gazeOriginalAuthButton) {
+            dialog._onAuthenticateButtonPressed =
+              dialogProto._onAuthenticateButtonPressed;
           }
-        };
 
-        const origAuthButton = dialog._onAuthenticateButtonPressed;
-        if (typeof origAuthButton === "function") {
-          dialog._onAuthenticateButtonPressed = function () {
-            if (this._confirmMode) {
-              respondToConfirm(this);
-            } else {
-              origAuthButton.call(this);
-            }
-          };
+          if (dialog._session) {
+            dialog._session.disconnectObject?.(dialog);
+            dialog._session.connectObject?.(
+              "completed",
+              dialog._onSessionCompleted.bind(dialog),
+              "request",
+              dialog._onSessionRequest.bind(dialog),
+              "show-error",
+              dialog._onSessionShowError.bind(dialog),
+              "show-info",
+              dialog._onSessionShowInfo.bind(dialog),
+              dialog,
+            );
+          }
+
+          ensureFaceHintLabel(dialog);
+          keepPasswordEntryVisible(dialog);
+        } catch (e) {
+          global.logError?.("[gaze] Failed to setup Polkit dialog hooks: " + e);
         }
       };
     }
@@ -507,45 +593,130 @@ class GazeCinnamonExtension {
       dialogProto._gazeOriginalShowInfo = dialogProto._onSessionShowInfo;
       dialogProto._onSessionShowInfo = function (session, text) {
         const trimmed = text?.trim();
+        if (!trimmed) return;
+
         if (isConfirmationMessage(trimmed)) {
+          hideFaceHint(this);
           enterConfirmMode(this, trimmed === GAZE_REQUIRE_CONFIRMATION);
           return;
         }
-        if (
-          trimmed === GAZE_MSG_LOOK_CAMERA ||
-          trimmed === GAZE_MSG_LOOK_OR_PASSWORD ||
-          trimmed === GAZE_MSG_FACE_VERIFIED
-        ) {
+
+        if (isCameraHintMessage(trimmed)) {
+          showFaceHint(this, FACE_HINT_TEXT);
           return;
         }
-        if (INTERNAL_ERROR_MAP.has(trimmed)) {
-          const mapped = INTERNAL_ERROR_MAP.get(trimmed);
-          dialogProto._gazeOriginalShowInfo.call(this, session, mapped);
+
+        if (isFaceVerifiedMessage(trimmed)) {
+          hideFaceHint(this);
+          this._infoMessageLabel?.hide();
           return;
         }
-        dialogProto._gazeOriginalShowInfo.call(this, session, text);
+
+        const internalErr = INTERNAL_ERROR_MAP.get(trimmed);
+        if (internalErr || trimmed.startsWith("GAZE_MSG_")) {
+          hideFaceHint(this);
+          const msg =
+            (internalErr && safeGettext(internalErr)) ||
+            safeGettext(
+              "Face authentication failed. Please enter your password.",
+            ) ||
+            "Face authentication failed. Please enter your password.";
+          this._passwordEntry?.set_text("");
+          this._errorMessageLabel?.set_text(msg);
+          this._errorMessageLabel?.show();
+          this._infoMessageLabel?.hide();
+          this._nullMessageLabel?.hide();
+          keepPasswordEntryVisible(this);
+          this._ensureOpen?.();
+          return;
+        }
+
+        if (FACE_STATUS_UPDATES.has(trimmed)) {
+          showFaceHint(this, trimmed);
+          return;
+        }
+
+        hideFaceHint(this);
+        if (dialogProto._gazeOriginalShowInfo) {
+          dialogProto._gazeOriginalShowInfo.call(this, session, text);
+        } else {
+          this._passwordEntry?.set_text("");
+          this._infoMessageLabel?.set_text(text);
+          this._infoMessageLabel?.show();
+          this._errorMessageLabel?.hide();
+          this._nullMessageLabel?.hide();
+          this._ensureOpen?.();
+        }
       };
 
       dialogProto._gazeOriginalShowError = dialogProto._onSessionShowError;
       if (typeof dialogProto._gazeOriginalShowError === "function") {
         dialogProto._onSessionShowError = function (session, text) {
+          hideFaceHint(this);
           const trimmed = text?.trim();
-          if (INTERNAL_ERROR_MAP.has(trimmed)) {
-            const mapped = INTERNAL_ERROR_MAP.get(trimmed);
-            dialogProto._gazeOriginalShowError.call(this, session, mapped);
-            return;
-          }
-          const mapped = GENERIC_ERROR_MAP.get(trimmed) ?? text;
-          dialogProto._gazeOriginalShowError.call(this, session, mapped);
+          const mapped = translatePamError(trimmed);
+          this._passwordEntry?.set_text("");
+          this._errorMessageLabel?.set_text(mapped);
+          this._errorMessageLabel?.show();
+          this._infoMessageLabel?.hide();
+          this._nullMessageLabel?.hide();
+          keepPasswordEntryVisible(this);
+          this._ensureOpen?.();
         };
       }
 
+      dialogProto._gazeOriginalRequest = dialogProto._onSessionRequest;
+      if (typeof dialogProto._gazeOriginalRequest === "function") {
+        dialogProto._onSessionRequest = function (session, request, echoOn) {
+          if (this._sessionRequestTimeoutId) {
+            GLib.source_remove(this._sessionRequestTimeoutId);
+            this._sessionRequestTimeoutId = 0;
+          }
+
+          const trimmed = request?.trim();
+          if (isConfirmationMessage(trimmed)) {
+            hideFaceHint(this);
+            enterConfirmMode(this, trimmed === GAZE_REQUIRE_CONFIRMATION);
+            return;
+          }
+
+          let hintText = "Password";
+          if (request) {
+            if (
+              trimmed?.startsWith("GAZE_MSG_") ||
+              isCameraHintMessage(trimmed) ||
+              trimmed === "Password:" ||
+              trimmed === "Password: " ||
+              /password/i.test(trimmed)
+            ) {
+              hintText = safeGettext("Password") || "Password";
+            } else {
+              hintText = request.replace(/: *$/, "").trim();
+            }
+          }
+
+          if (this._passwordEntry) {
+            this._passwordEntry.hint_text = hintText;
+            this._passwordEntry.password_visible = echoOn;
+            this._passwordEntry.show();
+            this._passwordEntry.set_text("");
+            this._passwordEntry.reactive = true;
+          }
+          if (this._okButton) {
+            this._okButton.reactive = false;
+          }
+
+          this._ensureOpen?.();
+          this._passwordEntry?.grab_key_focus?.();
+        };
+      }
 
       dialogProto._gazeOriginalEntryActivate = dialogProto._onEntryActivate;
       dialogProto._onEntryActivate = function () {
         if (this._confirmMode) {
           respondToConfirm(this);
         } else {
+          hideFaceHint(this);
           dialogProto._gazeOriginalEntryActivate.call(this);
         }
       };
@@ -557,6 +728,7 @@ class GazeCinnamonExtension {
           if (this._confirmMode) {
             respondToConfirm(this);
           } else {
+            hideFaceHint(this);
             dialogProto._gazeOriginalAuthButton.call(this);
           }
         };
@@ -565,6 +737,7 @@ class GazeCinnamonExtension {
       dialogProto._gazeOriginalDestroySession = dialogProto._destroySession;
       if (typeof dialogProto._gazeOriginalDestroySession === "function") {
         dialogProto._destroySession = function (delay) {
+          hideFaceHint(this);
           dialogProto._gazeOriginalDestroySession.call(this, delay);
           if (!delay) return;
           cancelDelayedReset(this);
@@ -600,19 +773,31 @@ class GazeCinnamonExtension {
         enterUnlockConfirmMode(this, ext, trimmed === GAZE_REQUIRE_CONFIRMATION);
         return;
       }
-      if (
-        trimmed === GAZE_MSG_LOOK_CAMERA ||
-        trimmed === GAZE_MSG_LOOK_OR_PASSWORD ||
-        trimmed === GAZE_MSG_FACE_VERIFIED
-      ) {
+      if (isCameraHintMessage(trimmed)) {
+        if (this._infoLabel) {
+          this._infoLabel.text = safeGettext(FACE_HINT_TEXT) || FACE_HINT_TEXT;
+        }
+        return;
+      }
+      if (isFaceVerifiedMessage(trimmed)) {
+        if (this._infoLabel) {
+          this._infoLabel.text = "";
+        }
         return;
       }
       if (INTERNAL_ERROR_MAP.has(trimmed)) {
-        this._infoLabel.text = INTERNAL_ERROR_MAP.get(trimmed);
+        this._infoLabel.text = safeGettext(INTERNAL_ERROR_MAP.get(trimmed));
+        return;
+      }
+      if (trimmed?.startsWith("GAZE_MSG_")) {
+        this._infoLabel.text =
+          safeGettext(
+            "Face authentication failed. Please enter your password.",
+          ) || "Face authentication failed. Please enter your password.";
         return;
       }
       if (trimmed && FACE_STATUS_UPDATES.has(trimmed)) {
-        this._infoLabel.text = trimmed;
+        this._infoLabel.text = safeGettext(trimmed) || trimmed;
         return;
       }
       exitUnlockConfirmMode(this);
@@ -626,6 +811,22 @@ class GazeCinnamonExtension {
         enterUnlockConfirmMode(this, ext, trimmed === GAZE_REQUIRE_CONFIRMATION);
         return;
       }
+      if (isCameraHintMessage(trimmed)) {
+        if (this._infoLabel) {
+          this._infoLabel.text = safeGettext(FACE_HINT_TEXT) || FACE_HINT_TEXT;
+        }
+        if (
+          this._passwordEntry &&
+          (!this._passwordEntry.hint_text ||
+            this._passwordEntry.hint_text.startsWith("GAZE_MSG_"))
+        ) {
+          this._passwordEntry.hint_text = safeGettext("Password") || "Password";
+        }
+        return;
+      }
+      if (trimmed?.startsWith("GAZE_MSG_")) {
+        return;
+      }
       exitUnlockConfirmMode(this);
       proto._gazeOriginalOnAuthPrompt.call(this, authClient, prompt);
     };
@@ -634,10 +835,7 @@ class GazeCinnamonExtension {
     proto._onAuthError = function (authClient, error) {
       exitUnlockConfirmMode(this);
       const trimmed = error?.trim();
-      const mapped =
-        INTERNAL_ERROR_MAP.get(trimmed) ??
-        GENERIC_ERROR_MAP.get(trimmed) ??
-        error;
+      const mapped = translatePamError(trimmed);
       proto._gazeOriginalOnAuthError.call(this, authClient, mapped);
     };
 
@@ -645,6 +843,12 @@ class GazeCinnamonExtension {
     proto._onAuthSuccess = function () {
       this._faceFailCounter = 0;
       this._faceAuthFailed = false;
+      if (
+        this._infoLabel &&
+        this._infoLabel.text === (safeGettext(FACE_HINT_TEXT) || FACE_HINT_TEXT)
+      ) {
+        this._infoLabel.text = "";
+      }
       if (this._confirmButton) this._confirmButton.hide();
       if (this._confirmSpinnerBin) this._confirmSpinnerBin.hide();
       proto._gazeOriginalOnAuthSuccess.call(this);
@@ -653,6 +857,12 @@ class GazeCinnamonExtension {
     proto._gazeOriginalOnAuthFailure = proto._onAuthFailure;
     proto._onAuthFailure = function () {
       exitUnlockConfirmMode(this);
+      if (
+        this._infoLabel &&
+        this._infoLabel.text === (safeGettext(FACE_HINT_TEXT) || FACE_HINT_TEXT)
+      ) {
+        this._infoLabel.text = "";
+      }
       this._faceFailCounter = (this._faceFailCounter || 0) + 1;
       proto._gazeOriginalOnAuthFailure.call(this);
 
@@ -669,6 +879,12 @@ class GazeCinnamonExtension {
     proto._onAuthCancel = function () {
       this._faceFailCounter = 0;
       this._faceAuthFailed = false;
+      if (
+        this._infoLabel &&
+        this._infoLabel.text === (safeGettext(FACE_HINT_TEXT) || FACE_HINT_TEXT)
+      ) {
+        this._infoLabel.text = "";
+      }
       exitUnlockConfirmMode(this);
       proto._gazeOriginalOnAuthCancel.call(this);
     };
@@ -751,6 +967,8 @@ class GazeCinnamonExtension {
           if (p._gazeOriginalShowInfo) p._onSessionShowInfo = p._gazeOriginalShowInfo;
           if (p._gazeOriginalShowError)
             p._onSessionShowError = p._gazeOriginalShowError;
+          if (p._gazeOriginalRequest)
+            p._onSessionRequest = p._gazeOriginalRequest;
           if (p._gazeOriginalEntryActivate)
             p._onEntryActivate = p._gazeOriginalEntryActivate;
           if (p._gazeOriginalAuthButton)
@@ -760,6 +978,7 @@ class GazeCinnamonExtension {
           delete p._gazeOverridden;
           delete p._gazeOriginalShowInfo;
           delete p._gazeOriginalShowError;
+          delete p._gazeOriginalRequest;
           delete p._gazeOriginalEntryActivate;
           delete p._gazeOriginalAuthButton;
           delete p._gazeOriginalDestroySession;
