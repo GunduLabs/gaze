@@ -20,6 +20,15 @@ import * as Main from "resource:///org/gnome/shell/ui/main.js";
 const GAZE_DBUS_INTERFACE = `
 <node>
   <interface name="com.gundulabs.Gaze">
+    <property name="PamInternal" type="as" access="readwrite"/>
+    <method name="AddPamInternal">
+      <arg name="service" type="s" direction="in"/>
+    </method>
+    <method name="RemovePamInternal">
+      <arg name="service" type="s" direction="in"/>
+    </method>
+    <method name="ClearPamInternal">
+    </method>
     <method name="RegisterExtension">
       <arg name="active" type="b" direction="in"/>
     </method>
@@ -189,11 +198,56 @@ const GENERIC_ERROR_MAP = new Map([
 const FACE_HINT_TEXT = "(or look at the camera)";
 const LEGACY_AUTH_SERVICES_ROLE = "fingerprint";
 
+const GAZE_MSG_LOOK_CAMERA = "GAZE_MSG_LOOK_CAMERA";
+const GAZE_MSG_LOOK_OR_PASSWORD = "GAZE_MSG_LOOK_OR_PASSWORD";
+const GAZE_MSG_FACE_VERIFIED = "GAZE_MSG_FACE_VERIFIED";
+const GAZE_REQUIRE_CONFIRMATION = "GAZE_REQUIRE_CONFIRMATION";
+const GAZE_CONFIRMED = "GAZE_CONFIRMED";
+const GAZE_CANCEL = "GAZE_CANCEL";
+const GAZE_MSG_FACE_NOT_RECOGNIZED = "GAZE_MSG_FACE_NOT_RECOGNIZED";
+const GAZE_MSG_FACE_NOT_DETECTED = "GAZE_MSG_FACE_NOT_DETECTED";
+const GAZE_MSG_FACE_TOO_DARK = "GAZE_MSG_FACE_TOO_DARK";
+const GAZE_MSG_FACE_TIMED_OUT = "GAZE_MSG_FACE_TIMED_OUT";
+const GAZE_MSG_FACE_UNAVAILABLE = "GAZE_MSG_FACE_UNAVAILABLE";
+
+const INTERNAL_ERROR_MAP = new Map([
+  [
+    GAZE_MSG_FACE_NOT_RECOGNIZED,
+    _("Face not recognized. Please enter your password.") ||
+      "Face not recognized. Please enter your password.",
+  ],
+  [
+    GAZE_MSG_FACE_NOT_DETECTED,
+    _("Face not detected. Please enter your password.") ||
+      "Face not detected. Please enter your password.",
+  ],
+  [
+    GAZE_MSG_FACE_TOO_DARK,
+    _("Too dark for face authentication. Please enter your password.") ||
+      "Too dark for face authentication. Please enter your password.",
+  ],
+  [
+    GAZE_MSG_FACE_TIMED_OUT,
+    _("Face authentication timed out. Please enter your password.") ||
+      "Face authentication timed out. Please enter your password.",
+  ],
+  [
+    GAZE_MSG_FACE_UNAVAILABLE,
+    _("Face authentication unavailable. Please enter your password.") ||
+      "Face authentication unavailable. Please enter your password.",
+  ],
+]);
+
 const CONFIRMATION_QUESTION = "Face Verified. Press Enter to confirm.";
 const CONFIRMATION_DIALOG_LABEL =
   "Face verified. Press Enter or click Authenticate to confirm.";
 
-const isConfirmationMessage = (text) => text?.trim() === CONFIRMATION_QUESTION;
+const isConfirmationMessage = (text) => {
+  const trimmed = text?.trim();
+  return (
+    trimmed === GAZE_REQUIRE_CONFIRMATION || trimmed === CONFIRMATION_QUESTION
+  );
+};
 
 const cancelDelayedReset = (dialog) => {
   if (!dialog._sessionRequestTimeoutId) return;
@@ -237,7 +291,7 @@ const enterConfirmMode = (dialog) => {
 
 const respondToConfirm = (dialog) => {
   dialog._confirmMode = false;
-  dialog._session.response("");
+  dialog._session.response(GAZE_CONFIRMED);
   dialog._passwordEntry?.set_text("");
   if (dialog._passwordEntry) dialog._passwordEntry.reactive = false;
   if (dialog._okButton) dialog._okButton.reactive = false;
@@ -385,7 +439,7 @@ const respondToAuthPromptConfirm = (authPrompt) => {
 
   const serviceName = authPrompt._queryingService;
   if (serviceName && authPrompt._userVerifier) {
-    authPrompt._userVerifier.answerQuery(serviceName, "");
+    authPrompt._userVerifier.answerQuery(serviceName, GAZE_CONFIRMED);
   }
 
   authPrompt.emit("next");
@@ -499,6 +553,18 @@ export default class GazeFaceAuthExtension extends Extension {
       }
     };
 
+    const registerPamInternalServices = (proxy) => {
+      if (!proxy) return;
+      try {
+        if (typeof proxy.AddPamInternalRemote === "function") {
+          proxy.AddPamInternalRemote("polkit-1");
+          proxy.AddPamInternalRemote(FACE_SERVICE_NAME);
+        }
+      } catch (e) {
+        logError(e, "[gaze] Failed to register PAM internal services");
+      }
+    };
+
     try {
       this._dbusProxy = new GazeProxy(
         Gio.DBus.system,
@@ -510,6 +576,7 @@ export default class GazeFaceAuthExtension extends Extension {
           }
           try {
             proxy.RegisterExtensionRemote(true);
+            registerPamInternalServices(proxy);
           } catch (e) {}
           cacheCamera();
         },
@@ -519,6 +586,7 @@ export default class GazeFaceAuthExtension extends Extension {
         if (this._dbusProxy.g_name_owner) {
           try {
             this._dbusProxy.RegisterExtensionRemote(true);
+            registerPamInternalServices(this._dbusProxy);
           } catch (e) {}
           cacheCamera();
         }
@@ -769,7 +837,34 @@ export default class GazeFaceAuthExtension extends Extension {
             return function (serviceName, info) {
               if (serviceName === FACE_SERVICE_NAME) {
                 const text = info?.trim();
-                if (!text || !FACE_STATUS_UPDATES.has(text)) return;
+                if (!text) return;
+
+                if (
+                  text === GAZE_MSG_LOOK_CAMERA ||
+                  text === GAZE_MSG_LOOK_OR_PASSWORD
+                ) {
+                  this.emit("filter-messages", {
+                    serviceName,
+                    messageType: MESSAGE_TYPE.HINT,
+                  });
+                  this.emit("queue-message", {
+                    serviceName,
+                    message: FACE_HINT_TEXT,
+                    messageType: MESSAGE_TYPE.HINT,
+                  });
+                  return;
+                }
+
+                if (INTERNAL_ERROR_MAP.has(text)) {
+                  this.emit("queue-priority-message", {
+                    serviceName,
+                    message: INTERNAL_ERROR_MAP.get(text),
+                    messageType: MESSAGE_TYPE.ERROR,
+                  });
+                  return;
+                }
+
+                if (!FACE_STATUS_UPDATES.has(text)) return;
 
                 this.emit("filter-messages", {
                   serviceName,
@@ -794,9 +889,13 @@ export default class GazeFaceAuthExtension extends Extension {
           (original) => {
             return function (serviceName, problem) {
               if (serviceName === FACE_SERVICE_NAME) {
+                const mapped =
+                  INTERNAL_ERROR_MAP.get(problem) ??
+                  GENERIC_ERROR_MAP.get(problem) ??
+                  problem;
                 this.emit("queue-priority-message", {
                   serviceName,
-                  message: GENERIC_ERROR_MAP.get(problem) ?? problem,
+                  message: mapped,
                   messageType: MESSAGE_TYPE.ERROR,
                 });
                 return;
@@ -819,13 +918,36 @@ export default class GazeFaceAuthExtension extends Extension {
                 });
                 this.emit("ask-question", {
                   serviceName,
-                  question: CONFIRMATION_QUESTION,
+                  question: GAZE_REQUIRE_CONFIRMATION,
                   secret: true,
                 });
                 return;
               }
 
               return original.call(this, serviceName, secretQuestion);
+            };
+          },
+        );
+
+        injectionManager.overrideMethod(
+          authProto,
+          "_handleOnInfoQuery",
+          (original) => {
+            return function (serviceName, query) {
+              if (isConfirmationMessage(query)) {
+                this.emit("filter-messages", {
+                  serviceName,
+                  messageType: MESSAGE_TYPE.HINT,
+                });
+                this.emit("ask-question", {
+                  serviceName,
+                  question: GAZE_REQUIRE_CONFIRMATION,
+                  secret: false,
+                });
+                return;
+              }
+
+              return original.call(this, serviceName, query);
             };
           },
         );
@@ -1108,6 +1230,24 @@ export default class GazeFaceAuthExtension extends Extension {
               const text = info?.trim();
               if (!text) return;
 
+              if (
+                text === GAZE_MSG_LOOK_CAMERA ||
+                text === GAZE_MSG_LOOK_OR_PASSWORD
+              ) {
+                this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
+                this._queueMessage(serviceName, FACE_HINT_TEXT, MESSAGE_TYPE.HINT);
+                return;
+              }
+
+              if (INTERNAL_ERROR_MAP.has(text)) {
+                this._queuePriorityMessage(
+                  serviceName,
+                  INTERNAL_ERROR_MAP.get(text),
+                  MESSAGE_TYPE.ERROR,
+                );
+                return;
+              }
+
               if (FACE_STATUS_UPDATES.has(text)) {
                 this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
                 this._queueMessage(serviceName, text, MESSAGE_TYPE.HINT);
@@ -1136,11 +1276,32 @@ export default class GazeFaceAuthExtension extends Extension {
                 // Enter must send confirmation, not the typed answer.
                 this._faceConfirmPending = true;
                 this._faceConfirmService = serviceName;
-                this.emit("ask-question", serviceName, CONFIRMATION_QUESTION, true);
+                this.emit("ask-question", serviceName, GAZE_REQUIRE_CONFIRMATION, true);
                 return;
               }
 
               original.call(this, client, serviceName, secretQuestion);
+            };
+          },
+        );
+
+        this._injectionManager.overrideMethod(
+          proto,
+          "_onInfoQuery",
+          (original) => {
+            return function (client, serviceName, query) {
+              if (isConfirmationMessage(query)) {
+                if (typeof this._clearMessageQueue === "function") {
+                  this._clearMessageQueue();
+                }
+                this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
+                this._faceConfirmPending = true;
+                this._faceConfirmService = serviceName;
+                this.emit("ask-question", serviceName, GAZE_REQUIRE_CONFIRMATION, false);
+                return;
+              }
+
+              original.call(this, client, serviceName, query);
             };
           },
         );
@@ -1150,7 +1311,7 @@ export default class GazeFaceAuthExtension extends Extension {
             if (this._faceConfirmPending && serviceName === this._faceConfirmService) {
               this._faceConfirmPending = false;
               this._faceConfirmService = null;
-              return original.call(this, serviceName, "");
+              return original.call(this, serviceName, GAZE_CONFIRMED);
             }
             return original.call(this, serviceName, answer);
           };
@@ -1159,7 +1320,10 @@ export default class GazeFaceAuthExtension extends Extension {
         this._injectionManager.overrideMethod(proto, "_onProblem", (original) => {
           return function (client, serviceName, problem) {
             if (this.serviceIsFace(serviceName)) {
-              const mapped = GENERIC_ERROR_MAP.get(problem) ?? problem;
+              const mapped =
+                INTERNAL_ERROR_MAP.get(problem) ??
+                GENERIC_ERROR_MAP.get(problem) ??
+                problem;
               this._queuePriorityMessage(
                 serviceName,
                 mapped,
@@ -1457,6 +1621,12 @@ export default class GazeFaceAuthExtension extends Extension {
   disable() {
     this._gazeEnableToken = null;
     if (this._dbusProxy) {
+      try {
+        if (typeof this._dbusProxy.RemovePamInternalRemote === "function") {
+          this._dbusProxy.RemovePamInternalRemote("polkit-1");
+          this._dbusProxy.RemovePamInternalRemote(FACE_SERVICE_NAME);
+        }
+      } catch (e) {}
       try {
         this._dbusProxy.RegisterExtensionRemote(false);
       } catch (e) {

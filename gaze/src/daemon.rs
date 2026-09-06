@@ -1853,7 +1853,10 @@ mod tests {
     #[test]
     fn pam_internal_service_normalization() {
         assert_eq!(AuthDaemon::normalize_pam_service("polkit-1"), "polkit-1");
-        assert_eq!(AuthDaemon::normalize_pam_service("  polkit-1  "), "polkit-1");
+        assert_eq!(
+            AuthDaemon::normalize_pam_service("  polkit-1  "),
+            "polkit-1"
+        );
         assert_eq!(
             AuthDaemon::normalize_pam_service("/etc/pam.d/polkit-1"),
             "polkit-1"

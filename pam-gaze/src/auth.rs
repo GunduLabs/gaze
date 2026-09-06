@@ -201,9 +201,7 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, _options: Pa
 
         let verdict = verify_within(&proxy, &username, service.as_deref(), budget).await;
         match verdict {
-            Verdict::Reached(AuthOutcome::Match, _) => {
-                Ok((config.auth, is_internal, prompt_line))
-            }
+            Verdict::Reached(AuthOutcome::Match, _) => Ok((config.auth, is_internal, prompt_line)),
             Verdict::Reached(AuthOutcome::NoMatch, _) => {
                 tell(if is_internal {
                     GAZE_MSG_FACE_NOT_RECOGNIZED
@@ -262,11 +260,7 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, _options: Pa
     } else {
         unsafe { confirm_authentication(pamh, prompt_line) }
     };
-    if confirmed {
-        PAM_SUCCESS
-    } else {
-        PAM_AUTH_ERR
-    }
+    if confirmed { PAM_SUCCESS } else { PAM_AUTH_ERR }
 }
 
 const PROMPT_RETIRE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -504,11 +498,7 @@ unsafe fn do_authenticate_simultaneous(
             } else {
                 unsafe { confirm_authentication(pamh, prompt_line) }
             };
-            return if confirmed {
-                PAM_SUCCESS
-            } else {
-                PAM_AUTH_ERR
-            };
+            return if confirmed { PAM_SUCCESS } else { PAM_AUTH_ERR };
         }
         unsafe { report_face_verified(pamh, silent, prompt_line, is_internal) };
         return PAM_SUCCESS;
@@ -567,11 +557,7 @@ unsafe fn do_authenticate_simultaneous(
                 } else {
                     unsafe { confirm_authentication(pamh, PromptLine::Printed) }
                 };
-                if confirmed {
-                    PAM_SUCCESS
-                } else {
-                    PAM_AUTH_ERR
-                }
+                if confirmed { PAM_SUCCESS } else { PAM_AUTH_ERR }
             } else {
                 unsafe { confirm_graphical_polkit(pamh, &state, prompt_thread, is_internal) }
             }

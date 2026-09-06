@@ -1353,8 +1353,14 @@ mod tests {
 
         assert!(is_service_internal("polkit-1", &internal_services));
         assert!(is_service_internal("gdm-face", &internal_services));
-        assert!(is_service_internal("/etc/pam.d/polkit-1", &internal_services));
-        assert!(is_service_internal("/etc/pam.d/gdm-face", &internal_services));
+        assert!(is_service_internal(
+            "/etc/pam.d/polkit-1",
+            &internal_services
+        ));
+        assert!(is_service_internal(
+            "/etc/pam.d/gdm-face",
+            &internal_services
+        ));
         assert!(is_service_internal("  polkit-1  ", &internal_services));
 
         assert!(!is_service_internal("sudo", &internal_services));
@@ -1393,10 +1399,7 @@ mod tests {
             internal_give_up_message(Some(CaptureStatus::Clipped)),
             GAZE_MSG_FACE_NOT_RECOGNIZED
         );
-        assert_eq!(
-            internal_give_up_message(None),
-            GAZE_MSG_FACE_NOT_DETECTED
-        );
+        assert_eq!(internal_give_up_message(None), GAZE_MSG_FACE_NOT_DETECTED);
     }
 
     #[test]
