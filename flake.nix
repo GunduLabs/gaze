@@ -22,12 +22,14 @@
         gaze = final.callPackage ./packaging/nix/gaze.nix { };
         gaze-gui = final.callPackage ./packaging/nix/gaze-gui.nix { };
         gaze-gnome-extension = final.callPackage ./packaging/nix/gnome-shell-extension.nix { };
+        gaze-cinnamon-extension = final.callPackage ./packaging/nix/cinnamon-extension.nix { };
       };
 
       packages = forAllSystems (pkgs: rec {
         gaze = pkgs.callPackage ./packaging/nix/gaze.nix { };
         gaze-gui = pkgs.callPackage ./packaging/nix/gaze-gui.nix { };
         gaze-gnome-extension = pkgs.callPackage ./packaging/nix/gnome-shell-extension.nix { };
+        gaze-cinnamon-extension = pkgs.callPackage ./packaging/nix/cinnamon-extension.nix { };
         default = gaze;
       });
 
