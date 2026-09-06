@@ -1,0 +1,37 @@
+{
+  "layout": {
+    "behavior": {
+      "type": "section",
+      "title": "Face authentication",
+      "keys": [
+        "enable-face-authentication",
+        "face-retry-mode",
+        "max-face-tries"
+      ]
+    }
+  },
+  "enable-face-authentication": {
+    "type": "checkbox",
+    "default": true,
+    "description": "Enable face authentication (lock screen)"
+  },
+  "face-retry-mode": {
+    "type": "combobox",
+    "default": "fixed",
+    "options": {
+      "Disabled": "disabled",
+      "Fixed tries": "fixed",
+      "Infinite": "infinite"
+    },
+    "description": "Face retry mode"
+  },
+  "max-face-tries": {
+    "type": "spinbutton",
+    "default": 3,
+    "min": 2,
+    "max": 20,
+    "step": 1,
+    "description": "Maximum face tries",
+    "dependency": "face-retry-mode=fixed"
+  }
+}
