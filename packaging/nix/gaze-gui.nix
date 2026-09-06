@@ -38,6 +38,7 @@ rustPlatform.buildRustPackage {
       ../../gaze
       ../../gaze-cli
       ../../gaze-core
+      ../../gaze-security
       ../../gaze-gui
       ../../pam-gaze
       ../../pam-gaze-grosshack

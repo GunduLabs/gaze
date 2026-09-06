@@ -242,6 +242,8 @@ gaze remove-face <name>      Remove a face
 gaze clear-user              Remove all face data for current user
 gaze config                  Interactive configuration editor
 gaze config --show           Print current config and exit
+gaze keyring                 Enroll optional TPM-backed GNOME Keyring unlock
+gaze keyring --forget        Remove your stored keyring credential
 gaze doctor                  Check config, daemon, cameras, enrollments, PAM, and TPM
 gaze doctor --benchmark      Also measure detector/recognizer/liveness inference speed
 gaze uninstall               Completely remove Gaze (packages, PAM, config, models, data)

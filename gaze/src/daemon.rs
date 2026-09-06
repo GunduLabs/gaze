@@ -3397,6 +3397,11 @@ impl AuthDaemon {
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
 
         new_config
+            .storage
+            .validate_keyring(&new_config.liveness)
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+
+        new_config
             .security
             .validate()
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;

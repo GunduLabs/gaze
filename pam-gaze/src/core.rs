@@ -495,7 +495,12 @@ pub async fn setup_auth_env() -> Result<(Config, GazeProxy<'static>), c_int> {
     let config = match gaze_core::dbus::try_load_config_from_daemon(&proxy).await {
         Ok(Some(config)) => config,
         Ok(None) => {
-            gaze_core::config::Config::load_from(gaze_core::config::CONFIG_PATH).unwrap_or_default()
+            let mut config = gaze_core::config::Config::load_from(gaze_core::config::CONFIG_PATH)
+                .unwrap_or_default();
+            // A disk config does not prove an older daemon actually enabled liveness for
+            // this attempt. Legacy layout fallback must never opt into credential release.
+            config.storage.unlock_gnome_keyring = false;
+            config
         }
         Err(_) => return Err(PAM_SERVICE_ERR),
     };

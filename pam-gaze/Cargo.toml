@@ -18,6 +18,7 @@ repository.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
+gaze-security = { path = "../gaze-security" }
 gaze-core = { path = "../gaze-core", default-features = false }
 libc = "0.2.189"
 zbus = "5.19.0"

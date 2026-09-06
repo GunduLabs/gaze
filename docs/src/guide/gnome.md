@@ -114,6 +114,60 @@ This is mostly about GNOME keyring behavior. GNOME keyring is normally unlocked 
 
 When that happens, apps that read saved secrets (browser credentials, git credentials, Wi-Fi secrets, chat clients, etc.) can keep prompting for a keyring password until you unlock it manually.
 
+### Optional TPM-backed keyring unlock
+
+Run the configuration wizard and enable TPM template encryption, liveness, and
+the optional GNOME Keyring unlock setting. Then enroll the login keyring password:
+
+```bash
+gaze config
+gaze keyring                         # enroll or replace for the current user
+sudo gaze keyring --user alice       # enroll for a specific account
+gaze keyring --forget                # remove your stored credential
+```
+
+The CLI requests root privileges before its hidden, confirmed password prompt.
+Enter the **login keyring's password**, normally your account password. Enrollment
+does not change or verify it; an incorrect password leaves the keyring locked.
+
+The corresponding settings in `/etc/gaze/config.toml` are:
+
+```toml
+[storage]
+encrypt_templates = true
+unlock_gnome_keyring = true
+
+[liveness]
+enabled = true
+```
+
+Enable [GDM face login](#optional-enable-face-at-gdm-login) separately. Upgrade the
+daemon, CLI, and PAM module together, then restart `gazed`. If you customized
+`gdm-face`, preserve its account/session rules and use this authentication order:
+
+```pam
+auth required pam_env.so
+auth [success=1 default=ignore] pam_gaze.so
+auth requisite pam_deny.so
+auth optional pam_gnome_keyring.so auto_start use_authtok
+```
+
+The shipped stacks include this ordering. `success=1` skips only `pam_deny`; the
+previous `success=done` skipped keyring. Only a successful normal face/liveness
+authentication (and any confirmation) can unseal a stored credential and set
+`PAM_AUTHTOK`. No credential is exposed through DBus, used by other PAM services,
+or written plaintext. Records are AES-256-GCM encrypted under a separate TPM-sealed
+key, root-owned (`/var/lib/gaze/keyring`, `0700`; records `0600`), and bound to the
+account UID, name, and current password hash. This is a recoverable password
+equivalent: root on this machine can access it, so protect the device accordingly.
+
+Missing/corrupt records, unavailable TPMs, or unseal failures do not release a
+token and return to GDM's password path. A password change invalidates the record;
+after logging in with the new password, run `gaze keyring` again. Keyring-only
+password changes also require re-enrollment. `gaze keyring --forget` removes the
+encrypted record; disable the config option before disabling TPM encryption or
+liveness. Test access under your distribution's SELinux/AppArmor policy.
+
 ## Optional: enable face at GDM login
 
 The easiest way is the **Enable face auth at GDM login** switch, under **Behavior → GDM login screen** in the [extension preferences](#open-the-extension-preferences). Toggling it triggers a polkit prompt, then the daemon writes `/etc/dconf/db/gdm.d/99-gaze` and runs `dconf update` for you.

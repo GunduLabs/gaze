@@ -559,6 +559,19 @@ impl InferenceConfig {
 pub struct StorageConfig {
     #[serde(default = "default_false")]
     pub encrypt_templates: bool,
+    #[serde(default = "default_false")]
+    pub unlock_gnome_keyring: bool,
+}
+
+impl StorageConfig {
+    pub fn validate_keyring(&self, liveness: &LivenessConfig) -> anyhow::Result<()> {
+        if self.unlock_gnome_keyring && (!self.encrypt_templates || !liveness.enabled) {
+            anyhow::bail!(
+                "storage.unlock_gnome_keyring requires storage.encrypt_templates and liveness.enabled"
+            );
+        }
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Value, OwnedValue, Type)]
@@ -1991,6 +2004,7 @@ mod tests {
             },
             storage: StorageConfig {
                 encrypt_templates: true,
+                unlock_gnome_keyring: true,
             },
         };
 
@@ -2026,6 +2040,7 @@ mod tests {
         assert_eq!(loaded.liveness.threshold, 0.9);
         assert_eq!(loaded.liveness.max_seconds, 2.5);
         assert!(loaded.storage.encrypt_templates);
+        assert!(loaded.storage.unlock_gnome_keyring);
     }
 
     #[test]
@@ -2390,6 +2405,24 @@ level = "low""#,
         )
         .unwrap();
         assert!(!absent.storage.encrypt_templates);
+    }
+
+    #[test]
+    fn keyring_defaults_off_and_requires_tpm_and_liveness() {
+        let mut config: Config =
+            toml_edit::de::from_str("[storage]\nencrypt_templates = true").unwrap();
+        assert!(!config.storage.unlock_gnome_keyring);
+        config.storage.unlock_gnome_keyring = true;
+        config.liveness.enabled = true;
+        assert!(config.storage.validate_keyring(&config.liveness).is_ok());
+        config.storage.encrypt_templates = false;
+        assert!(config.storage.validate_keyring(&config.liveness).is_err());
+        config.storage.encrypt_templates = true;
+        config.liveness.enabled = false;
+        assert!(config.storage.validate_keyring(&config.liveness).is_err());
+        config.storage.unlock_gnome_keyring = false;
+        assert!(config.storage.validate_keyring(&config.liveness).is_ok());
+        assert!(unknown_config_keys("[storage]\nunlock_gnome_keyring = false").is_empty());
     }
 
     #[test]

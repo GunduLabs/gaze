@@ -438,9 +438,9 @@ in
         # Face-only PAM service, equivalent of packaging/pam/gdm-face.arch.
         security.pam.services."gdm-face".text = ''
           auth       required                     pam_env.so
-          auth       [success=done ignore=ignore default=bad]   ${cfg.package}/lib/security/pam_gaze.so
-          auth       optional                     ${pkgs.gnome-keyring}/lib/security/pam_gnome_keyring.so only_if=login auto_start
-          auth       required                     pam_deny.so
+          auth       [success=1 default=ignore]    ${cfg.package}/lib/security/pam_gaze.so
+          auth       requisite                    pam_deny.so
+          auth       optional                     ${pkgs.gnome-keyring}/lib/security/pam_gnome_keyring.so auto_start use_authtok
 
           account    required                     pam_nologin.so
           account    required                     pam_unix.so
