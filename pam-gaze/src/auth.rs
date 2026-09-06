@@ -280,9 +280,9 @@ unsafe fn supply_keyring_token(pamh: PamHandle, username: &str) -> Result<(), ()
     if !existing.is_null() {
         return Ok(());
     }
-    let Some(secret) = gaze_security::keyring::load(username).map_err(|_| ())? else {
-        return Ok(());
-    };
+    let secret = gaze_security::keyring::load(username)
+        .map_err(|_| ())?
+        .ok_or(())?;
     // Linux-PAM copies the token; our zeroizing buffer is dropped immediately afterwards.
     if unsafe { pam_set_item(pamh, PAM_AUTHTOK, secret.as_ptr().cast()) } != PAM_SUCCESS {
         return Err(());
