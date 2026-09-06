@@ -538,6 +538,13 @@ _verify-package format:
     fi
     ok "$base ships the extension, gschema, gdm defaults and gdm-face stack"
 
+    load gaze-cinnamon-extension
+    want_files /usr/share/cinnamon/extensions/gaze@gundulabs.com/metadata.json \
+        /usr/share/cinnamon/extensions/gaze@gundulabs.com/extension.js \
+        /usr/share/cinnamon/extensions/gaze@gundulabs.com/settings-schema.json
+    want_depends cinnamon
+    ok "$base ships the Cinnamon extension files"
+
     load gaze-hyprlock
     want_files /etc/pam.d/hyprlock-gaze /etc/pam.d/hyprlock-gaze-simultaneous
     want_config /etc/pam.d/hyprlock-gaze /etc/pam.d/hyprlock-gaze-simultaneous
@@ -603,9 +610,9 @@ package-prebuilt format: _dist-packages
     # Use SUSE manifests together so packages do not mix PAM stack formats.
     # Other RPM hosts keep the existing manifests.
 
-    configs=(packaging/nfpm.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension.yaml packaging/nfpm-hyprlock.yaml packaging/nfpm-kde.yaml)
+    configs=(packaging/nfpm.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension.yaml packaging/nfpm-cinnamon-extension.yaml packaging/nfpm-hyprlock.yaml packaging/nfpm-kde.yaml)
     if [ "{{ format }}" = rpm ] && is_suse; then
-        configs=(packaging/nfpm-opensuse.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension-opensuse.yaml packaging/nfpm-hyprlock-opensuse.yaml packaging/nfpm-kde.yaml)
+        configs=(packaging/nfpm-opensuse.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension-opensuse.yaml packaging/nfpm-cinnamon-extension.yaml packaging/nfpm-hyprlock-opensuse.yaml packaging/nfpm-kde.yaml)
     fi
 
     for config in "${configs[@]}"; do {{ quote(just_executable()) }} _nfpm "$config" "{{ format }}"; done

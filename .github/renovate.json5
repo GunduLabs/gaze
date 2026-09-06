@@ -1,0 +1,112 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+
+  // Keep update PRs without creating a persistent dashboard issue.
+  "dependencyDashboard": false,
+  "dependencyDashboardApproval": false,
+  "automerge": false,
+  "timezone": "America/New_York",
+  "schedule": ["* 6-9 * * *"],
+  "minimumReleaseAge": "1 day",
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "labels": ["dependencies"],
+  "semanticCommits": "enabled",
+  "semanticCommitType": "chore",
+
+  // Nix support requires explicit opt-in.
+  "nix": { "enabled": true },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["* 6-9 * * 1"],
+  },
+
+  "packageRules": [
+    {
+      "description": "Keep manifest minimums current, as with the previous Dependabot setup",
+      "matchManagers": ["cargo", "bun", "npm"],
+      "rangeStrategy": "bump",
+    },
+    {
+      "matchManagers": ["cargo"],
+      "addLabels": ["rust"],
+      "semanticCommitType": "fix",
+    },
+    {
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Rust non-major dependencies",
+    },
+    {
+      "matchManagers": ["bun", "npm"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Docs non-major dependencies",
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "groupName": "GitHub Actions",
+    },
+    {
+      // Distro versions identify package targets and must change with their matrix metadata.
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["container", "service"],
+      "matchUpdateTypes": ["major", "minor"],
+      "enabled": false,
+    },
+    {
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": ["casey/just", "goreleaser/nfpm"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Build tools",
+    },
+  ],
+
+  // These release versions live in scripts instead of package manifests.
+  // Capturing only the numeric version preserves the existing optional v prefix.
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/[^/]+\\.ya?ml$/",
+        "/^packaging/docker/Dockerfile\\.build$/",
+      ],
+      "matchStrings": [
+        "(?:^|\\n)[ \\t]*(?:ARG[ \\t]+)?JUST_VERSION[ \\t]*[:=][ \\t]*v?(?<currentValue>\\d+\\.\\d+\\.\\d+)",
+      ],
+      "depNameTemplate": "casey/just",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver",
+      "extractVersionTemplate": "^v?(?<version>\\d+\\.\\d+\\.\\d+)$",
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/[^/]+\\.ya?ml$/",
+        "/^packaging/docker/Dockerfile\\.build$/",
+      ],
+      "matchStrings": [
+        "(?:^|\\n)[ \\t]*(?:ARG[ \\t]+)?NFPM_VERSION[ \\t]*[:=][ \\t]*v?(?<currentValue>\\d+\\.\\d+\\.\\d+)",
+      ],
+      "depNameTemplate": "goreleaser/nfpm",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver",
+      "extractVersionTemplate": "^v?(?<version>\\d+\\.\\d+\\.\\d+)$",
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^Justfile$/"],
+      "matchStrings": [
+        "(?:^|\\n)ort_version[ \\t]*:=[ \\t]*env\\(\"ORT_VERSION\",[ \\t]*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\"\\)",
+      ],
+      "depNameTemplate": "microsoft/onnxruntime",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver",
+      "extractVersionTemplate": "^v?(?<version>\\d+\\.\\d+\\.\\d+)$",
+    },
+  ],
+}
