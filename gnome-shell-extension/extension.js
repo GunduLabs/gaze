@@ -6,6 +6,7 @@ import GLib from "gi://GLib";
 import GObject from "gi://GObject";
 import St from "gi://St";
 import Clutter from "gi://Clutter";
+import Pango from "gi://Pango";
 import {
   Extension,
   InjectionManager,
@@ -21,6 +22,15 @@ import * as Main from "resource:///org/gnome/shell/ui/main.js";
 const GAZE_DBUS_INTERFACE = `
 <node>
   <interface name="com.gundulabs.Gaze">
+    <property name="PamInternal" type="as" access="readwrite"/>
+    <method name="AddPamInternal">
+      <arg name="service" type="s" direction="in"/>
+    </method>
+    <method name="RemovePamInternal">
+      <arg name="service" type="s" direction="in"/>
+    </method>
+    <method name="ClearPamInternal">
+    </method>
     <method name="RegisterExtension">
       <arg name="active" type="b" direction="in"/>
     </method>
@@ -190,6 +200,61 @@ const GENERIC_ERROR_MAP = new Map([
 const FACE_HINT_TEXT = "(or look at the camera)";
 const LEGACY_AUTH_SERVICES_ROLE = "fingerprint";
 
+const GAZE_MSG_LOOK_CAMERA = "GAZE_MSG_LOOK_CAMERA";
+const GAZE_MSG_LOOK_OR_PASSWORD = "GAZE_MSG_LOOK_OR_PASSWORD";
+const GAZE_MSG_FACE_VERIFIED = "GAZE_MSG_FACE_VERIFIED";
+const GAZE_REQUIRE_CONFIRMATION = "GAZE_REQUIRE_CONFIRMATION";
+const GAZE_CONFIRMED = "GAZE_CONFIRMED";
+const GAZE_CANCEL = "GAZE_CANCEL";
+const GAZE_MSG_FACE_NOT_RECOGNIZED = "GAZE_MSG_FACE_NOT_RECOGNIZED";
+const GAZE_MSG_FACE_NOT_DETECTED = "GAZE_MSG_FACE_NOT_DETECTED";
+const GAZE_MSG_FACE_TOO_DARK = "GAZE_MSG_FACE_TOO_DARK";
+const GAZE_MSG_FACE_TIMED_OUT = "GAZE_MSG_FACE_TIMED_OUT";
+const GAZE_MSG_FACE_UNAVAILABLE = "GAZE_MSG_FACE_UNAVAILABLE";
+
+let activeExtensionInstance = null;
+
+const safeGettext = (str) => {
+  if (!str) return str;
+  try {
+    if (activeExtensionInstance?.gettext) {
+      return activeExtensionInstance.gettext(str) || str;
+    }
+    return _(str) || str;
+  } catch (e) {
+    return str;
+  }
+};
+
+const INTERNAL_ERROR_MAP = new Map([
+  [
+    GAZE_MSG_FACE_NOT_RECOGNIZED,
+    "Face not recognized. Please enter your password.",
+  ],
+  [
+    GAZE_MSG_FACE_NOT_DETECTED,
+    "Face not detected. Please enter your password.",
+  ],
+  [
+    GAZE_MSG_FACE_TOO_DARK,
+    "Too dark for face authentication. Please enter your password.",
+  ],
+  [
+    GAZE_MSG_FACE_TIMED_OUT,
+    "Face authentication timed out. Please enter your password.",
+  ],
+  [
+    GAZE_MSG_FACE_UNAVAILABLE,
+    "Face authentication unavailable. Please enter your password.",
+  ],
+]);
+
+const getInternalErrorMessage = (msg) => {
+  const text = INTERNAL_ERROR_MAP.get(msg);
+  return text ? safeGettext(text) : null;
+};
+
+
 // RHEL 10's backport declares the AuthServices signals with positional
 // parameters; GNOME 50 upstream collapsed them into a single params object.
 const authServicesShapes = new WeakMap();
@@ -298,11 +363,53 @@ const readAskQuestionArgs = (args) => {
   return { serviceName: second, question: third };
 };
 
+
 const CONFIRMATION_QUESTION = "Face Verified. Press Enter to confirm.";
 const CONFIRMATION_DIALOG_LABEL =
   "Face verified. Press Enter or click Authenticate to confirm.";
 
-const isConfirmationMessage = (text) => text?.trim() === CONFIRMATION_QUESTION;
+const isConfirmationMessage = (text) => {
+  const trimmed = text?.trim();
+  return (
+    trimmed === GAZE_REQUIRE_CONFIRMATION || trimmed === CONFIRMATION_QUESTION
+  );
+};
+
+const isCameraHintMessage = (text) => {
+  if (!text) return false;
+  const trimmed = text.trim();
+  return (
+    trimmed === GAZE_MSG_LOOK_CAMERA ||
+    trimmed === GAZE_MSG_LOOK_OR_PASSWORD ||
+    trimmed === FACE_HINT_TEXT ||
+    trimmed === "Please look at the camera..." ||
+    trimmed.startsWith("GAZE_MSG_LOOK")
+  );
+};
+
+const isFaceVerifiedMessage = (text) => {
+  if (!text) return false;
+  const trimmed = text.trim();
+  return trimmed === GAZE_MSG_FACE_VERIFIED;
+};
+
+const getGenericErrorMessage = (msg) => {
+  const text = GENERIC_ERROR_MAP.get(msg);
+  return text ? safeGettext(text) : null;
+};
+
+const translatePamError = (text) => {
+  if (!text) return text;
+  const trimmed = text.trim();
+  const internalErr = getInternalErrorMessage(trimmed);
+  if (internalErr) return internalErr;
+  const genericErr = getGenericErrorMessage(trimmed);
+  if (genericErr) return genericErr;
+  if (trimmed.startsWith("GAZE_MSG_")) {
+    return safeGettext("Face authentication failed") || "Face authentication failed";
+  }
+  return text;
+};
 
 const cancelDelayedReset = (dialog) => {
   if (!dialog._sessionRequestTimeoutId) return;
@@ -310,10 +417,64 @@ const cancelDelayedReset = (dialog) => {
   dialog._sessionRequestTimeoutId = 0;
 };
 
+const ensureFaceHintLabel = (dialog) => {
+  if (dialog._faceHintLabel) return dialog._faceHintLabel;
+
+  const label = new St.Label({
+    style_class: "login-dialog-message-hint",
+    style:
+      "color: #dedee4; font-weight: 400; font-size: 0.818em; text-align: center; padding: 4px 0; min-height: 1.5em;",
+    text: safeGettext(FACE_HINT_TEXT) || FACE_HINT_TEXT,
+    x_align: Clutter.ActorAlign.CENTER,
+    y_align: Clutter.ActorAlign.START,
+    visible: false,
+  });
+  if (label.clutter_text && typeof Pango !== "undefined" && Pango) {
+    label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+    label.clutter_text.line_wrap = true;
+    if (typeof label.clutter_text.set_line_alignment === "function") {
+      label.clutter_text.set_line_alignment(Pango.Alignment.CENTER);
+    }
+  }
+
+  const warningBox = dialog._errorMessageLabel?.get_parent();
+  if (warningBox && typeof warningBox.insert_child_above === "function") {
+    warningBox.insert_child_above(label, dialog._errorMessageLabel);
+  } else if (dialog._passwordEntry?.get_parent()) {
+    dialog._passwordEntry.get_parent().add_child(label);
+  }
+
+  dialog._faceHintLabel = label;
+  return label;
+};
+
+const showFaceHint = (dialog, text = FACE_HINT_TEXT) => {
+  const label = ensureFaceHintLabel(dialog);
+  label.text = safeGettext(text) || text;
+  label.show();
+  dialog._infoMessageLabel?.hide();
+  dialog._errorMessageLabel?.hide();
+  dialog._nullMessageLabel?.hide();
+  keepPasswordEntryVisible(dialog);
+  dialog._ensureOpen();
+};
+
+const hideFaceHint = (dialog) => {
+  if (dialog._faceHintLabel) {
+    dialog._faceHintLabel.hide();
+  }
+};
+
 const keepPasswordEntryVisible = (dialog) => {
   const entry = dialog._passwordEntry;
   if (!entry || !dialog._session) return;
-  if (!entry.hint_text) entry.hint_text = "Password";
+  if (
+    !entry.hint_text ||
+    entry.hint_text.startsWith("GAZE_MSG_") ||
+    isCameraHintMessage(entry.hint_text)
+  ) {
+    entry.hint_text = safeGettext("Password") || "Password";
+  }
   entry.show();
   entry.reactive = true;
   cancelDelayedReset(dialog);
@@ -321,6 +482,7 @@ const keepPasswordEntryVisible = (dialog) => {
 
 const enterConfirmMode = (dialog) => {
   cancelDelayedReset(dialog);
+  hideFaceHint(dialog);
   dialog._passwordEntry?.set_text("");
   if (dialog._passwordEntry) {
     dialog._passwordEntry.reactive = false;
@@ -328,7 +490,8 @@ const enterConfirmMode = (dialog) => {
   }
 
   if (dialog._infoMessageLabel) {
-    dialog._infoMessageLabel.text = CONFIRMATION_DIALOG_LABEL;
+    dialog._infoMessageLabel.text =
+      safeGettext(CONFIRMATION_DIALOG_LABEL) || CONFIRMATION_DIALOG_LABEL;
     dialog._infoMessageLabel.show();
   }
   dialog._errorMessageLabel?.hide();
@@ -346,7 +509,7 @@ const enterConfirmMode = (dialog) => {
 
 const respondToConfirm = (dialog) => {
   dialog._confirmMode = false;
-  dialog._session.response("");
+  dialog._session.response(GAZE_CONFIRMED);
   dialog._passwordEntry?.set_text("");
   if (dialog._passwordEntry) dialog._passwordEntry.reactive = false;
   if (dialog._okButton) dialog._okButton.reactive = false;
@@ -358,7 +521,7 @@ const ensureAuthPromptConfirmButton = (authPrompt, extension) => {
   const button = new St.Button({
     style_class: "button modal-dialog-button default",
     style: "padding: 9px 24px; border-radius: 12px;",
-    label: _("Confirm Face Unlock") || "Confirm Face Unlock",
+    label: safeGettext("Confirm Face Unlock") || "Confirm Face Unlock",
     can_focus: true,
     reactive: true,
     x_align: Clutter.ActorAlign.FILL,
@@ -464,10 +627,11 @@ const enterAuthPromptConfirmMode = (authPrompt, serviceName, extension) => {
     logError(e, "[gaze] Failed to enter confirm mode");
     exitAuthPromptConfirmMode(authPrompt);
     authPrompt.setMessage(
-      _("Failed to show confirmation prompt") ||
+      safeGettext("Failed to show confirmation prompt") ||
         "Failed to show confirmation prompt",
       MESSAGE_TYPE.ERROR,
     );
+
   }
 };
 
@@ -494,7 +658,7 @@ const respondToAuthPromptConfirm = (authPrompt) => {
 
   const serviceName = authPrompt._queryingService;
   if (serviceName && authPrompt._userVerifier) {
-    authPrompt._userVerifier.answerQuery(serviceName, "");
+    authPrompt._userVerifier.answerQuery(serviceName, GAZE_CONFIRMED);
   }
 
   authPrompt.emit("next");
@@ -555,6 +719,7 @@ const FACE_STATUS_UPDATES = new Set([
 
 export default class GazeFaceAuthExtension extends Extension {
   enable() {
+    activeExtensionInstance = this;
     this._injectionManager = new InjectionManager();
     this._extensionSettings = this.getSettings();
     this._activeConfirmWidgets = new Set();
@@ -608,6 +773,18 @@ export default class GazeFaceAuthExtension extends Extension {
       }
     };
 
+    const registerPamInternalServices = (proxy) => {
+      if (!proxy) return;
+      try {
+        if (typeof proxy.AddPamInternalRemote === "function") {
+          proxy.AddPamInternalRemote("polkit-1");
+          proxy.AddPamInternalRemote(FACE_SERVICE_NAME);
+        }
+      } catch (e) {
+        logError(e, "[gaze] Failed to register PAM internal services");
+      }
+    };
+
     try {
       this._dbusProxy = new GazeProxy(
         Gio.DBus.system,
@@ -619,6 +796,7 @@ export default class GazeFaceAuthExtension extends Extension {
           }
           try {
             proxy.RegisterExtensionRemote(true);
+            registerPamInternalServices(proxy);
           } catch (e) {}
           cacheCamera();
         },
@@ -628,6 +806,7 @@ export default class GazeFaceAuthExtension extends Extension {
         if (this._dbusProxy.g_name_owner) {
           try {
             this._dbusProxy.RegisterExtensionRemote(true);
+            registerPamInternalServices(this._dbusProxy);
           } catch (e) {}
           cacheCamera();
         }
@@ -649,98 +828,301 @@ export default class GazeFaceAuthExtension extends Extension {
       }
     };
 
-    const dbusProxy = this._dbusProxy;
+    const createDialogHandlers = (
+      origShowInfo,
+      origShowError,
+      origRequest,
+      origEntryActivate,
+      origAuthButton,
+      origDestroySession,
+      origInitiateSession,
+    ) => {
+      const handleDialogShowInfo = function (session, text) {
+        const trimmed = text?.trim();
+        if (!trimmed) return;
+
+        if (isConfirmationMessage(trimmed)) {
+          hideFaceHint(this);
+          enterConfirmMode(this);
+          return;
+        }
+
+        if (isCameraHintMessage(trimmed)) {
+          showFaceHint(this, FACE_HINT_TEXT);
+          return;
+        }
+
+        if (isFaceVerifiedMessage(trimmed)) {
+          hideFaceHint(this);
+          this._infoMessageLabel?.hide();
+          return;
+        }
+
+        const internalErr = getInternalErrorMessage(trimmed);
+        if (internalErr || trimmed.startsWith("GAZE_MSG_")) {
+          hideFaceHint(this);
+          const msg =
+            internalErr ||
+            safeGettext("Face authentication failed") ||
+            "Face authentication failed";
+          this._passwordEntry?.set_text("");
+          this._errorMessageLabel?.set_text(msg);
+          this._errorMessageLabel?.show();
+          this._infoMessageLabel?.hide();
+          this._nullMessageLabel?.hide();
+          keepPasswordEntryVisible(this);
+          this._ensureOpen();
+          return;
+        }
+
+        if (FACE_STATUS_UPDATES.has(trimmed)) {
+          showFaceHint(this, trimmed);
+          return;
+        }
+
+        hideFaceHint(this);
+        if (origShowInfo) {
+          origShowInfo.call(this, session, text);
+        } else {
+          this._passwordEntry?.set_text("");
+          this._infoMessageLabel?.set_text(text);
+          this._infoMessageLabel?.show();
+          this._errorMessageLabel?.hide();
+          this._nullMessageLabel?.hide();
+          this._ensureOpen();
+        }
+      };
+
+      const handleDialogShowError = function (session, text) {
+        hideFaceHint(this);
+        const trimmed = text?.trim();
+        const mapped = translatePamError(trimmed);
+        this._passwordEntry?.set_text("");
+        this._errorMessageLabel?.set_text(mapped);
+        this._errorMessageLabel?.show();
+        this._infoMessageLabel?.hide();
+        this._nullMessageLabel?.hide();
+        keepPasswordEntryVisible(this);
+        this._ensureOpen();
+      };
+
+      const handleDialogRequest = function (session, request, echoOn) {
+        if (this._sessionRequestTimeoutId) {
+          GLib.source_remove(this._sessionRequestTimeoutId);
+          this._sessionRequestTimeoutId = 0;
+        }
+
+        if (isConfirmationMessage(request)) {
+          hideFaceHint(this);
+          enterConfirmMode(this);
+          return;
+        }
+
+        let hintText = "Password";
+        if (request) {
+          const trimmed = request.trim();
+          if (
+            trimmed === "Password:" ||
+            trimmed === "Password: " ||
+            trimmed.startsWith("GAZE_MSG_") ||
+            isCameraHintMessage(trimmed) ||
+            /password/i.test(trimmed)
+          ) {
+            hintText = safeGettext("Password") || "Password";
+          } else {
+            hintText = request.replace(/: *$/, "").trim();
+          }
+        }
+
+        if (this._passwordEntry) {
+          this._passwordEntry.hint_text = hintText;
+          this._passwordEntry.password_visible = echoOn;
+          this._passwordEntry.show();
+          this._passwordEntry.set_text("");
+          this._passwordEntry.reactive = true;
+        }
+        if (this._okButton) {
+          this._okButton.reactive = false;
+        }
+
+        this._ensureOpen();
+        this._passwordEntry?.grab_key_focus();
+      };
+
+      const handleDialogEntryActivate = function () {
+        if (this._confirmMode) {
+          respondToConfirm(this);
+        } else {
+          hideFaceHint(this);
+          if (origEntryActivate) {
+            origEntryActivate.call(this);
+          }
+        }
+      };
+
+      const handleDialogAuthButton = function () {
+        if (this._confirmMode) {
+          respondToConfirm(this);
+        } else if (origAuthButton) {
+          origAuthButton.call(this);
+        } else {
+          handleDialogEntryActivate.call(this);
+        }
+      };
+
+      const handleDialogDestroySession = function (delay = 0) {
+        hideFaceHint(this);
+        if (origDestroySession) {
+          origDestroySession.call(this, delay);
+        }
+        if (!delay) return;
+        cancelDelayedReset(this);
+        if (this._passwordEntry) {
+          this._passwordEntry.show();
+          this._passwordEntry.reactive = true;
+        }
+      };
+
+      const handleDialogInitiateSession = function () {
+        if (origInitiateSession) {
+          origInitiateSession.call(this);
+        }
+        if (this._session) {
+          this._session.disconnectObject(this);
+          this._session.connectObject(
+            "completed",
+            this._onSessionCompleted.bind(this),
+            "request",
+            this._onSessionRequest.bind(this),
+            "show-error",
+            this._onSessionShowError.bind(this),
+            "show-info",
+            this._onSessionShowInfo.bind(this),
+            this,
+          );
+        }
+      };
+
+      return {
+        handleDialogShowInfo,
+        handleDialogShowError,
+        handleDialogRequest,
+        handleDialogEntryActivate,
+        handleDialogAuthButton,
+        handleDialogDestroySession,
+        handleDialogInitiateSession,
+      };
+    };
 
     this._injectionManager.overrideMethod(
       PolkitAgent.Component.prototype,
       "_onInitiate",
       (original) => {
-        return function (
-          cookie,
-          identity,
-          actionId,
-          message,
-          iconName,
-          details,
-        ) {
-          if (dbusProxy) {
+        return function (...args) {
+          if (ext._dbusProxy) {
             try {
-              dbusProxy.RegisterExtensionRemote(true);
+              ext._dbusProxy.RegisterExtensionRemote(true);
+              registerPamInternalServices(ext._dbusProxy);
             } catch (e) {}
           }
-          original.call(
-            this,
-            cookie,
-            identity,
-            actionId,
-            message,
-            iconName,
-            details,
-          );
+          original.apply(this, args);
 
           const dialog = this._currentDialog;
           if (!dialog) {
             return;
           }
 
-          keepPasswordEntryVisible(dialog);
+          try {
+            const klass = dialog.constructor;
+            if (klass && !klass._gazeOverridden) {
+              klass._gazeOverridden = true;
+              extension._patchedDialogClass = klass;
 
-          const klass = dialog.constructor;
+              const origShowInfo = klass.prototype._onSessionShowInfo;
+              const origShowError = klass.prototype._onSessionShowError;
+              const origRequest = klass.prototype._onSessionRequest;
+              const origEntryActivate = klass.prototype._onEntryActivate;
+              const origAuthButton = klass.prototype._onAuthenticateButtonPressed;
+              const origDestroySession = klass.prototype._destroySession;
+              const origInitiateSession = klass.prototype._initiateSession;
 
-          if (dialog._session) {
-            dialog._session.connect("show-info", (session, text) => {
-              if (isConfirmationMessage(text))
-                enterConfirmMode(dialog);
-            });
-          }
+              extension._originalDialogShowInfo = origShowInfo;
+              extension._originalDialogShowError = origShowError;
+              extension._originalDialogRequest = origRequest;
+              extension._originalDialogEntryActivate = origEntryActivate;
+              extension._originalDialogAuthButton = origAuthButton;
+              extension._originalDialogDestroySession = origDestroySession;
+              extension._originalDialogInitiateSession = origInitiateSession;
 
-          const originalOnEntryActivate = dialog._onEntryActivate;
-          dialog._onEntryActivate = function () {
-            if (this._confirmMode) {
-              respondToConfirm(this);
-            } else {
-              originalOnEntryActivate.call(this);
-            }
-          };
+              const protoHandlers = createDialogHandlers(
+                origShowInfo,
+                origShowError,
+                origRequest,
+                origEntryActivate,
+                origAuthButton,
+                origDestroySession,
+                origInitiateSession,
+              );
 
-          if (klass && !klass._gazeOverridden) {
-            klass._gazeOverridden = true;
-            extension._patchedDialogClass = klass;
-
-            const originalShowInfo = klass.prototype._onSessionShowInfo;
-            extension._originalDialogShowInfo = originalShowInfo;
-            klass.prototype._onSessionShowInfo = function (session, text) {
-              if (isConfirmationMessage(text)) {
-                enterConfirmMode(this);
-              } else {
-                originalShowInfo.call(this, session, text);
+              klass.prototype._onSessionShowInfo =
+                protoHandlers.handleDialogShowInfo;
+              klass.prototype._onSessionShowError =
+                protoHandlers.handleDialogShowError;
+              klass.prototype._onSessionRequest =
+                protoHandlers.handleDialogRequest;
+              klass.prototype._onEntryActivate =
+                protoHandlers.handleDialogEntryActivate;
+              if (origAuthButton) {
+                klass.prototype._onAuthenticateButtonPressed =
+                  protoHandlers.handleDialogAuthButton;
               }
-            };
-
-            const originalProtoOnEntryActivate =
-              klass.prototype._onEntryActivate;
-            extension._originalDialogEntryActivate = originalProtoOnEntryActivate;
-            klass.prototype._onEntryActivate = function () {
-              if (this._confirmMode) {
-                respondToConfirm(this);
-              } else {
-                originalProtoOnEntryActivate.call(this);
+              if (origDestroySession) {
+                klass.prototype._destroySession =
+                  protoHandlers.handleDialogDestroySession;
               }
-            };
-
-            const originalDestroySession = klass.prototype._destroySession;
-            if (typeof originalDestroySession === "function") {
-              extension._originalDialogDestroySession = originalDestroySession;
-              klass.prototype._destroySession = function (delay) {
-                originalDestroySession.call(this, delay);
-                if (!delay) return;
-                cancelDelayedReset(this);
-                if (this._passwordEntry) {
-                  this._passwordEntry.show();
-                  this._passwordEntry.reactive = true;
-                }
-              };
+              if (origInitiateSession) {
+                klass.prototype._initiateSession =
+                  protoHandlers.handleDialogInitiateSession;
+              }
             }
+
+            const instanceHandlers = createDialogHandlers(
+              extension._originalDialogShowInfo,
+              extension._originalDialogShowError,
+              extension._originalDialogRequest,
+              extension._originalDialogEntryActivate,
+              extension._originalDialogAuthButton,
+              extension._originalDialogDestroySession,
+              extension._originalDialogInitiateSession,
+            );
+            dialog._onSessionShowInfo = instanceHandlers.handleDialogShowInfo;
+            dialog._onSessionShowError = instanceHandlers.handleDialogShowError;
+            dialog._onSessionRequest = instanceHandlers.handleDialogRequest;
+            dialog._onEntryActivate = instanceHandlers.handleDialogEntryActivate;
+            if (extension._originalDialogAuthButton) {
+              dialog._onAuthenticateButtonPressed =
+                instanceHandlers.handleDialogAuthButton;
+            }
+
+            if (dialog._session) {
+              dialog._session.disconnectObject(dialog);
+              dialog._session.connectObject(
+                "completed",
+                dialog._onSessionCompleted.bind(dialog),
+                "request",
+                dialog._onSessionRequest.bind(dialog),
+                "show-error",
+                dialog._onSessionShowError.bind(dialog),
+                "show-info",
+                dialog._onSessionShowInfo.bind(dialog),
+                dialog,
+              );
+            }
+
+            ensureFaceHintLabel(dialog);
+            keepPasswordEntryVisible(dialog);
+          } catch (e) {
+            logError(e, "[gaze] Failed to setup Polkit dialog hooks");
           }
         };
       },
@@ -876,14 +1258,58 @@ export default class GazeFaceAuthExtension extends Extension {
           "_handleOnInfo",
           (original) => {
             return function (serviceName, info) {
-              if (serviceName === FACE_SERVICE_NAME) {
-                const text = info?.trim();
-                if (!text || !FACE_STATUS_UPDATES.has(text)) return;
+              const text = info?.trim();
+              if (text) {
+                if (isConfirmationMessage(text)) {
+                  emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
+                  emitAskQuestion(
+                    this,
+                    serviceName,
+                    GAZE_REQUIRE_CONFIRMATION,
+                    true,
+                  );
+                  return;
+                }
 
-                emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
-                emitQueueMessage(this, serviceName, text, MESSAGE_TYPE.HINT);
-                return;
+                if (isCameraHintMessage(text)) {
+                  emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
+                  emitQueueMessage(
+                    this,
+                    serviceName,
+                    safeGettext(FACE_HINT_TEXT) || FACE_HINT_TEXT,
+                    MESSAGE_TYPE.HINT,
+                  );
+                  return;
+                }
+
+                if (isFaceVerifiedMessage(text)) {
+                  emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
+                  return;
+                }
+
+                const internalErr = getInternalErrorMessage(text);
+                if (internalErr || text.startsWith("GAZE_MSG_")) {
+                  const msg =
+                    internalErr ||
+                    safeGettext("Face authentication failed") ||
+                    "Face authentication failed";
+                  emitQueuePriorityMessage(
+                    this,
+                    serviceName,
+                    msg,
+                    MESSAGE_TYPE.ERROR,
+                  );
+                  return;
+                }
+
+                if (FACE_STATUS_UPDATES.has(text)) {
+                  emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
+                  emitQueueMessage(this, serviceName, text, MESSAGE_TYPE.HINT);
+                  return;
+                }
               }
+
+              if (serviceName === FACE_SERVICE_NAME) return;
 
               return original.call(this, serviceName, info);
             };
@@ -895,14 +1321,42 @@ export default class GazeFaceAuthExtension extends Extension {
           "_handleOnProblem",
           (original) => {
             return function (serviceName, problem) {
-              if (serviceName === FACE_SERVICE_NAME) {
-                emitQueuePriorityMessage(
-                  this,
-                  serviceName,
-                  GENERIC_ERROR_MAP.get(problem) ?? problem,
-                  MESSAGE_TYPE.ERROR,
-                );
-                return;
+              const text = problem?.trim();
+              if (text) {
+                const internalErr = getInternalErrorMessage(text);
+                if (internalErr) {
+                  emitQueuePriorityMessage(
+                    this,
+                    serviceName,
+                    internalErr,
+                    MESSAGE_TYPE.ERROR,
+                  );
+                  return;
+                }
+                if (text.startsWith("GAZE_MSG_")) {
+                  emitQueuePriorityMessage(
+                    this,
+                    serviceName,
+                    safeGettext("Face authentication failed") ||
+                      "Face authentication failed",
+                    MESSAGE_TYPE.ERROR,
+                  );
+                  return;
+                }
+                const genericErr = getGenericErrorMessage(text);
+                if (
+                  genericErr &&
+                  (serviceName === FACE_SERVICE_NAME ||
+                    this.serviceIsFace?.(serviceName))
+                ) {
+                  emitQueuePriorityMessage(
+                    this,
+                    serviceName,
+                    genericErr,
+                    MESSAGE_TYPE.ERROR,
+                  );
+                  return;
+                }
               }
 
               return original.call(this, serviceName, problem);
@@ -917,11 +1371,37 @@ export default class GazeFaceAuthExtension extends Extension {
             return function (serviceName, secretQuestion) {
               if (isConfirmationMessage(secretQuestion)) {
                 emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
-                emitAskQuestion(this, serviceName, CONFIRMATION_QUESTION, true);
+                emitAskQuestion(
+                  this,
+                  serviceName,
+                  GAZE_REQUIRE_CONFIRMATION,
+                  true,
+                );
                 return;
               }
 
               return original.call(this, serviceName, secretQuestion);
+            };
+          },
+        );
+
+        injectionManager.overrideMethod(
+          authProto,
+          "_handleOnInfoQuery",
+          (original) => {
+            return function (serviceName, query) {
+              if (isConfirmationMessage(query)) {
+                emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
+                emitAskQuestion(
+                  this,
+                  serviceName,
+                  GAZE_REQUIRE_CONFIRMATION,
+                  false,
+                );
+                return;
+              }
+
+              return original.call(this, serviceName, query);
             };
           },
         );
@@ -1201,9 +1681,52 @@ export default class GazeFaceAuthExtension extends Extension {
 
         this._injectionManager.overrideMethod(proto, "_onInfo", (original) => {
           return function (client, serviceName, info) {
-            if (this.serviceIsFace(serviceName)) {
-              const text = info?.trim();
-              if (!text) return;
+            const text = info?.trim();
+            if (text) {
+              if (isConfirmationMessage(text)) {
+                if (typeof this._clearMessageQueue === "function") {
+                  this._clearMessageQueue();
+                }
+                this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
+                this._faceConfirmPending = true;
+                this._faceConfirmService = serviceName;
+                this.emit(
+                  "ask-question",
+                  serviceName,
+                  GAZE_REQUIRE_CONFIRMATION,
+                  true,
+                );
+                return;
+              }
+
+              if (isCameraHintMessage(text)) {
+                this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
+                this._queueMessage(
+                  serviceName,
+                  safeGettext(FACE_HINT_TEXT) || FACE_HINT_TEXT,
+                  MESSAGE_TYPE.HINT,
+                );
+                return;
+              }
+
+              if (isFaceVerifiedMessage(text)) {
+                this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
+                return;
+              }
+
+              const internalErr = getInternalErrorMessage(text);
+              if (internalErr || text.startsWith("GAZE_MSG_")) {
+                const msg =
+                  internalErr ||
+                  safeGettext("Face authentication failed") ||
+                  "Face authentication failed";
+                this._queuePriorityMessage(
+                  serviceName,
+                  msg,
+                  MESSAGE_TYPE.ERROR,
+                );
+                return;
+              }
 
               if (FACE_STATUS_UPDATES.has(text)) {
                 this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
@@ -1233,11 +1756,32 @@ export default class GazeFaceAuthExtension extends Extension {
                 // Enter must send confirmation, not the typed answer.
                 this._faceConfirmPending = true;
                 this._faceConfirmService = serviceName;
-                this.emit("ask-question", serviceName, CONFIRMATION_QUESTION, true);
+                this.emit("ask-question", serviceName, GAZE_REQUIRE_CONFIRMATION, true);
                 return;
               }
 
               original.call(this, client, serviceName, secretQuestion);
+            };
+          },
+        );
+
+        this._injectionManager.overrideMethod(
+          proto,
+          "_onInfoQuery",
+          (original) => {
+            return function (client, serviceName, query) {
+              if (isConfirmationMessage(query)) {
+                if (typeof this._clearMessageQueue === "function") {
+                  this._clearMessageQueue();
+                }
+                this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
+                this._faceConfirmPending = true;
+                this._faceConfirmService = serviceName;
+                this.emit("ask-question", serviceName, GAZE_REQUIRE_CONFIRMATION, false);
+                return;
+              }
+
+              original.call(this, client, serviceName, query);
             };
           },
         );
@@ -1247,7 +1791,7 @@ export default class GazeFaceAuthExtension extends Extension {
             if (this._faceConfirmPending && serviceName === this._faceConfirmService) {
               this._faceConfirmPending = false;
               this._faceConfirmService = null;
-              return original.call(this, serviceName, "");
+              return original.call(this, serviceName, GAZE_CONFIRMED);
             }
             return original.call(this, serviceName, answer);
           };
@@ -1255,14 +1799,35 @@ export default class GazeFaceAuthExtension extends Extension {
 
         this._injectionManager.overrideMethod(proto, "_onProblem", (original) => {
           return function (client, serviceName, problem) {
-            if (this.serviceIsFace(serviceName)) {
-              const mapped = GENERIC_ERROR_MAP.get(problem) ?? problem;
-              this._queuePriorityMessage(
-                serviceName,
-                mapped,
-                MESSAGE_TYPE.ERROR,
-              );
-              return;
+            const text = problem?.trim();
+            if (text) {
+              const internalErr = getInternalErrorMessage(text);
+              if (internalErr) {
+                this._queuePriorityMessage(
+                  serviceName,
+                  internalErr,
+                  MESSAGE_TYPE.ERROR,
+                );
+                return;
+              }
+              if (text.startsWith("GAZE_MSG_")) {
+                this._queuePriorityMessage(
+                  serviceName,
+                  safeGettext("Face authentication failed") ||
+                    "Face authentication failed",
+                  MESSAGE_TYPE.ERROR,
+                );
+                return;
+              }
+              const genericErr = getGenericErrorMessage(text);
+              if (genericErr && this.serviceIsFace(serviceName)) {
+                this._queuePriorityMessage(
+                  serviceName,
+                  genericErr,
+                  MESSAGE_TYPE.ERROR,
+                );
+                return;
+              }
             }
 
             original.call(this, client, serviceName, problem);
@@ -1360,6 +1925,41 @@ export default class GazeFaceAuthExtension extends Extension {
 
 
     const authPromptProto = AuthPrompt.AuthPrompt.prototype;
+
+    this._injectionManager.overrideMethod(
+      authPromptProto,
+      "setMessage",
+      (original) => {
+        return function (message, type) {
+          if (message) {
+            const trimmed = typeof message === "string" ? message.trim() : "";
+            if (isCameraHintMessage(trimmed)) {
+              return original.call(
+                this,
+                safeGettext(FACE_HINT_TEXT) || FACE_HINT_TEXT,
+                MESSAGE_TYPE.HINT,
+              );
+            }
+            if (isFaceVerifiedMessage(trimmed)) {
+              return original.call(this, null, type);
+            }
+            const internalErr = getInternalErrorMessage(trimmed);
+            if (internalErr) {
+              return original.call(this, internalErr, MESSAGE_TYPE.ERROR);
+            }
+            if (trimmed.startsWith("GAZE_MSG_")) {
+              return original.call(
+                this,
+                safeGettext("Face authentication failed") ||
+                  "Face authentication failed",
+                MESSAGE_TYPE.ERROR,
+              );
+            }
+          }
+          return original.call(this, message, type);
+        };
+      },
+    );
 
     this._injectionManager.overrideMethod(
       authPromptProto,
@@ -1546,8 +2146,15 @@ export default class GazeFaceAuthExtension extends Extension {
   }
 
   disable() {
+    activeExtensionInstance = null;
     this._gazeEnableToken = null;
     if (this._dbusProxy) {
+      try {
+        if (typeof this._dbusProxy.RemovePamInternalRemote === "function") {
+          this._dbusProxy.RemovePamInternalRemote("polkit-1");
+          this._dbusProxy.RemovePamInternalRemote(FACE_SERVICE_NAME);
+        }
+      } catch (e) {}
       try {
         this._dbusProxy.RegisterExtensionRemote(false);
       } catch (e) {
@@ -1583,15 +2190,28 @@ export default class GazeFaceAuthExtension extends Extension {
       const klass = this._patchedDialogClass;
       if (this._originalDialogShowInfo)
         klass.prototype._onSessionShowInfo = this._originalDialogShowInfo;
+      if (this._originalDialogShowError)
+        klass.prototype._onSessionShowError = this._originalDialogShowError;
+      if (this._originalDialogRequest)
+        klass.prototype._onSessionRequest = this._originalDialogRequest;
       if (this._originalDialogEntryActivate)
         klass.prototype._onEntryActivate = this._originalDialogEntryActivate;
+      if (this._originalDialogAuthButton)
+        klass.prototype._onAuthenticateButtonPressed =
+          this._originalDialogAuthButton;
       if (this._originalDialogDestroySession)
         klass.prototype._destroySession = this._originalDialogDestroySession;
+      if (this._originalDialogInitiateSession)
+        klass.prototype._initiateSession = this._originalDialogInitiateSession;
       delete klass._gazeOverridden;
       this._patchedDialogClass = null;
       this._originalDialogShowInfo = null;
+      this._originalDialogShowError = null;
+      this._originalDialogRequest = null;
       this._originalDialogEntryActivate = null;
+      this._originalDialogAuthButton = null;
       this._originalDialogDestroySession = null;
+      this._originalDialogInitiateSession = null;
     }
 
     recreatePolkitAgent();

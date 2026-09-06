@@ -65,7 +65,7 @@ pub unsafe fn parse_raw_pam_options(argc: c_int, argv: *const *const c_char) -> 
 
 // Polkit dialogs ignore echo-off confirmation prompts, so keep a password request pending
 // for the agent to answer and flip the dialog into confirm mode via the info-message token.
-unsafe fn confirm_via_polkit_dialog(pamh: PamHandle) -> c_int {
+unsafe fn confirm_via_polkit_dialog(pamh: PamHandle, is_internal: bool) -> c_int {
     let state = new_auth_state();
     let prompt_thread = spawn_prompt_thread(pamh, &state, || {});
     wait_for_prompt_started(&state);
@@ -73,7 +73,7 @@ unsafe fn confirm_via_polkit_dialog(pamh: PamHandle) -> c_int {
     // or the dialog re-shows the password entry.
     std::thread::sleep(Duration::from_millis(150));
 
-    unsafe { confirm_graphical_polkit(pamh, &state, prompt_thread) }
+    unsafe { confirm_graphical_polkit(pamh, &state, prompt_thread, is_internal) }
 }
 
 const RETRY_BACKOFF: Duration = Duration::from_millis(500);
@@ -174,48 +174,75 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, _options: Pa
             EnrollmentDisposition::Continue => {}
         }
 
-        let prompt = if is_polkit {
+        let pam_internal = gaze_core::dbus::get_pam_internal(&proxy).await;
+        let is_internal = service
+            .as_deref()
+            .is_some_and(|s| is_service_internal(s, &pam_internal));
+
+        let prompt = if is_internal {
+            if is_polkit {
+                GAZE_MSG_LOOK_OR_PASSWORD
+            } else {
+                GAZE_MSG_LOOK_CAMERA
+            }
+        } else if is_polkit {
             LOOK_OR_PASSWORD_PROMPT
         } else {
             LOOK_PROMPT
         };
         // KScreenLocker reads an info message as "this unlock had a prompt".
-        let prompt_line = unsafe { announce_prompt(pamh, silent, prompt) };
+        let prompt_line = unsafe { announce_prompt(pamh, silent, prompt, is_internal) };
 
         let budget = camera_auth_timeout(&config.auth, service.as_deref());
 
         let tell = |text: &str| {
-            unsafe { report_outcome(pamh, service.as_deref(), silent, text) };
+            unsafe { report_outcome(pamh, service.as_deref(), silent, text, is_internal) };
         };
 
         let verdict = verify_within(&proxy, &username, service.as_deref(), budget).await;
         match verdict {
-            Verdict::Reached(AuthOutcome::Match, _) => Ok((config.auth, proxy, prompt_line)),
+            Verdict::Reached(AuthOutcome::Match, _) => Ok((config.auth, is_internal, prompt_line)),
             Verdict::Reached(AuthOutcome::NoMatch, _) => {
-                tell(FACE_NOT_RECOGNIZED);
+                tell(if is_internal {
+                    GAZE_MSG_FACE_NOT_RECOGNIZED
+                } else {
+                    FACE_NOT_RECOGNIZED
+                });
                 Err(PAM_AUTH_ERR)
             }
             Verdict::Reached(AuthOutcome::Unavailable, status) => {
-                tell(give_up_message(status));
+                tell(if is_internal {
+                    internal_give_up_message(status)
+                } else {
+                    give_up_message(status)
+                });
                 Err(PAM_AUTHINFO_UNAVAIL)
             }
             Verdict::Exhausted => {
-                tell(FACE_TIMED_OUT);
+                tell(if is_internal {
+                    GAZE_MSG_FACE_TIMED_OUT
+                } else {
+                    FACE_TIMED_OUT
+                });
                 Err(PAM_AUTHINFO_UNAVAIL)
             }
             Verdict::Failed => {
-                tell(FACE_UNAVAILABLE);
+                tell(if is_internal {
+                    GAZE_MSG_FACE_UNAVAILABLE
+                } else {
+                    FACE_UNAVAILABLE
+                });
                 Err(PAM_AUTHINFO_UNAVAIL)
             }
         }
     });
-    let (loaded_auth, _proxy, prompt_line) = match matched {
+    let (loaded_auth, is_internal, prompt_line) = match matched {
         Ok(session) => session,
         Err(code) => return code,
     };
 
     if !confirmation_required(Some(&loaded_auth), service.as_deref()) {
-        unsafe { report_face_verified(pamh, silent, prompt_line) };
+        unsafe { report_face_verified(pamh, silent, prompt_line, is_internal) };
         return PAM_SUCCESS;
     }
 
@@ -225,14 +252,15 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, _options: Pa
     }
 
     if is_polkit {
-        return unsafe { confirm_via_polkit_dialog(pamh) };
+        return unsafe { confirm_via_polkit_dialog(pamh, is_internal) };
     }
 
-    if unsafe { confirm_authentication(pamh, prompt_line) } {
-        PAM_SUCCESS
+    let confirmed = if is_internal {
+        unsafe { confirm_authentication_internal(pamh) }
     } else {
-        PAM_AUTH_ERR
-    }
+        unsafe { confirm_authentication(pamh, prompt_line) }
+    };
+    if confirmed { PAM_SUCCESS } else { PAM_AUTH_ERR }
 }
 
 const PROMPT_RETIRE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -429,11 +457,26 @@ unsafe fn do_authenticate_simultaneous(
         EnrollmentDisposition::Continue => {}
     }
 
-    let loaded_auth = rt.block_on(setup_auth_env()).ok().map(|(cfg, _)| cfg.auth);
+    let (loaded_auth, pam_internal) = match rt.block_on(setup_auth_env()) {
+        Ok((cfg, proxy)) => {
+            let internal = rt.block_on(gaze_core::dbus::get_pam_internal(&proxy));
+            (Some(cfg.auth), internal)
+        }
+        Err(_) => (None, Vec::new()),
+    };
+    let is_internal = service
+        .as_deref()
+        .is_some_and(|s| is_service_internal(s, &pam_internal));
+
     let require_confirmation = confirmation_required(loaded_auth.as_ref(), service.as_deref());
     let auth = loaded_auth.unwrap_or_default();
 
-    let prompt_line = unsafe { announce_prompt(pamh, silent, LOOK_OR_PASSWORD_PROMPT) };
+    let opening_prompt = if is_internal {
+        GAZE_MSG_LOOK_OR_PASSWORD
+    } else {
+        LOOK_OR_PASSWORD_PROMPT
+    };
+    let prompt_line = unsafe { announce_prompt(pamh, silent, opening_prompt, is_internal) };
 
     let is_polkit = matches!(service, Some(ref s) if s == "polkit-1");
 
@@ -450,13 +493,14 @@ unsafe fn do_authenticate_simultaneous(
         }
         if require_confirmation {
             // Its own conversation, on this thread, so there is nothing left to unblock.
-            return if unsafe { confirm_authentication(pamh, prompt_line) } {
-                PAM_SUCCESS
+            let confirmed = if is_internal {
+                unsafe { confirm_authentication_internal(pamh) }
             } else {
-                PAM_AUTH_ERR
+                unsafe { confirm_authentication(pamh, prompt_line) }
             };
+            return if confirmed { PAM_SUCCESS } else { PAM_AUTH_ERR };
         }
-        unsafe { report_face_verified(pamh, silent, prompt_line) };
+        unsafe { report_face_verified(pamh, silent, prompt_line, is_internal) };
         return PAM_SUCCESS;
     }
 
@@ -502,19 +546,20 @@ unsafe fn do_authenticate_simultaneous(
 
             if !require_confirmation {
                 retire_prompt(&state, prompt_thread);
-                unsafe { report_face_verified(pamh, silent, PromptLine::Printed) };
+                unsafe { report_face_verified(pamh, silent, PromptLine::Printed, is_internal) };
                 return PAM_SUCCESS;
             }
 
             if !is_polkit {
                 retire_prompt(&state, prompt_thread);
-                if unsafe { confirm_authentication(pamh, PromptLine::Printed) } {
-                    PAM_SUCCESS
+                let confirmed = if is_internal {
+                    unsafe { confirm_authentication_internal(pamh) }
                 } else {
-                    PAM_AUTH_ERR
-                }
+                    unsafe { confirm_authentication(pamh, PromptLine::Printed) }
+                };
+                if confirmed { PAM_SUCCESS } else { PAM_AUTH_ERR }
             } else {
-                unsafe { confirm_graphical_polkit(pamh, &state, prompt_thread) }
+                unsafe { confirm_graphical_polkit(pamh, &state, prompt_thread, is_internal) }
             }
         }
     }

@@ -73,6 +73,41 @@ pub const FACE_TOO_DARK: &str = "Too dark for face authentication. Enter your pa
 pub const FACE_TIMED_OUT: &str = "Face authentication timed out. Enter your password.";
 pub const FACE_UNAVAILABLE: &str = "Face authentication unavailable. Enter your password.";
 
+pub use gaze_core::dbus::{
+    GAZE_CANCEL, GAZE_CONFIRMED, GAZE_MSG_FACE_NOT_DETECTED, GAZE_MSG_FACE_NOT_RECOGNIZED,
+    GAZE_MSG_FACE_TIMED_OUT, GAZE_MSG_FACE_TOO_DARK, GAZE_MSG_FACE_UNAVAILABLE,
+    GAZE_MSG_FACE_VERIFIED, GAZE_MSG_LOOK_CAMERA, GAZE_MSG_LOOK_OR_PASSWORD,
+    GAZE_REQUIRE_CONFIRMATION,
+};
+
+pub fn is_service_internal(service: &str, internal_list: &[String]) -> bool {
+    let service_name = std::path::Path::new(service.trim())
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(service.trim());
+
+    internal_list.iter().any(|item| {
+        let item_name = std::path::Path::new(item.trim())
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(item.trim());
+        item_name == service_name
+    })
+}
+
+pub fn internal_give_up_message(status: Option<gaze_core::dbus::CaptureStatus>) -> &'static str {
+    match status {
+        Some(gaze_core::dbus::CaptureStatus::TooDark) => GAZE_MSG_FACE_TOO_DARK,
+        Some(gaze_core::dbus::CaptureStatus::NoFace) | None => GAZE_MSG_FACE_NOT_DETECTED,
+        Some(gaze_core::dbus::CaptureStatus::Unused) => GAZE_MSG_FACE_UNAVAILABLE,
+        _ => GAZE_MSG_FACE_NOT_RECOGNIZED,
+    }
+}
+
+pub fn internal_confirmation_accepted(response: Option<&str>) -> bool {
+    response.map(str::trim) == Some(GAZE_CONFIRMED)
+}
+
 pub type PamHandle = *mut c_void;
 
 #[macro_export]
@@ -202,7 +237,18 @@ fn write_tty_line(message: &str) -> Option<()> {
     tty.flush().ok()
 }
 
-pub unsafe fn announce_prompt(pamh: PamHandle, silent: bool, prompt: &str) -> PromptLine {
+pub unsafe fn announce_prompt(
+    pamh: PamHandle,
+    silent: bool,
+    prompt: &str,
+    is_internal: bool,
+) -> PromptLine {
+    if is_internal {
+        if !silent {
+            unsafe { say(pamh, prompt) };
+        }
+        return PromptLine::Absent;
+    }
     if !silent {
         unsafe { say(pamh, prompt) };
         return PromptLine::Printed;
@@ -222,16 +268,38 @@ fn report_face_verified_to_tty(prompt: PromptLine) -> Option<()> {
 
 /// Replace the camera prompt with a non-interactive success message when a terminal is available.
 /// Graphical PAM clients receive the same message through their conversation function instead.
-pub unsafe fn report_face_verified(pamh: PamHandle, silent: bool, prompt: PromptLine) {
-    if report_face_verified_to_tty(prompt).is_some() {
+pub unsafe fn report_face_verified(
+    pamh: PamHandle,
+    silent: bool,
+    prompt: PromptLine,
+    is_internal: bool,
+) {
+    if !is_internal && report_face_verified_to_tty(prompt).is_some() {
         return;
     }
     if !silent {
-        unsafe { say(pamh, FACE_VERIFIED) };
+        let msg = if is_internal {
+            GAZE_MSG_FACE_VERIFIED
+        } else {
+            FACE_VERIFIED
+        };
+        unsafe { say(pamh, msg) };
     }
 }
 
-pub unsafe fn report_outcome(pamh: PamHandle, service: Option<&str>, silent: bool, text: &str) {
+pub unsafe fn report_outcome(
+    pamh: PamHandle,
+    service: Option<&str>,
+    silent: bool,
+    text: &str,
+    is_internal: bool,
+) {
+    if is_internal {
+        if !silent {
+            unsafe { report(pamh, service, text) };
+        }
+        return;
+    }
     if silent {
         let _ = write_tty_line(text);
         return;
@@ -296,6 +364,12 @@ pub unsafe fn confirm_authentication(pamh: PamHandle, prompt: PromptLine) -> boo
     unsafe { converse(pamh, PAM_PROMPT_ECHO_ON, CONFIRMATION_PROMPT) }
         .map(|resp| resp.is_empty())
         .unwrap_or(false)
+}
+
+pub unsafe fn confirm_authentication_internal(pamh: PamHandle) -> bool {
+    let resp = unsafe { converse(pamh, PAM_PROMPT_ECHO_ON, GAZE_REQUIRE_CONFIRMATION) }
+        .or_else(|| unsafe { converse(pamh, PAM_PROMPT_ECHO_OFF, GAZE_REQUIRE_CONFIRMATION) });
+    internal_confirmation_accepted(resp.as_deref())
 }
 
 pub fn confirmation_accepted(response: Option<&str>) -> bool {
@@ -422,8 +496,14 @@ pub unsafe fn confirm_graphical_polkit(
     pamh: PamHandle,
     state: &SharedAuthState,
     prompt_thread: thread::JoinHandle<()>,
+    is_internal: bool,
 ) -> c_int {
-    unsafe { say(pamh, "Face Verified. Press Enter to confirm.") };
+    let prompt = if is_internal {
+        GAZE_REQUIRE_CONFIRMATION
+    } else {
+        "Face Verified. Press Enter to confirm."
+    };
+    unsafe { say(pamh, prompt) };
 
     let response = wait_for_prompt_response(state);
     let _ = prompt_thread.join();
@@ -431,7 +511,13 @@ pub unsafe fn confirm_graphical_polkit(
     let Some(resp) = response else {
         return PAM_AUTH_ERR;
     };
-    if confirmation_accepted(Some(&resp)) {
+    if is_internal {
+        if internal_confirmation_accepted(Some(&resp)) {
+            PAM_SUCCESS
+        } else {
+            unsafe { stash_password_and_fallback(pamh, &resp) }
+        }
+    } else if confirmation_accepted(Some(&resp)) {
         PAM_SUCCESS
     } else {
         unsafe { stash_password_and_fallback(pamh, &resp) }
@@ -1259,5 +1345,81 @@ mod tests {
                 "{status:?} must fall through to the password, not count as a failure"
             );
         }
+    }
+
+    #[test]
+    fn pam_internal_service_matching_checks_normalized_names() {
+        let internal_services = vec!["polkit-1".to_string(), "gdm-face".to_string()];
+
+        assert!(is_service_internal("polkit-1", &internal_services));
+        assert!(is_service_internal("gdm-face", &internal_services));
+        assert!(is_service_internal(
+            "/etc/pam.d/polkit-1",
+            &internal_services
+        ));
+        assert!(is_service_internal(
+            "/etc/pam.d/gdm-face",
+            &internal_services
+        ));
+        assert!(is_service_internal("  polkit-1  ", &internal_services));
+
+        assert!(!is_service_internal("sudo", &internal_services));
+        assert!(!is_service_internal("hyprlock", &internal_services));
+        assert!(!is_service_internal("gdm-password", &internal_services));
+        assert!(!is_service_internal("", &internal_services));
+
+        let empty: Vec<String> = Vec::new();
+        assert!(!is_service_internal("polkit-1", &empty));
+    }
+
+    #[test]
+    fn pam_internal_give_up_messages_map_correctly() {
+        use gaze_core::dbus::{
+            CaptureStatus, GAZE_MSG_FACE_NOT_DETECTED, GAZE_MSG_FACE_NOT_RECOGNIZED,
+            GAZE_MSG_FACE_TOO_DARK, GAZE_MSG_FACE_UNAVAILABLE,
+        };
+
+        assert_eq!(
+            internal_give_up_message(Some(CaptureStatus::Usable)),
+            GAZE_MSG_FACE_NOT_RECOGNIZED
+        );
+        assert_eq!(
+            internal_give_up_message(Some(CaptureStatus::NoFace)),
+            GAZE_MSG_FACE_NOT_DETECTED
+        );
+        assert_eq!(
+            internal_give_up_message(Some(CaptureStatus::TooDark)),
+            GAZE_MSG_FACE_TOO_DARK
+        );
+        assert_eq!(
+            internal_give_up_message(Some(CaptureStatus::Unused)),
+            GAZE_MSG_FACE_UNAVAILABLE
+        );
+        assert_eq!(
+            internal_give_up_message(Some(CaptureStatus::Clipped)),
+            GAZE_MSG_FACE_NOT_RECOGNIZED
+        );
+        assert_eq!(internal_give_up_message(None), GAZE_MSG_FACE_NOT_DETECTED);
+    }
+
+    #[test]
+    fn pam_internal_confirmation_strictly_requires_gaze_confirmed() {
+        use gaze_core::dbus::GAZE_CONFIRMED;
+
+        // In internal mode, only GAZE_CONFIRMED is accepted
+        assert!(internal_confirmation_accepted(Some(GAZE_CONFIRMED)));
+        assert!(internal_confirmation_accepted(Some("  GAZE_CONFIRMED\n")));
+        assert!(internal_confirmation_accepted(Some("GAZE_CONFIRMED\r\n")));
+
+        // Empty string / ENTER (which human users press in standard mode) must be rejected in internal mode!
+        assert!(!internal_confirmation_accepted(Some("")));
+        assert!(!internal_confirmation_accepted(Some("\n")));
+        assert!(!internal_confirmation_accepted(Some("   ")));
+        assert!(!internal_confirmation_accepted(None));
+
+        // Other responses rejected
+        assert!(!internal_confirmation_accepted(Some("yes")));
+        assert!(!internal_confirmation_accepted(Some("GAZE_CANCEL")));
+        assert!(!internal_confirmation_accepted(Some("gaze_confirmed")));
     }
 }
