@@ -22,7 +22,7 @@ use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
 use gaze_core::camera::{Camera, CameraKind, resolve_configured_sources};
 use gaze_core::config::Config;
-use gaze_core::dbus::{CaptureStatus, EnrollPrompt, VerifyResult};
+use gaze_core::dbus::{CaptureStatus, DbusConfig, EnrollPrompt, VerifyResult};
 use gaze_core::detect::FaceDetector;
 use gaze_core::face::{
     EnrollmentPoseStability, FaceChecker, IrDarkFrameGate, IrFrameKind, RgbFrameKind,
@@ -3379,22 +3379,28 @@ impl AuthDaemon {
     }
 
     #[zbus(property(emits_changed_signal = "invalidates"))]
-    async fn config(&self, #[zbus(header)] header: Option<Header<'_>>) -> fdo::Result<Config> {
+    async fn config(&self, #[zbus(header)] header: Option<Header<'_>>) -> fdo::Result<DbusConfig> {
         let header =
             header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
         Self::ensure_config_read_access(&header).await?;
-        Ok(self.current_config().await)
+        Ok(self.current_config().await.into())
     }
 
     #[zbus(property)]
     async fn set_config(
         &self,
         #[zbus(header)] header: Option<Header<'_>>,
-        new_config: Config,
+        new_config: DbusConfig,
     ) -> fdo::Result<()> {
         let header =
             header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
+
+        let mut new_config: Config = new_config.into();
+        // This local-only setting is intentionally absent from the stable DBus
+        // Config layout. The CLI writes it after applying the regular config.
+        new_config.storage.unlock_gnome_keyring =
+            self.current_config().await.storage.unlock_gnome_keyring;
 
         new_config
             .storage

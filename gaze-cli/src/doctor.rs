@@ -1621,7 +1621,7 @@ async fn read_daemon_config(proxy: &GazeProxy<'_>, ready_wait: Duration) -> zbus
     let deadline = Instant::now() + ready_wait;
     loop {
         match proxy.config().await {
-            Ok(config) => return Ok(config),
+            Ok(config) => return Ok(config.into()),
             Err(err) if dbus_is_not_activatable(&err) && Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }

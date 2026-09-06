@@ -455,7 +455,7 @@ impl SecurityLevel {
     }
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, Default, Value, OwnedValue, Type)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct Config {
     #[serde(default)]
     pub inference: InferenceConfig,
@@ -555,7 +555,7 @@ impl InferenceConfig {
 }
 
 // Its own table: a security preset replaces `[security]` wholesale, resetting it.
-#[derive(Deserialize, Serialize, Clone, Debug, Default, Value, OwnedValue, Type)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct StorageConfig {
     #[serde(default = "default_false")]
     pub encrypt_templates: bool,
@@ -1810,7 +1810,7 @@ mod tests {
         use zvariant::Type;
         assert_eq!(AuthConfig::SIGNATURE.to_string(), "(bbbbbtts)");
         assert_eq!(
-            Config::SIGNATURE.to_string(),
+            crate::dbus::DbusConfig::SIGNATURE.to_string(),
             "((ss)(sssdds)(ssbys)(bbbbbtts)(ud)(bdd)(b))"
         );
     }
@@ -2116,8 +2116,10 @@ mod tests {
             String::new(),
         );
 
-        let value = zvariant::OwnedValue::try_from(cfg).unwrap();
-        let back = Config::try_from(value).unwrap();
+        let value = zvariant::OwnedValue::try_from(crate::dbus::DbusConfig::from(cfg)).unwrap();
+        let back = crate::dbus::DbusConfig::try_from(value)
+            .map(Config::from)
+            .unwrap();
 
         assert_eq!(back.auth.start_delay_ms, 4500);
         assert_eq!(back.auth.resume_grace_ms, 1500);

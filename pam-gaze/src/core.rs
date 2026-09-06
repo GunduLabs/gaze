@@ -493,7 +493,13 @@ pub async fn setup_auth_env() -> Result<(Config, GazeProxy<'static>), c_int> {
         .await
         .map_err(|_| PAM_SERVICE_ERR)?;
     let config = match gaze_core::dbus::try_load_config_from_daemon(&proxy).await {
-        Ok(Some(config)) => config,
+        Ok(Some(mut config)) => {
+            config.storage.unlock_gnome_keyring = gaze_core::config::Config::load()
+                .unwrap_or_default()
+                .storage
+                .unlock_gnome_keyring;
+            config
+        }
         Ok(None) => {
             let mut config = gaze_core::config::Config::load_from(gaze_core::config::CONFIG_PATH)
                 .unwrap_or_default();

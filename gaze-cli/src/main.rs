@@ -317,6 +317,11 @@ async fn run_config_wizard(
     proxy: &GazeProxy<'_>,
     mut config: Config,
 ) -> anyhow::Result<()> {
+    // This setting is local-only so the Config DBus signature stays stable.
+    config.storage.unlock_gnome_keyring = Config::load()
+        .unwrap_or_default()
+        .storage
+        .unlock_gnome_keyring;
     let theme = ColorfulTheme::default();
 
     term.write_line(&format!(
@@ -582,6 +587,7 @@ async fn run_config_wizard(
         };
 
     apply_config_to_daemon(proxy, &config).await?;
+    config.save()?;
     term.write_line(&format!(
         "{} Configuration saved. Daemon will restart to apply changes.",
         style("✓").green().bold()
@@ -1817,7 +1823,11 @@ async fn run() -> anyhow::Result<()> {
             handle_clear_user(&proxy, &user.unwrap_or_else(get_current_user)).await?;
         }
         Commands::Config { show } => {
-            let config = load_config_from_daemon(&proxy).await?;
+            let mut config = load_config_from_daemon(&proxy).await?;
+            config.storage.unlock_gnome_keyring = Config::load()
+                .unwrap_or_default()
+                .storage
+                .unlock_gnome_keyring;
             if show {
                 println!(
                     "{} {}",

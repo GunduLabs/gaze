@@ -2,12 +2,66 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #![allow(unreachable_patterns)]
-use crate::config::Config;
+use crate::config::{
+    AuthConfig, CameraConfig, Config, EnrollmentConfig, InferenceConfig, LivenessConfig,
+    SecurityLevel,
+};
 use serde::{Deserialize, Serialize};
 use zbus::proxy;
 use zbus::zvariant::{OwnedValue, Type, Value};
 
 use strum_macros::{AsRefStr, Display, EnumString, VariantNames};
+
+/// Stable Config property layout. New local-only settings must not change this
+/// wire type because an installed daemon and client may be upgraded separately.
+#[derive(Clone, Debug, Value, OwnedValue, Type)]
+pub struct DbusConfig {
+    inference: InferenceConfig,
+    security: SecurityLevel,
+    cameras: CameraConfig,
+    auth: AuthConfig,
+    enrollment: EnrollmentConfig,
+    liveness: LivenessConfig,
+    storage: DbusStorageConfig,
+}
+
+#[derive(Clone, Debug, Value, OwnedValue, Type)]
+struct DbusStorageConfig {
+    encrypt_templates: bool,
+}
+
+impl From<Config> for DbusConfig {
+    fn from(config: Config) -> Self {
+        Self {
+            inference: config.inference,
+            security: config.security,
+            cameras: config.cameras,
+            auth: config.auth,
+            enrollment: config.enrollment,
+            liveness: config.liveness,
+            storage: DbusStorageConfig {
+                encrypt_templates: config.storage.encrypt_templates,
+            },
+        }
+    }
+}
+
+impl From<DbusConfig> for Config {
+    fn from(config: DbusConfig) -> Self {
+        Self {
+            inference: config.inference,
+            security: config.security,
+            cameras: config.cameras,
+            auth: config.auth,
+            enrollment: config.enrollment,
+            liveness: config.liveness,
+            storage: crate::config::StorageConfig {
+                encrypt_templates: config.storage.encrypt_templates,
+                unlock_gnome_keyring: false,
+            },
+        }
+    }
+}
 
 #[derive(
     Clone,
@@ -218,7 +272,7 @@ pub async fn try_load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Resul
 }
 
 pub fn config_from_property(raw: OwnedValue) -> anyhow::Result<Option<Config>> {
-    let expected = <Config as Type>::SIGNATURE;
+    let expected = <DbusConfig as Type>::SIGNATURE;
     let actual = raw.value_signature();
     if actual != expected {
         tracing::warn!(
@@ -229,7 +283,8 @@ pub fn config_from_property(raw: OwnedValue) -> anyhow::Result<Option<Config>> {
         return Ok(None);
     }
 
-    Config::try_from(raw)
+    DbusConfig::try_from(raw)
+        .map(Config::from)
         .map(Some)
         .map_err(|e| anyhow::anyhow!("Failed to decode config property: {}", e))
 }
@@ -245,7 +300,7 @@ pub async fn load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Co
 
 pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> anyhow::Result<()> {
     proxy
-        .set_config(config.clone())
+        .set_config(config.clone().into())
         .await
         .map_err(|e| anyhow::anyhow!("Failed to set config property: {}", e))
 }
@@ -429,10 +484,10 @@ pub trait Gaze {
     async fn delete_faces(&self, username: &str) -> zbus::Result<bool>;
 
     #[zbus(property)]
-    fn config(&self) -> zbus::Result<Config>;
+    fn config(&self) -> zbus::Result<DbusConfig>;
 
     #[zbus(property)]
-    fn set_config(&self, value: Config) -> zbus::Result<()>;
+    fn set_config(&self, value: DbusConfig) -> zbus::Result<()>;
 
     async fn get_gdm_face_auth(&self) -> zbus::Result<bool>;
     #[zbus(allow_interactive_auth)]
@@ -620,13 +675,18 @@ mod tests {
     }
 
     #[derive(Clone, Debug, Value, OwnedValue, Type)]
+    struct OldStorage {
+        encrypt_templates: bool,
+    }
+
+    #[derive(Clone, Debug, Value, OwnedValue, Type)]
     struct OldConfig {
         security: crate::config::SecurityLevel,
         cameras: crate::config::CameraConfig,
         auth: crate::config::AuthConfig,
         enrollment: crate::config::EnrollmentConfig,
         liveness: crate::config::LivenessConfig,
-        storage: crate::config::StorageConfig,
+        storage: OldStorage,
     }
 
     fn old_daemon_property() -> OwnedValue {
@@ -636,14 +696,16 @@ mod tests {
             auth: Default::default(),
             enrollment: Default::default(),
             liveness: Default::default(),
-            storage: Default::default(),
+            storage: OldStorage {
+                encrypt_templates: false,
+            },
         };
         OwnedValue::try_from(Value::from(old)).expect("old config converts to a value")
     }
 
     #[test]
     fn current_layout_decodes() {
-        let raw = OwnedValue::try_from(Value::from(Config::default())).unwrap();
+        let raw = OwnedValue::try_from(Value::from(DbusConfig::from(Config::default()))).unwrap();
         let decoded = config_from_property(raw)
             .expect("no error")
             .expect("current layout is readable");
@@ -665,7 +727,7 @@ mod tests {
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
         let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            Config::try_from(raw).is_ok()
+            DbusConfig::try_from(raw).is_ok()
         }));
         std::panic::set_hook(previous);
         assert!(

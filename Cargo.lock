@@ -2572,6 +2572,7 @@ dependencies = [
  "anyhow",
  "futures",
  "gaze-core",
+ "gaze-security",
  "libc",
  "parking_lot",
  "tokio",
