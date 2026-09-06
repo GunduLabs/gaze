@@ -211,33 +211,43 @@ const GAZE_MSG_FACE_TOO_DARK = "GAZE_MSG_FACE_TOO_DARK";
 const GAZE_MSG_FACE_TIMED_OUT = "GAZE_MSG_FACE_TIMED_OUT";
 const GAZE_MSG_FACE_UNAVAILABLE = "GAZE_MSG_FACE_UNAVAILABLE";
 
+const safeGettext = (str) => {
+  if (!str) return str;
+  try {
+    return _(str) || str;
+  } catch (e) {
+    return str;
+  }
+};
+
 const INTERNAL_ERROR_MAP = new Map([
   [
     GAZE_MSG_FACE_NOT_RECOGNIZED,
-    _("Face not recognized. Please enter your password.") ||
-      "Face not recognized. Please enter your password.",
+    "Face not recognized. Please enter your password.",
   ],
   [
     GAZE_MSG_FACE_NOT_DETECTED,
-    _("Face not detected. Please enter your password.") ||
-      "Face not detected. Please enter your password.",
+    "Face not detected. Please enter your password.",
   ],
   [
     GAZE_MSG_FACE_TOO_DARK,
-    _("Too dark for face authentication. Please enter your password.") ||
-      "Too dark for face authentication. Please enter your password.",
+    "Too dark for face authentication. Please enter your password.",
   ],
   [
     GAZE_MSG_FACE_TIMED_OUT,
-    _("Face authentication timed out. Please enter your password.") ||
-      "Face authentication timed out. Please enter your password.",
+    "Face authentication timed out. Please enter your password.",
   ],
   [
     GAZE_MSG_FACE_UNAVAILABLE,
-    _("Face authentication unavailable. Please enter your password.") ||
-      "Face authentication unavailable. Please enter your password.",
+    "Face authentication unavailable. Please enter your password.",
   ],
 ]);
+
+const getInternalErrorMessage = (msg) => {
+  const text = INTERNAL_ERROR_MAP.get(msg);
+  return text ? safeGettext(text) : null;
+};
+
 
 // RHEL 10's backport declares the AuthServices signals with positional
 // parameters; GNOME 50 upstream collapsed them into a single params object.
@@ -413,7 +423,7 @@ const ensureAuthPromptConfirmButton = (authPrompt, extension) => {
   const button = new St.Button({
     style_class: "button modal-dialog-button default",
     style: "padding: 9px 24px; border-radius: 12px;",
-    label: _("Confirm Face Unlock") || "Confirm Face Unlock",
+    label: safeGettext("Confirm Face Unlock") || "Confirm Face Unlock",
     can_focus: true,
     reactive: true,
     x_align: Clutter.ActorAlign.FILL,
@@ -519,10 +529,11 @@ const enterAuthPromptConfirmMode = (authPrompt, serviceName, extension) => {
     logError(e, "[gaze] Failed to enter confirm mode");
     exitAuthPromptConfirmMode(authPrompt);
     authPrompt.setMessage(
-      _("Failed to show confirmation prompt") ||
+      safeGettext("Failed to show confirmation prompt") ||
         "Failed to show confirmation prompt",
       MESSAGE_TYPE.ERROR,
     );
+
   }
 };
 
@@ -963,11 +974,12 @@ export default class GazeFaceAuthExtension extends Extension {
                   return;
                 }
 
-                if (INTERNAL_ERROR_MAP.has(text)) {
+                const internalErr = getInternalErrorMessage(text);
+                if (internalErr) {
                   emitQueuePriorityMessage(
                     this,
                     serviceName,
-                    INTERNAL_ERROR_MAP.get(text),
+                    internalErr,
                     MESSAGE_TYPE.ERROR,
                   );
                   return;
@@ -992,7 +1004,7 @@ export default class GazeFaceAuthExtension extends Extension {
             return function (serviceName, problem) {
               if (serviceName === FACE_SERVICE_NAME) {
                 const mapped =
-                  INTERNAL_ERROR_MAP.get(problem) ??
+                  getInternalErrorMessage(problem) ??
                   GENERIC_ERROR_MAP.get(problem) ??
                   problem;
                 emitQueuePriorityMessage(
@@ -1003,6 +1015,7 @@ export default class GazeFaceAuthExtension extends Extension {
                 );
                 return;
               }
+
 
               return original.call(this, serviceName, problem);
             };
@@ -1339,10 +1352,11 @@ export default class GazeFaceAuthExtension extends Extension {
                 return;
               }
 
-              if (INTERNAL_ERROR_MAP.has(text)) {
+              const internalErr = getInternalErrorMessage(text);
+              if (internalErr) {
                 this._queuePriorityMessage(
                   serviceName,
-                  INTERNAL_ERROR_MAP.get(text),
+                  internalErr,
                   MESSAGE_TYPE.ERROR,
                 );
                 return;
@@ -1421,7 +1435,7 @@ export default class GazeFaceAuthExtension extends Extension {
           return function (client, serviceName, problem) {
             if (this.serviceIsFace(serviceName)) {
               const mapped =
-                INTERNAL_ERROR_MAP.get(problem) ??
+                getInternalErrorMessage(problem) ??
                 GENERIC_ERROR_MAP.get(problem) ??
                 problem;
               this._queuePriorityMessage(
@@ -1431,6 +1445,7 @@ export default class GazeFaceAuthExtension extends Extension {
               );
               return;
             }
+
 
             original.call(this, client, serviceName, problem);
           };
