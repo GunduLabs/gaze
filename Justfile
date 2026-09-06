@@ -221,22 +221,32 @@ _nfpm config format:
         fi
     fi
 
+    is_suse() {
+        local os_rel=""
+        for os_rel in /etc/os-release /usr/lib/os-release; do
+            [ -r "$os_rel" ] || continue
+            (
+                # shellcheck disable=SC1091
+                . "$os_rel"
+                case "${ID:-} ${ID_LIKE:-}" in
+                *opensuse*|*suse*) exit 0 ;;
+                *) exit 1 ;;
+                esac
+            ) && return 0 || return 1
+        done
+        return 1
+    }
+
     # Keep unused dependency placeholders valid YAML after envsubst.
     export DEB_LIB_DEPENDS="      # unused for {{ format }}"
     export RPM_LIB_DEPENDS="      # unused for {{ format }}"
     export RPM_GSTREAMER_BASE="gstreamer1-plugins-base"
     export RPM_GSTREAMER_GOOD="gstreamer1-plugins-good"
     export RPM_GSTREAMER_PIPEWIRE="pipewire-gstreamer"
-    if [ "{{ format }}" = rpm ] && [ -r /etc/os-release ]; then
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        case "${ID:-} ${ID_LIKE:-}" in
-        *opensuse*|*suse*)
-            export RPM_GSTREAMER_BASE="gstreamer-plugins-base"
-            export RPM_GSTREAMER_GOOD="gstreamer-plugins-good"
-            export RPM_GSTREAMER_PIPEWIRE="gstreamer-plugin-pipewire"
-            ;;
-        esac
+    if [ "{{ format }}" = rpm ] && is_suse; then
+        export RPM_GSTREAMER_BASE="gstreamer-plugins-base"
+        export RPM_GSTREAMER_GOOD="gstreamer-plugins-good"
+        export RPM_GSTREAMER_PIPEWIRE="gstreamer-plugin-pipewire"
     fi
     case "{{ format }}" in
     deb) export DEB_LIB_DEPENDS="$lib_depends" ;;
@@ -398,13 +408,25 @@ _verify-package format:
         fi
     }
 
+    is_suse() {
+        local os_rel=""
+        for os_rel in /etc/os-release /usr/lib/os-release; do
+            [ -r "$os_rel" ] || continue
+            (
+                # shellcheck disable=SC1091
+                . "$os_rel"
+                case "${ID:-} ${ID_LIKE:-}" in
+                *opensuse*|*suse*) exit 0 ;;
+                *) exit 1 ;;
+                esac
+            ) && return 0 || return 1
+        done
+        return 1
+    }
+
     suse=""
-    if [ "{{ format }}" = rpm ] && [ -r /etc/os-release ]; then
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        case "${ID:-} ${ID_LIKE:-}" in
-        *opensuse*|*suse*) suse=1 ;;
-        esac
+    if [ "{{ format }}" = rpm ] && is_suse; then
+        suse=1
     fi
 
     case "{{ format }}" in
@@ -562,16 +584,28 @@ package-prebuilt format: _dist-packages
     #!/usr/bin/env bash
     set -euo pipefail
 
+    is_suse() {
+        local os_rel=""
+        for os_rel in /etc/os-release /usr/lib/os-release; do
+            [ -r "$os_rel" ] || continue
+            (
+                # shellcheck disable=SC1091
+                . "$os_rel"
+                case "${ID:-} ${ID_LIKE:-}" in
+                *opensuse*|*suse*) exit 0 ;;
+                *) exit 1 ;;
+                esac
+            ) && return 0 || return 1
+        done
+        return 1
+    }
+
     # Use SUSE manifests together so packages do not mix PAM stack formats.
     # Other RPM hosts keep the existing manifests.
 
     configs=(packaging/nfpm.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension.yaml packaging/nfpm-hyprlock.yaml packaging/nfpm-kde.yaml)
-    if [ "{{ format }}" = rpm ] && [ -r /etc/os-release ]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    case "${ID:-} ${ID_LIKE:-}" in
-    *opensuse*|*suse*) configs=(packaging/nfpm-opensuse.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension-opensuse.yaml packaging/nfpm-hyprlock-opensuse.yaml packaging/nfpm-kde.yaml) ;;
-    esac
+    if [ "{{ format }}" = rpm ] && is_suse; then
+        configs=(packaging/nfpm-opensuse.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension-opensuse.yaml packaging/nfpm-hyprlock-opensuse.yaml packaging/nfpm-kde.yaml)
     fi
 
     for config in "${configs[@]}"; do {{ quote(just_executable()) }} _nfpm "$config" "{{ format }}"; done
