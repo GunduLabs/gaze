@@ -21,8 +21,9 @@ use gaze_core::config::{
     START_DELAY_SCOPE_LABELS, SecurityLevel,
 };
 use gaze_core::dbus::{
-    CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, connect_gaze, dbus_error_message,
-    dbus_is_file_not_found, load_config_from_daemon, try_load_config_from_daemon,
+    CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon,
+    apply_config_with_keyring_to_daemon, connect_gaze, dbus_error_message, dbus_is_file_not_found,
+    load_config_with_keyring_from_daemon, try_load_config_from_daemon,
 };
 use std::{future::Future, time::Duration};
 use tui::{AuthScreen, BusyScreen, EnrollScreen, Tone, TuiAction, TuiTerminal};
@@ -252,9 +253,11 @@ enum Commands {
     },
     /// Enroll or replace a TPM-protected GNOME Keyring password (root only)
     Keyring {
-        /// Remove the current user's stored keyring credential
+        /// Remove the stored keyring credential instead of enrolling one
         #[arg(long)]
         forget: bool,
+        #[arg(short, long, help = "Act on this user instead of the current one")]
+        user: Option<String>,
     },
     /// Check the Gaze installation for configuration and runtime problems
     Doctor {
@@ -319,12 +322,8 @@ async fn run_config_wizard(
     term: &Term,
     proxy: &GazeProxy<'_>,
     mut config: Config,
+    keyring_supported: bool,
 ) -> anyhow::Result<()> {
-    // The keyring setting is omitted from the legacy Config property.
-    config.storage.unlock_gnome_keyring = Config::load()
-        .unwrap_or_default()
-        .storage
-        .unlock_gnome_keyring;
     let theme = ColorfulTheme::default();
 
     term.write_line(&format!(
@@ -580,7 +579,7 @@ async fn run_config_wizard(
         .interact()?;
 
     config.storage.unlock_gnome_keyring =
-        if config.storage.encrypt_templates && config.liveness.enabled {
+        if keyring_supported && config.storage.encrypt_templates && config.liveness.enabled {
             Confirm::with_theme(&theme)
                 .with_prompt("Enable TPM-backed GNOME Keyring unlock for GDM face logins")
                 .default(config.storage.unlock_gnome_keyring)
@@ -589,15 +588,12 @@ async fn run_config_wizard(
             false
         };
 
-    proxy
-        .set_config_with_keyring(
-            zbus::zvariant::OwnedValue::try_from(gaze_core::dbus::DbusConfig::from(
-                config.clone(),
-            ))?,
-            config.storage.unlock_gnome_keyring,
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to save configuration: {}", dbus_error_message(&e)))?;
+    let saved = if keyring_supported {
+        apply_config_with_keyring_to_daemon(proxy, &config).await
+    } else {
+        apply_config_to_daemon(proxy, &config).await
+    };
+    saved.map_err(|e| anyhow::anyhow!("Failed to save configuration: {e}"))?;
     term.write_line(&format!(
         "{} Configuration saved and applied.",
         style("✓").green().bold()
@@ -1208,6 +1204,20 @@ async fn handle_rename_face(
     Ok(())
 }
 
+fn forget_keyring_credential(term: &Term, user: &str) -> anyhow::Result<()> {
+    match gaze_security::keyring::forget(user) {
+        Ok(()) => Ok(()),
+        Err(err) => term
+            .write_line(&format!(
+                "{} Could not remove the stored GNOME Keyring credential for '{}': {}",
+                style("!").yellow().bold(),
+                user,
+                err
+            ))
+            .map_err(Into::into),
+    }
+}
+
 async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<()> {
     let term = Term::stdout();
     let result = run_busy(
@@ -1225,6 +1235,7 @@ async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
                 style("✓").green().bold(),
                 user
             ))?;
+            forget_keyring_credential(&term, user)?;
         }
         Ok(false) => {
             term.write_line(&format!(
@@ -1770,8 +1781,8 @@ async fn run() -> anyhow::Result<()> {
         (command_may_be_challenged(&cli.command) && !silent_auth).then(polkit::PolkitAgent::spawn);
 
     match &cli.command {
-        Commands::Keyring { forget } => {
-            let username = get_current_user();
+        Commands::Keyring { forget, user } => {
+            let username = user.clone().unwrap_or_else(get_current_user);
             if *forget {
                 gaze_security::keyring::forget(&username)?;
                 println!("Stored GNOME Keyring credential removed for {username}.");
@@ -1839,11 +1850,7 @@ async fn run() -> anyhow::Result<()> {
             handle_clear_user(&proxy, &user.unwrap_or_else(get_current_user)).await?;
         }
         Commands::Config { show } => {
-            let mut config = load_config_from_daemon(&proxy).await?;
-            config.storage.unlock_gnome_keyring = Config::load()
-                .unwrap_or_default()
-                .storage
-                .unlock_gnome_keyring;
+            let (config, keyring_supported) = load_config_with_keyring_from_daemon(&proxy).await?;
             if show {
                 println!(
                     "{} {}",
@@ -1981,7 +1988,7 @@ async fn run() -> anyhow::Result<()> {
                 );
                 return Ok(());
             }
-            run_config_wizard(&Term::stdout(), &proxy, config).await?;
+            run_config_wizard(&Term::stdout(), &proxy, config, keyring_supported).await?;
         }
 
         Commands::Doctor { .. } | Commands::Uninstall { .. } | Commands::Keyring { .. } => {
@@ -2107,7 +2114,10 @@ mod tests {
     #[test]
     fn forgetting_a_keyring_credential_requires_root() {
         let cli = Cli::try_parse_from(["gaze", "keyring", "--forget"]).unwrap();
-        assert!(matches!(cli.command, Commands::Keyring { forget: true }));
+        assert!(matches!(
+            cli.command,
+            Commands::Keyring { forget: true, .. }
+        ));
         assert_eq!(command_requires_root(&cli.command), Some("keyring"));
     }
 

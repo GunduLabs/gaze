@@ -182,6 +182,7 @@ pub async fn run(username: &str, benchmark: bool) -> anyhow::Result<bool> {
     check_privileged_files(&mut report);
     check_desktop_integration(&mut report);
     check_tpm(&mut report, config.as_ref());
+    check_keyring(&mut report, username, config.as_ref());
     check_daemon(&mut report, username, config.as_ref(), benchmark).await;
 
     report.print()?;
@@ -1510,6 +1511,120 @@ fn check_tpm(report: &mut Report, config: Option<&Config>) {
     );
 }
 
+fn gdm_face_auth_lines(contents: &str) -> Vec<&str> {
+    contents
+        .lines()
+        .map(|line| line.split('#').next().unwrap_or_default().trim())
+        .filter(|line| line.starts_with("auth"))
+        .collect()
+}
+
+/// The keyring hand-off needs the control flow shipped in packaging/pam/gdm-face: pam_gaze must
+/// fall through to pam_gnome_keyring instead of returning `success=done`, and the keyring module
+/// must consume the token with `use_authtok`. `/etc/pam.d/gdm-face` is packaged noreplace, so an
+/// upgraded machine keeps the stack that predates this and the unlock silently never happens.
+fn gdm_face_stack_passes_the_token(contents: &str) -> bool {
+    let lines = gdm_face_auth_lines(contents);
+    let gaze_falls_through = lines
+        .iter()
+        .filter(|line| line.contains("pam_gaze.so"))
+        .all(|line| !line.contains("success=done"));
+    let keyring_consumes_token = lines
+        .iter()
+        .filter(|line| line.contains("pam_gnome_keyring.so"))
+        .any(|line| line.contains("use_authtok"));
+    gaze_falls_through && keyring_consumes_token
+}
+
+fn keyring_record_state(username: &str) -> Option<bool> {
+    if unsafe { libc::geteuid() } != 0 {
+        return None;
+    }
+    let uid = user_uid(username)?;
+    Some(
+        Path::new(gaze_security::keyring::STORE_DIR)
+            .join(format!("{uid}.keyring"))
+            .exists(),
+    )
+}
+
+fn check_keyring(report: &mut Report, username: &str, config: Option<&Config>) {
+    let Some(config) = config else {
+        return;
+    };
+    if !config.storage.unlock_gnome_keyring {
+        report.off(
+            "Keyring",
+            "GNOME Keyring unlock after a GDM face login is off",
+            format!(
+                "Turn it on: set `unlock_gnome_keyring = true` under [storage] in {CONFIG_PATH} \
+                 (it also needs `encrypt_templates = true` and [liveness] `enabled = true`), \
+                 restart gazed, then run `sudo gaze keyring`."
+            ),
+        );
+        return;
+    }
+
+    if let Err(err) = config.storage.validate_keyring(&config.liveness) {
+        report.error(
+            "Keyring",
+            format!("GNOME Keyring unlock is enabled but unusable: {err}"),
+            format!(
+                "Set `encrypt_templates = true` under [storage] and `enabled = true` under \
+                 [liveness] in {CONFIG_PATH}, or turn off `unlock_gnome_keyring`, then restart gazed."
+            ),
+        );
+        return;
+    }
+
+    match read_pam_service(&format!("/etc/pam.d/{GDM_FACE_PAM_SERVICE}")) {
+        Some(contents) if !gdm_face_stack_passes_the_token(&contents) => {
+            report.error(
+                "Keyring",
+                format!(
+                    "/etc/pam.d/{GDM_FACE_PAM_SERVICE} predates the keyring hand-off, so the \
+                     password is never passed to pam_gnome_keyring"
+                ),
+                format!(
+                    "This file is preserved across upgrades. Replace it with the packaged stack \
+                     (look for /etc/pam.d/{GDM_FACE_PAM_SERVICE}.rpmnew, .pacnew or .dpkg-dist), \
+                     or edit it so pam_gaze.so uses `[success=1 default=ignore]` followed by \
+                     `auth requisite pam_deny.so` and `auth optional pam_gnome_keyring.so use_authtok`."
+                ),
+            );
+            return;
+        }
+        None => {
+            report.error(
+                "Keyring",
+                format!("GNOME Keyring unlock is enabled but /etc/pam.d/{GDM_FACE_PAM_SERVICE} is missing"),
+                "Install the Gaze GNOME extension package, which ships the gdm-face PAM stack.",
+            );
+            return;
+        }
+        Some(_) => {}
+    }
+
+    match keyring_record_state(username) {
+        Some(true) => report.pass(
+            "Keyring",
+            format!("a TPM-protected keyring credential is enrolled for {username}"),
+        ),
+        Some(false) => report.warning(
+            "Keyring",
+            format!("GNOME Keyring unlock is enabled but {username} has no enrolled credential"),
+            format!("Run `sudo gaze keyring --user {username}`."),
+        ),
+        None => report.pass(
+            "Keyring",
+            format!(
+                "the {GDM_FACE_PAM_SERVICE} stack passes the token; run `sudo gaze doctor` to \
+                 also check whether {username} is enrolled"
+            ),
+        ),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DaemonCredentials {
     uid: u32,
@@ -1597,6 +1712,15 @@ fn group_gid(name: &str) -> Option<u32> {
         return None;
     }
     Some(unsafe { (*entry).gr_gid })
+}
+
+fn user_uid(name: &str) -> Option<u32> {
+    let name = std::ffi::CString::new(name).ok()?;
+    let entry = unsafe { libc::getpwnam(name.as_ptr()) };
+    if entry.is_null() {
+        return None;
+    }
+    Some(unsafe { (*entry).pw_uid })
 }
 
 fn user_name(uid: u32) -> String {
@@ -2862,5 +2986,40 @@ mod tests {
         ));
         assert!(!has_grosshack("# auth sufficient pam_gaze_grosshack.so"));
         assert!(!has_grosshack("auth sufficient pam_gaze.so simultaneous"));
+    }
+
+    #[test]
+    fn every_shipped_gdm_face_stack_passes_the_keyring_token() {
+        for template in ["gdm-face", "gdm-face.arch", "gdm-face.deb", "gdm-face.suse"] {
+            let path =
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../packaging/pam/").to_string() + template;
+            let contents = std::fs::read_to_string(&path).expect(template);
+            assert!(
+                gdm_face_stack_passes_the_token(&contents),
+                "{template} must hand the token to pam_gnome_keyring"
+            );
+        }
+    }
+
+    #[test]
+    fn an_upgrade_preserved_gdm_face_stack_is_detected_as_stale() {
+        let stale = "auth required pam_env.so\n\
+             auth [success=done ignore=ignore default=bad] pam_gaze.so\n\
+             auth optional pam_gnome_keyring.so only_if=login auto_start\n\
+             auth required pam_deny.so\n";
+        assert!(!gdm_face_stack_passes_the_token(stale));
+
+        let no_keyring_module = "auth required pam_env.so\n\
+             auth [success=1 default=ignore] pam_gaze.so\n\
+             auth requisite pam_deny.so\n";
+        assert!(!gdm_face_stack_passes_the_token(no_keyring_module));
+
+        let commented_out = "auth [success=1 default=ignore] pam_gaze.so\n\
+             auth requisite pam_deny.so\n\
+             # auth optional pam_gnome_keyring.so use_authtok\n";
+        assert!(
+            !gdm_face_stack_passes_the_token(commented_out),
+            "a commented-out keyring line must not count"
+        );
     }
 }

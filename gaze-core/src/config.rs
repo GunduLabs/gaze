@@ -563,6 +563,19 @@ pub struct StorageConfig {
     pub unlock_gnome_keyring: bool,
 }
 
+impl Config {
+    /// Drop a keyring opt-in whose prerequisites are missing so a hand-edited file, or drift
+    /// between the daemon's live state and disk, degrades to the default instead of breaking
+    /// face login. Returns whether the flag was cleared.
+    pub fn clamp_keyring(&mut self) -> bool {
+        if self.storage.validate_keyring(&self.liveness).is_err() {
+            self.storage.unlock_gnome_keyring = false;
+            return true;
+        }
+        false
+    }
+}
+
 impl StorageConfig {
     pub fn validate_keyring(&self, liveness: &LivenessConfig) -> anyhow::Result<()> {
         if self.unlock_gnome_keyring && (!self.encrypt_templates || !liveness.enabled) {
@@ -2425,6 +2438,24 @@ level = "low""#,
         config.storage.unlock_gnome_keyring = false;
         assert!(config.storage.validate_keyring(&config.liveness).is_ok());
         assert!(unknown_config_keys("[storage]\nunlock_gnome_keyring = false").is_empty());
+    }
+
+    #[test]
+    fn a_hand_edited_keyring_opt_in_without_prerequisites_clamps_off() {
+        let mut config = Config::default();
+        config.storage.unlock_gnome_keyring = true;
+        config.storage.encrypt_templates = true;
+        config.liveness.enabled = false;
+        assert!(config.clamp_keyring());
+        assert!(!config.storage.unlock_gnome_keyring);
+
+        config.storage.unlock_gnome_keyring = true;
+        config.liveness.enabled = true;
+        assert!(!config.clamp_keyring(), "a valid opt-in survives");
+        assert!(config.storage.unlock_gnome_keyring);
+
+        let mut off = Config::default();
+        assert!(!off.clamp_keyring(), "the default needs no clamping");
     }
 
     #[test]

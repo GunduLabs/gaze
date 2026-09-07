@@ -270,7 +270,14 @@ fn validate_keyring_verification(
 
 fn resolve_config(loaded: anyhow::Result<Config>, last_good: &mut Config) -> Config {
     match loaded {
-        Ok(config) => {
+        Ok(mut config) => {
+            if config.clamp_keyring() {
+                warn!(
+                    path = CONFIG_PATH,
+                    "storage.unlock_gnome_keyring needs storage.encrypt_templates and \
+                     liveness.enabled; ignoring it"
+                );
+            }
             *last_good = config.clone();
             config
         }
@@ -1040,6 +1047,29 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_hand_edited_keyring_opt_in_is_ignored_rather_than_breaking_face_login() {
+        let mut on_disk = gaze_core::config::Config::default();
+        on_disk.storage.unlock_gnome_keyring = true;
+        on_disk.storage.encrypt_templates = false;
+        on_disk.liveness.enabled = true;
+
+        let mut last_good = gaze_core::config::Config::default();
+        let resolved = super::resolve_config(Ok(on_disk), &mut last_good);
+        assert!(!resolved.storage.unlock_gnome_keyring);
+        assert!(
+            !last_good.storage.unlock_gnome_keyring,
+            "the clamped value is what gets remembered"
+        );
+
+        let mut valid = gaze_core::config::Config::default();
+        valid.storage.unlock_gnome_keyring = true;
+        valid.storage.encrypt_templates = true;
+        valid.liveness.enabled = true;
+        let resolved = super::resolve_config(Ok(valid), &mut last_good);
+        assert!(resolved.storage.unlock_gnome_keyring);
     }
 
     #[test]
@@ -3581,10 +3611,13 @@ impl AuthDaemon {
         // Legacy clients do not send this flag; preserve the existing opt-in.
         new_config.storage.unlock_gnome_keyring =
             self.current_config().await.storage.unlock_gnome_keyring;
-        new_config
-            .storage
-            .validate_keyring(&new_config.liveness)
-            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        // A legacy client cannot see or clear the flag, so treat it as turning the feature off
+        // rather than rejecting every later write with an error it cannot act on.
+        if new_config.clamp_keyring() {
+            warn!(
+                "a legacy config update removed a keyring prerequisite; disabling GNOME Keyring unlock"
+            );
+        }
         self.apply_config(new_config).await
     }
 

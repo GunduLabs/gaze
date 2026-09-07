@@ -126,21 +126,54 @@ gaze keyring
 The password is stored in a root-only TPM-protected record. It is not sent over
 DBus. Re-enroll it after changing the account or keyring password.
 
-To remove the stored record, run `gaze keyring --forget`.
+To remove the stored record, run `gaze keyring --forget`. `gaze clear-user` also
+removes it. An administrator can act on another account with
+`sudo gaze keyring --user <name>`.
 
 Enable [GDM face login](#optional-enable-face-at-gdm-login) separately. If you
-maintain your own `gdm-face` file, use this auth order:
+maintain your own `gdm-face` file, use this auth order, and keep the session line:
 
 ```pam
-auth required pam_env.so
-auth [success=1 default=ignore] pam_gaze.so
-auth requisite pam_deny.so
-auth optional pam_gnome_keyring.so use_authtok
+auth    required   pam_env.so
+auth    [success=1 default=ignore] pam_gaze.so
+auth    requisite  pam_deny.so
+auth    optional   pam_gnome_keyring.so use_authtok
+
+session optional   pam_gnome_keyring.so auto_start
 ```
+
+Without the `session` line nothing consumes the token and the keyring stays
+locked. This only works with `pam_gaze.so` in its default sequential mode; the
+`simultaneous` option does not supply the token.
 
 Gaze sets `PAM_AUTHTOK` only after face and liveness authentication succeeds. If
 the TPM, record, or password binding is unavailable, GDM falls back to the normal
-password login. Clearing the TPM also requires re-enrollment.
+password login. A user who has not run `gaze keyring` logs in normally and is
+prompted for the keyring as before. Clearing the TPM, or changing the account
+password, requires re-enrollment.
+
+### What this changes about your security
+
+Read this before turning it on.
+
+- **The record is recoverable by root on this machine.** Sealing has no PCR
+  policy, so anyone who can run code as root here — including someone who boots
+  another OS from a USB stick against an unencrypted disk — can unseal the key
+  and recover the plaintext password. It protects a *stolen disk*, not a machine
+  someone else can boot. Enable full-disk encryption if that matters to you.
+- **The password becomes visible to the rest of the `gdm-face` stack.** Once
+  `PAM_AUTHTOK` is set, every later module in that service can read it, including
+  the distribution-managed `postlogin`, `system-auth` and `common-session`
+  includes. Linux-PAM wipes it when the service ends.
+- **Face becomes equivalent to your password at the login screen.** Without this
+  option a face login gives an attacker a desktop session; with it, it also gives
+  them everything in your keyring.
+
+### Upgrading from an earlier Gaze
+
+`/etc/pam.d/gdm-face` is preserved across package upgrades, so an existing
+install keeps the stack that predates this feature and the unlock silently never
+happens. Run `sudo gaze doctor`: it reports the stale file and how to replace it.
 
 ## Optional: enable face at GDM login
 

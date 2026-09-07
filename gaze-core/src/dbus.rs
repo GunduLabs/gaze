@@ -805,7 +805,7 @@ mod tests {
 
             let wire = DbusConfig::from(config);
             let raw = OwnedValue::try_from(Value::from(wire)).unwrap();
-            // Keeping the old flag reproduces the legacy setter's rejection.
+            // A keyring-aware client sees the flag, so an inconsistent update is a real error.
             assert!(config_update_from_property(raw.try_clone().unwrap(), true).is_err());
             let updated = config_update_from_property(raw, false).unwrap();
             assert!(!updated.storage.unlock_gnome_keyring);

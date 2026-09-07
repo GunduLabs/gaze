@@ -1199,6 +1199,7 @@ dependencies = [
  "anyhow",
  "futures",
  "gaze-core",
+ "gaze-security",
  "getrandom 0.4.3",
  "image",
  "libc",
@@ -1281,7 +1282,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-security"
-version = "0.2.13"
+version = "0.3.0"
 dependencies = [
  "aes-gcm",
  "anyhow",

@@ -323,9 +323,11 @@ unsafe fn supply_keyring_token(pamh: PamHandle, username: &str) -> Result<(), ()
     if existing_token_has_password(existing.cast()) {
         return Ok(());
     }
-    let secret = gaze_security::keyring::load(username)
-        .map_err(|_| ())?
-        .ok_or(())?;
+    // An unenrolled user has nothing to unlock: leave the keyring locked as before rather
+    // than failing the face login for everyone who has not run `gaze keyring`.
+    let Some(secret) = gaze_security::keyring::load(username).map_err(|_| ())? else {
+        return Ok(());
+    };
     // Linux-PAM copies the token; our zeroizing buffer is dropped immediately afterwards.
     if unsafe { pam_set_item(pamh, PAM_AUTHTOK, secret.as_ptr().cast()) } != PAM_SUCCESS {
         return Err(());

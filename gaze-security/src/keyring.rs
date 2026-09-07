@@ -122,7 +122,7 @@ fn encrypt(
     );
     let mut nonce = [0; 12];
     getrandom::fill(&mut nonce).map_err(|_| anyhow::anyhow!("random nonce unavailable"))?;
-    let mut secret = Zeroizing::new(Vec::with_capacity(password.len() + 17));
+    let mut secret = Zeroizing::new(Vec::with_capacity(password.len() + 1));
     secret.extend_from_slice(password);
     secret.push(0); // pam_set_item copies this C string; never make an unwiped CString.
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| anyhow::anyhow!("invalid key"))?;
@@ -147,7 +147,7 @@ fn encrypt(
 
 fn decrypt_with<F>(blob: &[u8], account: &Account, unseal: F) -> anyhow::Result<Secret>
 where
-    F: FnOnce(&[u8], &[u8]) -> anyhow::Result<[u8; 32]>,
+    F: FnOnce(&[u8], &[u8]) -> anyhow::Result<crate::tpm::SealedKey>,
 {
     ensure!(
         blob.len() >= 12 && blob.len() <= MAX_BLOB && &blob[..4] == MAGIC,
@@ -161,10 +161,7 @@ where
     );
     let end = 12 + public_len + private_len;
     ensure!(blob.len() > end + 12 + 16, "truncated credential record");
-    let key = Zeroizing::new(unseal(
-        &blob[12..12 + public_len],
-        &blob[12 + public_len..end],
-    )?);
+    let key = unseal(&blob[12..12 + public_len], &blob[12 + public_len..end])?;
     let cipher =
         Aes256Gcm::new_from_slice(key.as_ref()).map_err(|_| anyhow::anyhow!("invalid key"))?;
     let nonce =
@@ -346,7 +343,7 @@ mod tests {
         let secret = decrypt_with(&blob, &account(), |public, private| {
             assert_eq!(public, b"public");
             assert_eq!(private, b"private");
-            Ok(KEY)
+            Ok(Zeroizing::new(KEY))
         })
         .unwrap();
         assert_eq!(secret.as_slice(), b"test password\0");
@@ -360,7 +357,7 @@ mod tests {
             Account::bound_to(1001, "alice", b"shadow-hash"),
             Account::bound_to(1000, "bob", b"shadow-hash"),
         ] {
-            assert!(decrypt_with(&blob(), &changed, |_, _| Ok(KEY)).is_err());
+            assert!(decrypt_with(&blob(), &changed, |_, _| Ok(Zeroizing::new(KEY))).is_err());
         }
     }
 
@@ -372,10 +369,10 @@ mod tests {
             ))
             .is_err()
         );
-        assert!(decrypt_with(&blob(), &account(), |_, _| Ok([9; 32])).is_err());
+        assert!(decrypt_with(&blob(), &account(), |_, _| Ok(Zeroizing::new([9; 32]))).is_err());
         let mut corrupt = blob();
         *corrupt.last_mut().unwrap() ^= 1;
-        assert!(decrypt_with(&corrupt, &account(), |_, _| Ok(KEY)).is_err());
+        assert!(decrypt_with(&corrupt, &account(), |_, _| Ok(Zeroizing::new(KEY))).is_err());
     }
 
     #[test]
@@ -392,7 +389,7 @@ mod tests {
             assert!(
                 decrypt_with(&invalid, &account(), |_, _| {
                     touched.set(true);
-                    Ok(KEY)
+                    Ok(Zeroizing::new(KEY))
                 })
                 .is_err()
             );
@@ -400,7 +397,9 @@ mod tests {
         }
         let blob = blob();
         for end in 0..blob.len() {
-            assert!(decrypt_with(&blob[..end], &account(), |_, _| Ok(KEY)).is_err());
+            assert!(
+                decrypt_with(&blob[..end], &account(), |_, _| Ok(Zeroizing::new(KEY))).is_err()
+            );
         }
     }
 
@@ -416,7 +415,7 @@ mod tests {
         let password = vec![b'x'; MAX_PASSWORD];
         let blob = encrypt(&KEY, &account(), &password, b"p", b"s").unwrap();
         assert_eq!(
-            decrypt_with(&blob, &account(), |_, _| Ok(KEY))
+            decrypt_with(&blob, &account(), |_, _| Ok(Zeroizing::new(KEY)))
                 .unwrap()
                 .len(),
             MAX_PASSWORD + 1

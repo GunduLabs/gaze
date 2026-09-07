@@ -584,6 +584,8 @@ pub async fn setup_auth_env() -> Result<(Config, GazeProxy<'static>), c_int> {
                 .unwrap_or_default()
                 .storage
                 .unlock_gnome_keyring;
+            // The flag comes from disk but the prerequisites come from the running daemon.
+            config.clamp_keyring();
             config
         }
         Ok(None) => {

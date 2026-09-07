@@ -8,6 +8,17 @@ set -euo pipefail
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 test_dir=$(mktemp -d)
 trap 'rm -r -- "$test_dir"' EXIT
+
+if [ "$(uname -s)" != Linux ] || ! command -v cc >/dev/null 2>&1; then
+    echo 'SKIP: the GDM PAM harness needs Linux and a C compiler.'
+    exit 0
+fi
+if ! printf '#include <security/pam_appl.h>\n#include <security/pam_modules.h>\nint main(void){pam_handle_t *h=0;return pam_start_confdir("x","y",0,".",&h);}\n' \
+        | cc -x c - -lpam -o "$test_dir/probe" 2>/dev/null; then
+    echo 'SKIP: needs libpam headers with pam_start_confdir (Linux-PAM >= 1.4).'
+    exit 0
+fi
+
 cc -Wall -Wextra -Werror -fPIC -shared -DGAZE_MOCK_MODULE \
     "$repo/scripts/keyring-pam-harness.c" -lpam -o "$test_dir/mock.so"
 cc -Wall -Wextra -Werror "$repo/scripts/keyring-pam-harness.c" -lpam -o "$test_dir/driver"

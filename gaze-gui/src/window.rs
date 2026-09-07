@@ -678,6 +678,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     storage_group.add(&encrypt_templates_row);
 
     let unlock_gnome_keyring_row = libadwaita::ActionRow::new();
+    // Stays hidden until the load below reports a daemon that can store the flag.
+    unlock_gnome_keyring_row.set_visible(false);
     unlock_gnome_keyring_row.set_title("Unlock GNOME Keyring");
     unlock_gnome_keyring_row
         .set_subtitle("Use an enrolled password after liveness-protected GDM face login");
