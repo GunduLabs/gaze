@@ -235,6 +235,10 @@ pub fn dbus_is_not_activatable(err: &zbus::Error) -> bool {
     s.contains("not activatable") || s.contains("ServiceUnknown")
 }
 
+pub fn dbus_is_unknown_method(err: &zbus::Error) -> bool {
+    err.to_string().contains("UnknownMethod")
+}
+
 /// Backstop for a client awaiting one verify verdict. The daemon bounds its own run well inside
 /// this, so reaching it means the daemon stopped answering rather than that the face was rejected.
 pub const VERIFY_CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
@@ -322,11 +326,45 @@ pub async fn load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Co
     })
 }
 
+/// Load the complete configuration for clients that can manage the local-only keyring setting.
+/// Older daemons did not expose that flag, so they safely read as disabled and report false.
+pub async fn load_config_with_keyring_from_daemon(
+    proxy: &GazeProxy<'_>,
+) -> anyhow::Result<(Config, bool)> {
+    let mut config = load_config_from_daemon(proxy).await?;
+    let supported = match proxy.keyring_enabled().await {
+        Ok(enabled) => {
+            config.storage.unlock_gnome_keyring = enabled;
+            true
+        }
+        Err(error) if dbus_is_unknown_method(&error) => false,
+        Err(error) => {
+            return Err(anyhow::anyhow!(
+                "Failed to read GNOME Keyring configuration: {}",
+                error
+            ));
+        }
+    };
+    Ok((config, supported))
+}
+
 pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> anyhow::Result<()> {
     proxy
         .set_config(config.clone().into())
         .await
         .map_err(|e| anyhow::anyhow!("Failed to set config property: {}", e))
+}
+
+pub async fn apply_config_with_keyring_to_daemon(
+    proxy: &GazeProxy<'_>,
+    config: &Config,
+) -> anyhow::Result<()> {
+    let unlock_gnome_keyring = config.storage.unlock_gnome_keyring;
+    let config = OwnedValue::try_from(DbusConfig::from(config.clone()))?;
+    proxy
+        .set_config_with_keyring(config, unlock_gnome_keyring)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to set keyring-aware config: {}", e))
 }
 
 pub async fn get_pam_internal(proxy: &GazeProxy<'_>) -> Vec<String> {
@@ -495,6 +533,8 @@ pub trait Gaze {
     async fn verify_start_for(&self, face_name: &str, pam_service: &str) -> zbus::Result<()>;
     async fn verify_start_for_keyring(&self) -> zbus::Result<()>;
     async fn verify_stop(&self) -> zbus::Result<()>;
+
+    async fn keyring_enabled(&self) -> zbus::Result<bool>;
 
     async fn enroll_start(&self, face_name: &str) -> zbus::Result<()>;
     async fn enroll_stop(&self) -> zbus::Result<()>;
@@ -886,7 +926,11 @@ mod tests {
         let err = zbus::Error::Failure("ServiceUnknown".to_string());
         assert!(dbus_is_not_activatable(&err));
 
+        let err = zbus::Error::Failure("org.freedesktop.DBus.Error.UnknownMethod".to_string());
+        assert!(dbus_is_unknown_method(&err));
+
         let err = zbus::Error::Failure("camera unavailable".to_string());
         assert!(!dbus_is_not_activatable(&err));
+        assert!(!dbus_is_unknown_method(&err));
     }
 }

@@ -11,8 +11,9 @@ use gaze_core::config::{
     START_DELAY_SCOPE_LABELS, SecurityLevel,
 };
 use gaze_core::dbus::{
-    GazeProxy, apply_config_to_daemon, connect_gaze, dbus_error_message, dbus_is_file_not_found,
-    dbus_is_not_activatable, load_config_from_daemon,
+    GazeProxy, apply_config_to_daemon, apply_config_with_keyring_to_daemon, connect_gaze,
+    dbus_error_message, dbus_is_file_not_found, dbus_is_not_activatable, load_config_from_daemon,
+    load_config_with_keyring_from_daemon,
 };
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -107,6 +108,19 @@ fn set_liveness_config_rows_visible(
     let active = enabled_switch.is_active();
     threshold_row.set_visible(active);
     max_seconds_row.set_visible(active);
+}
+
+fn set_keyring_config_sensitivity(
+    keyring_switch: &gtk4::Switch,
+    liveness_switch: &gtk4::Switch,
+    encrypt_templates_switch: &gtk4::Switch,
+) {
+    let keyring_enabled = keyring_switch.is_active();
+    keyring_switch.set_sensitive(
+        keyring_enabled || (liveness_switch.is_active() && encrypt_templates_switch.is_active()),
+    );
+    liveness_switch.set_sensitive(!keyring_enabled);
+    encrypt_templates_switch.set_sensitive(!keyring_enabled);
 }
 
 fn set_inference_device_row_visible(
@@ -239,6 +253,7 @@ struct ConfigRows {
     start_delay: libadwaita::SpinRow,
     start_delay_scope: libadwaita::ComboRow,
     encrypt_templates: gtk4::Switch,
+    unlock_gnome_keyring: gtk4::Switch,
 }
 
 fn commit_focused_spin_row(window: &libadwaita::Window, rows: &ConfigRows) {
@@ -357,11 +372,18 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
     set_start_delay_scope_row_visible(&rows.start_delay, &rows.start_delay_scope);
     rows.encrypt_templates
         .set_active(cfg.storage.encrypt_templates);
+    rows.unlock_gnome_keyring
+        .set_active(cfg.storage.unlock_gnome_keyring);
 
     set_liveness_config_rows_visible(
         &rows.liveness_enabled,
         &rows.liveness_threshold,
         &rows.liveness_max_seconds,
+    );
+    set_keyring_config_sensitivity(
+        &rows.unlock_gnome_keyring,
+        &rows.liveness_enabled,
+        &rows.encrypt_templates,
     );
 }
 
@@ -655,6 +677,15 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     encrypt_templates_row.add_suffix(&encrypt_templates_switch);
     storage_group.add(&encrypt_templates_row);
 
+    let unlock_gnome_keyring_row = libadwaita::ActionRow::new();
+    unlock_gnome_keyring_row.set_title("Unlock GNOME Keyring");
+    unlock_gnome_keyring_row
+        .set_subtitle("Use an enrolled password after liveness-protected GDM face login");
+    let unlock_gnome_keyring_switch = gtk4::Switch::new();
+    unlock_gnome_keyring_switch.set_valign(gtk4::Align::Center);
+    unlock_gnome_keyring_row.add_suffix(&unlock_gnome_keyring_switch);
+    storage_group.add(&unlock_gnome_keyring_row);
+
     liveness_enabled_switch.connect_active_notify(glib::clone!(
         #[weak]
         liveness_threshold_row,
@@ -669,7 +700,30 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         }
     ));
 
+    for switch in [
+        &liveness_enabled_switch,
+        &encrypt_templates_switch,
+        &unlock_gnome_keyring_switch,
+    ] {
+        switch.connect_active_notify(glib::clone!(
+            #[weak]
+            liveness_enabled_switch,
+            #[weak]
+            encrypt_templates_switch,
+            #[weak]
+            unlock_gnome_keyring_switch,
+            move |_| {
+                set_keyring_config_sensitivity(
+                    &unlock_gnome_keyring_switch,
+                    &liveness_enabled_switch,
+                    &encrypt_templates_switch,
+                );
+            }
+        ));
+    }
+
     let is_loading = Rc::new(Cell::new(true));
+    let keyring_supported = Rc::new(Cell::new(false));
     let inference_touched = Rc::new(Cell::new(false));
     let camera_touched = Rc::new(Cell::new(false));
     let ir_touched = Rc::new(Cell::new(false));
@@ -677,11 +731,17 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     let apply_queue = new_apply_queue(
         Rc::new({
             let proxy_cell = proxy_cell.clone();
+            let keyring_supported = keyring_supported.clone();
             move |cfg: Config| {
                 let proxy_cell = proxy_cell.clone();
+                let keyring_supported = keyring_supported.clone();
                 Box::pin(async move {
                     let proxy = shared_proxy(&proxy_cell).await?;
-                    let result = apply_config_to_daemon(&proxy, &cfg).await;
+                    let result = if keyring_supported.get() {
+                        apply_config_with_keyring_to_daemon(&proxy, &cfg).await
+                    } else {
+                        apply_config_to_daemon(&proxy, &cfg).await
+                    };
                     if result.is_err() {
                         // The connection is cached for the life of the dialog, so a daemon that
                         // restarted would fail every later write too, silently losing each edit.
@@ -816,6 +876,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         start_delay_scope_row,
         #[weak]
         encrypt_templates_switch,
+        #[weak]
+        unlock_gnome_keyring_switch,
         #[strong]
         cameras,
         #[strong]
@@ -898,6 +960,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             cfg.auth.start_delay_scope =
                 AuthConfig::start_delay_scope_from_index(start_delay_scope_row.selected() as usize);
             cfg.storage.encrypt_templates = encrypt_templates_switch.is_active();
+            cfg.storage.unlock_gnome_keyring = unlock_gnome_keyring_switch.is_active();
 
             let cfg_to_apply = cfg.clone();
             drop(cfg);
@@ -1016,6 +1079,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         &require_confirm_lock_screen_switch,
         &require_confirm_elevation_switch,
         &encrypt_templates_switch,
+        &unlock_gnome_keyring_switch,
     ] {
         switch.connect_active_notify(glib::clone!(
             #[strong]
@@ -1052,6 +1116,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         start_delay: start_delay_row.clone(),
         start_delay_scope: start_delay_scope_row.clone(),
         encrypt_templates: encrypt_templates_switch.clone(),
+        unlock_gnome_keyring: unlock_gnome_keyring_switch.clone(),
     });
 
     {
@@ -1104,6 +1169,10 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         proxy_cell,
         #[strong]
         overlay,
+        #[weak]
+        unlock_gnome_keyring_row,
+        #[strong]
+        keyring_supported,
         move || {
             // A second load repopulating live rows fires every change handler, which writes the
             // reloaded values back over whatever the user typed in between.
@@ -1133,15 +1202,21 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 proxy_cell,
                 #[strong]
                 overlay,
+                #[weak]
+                unlock_gnome_keyring_row,
+                #[strong]
+                keyring_supported,
                 async move {
                     let load_result = async {
                         let proxy = shared_proxy(&proxy_cell).await?;
-                        load_config_from_daemon(&proxy).await
+                        load_config_with_keyring_from_daemon(&proxy).await
                     }
                     .await;
 
                     match load_result {
-                        Ok(cfg) => {
+                        Ok((cfg, supported)) => {
+                            keyring_supported.set(supported);
+                            unlock_gnome_keyring_row.set_visible(supported);
                             populate_config_rows(
                                 &cfg,
                                 &rows,

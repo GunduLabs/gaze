@@ -2773,6 +2773,11 @@ impl AuthDaemon {
             .await
     }
 
+    async fn keyring_enabled(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<bool> {
+        Self::ensure_config_read_access(&header).await?;
+        Ok(self.current_config().await.storage.unlock_gnome_keyring)
+    }
+
     async fn verify_stop(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
         self.check_claim(&header).await?;
         self.cancel_active_tasks().await;
