@@ -200,6 +200,7 @@ async fn main() -> anyhow::Result<()> {
         claim_state: claim_state.clone(),
         active_cancel: active_cancel.clone(),
         active_extensions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        pam_internal: Arc::new(Mutex::new(std::collections::HashSet::new())),
         resume_pending: resume_pending.clone(),
         resume_seen: resume_seen.clone(),
         lock_epochs: lock_epochs.clone(),
