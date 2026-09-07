@@ -21,9 +21,8 @@ use gaze_core::config::{
     START_DELAY_SCOPE_LABELS, SecurityLevel,
 };
 use gaze_core::dbus::{
-    CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon, connect_gaze,
-    dbus_error_message, dbus_is_file_not_found, load_config_from_daemon,
-    try_load_config_from_daemon,
+    CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, connect_gaze, dbus_error_message,
+    dbus_is_file_not_found, load_config_from_daemon, try_load_config_from_daemon,
 };
 use std::{future::Future, time::Duration};
 use tui::{AuthScreen, BusyScreen, EnrollScreen, Tone, TuiAction, TuiTerminal};
@@ -321,7 +320,7 @@ async fn run_config_wizard(
     proxy: &GazeProxy<'_>,
     mut config: Config,
 ) -> anyhow::Result<()> {
-    // This setting is local-only so the Config DBus signature stays stable.
+    // The keyring setting is omitted from the legacy Config property.
     config.storage.unlock_gnome_keyring = Config::load()
         .unwrap_or_default()
         .storage
@@ -590,10 +589,17 @@ async fn run_config_wizard(
             false
         };
 
-    apply_config_to_daemon(proxy, &config).await?;
-    config.save()?;
+    proxy
+        .set_config_with_keyring(
+            zbus::zvariant::OwnedValue::try_from(gaze_core::dbus::DbusConfig::from(
+                config.clone(),
+            ))?,
+            config.storage.unlock_gnome_keyring,
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to save configuration: {}", dbus_error_message(&e)))?;
     term.write_line(&format!(
-        "{} Configuration saved. Daemon will restart to apply changes.",
+        "{} Configuration saved and applied.",
         style("✓").green().bold()
     ))?;
 

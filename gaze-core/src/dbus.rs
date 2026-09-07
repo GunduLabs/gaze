@@ -12,7 +12,7 @@ use zbus::zvariant::{OwnedValue, Type, Value};
 
 use strum_macros::{AsRefStr, Display, EnumString, VariantNames};
 
-/// Stable Config property layout. New local-only settings must not change this
+/// Stable Config property layout. New settings must not change this
 /// wire type because an installed daemon and client may be upgraded separately.
 #[derive(Clone, Debug, Value, OwnedValue, Type)]
 pub struct DbusConfig {
@@ -289,6 +289,18 @@ pub fn config_from_property(raw: OwnedValue) -> anyhow::Result<Option<Config>> {
         .map_err(|e| anyhow::anyhow!("Failed to decode config property: {}", e))
 }
 
+/// Decode a complete update while preserving the legacy Config property's wire format.
+pub fn config_update_from_property(
+    raw: OwnedValue,
+    unlock_gnome_keyring: bool,
+) -> anyhow::Result<Config> {
+    let mut config = config_from_property(raw)?
+        .ok_or_else(|| anyhow::anyhow!("incompatible configuration layout"))?;
+    config.storage.unlock_gnome_keyring = unlock_gnome_keyring;
+    config.storage.validate_keyring(&config.liveness)?;
+    Ok(config)
+}
+
 pub async fn load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Config> {
     try_load_config_from_daemon(proxy).await?.ok_or_else(|| {
         anyhow::anyhow!(
@@ -465,6 +477,7 @@ pub trait Gaze {
 
     async fn verify_start(&self, face_name: &str) -> zbus::Result<()>;
     async fn verify_start_for(&self, face_name: &str, pam_service: &str) -> zbus::Result<()>;
+    async fn verify_start_for_keyring(&self) -> zbus::Result<()>;
     async fn verify_stop(&self) -> zbus::Result<()>;
 
     async fn enroll_start(&self, face_name: &str) -> zbus::Result<()>;
@@ -488,6 +501,13 @@ pub trait Gaze {
 
     #[zbus(property)]
     fn set_config(&self, value: DbusConfig) -> zbus::Result<()>;
+
+    #[zbus(allow_interactive_auth)]
+    async fn set_config_with_keyring(
+        &self,
+        config: OwnedValue,
+        unlock_gnome_keyring: bool,
+    ) -> zbus::Result<()>;
 
     async fn get_gdm_face_auth(&self) -> zbus::Result<bool>;
     #[zbus(allow_interactive_auth)]
@@ -701,6 +721,48 @@ mod tests {
             },
         };
         OwnedValue::try_from(Value::from(old)).expect("old config converts to a value")
+    }
+
+    #[test]
+    fn keyring_and_its_prerequisites_can_be_disabled_in_one_update() {
+        for disable_liveness in [true, false] {
+            let mut config = Config::default();
+            config.storage.encrypt_templates = true;
+            config.storage.unlock_gnome_keyring = true;
+            config.liveness.enabled = true;
+            if disable_liveness {
+                config.liveness.enabled = false;
+            } else {
+                config.storage.encrypt_templates = false;
+            }
+            config.storage.unlock_gnome_keyring = false;
+
+            let wire = DbusConfig::from(config);
+            let raw = OwnedValue::try_from(Value::from(wire)).unwrap();
+            // Keeping the old flag reproduces the legacy setter's rejection.
+            assert!(config_update_from_property(raw.try_clone().unwrap(), true).is_err());
+            let updated = config_update_from_property(raw, false).unwrap();
+            assert!(!updated.storage.unlock_gnome_keyring);
+            assert_eq!(updated.liveness.enabled, !disable_liveness);
+            assert_eq!(updated.storage.encrypt_templates, disable_liveness);
+        }
+    }
+
+    #[test]
+    fn enabling_keyring_in_a_config_update_requires_both_prerequisites() {
+        for liveness in [false, true] {
+            for encryption in [false, true] {
+                let mut config = Config::default();
+                config.liveness.enabled = liveness;
+                config.storage.encrypt_templates = encryption;
+                let raw = OwnedValue::try_from(DbusConfig::from(config)).unwrap();
+                let updated = config_update_from_property(raw, true);
+                assert_eq!(updated.is_ok(), liveness && encryption);
+                if let Ok(updated) = updated {
+                    assert!(updated.storage.unlock_gnome_keyring);
+                }
+            }
+        }
     }
 
     #[test]

@@ -99,9 +99,10 @@ async fn verify_within(
     username: &str,
     service: Option<&str>,
     budget: Duration,
+    require_keyring: bool,
 ) -> Verdict {
     let verdict = verify_until(budget, service_retries_transient_give_up(service), || {
-        authenticate_biometric_with_status_on(proxy, username, service)
+        authenticate_biometric_with_status_on(proxy, username, service, require_keyring)
     })
     .await;
 
@@ -188,7 +189,16 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, _options: Pa
             unsafe { report_outcome(pamh, service.as_deref(), silent, text) };
         };
 
-        let verdict = verify_within(&proxy, &username, service.as_deref(), budget).await;
+        let require_keyring =
+            service.as_deref() == Some(FACE_PAM_SERVICE) && config.storage.unlock_gnome_keyring;
+        let verdict = verify_within(
+            &proxy,
+            &username,
+            service.as_deref(),
+            budget,
+            require_keyring,
+        )
+        .await;
         match verdict {
             Verdict::Reached(AuthOutcome::Match, _) => Ok((config, proxy, prompt_line)),
             Verdict::Reached(AuthOutcome::NoMatch, _) => {
@@ -306,7 +316,7 @@ async fn authenticate_biometric_with_timeout(
 ) -> Option<c_int> {
     let auth_future = async {
         let (_config, proxy) = setup_auth_env().await.ok()?;
-        authenticate_biometric_with_status_on(&proxy, username, service)
+        authenticate_biometric_with_status_on(&proxy, username, service, false)
             .await
             .ok()
             .map(|(outcome, _)| outcome)
