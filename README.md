@@ -39,7 +39,7 @@ gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 > Running `gnome-extensions enable` before rebooting will return `Extension "gaze@gundulabs.com" does not exist`. Shell only rescans extension directories at session start, and it drops extension IDs it has not scanned, so an enable applied before the reboot can vanish at the next logout. Reboot first, then run the commands. `gaze doctor` reports this case and prints the steps.
 
 <details>
-<summary>Manual install (Debian/Ubuntu, Fedora/openSUSE RPM systems, Arch/Manjaro/CachyOS)</summary>
+<summary>Manual install (Debian/Ubuntu, Fedora/openSUSE RPM systems, Arch/Manjaro/CachyOS, Gentoo)</summary>
 
 **Debian / Ubuntu**
 
@@ -128,6 +128,21 @@ flatpak install --from https://packages.gundulabs.com/flatpak/com.gundulabs.Gaze
 ```
 
 On openSUSE Tumbleweed, the RPM post-install script enables the shared PAM stack; reapply it manually with `sudo pam-config --add --gaze && sudo pam-config --update` if needed. For GNOME lock screen face unlock after manual package installation, also install `gaze-gnome-extension` (`gaze-gnome-extension-bin` on Arch), reboot, then from your GNOME session run `gnome-extensions enable gaze@gundulabs.com` and `gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true`. On KDE Plasma, install `gaze-kde` (`gaze-kde-bin` on Arch) for hands-free lock screen face unlock and a Face Unlock entry in System Settings; see the [KDE guide](https://gaze.gundulabs.com/guide/kde).
+
+**Gentoo**
+
+[Benny Powers](https://github.com/bennypowers/gentoo-overlay) maintains a gentoo ebuild for gaze. Please file gentoo-specific issues on that repo, not here.
+
+```bash
+eselect repository enable bennypowers
+emaint sync -r bennypowers
+# assuming x86
+echo "sys-auth/gaze ~amd64" >> /etc/portage/package.accept_keywords/gaze
+emerge -av sys-auth/gaze
+```
+
+See the [USE flags](https://gpo.zugaina.org/sys-auth/gaze/USE#ptabs) for available build-time options.
+
 
 </details>
 
