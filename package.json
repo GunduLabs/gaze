@@ -2,7 +2,7 @@
   "devDependencies": {
     "@viteplus/versions": "^2.0.8",
     "esbuild": "^0.28.2",
-    "vitepress": "2.0.0-alpha.19"
+    "vitepress": "2.0.0-alpha.20"
   },
   "scripts": {
     "docs:prepare": "./scripts/prepare-docs.sh",

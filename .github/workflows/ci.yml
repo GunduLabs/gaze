@@ -22,6 +22,9 @@ env:
   CARGO_TERM_COLOR: always
   JUST_VERSION: 1.58.0
   NFPM_VERSION: v2.47.0
+  # The OpenVINO job links against Intel's onnxruntime-openvino wheel, which trails the upstream
+  # ONNX Runtime releases that `ort_version` tracks. Only the CI check uses it; no package ships it.
+  ORT_OPENVINO_VERSION: 1.24.1
 
 jobs:
   fmt:
@@ -137,7 +140,7 @@ jobs:
       - name: Provide an OpenVINO-enabled ONNX Runtime
         run: |
           set -euo pipefail
-          version="$(just --evaluate ort_version)"
+          version="$ORT_OPENVINO_VERSION"
           wheel="$RUNNER_TEMP/ov-wheel"
           mkdir -p "$ORT_LIB_LOCATION" "$wheel"
           python3 -m pip download --no-deps --only-binary :all: \

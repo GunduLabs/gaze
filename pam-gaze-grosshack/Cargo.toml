@@ -3,7 +3,7 @@
 
 [package]
 name = "pam-gaze-grosshack"
-version = "0.2.13"
+version = "0.3.0"
 edition = "2024"
 description = "Deprecated compatibility shim for Gaze simultaneous PAM module"
 categories.workspace = true

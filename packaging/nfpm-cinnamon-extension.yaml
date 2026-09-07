@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: "gaze-cinnamon-extension"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+release: "${PACKAGE_RELEASE}"
+section: "admin"
+priority: "optional"
+maintainer: "Gundu Labs <maintainers@gundulabs.com>"
+description: "Cinnamon Spices extension for Gaze"
+vendor: "Gundu Labs"
+homepage: "https://gaze.gundulabs.com"
+license: "GPL-3.0-or-later"
+
+contents:
+  - src: "cinnamon-extension/metadata.json"
+    dst: "/usr/share/cinnamon/extensions/gaze@gundulabs.com/metadata.json"
+    file_info:
+      mode: 0644
+  - src: "cinnamon-extension/extension.js"
+    dst: "/usr/share/cinnamon/extensions/gaze@gundulabs.com/extension.js"
+    file_info:
+      mode: 0644
+  - src: "cinnamon-extension/settings-schema.json"
+    dst: "/usr/share/cinnamon/extensions/gaze@gundulabs.com/settings-schema.json"
+    file_info:
+      mode: 0644
+
+deb:
+  signature:
+    method: debsign
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+rpm:
+  signature:
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+depends:
+  - cinnamon
+
+overrides:
+  deb:
+    recommends:
+      - gaze
+  rpm:
+    recommends:
+      - gaze

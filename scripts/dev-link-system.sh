@@ -63,6 +63,7 @@ LOCAL_BIN_DIR=/usr/local/bin
 SYSTEMD_DROPIN=/etc/systemd/system/gazed.service.d/zz-gaze-dev-checkout.conf
 LEGACY_SYSTEMD_DROPIN=/etc/systemd/system/gazed.service.d/dev-checkout.conf
 SYSTEM_EXTENSION_DIR=/usr/share/gnome-shell/extensions/gaze@gundulabs.com
+SYSTEM_CINNAMON_EXTENSION_DIR=/usr/share/cinnamon/extensions/gaze@gundulabs.com
 SCHEMA_SRC="$REPO/packaging/config/org.gnome.shell.extensions.gaze.gschema.xml"
 SCHEMA_DST=/usr/share/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml
 POLKIT_POLICY_SRC="$REPO/packaging/config/com.gundulabs.gaze.policy"
@@ -448,12 +449,54 @@ detect_session_desktop() {
     [ -n "$user" ] && [ "$user" != root ] || { printf 'other'; return; }
     if pgrep -u "$user" -x gnome-shell >/dev/null 2>&1; then
         printf 'gnome'
+    elif pgrep -u "$user" -x cinnamon >/dev/null 2>&1; then
+        printf 'cinnamon'
     elif pgrep -u "$user" -x Hyprland >/dev/null 2>&1 || pgrep -u "$user" -x hyprland >/dev/null 2>&1; then
         printf 'hyprland'
     elif pgrep -u "$user" -x plasmashell >/dev/null 2>&1; then
         printf 'kde'
     else
         printf 'other'
+    fi
+}
+
+link_cinnamon_files() {
+    dir="$1"
+    install -d "$dir"
+    backup_and_install "$REPO/cinnamon-extension/metadata.json" "$dir/metadata.json" 0644
+    backup_and_install "$REPO/cinnamon-extension/extension.js" "$dir/extension.js" 0644
+    backup_and_install "$REPO/cinnamon-extension/settings-schema.json" "$dir/settings-schema.json" 0644
+}
+
+restore_cinnamon_files() {
+    dir="$1"
+    restore_or_remove "$dir/metadata.json"
+    restore_or_remove "$dir/extension.js"
+    restore_or_remove "$dir/settings-schema.json"
+    rmdir "$dir" 2>/dev/null || true
+}
+
+link_cinnamon_extension() {
+    [ -d /usr/share/cinnamon ] || return 0
+    link_cinnamon_files "$SYSTEM_CINNAMON_EXTENSION_DIR"
+
+    if home=$(sudo_user_home); then
+        user_cinnamon_dir="$home/.local/share/cinnamon/extensions/gaze@gundulabs.com"
+        sudo_user_group=$(id -gn "$SUDO_USER")
+        install -d -o "$SUDO_USER" -g "$sudo_user_group" "$user_cinnamon_dir"
+        link_cinnamon_files "$user_cinnamon_dir"
+        chown "$SUDO_USER:$sudo_user_group" \
+            "$user_cinnamon_dir/metadata.json" \
+            "$user_cinnamon_dir/extension.js" \
+            "$user_cinnamon_dir/settings-schema.json"
+    fi
+}
+
+restore_cinnamon_extension() {
+    restore_cinnamon_files "$SYSTEM_CINNAMON_EXTENSION_DIR"
+
+    if home=$(sudo_user_home); then
+        restore_cinnamon_files "$home/.local/share/cinnamon/extensions/gaze@gundulabs.com"
     fi
 }
 
@@ -641,6 +684,7 @@ case "$cmd" in
         link_polkit_pam_config
         link_polkit_policy
         link_gnome_extension
+        link_cinnamon_extension
         link_hyprlock_pam
         link_kde_pam
         setup_tpm_encryption
@@ -649,6 +693,9 @@ case "$cmd" in
         case "$(detect_session_desktop)" in
             gnome)
                 printf 'Restart GNOME Shell or log out/in for extension.js changes. Reopen preferences for prefs.js changes.\n'
+                ;;
+            cinnamon)
+                printf 'Restart Cinnamon (Alt+F2, r, Enter) for extension changes.\n'
                 ;;
             hyprland)
                 printf 'Set `pam_module = hyprlock-gaze` in ~/.config/hypr/hyprlock.conf to test hyprlock face unlock.\n'
@@ -666,6 +713,7 @@ case "$cmd" in
         restore_polkit_pam_config
         restore_polkit_policy
         restore_gnome_extension
+        restore_cinnamon_extension
         restore_hyprlock_pam
         restore_kde_pam
         teardown_tpm_encryption
