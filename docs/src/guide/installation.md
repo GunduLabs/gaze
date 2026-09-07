@@ -158,6 +158,22 @@ removing `gazed`, the PAM modules, and the systemd unit. See
 if this already happened to you.
 :::
 
+### Gentoo
+
+The Gaze repository is also a Gentoo overlay. Add it directly, accept the
+testing keyword on amd64, and install the package:
+
+```bash
+sudo eselect repository add gaze git https://github.com/GunduLabs/gaze.git
+sudo emaint sync -r gaze
+printf '%s\n' 'sys-auth/gaze ~amd64' 'sci-libs/onnxruntime-bin ~amd64' \
+  | sudo tee /etc/portage/package.accept_keywords/gaze
+sudo emerge --ask sys-auth/gaze
+```
+
+Set the `gui` or `gnome` USE flags in `/etc/portage/package.use/gaze` for the
+optional GTK app or GNOME Shell integration.
+
 ## Path C: GUI-only via Flatpak
 
 The Flatpak is published to the Gundu Labs repository. The signing key and repo

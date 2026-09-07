@@ -131,18 +131,18 @@ On openSUSE Tumbleweed, the RPM post-install script enables the shared PAM stack
 
 **Gentoo**
 
-[Benny Powers](https://github.com/bennypowers/gentoo-overlay) maintains a gentoo ebuild for gaze. Please file gentoo-specific issues on that repo, not here.
+The Gaze repository is also a Gentoo overlay:
 
 ```bash
-eselect repository enable bennypowers
-emaint sync -r bennypowers
-# assuming x86
-echo "sys-auth/gaze ~amd64" >> /etc/portage/package.accept_keywords/gaze
-emerge -av sys-auth/gaze
+sudo eselect repository add gaze git https://github.com/GunduLabs/gaze.git
+sudo emaint sync -r gaze
+printf '%s\n' 'sys-auth/gaze ~amd64' 'sci-libs/onnxruntime-bin ~amd64' \
+  | sudo tee /etc/portage/package.accept_keywords/gaze
+sudo emerge --ask sys-auth/gaze
 ```
 
-See the [USE flags](https://gpo.zugaina.org/sys-auth/gaze/USE#ptabs) for available build-time options.
-
+Set the `gui` or `gnome` USE flags for the optional GTK app or GNOME Shell
+integration.
 
 </details>
 
