@@ -3,7 +3,7 @@
 
 [package]
 name = "gaze-gui"
-version = "0.2.13"
+version = "0.3.0"
 edition = "2024"
 description = "GTK application for configuring and enrolling users with Gaze"
 categories.workspace = true
