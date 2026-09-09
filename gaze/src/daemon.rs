@@ -678,8 +678,8 @@ impl AuthDaemon {
         active: Option<(u32, bool, bool)>,
         seat_unoccupied: bool,
     ) -> Option<CameraBinding> {
-        if caller_uid == 0
-            && let Some((active_uid, true, has_pipewire)) = active
+        if let Some((active_uid, true, has_pipewire)) = active
+            && (caller_uid == 0 || caller_uid == active_uid)
         {
             // An active greeter holds the seat's camera ACL, so it outranks the target's leftover PipeWire socket.
             return Some(if has_pipewire {
@@ -1526,6 +1526,22 @@ mod tests {
         assert_eq!(
             AuthDaemon::resolve_camera_uid(0, 1001, true, false, Some((42, true, false)), false),
             Some(CameraBinding::SeatDevice)
+        );
+    }
+
+    #[test]
+    fn camera_answers_the_greeter_probing_for_itself() {
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(42, 42, false, false, Some((42, true, false)), false),
+            Some(CameraBinding::SeatDevice)
+        );
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(42, 42, true, true, Some((42, true, true)), false),
+            Some(CameraBinding::Session(42))
+        );
+        assert_eq!(
+            AuthDaemon::resolve_camera_uid(1000, 1000, false, false, Some((42, true, false)), false),
+            None
         );
     }
 
