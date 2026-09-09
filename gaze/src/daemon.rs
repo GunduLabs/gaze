@@ -1540,7 +1540,14 @@ mod tests {
             Some(CameraBinding::Session(42))
         );
         assert_eq!(
-            AuthDaemon::resolve_camera_uid(1000, 1000, false, false, Some((42, true, false)), false),
+            AuthDaemon::resolve_camera_uid(
+                1000,
+                1000,
+                false,
+                false,
+                Some((42, true, false)),
+                false
+            ),
             None
         );
     }
