@@ -108,6 +108,11 @@ pub fn internal_confirmation_accepted(response: Option<&str>) -> bool {
     response.map(str::trim) == Some(GAZE_CONFIRMED)
 }
 
+pub fn internal_prompt_confirmation_accepted(response: Option<&str>) -> bool {
+    let answer = response.map(str::trim);
+    answer == Some(GAZE_CONFIRMED) || answer == Some("")
+}
+
 pub type PamHandle = *mut c_void;
 
 #[macro_export]
@@ -369,7 +374,7 @@ pub unsafe fn confirm_authentication(pamh: PamHandle, prompt: PromptLine) -> boo
 pub unsafe fn confirm_authentication_internal(pamh: PamHandle) -> bool {
     let resp = unsafe { converse(pamh, PAM_PROMPT_ECHO_ON, GAZE_REQUIRE_CONFIRMATION) }
         .or_else(|| unsafe { converse(pamh, PAM_PROMPT_ECHO_OFF, GAZE_REQUIRE_CONFIRMATION) });
-    internal_confirmation_accepted(resp.as_deref())
+    internal_prompt_confirmation_accepted(resp.as_deref())
 }
 
 pub fn confirmation_accepted(response: Option<&str>) -> bool {
@@ -1421,5 +1426,19 @@ mod tests {
         assert!(!internal_confirmation_accepted(Some("yes")));
         assert!(!internal_confirmation_accepted(Some("GAZE_CANCEL")));
         assert!(!internal_confirmation_accepted(Some("gaze_confirmed")));
+    }
+
+    #[test]
+    fn a_plain_internal_prompt_still_takes_a_bare_newline() {
+        use gaze_core::dbus::GAZE_CONFIRMED;
+
+        assert!(internal_prompt_confirmation_accepted(Some(GAZE_CONFIRMED)));
+        assert!(internal_prompt_confirmation_accepted(Some("")));
+        assert!(internal_prompt_confirmation_accepted(Some("\n")));
+        assert!(internal_prompt_confirmation_accepted(Some("   ")));
+
+        assert!(!internal_prompt_confirmation_accepted(None));
+        assert!(!internal_prompt_confirmation_accepted(Some("yes")));
+        assert!(!internal_prompt_confirmation_accepted(Some("GAZE_CANCEL")));
     }
 }
