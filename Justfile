@@ -716,6 +716,7 @@ test:
     @{{ gui_notice }}
     {{ opencv_env }} cargo test --workspace {{ gui_exclude }} --release
     {{ opencv_env }} cargo test -p gaze-core --release --no-default-features --features gaze-core/openvino-config config::
+    bash scripts/test-keyring-pam.sh
 
 # Run the OpenVINO-gated tests with an OpenVINO-enabled system ONNX Runtime.
 [group("checks")]

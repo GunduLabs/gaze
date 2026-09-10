@@ -584,9 +584,21 @@ pub async fn setup_auth_env() -> Result<(Config, GazeProxy<'static>), c_int> {
         .await
         .map_err(|_| PAM_SERVICE_ERR)?;
     let config = match gaze_core::dbus::try_load_config_from_daemon(&proxy).await {
-        Ok(Some(config)) => config,
+        Ok(Some(mut config)) => {
+            config.storage.unlock_gnome_keyring = gaze_core::config::Config::load()
+                .unwrap_or_default()
+                .storage
+                .unlock_gnome_keyring;
+            // The flag comes from disk but the prerequisites come from the running daemon.
+            config.clamp_keyring();
+            config
+        }
         Ok(None) => {
-            gaze_core::config::Config::load_from(gaze_core::config::CONFIG_PATH).unwrap_or_default()
+            let mut config = gaze_core::config::Config::load_from(gaze_core::config::CONFIG_PATH)
+                .unwrap_or_default();
+            // An incompatible daemon cannot support credential release.
+            config.storage.unlock_gnome_keyring = false;
+            config
         }
         Err(_) => return Err(PAM_SERVICE_ERR),
     };
@@ -685,7 +697,15 @@ fn auth_outcome(
 async fn request_verify_start(
     proxy: &GazeProxy<'static>,
     service: Option<&str>,
+    require_keyring: bool,
 ) -> anyhow::Result<()> {
+    if require_keyring {
+        // No legacy fallback: older daemons cannot guarantee the active prerequisites.
+        return proxy
+            .verify_start_for_keyring()
+            .await
+            .map_err(|e| anyhow::anyhow!("Keyring verification start failed: {e}"));
+    }
     match proxy
         .verify_start_for("any", service.unwrap_or_default())
         .await
@@ -706,6 +726,7 @@ pub async fn authenticate_biometric_with_status_on_and_notify<F>(
     proxy: &GazeProxy<'static>,
     username: &str,
     service: Option<&str>,
+    require_keyring: bool,
     on_status: F,
 ) -> anyhow::Result<(AuthOutcome, Option<gaze_core::dbus::CaptureStatus>)>
 where
@@ -729,7 +750,7 @@ where
         .receive_face_status()
         .await
         .map_err(|e| anyhow::anyhow!("Stream failed: {}", e))?;
-    request_verify_start(proxy, service).await?;
+    request_verify_start(proxy, service, require_keyring).await?;
 
     use futures::StreamExt;
     let mut last_status: Option<gaze_core::dbus::CaptureStatus> = None;
@@ -763,8 +784,16 @@ pub async fn authenticate_biometric_with_status_on(
     proxy: &GazeProxy<'static>,
     username: &str,
     service: Option<&str>,
+    require_keyring: bool,
 ) -> anyhow::Result<(AuthOutcome, Option<gaze_core::dbus::CaptureStatus>)> {
-    authenticate_biometric_with_status_on_and_notify(proxy, username, service, |_| {}).await
+    authenticate_biometric_with_status_on_and_notify(
+        proxy,
+        username,
+        service,
+        require_keyring,
+        |_| {},
+    )
+    .await
 }
 
 pub fn get_user_uid(username: &str) -> Option<u32> {

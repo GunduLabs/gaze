@@ -22,6 +22,7 @@ openvino = ["gaze-core/openvino", "ort/openvino"]
 aes-gcm = "0.11.1"
 anyhow = "1.0.104"
 gaze-core = { path = "../gaze-core" }
+gaze-security = { path = "../gaze-security" }
 getrandom = "0.4.3"
 image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
 libc = "0.2.189"

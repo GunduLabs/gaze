@@ -23,6 +23,7 @@ name = "gaze"
 path = "src/main.rs"
 
 [dependencies]
+gaze-security = { path = "../gaze-security" }
 anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive"] }
 clap_complete = { version = "4.6.9", features = ["unstable-dynamic"] }

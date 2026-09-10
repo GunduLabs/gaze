@@ -99,9 +99,10 @@ async fn verify_within(
     username: &str,
     service: Option<&str>,
     budget: Duration,
+    require_keyring: bool,
 ) -> Verdict {
     let verdict = verify_until(budget, service_retries_transient_give_up(service), || {
-        authenticate_biometric_with_status_on(proxy, username, service)
+        authenticate_biometric_with_status_on(proxy, username, service, require_keyring)
     })
     .await;
 
@@ -199,9 +200,18 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, _options: Pa
             unsafe { report_outcome(pamh, service.as_deref(), silent, text, is_internal) };
         };
 
-        let verdict = verify_within(&proxy, &username, service.as_deref(), budget).await;
+        let require_keyring =
+            service.as_deref() == Some(FACE_PAM_SERVICE) && config.storage.unlock_gnome_keyring;
+        let verdict = verify_within(
+            &proxy,
+            &username,
+            service.as_deref(),
+            budget,
+            require_keyring,
+        )
+        .await;
         match verdict {
-            Verdict::Reached(AuthOutcome::Match, _) => Ok((config.auth, is_internal, prompt_line)),
+            Verdict::Reached(AuthOutcome::Match, _) => Ok((config, is_internal, prompt_line)),
             Verdict::Reached(AuthOutcome::NoMatch, _) => {
                 tell(if is_internal {
                     GAZE_MSG_FACE_NOT_RECOGNIZED
@@ -236,31 +246,97 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, _options: Pa
             }
         }
     });
-    let (loaded_auth, is_internal, prompt_line) = match matched {
+    let (loaded_config, is_internal, prompt_line) = match matched {
         Ok(session) => session,
         Err(code) => return code,
     };
 
-    if !confirmation_required(Some(&loaded_auth), service.as_deref()) {
+    let authenticated = if !confirmation_required(Some(&loaded_config.auth), service.as_deref()) {
         unsafe { report_face_verified(pamh, silent, prompt_line, is_internal) };
-        return PAM_SUCCESS;
-    }
-
-    // A prompt on a slot nobody answers blocks until the lock ends.
-    if service_cannot_be_prompted(service.as_deref()) {
-        return PAM_SUCCESS;
-    }
-
-    if is_polkit {
-        return unsafe { confirm_via_polkit_dialog(pamh, is_internal) };
-    }
-
-    let confirmed = if is_internal {
-        unsafe { confirm_authentication_internal(pamh) }
+        PAM_SUCCESS
+    } else if service_cannot_be_prompted(service.as_deref()) {
+        // A prompt on a slot nobody answers blocks until the lock ends.
+        PAM_SUCCESS
+    } else if is_polkit {
+        unsafe { confirm_via_polkit_dialog(pamh, is_internal) }
     } else {
-        unsafe { confirm_authentication(pamh, prompt_line) }
+        let confirmed = if is_internal {
+            unsafe { confirm_authentication_internal(pamh) }
+        } else {
+            unsafe { confirm_authentication(pamh, prompt_line) }
+        };
+        if confirmed { PAM_SUCCESS } else { PAM_AUTH_ERR }
     };
-    if confirmed { PAM_SUCCESS } else { PAM_AUTH_ERR }
+    let result = finish_keyring(
+        authenticated,
+        service.as_deref(),
+        &loaded_config,
+        || unsafe { supply_keyring_token(pamh, &username) },
+    );
+    if authenticated == PAM_SUCCESS && result == PAM_AUTHINFO_UNAVAIL {
+        unsafe {
+            report_outcome(
+                pamh,
+                service.as_deref(),
+                silent,
+                "Keyring unlock unavailable. Enter your password.",
+                is_internal,
+            )
+        };
+    }
+    result
+}
+
+// Keep the release gate separate from FFI so tests can prove failures never read a secret.
+fn finish_keyring<F>(
+    authenticated: c_int,
+    service: Option<&str>,
+    config: &gaze_core::config::Config,
+    supply: F,
+) -> c_int
+where
+    F: FnOnce() -> Result<(), ()>,
+{
+    if authenticated != PAM_SUCCESS
+        || service != Some(FACE_PAM_SERVICE)
+        || !config.storage.unlock_gnome_keyring
+    {
+        return authenticated;
+    }
+    if config.storage.validate_keyring(&config.liveness).is_err() || supply().is_err() {
+        return PAM_AUTHINFO_UNAVAIL;
+    }
+    PAM_SUCCESS
+}
+
+unsafe fn supply_keyring_token(pamh: PamHandle, username: &str) -> Result<(), ()> {
+    if unsafe { libc::geteuid() } != 0 {
+        return Err(());
+    }
+    let mut existing = std::ptr::null();
+    if unsafe { pam_get_item(pamh, PAM_AUTHTOK, &mut existing) } != PAM_SUCCESS {
+        return Err(());
+    }
+    // GDM starts the face service by answering its password query with an empty
+    // string. That placeholder cannot unlock a keyring. Preserve only a real
+    // password supplied by another trusted PAM module.
+    if existing_token_has_password(existing.cast()) {
+        return Ok(());
+    }
+    // An unenrolled user has nothing to unlock: leave the keyring locked as before rather
+    // than failing the face login for everyone who has not run `gaze keyring`.
+    let Some(secret) = gaze_security::keyring::load(username).map_err(|_| ())? else {
+        return Ok(());
+    };
+    // Linux-PAM copies the token; our zeroizing buffer is dropped immediately afterwards.
+    if unsafe { pam_set_item(pamh, PAM_AUTHTOK, secret.as_ptr().cast()) } != PAM_SUCCESS {
+        return Err(());
+    }
+    Ok(())
+}
+
+fn existing_token_has_password(token: *const c_char) -> bool {
+    !token.is_null() && !unsafe { CStr::from_ptr(token) }.to_bytes().is_empty()
 }
 
 const PROMPT_RETIRE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -273,7 +349,7 @@ async fn authenticate_biometric_with_timeout(
 ) -> Option<c_int> {
     let auth_future = async {
         let (_config, proxy) = setup_auth_env().await.ok()?;
-        authenticate_biometric_with_status_on(&proxy, username, service)
+        authenticate_biometric_with_status_on(&proxy, username, service, false)
             .await
             .ok()
             .map(|(outcome, _)| outcome)
@@ -580,6 +656,115 @@ mod tests {
     use std::sync::mpsc;
     use std::sync::{Mutex, MutexGuard};
     use std::time::Instant;
+
+    fn keyring_config() -> gaze_core::config::Config {
+        let mut config = gaze_core::config::Config::default();
+        config.storage.encrypt_templates = true;
+        config.storage.unlock_gnome_keyring = true;
+        config.liveness.enabled = true;
+        config
+    }
+
+    #[test]
+    fn failed_face_liveness_or_confirmation_never_reads_a_credential() {
+        for failure in [
+            PAM_AUTH_ERR,
+            PAM_AUTHINFO_UNAVAIL,
+            PAM_IGNORE,
+            PAM_SERVICE_ERR,
+        ] {
+            assert_eq!(
+                finish_keyring(
+                    failure,
+                    Some(FACE_PAM_SERVICE),
+                    &keyring_config(),
+                    || panic!("must not release")
+                ),
+                failure
+            );
+        }
+    }
+
+    #[test]
+    fn keyring_is_opt_in_and_gdm_only() {
+        assert_eq!(
+            finish_keyring(
+                PAM_SUCCESS,
+                Some(FACE_PAM_SERVICE),
+                &Default::default(),
+                || panic!("disabled")
+            ),
+            PAM_SUCCESS
+        );
+        for service in [
+            None,
+            Some("sudo"),
+            Some("gdm-password"),
+            Some("kde-fingerprint"),
+            Some("login"),
+        ] {
+            assert_eq!(
+                finish_keyring(PAM_SUCCESS, service, &keyring_config(), || panic!(
+                    "not gdm-face"
+                )),
+                PAM_SUCCESS
+            );
+        }
+    }
+
+    #[test]
+    fn keyring_replaces_gdms_empty_password_placeholder() {
+        assert!(!existing_token_has_password(std::ptr::null()));
+        assert!(!existing_token_has_password(c"".as_ptr()));
+        assert!(existing_token_has_password(c"password".as_ptr()));
+    }
+
+    #[test]
+    fn keyring_requires_tpm_configuration_and_liveness() {
+        let mut config = keyring_config();
+        config.storage.encrypt_templates = false;
+        assert_eq!(
+            finish_keyring(PAM_SUCCESS, Some(FACE_PAM_SERVICE), &config, || panic!(
+                "no TPM"
+            )),
+            PAM_AUTHINFO_UNAVAIL
+        );
+        config.storage.encrypt_templates = true;
+        config.liveness.enabled = false;
+        assert_eq!(
+            finish_keyring(PAM_SUCCESS, Some(FACE_PAM_SERVICE), &config, || panic!(
+                "no liveness"
+            )),
+            PAM_AUTHINFO_UNAVAIL
+        );
+    }
+
+    #[test]
+    fn successful_biometrics_supply_token_once_and_failure_requests_password_fallback() {
+        let supplied = Cell::new(0);
+        assert_eq!(
+            finish_keyring(
+                PAM_SUCCESS,
+                Some(FACE_PAM_SERVICE),
+                &keyring_config(),
+                || {
+                    supplied.set(supplied.get() + 1);
+                    Ok(())
+                }
+            ),
+            PAM_SUCCESS
+        );
+        assert_eq!(supplied.get(), 1);
+        assert_eq!(
+            finish_keyring(
+                PAM_SUCCESS,
+                Some(FACE_PAM_SERVICE),
+                &keyring_config(),
+                || Err(())
+            ),
+            PAM_AUTHINFO_UNAVAIL
+        );
+    }
 
     #[test]
     fn mode_parsing_defaults_to_sequential() {

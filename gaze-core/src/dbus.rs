@@ -2,12 +2,66 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #![allow(unreachable_patterns)]
-use crate::config::Config;
+use crate::config::{
+    AuthConfig, CameraConfig, Config, EnrollmentConfig, InferenceConfig, LivenessConfig,
+    SecurityLevel,
+};
 use serde::{Deserialize, Serialize};
 use zbus::proxy;
 use zbus::zvariant::{OwnedValue, Type, Value};
 
 use strum_macros::{AsRefStr, Display, EnumString, VariantNames};
+
+/// Stable Config property layout. New settings must not change this
+/// wire type because an installed daemon and client may be upgraded separately.
+#[derive(Clone, Debug, Value, OwnedValue, Type)]
+pub struct DbusConfig {
+    inference: InferenceConfig,
+    security: SecurityLevel,
+    cameras: CameraConfig,
+    auth: AuthConfig,
+    enrollment: EnrollmentConfig,
+    liveness: LivenessConfig,
+    storage: DbusStorageConfig,
+}
+
+#[derive(Clone, Debug, Value, OwnedValue, Type)]
+struct DbusStorageConfig {
+    encrypt_templates: bool,
+}
+
+impl From<Config> for DbusConfig {
+    fn from(config: Config) -> Self {
+        Self {
+            inference: config.inference,
+            security: config.security,
+            cameras: config.cameras,
+            auth: config.auth,
+            enrollment: config.enrollment,
+            liveness: config.liveness,
+            storage: DbusStorageConfig {
+                encrypt_templates: config.storage.encrypt_templates,
+            },
+        }
+    }
+}
+
+impl From<DbusConfig> for Config {
+    fn from(config: DbusConfig) -> Self {
+        Self {
+            inference: config.inference,
+            security: config.security,
+            cameras: config.cameras,
+            auth: config.auth,
+            enrollment: config.enrollment,
+            liveness: config.liveness,
+            storage: crate::config::StorageConfig {
+                encrypt_templates: config.storage.encrypt_templates,
+                unlock_gnome_keyring: false,
+            },
+        }
+    }
+}
 
 #[derive(
     Clone,
@@ -181,6 +235,10 @@ pub fn dbus_is_not_activatable(err: &zbus::Error) -> bool {
     s.contains("not activatable") || s.contains("ServiceUnknown")
 }
 
+pub fn dbus_is_unknown_method(err: &zbus::Error) -> bool {
+    err.to_string().contains("UnknownMethod")
+}
+
 /// Backstop for a client awaiting one verify verdict. The daemon bounds its own run well inside
 /// this, so reaching it means the daemon stopped answering rather than that the face was rejected.
 pub const VERIFY_CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
@@ -230,7 +288,7 @@ pub async fn try_load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Resul
 }
 
 pub fn config_from_property(raw: OwnedValue) -> anyhow::Result<Option<Config>> {
-    let expected = <Config as Type>::SIGNATURE;
+    let expected = <DbusConfig as Type>::SIGNATURE;
     let actual = raw.value_signature();
     if actual != expected {
         tracing::warn!(
@@ -241,9 +299,22 @@ pub fn config_from_property(raw: OwnedValue) -> anyhow::Result<Option<Config>> {
         return Ok(None);
     }
 
-    Config::try_from(raw)
+    DbusConfig::try_from(raw)
+        .map(Config::from)
         .map(Some)
         .map_err(|e| anyhow::anyhow!("Failed to decode config property: {}", e))
+}
+
+/// Decode a complete update while preserving the legacy Config property's wire format.
+pub fn config_update_from_property(
+    raw: OwnedValue,
+    unlock_gnome_keyring: bool,
+) -> anyhow::Result<Config> {
+    let mut config = config_from_property(raw)?
+        .ok_or_else(|| anyhow::anyhow!("incompatible configuration layout"))?;
+    config.storage.unlock_gnome_keyring = unlock_gnome_keyring;
+    config.storage.validate_keyring(&config.liveness)?;
+    Ok(config)
 }
 
 pub async fn load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Config> {
@@ -255,11 +326,45 @@ pub async fn load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Co
     })
 }
 
+/// Load the complete configuration for clients that can manage the local-only keyring setting.
+/// Older daemons did not expose that flag, so they safely read as disabled and report false.
+pub async fn load_config_with_keyring_from_daemon(
+    proxy: &GazeProxy<'_>,
+) -> anyhow::Result<(Config, bool)> {
+    let mut config = load_config_from_daemon(proxy).await?;
+    let supported = match proxy.keyring_enabled().await {
+        Ok(enabled) => {
+            config.storage.unlock_gnome_keyring = enabled;
+            true
+        }
+        Err(error) if dbus_is_unknown_method(&error) => false,
+        Err(error) => {
+            return Err(anyhow::anyhow!(
+                "Failed to read GNOME Keyring configuration: {}",
+                error
+            ));
+        }
+    };
+    Ok((config, supported))
+}
+
 pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> anyhow::Result<()> {
     proxy
-        .set_config(config.clone())
+        .set_config(config.clone().into())
         .await
         .map_err(|e| anyhow::anyhow!("Failed to set config property: {}", e))
+}
+
+pub async fn apply_config_with_keyring_to_daemon(
+    proxy: &GazeProxy<'_>,
+    config: &Config,
+) -> anyhow::Result<()> {
+    let unlock_gnome_keyring = config.storage.unlock_gnome_keyring;
+    let config = OwnedValue::try_from(DbusConfig::from(config.clone()))?;
+    proxy
+        .set_config_with_keyring(config, unlock_gnome_keyring)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to set keyring-aware config: {}", e))
 }
 
 pub async fn get_pam_internal(proxy: &GazeProxy<'_>) -> Vec<String> {
@@ -426,7 +531,10 @@ pub trait Gaze {
 
     async fn verify_start(&self, face_name: &str) -> zbus::Result<()>;
     async fn verify_start_for(&self, face_name: &str, pam_service: &str) -> zbus::Result<()>;
+    async fn verify_start_for_keyring(&self) -> zbus::Result<()>;
     async fn verify_stop(&self) -> zbus::Result<()>;
+
+    async fn keyring_enabled(&self) -> zbus::Result<bool>;
 
     async fn enroll_start(&self, face_name: &str) -> zbus::Result<()>;
     async fn enroll_stop(&self) -> zbus::Result<()>;
@@ -445,10 +553,17 @@ pub trait Gaze {
     async fn delete_faces(&self, username: &str) -> zbus::Result<bool>;
 
     #[zbus(property)]
-    fn config(&self) -> zbus::Result<Config>;
+    fn config(&self) -> zbus::Result<DbusConfig>;
 
     #[zbus(property)]
-    fn set_config(&self, value: Config) -> zbus::Result<()>;
+    fn set_config(&self, value: DbusConfig) -> zbus::Result<()>;
+
+    #[zbus(allow_interactive_auth)]
+    async fn set_config_with_keyring(
+        &self,
+        config: OwnedValue,
+        unlock_gnome_keyring: bool,
+    ) -> zbus::Result<()>;
 
     #[zbus(property)]
     fn pam_internal(&self) -> zbus::Result<Vec<String>>;
@@ -646,13 +761,18 @@ mod tests {
     }
 
     #[derive(Clone, Debug, Value, OwnedValue, Type)]
+    struct OldStorage {
+        encrypt_templates: bool,
+    }
+
+    #[derive(Clone, Debug, Value, OwnedValue, Type)]
     struct OldConfig {
         security: crate::config::SecurityLevel,
         cameras: crate::config::CameraConfig,
         auth: crate::config::AuthConfig,
         enrollment: crate::config::EnrollmentConfig,
         liveness: crate::config::LivenessConfig,
-        storage: crate::config::StorageConfig,
+        storage: OldStorage,
     }
 
     fn old_daemon_property() -> OwnedValue {
@@ -662,14 +782,58 @@ mod tests {
             auth: Default::default(),
             enrollment: Default::default(),
             liveness: Default::default(),
-            storage: Default::default(),
+            storage: OldStorage {
+                encrypt_templates: false,
+            },
         };
         OwnedValue::try_from(Value::from(old)).expect("old config converts to a value")
     }
 
     #[test]
+    fn keyring_and_its_prerequisites_can_be_disabled_in_one_update() {
+        for disable_liveness in [true, false] {
+            let mut config = Config::default();
+            config.storage.encrypt_templates = true;
+            config.storage.unlock_gnome_keyring = true;
+            config.liveness.enabled = true;
+            if disable_liveness {
+                config.liveness.enabled = false;
+            } else {
+                config.storage.encrypt_templates = false;
+            }
+            config.storage.unlock_gnome_keyring = false;
+
+            let wire = DbusConfig::from(config);
+            let raw = OwnedValue::try_from(Value::from(wire)).unwrap();
+            // A keyring-aware client sees the flag, so an inconsistent update is a real error.
+            assert!(config_update_from_property(raw.try_clone().unwrap(), true).is_err());
+            let updated = config_update_from_property(raw, false).unwrap();
+            assert!(!updated.storage.unlock_gnome_keyring);
+            assert_eq!(updated.liveness.enabled, !disable_liveness);
+            assert_eq!(updated.storage.encrypt_templates, disable_liveness);
+        }
+    }
+
+    #[test]
+    fn enabling_keyring_in_a_config_update_requires_both_prerequisites() {
+        for liveness in [false, true] {
+            for encryption in [false, true] {
+                let mut config = Config::default();
+                config.liveness.enabled = liveness;
+                config.storage.encrypt_templates = encryption;
+                let raw = OwnedValue::try_from(DbusConfig::from(config)).unwrap();
+                let updated = config_update_from_property(raw, true);
+                assert_eq!(updated.is_ok(), liveness && encryption);
+                if let Ok(updated) = updated {
+                    assert!(updated.storage.unlock_gnome_keyring);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn current_layout_decodes() {
-        let raw = OwnedValue::try_from(Value::from(Config::default())).unwrap();
+        let raw = OwnedValue::try_from(Value::from(DbusConfig::from(Config::default()))).unwrap();
         let decoded = config_from_property(raw)
             .expect("no error")
             .expect("current layout is readable");
@@ -691,7 +855,7 @@ mod tests {
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
         let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            Config::try_from(raw).is_ok()
+            DbusConfig::try_from(raw).is_ok()
         }));
         std::panic::set_hook(previous);
         assert!(
@@ -762,7 +926,11 @@ mod tests {
         let err = zbus::Error::Failure("ServiceUnknown".to_string());
         assert!(dbus_is_not_activatable(&err));
 
+        let err = zbus::Error::Failure("org.freedesktop.DBus.Error.UnknownMethod".to_string());
+        assert!(dbus_is_unknown_method(&err));
+
         let err = zbus::Error::Failure("camera unavailable".to_string());
         assert!(!dbus_is_not_activatable(&err));
+        assert!(!dbus_is_unknown_method(&err));
     }
 }
