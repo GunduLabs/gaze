@@ -3,53 +3,69 @@
 
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": [
+    "config:recommended",
+    ":configMigration",
+    ":pinDevDependencies",
+    "abandonments:recommended",
+    "security:minimumReleaseAgeNpm",
+    ":maintainLockFilesWeekly",
+  ],
 
   // Keep update PRs without creating a persistent dashboard issue.
   "dependencyDashboard": false,
   "dependencyDashboardApproval": false,
   "automerge": false,
   "timezone": "America/New_York",
-  "schedule": ["* 6-9 * * *"],
-  "minimumReleaseAge": "1 day",
-  "prConcurrentLimit": 5,
-  "prHourlyLimit": 2,
+  "rangeStrategy": "bump",
+  "pinDigests": false,
+  "prConcurrentLimit": 0,
+  "prHourlyLimit": 0,
   "labels": ["dependencies"],
   "semanticCommits": "enabled",
   "semanticCommitType": "chore",
 
   // Nix support requires explicit opt-in.
   "nix": { "enabled": true },
+
+  // Weekly, but unrestricted within the day so a run cannot miss the window.
   "lockFileMaintenance": {
     "enabled": true,
-    "schedule": ["* 6-9 * * 1"],
+    "schedule": ["on monday"],
   },
 
   "packageRules": [
-    {
-      "description": "Keep manifest minimums current, as with the previous Dependabot setup",
-      "matchManagers": ["cargo", "bun", "npm"],
-      "rangeStrategy": "bump",
-    },
     {
       "matchManagers": ["cargo"],
       "addLabels": ["rust"],
       "semanticCommitType": "fix",
     },
     {
+      "description": "Non-major Rust crate updates: batch, run daily",
       "matchManagers": ["cargo"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "Rust non-major dependencies",
+      "schedule": ["* 0-5 * * *"],
     },
     {
+      "description": "Non-major docs (npm/bun) updates: batch, run daily",
       "matchManagers": ["bun", "npm"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "Docs non-major dependencies",
+      "schedule": ["* 0-5 * * *"],
     },
     {
+      "description": "Major Rust/docs updates: open a PR every other day",
+      "matchManagers": ["cargo", "bun", "npm"],
+      "matchUpdateTypes": ["major"],
+      "schedule": ["* 0-5 */2 * *"],
+    },
+    {
+      "description": "Group GitHub Actions updates, run daily",
       "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "groupName": "GitHub Actions",
+      "schedule": ["* 0-5 * * *"],
     },
     {
       // Distro versions identify package targets and must change with their matrix metadata.
@@ -59,10 +75,17 @@
       "enabled": false,
     },
     {
+      "description": "Non-major CI tool version bumps: run daily",
       "matchManagers": ["custom.regex"],
       "matchPackageNames": ["casey/just", "goreleaser/nfpm"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "Build tools",
+      "schedule": ["* 0-5 * * *"],
+    },
+    {
+      "description": "Never pin actions or container images to a digest. The presets that do this, helpers:pinGitHubActionDigests and docker:pinDigests, are deliberately left out of extends above; this rule is the backstop in case they ever come back, and it is last in packageRules so it overrides anything a preset sets",
+      "matchManagers": ["github-actions", "dockerfile", "docker-compose"],
+      "pinDigests": false,
     },
   ],
 
