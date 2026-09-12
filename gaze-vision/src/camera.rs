@@ -10,8 +10,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{info, warn};
 
-use crate::config::{CameraConfig, DEFAULT_RGB_CAMERA};
-use crate::ir::devices::{camera_function_of, find_device, usb_ids_of};
+use gaze_core::config::{CameraConfig, DEFAULT_RGB_CAMERA};
+use gaze_core::ir::devices::{camera_function_of, find_device, usb_ids_of};
 
 const REALTEK_IR_YUY2_WIDTH: u32 = 640;
 const REALTEK_IR_YUY2_HEIGHT: u32 = 480;
@@ -985,7 +985,7 @@ impl Camera {
                 return fps_val;
             }
         }
-        crate::config::DEFAULT_CAMERA_FPS
+        gaze_core::config::DEFAULT_CAMERA_FPS
     }
 
     /// Wait for the next frame while checking `stop` between short polling intervals.

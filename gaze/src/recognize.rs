@@ -5,10 +5,8 @@ use image::RgbImage;
 use ndarray::{Array1, Array4};
 use ort::{session::Session, value::TensorRef};
 
-use gaze_core::{
-    config::InferenceConfig,
-    inference::{InferenceRuntime, create_session},
-};
+use gaze_core::config::InferenceConfig;
+use gaze_vision::inference::{InferenceRuntime, create_session};
 
 pub struct FaceRecognizer {
     session: Session,
