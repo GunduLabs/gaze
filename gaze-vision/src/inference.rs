@@ -5,7 +5,10 @@ use anyhow::Context;
 use gaze_core::config::InferenceConfig;
 #[cfg(feature = "openvino")]
 use ort::ep;
-use ort::session::{Session, builder::GraphOptimizationLevel};
+use ort::session::{
+    Session,
+    builder::{GraphOptimizationLevel, SessionBuilder},
+};
 use std::ffi::CStr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,7 +67,7 @@ pub fn ensure_supported_runtime() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn build_cpu_session(model_path: &str) -> anyhow::Result<Session> {
+fn session_builder() -> anyhow::Result<SessionBuilder> {
     Session::builder()
         .map_err(|error| {
             anyhow::anyhow!("failed to create an ONNX Runtime session builder: {error}")
@@ -72,7 +75,11 @@ fn build_cpu_session(model_path: &str) -> anyhow::Result<Session> {
         .with_optimization_level(GraphOptimizationLevel::All)
         .map_err(|error| {
             anyhow::anyhow!("failed to set the ONNX Runtime graph optimization level: {error}")
-        })?
+        })
+}
+
+fn build_cpu_session(model_path: &str) -> anyhow::Result<Session> {
+    session_builder()?
         .commit_from_file(model_path)
         .with_context(|| format!("failed to load ONNX model {model_path} on cpu"))
 }
@@ -80,14 +87,7 @@ fn build_cpu_session(model_path: &str) -> anyhow::Result<Session> {
 #[cfg(feature = "openvino")]
 fn build_openvino_session(model_path: &str, device: &str) -> anyhow::Result<Session> {
     let openvino_device = device.to_ascii_uppercase();
-    Session::builder()
-        .map_err(|error| {
-            anyhow::anyhow!("failed to create an ONNX Runtime session builder: {error}")
-        })?
-        .with_optimization_level(GraphOptimizationLevel::All)
-        .map_err(|error| {
-            anyhow::anyhow!("failed to set the ONNX Runtime graph optimization level: {error}")
-        })?
+    session_builder()?
         .with_execution_providers([ep::OpenVINO::default()
             .with_device_type(&openvino_device)
             .build()

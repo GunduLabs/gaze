@@ -164,20 +164,20 @@ pub fn eye_motion_is_live(landmarks: &[[(f32, f32); 5]], min_ratio: Option<f32>)
 
     let dist = |a: (f32, f32), b: (f32, f32)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
 
-    let ratios: Vec<f32> = landmarks
+    let (pairs, motion_ratio) = landmarks
         .windows(2)
         .filter_map(|pair| {
             let motion = (dist(pair[0][0], pair[1][0]) + dist(pair[0][1], pair[1][1])) / 2.0;
             let ipd = (dist(pair[0][0], pair[0][1]) + dist(pair[1][0], pair[1][1])) / 2.0;
             (ipd > f32::EPSILON).then(|| motion / ipd)
         })
-        .collect();
+        .fold((0, 0.0_f32), |(pairs, max_ratio), ratio| {
+            (pairs + 1, max_ratio.max(ratio))
+        });
 
-    let pairs = ratios.len();
     if pairs == 0 {
         return neutral;
     }
-    let motion_ratio = ratios.iter().copied().fold(0.0_f32, f32::max);
 
     EyeMotion {
         live: motion_ratio >= threshold,

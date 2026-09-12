@@ -601,10 +601,7 @@ impl LivenessConfig {
                 self.threshold
             );
         }
-        if !self.max_seconds.is_finite()
-            || self.max_seconds < MIN_LIVENESS_MAX_SECONDS
-            || self.max_seconds > MAX_LIVENESS_MAX_SECONDS
-        {
+        if !Self::max_seconds_in_range(self.max_seconds) {
             anyhow::bail!(
                 "liveness.max_seconds must be between {} and {}, got {}",
                 MIN_LIVENESS_MAX_SECONDS,
@@ -620,6 +617,11 @@ impl LivenessConfig {
             && (MIN_LIVENESS_THRESHOLD..=MAX_LIVENESS_THRESHOLD).contains(&threshold)
     }
 
+    fn max_seconds_in_range(max_seconds: f64) -> bool {
+        max_seconds.is_finite()
+            && (MIN_LIVENESS_MAX_SECONDS..=MAX_LIVENESS_MAX_SECONDS).contains(&max_seconds)
+    }
+
     pub fn effective_threshold(&self) -> f64 {
         if Self::threshold_in_range(self.threshold) {
             self.threshold
@@ -629,9 +631,7 @@ impl LivenessConfig {
     }
 
     pub fn effective_max_seconds(&self) -> f64 {
-        if self.max_seconds.is_finite()
-            && (MIN_LIVENESS_MAX_SECONDS..=MAX_LIVENESS_MAX_SECONDS).contains(&self.max_seconds)
-        {
+        if Self::max_seconds_in_range(self.max_seconds) {
             self.max_seconds
         } else {
             default_max_seconds()

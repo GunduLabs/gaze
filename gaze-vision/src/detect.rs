@@ -317,14 +317,7 @@ fn nms(boxes: &[[f32; 4]], scores: &[f32], iou_threshold: f32) -> Vec<usize> {
     while !indices.is_empty() {
         let current = indices[0];
         keep.push(current);
-
-        let mut next_indices = Vec::new();
-        for &idx in indices.iter().skip(1) {
-            if iou(&boxes[current], &boxes[idx]) < iou_threshold {
-                next_indices.push(idx);
-            }
-        }
-        indices = next_indices;
+        indices.retain(|&idx| idx != current && iou(&boxes[current], &boxes[idx]) < iou_threshold);
     }
 
     keep
