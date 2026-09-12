@@ -15,7 +15,7 @@ const ENROLL_STABLE_PITCH_RANGE: f32 = 0.06;
 const ENROLL_HORIZONTAL_POSE_DELTA: f32 = 0.16;
 const ENROLL_VERTICAL_POSE_DELTA: f32 = 0.07;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Spectrum {
     Rgb,
     Ir,
