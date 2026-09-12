@@ -20,15 +20,15 @@ use crate::liveness::LivenessDetector;
 use crate::preview::PreviewStream;
 use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
-use gaze_core::camera::{Camera, CameraKind, resolve_configured_sources};
 use gaze_core::config::Config;
 use gaze_core::dbus::{CaptureStatus, EnrollPrompt, VerifyResult};
-use gaze_core::detect::FaceDetector;
-use gaze_core::face::{
+use gaze_core::ir::led::IrLed;
+use gaze_vision::camera::{Camera, CameraKind, resolve_configured_sources};
+use gaze_vision::detect::FaceDetector;
+use gaze_vision::face::{
     EnrollmentPoseStability, FaceChecker, IrDarkFrameGate, IrFrameKind, RgbFrameKind,
     RgbWarmupGate, Spectrum, enrollment_pose_matches,
 };
-use gaze_core::ir::led::IrLed;
 
 const CONFIG_PATH: &str = "/etc/gaze/config.toml";
 const POLKIT_ACTION_MANAGE_FACES: &str = "com.gundulabs.gaze.manage-faces";
@@ -1190,7 +1190,7 @@ mod tests {
         use opencv::core::{CV_8UC3, Mat, Scalar};
 
         let frame = Mat::new_rows_cols_with_default(480, 640, CV_8UC3, Scalar::all(255.0)).unwrap();
-        let padded = gaze_core::detect::FaceDetector::pad_to_square(&frame).unwrap();
+        let padded = gaze_vision::detect::FaceDetector::pad_to_square(&frame).unwrap();
 
         let data = FaceData {
             embedding: ndarray::Array1::zeros(512),
@@ -1213,7 +1213,7 @@ mod tests {
     #[test]
     fn emitter_guard_is_inert_for_rgb_and_when_disabled() {
         use super::EmitterGuard;
-        use gaze_core::camera::CameraKind;
+        use gaze_vision::camera::CameraKind;
 
         assert!(
             EmitterGuard::engage(
@@ -1983,11 +1983,11 @@ fn gdm_override_error(action: &str, path: &std::path::Path, err: std::io::Error)
 /// Point capture at `uid`'s PipeWire session for the life of the claim. Each pipeline opens its
 /// own socket, so nothing is connected here and a missing socket is handled at open time.
 pub fn bind_pipewire_session_for_uid(uid: u32) {
-    gaze_core::camera::set_pipewire_uid(Some(uid));
+    gaze_vision::camera::set_pipewire_uid(Some(uid));
 }
 
 pub fn clear_pipewire_session() {
-    gaze_core::camera::set_pipewire_uid(None);
+    gaze_vision::camera::set_pipewire_uid(None);
 }
 
 async fn prepare_for_sleep_stream(conn: &zbus::Connection) -> zbus::Result<zbus::MessageStream> {
@@ -2382,7 +2382,7 @@ const BENCHMARK_TIMED_ITERS: usize = 15;
 
 fn benchmark_component(
     component: &str,
-    runtime: &gaze_core::inference::InferenceRuntime,
+    runtime: &gaze_vision::inference::InferenceRuntime,
     mut run_once: impl FnMut() -> anyhow::Result<()>,
 ) -> anyhow::Result<gaze_core::dbus::BenchmarkResult> {
     for _ in 0..BENCHMARK_WARMUP_ITERS {
@@ -2478,7 +2478,7 @@ fn run_inference_benchmark(
 #[cfg(test)]
 mod benchmark_tests {
     use super::{BENCHMARK_TIMED_ITERS, BENCHMARK_WARMUP_ITERS, benchmark_component};
-    use gaze_core::inference::InferenceRuntime;
+    use gaze_vision::inference::InferenceRuntime;
 
     fn cpu_runtime() -> InferenceRuntime {
         InferenceRuntime {
@@ -2824,7 +2824,7 @@ impl AuthDaemon {
 
             let (enroll_tx, mut enroll_rx) = tokio::sync::mpsc::channel::<EnrollMsg>(10);
             let (preview_tx, mut preview_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(1);
-            let stream_preview = !gaze_core::camera::preview_can_be_shared(&config.cameras);
+            let stream_preview = !gaze_vision::camera::preview_can_be_shared(&config.cameras);
             let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let completed_steps_atomic = Arc::new(std::sync::atomic::AtomicU32::new(0));
             let rgb_captured_for_step = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -2842,7 +2842,7 @@ impl AuthDaemon {
                 let preview_tx_clone = preview_tx.clone();
 
                 rgb_thread = Some(std::thread::spawn(move || {
-                    gaze_core::camera::bind_pipewire_uid_for_thread(pipewire_uid);
+                    gaze_vision::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, true);
                     let mut preview = if stream_preview {
                         PreviewStream::new(preview_tx_clone)
@@ -3034,7 +3034,7 @@ impl AuthDaemon {
                 let preview_tx_clone = preview_tx.clone();
 
                 ir_thread = Some(std::thread::spawn(move || {
-                    gaze_core::camera::bind_pipewire_uid_for_thread(pipewire_uid);
+                    gaze_vision::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, true);
                     let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
                     let mut preview = if stream_preview {
@@ -3635,7 +3635,7 @@ impl AuthDaemon {
 
         {
             let mut detector = self.detector.lock().unwrap_or_else(|e| e.into_inner());
-            match gaze_core::detect::FaceDetector::new_with_inference(
+            match gaze_vision::detect::FaceDetector::new_with_inference(
                 det_path.to_str().unwrap(),
                 &new_config.inference,
             ) {
@@ -3857,7 +3857,7 @@ impl AuthDaemon {
         let mut ir_node = self.ir_node.lock().await.clone();
         if emitter_enabled
             && ir_node.is_empty()
-            && let Some(resolved) = gaze_core::camera::resolve_node(&ir_device)
+            && let Some(resolved) = gaze_vision::camera::resolve_node(&ir_device)
         {
             *self.ir_node.lock().await = resolved.clone();
             ir_node = resolved;
@@ -3969,7 +3969,7 @@ impl AuthDaemon {
                 let hybrid_policy_clone = hybrid_policy.clone();
 
                 rgb_thread = Some(std::thread::spawn(move || {
-                    gaze_core::camera::bind_pipewire_uid_for_thread(pipewire_uid);
+                    gaze_vision::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     // Set on every exit path (incl. panic) once the RGB camera is released.
                     // Declared before `cam` so `cam` drops first and release precedes the signal.
                     struct RgbPhaseGuard(Arc<std::sync::atomic::AtomicBool>);
@@ -4185,7 +4185,7 @@ impl AuthDaemon {
                 let rgb_phase_done_clone = rgb_phase_done.clone();
 
                 ir_thread = Some(std::thread::spawn(move || {
-                    gaze_core::camera::bind_pipewire_uid_for_thread(pipewire_uid);
+                    gaze_vision::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     // Wait for RGB to release its camera before opening IR and firing the emitter,
                     // so single-function devices keep one live stream. Bail if verify passed.
                     if ir_waits_for_rgb(run_rgb, serial_capture) {

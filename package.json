@@ -1,6 +1,6 @@
 {
   "devDependencies": {
-    "@viteplus/versions": "^2.0.8",
+    "@viteplus/versions": "^2.0.9",
     "esbuild": "^0.28.2",
     "vitepress": "2.0.0-alpha.20"
   },

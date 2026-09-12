@@ -30,7 +30,8 @@ console = "0.16.4"
 crossterm = "0.29"
 dialoguer = "0.12"
 futures = "0.3.34"
-gaze-core = { path = "../gaze-core", default-features = false }
+gaze-core = { path = "../gaze-core" }
+gaze-vision = { path = "../gaze-vision", default-features = false }
 libc = "0.2.189"
 ratatui = "0.30.2"
 tokio = { version = "1.53.1", features = ["full", "rt-multi-thread"] }

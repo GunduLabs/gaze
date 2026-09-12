@@ -4,7 +4,7 @@
   "workspaces": {
     "": {
       "devDependencies": {
-        "@viteplus/versions": "^2.0.8",
+        "@viteplus/versions": "^2.0.9",
         "esbuild": "^0.28.2",
         "vitepress": "2.0.0-alpha.20",
       },
@@ -155,7 +155,7 @@
 
     "@vitejs/plugin-vue": ["@vitejs/plugin-vue@6.0.8", "", { "dependencies": { "@rolldown/pluginutils": "^1.0.1" }, "peerDependencies": { "vite": "^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0", "vue": "^3.2.25" } }, "sha512-0ZjgOg7oO6farnNGup7yvoM/YXZV84OZxHAwtflItNa/6zzQyVb5LNxyea3FEKEX2XlagIKzrlH7wwxkKgtiew=="],
 
-    "@viteplus/versions": ["@viteplus/versions@2.0.8", "", { "dependencies": { "@remotex-labs/xansi": "^1.3.7", "vitepress": "^2.0.0-alpha.19" } }, "sha512-Ok6bSSN7uxigt7q9dCghUWwlCMzvqu5WCLS6zuZgEclvMVqv3rUy+NgtD4QqpV1AM2yGqT2yuDZqro7KSvrCuw=="],
+    "@viteplus/versions": ["@viteplus/versions@2.0.9", "", { "dependencies": { "@remotex-labs/xansi": "^1.3.7" }, "peerDependencies": { "vitepress": "^1.6.4 || ^2.0.0" }, "optionalPeers": ["vitepress"] }, "sha512-U1CG95SJT1xX8rarL4AyY8ZfxFZUqyfY+neo57YhX38pDO9l6gXwLOfMtWBt7dufTlUxS4MSKz61Uq5//Riafw=="],
 
     "@vue/compiler-core": ["@vue/compiler-core@3.5.42", "", { "dependencies": { "@babel/parser": "^7.29.8", "@vue/shared": "3.5.42", "entities": "^7.0.1", "estree-walker": "^2.0.2", "source-map-js": "^1.2.1" } }, "sha512-2Ye1ilMtKXxl8qZUrQ5j0CdgenFp/HFQmta6rfRyfEsTG69L6Wk+tWuNoHYHMx9E8tF2Slvdg1FuwDvAXdy1LQ=="],
 
