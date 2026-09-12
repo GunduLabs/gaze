@@ -25,10 +25,10 @@ zvariant = "5.15.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_plain = "1.0.2"
 tracing = "0.1.44"
-toml_edit = { version = "0.25.13", features = ["serde"] }
+toml_edit = { version = "0.25.15", features = ["serde"] }
 strum = "0.28"
 strum_macros = "0.28"
 
 [build-dependencies]
-toml_edit = { version = "0.25.13", features = ["serde"] }
+toml_edit = { version = "0.25.15", features = ["serde"] }
 serde = { version = "1.0.229", features = ["derive"] }
