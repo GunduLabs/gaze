@@ -823,12 +823,11 @@ impl Camera {
         let video_info = gstreamer_video::VideoInfo::from_caps(caps)
             .map_err(|e| anyhow::anyhow!("Failed to parse video info: {e}"))?;
 
-        if let Some(fps_val) = video_info_fps(&video_info) {
-            if let Ok(mut guard) = self.fps.lock()
-                && guard.is_none()
-            {
-                *guard = Some(fps_val);
-            }
+        if let Some(fps_val) = video_info_fps(&video_info)
+            && let Ok(mut guard) = self.fps.lock()
+            && guard.is_none()
+        {
+            *guard = Some(fps_val);
         }
 
         anyhow::ensure!(
