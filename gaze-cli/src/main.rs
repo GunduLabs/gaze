@@ -273,7 +273,7 @@ enum Commands {
 
 fn ensure_configured_source_listed(options: &mut Vec<(String, String)>, configured: &str) {
     let configured = configured.trim();
-    if configured.is_empty() || gaze_core::camera::is_listed_source(options, configured) {
+    if configured.is_empty() || gaze_vision::camera::is_listed_source(options, configured) {
         return;
     }
     options.push((format!("{configured} (configured)"), configured.to_string()));
@@ -396,13 +396,13 @@ async fn run_config_wizard(
         ))?;
     }
 
-    let mut cameras = gaze_core::camera::enumerate_cameras().unwrap_or_default();
+    let mut cameras = gaze_vision::camera::enumerate_cameras().unwrap_or_default();
     if cameras.is_empty() {
         anyhow::bail!("No PipeWire cameras detected! Please ensure your video inputs are active.");
     }
     ensure_configured_source_listed(&mut cameras, &config.cameras.rgb);
     let cam_names: Vec<String> = cameras.iter().map(|(n, _)| n.clone()).collect();
-    let default_cam_idx = gaze_core::camera::source_index(&cameras, &config.cameras.rgb);
+    let default_cam_idx = gaze_vision::camera::source_index(&cameras, &config.cameras.rgb);
 
     let selected_cam_idx = Select::with_theme(&theme)
         .with_prompt("RGB camera source")
@@ -417,11 +417,11 @@ async fn run_config_wizard(
         .default(config.cameras.dark_luma_threshold)
         .interact_text()?;
 
-    let mut ir_options = gaze_core::camera::ir_choices();
+    let mut ir_options = gaze_vision::camera::ir_choices();
     ensure_configured_source_listed(&mut ir_options, &config.cameras.ir);
 
     let ir_names: Vec<String> = ir_options.iter().map(|(n, _)| n.clone()).collect();
-    let default_ir_idx = gaze_core::camera::source_index(&ir_options, &config.cameras.ir);
+    let default_ir_idx = gaze_vision::camera::source_index(&ir_options, &config.cameras.ir);
 
     let selected_ir_idx = Select::with_theme(&theme)
         .with_prompt("IR camera source")
