@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use crate::config::InferenceConfig;
 use anyhow::Context;
+use gaze_core::config::InferenceConfig;
 #[cfg(feature = "openvino")]
 use ort::ep;
 use ort::session::{Session, builder::GraphOptimizationLevel};

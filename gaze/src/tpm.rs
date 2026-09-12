@@ -335,7 +335,7 @@ mod tests {
     fn full_daemon_workflow_encrypts_and_reloads() {
         use crate::crypto::EmbeddingCipher;
         use crate::users::UserDatabase;
-        use gaze_core::face::Spectrum;
+        use gaze_vision::face::Spectrum;
         use ndarray::Array1;
 
         let _guard = TPM_LOCK.lock().unwrap_or_else(|e| e.into_inner());

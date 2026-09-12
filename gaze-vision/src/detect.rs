@@ -6,10 +6,8 @@ use opencv::prelude::*;
 use ort::{session::Session, value::TensorRef};
 use std::fmt;
 
-use crate::{
-    config::InferenceConfig,
-    inference::{InferenceRuntime, create_session},
-};
+use crate::inference::{InferenceRuntime, create_session};
+use gaze_core::config::InferenceConfig;
 
 #[derive(Debug)]
 pub enum DetectError {

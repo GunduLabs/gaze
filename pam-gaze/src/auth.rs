@@ -566,6 +566,9 @@ unsafe fn do_authenticate_simultaneous(
 }
 
 pub unsafe fn do_authenticate(pamh: PamHandle, flags: c_int, options: PamOptions) -> c_int {
+    if caller_is_remote(unsafe { get_pam_rhost(pamh) }.as_deref()) {
+        return PAM_IGNORE;
+    }
     match options.mode {
         PamMode::Sequential => unsafe { do_authenticate_sequential(pamh, flags, options) },
         PamMode::Simultaneous => unsafe { do_authenticate_simultaneous(pamh, flags, options) },

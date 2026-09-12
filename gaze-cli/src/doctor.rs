@@ -645,7 +645,7 @@ fn config_findings(config: &Config) -> Vec<Check> {
                 "Use /dev/video<number>, usb:VVVV:PPPP, \"primary\", or a GStreamer source.",
             );
         }
-    } else if rgb.starts_with("usb:") && gaze_core::camera::parse_usb_spec(rgb).is_none() {
+    } else if rgb.starts_with("usb:") && gaze_vision::camera::parse_usb_spec(rgb).is_none() {
         error(
             format!("invalid RGB USB spec {rgb:?}"),
             "Use usb:VVVV:PPPP with hex VID:PID, for example usb:046d:085e.",
@@ -1919,7 +1919,7 @@ fn gstreamer_package_hint() -> &'static str {
 }
 
 fn check_gstreamer_plugins(report: &mut Report) -> bool {
-    match gaze_core::camera::missing_camera_elements() {
+    match gaze_vision::camera::missing_camera_elements() {
         Ok(missing) if missing.is_empty() => {
             report.pass(
                 "GStreamer plugins",
@@ -1960,7 +1960,7 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
 
     let rgb = config.cameras.rgb.trim();
     if !rgb.is_empty() {
-        match gaze_core::camera::enumerate_cameras() {
+        match gaze_vision::camera::enumerate_cameras() {
             Ok(cameras) => {
                 let detected = cameras
                     .iter()
@@ -1993,7 +1993,7 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
                             ),
                         );
                     }
-                } else if let Some((vid, pid)) = gaze_core::camera::parse_usb_spec(rgb) {
+                } else if let Some((vid, pid)) = gaze_vision::camera::parse_usb_spec(rgb) {
                     report.pass(
                         "RGB camera",
                         format!("resolves the color node for USB {vid:04x}:{pid:04x} at runtime"),
@@ -2051,7 +2051,7 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
             ),
         }
     } else if ir.starts_with("pipewiresrc target-object=") {
-        match gaze_core::camera::enumerate_ir_cameras() {
+        match gaze_vision::camera::enumerate_ir_cameras() {
             Ok(cameras) if cameras.iter().any(|(_, target)| target == ir) => {
                 report.pass("IR camera", "the configured PipeWire source is visible");
             }
@@ -2066,7 +2066,7 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
                 "Verify PipeWire is running and the IR device is connected.",
             ),
         }
-    } else if let Some((vid, pid)) = gaze_core::camera::parse_usb_spec(ir) {
+    } else if let Some((vid, pid)) = gaze_vision::camera::parse_usb_spec(ir) {
         report.pass(
             "IR camera",
             format!("resolves the IR node for USB {vid:04x}:{pid:04x} at runtime"),
