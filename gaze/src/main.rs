@@ -30,7 +30,7 @@ fn warn_on_ir_misconfig(cameras: &gaze_core::config::CameraConfig) {
         }
         return;
     }
-    match gaze_core::camera::resolve_node(ir) {
+    match gaze_vision::camera::resolve_node(ir) {
         // A missing node breaks IR capture whether or not the emitter is driven.
         Some(node) => {
             if !std::path::Path::new(&node).exists() {
@@ -61,8 +61,8 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    gaze_core::inference::ensure_supported_runtime()?;
-    if let Ok(version) = gaze_core::inference::runtime_version() {
+    gaze_vision::inference::ensure_supported_runtime()?;
+    if let Ok(version) = gaze_vision::inference::runtime_version() {
         info!(version, "Loaded ONNX Runtime");
     }
 
@@ -105,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
     let (det_path, rec_path) =
         models::ensure_models(MODELS_DIR, security.detector(), security.recognizer())?;
 
-    let detector = gaze_core::detect::FaceDetector::new_with_inference(
+    let detector = gaze_vision::detect::FaceDetector::new_with_inference(
         det_path.to_str().unwrap(),
         &config.inference,
     )
@@ -171,7 +171,7 @@ async fn main() -> anyhow::Result<()> {
 
     warn_on_ir_misconfig(&config.cameras);
 
-    let sources = gaze_core::camera::resolve_configured_sources(&config.cameras);
+    let sources = gaze_vision::camera::resolve_configured_sources(&config.cameras);
 
     let resume_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let resume_seen = Arc::new(std::sync::atomic::AtomicBool::new(false));

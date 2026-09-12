@@ -16,12 +16,13 @@ repository.workspace = true
 
 [features]
 default = []
-openvino = ["gaze-core/openvino", "ort/openvino"]
+openvino = ["gaze-vision/openvino", "ort/openvino"]
 
 [dependencies]
 aes-gcm = "0.11.1"
 anyhow = "1.0.104"
 gaze-core = { path = "../gaze-core" }
+gaze-vision = { path = "../gaze-vision" }
 getrandom = "0.4.3"
 image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
 libc = "0.2.189"

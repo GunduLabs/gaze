@@ -6,10 +6,8 @@ use image::imageops::{FilterType, crop_imm, resize};
 use ndarray::Array4;
 use ort::{session::Session, value::TensorRef};
 
-use gaze_core::{
-    config::InferenceConfig,
-    inference::{InferenceRuntime, create_session},
-};
+use gaze_core::config::InferenceConfig;
+use gaze_vision::inference::{InferenceRuntime, create_session};
 
 // Fixed by how MiniFASNet v2 was trained (upstream calls it scale_2.7_80x80). Feeding it a
 // tighter crop or another resolution shifts the score distribution and the threshold stops meaning anything.

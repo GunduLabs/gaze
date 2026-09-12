@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::capture_dialog;
-use gaze_core::camera::{is_listed_source, source_index};
 use gaze_core::config::{
     AuthConfig, CameraConfig, Config, DEFAULT_RGB_CAMERA, HYBRID_POLICY_LABELS,
     INFERENCE_DEVICE_OPTIONS, INFERENCE_EXECUTION_PROVIDER_OPTIONS, InferenceConfig,
@@ -14,6 +13,7 @@ use gaze_core::dbus::{
     GazeProxy, apply_config_to_daemon, connect_gaze, dbus_error_message, dbus_is_file_not_found,
     dbus_is_not_activatable, load_config_from_daemon,
 };
+use gaze_vision::camera::{is_listed_source, source_index};
 use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
@@ -473,7 +473,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     inference_device_row.set_model(Some(&inference_device_model));
     hardware_group.add(&inference_device_row);
 
-    let cameras = gaze_core::camera::enumerate_cameras()
+    let cameras = gaze_vision::camera::enumerate_cameras()
         .unwrap_or_else(|_| vec![("Primary Camera".to_string(), DEFAULT_RGB_CAMERA.to_string())]);
     let cam_names = cameras.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
 
@@ -484,7 +484,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     camera_row.set_model(Some(&cam_model));
     hardware_group.add(&camera_row);
 
-    let ir_options = gaze_core::camera::ir_choices();
+    let ir_options = gaze_vision::camera::ir_choices();
     let ir_names = ir_options
         .iter()
         .map(|(n, _)| n.clone())
