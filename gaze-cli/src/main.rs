@@ -1283,6 +1283,8 @@ fn remove_unmanaged_install_artifacts_cmd() -> String {
     [
         r#"owned_by_pkg() {
           p=$1;
+          if command -v qfile >/dev/null 2>&1; then qfile -q "$p" >/dev/null 2>&1 && return 0; fi;
+          if command -v equery >/dev/null 2>&1; then equery -q belongs "$p" >/dev/null 2>&1 && return 0; fi;
           if command -v pacman >/dev/null 2>&1; then pacman -Qo "$p" >/dev/null 2>&1 && return 0; fi;
           if command -v dpkg-query >/dev/null 2>&1; then dpkg-query -S "$p" >/dev/null 2>&1 && return 0; fi;
           if command -v rpm >/dev/null 2>&1; then rpm -qf "$p" >/dev/null 2>&1 && return 0; fi;
@@ -1369,6 +1371,12 @@ fn remove_zypper_packages_cmd() -> String {
         .into()
 }
 
+fn remove_portage_package_cmd() -> String {
+    "sudo emerge --unmerge sys-auth/gaze 2>/dev/null || true; \
+      sudo emerge --depclean sci-libs/onnxruntime-bin 2>/dev/null || true"
+        .into()
+}
+
 fn remove_suse_pam_configuration_cmd() -> String {
     // Remove both managed PAM modes independently.
     "if command -v pam-config >/dev/null 2>&1; then \
@@ -1404,6 +1412,7 @@ fn remove_zypper_repo_and_key_cmd() -> String {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PackageManager {
+    Portage,
     Apt,
     Zypper,
     Dnf,
@@ -1416,6 +1425,16 @@ fn append_package_manager_uninstall_steps(
     package_manager: PackageManager,
 ) {
     match package_manager {
+        PackageManager::Portage => {
+            plan.push(("Remove Portage package", remove_portage_package_cmd()));
+            plan.push((
+                "Remove Gaze Gentoo overlay",
+                "if command -v eselect >/dev/null 2>&1; then \
+                  sudo eselect repository remove -f gaze 2>/dev/null || true; \
+                  fi"
+                .into(),
+            ));
+        }
         PackageManager::Apt => {
             plan.push((
                 "Remove apt packages",
@@ -1479,9 +1498,13 @@ fn package_manager_from_availability(
     dnf: bool,
     pacman: bool,
     rpm_ostree: bool,
+    portage: bool,
 ) -> Option<PackageManager> {
-    // Prefer zypper when optional apt or dnf tools are also installed.
-    if zypper {
+    // Prefer the distribution's native package manager when optional tools
+    // from other ecosystems are also installed.
+    if portage {
+        Some(PackageManager::Portage)
+    } else if zypper {
         Some(PackageManager::Zypper)
     } else if apt {
         Some(PackageManager::Apt)
@@ -1503,6 +1526,7 @@ fn detect_package_manager() -> Option<PackageManager> {
         which("dnf"),
         which("pacman"),
         which("rpm-ostree") && std::path::Path::new("/run/ostree-booted").exists(),
+        which("emerge"),
     )
 }
 
@@ -2194,6 +2218,37 @@ mod tests {
     }
 
     #[test]
+    fn portage_uninstall_removes_package_and_official_overlay() {
+        let mut plan = Vec::new();
+        append_package_manager_uninstall_steps(&mut plan, PackageManager::Portage);
+
+        assert_eq!(plan.len(), 2);
+        assert_eq!(plan[0].0, "Remove Portage package");
+        assert!(plan[0].1.contains("emerge --unmerge sys-auth/gaze"));
+        assert!(
+            plan[0]
+                .1
+                .contains("emerge --depclean sci-libs/onnxruntime-bin")
+        );
+        assert_eq!(plan[1].0, "Remove Gaze Gentoo overlay");
+        assert!(plan[1].1.contains("eselect repository remove -f gaze"));
+
+        for (_, command) in plan {
+            let output = std::process::Command::new("sh")
+                .arg("-n")
+                .arg("-c")
+                .arg(&command)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "invalid Portage cleanup shell command: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    #[test]
     fn suse_uninstall_removes_both_pam_config_definitions() {
         let command = remove_suse_pam_configuration_cmd();
         assert!(command.contains("pam-config --delete --gaze"));
@@ -2250,11 +2305,11 @@ mod tests {
     #[test]
     fn open_suse_package_manager_precedes_dnf_when_both_are_available() {
         assert_eq!(
-            package_manager_from_availability(false, true, true, false, false),
+            package_manager_from_availability(false, true, true, false, false, false),
             Some(PackageManager::Zypper)
         );
         assert_eq!(
-            package_manager_from_availability(true, true, true, false, false),
+            package_manager_from_availability(true, true, true, false, false, false),
             Some(PackageManager::Zypper)
         );
     }
@@ -2262,12 +2317,20 @@ mod tests {
     #[test]
     fn rpm_ostree_package_manager_precedes_dnf_when_both_are_available() {
         assert_eq!(
-            package_manager_from_availability(false, false, true, false, true),
+            package_manager_from_availability(false, false, true, false, true, false),
             Some(PackageManager::RpmOstree)
         );
         assert_eq!(
-            package_manager_from_availability(false, false, true, false, false),
+            package_manager_from_availability(false, false, true, false, false, false),
             Some(PackageManager::Dnf)
+        );
+    }
+
+    #[test]
+    fn portage_package_manager_takes_precedence() {
+        assert_eq!(
+            package_manager_from_availability(true, true, true, true, true, true),
+            Some(PackageManager::Portage)
         );
     }
 

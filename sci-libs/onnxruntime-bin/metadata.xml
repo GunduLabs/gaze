@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="project">
+		<email>maintainers@gundulabs.com</email>
+		<name>Gundu Labs</name>
+	</maintainer>
+	<upstream>
+		<bugs-to>https://github.com/microsoft/onnxruntime/issues</bugs-to>
+		<remote-id type="github">microsoft/onnxruntime</remote-id>
+	</upstream>
+</pkgmetadata>
