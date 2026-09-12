@@ -631,6 +631,12 @@ pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
+fn video_info_fps(video_info: &gstreamer_video::VideoInfo) -> Option<f64> {
+    let fraction = video_info.fps();
+    let (num, denom) = (fraction.numer(), fraction.denom());
+    (num > 0 && denom > 0).then(|| num as f64 / denom as f64)
+}
+
 impl Camera {
     pub fn open(camera_source: &str) -> anyhow::Result<Self> {
         Self::open_kind(camera_source, true)
@@ -817,10 +823,7 @@ impl Camera {
         let video_info = gstreamer_video::VideoInfo::from_caps(caps)
             .map_err(|e| anyhow::anyhow!("Failed to parse video info: {e}"))?;
 
-        let fraction = video_info.fps();
-        let (num, denom) = (fraction.numer(), fraction.denom());
-        if num > 0 && denom > 0 {
-            let fps_val = num as f64 / denom as f64;
+        if let Some(fps_val) = video_info_fps(&video_info) {
             if let Ok(mut guard) = self.fps.lock()
                 && guard.is_none()
             {
@@ -974,16 +977,12 @@ impl Camera {
             .static_pad("sink")
             .and_then(|p| p.current_caps())
             && let Ok(video_info) = gstreamer_video::VideoInfo::from_caps(&caps)
+            && let Some(fps_val) = video_info_fps(&video_info)
         {
-            let fraction = video_info.fps();
-            let (num, denom) = (fraction.numer(), fraction.denom());
-            if num > 0 && denom > 0 {
-                let fps_val = num as f64 / denom as f64;
-                if let Ok(mut guard) = self.fps.lock() {
-                    *guard = Some(fps_val);
-                }
-                return fps_val;
+            if let Ok(mut guard) = self.fps.lock() {
+                *guard = Some(fps_val);
             }
+            return fps_val;
         }
         gaze_core::config::DEFAULT_CAMERA_FPS
     }
@@ -1140,10 +1139,9 @@ fn collect_camera_entries(want_color: Option<bool>) -> anyhow::Result<Vec<Camera
 }
 
 fn v4l2_node_of(props: &gstreamer::StructureRef) -> Option<String> {
-    if let Some(path) = string_property(props, "api.v4l2.path") {
-        return Some(path);
-    }
-    string_property(props, "device.path").filter(|path| path.starts_with("/dev/video"))
+    string_property(props, "api.v4l2.path").or_else(|| {
+        string_property(props, "device.path").filter(|path| path.starts_with("/dev/video"))
+    })
 }
 
 fn wait_for_device_updates(monitor: &gstreamer::DeviceMonitor) {

@@ -367,9 +367,10 @@ pub fn show_capture_dialog(
                         }
                     };
 
-                    let mut preview_stream = match can_share {
-                        true => None,
-                        false => proxy.receive_preview_frame().await.ok(),
+                    let mut preview_stream = if can_share {
+                        None
+                    } else {
+                        proxy.receive_preview_frame().await.ok()
                     };
 
                     if proxy.enroll_start(&face_name).await.is_err() {

@@ -270,15 +270,17 @@ fn extension_schema_dir() -> Option<PathBuf> {
     extension_schema_dir_in(&xdg_data_dirs())
 }
 
+fn extension_dir(data_dir: &Path) -> PathBuf {
+    data_dir
+        .join("gnome-shell")
+        .join("extensions")
+        .join(GNOME_EXTENSION_ID)
+}
+
 fn extension_schema_dir_in(data_dirs: &[PathBuf]) -> Option<PathBuf> {
     data_dirs
         .iter()
-        .map(|dir| {
-            dir.join("gnome-shell")
-                .join("extensions")
-                .join(GNOME_EXTENSION_ID)
-                .join("schemas")
-        })
+        .map(|dir| extension_dir(dir).join("schemas"))
         .find(|dir| dir.join("gschemas.compiled").exists())
 }
 
@@ -289,13 +291,9 @@ fn extension_installed() -> bool {
 }
 
 fn extension_installed_in(data_dirs: &[PathBuf]) -> bool {
-    data_dirs.iter().any(|dir| {
-        dir.join("gnome-shell")
-            .join("extensions")
-            .join(GNOME_EXTENSION_ID)
-            .join("metadata.json")
-            .exists()
-    })
+    data_dirs
+        .iter()
+        .any(|dir| extension_dir(dir).join("metadata.json").exists())
 }
 
 fn extension_setting(key: &str) -> std::io::Result<(bool, String)> {

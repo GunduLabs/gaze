@@ -1013,6 +1013,15 @@ fn spectrum_badge(label: &str, enrolled: bool, configured: bool) -> String {
     }
 }
 
+fn write_no_faces(term: &Term, user: &str) -> anyhow::Result<()> {
+    term.write_line(&format!(
+        "{} No faces found for {}",
+        style("i").cyan().bold(),
+        style(user).bold()
+    ))?;
+    Ok(())
+}
+
 async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<()> {
     let term = Term::stdout();
     let cameras = try_load_config_from_daemon(proxy)
@@ -1037,11 +1046,7 @@ async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
     match result {
         Ok(faces) => {
             if faces.is_empty() {
-                term.write_line(&format!(
-                    "{} No faces found for {}",
-                    style("i").cyan().bold(),
-                    style(user).bold()
-                ))?;
+                write_no_faces(&term, user)?;
             } else {
                 term.write_line(&format!(
                     "\n{} face{} for {}:\n",
@@ -1067,11 +1072,7 @@ async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
         }
         Err(e) => {
             if dbus_is_file_not_found(&e) {
-                term.write_line(&format!(
-                    "{} No faces found for {}",
-                    style("i").cyan().bold(),
-                    style(user).bold()
-                ))?;
+                write_no_faces(&term, user)?;
             } else {
                 term.write_line(&format!(
                     "{} Failed to fetch faces: {}",

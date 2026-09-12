@@ -81,19 +81,18 @@ pub use gaze_core::dbus::{
     GAZE_REQUIRE_CONFIRMATION,
 };
 
-pub fn is_service_internal(service: &str, internal_list: &[String]) -> bool {
-    let service_name = std::path::Path::new(service.trim())
+fn pam_service_name(service: &str) -> &str {
+    std::path::Path::new(service.trim())
         .file_name()
         .and_then(|n| n.to_str())
-        .unwrap_or(service.trim());
+        .unwrap_or(service.trim())
+}
 
-    internal_list.iter().any(|item| {
-        let item_name = std::path::Path::new(item.trim())
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(item.trim());
-        item_name == service_name
-    })
+pub fn is_service_internal(service: &str, internal_list: &[String]) -> bool {
+    let service_name = pam_service_name(service);
+    internal_list
+        .iter()
+        .any(|item| pam_service_name(item) == service_name)
 }
 
 pub fn internal_give_up_message(status: Option<gaze_core::dbus::CaptureStatus>) -> &'static str {
@@ -781,27 +780,21 @@ pub fn get_user_uid(username: &str) -> Option<u32> {
 }
 
 pub unsafe fn get_pam_service(pamh: PamHandle) -> Option<String> {
-    let mut service_ptr: *const c_void = std::ptr::null();
-    let ret = unsafe { pam_get_item(pamh, PAM_SERVICE, &mut service_ptr) };
-    if ret != PAM_SUCCESS || service_ptr.is_null() {
-        return None;
-    }
-    unsafe {
-        CStr::from_ptr(service_ptr as *const c_char)
-            .to_str()
-            .ok()
-            .map(|s| s.to_owned())
-    }
+    unsafe { get_pam_string(pamh, PAM_SERVICE) }
 }
 
 pub unsafe fn get_pam_rhost(pamh: PamHandle) -> Option<String> {
-    let mut rhost_ptr: *const c_void = std::ptr::null();
-    let ret = unsafe { pam_get_item(pamh, PAM_RHOST, &mut rhost_ptr) };
-    if ret != PAM_SUCCESS || rhost_ptr.is_null() {
+    unsafe { get_pam_string(pamh, PAM_RHOST) }
+}
+
+unsafe fn get_pam_string(pamh: PamHandle, item_type: c_int) -> Option<String> {
+    let mut item_ptr: *const c_void = std::ptr::null();
+    let ret = unsafe { pam_get_item(pamh, item_type, &mut item_ptr) };
+    if ret != PAM_SUCCESS || item_ptr.is_null() {
         return None;
     }
     unsafe {
-        CStr::from_ptr(rhost_ptr as *const c_char)
+        CStr::from_ptr(item_ptr as *const c_char)
             .to_str()
             .ok()
             .map(|s| s.to_owned())
@@ -870,10 +863,11 @@ fn pam_auth_line_runs_gaze(line: &str) -> bool {
         return false;
     }
     fields.any(|field| {
-        GAZE_PAM_MODULES.iter().any(|module| {
-            // NixOS writes an absolute store path, not a bare module name.
-            field == *module || field.ends_with(&format!("/{module}"))
-        })
+        // NixOS writes an absolute store path, not a bare module name.
+        field
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| GAZE_PAM_MODULES.contains(&name))
     })
 }
 

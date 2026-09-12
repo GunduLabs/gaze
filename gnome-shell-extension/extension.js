@@ -1364,47 +1364,22 @@ export default class GazeFaceAuthExtension extends Extension {
           },
         );
 
-        injectionManager.overrideMethod(
-          authProto,
-          "_handleOnSecretInfoQuery",
-          (original) => {
-            return function (serviceName, secretQuestion) {
-              if (isConfirmationMessage(secretQuestion)) {
-                emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
-                emitAskQuestion(
-                  this,
-                  serviceName,
-                  GAZE_REQUIRE_CONFIRMATION,
-                  true,
-                );
-                return;
-              }
-
-              return original.call(this, serviceName, secretQuestion);
-            };
-          },
-        );
-
-        injectionManager.overrideMethod(
-          authProto,
-          "_handleOnInfoQuery",
-          (original) => {
+        for (const [method, secret] of [
+          ["_handleOnSecretInfoQuery", true],
+          ["_handleOnInfoQuery", false],
+        ]) {
+          injectionManager.overrideMethod(authProto, method, (original) => {
             return function (serviceName, query) {
               if (isConfirmationMessage(query)) {
                 emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
-                emitAskQuestion(
-                  this,
-                  serviceName,
-                  GAZE_REQUIRE_CONFIRMATION,
-                  false,
-                );
+                emitAskQuestion(this, serviceName, GAZE_REQUIRE_CONFIRMATION, secret);
                 return;
               }
 
               return original.call(this, serviceName, query);
             };
-          },
-        );
+          });
+        }
 
         injectionManager.overrideMethod(
           authProto,
@@ -1741,12 +1716,13 @@ export default class GazeFaceAuthExtension extends Extension {
           };
         });
 
-        this._injectionManager.overrideMethod(
-          proto,
-          "_onSecretInfoQuery",
-          (original) => {
-            return function (client, serviceName, secretQuestion) {
-              if (isConfirmationMessage(secretQuestion)) {
+        for (const [method, secret] of [
+          ["_onSecretInfoQuery", true],
+          ["_onInfoQuery", false],
+        ]) {
+          this._injectionManager.overrideMethod(proto, method, (original) => {
+            return function (client, serviceName, query) {
+              if (isConfirmationMessage(query)) {
                 // _filterServiceMessages only force-clears when another message is queued behind
                 // the current one, so a lone hint rides out its full ~1s interval unless cleared.
                 if (typeof this._clearMessageQueue === "function") {
@@ -1756,35 +1732,14 @@ export default class GazeFaceAuthExtension extends Extension {
                 // Enter must send confirmation, not the typed answer.
                 this._faceConfirmPending = true;
                 this._faceConfirmService = serviceName;
-                this.emit("ask-question", serviceName, GAZE_REQUIRE_CONFIRMATION, true);
-                return;
-              }
-
-              original.call(this, client, serviceName, secretQuestion);
-            };
-          },
-        );
-
-        this._injectionManager.overrideMethod(
-          proto,
-          "_onInfoQuery",
-          (original) => {
-            return function (client, serviceName, query) {
-              if (isConfirmationMessage(query)) {
-                if (typeof this._clearMessageQueue === "function") {
-                  this._clearMessageQueue();
-                }
-                this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
-                this._faceConfirmPending = true;
-                this._faceConfirmService = serviceName;
-                this.emit("ask-question", serviceName, GAZE_REQUIRE_CONFIRMATION, false);
+                this.emit("ask-question", serviceName, GAZE_REQUIRE_CONFIRMATION, secret);
                 return;
               }
 
               original.call(this, client, serviceName, query);
             };
-          },
-        );
+          });
+        }
 
         this._injectionManager.overrideMethod(proto, "answerQuery", (original) => {
           return function (serviceName, answer) {
@@ -2008,49 +1963,29 @@ export default class GazeFaceAuthExtension extends Extension {
       },
     );
 
-    this._injectionManager.overrideMethod(
-      authPromptProto,
-      "reset",
-      (original) => {
-        return function (...args) {
-          if (
-            this.verificationStatus ===
-              AuthPrompt.AuthPromptStatus.VERIFICATION_SUCCEEDED ||
-            this._confirmSucceeded
-          ) {
-            const result = original.apply(this, args);
-            if (this._entry) this._entry.hide();
-            if (this._passwordEntry) this._passwordEntry.hide();
-            if (this._textEntry) this._textEntry.hide();
-            return result;
-          }
-          exitAuthPromptConfirmMode(this);
-          return original.apply(this, args);
-        };
-      },
-    );
-
-    this._injectionManager.overrideMethod(
-      authPromptProto,
-      "clear",
-      (original) => {
-        return function (...args) {
-          if (
-            this.verificationStatus ===
-              AuthPrompt.AuthPromptStatus.VERIFICATION_SUCCEEDED ||
-            this._confirmSucceeded
-          ) {
-            const result = original.apply(this, args);
-            if (this._entry) this._entry.hide();
-            if (this._passwordEntry) this._passwordEntry.hide();
-            if (this._textEntry) this._textEntry.hide();
-            return result;
-          }
-          exitAuthPromptConfirmMode(this);
-          return original.apply(this, args);
-        };
-      },
-    );
+    for (const method of ["reset", "clear"]) {
+      this._injectionManager.overrideMethod(
+        authPromptProto,
+        method,
+        (original) => {
+          return function (...args) {
+            if (
+              this.verificationStatus ===
+                AuthPrompt.AuthPromptStatus.VERIFICATION_SUCCEEDED ||
+              this._confirmSucceeded
+            ) {
+              const result = original.apply(this, args);
+              if (this._entry) this._entry.hide();
+              if (this._passwordEntry) this._passwordEntry.hide();
+              if (this._textEntry) this._textEntry.hide();
+              return result;
+            }
+            exitAuthPromptConfirmMode(this);
+            return original.apply(this, args);
+          };
+        },
+      );
+    }
 
     this._injectionManager.overrideMethod(
       authPromptProto,

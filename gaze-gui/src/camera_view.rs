@@ -22,6 +22,19 @@ struct FrameData {
     mat: opencv::core::Mat,
 }
 
+fn update_aspect(
+    frame_aspect: &Cell<f64>,
+    aspect_frame: &gtk4::AspectFrame,
+    width: i32,
+    height: i32,
+) {
+    if height > 0 {
+        let aspect = width as f64 / height as f64;
+        frame_aspect.set(aspect);
+        aspect_frame.set_ratio(aspect as f32);
+    }
+}
+
 pub struct CameraFeed {
     pub picture: gtk4::Picture,
     guide: gtk4::DrawingArea,
@@ -75,10 +88,8 @@ impl CameraFeed {
                     height: size.height,
                     mat: frame,
                 };
-                match tx.try_send(frame_data) {
-                    Ok(()) => {}
-                    Err(TrySendError::Full(_)) => {}
-                    Err(TrySendError::Disconnected(_)) => break,
+                if matches!(tx.try_send(frame_data), Err(TrySendError::Disconnected(_))) {
+                    break;
                 }
             }
         });
@@ -294,11 +305,7 @@ impl CameraFeed {
                             &bytes,
                             (frame.width * 3) as usize,
                         );
-                        if frame.height > 0 {
-                            let aspect = frame.width as f64 / frame.height as f64;
-                            frame_aspect.set(aspect);
-                            aspect_frame.set_ratio(aspect as f32);
-                        }
+                        update_aspect(&frame_aspect, &aspect_frame, frame.width, frame.height);
                         picture.set_paintable(Some(&texture));
                         *latest_frame.borrow_mut() = Some(frame.mat);
                     }
@@ -322,11 +329,12 @@ impl CameraFeed {
             }
         };
 
-        if texture.height() > 0 {
-            let aspect = texture.width() as f64 / texture.height() as f64;
-            self.frame_aspect.set(aspect);
-            self.aspect_frame.set_ratio(aspect as f32);
-        }
+        update_aspect(
+            &self.frame_aspect,
+            &self.aspect_frame,
+            texture.width(),
+            texture.height(),
+        );
         self.picture.set_paintable(Some(&texture));
         self.picture.set_visible(true);
     }
