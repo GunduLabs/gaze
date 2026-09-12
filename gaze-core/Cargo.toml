@@ -5,7 +5,7 @@
 name = "gaze-core"
 version = "0.3.1"
 edition = "2024"
-description = "Shared camera, configuration, D-Bus, and face detection library for Gaze"
+description = "Shared configuration, D-Bus, and IR device library for Gaze"
 categories.workspace = true
 homepage.workspace = true
 keywords.workspace = true
@@ -15,35 +15,17 @@ readme.workspace = true
 repository.workspace = true
 
 [features]
-default = ["detection"]
-detection = ["dep:ort"]
 openvino-config = []
-openvino = ["detection", "openvino-config", "ort/openvino"]
 
 [dependencies]
 anyhow = "1.0.104"
-image = { version = "0.25.10", default-features = false }
 libc = "0.2.189"
-ndarray = "0.17.2"
-opencv = { version = "0.100.1", default-features = false, features = ["imgproc"] }
-ort = { version = "2.0.0-rc.13", optional = true, default-features = false, features = [
-    "std",
-    "ndarray",
-    "tracing",
-    "download-binaries",
-    "copy-dylibs",
-    "tls-native",
-    "api-21",
-] }
 zbus = "5.19.0"
 zvariant = "5.15.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_plain = "1.0.2"
 tracing = "0.1.44"
 toml_edit = { version = "0.25.13", features = ["serde"] }
-gstreamer = "0.25.3"
-gstreamer-app = "0.25.2"
-gstreamer-video = "0.25.3"
 strum = "0.28"
 strum_macros = "0.28"
 

@@ -17,7 +17,7 @@ nfpm := require("nfpm")
 # Required by the `srpm` recipe only.
 rpmbuild := require("rpmbuild")
 # ONNX Runtime release bundled into the offline builds (flatpak and srpm).
-ort_version := env("ORT_VERSION", "1.29.0")
+ort_version := env("ORT_VERSION", "1.30.0")
 
 # The opencv crate probes only the `opencv4`/`opencv` pkg-config names, so distros shipping
 # OpenCV 5 (e.g. Arch) need this override. Empty when opencv4/opencv resolve or opencv5 doesn't.
@@ -44,19 +44,21 @@ default:
 
 # ── build ─────────────────────────────────────────────────────────────────────
 
-# Two invocations so gaze-core's `detection` feature does not unify into the client binaries;
+# Two invocations so gaze-vision's `detection` feature does not unify into the client binaries;
 # ONNX Runtime's constructors require AVX2 and crash on older CPUs.
 # Build all Rust workspace binaries (release)
 [group("build")]
 build-rust:
     {{ opencv_env }} cargo build -p gaze --release
     {{ opencv_env }} cargo build -p gaze-cli {{ gui_pkg }} -p pam-gaze -p pam-gaze-grosshack --release
+    scripts/check-pam-link.sh target/release/libpam_gaze.so target/release/libpam_gaze_grosshack.so
 
 # Build all Rust workspace binaries with OpenVINO configuration and runtime support.
 [group("build")]
 build-rust-openvino:
     {{ opencv_env }} cargo build -p gaze --release --features gaze/openvino
     {{ opencv_env }} cargo build -p gaze-cli {{ gui_pkg }} -p pam-gaze -p pam-gaze-grosshack --release --features gaze-cli/openvino{{ gui_feature }}
+    scripts/check-pam-link.sh target/release/libpam_gaze.so target/release/libpam_gaze_grosshack.so
 
 # Compile the SELinux policy module
 [group("build")]
@@ -159,6 +161,12 @@ _nfpm config format:
     done < <(grep -oE 'target/release/[A-Za-z0-9_.+-]+' {{ quote(config) }} | sort -u)
 
     needed() { objdump -p "${binaries[@]}" | awk '/NEEDED/ { print $2 }' | sort -u; }
+
+    for module in "${binaries[@]}"; do
+        case "$module" in
+        */libpam_gaze.so|*/libpam_gaze_grosshack.so) scripts/check-pam-link.sh "$module" ;;
+        esac
+    done
     yaml_list() { sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' -e 's/^/      - /'; }
 
     lib_depends=""
@@ -715,17 +723,23 @@ setup-hooks:
 test:
     @{{ gui_notice }}
     {{ opencv_env }} cargo test --workspace {{ gui_exclude }} --release
-    {{ opencv_env }} cargo test -p gaze-core --release --no-default-features --features gaze-core/openvino-config config::
+    {{ opencv_env }} cargo test -p gaze-core --release --features gaze-core/openvino-config config::
 
 # Run the OpenVINO-gated tests with an OpenVINO-enabled system ONNX Runtime.
 [group("checks")]
 test-openvino:
-    {{ opencv_env }} cargo test -p gaze-core --release --features gaze-core/openvino -- inference:: config::
+    {{ opencv_env }} cargo test -p gaze-vision --release --features gaze-vision/openvino -- inference::
+    {{ opencv_env }} cargo test -p gaze-core --release --features gaze-core/openvino-config config::
 
 # Check dependencies for known security advisories
 [group("checks")]
 audit:
     cargo audit
+
+# Verify the PAM modules link nothing beyond libc and friends
+[group("checks")]
+check-pam-link:
+    scripts/check-pam-link.sh target/release/libpam_gaze.so target/release/libpam_gaze_grosshack.so
 
 # Run clippy lints across the workspace
 [group("checks")]
@@ -736,7 +750,7 @@ lint:
 # Lint the OpenVINO-gated code with an OpenVINO-enabled system ONNX Runtime.
 [group("checks")]
 lint-openvino:
-    {{ opencv_env }} cargo clippy -p gaze-core --all-targets --features gaze-core/openvino -- -D warnings
+    {{ opencv_env }} cargo clippy -p gaze-vision --all-targets --features gaze-vision/openvino -- -D warnings
 
 # Check formatting (does not write)
 [group("checks")]

@@ -20,6 +20,7 @@ pub const PAM_AUTH_ERR: c_int = 7;
 pub const PAM_SERVICE_ERR: c_int = 3;
 pub const PAM_CONV: c_int = 5;
 pub const PAM_SERVICE: c_int = 1;
+pub const PAM_RHOST: c_int = 4;
 pub const PAM_AUTHTOK: c_int = 6;
 pub const PAM_TEXT_INFO: c_int = 4;
 pub const PAM_ERROR_MSG: c_int = 3;
@@ -793,6 +794,33 @@ pub unsafe fn get_pam_service(pamh: PamHandle) -> Option<String> {
     }
 }
 
+pub unsafe fn get_pam_rhost(pamh: PamHandle) -> Option<String> {
+    let mut rhost_ptr: *const c_void = std::ptr::null();
+    let ret = unsafe { pam_get_item(pamh, PAM_RHOST, &mut rhost_ptr) };
+    if ret != PAM_SUCCESS || rhost_ptr.is_null() {
+        return None;
+    }
+    unsafe {
+        CStr::from_ptr(rhost_ptr as *const c_char)
+            .to_str()
+            .ok()
+            .map(|s| s.to_owned())
+    }
+}
+
+pub fn caller_is_remote(rhost: Option<&str>) -> bool {
+    match rhost {
+        None => false,
+        Some(host) => {
+            let host = host.trim();
+            !matches!(
+                host,
+                "" | "localhost" | "localhost.localdomain" | "127.0.0.1" | "::1"
+            )
+        }
+    }
+}
+
 pub fn service_defers_to_face_service(service: Option<&str>) -> bool {
     match service {
         Some(name) => name.starts_with("gdm-") && name != FACE_PAM_SERVICE,
@@ -888,6 +916,33 @@ pub fn service_retries_transient_give_up(service: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn network_logins_are_not_face_authenticated() {
+        for rhost in [
+            "192.168.1.120",
+            "mail.example.com",
+            "2001:db8::1",
+            "10.0.0.4",
+        ] {
+            assert!(caller_is_remote(Some(rhost)), "{rhost}");
+        }
+    }
+
+    #[test]
+    fn local_callers_are_face_authenticated() {
+        for rhost in [
+            None,
+            Some(""),
+            Some("  "),
+            Some("localhost"),
+            Some("localhost.localdomain"),
+            Some("127.0.0.1"),
+            Some("::1"),
+        ] {
+            assert!(!caller_is_remote(rhost), "{rhost:?}");
+        }
+    }
 
     // The escape moves up a line and clears it, so it must only run when a line was printed.
     #[test]
