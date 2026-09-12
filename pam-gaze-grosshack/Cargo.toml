@@ -27,4 +27,4 @@ anyhow = "1.0.104"
 futures = "0.3.34"
 
 [dev-dependencies]
-tokio = { version = "1.53.1", features = ["full", "test-util"] }
+tokio = { version = "=1.53.1", features = ["full", "test-util"] }
