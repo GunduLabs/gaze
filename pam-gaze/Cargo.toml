@@ -3,7 +3,7 @@
 
 [package]
 name = "pam-gaze"
-version = "0.3.0"
+version = "0.3.2"
 edition = "2024"
 description = "Facial authentication PAM module for Gaze"
 categories.workspace = true
@@ -19,7 +19,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 gaze-security = { path = "../gaze-security" }
-gaze-core = { path = "../gaze-core", default-features = false }
+gaze-core = { path = "../gaze-core" }
 libc = "0.2.189"
 zbus = "5.19.0"
 tokio = { version = "1.53.1", features = ["full"] }
@@ -28,4 +28,4 @@ anyhow = "1.0.104"
 futures = "0.3.34"
 
 [dev-dependencies]
-tokio = { version = "1.53.1", features = ["full", "test-util"] }
+tokio = { version = "=1.53.1", features = ["full", "test-util"] }

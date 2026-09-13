@@ -24,11 +24,11 @@ pub struct CameraSetup {
 
 impl CameraSetup {
     pub fn from_config(cameras: &CameraConfig) -> Self {
-        let (device, is_ir) = gaze_core::camera::preferred_capture_source(cameras);
+        let (device, is_ir) = gaze_vision::camera::preferred_capture_source(cameras);
         Self {
             device,
             is_ir,
-            can_share: gaze_core::camera::preview_can_be_shared(cameras),
+            can_share: gaze_vision::camera::preview_can_be_shared(cameras),
         }
     }
 
@@ -367,9 +367,10 @@ pub fn show_capture_dialog(
                         }
                     };
 
-                    let mut preview_stream = match can_share {
-                        true => None,
-                        false => proxy.receive_preview_frame().await.ok(),
+                    let mut preview_stream = if can_share {
+                        None
+                    } else {
+                        proxy.receive_preview_frame().await.ok()
                     };
 
                     if proxy.enroll_start(&face_name).await.is_err() {

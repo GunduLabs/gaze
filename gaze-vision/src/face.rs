@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use crate::config::Config;
-use crate::dbus::{CaptureStatus, EnrollPrompt};
 use crate::detect::{DetectError, FaceDetector};
+use gaze_core::config::Config;
+use gaze_core::dbus::{CaptureStatus, EnrollPrompt};
 use opencv::core::Mat;
 use opencv::prelude::*;
 use std::sync::{Mutex, MutexGuard};
@@ -15,7 +15,7 @@ const ENROLL_STABLE_PITCH_RANGE: f32 = 0.06;
 const ENROLL_HORIZONTAL_POSE_DELTA: f32 = 0.16;
 const ENROLL_VERTICAL_POSE_DELTA: f32 = 0.07;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Spectrum {
     Rgb,
     Ir,

@@ -401,6 +401,43 @@ Gaze, fix the distribution-specific `polkit-1` setup. See
 [Browser extensions through Polkit](/guide/pam#browser-extensions-through-polkit-bitwarden)
 for the complete setup and diagnostic split.
 
+### Another service stops authenticating after enabling Gaze (dovecot, sshd, cron)
+
+Symptoms are in that service's own log rather than Gaze's. For dovecot, IMAP
+logins fail and `mail.log` shows the auth worker dying:
+
+```
+dovecot: auth-worker: Error: OpenBLAS error: Memory allocation still failed after 10 retries, giving up.
+dovecot: auth-worker: Error: Unexpected exit - converting to abort
+dovecot: auth: Error: auth-worker: Aborted PASSV request for user: Worker process died unexpectedly
+dovecot: imap-login: Login aborted: Connection closed (auth service reported temporary failure)
+```
+
+Packages up to and including 0.3.1 linked OpenCV into `pam_gaze.so`. On Debian
+and Ubuntu, OpenCV pulls in OpenBLAS, whose startup code reserves per-thread
+memory sized for every CPU core. Services that cap their address space, as
+dovecot's auth worker does at 256 MB by default, cannot satisfy that
+reservation and abort as the module loads, before any Gaze code runs. Enabling
+a Gaze profile with `pam-auth-update` puts the module in `common-auth`, which
+those services include, so the crash reaches them even though they have nothing
+to do with face authentication.
+
+Later packages build the PAM module without OpenCV, so update:
+
+```bash
+curl -fsSL https://gaze.gundulabs.com/install.sh | sh
+```
+
+Confirm the module no longer links it:
+
+```bash
+objdump -p /usr/lib/security/pam_gaze.so | grep NEEDED
+```
+
+Nothing beyond libc, libgcc, libm, and the dynamic loader should appear. To
+restore mail service before updating, disable Gaze in the shared stack with
+`sudo pam-auth-update --disable gaze gaze-simultaneous`.
+
 ## 6. First run is slow
 
 This is normal when models are downloaded initially.

@@ -82,6 +82,18 @@ If you changed packaging files, scripts, systemd units, DBus policy, PAM integra
 just package <deb | rpm | archlinux>
 ```
 
+If you changed anything the PAM modules link, including the dependencies of
+`gaze-core`, check their shared-library footprint:
+
+```bash
+just build-rust
+just check-pam-link
+```
+
+`just build-rust` and every package build run this check already, so a failure
+there means a dependency reached `pam_gaze.so` that must not be in it. See
+[the warning in the development guide](/guide/development#build-and-test-rust-components).
+
 ## Tests
 
 Prefer tests that run in CI without hardware or system services.

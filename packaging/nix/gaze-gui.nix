@@ -39,6 +39,7 @@ rustPlatform.buildRustPackage {
       ../../gaze-cli
       ../../gaze-core
       ../../gaze-security
+      ../../gaze-vision
       ../../gaze-gui
       ../../pam-gaze
       ../../pam-gaze-grosshack
@@ -48,7 +49,7 @@ rustPlatform.buildRustPackage {
 
   cargoLock.lockFile = ../../Cargo.lock;
 
-  # Keeps gaze-core's `detection` feature (ONNX Runtime) out of the GUI.
+  # Keeps gaze-vision's `detection` feature (ONNX Runtime) out of the GUI.
   cargoBuildFlags = [
     "--package"
     "gaze-gui"

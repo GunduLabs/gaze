@@ -207,6 +207,7 @@ Default locations:
 - `gazed`: daemon that performs detection and recognition (crate: `gaze`)
 - `gaze`: CLI client (crate: `gaze-cli`, kept separate so the client binary does not link ONNX Runtime)
 - `gaze-gui`: GTK app
+- `pam_gaze.so`: PAM module. It holds no camera or inference code of its own; it asks `gazed` over DBus and reports the answer back to PAM
 - PAM integration, the GNOME extension, and KDE's biometric PAM slot for login/lock screen flow
 
 The CLI and GUI communicate with daemon over DBus (`com.gundulabs.Gaze`).

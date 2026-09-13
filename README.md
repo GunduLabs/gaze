@@ -188,7 +188,7 @@ Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Matc
 | `gazed` | System daemon exposing `com.gundulabs.Gaze` on DBus |
 | `gaze` | CLI for enrollment and authentication (crate: `gaze-cli`) |
 | `gaze-gui` | GTK4/Adwaita graphical application |
-| `pam-gaze` | PAM module for login/lock screen integration |
+| `pam-gaze` | PAM module for login/lock screen integration. Asks `gazed` over DBus; links no camera or inference code |
 | `gaze-gnome-extension` | GNOME Shell extension for lock screen auth |
 | `gaze-hyprlock` | PAM service for hyprlock face unlock on Hyprland |
 

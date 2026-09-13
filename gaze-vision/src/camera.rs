@@ -10,8 +10,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{info, warn};
 
-use crate::config::{CameraConfig, DEFAULT_RGB_CAMERA};
-use crate::ir::devices::{camera_function_of, find_device, usb_ids_of};
+use gaze_core::config::{CameraConfig, DEFAULT_RGB_CAMERA};
+use gaze_core::ir::devices::{camera_function_of, find_device, usb_ids_of};
 
 const REALTEK_IR_YUY2_WIDTH: u32 = 640;
 const REALTEK_IR_YUY2_HEIGHT: u32 = 480;
@@ -631,6 +631,12 @@ pub fn frame_to_bytes(frame: &Mat) -> anyhow::Result<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
+fn video_info_fps(video_info: &gstreamer_video::VideoInfo) -> Option<f64> {
+    let fraction = video_info.fps();
+    let (num, denom) = (fraction.numer(), fraction.denom());
+    (num > 0 && denom > 0).then(|| num as f64 / denom as f64)
+}
+
 impl Camera {
     pub fn open(camera_source: &str) -> anyhow::Result<Self> {
         Self::open_kind(camera_source, true)
@@ -817,15 +823,11 @@ impl Camera {
         let video_info = gstreamer_video::VideoInfo::from_caps(caps)
             .map_err(|e| anyhow::anyhow!("Failed to parse video info: {e}"))?;
 
-        let fraction = video_info.fps();
-        let (num, denom) = (fraction.numer(), fraction.denom());
-        if num > 0 && denom > 0 {
-            let fps_val = num as f64 / denom as f64;
-            if let Ok(mut guard) = self.fps.lock()
-                && guard.is_none()
-            {
-                *guard = Some(fps_val);
-            }
+        if let Some(fps_val) = video_info_fps(&video_info)
+            && let Ok(mut guard) = self.fps.lock()
+            && guard.is_none()
+        {
+            *guard = Some(fps_val);
         }
 
         anyhow::ensure!(
@@ -974,18 +976,14 @@ impl Camera {
             .static_pad("sink")
             .and_then(|p| p.current_caps())
             && let Ok(video_info) = gstreamer_video::VideoInfo::from_caps(&caps)
+            && let Some(fps_val) = video_info_fps(&video_info)
         {
-            let fraction = video_info.fps();
-            let (num, denom) = (fraction.numer(), fraction.denom());
-            if num > 0 && denom > 0 {
-                let fps_val = num as f64 / denom as f64;
-                if let Ok(mut guard) = self.fps.lock() {
-                    *guard = Some(fps_val);
-                }
-                return fps_val;
+            if let Ok(mut guard) = self.fps.lock() {
+                *guard = Some(fps_val);
             }
+            return fps_val;
         }
-        crate::config::DEFAULT_CAMERA_FPS
+        gaze_core::config::DEFAULT_CAMERA_FPS
     }
 
     /// Wait for the next frame while checking `stop` between short polling intervals.
@@ -1140,10 +1138,9 @@ fn collect_camera_entries(want_color: Option<bool>) -> anyhow::Result<Vec<Camera
 }
 
 fn v4l2_node_of(props: &gstreamer::StructureRef) -> Option<String> {
-    if let Some(path) = string_property(props, "api.v4l2.path") {
-        return Some(path);
-    }
-    string_property(props, "device.path").filter(|path| path.starts_with("/dev/video"))
+    string_property(props, "api.v4l2.path").or_else(|| {
+        string_property(props, "device.path").filter(|path| path.starts_with("/dev/video"))
+    })
 }
 
 fn wait_for_device_updates(monitor: &gstreamer::DeviceMonitor) {

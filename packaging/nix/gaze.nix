@@ -39,6 +39,7 @@ rustPlatform.buildRustPackage {
       ../../gaze-cli
       ../../gaze-core
       ../../gaze-security
+      ../../gaze-vision
       ../../gaze-gui
       ../../pam-gaze
       ../../pam-gaze-grosshack
@@ -73,7 +74,7 @@ rustPlatform.buildRustPackage {
     ORT_PREFER_DYNAMIC_LINK = "1";
   };
 
-  # Two invocations keep gaze-core's `detection` feature out of the clients.
+  # Two invocations keep gaze-vision's `detection` feature out of the clients.
   buildPhase = ''
     runHook preBuild
     cargo build --release --offline -p gaze

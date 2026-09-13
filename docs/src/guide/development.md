@@ -130,8 +130,9 @@ Git hooks are local to each clone. `just setup-hooks` points Git at the tracked 
 
 - `gaze`: the `gazed` daemon, ML pipeline, and user database.
 - `gaze-cli`: the `gaze` CLI binary. It lives in its own crate so the client binary does not statically link ONNX Runtime (see warning below).
-- `gaze-core`: shared camera/config/DBus library. Face detection sits behind the `detection` cargo feature (on by default); client crates opt out with `default-features = false`.
-- `pam-gaze`: `cdylib` PAM module.
+- `gaze-core`: shared config/DBus/IR library. Deliberately light: no OpenCV, GStreamer, or ONNX Runtime, so the PAM modules can depend on it.
+- `gaze-vision`: camera capture, face detection, and inference. Detection sits behind the `detection` cargo feature (on by default); the CLI and GUI opt out with `default-features = false` and get camera support alone.
+- `pam-gaze`: `cdylib` PAM module. Depends on `gaze-core` only, never `gaze-vision`, and `just check-pam-link` enforces that (see warning below).
 - `gaze-gui`: GTK4/libadwaita app. `gnome-shell-extension/` is packaged separately.
 
 ## Build and test rust components
@@ -141,8 +142,9 @@ just build-rust
 just test
 just lint
 just fmt-check
-just audit        # check dependencies for known CVEs
-just fmt          # apply formatting (fmt-check only checks)
+just audit             # check dependencies for known CVEs
+just check-pam-link    # check the PAM modules' shared-library footprint
+just fmt               # apply formatting (fmt-check only checks)
 ```
 
 The default build supports CPU inference only. To build the daemon and
@@ -160,7 +162,7 @@ The `openvino` Cargo feature is explicit. The build fails when that feature is
 enabled without a matching ONNX Runtime library.
 
 ::: warning Keep the `api-21` feature on the `ort` dependency
-`gaze` and `gaze-core` depend on `ort` with `default-features = false` and
+`gaze` and `gaze-vision` depend on `ort` with `default-features = false` and
 `api-21`, which pins the ONNX Runtime C API version the binaries ask for. `ort`
 defaults to the newest API its release targets, and a runtime older than that
 makes ONNX Runtime hand back a null API pointer, which `ort` turns into a panic
@@ -168,7 +170,7 @@ during process teardown and a core dump. Anything that links a system runtime
 (Nix, Flatpak, RPM source builds, `ORT_STRATEGY=system` in CI) can be as old as
 ONNX Runtime 1.21, so an `ort` upgrade must keep the `api-21` feature rather than
 inherit the new default. `gazed` also checks the loaded runtime before touching
-`ort`, and `gaze-core`'s `inference::` tests fail against a runtime that is too
+`ort`, and `gaze-vision`'s `inference::` tests fail against a runtime that is too
 old.
 
 `api-21` is also the newest API level Gaze can ask for safely. From `api-22` on,
@@ -205,6 +207,19 @@ ship with, but that path needs no OpenVINO runtime.
 
 ::: warning Build with `just build-rust`, not `cargo build --workspace`
 `just build-rust` builds the daemon and the clients in separate cargo invocations so feature unification cannot link ONNX Runtime into the CLI, GUI, or PAM modules. ONNX Runtime's startup code requires AVX2, and a single workspace build would silently reintroduce crashes on older CPUs.
+:::
+
+::: warning Never give the PAM modules a `gaze-vision` dependency
+`pam_gaze.so` is dlopened into every process that authenticates through
+`common-auth`, including network services such as `sshd` and `dovecot`. Linking
+the vision stack there pulls in OpenCV, which pulls in OpenBLAS, whose ELF
+constructor reserves per-thread buffers sized for every core. Services that cap
+address space then abort on load: this broke IMAP authentication in
+[#607](https://github.com/GunduLabs/gaze/issues/607). A crate boundary, not a
+cargo feature, is what keeps this out, because features unify across packages
+built in one `cargo build` invocation. `just check-pam-link` verifies the built
+modules link nothing beyond libc and runs as part of `just build-rust` and every
+package build.
 :::
 
 ## Run a locally-built daemon
@@ -277,6 +292,9 @@ The CLI and GUI need no special setup; they talk to whichever `gazed` currently 
 `pam-gaze` builds as a `cdylib`. After `just build-rust` you'll have:
 
 - `target/release/libpam_gaze.so`
+
+`just build-rust` also runs `just check-pam-link` over it, which fails the build
+if the module links anything beyond libc, libgcc, libm, and the dynamic loader.
 
 To exercise them through real PAM, copy into the system PAM library directory (path is distro-specific):
 

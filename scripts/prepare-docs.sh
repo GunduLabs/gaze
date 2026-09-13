@@ -10,7 +10,7 @@ cd "$SCRIPT_DIR/.."
 
 echo "Preparing versioned documentation..."
 
-git fetch --tags || true
+git fetch --tags --force || true
 
 rm -rf docs/archive
 mkdir -p docs/archive

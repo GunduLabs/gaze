@@ -16,6 +16,20 @@ If you specifically want GNOME lock screen or GDM login behavior, use the [GNOME
 Sequential (the default) means face auth runs first, then password fallback.
 Simultaneous (enabled via the `simultaneous` option, e.g. `pam_gaze.so simultaneous`) means face auth and password prompt run in parallel.
 
+### Network logins are skipped
+
+A camera attached to this machine cannot see whoever is at the other end of a
+network login, so Gaze steps aside for them. When the calling service sets
+`PAM_RHOST` to anything other than loopback, `pam_gaze.so` returns `PAM_IGNORE`
+immediately and the stack falls through to the next module, normally the
+password check. Services that authenticate remote clients set this item:
+`sshd`, `dovecot`, `vsftpd`, and Samba among them.
+
+This matters on Debian and Ubuntu, where enabling a Gaze profile through
+`pam-auth-update` puts Gaze in `common-auth`, and `common-auth` is included by
+nearly every service on the system, not just the desktop ones. Those services
+keep authenticating by password exactly as before.
+
 ## Debian / Ubuntu
 
 Packages install PAM profiles for `pam-auth-update`.

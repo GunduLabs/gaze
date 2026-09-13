@@ -3,7 +3,7 @@
 
 [package]
 name = "gaze"
-version = "0.3.0"
+version = "0.3.2"
 edition = "2024"
 description = "Linux facial authentication daemon and machine-learning pipeline for Gaze"
 categories.workspace = true
@@ -16,13 +16,14 @@ repository.workspace = true
 
 [features]
 default = []
-openvino = ["gaze-core/openvino", "ort/openvino"]
+openvino = ["gaze-vision/openvino", "ort/openvino"]
 
 [dependencies]
 aes-gcm = "0.11.1"
 anyhow = "1.0.104"
 gaze-core = { path = "../gaze-core" }
 gaze-security = { path = "../gaze-security" }
+gaze-vision = { path = "../gaze-vision" }
 getrandom = "0.4.3"
 image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
 libc = "0.2.189"
@@ -40,8 +41,8 @@ ort = { version = "2.0.0-rc.13", default-features = false, features = [
 ] }
 sha2 = "0.11"
 tokio = { version = "1.53.1", features = ["full", "rt-multi-thread"] }
-ureq = "3.4.0"
-uuid = { version = "1.26.0", features = ["v4"] }
+ureq = "3.4.2"
+uuid = { version = "1.26.1", features = ["v4"] }
 zbus = "5.19.0"
 zip = "8.6"
 tracing = "0.1.44"
