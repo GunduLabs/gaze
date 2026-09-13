@@ -31,8 +31,10 @@ const sortedVersioningPlugin = computed(() => ({
 </script>
 
 <template>
-  <UpstreamVersionSwitcher
-    :versioning-plugin="sortedVersioningPlugin"
-    :screen-menu="screenMenu"
-  />
+  <ClientOnly>
+    <UpstreamVersionSwitcher
+      :versioning-plugin="sortedVersioningPlugin"
+      :screen-menu="screenMenu"
+    />
+  </ClientOnly>
 </template>
