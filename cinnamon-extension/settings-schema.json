@@ -1,17 +1,29 @@
 {
   "layout": {
+    "type": "layout",
+    "pages": ["behavior"],
     "behavior": {
+      "type": "page",
+      "title": "Behavior",
+      "sections": ["face-authentication"]
+    },
+    "face-authentication": {
       "type": "section",
       "title": "Face authentication",
       "keys": [
+        "face-authentication-description",
         "enable-face-authentication",
         "face-retry-mode",
         "max-face-tries"
       ]
     }
   },
+  "face-authentication-description": {
+    "type": "label",
+    "description": "Face authentication for unlocking this session. This does not affect the login screen. Settings are stored in this extension's configuration."
+  },
   "enable-face-authentication": {
-    "type": "checkbox",
+    "type": "switch",
     "default": true,
     "description": "Enable face authentication (lock screen)"
   },

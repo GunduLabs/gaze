@@ -46,7 +46,7 @@ cinnamon-settings extensions
 
 Or open **System Settings** → **Extensions**, find **Gaze**, and click the **Configure** (gear) button from the row.
 
-The configuration window provides:
+The window has a single **Behavior** page with one group:
 
 | Group | Contains |
 |---|---|
@@ -55,7 +55,8 @@ The configuration window provides:
 ## Retry behavior
 
 The extension decides how many times face authentication is retried within one
-authentication cycle. All settings live under **Face authentication** in the extension preferences:
+authentication cycle. All settings live under **Behavior → Face authentication**
+in the extension preferences:
 
 | Setting | Key | Values | Default |
 |---|---|---|---|
