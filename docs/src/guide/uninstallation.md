@@ -134,6 +134,11 @@ sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin gaze-hyprlock-bi
 pacman -Q | awk '/^gaze.*-debug /{print $1}' | xargs -r sudo pacman -Rns --noconfirm
 ```
 
+```bash [Gentoo]
+sudo emerge --unmerge sys-auth/gaze
+sudo emerge --depclean sci-libs/onnxruntime-bin
+```
+
 ```bash [Flatpak (GUI only)]
 flatpak uninstall com.gundulabs.Gaze
 ```
@@ -175,6 +180,10 @@ sudo dnf makecache
 sudo sed -i '/^\[gaze\]/,/^$/d' /etc/pacman.conf
 sudo rm -f /etc/pacman.d/gaze-mirrorlist
 sudo pacman -Sy
+```
+
+```bash [Gentoo]
+sudo eselect repository remove -f gaze
 ```
 
 ```bash [Flatpak]

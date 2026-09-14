@@ -25,6 +25,9 @@ dist/
 index.scip
 docs/archive/
 
+# Generated Gentoo metadata cache
+/metadata/md5-cache/
+
 # nix build outputs
 result
 result-*

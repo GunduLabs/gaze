@@ -1,0 +1,65 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Gentoo
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/gentoo.yml"
+      - "metadata/**"
+      - "profiles/**"
+      - "sci-libs/**"
+      - "sys-auth/**"
+  pull_request:
+    paths:
+      - ".github/workflows/gentoo.yml"
+      - "metadata/**"
+      - "profiles/**"
+      - "sci-libs/**"
+      - "sys-auth/**"
+
+permissions:
+  contents: read
+
+jobs:
+  pkgcheck:
+    name: pkgcheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Set up Gentoo repository metadata
+        run: |
+          qa_root="${RUNNER_TEMP}/gentoo-qa"
+          git clone --depth=1 https://github.com/gentoo-mirror/gentoo.git "${qa_root}/gentoo"
+          mkdir -p "${qa_root}/etc/portage/repos.conf"
+          ln -s "${qa_root}/gentoo/profiles/default/linux/amd64/23.0" \
+            "${qa_root}/etc/portage/make.profile"
+          cat >"${qa_root}/etc/portage/repos.conf/repos.conf" <<EOF
+          [DEFAULT]
+          main-repo = gentoo
+
+          [gentoo]
+          location = ${qa_root}/gentoo
+
+          [gaze]
+          location = ${GITHUB_WORKSPACE}
+          EOF
+          python -m venv "${qa_root}/venv"
+          "${qa_root}/venv/bin/pip" install pkgcheck==0.10.43
+
+      - name: Scan overlay
+        run: |
+          qa_root="${RUNNER_TEMP}/gentoo-qa"
+          "${qa_root}/venv/bin/pkgcheck" scan \
+            --repo gaze \
+            --cache-dir "${qa_root}/cache"

@@ -116,6 +116,7 @@ body:
         - rpm-ostree (Silverblue / Bazzite / Kinoite)
         - Fedora Copr (@gundulabs/gaze)
         - AUR (gaze-bin, gaze-gui-bin, gaze-kde-bin, gaze-gnome-extension-bin)
+        - Gaze Gentoo overlay (sys-auth/gaze)
         - Nix / NixOS module
         - Flatpak (GUI only)
         - Built from source

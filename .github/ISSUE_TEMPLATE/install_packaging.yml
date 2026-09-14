@@ -55,6 +55,7 @@ body:
         - rpm-ostree (Silverblue / Bazzite / Kinoite)
         - Fedora Copr (@gundulabs/gaze)
         - AUR (gaze-bin, gaze-gui-bin, gaze-kde-bin, gaze-gnome-extension-bin)
+        - Gaze Gentoo overlay (sys-auth/gaze)
         - Nix / NixOS module
         - Flatpak (GUI only)
         - Built from source
@@ -109,6 +110,7 @@ body:
         apt list --installed 2>/dev/null | grep -i gaze
         rpm -qa | grep -i gaze
         pacman -Q | grep -i gaze
+        emerge --info sys-auth/gaze
         flatpak list | grep -i gaze
         ```
 
@@ -125,6 +127,7 @@ body:
         ```bash
         cat /etc/apt/sources.list.d/gundulabs.list
         cat /etc/yum.repos.d/gundulabs.repo
+        eselect repository list -i
         ```
 
         Include whether you have both the Gundu Labs dnf repository and Copr enabled, since enabling both causes conflicts.
