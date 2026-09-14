@@ -17,6 +17,7 @@ pub enum PamMode {
     #[default]
     Sequential,
     Simultaneous,
+    Retry,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -30,8 +31,10 @@ where
 {
     let mut options = PamOptions::default();
     for arg in args {
-        if arg == "simultaneous" {
-            options.mode = PamMode::Simultaneous;
+        match arg {
+            "simultaneous" => options.mode = PamMode::Simultaneous,
+            "retry" => options.mode = PamMode::Retry,
+            _ => {}
         }
     }
     options
@@ -51,13 +54,13 @@ pub unsafe fn parse_raw_pam_options(argc: c_int, argv: *const *const c_char) -> 
     let mut options = PamOptions::default();
     for i in 0..argc as isize {
         let arg_ptr = unsafe { *argv.offset(i) };
-        if !arg_ptr.is_null()
-            && matches!(
-                unsafe { CStr::from_ptr(arg_ptr) }.to_str(),
-                Ok("simultaneous")
-            )
-        {
-            options.mode = PamMode::Simultaneous;
+        if arg_ptr.is_null() {
+            continue;
+        }
+        match unsafe { CStr::from_ptr(arg_ptr) }.to_str() {
+            Ok("simultaneous") => options.mode = PamMode::Simultaneous,
+            Ok("retry") => options.mode = PamMode::Retry,
+            _ => {}
         }
     }
     options
@@ -148,12 +151,29 @@ where
     }
 }
 
-unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, _options: PamOptions) -> c_int {
+fn retry_is_warranted(verdict: Option<FirstPassVerdict>) -> bool {
+    verdict.is_none_or(FirstPassVerdict::allows_retry)
+}
+
+fn sequential_handoff(verdict: &Verdict) -> Option<FirstPassVerdict> {
+    match verdict {
+        Verdict::Reached(AuthOutcome::Match, _) => None,
+        Verdict::Reached(AuthOutcome::NoMatch, _) => Some(FirstPassVerdict::NoMatch),
+        _ => Some(FirstPassVerdict::Undecided),
+    }
+}
+
+unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, options: PamOptions) -> c_int {
     let service = unsafe { get_pam_service(pamh) };
     if service_defers_to_face_service(service.as_deref())
         || service_defers_to_face_slot(service.as_deref())
     {
         return PAM_IGNORE;
+    }
+
+    let is_retry = options.mode == PamMode::Retry;
+    if is_retry && !retry_is_warranted(unsafe { read_first_pass_verdict(pamh) }) {
+        return PAM_AUTHINFO_UNAVAIL;
     }
 
     let silent = caller_wants_silence(flags);
@@ -180,11 +200,13 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, _options: Pa
             .is_some_and(|s| is_service_internal(s, &pam_internal));
 
         let prompt = if is_internal {
-            if is_polkit {
+            if is_polkit && !is_retry {
                 GAZE_MSG_LOOK_OR_PASSWORD
             } else {
                 GAZE_MSG_LOOK_CAMERA
             }
+        } else if is_retry {
+            LOOK_AFTER_PASSWORD_PROMPT
         } else if is_polkit {
             LOOK_OR_PASSWORD_PROMPT
         } else {
@@ -200,6 +222,9 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, _options: Pa
         };
 
         let verdict = verify_within(&proxy, &username, service.as_deref(), budget).await;
+        if let Some(handoff) = sequential_handoff(&verdict) {
+            unsafe { record_first_pass_verdict(pamh, handoff) };
+        }
         match verdict {
             Verdict::Reached(AuthOutcome::Match, _) => Ok((config.auth, is_internal, prompt_line)),
             Verdict::Reached(AuthOutcome::NoMatch, _) => {
@@ -270,7 +295,7 @@ async fn authenticate_biometric_with_timeout(
     username: &str,
     service: Option<&str>,
     timeout_duration: Duration,
-) -> Option<c_int> {
+) -> Option<AuthOutcome> {
     let auth_future = async {
         let (_config, proxy) = setup_auth_env().await.ok()?;
         authenticate_biometric_with_status_on(&proxy, username, service)
@@ -280,14 +305,15 @@ async fn authenticate_biometric_with_timeout(
     };
 
     tokio::select! {
-        res = auth_future => {
-            match res {
-                Some(AuthOutcome::Match) => Some(PAM_SUCCESS),
-                Some(AuthOutcome::NoMatch) | Some(AuthOutcome::Unavailable) => Some(PAM_AUTH_ERR),
-                None => None,
-            }
-        }
+        res = auth_future => res,
         _ = tokio::time::sleep(timeout_duration) => None,
+    }
+}
+
+fn first_pass_verdict(outcome: Option<AuthOutcome>) -> FirstPassVerdict {
+    match outcome {
+        Some(AuthOutcome::NoMatch) => FirstPassVerdict::NoMatch,
+        _ => FirstPassVerdict::Undecided,
     }
 }
 
@@ -488,7 +514,8 @@ unsafe fn do_authenticate_simultaneous(
             service.as_deref(),
             camera_auth_timeout(&auth, service.as_deref()),
         ));
-        if bio != Some(PAM_SUCCESS) {
+        if bio != Some(AuthOutcome::Match) {
+            unsafe { record_first_pass_verdict(pamh, first_pass_verdict(bio)) };
             return PAM_AUTHINFO_UNAVAIL;
         }
         if require_confirmation {
@@ -520,7 +547,7 @@ unsafe fn do_authenticate_simultaneous(
     let password_fut = notify.notified();
 
     enum SelectorResult {
-        Biometric(Option<c_int>),
+        Biometric(Option<AuthOutcome>),
         Password,
     }
 
@@ -533,12 +560,14 @@ unsafe fn do_authenticate_simultaneous(
 
     match select_res {
         SelectorResult::Password => {
+            unsafe { record_first_pass_verdict(pamh, FirstPassVerdict::Preempted) };
             let fallback = unsafe { wait_for_password_and_fallback(pamh, &state) };
             let _ = prompt_thread.join();
             fallback
         }
         SelectorResult::Biometric(bio_res) => {
-            if bio_res != Some(PAM_SUCCESS) {
+            if bio_res != Some(AuthOutcome::Match) {
+                unsafe { record_first_pass_verdict(pamh, first_pass_verdict(bio_res)) };
                 let fallback = unsafe { wait_for_password_and_fallback(pamh, &state) };
                 let _ = prompt_thread.join();
                 return fallback;
@@ -570,7 +599,9 @@ pub unsafe fn do_authenticate(pamh: PamHandle, flags: c_int, options: PamOptions
         return PAM_IGNORE;
     }
     match options.mode {
-        PamMode::Sequential => unsafe { do_authenticate_sequential(pamh, flags, options) },
+        PamMode::Sequential | PamMode::Retry => unsafe {
+            do_authenticate_sequential(pamh, flags, options)
+        },
         PamMode::Simultaneous => unsafe { do_authenticate_simultaneous(pamh, flags, options) },
     }
 }
@@ -588,6 +619,78 @@ mod tests {
     fn mode_parsing_defaults_to_sequential() {
         assert_eq!(parse_pam_mode(Vec::<&str>::new()), PamMode::Sequential);
         assert_eq!(parse_pam_mode(["debug", "silent"]), PamMode::Sequential);
+    }
+
+    #[test]
+    fn mode_parsing_detects_retry() {
+        assert_eq!(parse_pam_mode(["retry"]), PamMode::Retry);
+        assert_eq!(parse_pam_mode(["debug", "retry"]), PamMode::Retry);
+    }
+
+    #[test]
+    fn last_mode_token_wins() {
+        assert_eq!(parse_pam_mode(["simultaneous", "retry"]), PamMode::Retry);
+        assert_eq!(
+            parse_pam_mode(["retry", "simultaneous"]),
+            PamMode::Simultaneous
+        );
+    }
+
+    #[test]
+    fn a_definitive_non_match_stands_the_retry_down() {
+        assert!(!retry_is_warranted(Some(FirstPassVerdict::NoMatch)));
+    }
+
+    #[test]
+    fn an_undecided_first_pass_earns_a_retry() {
+        assert!(retry_is_warranted(Some(FirstPassVerdict::Undecided)));
+        assert!(retry_is_warranted(Some(FirstPassVerdict::Preempted)));
+    }
+
+    #[test]
+    fn a_retry_module_standing_alone_still_runs() {
+        assert!(retry_is_warranted(None));
+    }
+
+    #[test]
+    fn only_a_reached_non_match_hands_off_as_non_match() {
+        assert_eq!(
+            sequential_handoff(&Verdict::Reached(AuthOutcome::NoMatch, None)),
+            Some(FirstPassVerdict::NoMatch)
+        );
+        assert_eq!(
+            sequential_handoff(&Verdict::Reached(AuthOutcome::Unavailable, None)),
+            Some(FirstPassVerdict::Undecided)
+        );
+        assert_eq!(
+            sequential_handoff(&Verdict::Exhausted),
+            Some(FirstPassVerdict::Undecided)
+        );
+        assert_eq!(
+            sequential_handoff(&Verdict::Failed),
+            Some(FirstPassVerdict::Undecided)
+        );
+    }
+
+    #[test]
+    fn a_match_hands_nothing_off() {
+        assert_eq!(
+            sequential_handoff(&Verdict::Reached(AuthOutcome::Match, None)),
+            None
+        );
+    }
+
+    #[test]
+    fn a_timed_out_camera_is_undecided_not_a_non_match() {
+        assert_eq!(first_pass_verdict(None), FirstPassVerdict::Undecided);
+        assert_eq!(
+            first_pass_verdict(Some(AuthOutcome::Unavailable)),
+            FirstPassVerdict::Undecided
+        );
+        assert_eq!(
+            first_pass_verdict(Some(AuthOutcome::NoMatch)),
+            FirstPassVerdict::NoMatch
+        );
     }
 
     #[test]

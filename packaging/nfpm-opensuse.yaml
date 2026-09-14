@@ -62,6 +62,11 @@ contents:
     packager: rpm
     file_info:
       mode: 0644
+  - src: "packaging/pam/gaze-retry.conf.suse"
+    dst: "/usr/lib/pam-config.d/gaze-retry.conf"
+    packager: rpm
+    file_info:
+      mode: 0644
 
 rpm:
   signature:

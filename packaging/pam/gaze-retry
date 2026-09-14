@@ -1,0 +1,6 @@
+Name: Gaze Face Authentication (Retry After Password)
+Default: no
+Priority: 128
+Auth-Type: Primary
+Auth:
+        [success=end default=ignore]    pam_gaze.so retry

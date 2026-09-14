@@ -220,6 +220,18 @@ in
               '';
             };
 
+            retry = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = ''
+                Add a second pam_gaze.so rule below the password module, giving
+                face authentication one more attempt after a rejected password.
+                Composes with either sequential or simultaneous mode. The retry
+                rule stands down without using the camera when the first pass
+                already decided the face was not a match.
+              '';
+            };
+
             order = lib.mkOption {
               type = lib.types.nullOr lib.types.int;
               default = null;
@@ -257,6 +269,18 @@ in
               modulePath = pamModule;
               args = lib.optional config.gaze.simultaneous "simultaneous";
               order = if config.gaze.order != null then config.gaze.order else fallbackOrder - 10;
+            }
+          );
+
+          config.rules.auth.gazeRetry = lib.mkIf (config.gaze.enable && config.gaze.retry) (
+            let
+              unixOrder = config.rules.auth.unix.order or null;
+            in
+            {
+              control = config.gaze.control;
+              modulePath = pamModule;
+              args = [ "retry" ];
+              order = if unixOrder == null then 20000 else unixOrder + 10;
             }
           );
         }
