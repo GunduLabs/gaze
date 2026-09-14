@@ -915,6 +915,35 @@ fn find_pam_references() -> Vec<PathBuf> {
 }
 
 const PAM_ORDERING_COMPETITORS: [&str; 2] = ["pam_unix.so", "pam_fprintd.so"];
+const PAM_PASSWORD_MODULE: &str = "pam_unix.so";
+
+fn pam_line_is_retry(line: &str) -> bool {
+    pam_line_has_reference(line)
+        && line
+            .split('#')
+            .next()
+            .unwrap_or_default()
+            .split_ascii_whitespace()
+            .any(|token| token == "retry")
+}
+
+fn pam_auth_lines(contents: &str) -> Vec<&str> {
+    contents
+        .lines()
+        .map(|line| line.split('#').next().unwrap_or_default().trim())
+        .filter(|line| matches!(line.split_ascii_whitespace().next(), Some("auth" | "-auth")))
+        .collect()
+}
+
+fn find_misplaced_retry_entry(contents: &str) -> bool {
+    let auth_lines = pam_auth_lines(contents);
+    let Some(retry_idx) = auth_lines.iter().position(|line| pam_line_is_retry(line)) else {
+        return false;
+    };
+    !auth_lines[..retry_idx]
+        .iter()
+        .any(|line| line.contains(PAM_PASSWORD_MODULE))
+}
 
 /// Returns competing auth modules (password, fingerprint) that appear earlier
 /// in the `auth` stack than Gaze, which stalls face auth behind their prompts.
@@ -927,7 +956,7 @@ fn find_pam_ordering_conflicts(contents: &str) -> Vec<&'static str> {
 
     let Some(gaze_idx) = auth_lines
         .iter()
-        .position(|line| pam_line_has_reference(line))
+        .position(|line| pam_line_has_reference(line) && !pam_line_is_retry(line))
     else {
         return Vec::new();
     };
@@ -1052,6 +1081,18 @@ fn check_pam(report: &mut Report) {
                         path.display()
                     ),
                     "Re-run `sudo pam-auth-update --package` (Debian/Ubuntu) or move the Gaze line above pam_unix.so/pam_fprintd.so.",
+                );
+            }
+
+            if find_misplaced_retry_entry(&contents) {
+                report.warning(
+                    "PAM retry ordering",
+                    format!(
+                        "pam_gaze.so retry runs before {} in {}, so it can never be reached by a rejected password",
+                        PAM_PASSWORD_MODULE,
+                        path.display()
+                    ),
+                    "Move the `pam_gaze.so retry` line below pam_unix.so, or re-run `sudo pam-auth-update --package` (Debian/Ubuntu).",
                 );
             }
         }
@@ -2833,6 +2874,52 @@ mod tests {
         assert!(find_pam_ordering_conflicts(stacked_first).is_empty());
 
         assert!(find_pam_ordering_conflicts("auth include system-auth\n").is_empty());
+    }
+
+    #[test]
+    fn a_retry_entry_is_not_a_stalled_first_pass() {
+        let retry_stack = "auth sufficient pam_gaze.so simultaneous\n\
+             auth sufficient pam_unix.so try_first_pass nullok\n\
+             auth sufficient pam_gaze.so retry\n";
+        assert!(find_pam_ordering_conflicts(retry_stack).is_empty());
+        assert!(!find_misplaced_retry_entry(retry_stack));
+    }
+
+    #[test]
+    fn a_lone_retry_entry_below_the_password_is_not_flagged_as_stalled() {
+        let lone_retry = "auth sufficient pam_unix.so try_first_pass nullok\n\
+             auth sufficient pam_gaze.so retry\n";
+        assert!(find_pam_ordering_conflicts(lone_retry).is_empty());
+        assert!(!find_misplaced_retry_entry(lone_retry));
+    }
+
+    #[test]
+    fn a_retry_entry_above_the_password_is_unreachable() {
+        let misplaced = "auth sufficient pam_gaze.so retry\n\
+             auth sufficient pam_unix.so try_first_pass nullok\n";
+        assert!(find_misplaced_retry_entry(misplaced));
+    }
+
+    #[test]
+    fn a_stack_without_a_retry_entry_reports_nothing() {
+        assert!(!find_misplaced_retry_entry(
+            "auth sufficient pam_gaze.so\nauth sufficient pam_unix.so\n"
+        ));
+    }
+
+    #[test]
+    fn a_fingerprint_module_does_not_count_as_the_password_module() {
+        let fprintd_only = "auth sufficient pam_fprintd.so\n\
+             auth sufficient pam_gaze.so retry\n\
+             auth sufficient pam_unix.so try_first_pass nullok\n";
+        assert!(find_misplaced_retry_entry(fprintd_only));
+    }
+
+    #[test]
+    fn retry_is_only_a_mode_token_on_a_gaze_line() {
+        assert!(pam_line_is_retry("auth sufficient pam_gaze.so retry"));
+        assert!(!pam_line_is_retry("auth sufficient pam_gaze.so"));
+        assert!(!pam_line_is_retry("auth sufficient pam_unix.so retry"));
     }
 
     #[test]
