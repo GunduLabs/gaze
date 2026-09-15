@@ -455,7 +455,7 @@ impl SecurityLevel {
     }
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, Default, Value, OwnedValue, Type)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct Config {
     #[serde(default)]
     pub inference: InferenceConfig,
@@ -555,10 +555,36 @@ impl InferenceConfig {
 }
 
 // Its own table: a security preset replaces `[security]` wholesale, resetting it.
-#[derive(Deserialize, Serialize, Clone, Debug, Default, Value, OwnedValue, Type)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct StorageConfig {
     #[serde(default = "default_false")]
     pub encrypt_templates: bool,
+    #[serde(default = "default_false")]
+    pub unlock_gnome_keyring: bool,
+}
+
+impl Config {
+    /// Drop a keyring opt-in whose prerequisites are missing so a hand-edited file, or drift
+    /// between the daemon's live state and disk, degrades to the default instead of breaking
+    /// face login. Returns whether the flag was cleared.
+    pub fn clamp_keyring(&mut self) -> bool {
+        if self.storage.validate_keyring(&self.liveness).is_err() {
+            self.storage.unlock_gnome_keyring = false;
+            return true;
+        }
+        false
+    }
+}
+
+impl StorageConfig {
+    pub fn validate_keyring(&self, liveness: &LivenessConfig) -> anyhow::Result<()> {
+        if self.unlock_gnome_keyring && (!self.encrypt_templates || !liveness.enabled) {
+            anyhow::bail!(
+                "storage.unlock_gnome_keyring requires storage.encrypt_templates and liveness.enabled"
+            );
+        }
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Value, OwnedValue, Type)]
@@ -1797,7 +1823,7 @@ mod tests {
         use zvariant::Type;
         assert_eq!(AuthConfig::SIGNATURE.to_string(), "(bbbbbtts)");
         assert_eq!(
-            Config::SIGNATURE.to_string(),
+            crate::dbus::DbusConfig::SIGNATURE.to_string(),
             "((ss)(sssdds)(ssbys)(bbbbbtts)(ud)(bdd)(b))"
         );
     }
@@ -1991,6 +2017,7 @@ mod tests {
             },
             storage: StorageConfig {
                 encrypt_templates: true,
+                unlock_gnome_keyring: true,
             },
         };
 
@@ -2026,6 +2053,7 @@ mod tests {
         assert_eq!(loaded.liveness.threshold, 0.9);
         assert_eq!(loaded.liveness.max_seconds, 2.5);
         assert!(loaded.storage.encrypt_templates);
+        assert!(loaded.storage.unlock_gnome_keyring);
     }
 
     #[test]
@@ -2101,8 +2129,10 @@ mod tests {
             String::new(),
         );
 
-        let value = zvariant::OwnedValue::try_from(cfg).unwrap();
-        let back = Config::try_from(value).unwrap();
+        let value = zvariant::OwnedValue::try_from(crate::dbus::DbusConfig::from(cfg)).unwrap();
+        let back = crate::dbus::DbusConfig::try_from(value)
+            .map(Config::from)
+            .unwrap();
 
         assert_eq!(back.auth.start_delay_ms, 4500);
         assert_eq!(back.auth.resume_grace_ms, 1500);
@@ -2390,6 +2420,42 @@ level = "low""#,
         )
         .unwrap();
         assert!(!absent.storage.encrypt_templates);
+    }
+
+    #[test]
+    fn keyring_defaults_off_and_requires_tpm_and_liveness() {
+        let mut config: Config =
+            toml_edit::de::from_str("[storage]\nencrypt_templates = true").unwrap();
+        assert!(!config.storage.unlock_gnome_keyring);
+        config.storage.unlock_gnome_keyring = true;
+        config.liveness.enabled = true;
+        assert!(config.storage.validate_keyring(&config.liveness).is_ok());
+        config.storage.encrypt_templates = false;
+        assert!(config.storage.validate_keyring(&config.liveness).is_err());
+        config.storage.encrypt_templates = true;
+        config.liveness.enabled = false;
+        assert!(config.storage.validate_keyring(&config.liveness).is_err());
+        config.storage.unlock_gnome_keyring = false;
+        assert!(config.storage.validate_keyring(&config.liveness).is_ok());
+        assert!(unknown_config_keys("[storage]\nunlock_gnome_keyring = false").is_empty());
+    }
+
+    #[test]
+    fn a_hand_edited_keyring_opt_in_without_prerequisites_clamps_off() {
+        let mut config = Config::default();
+        config.storage.unlock_gnome_keyring = true;
+        config.storage.encrypt_templates = true;
+        config.liveness.enabled = false;
+        assert!(config.clamp_keyring());
+        assert!(!config.storage.unlock_gnome_keyring);
+
+        config.storage.unlock_gnome_keyring = true;
+        config.liveness.enabled = true;
+        assert!(!config.clamp_keyring(), "a valid opt-in survives");
+        assert!(config.storage.unlock_gnome_keyring);
+
+        let mut off = Config::default();
+        assert!(!off.clamp_keyring(), "the default needs no clamping");
     }
 
     #[test]
