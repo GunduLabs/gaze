@@ -67,6 +67,7 @@ pub const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Es
 
 pub const LOOK_PROMPT: &str = "Please look at the camera";
 pub const LOOK_OR_PASSWORD_PROMPT: &str = "Please look at the camera or enter password";
+pub const LOOK_AFTER_PASSWORD_PROMPT: &str = "Password incorrect. Please look at the camera";
 pub const FACE_VERIFIED: &str = "Face Verified.";
 pub const FACE_NOT_RECOGNIZED: &str = "Face not recognized. Enter your password.";
 pub const FACE_NOT_DETECTED: &str = "Face not detected. Enter your password.";
@@ -169,6 +170,74 @@ unsafe extern "C" {
     pub fn pam_get_user(pamh: PamHandle, user: *mut *const c_char, prompt: *const c_char) -> c_int;
     pub fn pam_get_item(pamh: PamHandle, item_type: c_int, item: *mut *const c_void) -> c_int;
     pub fn pam_set_item(pamh: PamHandle, item_type: c_int, item: *const c_void) -> c_int;
+    pub fn pam_set_data(
+        pamh: PamHandle,
+        module_data_name: *const c_char,
+        data: *mut c_void,
+        cleanup: Option<
+            unsafe extern "C" fn(pamh: PamHandle, data: *mut c_void, error_status: c_int),
+        >,
+    ) -> c_int;
+    pub fn pam_get_data(
+        pamh: PamHandle,
+        module_data_name: *const c_char,
+        data: *mut *const c_void,
+    ) -> c_int;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FirstPassVerdict {
+    NoMatch = 1,
+    Undecided = 2,
+    Preempted = 3,
+}
+
+impl FirstPassVerdict {
+    pub fn from_repr(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Self::NoMatch),
+            2 => Some(Self::Undecided),
+            3 => Some(Self::Preempted),
+            _ => None,
+        }
+    }
+
+    pub fn allows_retry(self) -> bool {
+        !matches!(self, Self::NoMatch)
+    }
+}
+
+pub const FIRST_PASS_DATA_KEY: &CStr = c"gaze_first_pass_verdict";
+
+unsafe extern "C" fn free_first_pass_verdict(_pamh: PamHandle, data: *mut c_void, _status: c_int) {
+    if !data.is_null() {
+        drop(unsafe { Box::from_raw(data as *mut u8) });
+    }
+}
+
+pub unsafe fn record_first_pass_verdict(pamh: PamHandle, verdict: FirstPassVerdict) {
+    let boxed = Box::into_raw(Box::new(verdict as u8));
+    let rc = unsafe {
+        pam_set_data(
+            pamh,
+            FIRST_PASS_DATA_KEY.as_ptr(),
+            boxed as *mut c_void,
+            Some(free_first_pass_verdict),
+        )
+    };
+    if rc != PAM_SUCCESS {
+        drop(unsafe { Box::from_raw(boxed) });
+    }
+}
+
+pub unsafe fn read_first_pass_verdict(pamh: PamHandle) -> Option<FirstPassVerdict> {
+    let mut data: *const c_void = ptr::null();
+    let rc = unsafe { pam_get_data(pamh, FIRST_PASS_DATA_KEY.as_ptr(), &mut data) };
+    if rc != PAM_SUCCESS || data.is_null() {
+        return None;
+    }
+    FirstPassVerdict::from_repr(unsafe { *(data as *const u8) })
 }
 
 pub unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<String> {
@@ -1518,5 +1587,30 @@ mod tests {
         assert!(!internal_prompt_confirmation_accepted(None));
         assert!(!internal_prompt_confirmation_accepted(Some("yes")));
         assert!(!internal_prompt_confirmation_accepted(Some("GAZE_CANCEL")));
+    }
+
+    #[test]
+    fn verdict_survives_the_round_trip_through_pam_data() {
+        for verdict in [
+            FirstPassVerdict::NoMatch,
+            FirstPassVerdict::Undecided,
+            FirstPassVerdict::Preempted,
+        ] {
+            assert_eq!(FirstPassVerdict::from_repr(verdict as u8), Some(verdict));
+        }
+    }
+
+    #[test]
+    fn an_unknown_verdict_byte_is_rejected() {
+        assert_eq!(FirstPassVerdict::from_repr(0), None);
+        assert_eq!(FirstPassVerdict::from_repr(4), None);
+        assert_eq!(FirstPassVerdict::from_repr(255), None);
+    }
+
+    #[test]
+    fn only_a_non_match_blocks_a_retry() {
+        assert!(!FirstPassVerdict::NoMatch.allows_retry());
+        assert!(FirstPassVerdict::Undecided.allows_retry());
+        assert!(FirstPassVerdict::Preempted.allows_retry());
     }
 }

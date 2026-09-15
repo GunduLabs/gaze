@@ -11,6 +11,7 @@ auth        sufficient                                   pam_gaze.so simultaneou
 auth        sufficient                                   pam_gaze.so                                            {exclude if "with-face-simultaneous"}
 auth        sufficient                                   pam_unix.so {if not "without-nullok":nullok} try_first_pass
 auth        sufficient                                   pam_systemd_home.so                                    {include if "with-systemd-homed"}
+auth        sufficient                                   pam_gaze.so retry                                      {include if "with-face-retry"}
 auth        required                                     pam_faillock.so authfail                               {include if "with-faillock"}
 auth        optional                                     pam_gnome_keyring.so only_if=login auto_start          {include if "with-pam-gnome-keyring"}
 auth        required                                     pam_deny.so

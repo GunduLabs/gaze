@@ -11,10 +11,13 @@ If you specifically want GNOME lock screen or GDM login behavior, use the [GNOME
 
 ## What Gaze installs
 
-- `pam_gaze.so` (supports sequential and simultaneous modes)
+- `pam_gaze.so` (supports sequential, simultaneous, and retry modes)
 
 Sequential (the default) means face auth runs first, then password fallback.
 Simultaneous (enabled via the `simultaneous` option, e.g. `pam_gaze.so simultaneous`) means face auth and password prompt run in parallel.
+Retry (enabled via the `retry` option, e.g. `pam_gaze.so retry`) is a second Gaze
+entry placed *below* the password module, so face auth gets one more attempt
+after a rejected password. See [Retry after a rejected password](#retry-after-a-rejected-password).
 
 ### Network logins are skipped
 
@@ -70,7 +73,7 @@ editing these files.
 First disable the shared Gaze profiles:
 
 ```bash
-sudo pam-auth-update --disable gaze gaze-simultaneous
+sudo pam-auth-update --disable gaze gaze-simultaneous gaze-retry
 ```
 
 `--disable` (rather than `--remove`) records the choice, so the
@@ -192,6 +195,12 @@ Or simultaneous mode:
 sudo authselect select gaze with-face-simultaneous with-silent-lastlog --force
 ```
 
+Add a retry after a rejected password to either of the above:
+
+```bash
+sudo authselect enable-feature with-face-retry
+```
+
 Verify profile + PAM behavior:
 
 ```bash
@@ -224,6 +233,22 @@ sudo pam-config --delete --gaze
 sudo pam-config --add --gaze_grosshack
 sudo pam-config --update
 ```
+
+To add a retry after a rejected password, enable the retry definition alongside
+whichever of the above you use:
+
+```bash
+sudo pam-config --add --gaze_retry
+sudo pam-config --update
+```
+
+::: warning
+The openSUSE retry definition is newer than the others and has had less testing
+on Tumbleweed than the Debian and Fedora profiles. Check the generated
+`/etc/pam.d/common-auth` afterwards and confirm the `pam_gaze.so retry` line
+landed *below* `pam_unix.so`. If it did not, remove it with
+`sudo pam-config --delete --gaze_retry` and add the line by hand instead.
+:::
 
 Check that the managed file contains Gaze and that the common-auth link still
 points at the generated file:
@@ -310,6 +335,63 @@ auth    sufficient    pam_unix.so try_first_pass nullok
 ```
 
 Then test with `sudo -v`.
+
+## Retry after a rejected password
+
+By default a typed password ends the Gaze attempt. In simultaneous mode Gaze
+stands down as soon as you submit one, and if that password turns out to be
+wrong the whole authentication fails: there is no second look at the camera.
+
+The `retry` option adds one. It is a *second* `pam_gaze.so` line placed below
+the password module, so it is only reached when the password was rejected:
+
+```text
+auth    sufficient    pam_gaze.so simultaneous
+auth    sufficient    pam_unix.so try_first_pass nullok
+auth    sufficient    pam_gaze.so retry
+```
+
+The first line still gives you face-or-password. The third line is what catches
+a typo: the password is rejected, and Gaze looks once more instead of failing
+the attempt outright.
+
+Retry composes with either mode, so `pam_gaze.so` on its own works as the first
+line too.
+
+### It does not repeat a decided verdict
+
+A retry entry is not a second full camera run in every case. When the first
+Gaze entry already saw a face and decided it was not yours, the retry entry
+stands down immediately rather than spending another camera timeout on a
+question that has been answered. It only looks again when the first pass was
+undecided: no face found, too dark, timed out, camera unavailable, or a
+password submitted before the camera reached a verdict.
+
+### Enabling it
+
+On Debian and Ubuntu the profile is shipped but off by default:
+
+```bash
+sudo pam-auth-update --enable gaze-retry
+```
+
+On Fedora it is an authselect feature:
+
+```bash
+sudo authselect enable-feature with-face-retry
+```
+
+### Lockout counters
+
+A rejected password is still a rejected password. On distributions that use
+`pam_faillock`, the failed attempt may be tallied even when the face retry then
+succeeds. The shipped Fedora profile places the retry entry *above*
+`pam_faillock.so authfail` so a successful retry short-circuits before the tally
+is written, but stacks you assemble by hand will not do this unless you order
+them the same way.
+
+If you type passwords wrong often and rely on the retry, check `faillock --user
+$USER` after a few attempts to confirm your stack behaves the way you expect.
 
 ## Browser extensions through Polkit (Bitwarden)
 

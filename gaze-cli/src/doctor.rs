@@ -34,6 +34,7 @@ const PLASMALOGIN_FACE_PAM_FILE: &str = "/etc/pam.d/plasmalogin-fingerprint";
 /// openSUSE ship these slots only there, so reading `/etc` alone sees nothing.
 const VENDOR_PAM_DIR: &str = "/usr/lib/pam.d";
 const POLKIT_PAM_FILE: &str = "/etc/pam.d/polkit-1";
+const ELEVATION_PAM_SERVICE: &str = "sudo";
 
 fn read_pam_service(path: &str) -> Option<String> {
     fs::read_to_string(path).ok().or_else(|| {
@@ -916,6 +917,35 @@ fn find_pam_references() -> Vec<PathBuf> {
 }
 
 const PAM_ORDERING_COMPETITORS: [&str; 2] = ["pam_unix.so", "pam_fprintd.so"];
+const PAM_PASSWORD_MODULE: &str = "pam_unix.so";
+
+fn pam_line_is_retry(line: &str) -> bool {
+    pam_line_has_reference(line)
+        && line
+            .split('#')
+            .next()
+            .unwrap_or_default()
+            .split_ascii_whitespace()
+            .any(|token| token == "retry")
+}
+
+fn pam_auth_lines(contents: &str) -> Vec<&str> {
+    contents
+        .lines()
+        .map(|line| line.split('#').next().unwrap_or_default().trim())
+        .filter(|line| matches!(line.split_ascii_whitespace().next(), Some("auth" | "-auth")))
+        .collect()
+}
+
+fn find_misplaced_retry_entry(contents: &str) -> bool {
+    let auth_lines = pam_auth_lines(contents);
+    let Some(retry_idx) = auth_lines.iter().position(|line| pam_line_is_retry(line)) else {
+        return false;
+    };
+    !auth_lines[..retry_idx]
+        .iter()
+        .any(|line| line.contains(PAM_PASSWORD_MODULE))
+}
 
 /// Returns competing auth modules (password, fingerprint) that appear earlier
 /// in the `auth` stack than Gaze, which stalls face auth behind their prompts.
@@ -928,7 +958,7 @@ fn find_pam_ordering_conflicts(contents: &str) -> Vec<&'static str> {
 
     let Some(gaze_idx) = auth_lines
         .iter()
-        .position(|line| pam_line_has_reference(line))
+        .position(|line| pam_line_has_reference(line) && !pam_line_is_retry(line))
     else {
         return Vec::new();
     };
@@ -1055,9 +1085,71 @@ fn check_pam(report: &mut Report) {
                     "Re-run `sudo pam-auth-update --package` (Debian/Ubuntu) or move the Gaze line above pam_unix.so/pam_fprintd.so.",
                 );
             }
+
+            if find_misplaced_retry_entry(&contents) {
+                report.warning(
+                    "PAM retry ordering",
+                    format!(
+                        "pam_gaze.so retry runs before {} in {}, so it can never be reached by a rejected password",
+                        PAM_PASSWORD_MODULE,
+                        path.display()
+                    ),
+                    "Move the `pam_gaze.so retry` line below pam_unix.so, or re-run `sudo pam-auth-update --package` (Debian/Ubuntu).",
+                );
+            }
         }
 
+        check_elevation_pam(report);
         check_polkit_pam(report);
+    }
+}
+
+fn shared_stack_hint_for(os_release: &str) -> &'static str {
+    let os_release = os_release.to_ascii_lowercase();
+    if os_release.contains("suse") {
+        "Run `sudo pam-config --add --gaze` then `sudo pam-config --update`, and confirm pam_gaze.so appears in /etc/pam.d/common-auth. See https://gaze.gundulabs.com/guide/pam"
+    } else if ["fedora", "rhel", "centos"]
+        .iter()
+        .any(|family| os_release.contains(family))
+    {
+        "Run `sudo authselect select gaze with-silent-lastlog --force`. See https://gaze.gundulabs.com/guide/pam"
+    } else if ["debian", "ubuntu"]
+        .iter()
+        .any(|family| os_release.contains(family))
+    {
+        "Run `sudo pam-auth-update --package` and enable the Gaze profile. See https://gaze.gundulabs.com/guide/pam"
+    } else if ["arch", "manjaro", "omarchy"]
+        .iter()
+        .any(|family| os_release.contains(family))
+    {
+        "Add 'auth        sufficient    pam_gaze.so' above the first auth line of /etc/pam.d/sudo. See https://gaze.gundulabs.com/guide/pam"
+    } else {
+        "Add 'auth        sufficient    pam_gaze.so' above the first auth line of your shared auth stack (/etc/pam.d/system-auth, or /etc/pam.d/common-auth on openSUSE). See https://gaze.gundulabs.com/guide/pam"
+    }
+}
+
+fn shared_stack_hint() -> &'static str {
+    let os_release = fs::read_to_string("/etc/os-release").unwrap_or_default();
+    shared_stack_hint_for(&os_release)
+}
+
+fn check_elevation_pam(report: &mut Report) {
+    if read_pam_service(&format!("/etc/pam.d/{ELEVATION_PAM_SERVICE}")).is_none() {
+        return;
+    }
+    if pam_service_reaches_gaze(ELEVATION_PAM_SERVICE, 2) {
+        report.pass(
+            "Elevation PAM",
+            format!("the {ELEVATION_PAM_SERVICE} service reaches a Gaze module"),
+        );
+    } else {
+        report.warning(
+            "Elevation PAM",
+            format!(
+                "the {ELEVATION_PAM_SERVICE} service reaches no Gaze module, so terminal elevation falls straight through to the password stack"
+            ),
+            shared_stack_hint(),
+        );
     }
 }
 
@@ -2229,6 +2321,20 @@ mod tests {
     }
 
     #[test]
+    fn shared_stack_remedies_use_the_tool_that_owns_the_stack() {
+        for (os_release, tool) in [
+            ("ID=opensuse-tumbleweed\nID_LIKE=suse\n", "pam-config"),
+            ("ID=fedora\n", "authselect"),
+            ("ID=ubuntu\nID_LIKE=debian\n", "pam-auth-update"),
+            ("ID=omarchy\nID_LIKE=arch\n", "/etc/pam.d/sudo"),
+            ("ID=void\n", "/etc/pam.d/system-auth"),
+        ] {
+            let hint = shared_stack_hint_for(os_release);
+            assert!(hint.contains(tool), "{hint:?} does not name {tool}");
+        }
+    }
+
+    #[test]
     fn gstreamer_plugin_remedies_use_distro_package_names() {
         for (os_release, packages) in [
             (
@@ -2957,6 +3063,52 @@ mod tests {
         assert!(find_pam_ordering_conflicts(stacked_first).is_empty());
 
         assert!(find_pam_ordering_conflicts("auth include system-auth\n").is_empty());
+    }
+
+    #[test]
+    fn a_retry_entry_is_not_a_stalled_first_pass() {
+        let retry_stack = "auth sufficient pam_gaze.so simultaneous\n\
+             auth sufficient pam_unix.so try_first_pass nullok\n\
+             auth sufficient pam_gaze.so retry\n";
+        assert!(find_pam_ordering_conflicts(retry_stack).is_empty());
+        assert!(!find_misplaced_retry_entry(retry_stack));
+    }
+
+    #[test]
+    fn a_lone_retry_entry_below_the_password_is_not_flagged_as_stalled() {
+        let lone_retry = "auth sufficient pam_unix.so try_first_pass nullok\n\
+             auth sufficient pam_gaze.so retry\n";
+        assert!(find_pam_ordering_conflicts(lone_retry).is_empty());
+        assert!(!find_misplaced_retry_entry(lone_retry));
+    }
+
+    #[test]
+    fn a_retry_entry_above_the_password_is_unreachable() {
+        let misplaced = "auth sufficient pam_gaze.so retry\n\
+             auth sufficient pam_unix.so try_first_pass nullok\n";
+        assert!(find_misplaced_retry_entry(misplaced));
+    }
+
+    #[test]
+    fn a_stack_without_a_retry_entry_reports_nothing() {
+        assert!(!find_misplaced_retry_entry(
+            "auth sufficient pam_gaze.so\nauth sufficient pam_unix.so\n"
+        ));
+    }
+
+    #[test]
+    fn a_fingerprint_module_does_not_count_as_the_password_module() {
+        let fprintd_only = "auth sufficient pam_fprintd.so\n\
+             auth sufficient pam_gaze.so retry\n\
+             auth sufficient pam_unix.so try_first_pass nullok\n";
+        assert!(find_misplaced_retry_entry(fprintd_only));
+    }
+
+    #[test]
+    fn retry_is_only_a_mode_token_on_a_gaze_line() {
+        assert!(pam_line_is_retry("auth sufficient pam_gaze.so retry"));
+        assert!(!pam_line_is_retry("auth sufficient pam_gaze.so"));
+        assert!(!pam_line_is_retry("auth sufficient pam_unix.so retry"));
     }
 
     #[test]

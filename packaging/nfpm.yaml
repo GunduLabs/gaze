@@ -98,6 +98,11 @@ contents:
     packager: deb
     file_info:
       mode: 0644
+  - src: "packaging/pam/gaze-retry"
+    dst: "/usr/share/pam-configs/"
+    packager: deb
+    file_info:
+      mode: 0644
   - src: "packaging/authselect/custom/gaze/"
     dst: "/usr/share/authselect/vendor/gaze/"
     packager: rpm
