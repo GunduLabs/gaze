@@ -610,10 +610,15 @@ configure_pam_opensuse() {
     fi
 
     # Enable the default mode and regenerate common-*.
-    if sudo pam-config --add --gaze </dev/null && sudo pam-config --update </dev/null; then
+    pam_config_error="$TMP/pam-config.err"
+    if sudo pam-config --add --gaze </dev/null 2>"$pam_config_error" &&
+        sudo pam-config --update </dev/null 2>>"$pam_config_error"; then
         ok "Enabled the Gaze PAM module through pam-config."
     else
         warn "Could not enable the Gaze PAM module through pam-config."
+        while IFS= read -r line; do
+            [ -n "$line" ] && say "  $line"
+        done <"$pam_config_error"
         say "After installation, run:"
         cmd "sudo pam-config --add --gaze"
         cmd "sudo pam-config --update"

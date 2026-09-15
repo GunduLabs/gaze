@@ -39,7 +39,12 @@ configure_pam_suse() {
 	# Query status is always zero, so detect the auth: output.
 	if ! pam-config -q --gaze 2>/dev/null | grep -q '^auth:' &&
 		! pam-config -q --gaze_grosshack 2>/dev/null | grep -q '^auth:'; then
-		pam-config -a --gaze >/dev/null 2>&1 || true
+		if ! pam_config_error="$(pam-config -a --gaze 2>&1)"; then
+			printf '\n\033[1;33m[Gaze Notice]\033[0m Could not add Gaze to the common PAM stack:\n' >&2
+			printf '%s\n' "$pam_config_error" | sed 's/^/  /' >&2
+			printf 'sudo and polkit will not use face authentication until this succeeds.\n' >&2
+			printf 'Run "sudo pam-config -a --gaze" and then "gaze doctor".\n\n' >&2
+		fi
 	fi
 }
 
