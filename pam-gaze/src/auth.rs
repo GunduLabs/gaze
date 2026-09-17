@@ -312,7 +312,6 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, options: Pam
     result
 }
 
-// Keep the release gate separate from FFI so tests can prove failures never read a secret.
 fn finish_keyring<F>(
     authenticated: c_int,
     service: Option<&str>,
@@ -342,10 +341,8 @@ unsafe fn supply_keyring_token(pamh: PamHandle, username: &str) -> Result<(), ()
     if unsafe { pam_get_item(pamh, PAM_AUTHTOK, &mut existing) } != PAM_SUCCESS {
         return Err(());
     }
-    // GDM starts the face service by answering its password query with an empty
-    // string. That placeholder cannot unlock a keyring. Preserve only a real
-    // password supplied by another trusted PAM module.
-    if existing_token_has_password(existing.cast()) {
+    // GDM's empty password placeholder must not prevent the keyring hand-off.
+    if unsafe { existing_token_has_password(existing.cast()) } {
         return Ok(());
     }
     // An unenrolled user has nothing to unlock: leave the keyring locked as before rather
@@ -360,8 +357,9 @@ unsafe fn supply_keyring_token(pamh: PamHandle, username: &str) -> Result<(), ()
     Ok(())
 }
 
-fn existing_token_has_password(token: *const c_char) -> bool {
-    !token.is_null() && !unsafe { CStr::from_ptr(token) }.to_bytes().is_empty()
+// A non-null token must point to readable PAM-owned memory.
+unsafe fn existing_token_has_password(token: *const c_char) -> bool {
+    !token.is_null() && unsafe { *token } != 0
 }
 
 const PROMPT_RETIRE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -748,9 +746,9 @@ mod tests {
 
     #[test]
     fn keyring_replaces_gdms_empty_password_placeholder() {
-        assert!(!existing_token_has_password(std::ptr::null()));
-        assert!(!existing_token_has_password(c"".as_ptr()));
-        assert!(existing_token_has_password(c"password".as_ptr()));
+        assert!(!unsafe { existing_token_has_password(std::ptr::null()) });
+        assert!(!unsafe { existing_token_has_password(c"".as_ptr()) });
+        assert!(unsafe { existing_token_has_password(c"password".as_ptr()) });
     }
 
     #[test]

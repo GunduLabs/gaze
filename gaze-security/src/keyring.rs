@@ -19,6 +19,7 @@ pub const STORE_DIR: &str = "/var/lib/gaze/keyring";
 const MAGIC: &[u8; 4] = b"GZK1";
 const MAX_BLOB: usize = 16384;
 pub const MAX_PASSWORD: usize = 4096;
+/// NUL-terminated password, wiped on drop so PAM can copy it without an unwiped CString.
 pub type Secret = Zeroizing<Vec<u8>>;
 
 /// Not Debug/Clone: neither the password nor the shadow record belongs in diagnostics.
@@ -47,13 +48,12 @@ impl Account {
             )
         };
         ensure!(status == 0 && !result.is_null(), "account not found");
-        let uid = unsafe { (*result).pw_uid };
-        ensure!(uid != 0, "root keyring enrollment is not supported");
-        Ok(uid)
+        Ok(unsafe { (*result).pw_uid })
     }
 
     pub fn lookup(username: &str) -> anyhow::Result<Self> {
         let uid = Self::uid(username)?;
+        ensure!(uid != 0, "root keyring enrollment is not supported");
         let name = CString::new(username)?;
         let mut buffer = Zeroizing::new(vec![0u8; 65536]);
 
@@ -86,6 +86,7 @@ impl Account {
     }
 
     fn bound_to(uid: u32, username: &str, hash: &[u8]) -> Self {
+        // Used as AES-GCM AAD: changing the account identity or shadow hash invalidates the record.
         let mut digest = Sha256::new();
         digest.update(b"gaze-gnome-keyring-v1\0");
         digest.update(uid.to_le_bytes());
@@ -107,7 +108,6 @@ pub fn validate_password(password: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
-// Keep decryption in a wiping buffer even when authentication of the ciphertext fails.
 fn encrypt(
     key: &[u8; 32],
     account: &Account,
@@ -124,7 +124,7 @@ fn encrypt(
     getrandom::fill(&mut nonce).map_err(|_| anyhow::anyhow!("random nonce unavailable"))?;
     let mut secret = Zeroizing::new(Vec::with_capacity(password.len() + 1));
     secret.extend_from_slice(password);
-    secret.push(0); // pam_set_item copies this C string; never make an unwiped CString.
+    secret.push(0);
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| anyhow::anyhow!("invalid key"))?;
     let tag = cipher
         .encrypt_inout_detached(
@@ -133,6 +133,7 @@ fn encrypt(
             secret.as_mut_slice().into(),
         )
         .map_err(|_| anyhow::anyhow!("credential encryption failed"))?;
+    // GZK1 | public/private lengths (u32 LE) | sealed blobs | nonce | ciphertext | tag.
     let mut blob = Vec::new();
     blob.extend_from_slice(MAGIC);
     blob.extend_from_slice(&(public.len() as u32).to_le_bytes());
@@ -160,7 +161,11 @@ where
         "invalid sealed key length"
     );
     let end = 12 + public_len + private_len;
-    ensure!(blob.len() > end + 12 + 16, "truncated credential record");
+    let ciphertext_len = blob.len().checked_sub(end + 12 + 16);
+    ensure!(
+        ciphertext_len.is_some_and(|len| (2..=MAX_PASSWORD + 1).contains(&len)),
+        "invalid credential ciphertext length"
+    );
     let key = unseal(&blob[12..12 + public_len], &blob[12 + public_len..end])?;
     let cipher =
         Aes256Gcm::new_from_slice(key.as_ref()).map_err(|_| anyhow::anyhow!("invalid key"))?;
@@ -168,6 +173,7 @@ where
         Nonce::try_from(&blob[end..end + 12]).map_err(|_| anyhow::anyhow!("invalid nonce"))?;
     let tag = aes_gcm::Tag::try_from(&blob[blob.len() - 16..])
         .map_err(|_| anyhow::anyhow!("invalid tag"))?;
+    // Authentication failure must wipe any partially decrypted data too.
     let mut password = Zeroizing::new(blob[end + 12..blob.len() - 16].to_vec());
     cipher
         .decrypt_inout_detached(
@@ -211,6 +217,7 @@ fn record_path(dir: &Path, uid: u32) -> PathBuf {
 fn read_record(path: &Path, owner: u32) -> anyhow::Result<Option<Vec<u8>>> {
     let file = match OpenOptions::new()
         .read(true)
+        // O_NONBLOCK lets us reject a FIFO via metadata instead of hanging PAM in open().
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)
     {
@@ -237,12 +244,13 @@ fn write_record(dir: &Path, account: &Account, blob: &[u8]) -> anyhow::Result<()
         account.uid,
         u64::from_le_bytes(random)
     ));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp)?;
+    // Cleanup must only remove a temporary file this call successfully created.
     let result = (|| {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&tmp)?;
         file.write_all(blob)?;
         file.sync_all()?;
         std::fs::rename(&tmp, record_path(dir, account.uid))?;
@@ -327,6 +335,7 @@ pub fn load(username: &str) -> anyhow::Result<Option<Secret>> {
 mod tests {
     use super::*;
     use std::cell::Cell;
+    use std::os::unix::fs::{PermissionsExt, symlink};
 
     const KEY: [u8; 32] = [7; 32];
     fn account() -> Account {
@@ -379,11 +388,18 @@ mod tests {
     fn malformed_records_are_rejected_before_touching_tpm() {
         let mut overflow = blob();
         overflow[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+        let ciphertext_start = 12 + b"public".len() + b"private".len() + 12;
+        let mut empty_password = blob();
+        empty_password.truncate(ciphertext_start + 1 + 16);
+        let mut oversized_password = blob();
+        oversized_password.resize(ciphertext_start + MAX_PASSWORD + 2 + 16, 0);
         for invalid in [
             vec![],
             b"plaintext password".to_vec(),
             overflow,
             vec![0; MAX_BLOB + 1],
+            empty_password,
+            oversized_password,
         ] {
             let touched = Cell::new(false);
             assert!(
@@ -420,6 +436,61 @@ mod tests {
                 .len(),
             MAX_PASSWORD + 1
         );
+    }
+
+    #[test]
+    fn record_writes_are_private_and_replace_without_leaving_temporary_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = record_path(dir.path(), account().uid);
+        write_record(dir.path(), &account(), &blob()).unwrap();
+        let replacement = blob();
+        write_record(dir.path(), &account(), &replacement).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        assert_eq!(
+            read_record(&path, unsafe { libc::geteuid() }).unwrap(),
+            Some(replacement)
+        );
+    }
+
+    #[test]
+    fn failed_record_replacement_removes_only_the_temporary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = record_path(dir.path(), account().uid);
+        std::fs::create_dir(&path).unwrap();
+        assert!(write_record(dir.path(), &account(), &blob()).is_err());
+        assert!(path.is_dir());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn unsafe_credential_files_are_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = record_path(dir.path(), account().uid);
+        let owner = unsafe { libc::geteuid() };
+        write_record(dir.path(), &account(), &blob()).unwrap();
+        assert!(read_record(&path, owner.wrapping_add(1)).is_err());
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(read_record(&path, owner).is_err());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        let link = dir.path().join("link");
+        symlink(&path, &link).unwrap();
+        assert!(read_record(&link, owner).is_err());
+        std::fs::remove_file(&link).unwrap();
+        std::fs::hard_link(&path, &link).unwrap();
+        assert!(read_record(&path, owner).is_err());
+        std::fs::remove_file(&link).unwrap();
+
+        std::fs::write(&path, vec![0; MAX_BLOB + 1]).unwrap();
+        assert!(read_record(&path, owner).is_err());
+        assert!(read_record(dir.path(), owner).is_err());
+
+        let fifo = dir.path().join("fifo");
+        let name = CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        assert!(read_record(&fifo, owner).is_err());
     }
 
     #[test]

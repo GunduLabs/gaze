@@ -326,8 +326,8 @@ pub async fn load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Co
     })
 }
 
-/// Load the complete configuration for clients that can manage the local-only keyring setting.
-/// Older daemons did not expose that flag, so they safely read as disabled and report false.
+/// Returns the complete config and whether the daemon supports keyring-aware updates.
+/// Older daemons report the option as disabled and unsupported.
 pub async fn load_config_with_keyring_from_daemon(
     proxy: &GazeProxy<'_>,
 ) -> anyhow::Result<(Config, bool)> {

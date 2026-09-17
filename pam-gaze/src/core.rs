@@ -654,17 +654,17 @@ pub async fn setup_auth_env() -> Result<(Config, GazeProxy<'static>), c_int> {
         .map_err(|_| PAM_SERVICE_ERR)?;
     let config = match gaze_core::dbus::try_load_config_from_daemon(&proxy).await {
         Ok(Some(mut config)) => {
-            config.storage.unlock_gnome_keyring = gaze_core::config::Config::load()
+            // The legacy Config property omits this flag.
+            // VerifyStartForKeyring checks active prerequisites before authentication.
+            config.storage.unlock_gnome_keyring = Config::load()
                 .unwrap_or_default()
                 .storage
                 .unlock_gnome_keyring;
-            // The flag comes from disk but the prerequisites come from the running daemon.
             config.clamp_keyring();
             config
         }
         Ok(None) => {
-            let mut config = gaze_core::config::Config::load_from(gaze_core::config::CONFIG_PATH)
-                .unwrap_or_default();
+            let mut config = Config::load_from(gaze_core::config::CONFIG_PATH).unwrap_or_default();
             // An incompatible daemon cannot support credential release.
             config.storage.unlock_gnome_keyring = false;
             config

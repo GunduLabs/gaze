@@ -1205,20 +1205,6 @@ async fn handle_rename_face(
     Ok(())
 }
 
-fn forget_keyring_credential(term: &Term, user: &str) -> anyhow::Result<()> {
-    match gaze_security::keyring::forget(user) {
-        Ok(()) => Ok(()),
-        Err(err) => term
-            .write_line(&format!(
-                "{} Could not remove the stored GNOME Keyring credential for '{}': {}",
-                style("!").yellow().bold(),
-                user,
-                err
-            ))
-            .map_err(Into::into),
-    }
-}
-
 async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<()> {
     let term = Term::stdout();
     let result = run_busy(
@@ -1230,18 +1216,16 @@ async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
     .await?;
 
     match result {
-        Ok(true) => {
+        Ok(_) => {
+            gaze_security::keyring::forget(user).map_err(|err| {
+                anyhow::anyhow!(
+                    "Face data cleared, but could not remove the stored GNOME Keyring credential \
+                     for '{user}': {err}"
+                )
+            })?;
             term.write_line(&format!(
                 "{} All data cleared for '{}'",
                 style("✓").green().bold(),
-                user
-            ))?;
-            forget_keyring_credential(&term, user)?;
-        }
-        Ok(false) => {
-            term.write_line(&format!(
-                "{} No data found for '{}'",
-                style("!").yellow().bold(),
                 user
             ))?;
         }

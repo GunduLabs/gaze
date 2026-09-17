@@ -1601,29 +1601,65 @@ fn check_tpm(report: &mut Report, config: Option<&Config>) {
     );
 }
 
-fn gdm_face_auth_lines(contents: &str) -> Vec<&str> {
-    contents
-        .lines()
-        .map(|line| line.split('#').next().unwrap_or_default().trim())
-        .filter(|line| line.starts_with("auth"))
-        .collect()
+fn pam_entry(line: &str) -> Option<(&str, &str, &str, &str)> {
+    let line = line.split('#').next()?.trim();
+    let (kind, rest) = line.split_once(char::is_whitespace)?;
+    let rest = rest.trim_start();
+    // @include also affects auth; ignoring it would miscount pam_gaze's success=1 jump.
+    if kind == "@include" {
+        return Some(("auth", "include", rest, ""));
+    }
+    let (control, rest) = if rest.starts_with('[') {
+        rest.split_at(rest.find(']')? + 1)
+    } else {
+        rest.split_once(char::is_whitespace)?
+    };
+    let (module, options) = rest
+        .trim_start()
+        .split_once(char::is_whitespace)
+        .unwrap_or((rest.trim_start(), ""));
+    let module = module.rsplit('/').next()?;
+    Some((kind.trim_start_matches('-'), control, module, options))
 }
 
-/// The keyring hand-off needs the control flow shipped in packaging/pam/gdm-face: pam_gaze must
-/// fall through to pam_gnome_keyring instead of returning `success=done`, and the keyring module
-/// must consume the token with `use_authtok`. `/etc/pam.d/gdm-face` is packaged noreplace, so an
-/// upgraded machine keeps the stack that predates this and the unlock silently never happens.
+/// Recognize the packaged hand-off, including the session hook that starts the keyring.
 fn gdm_face_stack_passes_the_token(contents: &str) -> bool {
-    let lines = gdm_face_auth_lines(contents);
-    let gaze_falls_through = lines
-        .iter()
-        .filter(|line| line.contains("pam_gaze.so"))
-        .all(|line| !line.contains("success=done"));
-    let keyring_consumes_token = lines
-        .iter()
-        .filter(|line| line.contains("pam_gnome_keyring.so"))
-        .any(|line| line.contains("use_authtok"));
-    gaze_falls_through && keyring_consumes_token
+    let entries: Vec<_> = contents.lines().filter_map(pam_entry).collect();
+    let auth: Vec<_> = entries.iter().filter(|entry| entry.0 == "auth").collect();
+    let handoff = auth.windows(3).any(|lines| {
+        let (_, control, module, options) = *lines[0];
+        module == "pam_gaze.so"
+            && control
+                .split_ascii_whitespace()
+                .eq(["[success=1", "default=ignore]"])
+            && !options
+                .split_ascii_whitespace()
+                .any(|option| option == "simultaneous")
+            && lines[1].1 == "requisite"
+            && lines[1].2 == "pam_deny.so"
+            && lines[2].1 == "optional"
+            && lines[2].2 == "pam_gnome_keyring.so"
+            && lines[2]
+                .3
+                .split_ascii_whitespace()
+                .any(|option| option == "use_authtok")
+            && !lines[2]
+                .3
+                .split_ascii_whitespace()
+                .any(|option| option == "auto_start" || option.starts_with("only_if="))
+    });
+    let session = entries.iter().any(|&(kind, control, module, options)| {
+        kind == "session"
+            && matches!(control, "optional" | "required")
+            && module == "pam_gnome_keyring.so"
+            && options
+                .split_ascii_whitespace()
+                .any(|option| option == "auto_start")
+            && !options
+                .split_ascii_whitespace()
+                .any(|option| option.starts_with("only_if="))
+    });
+    handoff && session
 }
 
 fn keyring_record_state(username: &str) -> Option<bool> {
@@ -1672,14 +1708,15 @@ fn check_keyring(report: &mut Report, username: &str, config: Option<&Config>) {
             report.error(
                 "Keyring",
                 format!(
-                    "/etc/pam.d/{GDM_FACE_PAM_SERVICE} predates the keyring hand-off, so the \
-                     password is never passed to pam_gnome_keyring"
+                    "/etc/pam.d/{GDM_FACE_PAM_SERVICE} does not have the packaged keyring \
+                     hand-off and session hook"
                 ),
                 format!(
                     "This file is preserved across upgrades. Replace it with the packaged stack \
                      (look for /etc/pam.d/{GDM_FACE_PAM_SERVICE}.rpmnew, .pacnew or .dpkg-dist), \
                      or edit it so pam_gaze.so uses `[success=1 default=ignore]` followed by \
-                     `auth requisite pam_deny.so` and `auth optional pam_gnome_keyring.so use_authtok`."
+                     `auth requisite pam_deny.so` and `auth optional pam_gnome_keyring.so use_authtok`, \
+                     plus `session optional pam_gnome_keyring.so auto_start`."
                 ),
             );
             return;
@@ -3148,6 +3185,36 @@ mod tests {
                 gdm_face_stack_passes_the_token(&contents),
                 "{template} must hand the token to pam_gnome_keyring"
             );
+        }
+    }
+
+    #[test]
+    fn incomplete_or_misordered_keyring_stacks_are_not_reported_healthy() {
+        let valid = "auth [success=1 default=ignore] /usr/lib/security/pam_gaze.so\n\
+            auth requisite pam_deny.so\n\
+            auth optional pam_gnome_keyring.so use_authtok\n\
+            session optional pam_gnome_keyring.so auto_start\n";
+        assert!(gdm_face_stack_passes_the_token(valid));
+        for broken in [
+            valid.replace(
+                "auth [success=1 default=ignore] /usr/lib/security/pam_gaze.so\n",
+                "",
+            ),
+            valid.replace("[success=1 default=ignore]", "sufficient"),
+            valid.replace("pam_gaze.so", "pam_gaze.so simultaneous"),
+            valid.replace("requisite pam_deny.so", "optional pam_deny.so"),
+            valid.replace("auth requisite", "@include common-auth\nauth requisite"),
+            valid.replace("use_authtok", "not_use_authtok"),
+            valid.replace("use_authtok", "use_authtok only_if=login"),
+            valid.replace("session optional pam_gnome_keyring.so auto_start\n", ""),
+            valid.replace("session optional", "# session optional"),
+            valid.replace("auto_start", "auto_start only_if=login"),
+            format!(
+                "auth optional pam_gnome_keyring.so use_authtok\n{}",
+                valid.replace("auth optional pam_gnome_keyring.so use_authtok\n", "")
+            ),
+        ] {
+            assert!(!gdm_face_stack_passes_the_token(&broken), "{broken}");
         }
     }
 

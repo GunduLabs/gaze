@@ -1,11 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The TPM 2.0 sealing primitives shared by gazed's template key and the keyring credential.
-//!
-//! `local_device_context` deliberately opens a local device instead of accepting a TCTI from
-//! the PAM process environment. gazed builds its own context and keeps the environment
-//! override its tests rely on.
+//! TPM sealing shared by gazed's template key and the keyring credential.
+//! PAM uses a local device, never a TCTI supplied through its host's environment.
 
 use anyhow::{Context as _, anyhow};
 use std::path::Path;
@@ -34,7 +31,7 @@ pub const TPM_RM_DEVICE: &str = "/dev/tpmrm0";
 pub const TPM_RAW_DEVICE: &str = "/dev/tpm0";
 pub const TPM_DEVICES: [&str; 2] = [TPM_RM_DEVICE, TPM_RAW_DEVICE];
 
-pub fn local_device_context() -> anyhow::Result<Context> {
+fn local_device_context() -> anyhow::Result<Context> {
     for device in TPM_DEVICES {
         if Path::new(device).exists() {
             let config = DeviceConfig::from_str(device)?;
@@ -48,7 +45,7 @@ pub fn local_device_context() -> anyhow::Result<Context> {
 
 // Nothing about this parent is stored on disk. CreatePrimary re-derives the identical key
 // from the owner seed and this exact template, and no PCR policy means updates don't break it.
-pub fn create_primary(context: &mut Context) -> anyhow::Result<tss_esapi::handles::KeyHandle> {
+fn create_primary(context: &mut Context) -> anyhow::Result<tss_esapi::handles::KeyHandle> {
     let attrs = ObjectAttributesBuilder::new()
         .with_fixed_tpm(true)
         .with_fixed_parent(true)
@@ -111,10 +108,10 @@ pub fn sealed_object_public() -> anyhow::Result<Public> {
 }
 
 pub fn seal_in(context: &mut Context, key: &[u8; KEY_LEN]) -> anyhow::Result<(Public, Private)> {
-    let parent = create_primary(context)?;
     let public = sealed_object_public()?;
     let sensitive =
         SensitiveData::try_from(key.to_vec()).map_err(|e| anyhow!("invalid key length: {e}"))?;
+    let parent = create_primary(context)?;
     let result = context.execute_with_nullauth_session(|ctx| {
         ctx.create(parent, public, None, Some(sensitive), None, None)
     });

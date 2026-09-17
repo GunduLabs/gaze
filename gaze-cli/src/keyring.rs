@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use gaze_core::config::Config;
-use gaze_security::keyring::{Zeroizing, validate_password};
+use gaze_security::keyring::Zeroizing;
 
 pub fn enroll(username: &str, config: &Config) -> anyhow::Result<()> {
     anyhow::ensure!(
@@ -19,6 +19,7 @@ pub fn enroll(username: &str, config: &Config) -> anyhow::Result<()> {
         unsafe { libc::setrlimit(libc::RLIMIT_CORE, &limit) } == 0,
         "cannot disable credential core dumps"
     );
+    // Fail before prompting for an unusable account; enrollment checks again for account changes.
     gaze_security::keyring::Account::lookup(username)?;
     println!("Enter the login keyring password for {username}.");
     let password = Zeroizing::new(
@@ -27,7 +28,6 @@ pub fn enroll(username: &str, config: &Config) -> anyhow::Result<()> {
             .with_confirmation("Confirm keyring password", "Passwords did not match")
             .interact()?,
     );
-    validate_password(password.as_bytes())?;
     gaze_security::keyring::enroll(username, password.as_bytes())?;
     println!("GNOME Keyring unlock enrolled for {username}.");
     Ok(())

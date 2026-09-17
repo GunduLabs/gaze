@@ -564,9 +564,7 @@ pub struct StorageConfig {
 }
 
 impl Config {
-    /// Drop a keyring opt-in whose prerequisites are missing so a hand-edited file, or drift
-    /// between the daemon's live state and disk, degrades to the default instead of breaking
-    /// face login. Returns whether the flag was cleared.
+    /// Disable keyring unlock when prerequisites are missing. Returns whether it was cleared.
     pub fn clamp_keyring(&mut self) -> bool {
         if self.storage.validate_keyring(&self.liveness).is_err() {
             self.storage.unlock_gnome_keyring = false;

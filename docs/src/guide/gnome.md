@@ -142,15 +142,16 @@ auth    optional   pam_gnome_keyring.so use_authtok
 session optional   pam_gnome_keyring.so auto_start
 ```
 
-Without the `session` line nothing consumes the token and the keyring stays
-locked. This only works with `pam_gaze.so` in its default sequential mode; the
+The auth hook saves the token; the `session` hook starts and unlocks the keyring. This only works with `pam_gaze.so` in its default sequential mode; the
 `simultaneous` option does not supply the token.
 
 Gaze sets `PAM_AUTHTOK` only after face and liveness authentication succeeds. If
 the TPM, record, or password binding is unavailable, GDM falls back to the normal
 password login. A user who has not run `gaze keyring` logs in normally and is
 prompted for the keyring as before. Clearing the TPM, or changing the account
-password, requires re-enrollment.
+password, requires re-enrollment. Gaze cannot verify the keyring password during
+enrollment or detect a later keyring-only password change: an incorrect or stale
+password leaves the keyring locked and requires a manual unlock and re-enrollment.
 
 ### What this changes about your security
 
