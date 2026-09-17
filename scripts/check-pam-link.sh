@@ -26,7 +26,13 @@ for module in "$@"; do
     needed=$(objdump -p "$module" | awk '/NEEDED/ { print $2 }' | sort -u)
 
     for lib in $needed; do
-        if ! echo "$ALLOWED" | grep -qx "$lib"; then
+        # The main PAM module unseals the GNOME Keyring credential locally
+        # after face verification. The compatibility shim does not use TPM.
+        case "${module##*/}:$lib" in
+            libpam_gaze.so:libtss2-esys.so.0|libpam_gaze.so:libtss2-mu.so.0|libpam_gaze.so:libtss2-tctildr.so.0)
+                continue ;;
+        esac
+        if ! echo "$ALLOWED" | grep -qxF "$lib"; then
             echo "check-pam-link: $module links $lib" >&2
             status=1
         fi
@@ -39,9 +45,10 @@ if [ "$status" -ne 0 ]; then
     cat >&2 <<'EOF'
 
 A PAM module gained a shared-library dependency outside the allowlist.
-Gaze's PAM modules talk to gazed over D-Bus and must not link the camera,
-inference, or GUI stack. Check whether a new `use` pulled gaze-vision in,
-or whether a crate that pam-gaze depends on grew a heavy dependency.
+Gaze's PAM modules use D-Bus for face verification; the main module also
+uses TPM libraries for local keyring credential unsealing. Neither module
+may link the camera, inference, or GUI stack. Check whether a new `use` pulled
+gaze-vision in, or a crate that pam-gaze depends on grew a heavy dependency.
 EOF
     exit 1
 fi

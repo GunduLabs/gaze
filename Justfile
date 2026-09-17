@@ -737,7 +737,7 @@ test-openvino:
 audit:
     cargo audit
 
-# Verify the PAM modules link nothing beyond libc and friends
+# Verify PAM links only system libraries and the main module's TPM libraries
 [group("checks")]
 check-pam-link:
     scripts/check-pam-link.sh target/release/libpam_gaze.so target/release/libpam_gaze_grosshack.so
