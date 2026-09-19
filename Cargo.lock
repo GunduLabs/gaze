@@ -27,6 +27,7 @@ dependencies = [
  "cipher",
  "cpubits",
  "cpufeatures 0.3.1",
+ "zeroize",
 ]
 
 [[package]]
@@ -41,6 +42,7 @@ dependencies = [
  "ctr",
  "ctutils",
  "ghash",
+ "zeroize",
 ]
 
 [[package]]
@@ -1197,6 +1199,7 @@ dependencies = [
  "anyhow",
  "futures",
  "gaze-core",
+ "gaze-security",
  "gaze-vision",
  "getrandom 0.4.3",
  "image",
@@ -1229,6 +1232,7 @@ dependencies = [
  "dialoguer",
  "futures",
  "gaze-core",
+ "gaze-security",
  "gaze-vision",
  "libc",
  "ratatui",
@@ -1270,6 +1274,20 @@ dependencies = [
  "tracing-subscriber",
  "zbus",
  "zbus_polkit",
+]
+
+[[package]]
+name = "gaze-security"
+version = "0.3.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "getrandom 0.4.3",
+ "libc",
+ "sha2 0.11.0",
+ "tempfile",
+ "tss-esapi",
+ "zeroize",
 ]
 
 [[package]]
@@ -1398,6 +1416,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2eecf2d5dc9b66b732b97707a0210906b1d30523eb773193ab777c0c84b3e8d5"
 dependencies = [
  "polyval",
+ "zeroize",
 ]
 
 [[package]]
@@ -2552,6 +2571,7 @@ dependencies = [
  "anyhow",
  "futures",
  "gaze-core",
+ "gaze-security",
  "libc",
  "parking_lot",
  "tokio",
@@ -2565,6 +2585,7 @@ dependencies = [
  "anyhow",
  "futures",
  "gaze-core",
+ "gaze-security",
  "libc",
  "parking_lot",
  "tokio",
@@ -2829,6 +2850,7 @@ dependencies = [
  "cpubits",
  "cpufeatures 0.3.1",
  "universal-hash",
+ "zeroize",
 ]
 
 [[package]]

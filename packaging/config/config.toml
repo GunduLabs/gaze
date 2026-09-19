@@ -95,3 +95,6 @@ max_seconds = 2.0
 [storage]
 # Encrypt face templates at rest with a TPM-sealed key (requires a TPM 2.0). See docs.
 encrypt_templates = false
+# Opt-in GNOME Keyring unlock on gdm-face. Requires TPM encryption and liveness.
+# Enroll each user's keyring password with `gaze keyring`; no secrets go in this file.
+unlock_gnome_keyring = false

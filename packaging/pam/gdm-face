@@ -3,9 +3,10 @@
 
 #%PAM-1.0
 auth        required                                     pam_env.so
-auth        [success=done ignore=ignore default=bad]     pam_gaze.so
-auth        optional                                     pam_gnome_keyring.so only_if=login auto_start
-auth        required                                     pam_deny.so
+# Only a successful biometric result skips pam_deny; then pass PAM_AUTHTOK to keyring.
+auth        [success=1 default=ignore]                    pam_gaze.so
+auth        requisite                                    pam_deny.so
+auth        optional                                     pam_gnome_keyring.so use_authtok
 auth        include                                      postlogin
 
 account     required                                     pam_nologin.so
@@ -16,3 +17,4 @@ password    required                                     pam_deny.so
 session     required                                     pam_loginuid.so
 session     include                                      system-auth
 session     include                                      postlogin
+session     optional                                     pam_gnome_keyring.so auto_start

@@ -3,6 +3,7 @@
 
 [workspace]
 members = [
+    "gaze-security",
     "gaze",
     "gaze-cli",
     "gaze-core",
@@ -12,6 +13,7 @@ members = [
     "gaze-gui",
 ]
 default-members = [
+    "gaze-security",
     "gaze",
     "gaze-cli",
     "gaze-core",
