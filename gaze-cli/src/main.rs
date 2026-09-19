@@ -1277,7 +1277,7 @@ fn reset_gnome_user_settings_cmd() -> String {
 
 fn remove_gdm_dconf_overrides_cmd() -> String {
     [
-        "sudo rm -f /etc/dconf/db/gdm.d/00-gaze-defaults* /etc/dconf/db/gdm.d/99-gaze* &&",
+        "sudo rm -f /etc/dconf/db/gdm.d/*gaze* &&",
         "if command -v dconf >/dev/null 2>&1; then",
         "sudo dconf update >/dev/null 2>&1 || true;",
         "fi",

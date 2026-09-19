@@ -442,6 +442,7 @@ in
               {
                 settings = {
                   "org/gnome/shell".enabled-extensions = [ gnomeExtensionUuid ];
+                  "org/gnome/shell".disable-user-extensions = false;
                   "org/gnome/shell/extensions/gaze".enable-face-authentication =
                     cfg.gnome.gdmFaceLogin;
                 };

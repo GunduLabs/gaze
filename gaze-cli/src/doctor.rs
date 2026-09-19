@@ -46,6 +46,9 @@ const GDM_DCONF_PROFILE: &str = "gdm";
 const GDM_DCONF_PROFILE_PATH: &str = "/etc/dconf/profile/gdm";
 const GDM_DCONF_FACE_AUTH_KEY: &str = "/org/gnome/shell/extensions/gaze/enable-face-authentication";
 const GDM_ENABLED_EXTENSIONS_KEY: &str = "/org/gnome/shell/enabled-extensions";
+const GDM_DISABLE_EXTENSIONS_KEY: &str = "/org/gnome/shell/disable-user-extensions";
+/// Debian and Ubuntu name the account `gdm3`, everyone else `gdm`.
+const GDM_HOME_DIRS: [&str; 2] = ["/var/lib/gdm", "/var/lib/gdm3"];
 const GDM_COMPILED_DB_PATH: &str = "/etc/dconf/db/gdm";
 const GDM_FACE_PAM_SERVICE: &str = "gdm-face";
 const SELINUX_ENFORCE_PATH: &str = "/sys/fs/selinux/enforce";
@@ -306,21 +309,89 @@ fn extension_setting(key: &str) -> std::io::Result<(bool, String)> {
     command_output_env("gsettings", &["get", GNOME_EXTENSION_SCHEMA, key], &env)
 }
 
-fn gdm_system_dconf_read(key: &str) -> Option<String> {
-    let profile = std::env::temp_dir().join(format!(
-        "gaze-doctor-{}-{}.profile",
-        GDM_DCONF_PROFILE,
-        std::process::id()
-    ));
-    fs::write(&profile, format!("system-db:{GDM_DCONF_PROFILE}\n")).ok()?;
-    let result = command_output_env(
-        "dconf",
-        &["read", key],
-        &[("DCONF_PROFILE", profile.as_os_str())],
-    );
+/// `None` only when `dconf` itself could not answer. An unset key reads back as an empty
+/// string, which callers layering one db over another must tell apart from a real value.
+fn dconf_read_with_profile(
+    tag: &str,
+    profile_body: &str,
+    config_home: Option<&Path>,
+    key: &str,
+) -> Option<String> {
+    let profile =
+        std::env::temp_dir().join(format!("gaze-doctor-{tag}-{}.profile", std::process::id()));
+    fs::write(&profile, profile_body).ok()?;
+    let mut env: Vec<(&str, &OsStr)> = vec![("DCONF_PROFILE", profile.as_os_str())];
+    if let Some(home) = config_home {
+        env.push(("XDG_CONFIG_HOME", home.as_os_str()));
+    }
+    let result = command_output_env("dconf", &["read", key], &env);
     let _ = fs::remove_file(&profile);
     match result {
         Ok((true, value)) => Some(value.trim().to_string()),
+        _ => None,
+    }
+}
+
+fn gdm_system_dconf_read(key: &str) -> Option<String> {
+    dconf_read_with_profile(
+        GDM_DCONF_PROFILE,
+        &format!("system-db:{GDM_DCONF_PROFILE}\n"),
+        None,
+        key,
+    )
+}
+
+fn gdm_user_db_read(dir: &Path, key: &str) -> Option<String> {
+    dconf_read_with_profile("gdm-user", "user-db:user\n", Some(dir), key)
+        .filter(|value| !value.is_empty())
+}
+
+/// The greeter runs as `gdm` with its own `XDG_CONFIG_HOME`, and the path differs by
+/// distribution and by seat, so every candidate holding a db has to be considered.
+fn gdm_greeter_config_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    for home in GDM_HOME_DIRS {
+        let home = Path::new(home);
+        if !home.is_dir() {
+            continue;
+        }
+        dirs.push(home.join(".config"));
+        if let Ok(entries) = fs::read_dir(home) {
+            for entry in entries.flatten() {
+                dirs.push(entry.path().join("config"));
+            }
+        }
+    }
+    dirs.retain(|dir| dir.join("dconf/user").is_file());
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
+/// `user-db:user` leads the greeter profile, so whatever GDM has written for itself outranks
+/// every `system-db` keyfile. Reading only `system-db:gdm` reports what Gaze installed rather
+/// than what the greeter resolves, which is how a disabled extension system passed as ready.
+fn gdm_greeter_dconf_read(key: &str) -> Option<String> {
+    for dir in gdm_greeter_config_dirs() {
+        if let Some(value) = gdm_user_db_read(&dir, key) {
+            return Some(value);
+        }
+    }
+    gdm_system_dconf_read(key)
+}
+
+/// Which greeter db holds `key`, for a fix that has to name the file it must be cleared from.
+fn gdm_greeter_dconf_source(key: &str) -> Option<PathBuf> {
+    gdm_greeter_config_dirs()
+        .into_iter()
+        .find(|dir| gdm_user_db_read(dir, key).is_some())
+        .map(|dir| dir.join("dconf/user"))
+}
+
+fn dconf_bool(value: &str) -> Option<bool> {
+    match value {
+        "true" => Some(true),
+        "false" => Some(false),
         _ => None,
     }
 }
@@ -330,11 +401,7 @@ fn gdm_face_auth_from_dconf() -> Option<bool> {
     if !Path::new(GDM_DCONF_PROFILE_PATH).exists() {
         return None;
     }
-    match gdm_system_dconf_read(GDM_DCONF_FACE_AUTH_KEY)?.as_str() {
-        "true" => Some(true),
-        "false" => Some(false),
-        _ => None,
-    }
+    dconf_bool(&gdm_greeter_dconf_read(GDM_DCONF_FACE_AUTH_KEY)?)
 }
 
 fn profile_reads_system_db(contents: &str, db: &str) -> bool {
@@ -354,6 +421,8 @@ enum GdmGreeterReadiness {
     ProfileMissingSystemDb,
     CompiledDbMissing,
     ExtensionNotEnabled,
+    /// `Some` names the greeter db holding the key, `None` means a `system-db` layer set it.
+    ExtensionsDisabled(Option<PathBuf>),
     Unverifiable(String),
 }
 
@@ -374,13 +443,29 @@ fn gdm_greeter_readiness() -> GdmGreeterReadiness {
         return GdmGreeterReadiness::CompiledDbMissing;
     }
 
-    match gdm_system_dconf_read(GDM_ENABLED_EXTENSIONS_KEY) {
-        Some(value) if extensions_include(&value, GNOME_EXTENSION_ID) => GdmGreeterReadiness::Ready,
-        Some(_) => GdmGreeterReadiness::ExtensionNotEnabled,
-        None => GdmGreeterReadiness::Unverifiable(
-            "`dconf read` against the GDM database failed".to_string(),
-        ),
+    match gdm_greeter_dconf_read(GDM_ENABLED_EXTENSIONS_KEY) {
+        Some(value) if extensions_include(&value, GNOME_EXTENSION_ID) => {}
+        Some(_) => return GdmGreeterReadiness::ExtensionNotEnabled,
+        None => {
+            return GdmGreeterReadiness::Unverifiable(
+                "`dconf read` against the GDM database failed".to_string(),
+            );
+        }
     }
+
+    // Checked after the list because it overrides it: gnome-shell stops its whole extension
+    // system, so the greeter loads nothing however the extension is enabled.
+    if gdm_greeter_dconf_read(GDM_DISABLE_EXTENSIONS_KEY)
+        .as_deref()
+        .and_then(dconf_bool)
+        == Some(true)
+    {
+        return GdmGreeterReadiness::ExtensionsDisabled(gdm_greeter_dconf_source(
+            GDM_DISABLE_EXTENSIONS_KEY,
+        ));
+    }
+
+    GdmGreeterReadiness::Ready
 }
 
 fn selinux_is_enforcing() -> bool {
@@ -1346,6 +1431,24 @@ fn check_desktop_integration(report: &mut Report) {
                         "the GDM database does not enable {GNOME_EXTENSION_ID} for the greeter, so the login screen never starts the {GDM_FACE_PAM_SERVICE} PAM service"
                     ),
                     "Reinstall the Gaze GNOME extension package, run `sudo dconf update`, then reboot.",
+                ),
+                GdmGreeterReadiness::ExtensionsDisabled(source) => report.error(
+                    "GDM login face auth",
+                    format!(
+                        "the greeter resolves `org.gnome.shell disable-user-extensions` to true, which switches off every GNOME Shell extension at the login screen, {GNOME_EXTENSION_ID} included"
+                    ),
+                    match source {
+                        Some(path) => format!(
+                            "{} holds that key and outranks every keyfile under /etc/dconf/db/gdm.d, so it has to be cleared there:\n\
+                             sudo rm -f {}\n\
+                             Then reboot. GDM writes the file again with its own defaults.",
+                            path.display(),
+                            path.display()
+                        ),
+                        None => format!(
+                            "Put `disable-user-extensions=false` under `[org/gnome/shell]` in {GDM_FACE_OVERRIDE_PATH}, run `sudo dconf update`, then reboot."
+                        ),
+                    },
                 ),
                 GdmGreeterReadiness::Unverifiable(why) => report.warning(
                     "GDM login face auth",
@@ -2427,6 +2530,15 @@ mod tests {
                 !profile_reads_system_db(broken, "gdm"),
                 "{broken:?} must not count as reading system-db:gdm"
             );
+        }
+    }
+
+    #[test]
+    fn dconf_booleans_are_read_strictly() {
+        assert_eq!(dconf_bool("true"), Some(true));
+        assert_eq!(dconf_bool("false"), Some(false));
+        for unset in ["", "@as []", "nothing to read", "True"] {
+            assert_eq!(dconf_bool(unset), None, "{unset:?} is not a boolean");
         }
     }
 
