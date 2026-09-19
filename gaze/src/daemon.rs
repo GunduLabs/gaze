@@ -701,7 +701,8 @@ impl AuthDaemon {
         if let Some((active_uid, true, has_pipewire)) = active
             && (caller_uid == 0 || caller_uid == active_uid)
         {
-            // An active greeter holds the seat's camera ACL, so it outranks the target's leftover PipeWire socket.
+            // An active greeter holds the seat's camera ACL, so it outranks the target's
+            // leftover PipeWire socket.
             return Some(if has_pipewire {
                 CameraBinding::Session(active_uid)
                 // SDDM and Plasma Login Manager greeters have no `/run/user/<uid>` to bind to.
@@ -1965,7 +1966,6 @@ mod tests {
     fn pam_internal_set_add_remove_clear_logic() {
         let set = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
 
-        // Add services with normalization
         {
             let mut s = set.lock().unwrap();
             let norm = AuthDaemon::normalize_pam_service("/etc/pam.d/polkit-1");
@@ -1985,7 +1985,6 @@ mod tests {
             assert_eq!(s.len(), 2);
         }
 
-        // Remove service
         {
             let mut s = set.lock().unwrap();
             let norm = AuthDaemon::normalize_pam_service("polkit-1");
@@ -1999,7 +1998,6 @@ mod tests {
             assert_eq!(s.len(), 1);
         }
 
-        // Clear
         {
             let mut s = set.lock().unwrap();
             s.clear();
@@ -2014,7 +2012,7 @@ mod tests {
 
 pub use gaze_core::dbus::get_active_session_uid;
 
-/// The effective value in the GDM profile, which a NixOS configuration sets without our override file.
+/// The effective value in the GDM profile, which a NixOS config sets without our override file.
 fn gdm_face_auth_from_dconf() -> Option<bool> {
     if !std::path::Path::new(GDM_DCONF_PROFILE_PATH).exists() {
         return None;
@@ -2272,7 +2270,7 @@ fn hybrid_auth_passed(
         (true, true) => match policy {
             "or" => rgb_success || ir_success,
             "and" => rgb_success && ir_success,
-            // Fallback policy, where both spectra must pass unless RGB ran and was too dark to judge.
+            // Fallback policy: both spectra must pass unless RGB ran and was too dark to judge.
             _ => {
                 if !rgb_attempted {
                     rgb_success && ir_success
@@ -4362,7 +4360,7 @@ impl AuthDaemon {
                                     logged_lit_luma = true;
                                 }
                             }
-                            // A gap between emitter strobes rather than a fault, so drop it silently.
+                            // A gap between emitter strobes, not a fault, so drop it silently.
                             IrFrameKind::StrobeDark => continue,
                             IrFrameKind::EmitterDark => {
                                 if !logged_dark_luma {

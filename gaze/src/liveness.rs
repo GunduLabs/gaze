@@ -9,8 +9,8 @@ use ort::{session::Session, value::TensorRef};
 use gaze_core::config::InferenceConfig;
 use gaze_vision::inference::{InferenceRuntime, create_session};
 
-// Fixed by how MiniFASNet v2 was trained (upstream calls it scale_2.7_80x80). Feeding it a
-// tighter crop or another resolution shifts the score distribution and the threshold stops meaning anything.
+// Fixed by how MiniFASNet v2 was trained (upstream calls it scale_2.7_80x80). A tighter crop
+// or another resolution shifts the score distribution and the threshold stops meaning anything.
 const INPUT_SIZE: u32 = 80;
 const CROP_SCALE: f32 = 2.7;
 const SUSTAINED_SCORE_FRAMES: usize = 5;
@@ -74,7 +74,7 @@ impl LivenessDetector {
     }
 
     /// MiniFASNet emits three raw logits, not a probability, and the live class sits between the
-    /// two spoof classes. Softmax over all three, shifted by the max so the exponentials stay finite.
+    /// two spoof classes. Softmax over all three, shifted by the max to keep exponentials finite.
     fn live_score_from_output(data: &[f32]) -> anyhow::Result<f32> {
         if data.len() != 3 {
             anyhow::bail!("liveness model produced {} scores, expected 3", data.len());

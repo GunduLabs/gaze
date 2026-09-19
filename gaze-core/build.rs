@@ -25,12 +25,12 @@ struct Device {
 
 #[derive(Deserialize)]
 struct Emitter {
-    // Simple format
+    // Simple format.
     unit: Option<u8>,
     selector: Option<u8>,
     control_bytes: Option<Vec<u8>>,
     off_control_bytes: Option<Vec<u8>>,
-    // Multi-step format
+    // Multi-step format.
     on: Option<Vec<Step>>,
     off: Option<Vec<Step>>,
 }

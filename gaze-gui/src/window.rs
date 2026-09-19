@@ -387,9 +387,8 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
     );
 }
 
-/// Green once a profile holds captures for the spectrum, amber when a camera is
-/// configured but the profile never captured it, and unlit when there is no
-/// camera for that spectrum at all.
+/// Green once the profile holds captures for the spectrum, amber when a camera is configured
+/// but never captured, and unlit when no camera exists for that spectrum at all.
 fn spectrum_badge_class(enrolled: bool, configured: bool) -> &'static str {
     match (enrolled, configured) {
         (true, _) => "badge-success",

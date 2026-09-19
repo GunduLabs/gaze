@@ -25,9 +25,8 @@ const REQUIRED_CAMERA_ELEMENTS: [&str; 7] = [
     "pipewiresrc",
 ];
 
-/// Return the dynamically loaded GStreamer elements Gaze's supported camera paths require but
-/// the current plugin registry cannot provide. Linker-based package dependency scanners cannot
-/// discover these, so packaging checks and `gaze doctor` both use this runtime view.
+/// GStreamer elements Gaze's camera paths need but the registry cannot provide. Linker-based
+/// dependency scanners cannot see these, so packaging and `gaze doctor` ask at runtime instead.
 pub fn missing_camera_elements() -> anyhow::Result<Vec<&'static str>> {
     gstreamer::init()?;
     Ok(REQUIRED_CAMERA_ELEMENTS
@@ -467,9 +466,8 @@ fn bus_error_detail(pipeline: &gstreamer::Pipeline) -> Option<String> {
     None
 }
 
-/// What a failed PipeWire open may retry through. Only the bare element, which is what `primary`
-/// resolves to, means "any camera you can reach". A named target means one camera, so it may only
-/// retry through that same camera's own V4L2 node; substituting another camera is not a fallback.
+/// What a failed PipeWire open may retry through. Only the bare element, what `primary` resolves
+/// to, means "any camera"; a named target may retry only its own node, never a substitute camera.
 #[derive(Debug, PartialEq, Eq)]
 enum V4l2Fallback {
     AnyDevice,
@@ -497,8 +495,7 @@ fn v4l2_fallback_for(src_element: &str) -> V4l2Fallback {
 const V4L2_BY_PATH_DIR: &str = "/dev/v4l/by-path";
 
 /// PipeWire names a V4L2 camera `v4l2_input.<udev ID_PATH>` with `:` rewritten as `_`, and udev
-/// links that same path under `/dev/v4l/by-path`, so a pinned target names a node the kernel can
-/// still reach with no PipeWire session to ask.
+/// links that path under `/dev/v4l/by-path`, so a pinned target still resolves with no session.
 fn v4l2_by_path_for_target(target: &str) -> Option<String> {
     let by_path = target.strip_prefix("v4l2_input.")?;
     (!by_path.is_empty()).then(|| by_path.replace('_', ":"))
@@ -986,7 +983,6 @@ impl Camera {
         gaze_core::config::DEFAULT_CAMERA_FPS
     }
 
-    /// Wait for the next frame while checking `stop` between short polling intervals.
     pub fn next_interruptible(&mut self, stop: &AtomicBool) -> Option<Mat> {
         while !stop.load(Ordering::Relaxed) {
             match self.poll_frame(gstreamer::ClockTime::from_mseconds(
