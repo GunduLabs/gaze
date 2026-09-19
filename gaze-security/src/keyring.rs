@@ -16,6 +16,41 @@ use std::path::{Path, PathBuf};
 pub use zeroize::Zeroizing;
 
 pub const STORE_DIR: &str = "/var/lib/gaze/keyring";
+pub const KWALLET_STORE_DIR: &str = "/var/lib/gaze/kwallet";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    Gnome,
+    KWallet,
+}
+
+impl Backend {
+    pub fn store_dir(self) -> &'static str {
+        match self {
+            Self::Gnome => STORE_DIR,
+            Self::KWallet => KWALLET_STORE_DIR,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Gnome => "GNOME Keyring",
+            Self::KWallet => "KWallet",
+        }
+    }
+    fn account(self, username: &str) -> anyhow::Result<Account> {
+        Ok(self.bind(Account::lookup(username)?))
+    }
+    fn bind(self, mut account: Account) -> Account {
+        if self == Self::KWallet {
+            let mut digest = Sha256::new();
+            digest.update(b"gaze-kwallet-v1\0");
+            digest.update(account.binding);
+            account.binding = digest.finalize().into();
+        }
+        account
+    }
+}
+
 const MAGIC: &[u8; 4] = b"GZK1";
 const MAX_BLOB: usize = 16384;
 pub const MAX_PASSWORD: usize = 4096;
@@ -272,9 +307,13 @@ fn remove_record(dir: &Path, uid: u32) -> anyhow::Result<()> {
 }
 
 pub fn enroll(username: &str, password: &[u8]) -> anyhow::Result<()> {
-    let account = Account::lookup(username)?;
+    enroll_for(Backend::Gnome, username, password)
+}
+
+pub fn enroll_for(backend: Backend, username: &str, password: &[u8]) -> anyhow::Result<()> {
+    let account = backend.account(username)?;
     validate_password(password)?;
-    let dir = Path::new(STORE_DIR);
+    let dir = Path::new(backend.store_dir());
     // /var/lib/gaze is provisioned by gazed's StateDirectory; do not create arbitrary parents.
     check_directory(dir.parent().context("missing parent")?, 0)?;
     match std::fs::DirBuilder::new().mode(0o700).create(dir) {
@@ -290,7 +329,7 @@ pub fn enroll(username: &str, password: &[u8]) -> anyhow::Result<()> {
     // Verify sealing before replacing a working record; a failed setup leaves it intact.
     let _check = decrypt_with(&blob, &account, crate::tpm::unseal)?;
     ensure!(
-        Account::lookup(username)?.binding == account.binding,
+        backend.account(username)?.binding == account.binding,
         "account changed during enrollment; retry"
     );
     write_record(dir, &account, &blob)
@@ -298,8 +337,12 @@ pub fn enroll(username: &str, password: &[u8]) -> anyhow::Result<()> {
 
 /// Remove an enrolled credential without reading or unsealing it.
 pub fn forget(username: &str) -> anyhow::Result<()> {
+    forget_for(Backend::Gnome, username)
+}
+
+pub fn forget_for(backend: Backend, username: &str) -> anyhow::Result<()> {
     let uid = Account::uid(username)?;
-    let dir = Path::new(STORE_DIR);
+    let dir = Path::new(backend.store_dir());
     if !dir.try_exists()? {
         return Ok(());
     }
@@ -310,22 +353,26 @@ pub fn forget(username: &str) -> anyhow::Result<()> {
 /// Call only from trusted PAM code after face, liveness, and confirmation succeed.
 /// A missing record is an unenrolled user; other failures request password fallback.
 pub fn load(username: &str) -> anyhow::Result<Option<Secret>> {
+    load_for(Backend::Gnome, username)
+}
+
+pub fn load_for(backend: Backend, username: &str) -> anyhow::Result<Option<Secret>> {
     ensure!(
         unsafe { libc::geteuid() } == 0,
         "keyring access requires root"
     );
-    let dir = Path::new(STORE_DIR);
+    let dir = Path::new(backend.store_dir());
     if !dir.try_exists()? {
         return Ok(None);
     }
     check_directory(dir, 0)?;
-    let account = Account::lookup(username)?;
+    let account = backend.account(username)?;
     let Some(blob) = read_record(&record_path(dir, account.uid), 0)? else {
         return Ok(None);
     };
     let secret = decrypt_with(&blob, &account, crate::tpm::unseal)?;
     ensure!(
-        Account::lookup(username)?.binding == account.binding,
+        backend.account(username)?.binding == account.binding,
         "account changed during unlock"
     );
     Ok(Some(secret))
@@ -357,6 +404,23 @@ mod tests {
         .unwrap();
         assert_eq!(secret.as_slice(), b"test password\0");
         assert_ne!(blob, self::blob(), "fresh nonce on every enrollment");
+    }
+
+    #[test]
+    fn wallet_records_are_isolated_and_gnome_records_remain_compatible() {
+        let gnome = Backend::Gnome.bind(account());
+        let kde = Backend::KWallet.bind(account());
+        assert_eq!(gnome.binding, account().binding);
+        assert_ne!(gnome.binding, kde.binding);
+        assert_ne!(Backend::Gnome.store_dir(), Backend::KWallet.store_dir());
+        let blob = encrypt(&KEY, &kde, b"wallet password", b"public", b"private").unwrap();
+        assert!(decrypt_with(&blob, &gnome, |_, _| Ok(Zeroizing::new(KEY))).is_err());
+        assert_eq!(
+            decrypt_with(&blob, &kde, |_, _| Ok(Zeroizing::new(KEY)))
+                .unwrap()
+                .as_slice(),
+            b"wallet password\0"
+        );
     }
 
     #[test]

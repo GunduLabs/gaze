@@ -224,6 +224,7 @@ threshold = 0.8
 
 [storage]
 encrypt_templates = false   # seal face templates to the TPM
+unlock_kwallet = false # optional TPM-backed KDE wallet unlock
 unlock_gnome_keyring = false # unlock the GNOME keyring after a GDM face login
 ```
 
@@ -251,6 +252,7 @@ gaze config                  Interactive configuration editor
 gaze config --show           Print current config and exit
 gaze keyring                 Enroll optional TPM-backed GNOME Keyring unlock
 gaze keyring --forget        Remove the stored GNOME Keyring credential
+gaze keyring --kwallet       Enroll optional TPM-backed KDE KWallet unlock
 gaze doctor                  Check config, daemon, cameras, enrollments, PAM, and TPM
 gaze doctor --benchmark      Also measure detector/recognizer/liveness inference speed
 gaze uninstall               Completely remove Gaze (packages, PAM, config, models, data)

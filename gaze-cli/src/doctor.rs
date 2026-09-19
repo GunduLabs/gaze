@@ -183,6 +183,7 @@ pub async fn run(username: &str, benchmark: bool) -> anyhow::Result<bool> {
     check_desktop_integration(&mut report);
     check_tpm(&mut report, config.as_ref());
     check_keyring(&mut report, username, config.as_ref());
+    check_kwallet(&mut report, username, config.as_ref());
     check_daemon(&mut report, username, config.as_ref(), benchmark).await;
 
     report.print()?;
@@ -1659,13 +1660,13 @@ fn gdm_face_stack_passes_the_token(contents: &str) -> bool {
     handoff && session
 }
 
-fn keyring_record_state(username: &str) -> Option<bool> {
+fn keyring_record_state(username: &str, backend: gaze_security::keyring::Backend) -> Option<bool> {
     if unsafe { libc::geteuid() } != 0 {
         return None;
     }
     let uid = user_uid(username)?;
     Some(
-        Path::new(gaze_security::keyring::STORE_DIR)
+        Path::new(backend.store_dir())
             .join(format!("{uid}.keyring"))
             .exists(),
     )
@@ -1729,7 +1730,7 @@ fn check_keyring(report: &mut Report, username: &str, config: Option<&Config>) {
         Some(_) => {}
     }
 
-    match keyring_record_state(username) {
+    match keyring_record_state(username, gaze_security::keyring::Backend::Gnome) {
         Some(true) => report.pass(
             "Keyring",
             format!("a TPM-protected keyring credential is enrolled for {username}"),
@@ -1745,6 +1746,102 @@ fn check_keyring(report: &mut Report, username: &str, config: Option<&Config>) {
                 "the {GDM_FACE_PAM_SERVICE} stack passes the token; run `sudo gaze doctor` to \
                  also check whether {username} is enrolled"
             ),
+        ),
+    }
+}
+
+/// Check the exact managed branch: no wallet hook is reachable on biometric failure.
+fn kde_login_stack_passes_the_token(contents: &str) -> bool {
+    let entries: Vec<_> = contents.lines().filter_map(pam_entry).collect();
+    let auth: Vec<_> = entries.iter().filter(|entry| entry.0 == "auth").collect();
+    let handoff = auth.windows(4).any(|lines| {
+        let (_, control, module, options) = *lines[0];
+        module == "pam_gaze.so"
+            && (control
+                .split_ascii_whitespace()
+                .eq(["[success=1", "default=ignore]"])
+                || control
+                    .split_ascii_whitespace()
+                    .eq(["[success=1", "default=die]"]))
+            && options.split_ascii_whitespace().eq(["kde-login"])
+            && lines[1]
+                .1
+                .split_ascii_whitespace()
+                .eq(["[success=2", "default=ignore]"])
+            && lines[1].2 == "pam_permit.so"
+            && lines[2].1 == "optional"
+            && lines[2].2 == "pam_kwallet5.so"
+            && lines[2].3.is_empty()
+            && lines[3]
+                .1
+                .split_ascii_whitespace()
+                .eq(["[success=done", "default=ignore]"])
+            && lines[3].2 == "pam_permit.so"
+    });
+    handoff
+        && entries.iter().any(|&(kind, control, module, options)| {
+            kind == "session"
+                && control == "optional"
+                && module == "pam_kwallet5.so"
+                && options.split_ascii_whitespace().eq(["auto_start"])
+        })
+}
+
+fn check_kwallet(report: &mut Report, username: &str, config: Option<&Config>) {
+    let Some(config) = config else { return };
+    if !config.storage.unlock_kwallet {
+        report.off("KWallet", "KWallet unlock after a KDE face login is off",
+            "Enable KWallet unlock in `gaze config`, then run `gaze keyring --kwallet` and `sudo gaze-kde-pam enable-login`.");
+        return;
+    }
+    if let Err(err) = config.storage.validate_keyring(&config.liveness) {
+        report.error("KWallet", format!("KWallet unlock is enabled but unusable: {err}"),
+            "Enable TPM template encryption and liveness, or disable KWallet unlock in `gaze config`.");
+        return;
+    }
+    if !pam_search_dirs()
+        .iter()
+        .any(|dir| dir.join("pam_kwallet5.so").exists())
+    {
+        report.warning(
+            "KWallet",
+            "pam_kwallet5.so was not found",
+            "Install your distribution's KWallet PAM package (kwallet-pam or libpam-kwallet5).",
+        );
+    }
+    let mut found = false;
+    for service in ["sddm", "plasmalogin", "plasmalogin-fingerprint"] {
+        let Some(contents) = read_pam_service(&format!("/etc/pam.d/{service}")) else {
+            continue;
+        };
+        found = true;
+        if !kde_login_stack_passes_the_token(&contents) {
+            report.warning("KWallet", format!("{service} lacks the managed KWallet handoff/session hook"),
+                "Run `sudo gaze-kde-pam enable-login`. Custom PAM entries must use sequential mode and pass the token to pam_kwallet5 before ending authentication.");
+        }
+    }
+    if !found {
+        report.error(
+            "KWallet",
+            "No supported KDE login PAM service was found",
+            "Install SDDM or Plasma Login Manager and run `sudo gaze-kde-pam enable-login`.",
+        );
+        return;
+    }
+    match keyring_record_state(username, gaze_security::keyring::Backend::KWallet) {
+        Some(true) => report.pass(
+            "KWallet",
+            format!("a TPM-protected KWallet credential is enrolled for {username}"),
+        ),
+        Some(false) => report.warning(
+            "KWallet",
+            format!("{username} has no enrolled KWallet credential"),
+            format!("Run `sudo gaze keyring --kwallet --user {username}`."),
+        ),
+        None => report.warning(
+            "KWallet",
+            "KWallet enrollment could not be checked without root",
+            "Run `sudo gaze doctor` to check the credential record.",
         ),
     }
 }
@@ -3170,6 +3267,30 @@ mod tests {
         ));
         assert!(!has_grosshack("# auth sufficient pam_gaze_grosshack.so"));
         assert!(!has_grosshack("auth sufficient pam_gaze.so simultaneous"));
+    }
+
+    #[test]
+    fn kwallet_diagnostics_reject_bypassed_or_unsafe_handoffs() {
+        let valid = "-auth [success=1 default=ignore] pam_gaze.so kde-login\n\
+            -auth [success=2 default=ignore] pam_permit.so\n\
+            -auth optional pam_kwallet5.so\n\
+            -auth [success=done default=ignore] pam_permit.so\n\
+            -session optional pam_kwallet5.so auto_start\n";
+        assert!(kde_login_stack_passes_the_token(valid));
+        assert!(kde_login_stack_passes_the_token(&valid.replacen(
+            "default=ignore",
+            "default=die",
+            1
+        )));
+        for invalid in [
+            valid.replace("success=1", "success=done"),
+            valid.replace("success=2", "success=1"),
+            valid.replace("kde-login", "simultaneous"),
+            valid.replace("-auth optional pam_kwallet5.so\n", ""),
+            valid.replace("-session optional pam_kwallet5.so auto_start\n", ""),
+        ] {
+            assert!(!kde_login_stack_passes_the_token(&invalid));
+        }
     }
 
     #[test]

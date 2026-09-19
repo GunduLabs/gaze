@@ -251,8 +251,11 @@ enum Commands {
         #[arg(long, help = "Print current values and exit")]
         show: bool,
     },
-    /// Enroll or replace a TPM-protected GNOME Keyring password (root only)
+    /// Enroll or replace a TPM-protected GNOME Keyring or KWallet password (root only)
     Keyring {
+        /// Use KDE KWallet instead of GNOME Keyring
+        #[arg(long)]
+        kwallet: bool,
         /// Remove the stored keyring credential instead of enrolling one
         #[arg(long)]
         forget: bool,
@@ -322,7 +325,7 @@ async fn run_config_wizard(
     term: &Term,
     proxy: &GazeProxy<'_>,
     mut config: Config,
-    keyring_supported: bool,
+    keyring_supported: gaze_core::dbus::KeyringSupport,
 ) -> anyhow::Result<()> {
     let theme = ColorfulTheme::default();
 
@@ -579,7 +582,7 @@ async fn run_config_wizard(
         .interact()?;
 
     config.storage.unlock_gnome_keyring =
-        if keyring_supported && config.storage.encrypt_templates && config.liveness.enabled {
+        if keyring_supported.gnome && config.storage.encrypt_templates && config.liveness.enabled {
             Confirm::with_theme(&theme)
                 .with_prompt("Enable TPM-backed GNOME Keyring unlock for GDM face logins")
                 .default(config.storage.unlock_gnome_keyring)
@@ -588,7 +591,18 @@ async fn run_config_wizard(
             false
         };
 
-    let saved = if keyring_supported {
+    config.storage.unlock_kwallet =
+        if keyring_supported.kwallet && config.storage.encrypt_templates && config.liveness.enabled
+        {
+            Confirm::with_theme(&theme)
+                .with_prompt("Enable TPM-backed KWallet unlock for KDE face logins")
+                .default(config.storage.unlock_kwallet)
+                .interact()?
+        } else {
+            false
+        };
+
+    let saved = if keyring_supported.gnome || keyring_supported.kwallet {
         apply_config_with_keyring_to_daemon(proxy, &config).await
     } else {
         apply_config_to_daemon(proxy, &config).await
@@ -605,7 +619,24 @@ async fn run_config_wizard(
             .default(false)
             .interact()?
     {
-        keyring::enroll(&get_current_user(), &config)?;
+        keyring::enroll(
+            &get_current_user(),
+            &config,
+            gaze_security::keyring::Backend::Gnome,
+        )?;
+    }
+
+    if config.storage.unlock_kwallet
+        && Confirm::with_theme(&theme)
+            .with_prompt("Enroll the KWallet password now")
+            .default(false)
+            .interact()?
+    {
+        keyring::enroll(
+            &get_current_user(),
+            &config,
+            gaze_security::keyring::Backend::KWallet,
+        )?;
     }
 
     Ok(())
@@ -1217,12 +1248,19 @@ async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
 
     match result {
         Ok(_) => {
-            gaze_security::keyring::forget(user).map_err(|err| {
-                anyhow::anyhow!(
-                    "Face data cleared, but could not remove the stored GNOME Keyring credential \
+            gaze_security::keyring::forget(user)
+                .and_then(|()| {
+                    gaze_security::keyring::forget_for(
+                        gaze_security::keyring::Backend::KWallet,
+                        user,
+                    )
+                })
+                .map_err(|err| {
+                    anyhow::anyhow!(
+                        "Face data cleared, but could not remove a stored keyring credential \
                      for '{user}': {err}"
-                )
-            })?;
+                    )
+                })?;
             term.write_line(&format!(
                 "{} All data cleared for '{}'",
                 style("✓").green().bold(),
@@ -1766,13 +1804,25 @@ async fn run() -> anyhow::Result<()> {
         (command_may_be_challenged(&cli.command) && !silent_auth).then(polkit::PolkitAgent::spawn);
 
     match &cli.command {
-        Commands::Keyring { forget, user } => {
+        Commands::Keyring {
+            forget,
+            user,
+            kwallet,
+        } => {
+            let backend = if *kwallet {
+                gaze_security::keyring::Backend::KWallet
+            } else {
+                gaze_security::keyring::Backend::Gnome
+            };
             let username = user.clone().unwrap_or_else(get_current_user);
             if *forget {
-                gaze_security::keyring::forget(&username)?;
-                println!("Stored GNOME Keyring credential removed for {username}.");
+                gaze_security::keyring::forget_for(backend, &username)?;
+                println!(
+                    "Stored {} credential removed for {username}.",
+                    backend.name()
+                );
             } else {
-                keyring::enroll(&username, &Config::load()?)?;
+                keyring::enroll(&username, &Config::load()?, backend)?;
             }
             return Ok(());
         }
@@ -1970,6 +2020,11 @@ async fn run() -> anyhow::Result<()> {
                     "{} {}",
                     style("storage.unlock_gnome_keyring:").bold(),
                     config.storage.unlock_gnome_keyring
+                );
+                println!(
+                    "{} {}",
+                    style("storage.unlock_kwallet:").bold(),
+                    config.storage.unlock_kwallet
                 );
                 return Ok(());
             }

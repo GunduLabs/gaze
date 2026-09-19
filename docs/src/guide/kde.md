@@ -211,13 +211,13 @@ vendor copy meanwhile. `enable-login` reads whichever of the two the greeter wou
 really use, so it neither reports a missing login stack on those systems nor
 writes an `/etc` file where there is no block to add.
 
-On Fedora, Debian, and openSUSE it will report that the stack **already reaches Gaze** and
-change nothing. That is correct: those login stacks include the shared
-authentication stack Gaze installs into (`password-auth` or `common-auth`), so face
-auth already runs at the greeter on submit. Inserting a second line would make a
-failed scan run the camera twice over before the password prompt appeared. In
-practice `enable-login` only has work to do on Arch, where Gaze is wired into
-`sudo` and `polkit-1` alone.
+On Fedora, Debian, and openSUSE, shared authentication stacks may already run
+Gaze. `enable-login` adds a managed sequential login entry so KWallet receives
+the credential before authentication ends. That entry marks its attempt in PAM;
+later Gaze entries in the shared stack stand down during password fallback,
+avoiding a second scan. The helper also appends a KWallet session hook after the
+distribution's session setup. Re-running it refreshes older managed blocks;
+unmanaged custom Gaze entries are left for the administrator to update.
 
 ### Hands-free at the greeter
 
@@ -252,14 +252,57 @@ Nothing here applies to SDDM.
 December 2019 and is still open, and upstream's answer has been that Plasma Login
 Manager is where it gets solved.
 
-::: warning KWallet asks for its password after a face login
-KWallet unlocks itself at login by reusing the password you typed. After a face
-login there is no password to reuse, so KWallet prompts you for one once, in the
-session. `success=done` keeps that prompt out of the greeter itself, where it
-would otherwise appear as a second password box.
+### Optional TPM-backed KWallet unlock
 
-Nothing to do on the lock screen: KWallet only unlocks at login.
-:::
+KWallet normally reuses your login password. After a face login it stays locked
+unless you unlock it manually or enroll an optional TPM-protected credential.
+This works with `sddm`, `plasmalogin`, and `plasmalogin-fingerprint` in sequential
+PAM mode. Lock-screen unlocks do not need or release the wallet password.
+
+1. Install your distribution's KWallet PAM package providing `pam_kwallet5.so`
+   (commonly `kwallet-pam` or `libpam-kwallet5`). Use a password-encrypted
+   `kdewallet`; KWallet's PAM integration does not support GPG-encrypted wallets.
+2. In `gaze config`, enable TPM template encryption, liveness, and **KWallet
+   unlock**. The GUI exposes the same storage toggle. This sets
+   `storage.unlock_kwallet = true`; it defaults to `false`.
+3. Enroll your wallet password and refresh the login PAM integration:
+
+   ```bash
+   gaze keyring --kwallet
+   sudo gaze-kde-pam enable-login
+   gaze doctor
+   ```
+
+The credential is separate from GNOME Keyring enrollment, so the two wallets can
+have different passwords. It lives encrypted under `/var/lib/gaze/kwallet` and
+is never sent over DBus. After face authentication and liveness succeed, the PAM
+module supplies it to KWallet's auth hook; the session hook opens the wallet.
+The helper preserves the distribution's password fallback and session setup.
+Users without an enrolled credential still log in by face and unlock the wallet
+inside their session, without an extra greeter password prompt.
+
+Re-enroll after changing your account or wallet password or resetting the TPM.
+An unreadable or invalid stored record requests password fallback. Gaze cannot
+validate a wallet password during enrollment or detect a wallet-only password
+change: an incorrect or stale password leaves the wallet locked. If you typed a
+nonempty password in the greeter, that existing PAM token takes precedence.
+
+```bash
+gaze keyring --kwallet --forget          # remove only the KWallet credential
+sudo gaze keyring --kwallet --user alice # enroll for another user
+```
+
+`gaze clear-user` removes both GNOME Keyring and KWallet records. Simultaneous
+and grosshack authentication do not release wallet credentials. The managed KDE
+login entry uses sequential mode and prevents a second scan in shared Gaze
+stacks during password fallback.
+
+This opt-in makes the wallet accessible to anyone who can pass your face and
+liveness checks. It has the same [TPM and biometric security limits as GNOME
+Keyring unlock](/guide/gnome#optional-tpm-backed-keyring-unlock).
+
+The handoff follows [KWallet PAM's auth/session implementation](https://github.com/KDE/kwallet-pam/blob/master/pam_kwallet.c).
+
 
 ## Managing it by hand
 

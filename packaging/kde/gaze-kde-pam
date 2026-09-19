@@ -16,6 +16,14 @@ STATE_DIR=${GAZE_KDE_STATE_DIR:-/etc/gaze}
 BEGIN_MARKER='# BEGIN gaze (managed by gaze-kde; remove with `gaze-kde-pam disable`)'
 END_MARKER='# END gaze'
 
+is_login_target() {
+	[ "$1" = "$LOGIN_FACE_PAM_FILE" ] && return 0
+	for login_target in $LOGIN_PAM_FILES; do
+		[ "$1" = "$login_target" ] && return 0
+	done
+	return 1
+}
+
 # The block Gaze owns. Every line carries the `-` prefix so a distro without the
 # module, or a Gaze that has been uninstalled, is skipped rather than aborting the
 # stack: a faulty module reference can leave the greeter accepting input and never
@@ -31,8 +39,16 @@ managed_block() {
 	printf '%s\n' "$BEGIN_MARKER"
 	printf -- '-auth       requisite                                    pam_nologin.so\n'
 	printf -- '-auth       requisite                                    pam_faillock.so    preauth\n'
-	# `success=done` also skips pam_kwallet5, which would prompt for a password.
-	printf -- '-auth       [%s]                pam_gaze.so\n' "$control"
+	if is_login_target "${2:-}"; then
+		# On failure skip both wallet and success terminator, reaching password fallback.
+		# On success skip that jump, save the token in KWallet, then end authentication.
+		printf -- '-auth       [%s]                pam_gaze.so kde-login\n' "$(printf '%s' "$control" | sed 's/success=done/success=1/')"
+		printf -- '-auth       [success=2 default=ignore]                pam_permit.so\n'
+		printf -- '-auth       optional                                  pam_kwallet5.so\n'
+		printf -- '-auth       [success=done default=ignore]             pam_permit.so\n'
+	else
+		printf -- '-auth       [%s]                pam_gaze.so\n' "$control"
+	fi
 	printf '%s\n' "$END_MARKER"
 }
 
@@ -173,7 +189,7 @@ stack_matches() {
 	return 1
 }
 
-# Fedora and Debian login stacks already include Gaze; a second line scans twice.
+# Used by status to recognize Gaze in a shared distribution stack.
 stack_reaches_gaze() {
 	stack_matches "$1" "$GAZE_MODULES"
 }
@@ -316,7 +332,7 @@ insert_block() {
 	tmp=$(mktemp)
 	trap 'rm -f "$tmp"' EXIT
 
-	managed_block "$(gaze_control "$1")" >"$tmp.block"
+	managed_block "$(gaze_control "$1")" "$1" >"$tmp.block"
 	awk -v position="$position" -v blockfile="$tmp.block" '
 		function emit() {
 			while ((getline line < blockfile) > 0) {
@@ -333,6 +349,16 @@ insert_block() {
 		END { if (!inserted) { emit() } }
 	' "$target" >"$tmp"
 
+	if is_login_target "$1"; then
+		# Run after the distro session hooks have established the runtime directory.
+		# Reusing the markers lets disable remove both owned blocks. Existing distro
+		# wallet hooks remain intact; KWallet detects an already-started session.
+		{
+			printf '%s\n' "$BEGIN_MARKER"
+			printf -- '-session    optional                                  pam_kwallet5.so auto_start\n'
+			printf '%s\n' "$END_MARKER"
+		} >>"$tmp"
+	fi
 	status=0
 	write_back "$target" "$tmp" || status=1
 	rm -f "$tmp" "$tmp.block"
@@ -393,7 +419,7 @@ create_face_service() {
 	mkdir -p "$(dirname "$target")"
 	{
 		printf '#%%PAM-1.0\n'
-		managed_block "$(gaze_control "$target")"
+		managed_block "$(gaze_control "$target")" "$target"
 		cat <<EOF
 auth        required                                     pam_deny.so
 account     required                                     pam_permit.so
@@ -477,7 +503,7 @@ enable() {
 
 	# An upgrade must not silently drop a login opt-in made earlier.
 	if [ -f "$(login_flag)" ]; then
-		enable_login_face
+		enable_login
 	fi
 }
 
@@ -543,10 +569,12 @@ login_targets() {
 # the password prompt nothing and no submit is needed. Only where it exists.
 enable_login_face() {
 	slot_exists "$LOGIN_FACE_PAM_FILE" || return 0
-	if has_gaze "$(effective_file "$LOGIN_FACE_PAM_FILE")"; then
+	ensure_local_copy "$LOGIN_FACE_PAM_FILE" || return 1
+	if grep -qF "$BEGIN_MARKER" "$LOGIN_FACE_PAM_FILE"; then
+		remove_block "$LOGIN_FACE_PAM_FILE" || return 1
+	elif has_gaze "$LOGIN_FACE_PAM_FILE"; then
 		return 0
 	fi
-	ensure_local_copy "$LOGIN_FACE_PAM_FILE" || return 1
 	# Ahead of pam_fprintd for the same reason as the lock screen slot.
 	if insert_block "$LOGIN_FACE_PAM_FILE"; then
 		record_installed "$LOGIN_FACE_PAM_FILE"
@@ -570,16 +598,15 @@ enable_login() {
 	enable_login_face
 
 	login_targets | while read -r service; do
+		ensure_local_copy "$service" || continue
 		effective=$(effective_file "$service")
+		if grep -qF "$BEGIN_MARKER" "$effective"; then
+			remove_block "$service" || exit 1
+		fi
 		if has_gaze "$effective"; then
 			printf 'Gaze is already referenced by %s.\n' "$effective"
 			continue
 		fi
-		if stack_reaches_gaze "$effective"; then
-			printf '%s already reaches Gaze through an included stack; leaving it alone.\n' "$effective"
-			continue
-		fi
-		ensure_local_copy "$service" || continue
 		where=$(real_file "$service")
 		if insert_block "$service"; then
 			record_installed "$service"
@@ -605,8 +632,9 @@ EOF
 
 	cat <<'EOF'
 
-Your KWallet will ask for its password once after a face login, because no
-password was typed for it to reuse.
+For optional TPM-backed KWallet unlock, enable KWallet unlock in `gaze config`
+and enroll with `gaze keyring --kwallet`. Install your distro's kwallet-pam package.
+Without enrollment, KWallet stays locked until you unlock it in the session.
 EOF
 }
 

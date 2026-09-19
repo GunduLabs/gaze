@@ -53,6 +53,7 @@ max_seconds = 2.0
 
 [storage]
 encrypt_templates = false
+unlock_kwallet = false # optional TPM-backed KDE wallet unlock
 unlock_gnome_keyring = false
 ```
 
@@ -419,6 +420,14 @@ skip it keep logging in with face and are prompted for the keyring as before.
 Read the security notes in
 [GNOME Keyring setup](/guide/gnome#optional-tpm-backed-keyring-unlock) first:
 the stored password is recoverable by root on this machine.
+
+## Unlock KWallet after a KDE face login
+
+`storage.unlock_kwallet` also defaults to `false` and requires both TPM template
+encryption and liveness. Enable it for KDE login wallet unlock, then run
+`gaze keyring --kwallet` and `sudo gaze-kde-pam enable-login`. Its credential is
+independent of GNOME Keyring. See [KWallet setup](/guide/kde#optional-tpm-backed-kwallet-unlock)
+for supported login services, PAM setup, and re-enrollment requirements.
 
 ## Enrollment behavior
 

@@ -655,10 +655,9 @@ pub async fn setup_auth_env() -> Result<(Config, GazeProxy<'static>), c_int> {
         Ok(Some(mut config)) => {
             // The legacy Config property omits this flag.
             // VerifyStartForKeyring checks active prerequisites before authentication.
-            config.storage.unlock_gnome_keyring = Config::load()
-                .unwrap_or_default()
-                .storage
-                .unlock_gnome_keyring;
+            let storage = Config::load().unwrap_or_default().storage;
+            config.storage.unlock_gnome_keyring = storage.unlock_gnome_keyring;
+            config.storage.unlock_kwallet = storage.unlock_kwallet;
             config.clamp_keyring();
             config
         }
@@ -666,6 +665,7 @@ pub async fn setup_auth_env() -> Result<(Config, GazeProxy<'static>), c_int> {
             let mut config = Config::load_from(gaze_core::config::CONFIG_PATH).unwrap_or_default();
             // An incompatible daemon cannot support credential release.
             config.storage.unlock_gnome_keyring = false;
+            config.storage.unlock_kwallet = false;
             config
         }
         Err(_) => return Err(PAM_SERVICE_ERR),
@@ -769,6 +769,15 @@ async fn request_verify_start(
 ) -> anyhow::Result<()> {
     if require_keyring {
         // No legacy fallback: older daemons cannot guarantee the active prerequisites.
+        if matches!(
+            service,
+            Some("sddm" | "plasmalogin" | "plasmalogin-fingerprint")
+        ) {
+            return proxy
+                .verify_start_for_kwallet(service.unwrap())
+                .await
+                .map_err(|e| anyhow::anyhow!("KWallet verification start failed: {e}"));
+        }
         return proxy
             .verify_start_for_keyring()
             .await
