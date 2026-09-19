@@ -18,7 +18,7 @@ gaze-gui
 ```
 
 - **Enroll a new face profile**: Initiates a guided camera capture. If both RGB and IR cameras are configured, it captures from both.
-- **View enrolled profiles**: The main window lists enrolled faces with green/red `RGB` and `IR` badges indicating which capture types are active, along with the total template capture count.
+- **View enrolled profiles**: The main window lists enrolled faces with `RGB` and `IR` badges and the total template capture count. A badge is green when the profile has captures for that spectrum, amber when a camera is configured for it but the profile has none, and grey when no camera is configured for that spectrum at all. An RGB-only machine therefore shows a green `RGB` and a grey `IR`, not a failure.
 - **Refine profiles**: Tap the edit/refine icon on a profile to capture additional samples or add a missing spectrum (e.g. adding IR captures to an existing RGB-only face profile after configuring an IR camera).
 - **Test authentication**: Check Gaze's recognition with immediate pass/fail visual feedback.
 - **Remove profiles**: Delete specific face profiles.
@@ -48,6 +48,8 @@ compiled with the `openvino-config` Cargo feature. See
 **Cameras**
 
 - RGB camera source, IR camera source, and Force IR Emitter
+- Parallel RGB + IR Capture, which decides whether hybrid verification reads both
+  sensors at once. Some webcams cannot, so the default captures them one at a time
 - Darkness cutoff, the dark-frame rejection threshold
 
 **Enrollment**
@@ -62,6 +64,8 @@ compiled with the `openvino-config` Cargo feature. See
 **Auth**
 
 - Abort if SSH, abort if lid closed
+- Require a suspend first, which refuses face auth until the machine has suspended
+  and resumed once
 - Require confirmation on lock screen, require confirmation for elevated auth
 - Resume grace period and start delay, both in milliseconds
 - Start delay applies to, either every face auth or screen lockers only
@@ -71,6 +75,11 @@ compiled with the `openvino-config` Cargo feature. See
 
 - Encrypt face templates, which seals enrolled templates with the TPM. See
   [How it works](/guide/how-it-works) for what that protects against.
+- Unlock GNOME Keyring, which replays an enrolled password after a
+  liveness-protected GDM face login. It needs template encryption and liveness
+  on, and each user still has to run `gaze keyring`. Read
+  [what it changes about your security](/guide/gnome#what-this-changes-about-your-security)
+  first.
 
 ## Common tasks
 

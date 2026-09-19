@@ -18,7 +18,16 @@ remove packages (including AUR `-debug` split packages) and the repo, delete
 `gazed` core dumps, and wipe `/etc/gaze`, `/var/cache/gaze`, and
 `/var/lib/gaze`. On openSUSE it also removes the `pam-config` entries, native
 packages, Tumbleweed repository, and repository signing key.
-It prints the plan and asks for confirmation first. Useful flags:
+It prints the plan and asks for confirmation first.
+
+::: warning `gaze uninstall` does not remove `gaze-cinnamon-extension`
+The package list it drives covers `gaze`, `gaze-gui`, `gaze-gnome-extension`,
+`gaze-hyprlock`, and `gaze-kde`. If you installed the Cinnamon extension,
+remove it yourself with your package manager and follow
+[Reset Cinnamon lock screen settings](#reset-cinnamon-lock-screen-settings).
+:::
+
+Useful flags:
 
 - `--keep-data`: preserve `/var/lib/gaze` (enrolled faces)
 - `--dry-run`: print the plan without running anything
@@ -41,6 +50,19 @@ rm -f ~/.config/autostart/gaze-gnome-enable.desktop ~/.local/share/gaze/gnome-en
 ```
 
 Repeat this for each desktop user who enabled lock screen face unlock. The `rm -rf` removes any per-user copy of the extension (left by `gnome-extensions install` or a development checkout); without it GNOME keeps listing the extension as disabled. The last line removes the one-shot autostart entry the installer leaves behind to finish enabling the extension at the next login; it normally deletes itself once it has run.
+
+### Reset Cinnamon lock screen settings
+
+```bash
+gsettings set org.cinnamon enabled-extensions \
+  "$(gsettings get org.cinnamon enabled-extensions | sed "s/, *'gaze@gundulabs.com'//; s/'gaze@gundulabs.com', *//; s/\['gaze@gundulabs.com'\]/@as []/")"
+rm -rf ~/.local/share/cinnamon/extensions/gaze@gundulabs.com
+rm -rf ~/.cinnamon/configs/gaze@gundulabs.com
+```
+
+Repeat this for each desktop user who enabled it, then reload Cinnamon
+(`Alt + F2`, `r`, Enter). The last line removes the extension's saved settings,
+which Cinnamon keeps outside dconf.
 
 ### Revert KDE face unlock
 
@@ -116,20 +138,23 @@ sudo systemctl disable gazed
 ::: code-group
 
 ```bash [Debian/Ubuntu]
-sudo apt remove --purge gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde
+sudo apt remove --purge gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde
 sudo apt autoremove
 ```
 
 ```bash [Fedora and compatible]
-sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde
+sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde
 ```
 
 ```bash [openSUSE Tumbleweed]
-sudo zypper remove gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde
+sudo zypper remove gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde
 ```
 
 ```bash [Arch Linux / Manjaro]
+# Drop any name that isn't installed; -Rns errors out on an unknown package.
 sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin gaze-hyprlock-bin gaze-kde-bin
+# If you installed the Cinnamon extension, remove it too (check the exact name with `pacman -Qs gaze`):
+sudo pacman -Rns gaze-cinnamon-extension-bin
 # AUR builds may also have installed -debug split packages:
 pacman -Q | awk '/^gaze.*-debug /{print $1}' | xargs -r sudo pacman -Rns --noconfirm
 ```
@@ -195,6 +220,9 @@ sudo glib-compile-schemas /usr/share/glib-2.0/schemas
 ```
 
 ### Face enrollment data
+
+`/var/lib/gaze` holds the enrolled templates (`users/`), the TPM-sealed template
+key (`tpm/`), and any TPM-protected GNOME Keyring credentials (`keyring/`):
 
 ```bash
 sudo rm -rf /var/lib/gaze

@@ -131,9 +131,11 @@ Git hooks are local to each clone. `just setup-hooks` points Git at the tracked 
 - `gaze`: the `gazed` daemon, ML pipeline, and user database.
 - `gaze-cli`: the `gaze` CLI binary. It lives in its own crate so the client binary does not statically link ONNX Runtime (see warning below).
 - `gaze-core`: shared config/DBus/IR library. Deliberately light: no OpenCV, GStreamer, or ONNX Runtime, so the PAM modules can depend on it.
+- `gaze-security`: TPM sealing and the GNOME Keyring credential store. Links tpm2-tss plus pure-Rust crypto (`aes-gcm`, `sha2`) and nothing heavier, so `pam-gaze` can depend on it.
 - `gaze-vision`: camera capture, face detection, and inference. Detection sits behind the `detection` cargo feature (on by default); the CLI and GUI opt out with `default-features = false` and get camera support alone.
 - `pam-gaze`: `cdylib` PAM module. Depends on `gaze-core` and `gaze-security` for TPM keyring unsealing, never `gaze-vision`; `just check-pam-link` enforces its library allowlist (see warning below).
-- `gaze-gui`: GTK4/libadwaita app. `gnome-shell-extension/` is packaged separately.
+- `pam-gaze-grosshack`: deprecated `cdylib` compatibility shim that forces `PamMode::Simultaneous` and prints a deprecation notice. It `#[path]`-includes `pam-gaze`'s own modules rather than duplicating them. Shipped on openSUSE only, and slated for removal; new work belongs in `pam-gaze`.
+- `gaze-gui`: GTK4/libadwaita app. `gnome-shell-extension/` and `cinnamon-extension/` are packaged separately.
 
 ## Build and test rust components
 
@@ -293,6 +295,7 @@ The CLI and GUI need no special setup; they talk to whichever `gazed` currently 
 `pam-gaze` builds as a `cdylib`. After `just build-rust` you'll have:
 
 - `target/release/libpam_gaze.so`
+- `target/release/libpam_gaze_grosshack.so` (the deprecated shim; only the openSUSE packages install it)
 
 `just build-rust` also runs `just check-pam-link` over it, which fails the build
 if the module links anything beyond libc, libgcc, libm, the dynamic loader, and
@@ -350,6 +353,41 @@ journalctl -f /usr/bin/gnome-shell
 ```
 
 For the unlock-dialog session mode (lock screen), changes only take effect after a fresh lock, not a shell reload.
+
+## Iterating on the Cinnamon extension
+
+The extension source lives in `cinnamon-extension/`. Cinnamon reads its settings
+schema from the extension directory, so no `glib-compile-schemas` step is needed:
+
+```bash
+mkdir -p ~/.local/share/cinnamon/extensions
+ln -sfn "$PWD/cinnamon-extension" \
+  ~/.local/share/cinnamon/extensions/gaze@gundulabs.com
+```
+
+Reload Cinnamon with `Alt + F2`, `r`, Enter, then enable it from
+**System Settings → Extensions**. Watch its logs with:
+
+```bash
+journalctl -f /usr/bin/cinnamon
+```
+
+`just dev-link-system` also links this extension system-wide and for the
+invoking user when `/usr/share/cinnamon` exists, so an installed checkout picks
+it up without the symlink above.
+
+## Building the docs
+
+The site is VitePress, driven through `bun`:
+
+```bash
+just build-docs        # bun install && bun run docs:build
+bun run docs:dev       # live preview at http://localhost:5173
+```
+
+`scripts/prepare-docs.sh` runs first in both cases and stages the archived
+versions under `docs/archive/`. Edit `docs/src/`; never edit generated output
+under `docs/.vitepress/dist`.
 
 ## Checking the KDE lock screen without Plasma
 

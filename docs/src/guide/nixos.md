@@ -3,10 +3,10 @@
 
 # Nix & NixOS
 
-Gaze ships a Nix flake with packages for the daemon, CLI, GUI, and GNOME Shell
-extension, plus a NixOS module that wires up everything the distro packages do
-imperatively: the `gazed` systemd service, D-Bus and polkit policies, PAM
-integration, and GNOME/GDM defaults.
+Gaze ships a Nix flake with packages for the daemon, CLI, GUI, and the GNOME
+Shell and Cinnamon extensions, plus a NixOS module that wires up everything the
+distro packages do imperatively: the `gazed` systemd service, D-Bus and polkit
+policies, PAM integration, and GNOME/GDM defaults.
 
 Face authentication needs a system daemon and PAM configuration, so the NixOS
 module is the recommended path. On non-NixOS systems with Nix (including
@@ -21,11 +21,13 @@ the Flatpak.
 | `packages.<system>.gaze` | `gazed` daemon, `gaze` CLI, and the PAM modules |
 | `packages.<system>.gaze-gui` | GTK4/Adwaita configuration GUI |
 | `packages.<system>.gaze-gnome-extension` | GNOME Shell extension |
+| `packages.<system>.gaze-cinnamon-extension` | Cinnamon Spices extension |
 | `packages.<system>.default` | Alias for `packages.<system>.gaze` |
 | `nixosModules.gaze` | NixOS module (`services.gaze.*`) |
 | `nixosModules.default` | Alias for `nixosModules.gaze` |
-| `overlays.default` | Adds the three packages to `pkgs` |
+| `overlays.default` | Adds the four packages to `pkgs` |
 | `devShells.<system>.default` | Development shell with the full build environment |
+| `checks.<system>` | Builds `gaze`, `gaze-gui`, and `gaze-gnome-extension` |
 
 `<system>` is `x86_64-linux` or `aarch64-linux`.
 
@@ -239,6 +241,28 @@ there was no password to hand it. See the [KDE Plasma guide](/guide/kde).
 
 The System Settings entry ships in the `gaze-kde` package rather than the NixOS
 module, so on Nix use `gaze add-face` or `services.gaze.gui.enable`.
+
+### Cinnamon
+
+The module has no Cinnamon options, so wire it up in two parts. Install the
+extension package and enable it in your session:
+
+```nix
+environment.systemPackages = [
+  inputs.gaze.packages.${pkgs.stdenv.hostPlatform.system}.gaze-cinnamon-extension
+];
+```
+
+Then add the lock screen's PAM service, which is the standalone screensaver on
+X11 sessions:
+
+```nix
+security.pam.services.cinnamon-screensaver.gaze.enable = true;
+```
+
+Polkit prompts are already covered by the default `polkit-1` service. See the
+[Cinnamon Extension guide](/guide/cinnamon) for which lock screen your Cinnamon
+version uses and what the extension changes on each.
 
 ### Other desktops
 

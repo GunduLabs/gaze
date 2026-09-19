@@ -78,9 +78,9 @@ gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 
 Run those from a GNOME session that started **after** the package was installed. GNOME Shell only scans extension directories at session start and drops IDs it does not recognise, so enabling the extension from the session you installed in can look correct and then vanish at the next logout. Reboot, then re-run the two commands. `gaze doctor` reports this as `GNOME extension: installed, but not enabled for the current user` and prints the same steps. See [The extension disappears again after a logout](/guide/gnome#the-extension-disappears-again-after-a-logout).
 
-Hands-free lock screen and GDM login face auth through this extension are GNOME-specific. KDE Plasma gets a hands-free lock screen a different way, through the biometric PAM slot KScreenLocker starts up front, see [KDE Plasma](/guide/kde). Other desktops integrate the lock screen through PAM instead, see [Hyprland](/guide/hyprland) and [PAM](/guide/pam).
+Hands-free lock screen and GDM login face auth through this extension are GNOME-specific. Cinnamon has its own extension covering the lock screen and PolKit prompts, see [Cinnamon Extension](/guide/cinnamon). KDE Plasma gets a hands-free lock screen a different way, through the biometric PAM slot KScreenLocker starts up front, see [KDE Plasma](/guide/kde). Other surfaces integrate through PAM instead, see [Hyprland](/guide/hyprland), [LightDM](/guide/lightdm), [Console login (TTY)](/guide/console), and [PAM](/guide/pam).
 GDM login face auth is separate and disabled by default due to GNOME keyring behavior.
-See [GNOME Extension](/guide/gnome) for details and optional login enablement.
+See [GNOME Extension](/guide/gnome) for details and optional login enablement, including the optional TPM-backed keyring unlock that removes that caveat.
 
 ## If something fails
 
@@ -93,5 +93,7 @@ Go to the [troubleshooting guide](/guide/troubleshooting) for camera, daemon, PA
 - Use the desktop app via the [GUI guide](/guide/gui)
 - Review PAM setup in [PAM](/guide/pam)
 - Review lock/login behavior in [GNOME Extension](/guide/gnome)
+- Set up the [Cinnamon Extension](/guide/cinnamon) for the Cinnamon lock screen and PolKit prompts
 - Set up the [KDE Plasma](/guide/kde) lock screen and System Settings page
 - Enable face unlock for [Hyprland (hyprlock)](/guide/hyprland)
+- Add face auth to [LightDM](/guide/lightdm) or a [console login (TTY)](/guide/console)

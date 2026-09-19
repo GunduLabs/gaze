@@ -9,7 +9,7 @@ All commands talk to the running `gazed` daemon over DBus.
 
 ## Commands that need privileges
 
-An enrolled face is a login credential, so creating, changing, or deleting one requires root, even on your own account. You never type `sudo` yourself: `gaze add-face`, `gaze refine-face`, `gaze remove-face`, `gaze rename-face`, `gaze clear-user`, and `gaze config` re-run themselves through `sudo` and prompt for your password. They still act on the account that invoked them, not on `root`, so `gaze add-face default` enrolls a face for you; pass `-u root` if you really want root's own enrollment.
+An enrolled face is a login credential, so creating, changing, or deleting one requires root, even on your own account. You never type `sudo` yourself: `gaze add-face`, `gaze refine-face`, `gaze remove-face`, `gaze rename-face`, `gaze clear-user`, `gaze config`, and `gaze keyring` re-run themselves through `sudo` and prompt for your password. They still act on the account that invoked them, not on `root`, so `gaze add-face default` enrolls a face for you; pass `-u root` if you really want root's own enrollment.
 
 `gaze auth`, `gaze list-faces`, `gaze doctor`, and `gaze config --show` are read-only and stay unprivileged.
 
@@ -43,6 +43,7 @@ It checks:
 - PAM module installation, permissions, and active PAM stack references
 - GNOME, KDE, or hyprlock integration when running those desktops (on KDE it reports which biometric slot runs Gaze, and whether the login greeter scans before you type or on submit)
 - TPM availability when encrypted template storage is enabled
+- GNOME Keyring unlock: whether it is on, whether its prerequisites are met, whether `/etc/pam.d/gdm-face` still passes the token, and whether the user has a credential enrolled
 
 Every warning or error includes a suggested next step. Errors that can prevent Gaze from working make the command exit with status `1`; warnings are advisory and leave the exit status at `0`.
 
@@ -163,6 +164,26 @@ gaze clear-user
 
 This is destructive.
 
+## Unlock the GNOME Keyring after a GDM face login
+
+A face login supplies no password, so the GNOME login keyring normally stays
+locked. `gaze keyring` stores the account password in a root-only TPM-protected
+record that `pam_gaze.so` replays to `pam_gnome_keyring` after a successful face
+and liveness check:
+
+```bash
+gaze keyring                    # enroll or replace the credential
+gaze keyring --forget           # remove the stored credential
+sudo gaze keyring --user alice  # act on another account
+```
+
+It needs `storage.unlock_gnome_keyring = true`, which in turn needs
+`storage.encrypt_templates = true` and `liveness.enabled = true`. `gaze
+clear-user` removes the record along with the rest of the user's data.
+
+Read [What this changes about your security](/guide/gnome#what-this-changes-about-your-security)
+before enabling it: the stored password is recoverable by root on this machine.
+
 ## Uninstall Gaze completely
 
 ```bash
@@ -190,7 +211,7 @@ Show-only mode:
 gaze config --show
 ```
 
-Prints all current config values without opening the editor: inference execution provider and device, security level, detector and recognizer model, RGB and IR thresholds, hybrid combining policy (both the raw value and what it resolves to), camera sources, emitter state, dark-frame threshold, auth behavior, enrollment limit and minimum face-size ratio, liveness settings, and whether template encryption is on.
+Prints all current config values without opening the editor: inference execution provider and device, security level, detector and recognizer model, RGB and IR thresholds, hybrid combining policy (both the raw value and what it resolves to), camera sources, emitter state, parallel capture mode, dark-frame threshold, auth behavior, enrollment limit and minimum face-size ratio, liveness settings, and whether template encryption and GNOME Keyring unlock are on.
 
 ## Shell completions
 

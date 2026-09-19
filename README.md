@@ -29,7 +29,7 @@ Facial authentication for Linux with on-device face recognition, PAM integration
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 ```
 
-The installer installs the Gaze daemon, CLI, and GUI. It supports openSUSE Tumbleweed on x86_64 through its native `zypper` package manager and a Tumbleweed-specific RPM repository. It installs the GNOME Shell extension only when it detects a GNOME desktop session; on KDE Plasma it installs `gaze-kde` instead, and on other non-GNOME desktops it skips GNOME-specific packages so it does not pull in GNOME Shell. If you installed the GNOME extension manually or automatic enablement was not possible, reboot (so GNOME Shell scans the new extension) and then run from GNOME:
+The installer installs the Gaze daemon, CLI, and GUI. It supports openSUSE Tumbleweed on x86_64 through its native `zypper` package manager and a Tumbleweed-specific RPM repository. It installs the GNOME Shell extension only when it detects a GNOME desktop session; on Cinnamon it installs `gaze-cinnamon-extension`, on KDE Plasma it installs `gaze-kde`, and on other desktops it skips the desktop extension packages so it does not pull in GNOME Shell. If you installed the GNOME extension manually or automatic enablement was not possible, reboot (so GNOME Shell scans the new extension) and then run from GNOME:
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
@@ -127,14 +127,14 @@ yay -S --needed gaze-bin gaze-gui-bin
 flatpak install --from https://packages.gundulabs.com/flatpak/com.gundulabs.Gaze.flatpakref
 ```
 
-On openSUSE Tumbleweed, the RPM post-install script enables the shared PAM stack; reapply it manually with `sudo pam-config --add --gaze && sudo pam-config --update` if needed. For GNOME lock screen face unlock after manual package installation, also install `gaze-gnome-extension` (`gaze-gnome-extension-bin` on Arch), reboot, then from your GNOME session run `gnome-extensions enable gaze@gundulabs.com` and `gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true`. On KDE Plasma, install `gaze-kde` (`gaze-kde-bin` on Arch) for hands-free lock screen face unlock and a Face Unlock entry in System Settings; see the [KDE guide](https://gaze.gundulabs.com/guide/kde).
+On openSUSE Tumbleweed, the RPM post-install script enables the shared PAM stack; reapply it manually with `sudo pam-config --add --gaze && sudo pam-config --update` if needed. For GNOME lock screen face unlock after manual package installation, also install `gaze-gnome-extension` (`gaze-gnome-extension-bin` on Arch), reboot, then from your GNOME session run `gnome-extensions enable gaze@gundulabs.com` and `gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true`. On Cinnamon, install `gaze-cinnamon-extension` and enable it from **System Settings → Extensions**; see the [Cinnamon guide](https://gaze.gundulabs.com/guide/cinnamon). On KDE Plasma, install `gaze-kde` (`gaze-kde-bin` on Arch) for hands-free lock screen face unlock and a Face Unlock entry in System Settings; see the [KDE guide](https://gaze.gundulabs.com/guide/kde).
 
 </details>
 
 <details>
 <summary>Nix / NixOS (flake)</summary>
 
-The repo is a Nix flake with packages (`gaze`, `gaze-gui`, `gaze-gnome-extension`) and a NixOS module that configures the daemon, D-Bus/polkit, and PAM declaratively:
+The repo is a Nix flake with packages (`gaze`, `gaze-gui`, `gaze-gnome-extension`, `gaze-cinnamon-extension`) and a NixOS module that configures the daemon, D-Bus/polkit, and PAM declaratively:
 
 ```nix
 # flake.nix inputs
@@ -189,7 +189,10 @@ Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Matc
 | `gaze` | CLI for enrollment and authentication (crate: `gaze-cli`) |
 | `gaze-gui` | GTK4/Adwaita graphical application |
 | `pam-gaze` | PAM module for login/lock screen integration. Asks `gazed` over DBus; links no camera or inference code |
-| `gaze-gnome-extension` | GNOME Shell extension for lock screen auth |
+| `gaze-security` | TPM sealing and the privileged credential store behind template encryption and keyring unlock |
+| `gaze-gnome-extension` | GNOME Shell extension for lock screen and GDM auth |
+| `gaze-cinnamon-extension` | Cinnamon Spices extension for lock screen and PolKit auth |
+| `gaze-kde` | KDE Plasma lock screen wiring and a Face Unlock entry in System Settings |
 | `gaze-hyprlock` | PAM service for hyprlock face unlock on Hyprland |
 
 ## Configuration
@@ -218,6 +221,10 @@ min_face_size_ratio = 0.25
 [liveness]
 enabled = true
 threshold = 0.8
+
+[storage]
+encrypt_templates = false   # seal face templates to the TPM
+unlock_gnome_keyring = false # unlock the GNOME keyring after a GDM face login
 ```
 
 OpenVINO selects its device at run time. An OpenVINO-enabled installation

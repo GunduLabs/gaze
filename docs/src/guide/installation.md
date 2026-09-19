@@ -127,6 +127,13 @@ sudo zypper refresh
 sudo zypper install gaze gaze-gui
 ```
 
+```bash [Arch Linux / Manjaro / CachyOS]
+# Requires an AUR helper such as yay or paru. yay shown here.
+yay -S --needed gaze-bin gaze-gui-bin
+```
+
+:::
+
 The openSUSE RPM ships a `pam-config` definition and enables Gaze for `sudo`,
 GDM, and other services that include `common-auth` in its post-install script.
 To reapply the setting manually after changing PAM modules, run:
@@ -138,13 +145,6 @@ sudo pam-config --update
 
 The one-line installer also reapplies this setting after the package install
 when `pam-config` is available.
-
-```bash [Arch Linux / Manjaro / CachyOS]
-# Requires an AUR helper such as yay or paru. yay shown here.
-yay -S --needed gaze-bin gaze-gui-bin
-```
-
-:::
 
 ::: warning Arch: install the `-bin` packages, not the release artifacts
 On Arch, install Gaze only through the AUR packages above. The
