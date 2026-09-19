@@ -3,7 +3,7 @@
 
 [package]
 name = "gaze-security"
-version = "0.3.0"
+version = "0.3.2"
 edition = "2024"
 description = "TPM and privileged credential storage for Gaze"
 categories.workspace = true
