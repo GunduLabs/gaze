@@ -325,6 +325,7 @@ jobs:
             return 1
           }
           retry zypper --non-interactive refresh
+          retry zypper --non-interactive dist-upgrade --no-recommends --allow-vendor-change
           retry zypper --non-interactive install --no-recommends \
             git \
             ca-certificates \
