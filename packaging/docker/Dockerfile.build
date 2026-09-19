@@ -3,7 +3,7 @@
 
 # Linux build environment for hosts that lack the platform APIs Gaze needs (V4L2, PAM, TPM2,
 # polkit, GTK4). Mirrors the CD workflow toolchain and is driven by `just docker <target>`.
-FROM ubuntu:26.04@sha256:cd21a4f68a617580279d4b091cb18e3af9fa8a87500665f0ae5f7f757d17d367
+FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
 
 # amd64 | arm64. Auto-populated by buildkit; on the legacy builder it is empty,
 # so the RUN steps below fall back to `dpkg --print-architecture`.
