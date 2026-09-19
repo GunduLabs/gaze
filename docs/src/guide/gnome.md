@@ -209,6 +209,29 @@ sudo rm -f /etc/dconf/db/gdm.d/99-gaze*
 sudo dconf update
 ```
 
+## Nothing appears at the GDM login screen
+
+If the lock screen works but the login screen never offers face auth, and the GDM
+journal shows nothing, check whether the greeter has extensions switched off:
+
+```bash
+sudo env DCONF_PROFILE=gdm XDG_CONFIG_HOME=/var/lib/gdm/seat0/config \
+  gsettings get org.gnome.shell disable-user-extensions
+```
+
+`true` means GNOME Shell stops its whole extension system in the greeter, so Gaze
+never loads there however it is configured. GDM's own dconf database holds the key
+and outranks every keyfile Gaze installs under `/etc/dconf/db/gdm.d`, so clear it
+at the source and reboot:
+
+```bash
+sudo rm -f /var/lib/gdm/seat0/config/dconf/user
+```
+
+GDM writes the file again with its own defaults. On Debian and Ubuntu the path is
+under `/var/lib/gdm3`, and a machine with more than one seat has one directory per
+seat. `gaze doctor` reports this and names the file for you.
+
 ## Verify GNOME flow
 
 - Lock screen, then try unlock with face.

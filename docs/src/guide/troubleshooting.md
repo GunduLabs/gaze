@@ -327,6 +327,34 @@ journalctl -u gazed -b
 
 Older Gaze builds could try to use the selected user's PipeWire runtime before that user session existed. Update Gaze if you see this behavior.
 
+#### GDM shows no face auth at all, and its journal says nothing
+
+Different from the SELinux case below: there the prompt appears and the camera
+stays dark, here nothing about face auth appears at the login screen and the
+greeter logs nothing, while the lock screen, `sudo` and `gaze auth` all work.
+
+The greeter has GNOME Shell's extension kill switch on, which stops every
+extension there regardless of what enables them:
+
+```bash
+sudo env DCONF_PROFILE=gdm XDG_CONFIG_HOME=/var/lib/gdm/seat0/config \
+  gsettings get org.gnome.shell disable-user-extensions
+```
+
+If that prints `true`, the value lives in GDM's own dconf database. That database
+is the one layer of the greeter profile that outranks the keyfiles Gaze installs
+under `/etc/dconf/db/gdm.d`, so adding an override there cannot help. Clear it at
+the source and reboot:
+
+```bash
+sudo rm -f /var/lib/gdm/seat0/config/dconf/user
+sudo reboot
+```
+
+GDM writes the file again with its own defaults. The path is under `/var/lib/gdm3`
+on Debian and Ubuntu, and a multi-seat machine has one directory per seat.
+`gaze doctor` reports this as **GDM login face auth** and names the exact file.
+
 #### GDM never scans on Fedora or SELinux-enabled systems
 
 If face auth works in your desktop session (`sudo`, the lock screen, `gaze auth`)
