@@ -24,4 +24,4 @@ tss-esapi = "7.7.0"
 zeroize = "1.8"
 
 [dev-dependencies]
-tempfile = "3.27"
+tempfile = "=3.27.0"
