@@ -118,6 +118,8 @@ fn capture_must_serialize(rgb_node: Option<&str>, ir_node: Option<&str>) -> bool
 }
 
 fn functions_must_serialize(rgb_function: Option<String>, ir_function: Option<String>) -> bool {
+    // Different video nodes can share one UVC function and cannot necessarily stream together.
+    // Unknown identities must serialize too; only proven distinct functions run concurrently.
     match (rgb_function, ir_function) {
         (Some(rgb), Some(ir)) => rgb == ir,
         _ => true,

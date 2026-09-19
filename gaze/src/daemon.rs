@@ -429,6 +429,8 @@ impl AuthDaemon {
 
     fn read_ppid_at(base: &std::path::Path, pid: u32) -> Option<u32> {
         let stat = std::fs::read_to_string(base.join(pid.to_string()).join("stat")).ok()?;
+        // /proc/<pid>/stat encloses comm in parentheses, but comm itself may contain spaces
+        // and ')'. Split at the last ')' before counting the state and parent-PID fields.
         let after_comm = stat.rsplit_once(')')?.1;
         let mut fields = after_comm.split_whitespace();
         let _state = fields.next()?;
