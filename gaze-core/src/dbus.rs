@@ -275,7 +275,7 @@ pub fn benchmark_from_reply(
 
     body.deserialize::<Vec<BenchmarkResult>>()
         .map(Some)
-        .map_err(|e| anyhow::anyhow!("Failed to decode benchmark results: {}", e))
+        .map_err(|e| anyhow::anyhow!("Failed to decode benchmark results: {e}"))
 }
 
 pub async fn try_load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Option<Config>> {
@@ -283,7 +283,7 @@ pub async fn try_load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Resul
         .inner()
         .get_property("Config")
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to read config property: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to read config property: {e}"))?;
     config_from_property(raw)
 }
 
@@ -302,7 +302,7 @@ pub fn config_from_property(raw: OwnedValue) -> anyhow::Result<Option<Config>> {
     DbusConfig::try_from(raw)
         .map(Config::from)
         .map(Some)
-        .map_err(|e| anyhow::anyhow!("Failed to decode config property: {}", e))
+        .map_err(|e| anyhow::anyhow!("Failed to decode config property: {e}"))
 }
 
 /// Decode a complete update while preserving the legacy Config property's wire format.
@@ -352,7 +352,7 @@ pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> a
     proxy
         .set_config(config.clone().into())
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to set config property: {}", e))
+        .map_err(|e| anyhow::anyhow!("Failed to set config property: {e}"))
 }
 
 pub async fn apply_config_with_keyring_to_daemon(
@@ -364,7 +364,7 @@ pub async fn apply_config_with_keyring_to_daemon(
     proxy
         .set_config_with_keyring(config, unlock_gnome_keyring)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to set keyring-aware config: {}", e))
+        .map_err(|e| anyhow::anyhow!("Failed to set keyring-aware config: {e}"))
 }
 
 pub async fn get_pam_internal(proxy: &GazeProxy<'_>) -> Vec<String> {

@@ -685,7 +685,7 @@ pub async fn has_enrolled_faces_on(proxy: &GazeProxy<'_>, username: &str) -> any
 pub async fn has_enrolled_faces(username: &str) -> anyhow::Result<bool> {
     let (_config, proxy) = setup_auth_env()
         .await
-        .map_err(|e| anyhow::anyhow!("PAM error: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("PAM error: {e}"))?;
     has_enrolled_faces_on(&proxy, username).await
 }
 
@@ -784,9 +784,9 @@ async fn request_verify_start(
             proxy
                 .verify_start("any")
                 .await
-                .map_err(|e| anyhow::anyhow!("Verify start failed: {}", e))
+                .map_err(|e| anyhow::anyhow!("Verify start failed: {e}"))
         }
-        other => other.map_err(|e| anyhow::anyhow!("Verify start failed: {}", e)),
+        other => other.map_err(|e| anyhow::anyhow!("Verify start failed: {e}")),
     }
 }
 
@@ -813,11 +813,11 @@ where
     let mut verify_stream = proxy
         .receive_verify_status()
         .await
-        .map_err(|e| anyhow::anyhow!("Stream failed: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Stream failed: {e}"))?;
     let mut face_stream = proxy
         .receive_face_status()
         .await
-        .map_err(|e| anyhow::anyhow!("Stream failed: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Stream failed: {e}"))?;
     request_verify_start(proxy, service, require_keyring).await?;
 
     use futures::StreamExt;

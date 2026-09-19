@@ -11,9 +11,9 @@ You do not need to enable this extension for the CLI, the GUI, or normal PAM pro
 
 > [!IMPORTANT]
 > If you enable `require_confirmation_lock_screen = true` or `require_confirmation_elevation = true` in `/etc/gaze/config.toml`, this Cinnamon Extension **must** be enabled for face-authorization confirmation to function inside Cinnamon's graphical PolKit prompts and on the lock screen.
-> 
+>
 > **Why this is required:** Standard Cinnamon PolKit prompt windows do not natively allow clicking confirmation buttons with an empty or blank password field. The Cinnamon Extension solves this by dynamically intercepting Gaze's confirmation signals, automatically hiding the password entry, and focusing the confirmation button (the native "Authenticate" button in PolKit and a dedicated "Confirm Face Unlock" button on the unified lock screen dialog).
-> 
+>
 > If the extension is **inactive/disabled** under Cinnamon while either toggle is set, Gaze's PAM modules will **safely bypass confirmation** (returning success instantly upon face match) to prevent empty input hangs and user lockouts.
 
 ## Should I enable it?

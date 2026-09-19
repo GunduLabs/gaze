@@ -1119,7 +1119,7 @@ fn collect_camera_entries(want_color: Option<bool>) -> anyhow::Result<Vec<Camera
             let Some(target) = pipewire_target(&props) else {
                 continue;
             };
-            let target = format!("pipewiresrc target-object={}", target);
+            let target = format!("pipewiresrc target-object={target}");
             if !cameras.iter().any(|entry| entry.target == target) {
                 cameras.push(CameraEntry {
                     display_name,
