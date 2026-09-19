@@ -296,7 +296,7 @@ impl SecurityLevel {
                 _ => "det_500m.onnx",
             },
             other => {
-                tracing::warn!("invalid security level {other:?}; using medium detector");
+                tracing::warn!("Invalid security level {other:?}; using medium detector");
                 "det_500m.onnx"
             }
         }
@@ -311,7 +311,7 @@ impl SecurityLevel {
                 _ => "w600k_mbf.onnx",
             },
             other => {
-                tracing::warn!("invalid security level {other:?}; using medium recognizer");
+                tracing::warn!("Invalid security level {other:?}; using medium recognizer");
                 "w600k_mbf.onnx"
             }
         }
@@ -853,7 +853,7 @@ impl AuthConfig {
             "screen_lock" => "screen_lock",
             "" | "all" => "all",
             other => {
-                tracing::warn!("invalid start delay scope {other:?}; delaying every auth");
+                tracing::warn!("Invalid start delay scope {other:?}; delaying every auth");
                 "all"
             }
         }

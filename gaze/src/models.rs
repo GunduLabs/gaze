@@ -231,7 +231,7 @@ pub fn ensure_models(
 
     for pack_name in needed_packs {
         let url = zip_url(pack_name);
-        let zip_path = dir.join(format!("{}.zip", pack_name));
+        let zip_path = dir.join(format!("{pack_name}.zip"));
         let expected_sha256 = expected_pack_sha256(pack_name)?;
 
         download_file(&url, &zip_path, expected_sha256)?;
@@ -240,10 +240,10 @@ pub fn ensure_models(
     }
 
     if !det_path.exists() {
-        anyhow::bail!("Detection model '{}' not found in pack", detector_name);
+        anyhow::bail!("Detection model '{detector_name}' not found in pack");
     }
     if !rec_path.exists() {
-        anyhow::bail!("Recognition model '{}' not found in pack", recognizer_name);
+        anyhow::bail!("Recognition model '{recognizer_name}' not found in pack");
     }
     verify_known_model(&det_path, detector_name)?;
     verify_known_model(&rec_path, recognizer_name)?;

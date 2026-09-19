@@ -459,7 +459,7 @@ impl FaceChecker {
                         threshold: self.dark_luma_threshold,
                     });
 
-                    tracing::debug!("luma: {} avg_luma: {}", luma, avg_luma);
+                    tracing::debug!("Luma: {luma} avg_luma: {avg_luma}");
 
                     if !is_current_frame_dark {
                         CaptureStatus::Usable

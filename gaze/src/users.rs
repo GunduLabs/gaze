@@ -27,11 +27,11 @@ pub enum UserDbError {
 impl std::fmt::Display for UserDbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            UserDbError::UserNotFound(username) => write!(f, "User '{}' not found", username),
-            UserDbError::FaceNotFound(face_name) => write!(f, "Face '{}' not found", face_name),
-            UserDbError::FaceExists(face_name) => write!(f, "Face '{}' already exists", face_name),
-            UserDbError::InvalidName(msg) => write!(f, "{}", msg),
-            UserDbError::Io(err) => write!(f, "{}", err),
+            UserDbError::UserNotFound(username) => write!(f, "User '{username}' not found"),
+            UserDbError::FaceNotFound(face_name) => write!(f, "Face '{face_name}' not found"),
+            UserDbError::FaceExists(face_name) => write!(f, "Face '{face_name}' already exists"),
+            UserDbError::InvalidName(msg) => write!(f, "{msg}"),
+            UserDbError::Io(err) => write!(f, "{err}"),
         }
     }
 }

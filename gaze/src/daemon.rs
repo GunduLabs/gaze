@@ -186,7 +186,7 @@ impl EmitterGuard {
                     Some(led)
                 }
                 None => {
-                    warn!("no IR emitter profile for {node}; continuing without illumination");
+                    warn!("No IR emitter profile for {node}; continuing without illumination");
                     None
                 }
             },

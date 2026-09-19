@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # KDE Plasma
 
 On the KDE Plasma **lock screen**, the `gaze-kde` package makes face unlock start

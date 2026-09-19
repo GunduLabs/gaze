@@ -11,9 +11,9 @@ You do not need to enable this extension for the CLI, the GUI, or normal PAM pro
 
 > [!IMPORTANT]
 > If you enable `require_confirmation_lock_screen = true` or `require_confirmation_elevation = true` in `/etc/gaze/config.toml`, this GNOME Shell Extension **must** be enabled for face-authorization confirmation to function inside GNOME's graphical PolKit prompts and on the lock screen / GDM login screen.
-> 
+>
 > **Why this is required:** Standard GNOME PolKit prompt windows and lock screen prompts do not natively allow clicking confirmation buttons with an empty or blank password field. The GNOME Shell Extension solves this by dynamically intercepting Gaze's confirmation signals, automatically hiding the password entry, and focusing the confirmation button (the native "Authenticate" button in PolKit and a dedicated "Confirm Face Unlock" button on the lock screen and GDM login dialog).
-> 
+>
 > If the extension is **inactive/disabled** under GNOME while either toggle is set, Gaze's PAM modules will **safely bypass confirmation** (returning success instantly upon face match) to prevent empty input hangs and user lockouts.
 
 ## Should I enable it?

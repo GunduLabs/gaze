@@ -189,7 +189,7 @@ fn drain_config_apply_queue(queue: &ApplyQueue) {
                 let write = queue.borrow().write.clone();
                 if let Err(e) = write(cfg).await {
                     let report_error = queue.borrow().report_error.clone();
-                    report_error(format!("Failed to apply config: {}", e));
+                    report_error(format!("Failed to apply config: {e}"));
                 }
             }
             queue.borrow_mut().in_flight = false;
@@ -1379,7 +1379,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     let main_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
     let header = libadwaita::HeaderBar::new();
-    let title = libadwaita::WindowTitle::new("Gaze", &format!("User: {}", username));
+    let title = libadwaita::WindowTitle::new("Gaze", &format!("User: {username}"));
     header.set_title_widget(Some(&title));
 
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");

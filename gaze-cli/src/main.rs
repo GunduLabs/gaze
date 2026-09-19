@@ -1244,7 +1244,7 @@ async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
 fn which(bin: &str) -> bool {
     std::process::Command::new("sh")
         .arg("-c")
-        .arg(format!("command -v {} >/dev/null 2>&1", bin))
+        .arg(format!("command -v {bin} >/dev/null 2>&1"))
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
