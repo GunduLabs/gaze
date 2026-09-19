@@ -263,6 +263,8 @@ impl FaceDetector {
             return Err(DetectError::NoFacesDetected);
         }
 
+        // Keep boxes and landmarks in the padded image's coordinates: callers crop and align
+        // against the returned mat_rgb, so subtracting the padding here would misplace them.
         let scale_x = (mat_square.cols() as f32) / (w as f32);
         let scale_y = (mat_square.rows() as f32) / (h as f32);
 

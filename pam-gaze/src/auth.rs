@@ -157,6 +157,8 @@ fn retry_is_warranted(verdict: Option<FirstPassVerdict>) -> bool {
 }
 
 fn sequential_handoff(verdict: &Verdict) -> Option<FirstPassVerdict> {
+    // Only an actual non-match suppresses the later retry PAM entry. Timeouts and unavailable
+    // cameras leave identity undecided, so that entry may try again after password fallback.
     match verdict {
         Verdict::Reached(AuthOutcome::Match, _) => None,
         Verdict::Reached(AuthOutcome::NoMatch, _) => Some(FirstPassVerdict::NoMatch),
