@@ -17,6 +17,7 @@ When using an IR camera and RGB liveness checking, Gaze offers significant resis
 - No cloud account is required.
 - Face embeddings are stored on disk under your local Gaze data path, readable only by root.
 - They can optionally be encrypted at rest with a key sealed to the TPM, so a stolen disk is useless on another machine. See [template encryption](/guide/configuration#encrypt-face-templates-with-the-tpm).
+- If you enable [GNOME Keyring unlock](/guide/gnome#optional-tpm-backed-keyring-unlock), your account password is additionally stored in a TPM-protected record so a face login can unlock the keyring. That record is recoverable by root on this machine; read the security notes before turning it on.
 
 ## Authentication pipeline
 
@@ -199,6 +200,7 @@ Default locations:
 
 - User embeddings: `/var/lib/gaze/users`
 - TPM-sealed encryption key (only when template encryption is enabled): `/var/lib/gaze/tpm`
+- TPM-protected GNOME Keyring credentials (only when `gaze keyring` has been run): `/var/lib/gaze/keyring`
 - Model files: `/var/cache/gaze`
 - Config file: `/etc/gaze/config.toml`
 
@@ -207,7 +209,7 @@ Default locations:
 - `gazed`: daemon that performs detection and recognition (crate: `gaze`)
 - `gaze`: CLI client (crate: `gaze-cli`, kept separate so the client binary does not link ONNX Runtime)
 - `gaze-gui`: GTK app
-- `pam_gaze.so`: PAM module. It holds no camera or inference code of its own; it asks `gazed` over DBus and reports the answer back to PAM
-- PAM integration, the GNOME extension, and KDE's biometric PAM slot for login/lock screen flow
+- `pam_gaze.so`: PAM module. It holds no camera or inference code of its own; it asks `gazed` over DBus and reports the answer back to PAM. It links `gaze-security` so it can unseal a stored GNOME Keyring credential after a successful login
+- PAM integration, the GNOME and Cinnamon extensions, and KDE's biometric PAM slot for login/lock screen flow
 
 The CLI and GUI communicate with daemon over DBus (`com.gundulabs.Gaze`).

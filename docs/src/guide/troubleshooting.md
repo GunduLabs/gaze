@@ -351,6 +351,26 @@ sudo semodule -i /usr/share/gaze/gaze-gdm-camera.pp
 sudo reboot
 ```
 
+### Cinnamon
+
+Check that the extension is enabled from your Cinnamon session:
+
+```bash
+gsettings get org.cinnamon enabled-extensions | grep gaze@gundulabs.com
+```
+
+If it is missing, enable it from **System Settings → Extensions** or with the
+command in the [Cinnamon Extension guide](/guide/cinnamon#enable-the-extension),
+then reload Cinnamon (`Alt + F2`, `r`, Enter).
+
+On X11 sessions that use the standalone `cinnamon-screensaver` (Linux Mint 22.x
+and similar), the lock screen authenticates through
+`/etc/pam.d/cinnamon-screensaver` rather than the extension. Face unlock there
+needs `pam_gaze.so` in that service or in the shared auth stack, and it cannot
+show a confirmation button, so `require_confirmation_lock_screen = true` is not
+enforced on that surface. See
+[Lock screen behavior](/guide/cinnamon#lock-screen-behavior).
+
 ### KDE Plasma
 
 Check the "KDE lock screen" line in `gaze doctor`, then:

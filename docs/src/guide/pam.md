@@ -13,6 +13,10 @@ If you specifically want GNOME lock screen or GDM login behavior, use the [GNOME
 
 - `pam_gaze.so` (supports sequential, simultaneous, and retry modes)
 
+`pam_gaze_grosshack.so` also still ships on openSUSE as a compatibility shim for
+old configurations. It is deprecated, prints a notice on every authentication,
+and will be removed; it does nothing that `pam_gaze.so simultaneous` does not.
+
 Sequential (the default) means face auth runs first, then password fallback.
 Simultaneous (enabled via the `simultaneous` option, e.g. `pam_gaze.so simultaneous`) means face auth and password prompt run in parallel.
 Retry (enabled via the `retry` option, e.g. `pam_gaze.so retry`) is a second Gaze
@@ -225,14 +229,28 @@ The `--gaze` option is provided by the Gaze package's definition under
 that the base `gaze` package (not only `gaze-gui` or the GNOME extension) is
 installed.
 
-For simultaneous face and password authentication, enable
-`pam_gaze_grosshack.so` instead (do not enable both modules):
+### Simultaneous mode on openSUSE
 
-```bash
-sudo pam-config --delete --gaze
-sudo pam-config --add --gaze_grosshack
-sudo pam-config --update
+There is no `pam-config` definition for simultaneous mode. The package ships
+only `--gaze` (sequential) and `--gaze_retry`, so add the `simultaneous` option
+by hand: run `sudo pam-config --add --gaze && sudo pam-config --update`, then
+edit the generated `/etc/pam.d/common-auth-pc` so the Gaze line reads
+
+```text
+auth    sufficient    pam_gaze.so simultaneous
 ```
+
+`pam-config --update` regenerates that file, so re-apply the edit after any
+later `pam-config` run.
+
+::: warning `pam_gaze_grosshack.so` is deprecated
+Older openSUSE instructions used `sudo pam-config --add --gaze_grosshack`. That
+definition is no longer shipped, and the module it enabled prints a deprecation
+notice on every authentication and will be removed in a future release. If
+`/etc/pam.d` still references it, drop it with
+`sudo pam-config --delete --gaze_grosshack` and use `pam_gaze.so simultaneous`
+instead. `gaze doctor` reports a stack that still loads it.
+:::
 
 To add a retry after a rejected password, enable the retry definition alongside
 whichever of the above you use:
