@@ -96,7 +96,6 @@ const fn const_index_of(options: &[&str], value: &str) -> u32 {
     panic!("option is not present in its own option list")
 }
 
-/// Index of `value` in `options`, or `fallback` when it is not listed.
 pub fn index_of(options: &[&str], value: &str, fallback: u32) -> u32 {
     options
         .iter()
@@ -105,7 +104,6 @@ pub fn index_of(options: &[&str], value: &str, fallback: u32) -> u32 {
         .unwrap_or(fallback)
 }
 
-/// Value at `index` in `options`, or `fallback` when the index is out of range.
 pub fn value_at(options: &[&'static str], index: usize, fallback: &'static str) -> &'static str {
     options.get(index).copied().unwrap_or(fallback)
 }
@@ -871,7 +869,6 @@ impl AuthConfig {
         }
     }
 
-    /// Milliseconds to wait before face verification begins.
     pub fn effective_start_delay_ms(&self, resumed: bool, surface: AuthSurface) -> u64 {
         self.start_delay_after_lock_ms(resumed, surface, None)
     }
@@ -1398,7 +1395,7 @@ mod tests {
         assert_eq!(liveness.effective_max_frames(30.0), 60);
         assert_eq!(liveness.effective_max_frames(60.0), 120);
         assert_eq!(liveness.effective_max_frames(15.0), 30);
-        // Minimum frame floor
+        // Minimum frame floor.
         let short_liveness = LivenessConfig {
             max_seconds: 0.2,
             ..LivenessConfig::default()
@@ -1647,7 +1644,7 @@ mod tests {
 
     #[test]
     fn load_from_migrates_legacy_max_frames() {
-        // Case 1: default 40 frames migrates to 2.0s
+        // Case 1: default 40 frames migrates to 2.0s.
         let temp = TempDir::new("legacy-max-frames-40");
         let path = temp.path().join("config.toml");
         std::fs::write(
@@ -1664,7 +1661,7 @@ mod tests {
         assert!(on_disk.contains("max_seconds = 2.0"));
         assert!(!on_disk.contains("max_frames"));
 
-        // Case 2: custom non-40 frames migrates faithfully (e.g. 25 frames -> 0.83s)
+        // Case 2: custom non-40 frames migrates faithfully (e.g. 25 frames -> 0.83s).
         let temp2 = TempDir::new("legacy-max-frames-custom");
         let path2 = temp2.path().join("config.toml");
         std::fs::write(

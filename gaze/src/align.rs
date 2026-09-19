@@ -4,7 +4,7 @@
 use image::RgbImage;
 use nalgebra::Matrix3;
 
-/// Standard 112x112 ArcFace alignment template, taken from InsightFace's `arcface_dst` in face_align.py.
+/// Standard 112x112 ArcFace alignment template, from InsightFace's `arcface_dst` in face_align.py.
 pub const ARCFACE_SRC_PTS: [[f32; 2]; 5] = [
     [38.2946, 51.6963],
     [73.5318, 51.5014],

@@ -415,9 +415,8 @@ fn confirm_from_tty(prompt: PromptLine) -> Option<bool> {
 fn tty_confirmation(read: usize, key: u8) -> bool {
     read != 0 && matches!(key, b'\n' | b'\r')
 }
-// isatty(STDIN_FILENO) would miss a real controlling terminal whenever stdin is
-// redirected, e.g. `echo 1 | sudo tee /tmp/1`; opening /dev/tty directly is how
-// sudo itself finds the terminal to prompt on.
+// isatty(STDIN_FILENO) misses a real controlling terminal whenever stdin is redirected, e.g.
+// `echo 1 | sudo tee /tmp/1`; opening /dev/tty is how sudo itself finds the terminal.
 fn open_interactive_tty() -> Option<std::fs::File> {
     OpenOptions::new()
         .read(true)
@@ -1558,18 +1557,16 @@ mod tests {
     fn pam_internal_confirmation_strictly_requires_gaze_confirmed() {
         use gaze_core::dbus::GAZE_CONFIRMED;
 
-        // In internal mode, only GAZE_CONFIRMED is accepted
         assert!(internal_confirmation_accepted(Some(GAZE_CONFIRMED)));
         assert!(internal_confirmation_accepted(Some("  GAZE_CONFIRMED\n")));
         assert!(internal_confirmation_accepted(Some("GAZE_CONFIRMED\r\n")));
 
-        // Empty string / ENTER (which human users press in standard mode) must be rejected in internal mode!
+        // A bare ENTER confirms in standard mode, so internal mode must not accept it.
         assert!(!internal_confirmation_accepted(Some("")));
         assert!(!internal_confirmation_accepted(Some("\n")));
         assert!(!internal_confirmation_accepted(Some("   ")));
         assert!(!internal_confirmation_accepted(None));
 
-        // Other responses rejected
         assert!(!internal_confirmation_accepted(Some("yes")));
         assert!(!internal_confirmation_accepted(Some("GAZE_CANCEL")));
         assert!(!internal_confirmation_accepted(Some("gaze_confirmed")));

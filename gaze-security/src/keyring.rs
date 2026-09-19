@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Root-only, per-account GNOME Keyring credentials. No IPC or biometric verdicts live here:
-//! the PAM caller must finish authentication before calling `load`.
+//! Root-only: no IPC or biometric verdicts live here, and the PAM caller must finish
+//! authentication before calling `load`.
 
 use aes_gcm::aead::{AeadInOut, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};

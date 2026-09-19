@@ -65,9 +65,8 @@ const PRIVILEGED_FILES: [&str; 5] = [
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Level {
     Pass,
-    /// A working feature the user has deliberately left switched off. Not a
-    /// problem, so it must not wear a checkmark, but it still carries the steps
-    /// that switch it on.
+    /// A working feature the user deliberately switched off: no checkmark, but it
+    /// still carries the steps that switch it on.
     Off,
     Warning,
     Error,
@@ -1232,10 +1231,8 @@ fn gnome_prefs_path(group: &str, switch: &str) -> String {
     )
 }
 
-/// GNOME Shell only scans extension directories at session start. A running
-/// session asked to enable a UUID it has never scanned drops the entry again the
-/// next time it rewrites `enabled-extensions`, which is why a fresh install can
-/// look enabled right up until the first logout.
+/// GNOME Shell only scans extension directories at session start, so a session asked
+/// to enable a UUID it never scanned drops it at the next `enabled-extensions` rewrite.
 fn gnome_extension_enable_steps() -> String {
     format!(
         "1. Reboot, or log out and back in, so GNOME Shell scans the extension.\n\
