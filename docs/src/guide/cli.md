@@ -173,11 +173,17 @@ and liveness check:
 
 ```bash
 gaze keyring                    # enroll or replace the credential
-gaze keyring --forget           # remove the stored credential
+gaze keyring --forget           # remove the stored GNOME credential
+gaze keyring --kwallet          # enroll or replace the KDE wallet credential
+gaze keyring --kwallet --forget # remove only the KDE wallet credential
 sudo gaze keyring --user alice  # act on another account
 ```
 
-It needs `storage.unlock_gnome_keyring = true`, which in turn needs
+For KDE, use `--kwallet` with `storage.unlock_kwallet = true` and the
+[managed KDE login PAM hooks](/guide/kde#optional-tpm-backed-kwallet-unlock).
+The two backends have separate credentials; `gaze clear-user` removes both.
+
+GNOME enrollment needs `storage.unlock_gnome_keyring = true`, which in turn needs
 `storage.encrypt_templates = true` and `liveness.enabled = true`. `gaze
 clear-user` removes the record along with the rest of the user's data.
 

@@ -98,3 +98,7 @@ encrypt_templates = false
 # Opt-in GNOME Keyring unlock on gdm-face. Requires TPM encryption and liveness.
 # Enroll each user's keyring password with `gaze keyring`; no secrets go in this file.
 unlock_gnome_keyring = false
+# Opt-in KDE KWallet unlock on SDDM / Plasma Login Manager (sequential PAM only).
+# Same TPM/liveness requirements. Run `gaze keyring --kwallet` and
+# `sudo gaze-kde-pam enable-login`; install your distro's KWallet PAM package.
+unlock_kwallet = false

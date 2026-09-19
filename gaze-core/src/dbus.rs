@@ -58,6 +58,7 @@ impl From<DbusConfig> for Config {
             storage: crate::config::StorageConfig {
                 encrypt_templates: config.storage.encrypt_templates,
                 unlock_gnome_keyring: false,
+                unlock_kwallet: false,
             },
         }
     }
@@ -326,11 +327,17 @@ pub async fn load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Co
     })
 }
 
-/// Returns the complete config and whether the daemon supports keyring-aware updates.
+#[derive(Clone, Copy, Default)]
+pub struct KeyringSupport {
+    pub gnome: bool,
+    pub kwallet: bool,
+}
+
+/// Returns the complete config and the credential backends supported by the daemon.
 /// Older daemons report the option as disabled and unsupported.
 pub async fn load_config_with_keyring_from_daemon(
     proxy: &GazeProxy<'_>,
-) -> anyhow::Result<(Config, bool)> {
+) -> anyhow::Result<(Config, KeyringSupport)> {
     let mut config = load_config_from_daemon(proxy).await?;
     let supported = match proxy.keyring_enabled().await {
         Ok(enabled) => {
@@ -345,7 +352,25 @@ pub async fn load_config_with_keyring_from_daemon(
             ));
         }
     };
-    Ok((config, supported))
+    let kwallet = match proxy.kwallet_enabled().await {
+        Ok(enabled) => {
+            config.storage.unlock_kwallet = enabled;
+            true
+        }
+        Err(error) if dbus_is_unknown_method(&error) => false,
+        Err(error) => {
+            return Err(anyhow::anyhow!(
+                "Failed to read KWallet configuration: {error}"
+            ));
+        }
+    };
+    Ok((
+        config,
+        KeyringSupport {
+            gnome: supported,
+            kwallet,
+        },
+    ))
 }
 
 pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> anyhow::Result<()> {
@@ -360,7 +385,20 @@ pub async fn apply_config_with_keyring_to_daemon(
     config: &Config,
 ) -> anyhow::Result<()> {
     let unlock_gnome_keyring = config.storage.unlock_gnome_keyring;
+    let unlock_kwallet = config.storage.unlock_kwallet;
     let config = OwnedValue::try_from(DbusConfig::from(config.clone()))?;
+    match proxy
+        .set_config_with_wallets(config.try_clone()?, unlock_gnome_keyring, unlock_kwallet)
+        .await
+    {
+        Ok(()) => return Ok(()),
+        Err(error) if dbus_is_unknown_method(&error) && !unlock_kwallet => {}
+        Err(error) => {
+            return Err(anyhow::anyhow!(
+                "Failed to set wallet configuration: {error}"
+            ));
+        }
+    }
     proxy
         .set_config_with_keyring(config, unlock_gnome_keyring)
         .await
@@ -535,6 +573,16 @@ pub trait Gaze {
     async fn verify_stop(&self) -> zbus::Result<()>;
 
     async fn keyring_enabled(&self) -> zbus::Result<bool>;
+    async fn kwallet_enabled(&self) -> zbus::Result<bool>;
+    async fn verify_start_for_kwallet(&self, pam_service: &str) -> zbus::Result<()>;
+
+    #[zbus(allow_interactive_auth)]
+    async fn set_config_with_wallets(
+        &self,
+        config: OwnedValue,
+        unlock_gnome_keyring: bool,
+        unlock_kwallet: bool,
+    ) -> zbus::Result<()>;
 
     async fn enroll_start(&self, face_name: &str) -> zbus::Result<()>;
     async fn enroll_stop(&self) -> zbus::Result<()>;

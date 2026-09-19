@@ -112,13 +112,14 @@ fn set_liveness_config_rows_visible(
 
 fn set_keyring_config_sensitivity(
     keyring_switch: &gtk4::Switch,
+    kwallet_switch: &gtk4::Switch,
     liveness_switch: &gtk4::Switch,
     encrypt_templates_switch: &gtk4::Switch,
 ) {
-    let keyring_enabled = keyring_switch.is_active();
-    keyring_switch.set_sensitive(
-        keyring_enabled || (liveness_switch.is_active() && encrypt_templates_switch.is_active()),
-    );
+    let keyring_enabled = keyring_switch.is_active() || kwallet_switch.is_active();
+    let prerequisites = liveness_switch.is_active() && encrypt_templates_switch.is_active();
+    keyring_switch.set_sensitive(keyring_switch.is_active() || prerequisites);
+    kwallet_switch.set_sensitive(kwallet_switch.is_active() || prerequisites);
     liveness_switch.set_sensitive(!keyring_enabled);
     encrypt_templates_switch.set_sensitive(!keyring_enabled);
 }
@@ -254,6 +255,7 @@ struct ConfigRows {
     start_delay_scope: libadwaita::ComboRow,
     encrypt_templates: gtk4::Switch,
     unlock_gnome_keyring: gtk4::Switch,
+    unlock_kwallet: gtk4::Switch,
 }
 
 fn commit_focused_spin_row(window: &libadwaita::Window, rows: &ConfigRows) {
@@ -374,6 +376,7 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
         .set_active(cfg.storage.encrypt_templates);
     rows.unlock_gnome_keyring
         .set_active(cfg.storage.unlock_gnome_keyring);
+    rows.unlock_kwallet.set_active(cfg.storage.unlock_kwallet);
 
     set_liveness_config_rows_visible(
         &rows.liveness_enabled,
@@ -382,6 +385,7 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
     );
     set_keyring_config_sensitivity(
         &rows.unlock_gnome_keyring,
+        &rows.unlock_kwallet,
         &rows.liveness_enabled,
         &rows.encrypt_templates,
     );
@@ -687,6 +691,15 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     unlock_gnome_keyring_row.add_suffix(&unlock_gnome_keyring_switch);
     storage_group.add(&unlock_gnome_keyring_row);
 
+    let unlock_kwallet_row = libadwaita::ActionRow::new();
+    unlock_kwallet_row.set_visible(false);
+    unlock_kwallet_row.set_title("Unlock KDE KWallet");
+    unlock_kwallet_row.set_subtitle("Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet");
+    let unlock_kwallet_switch = gtk4::Switch::new();
+    unlock_kwallet_switch.set_valign(gtk4::Align::Center);
+    unlock_kwallet_row.add_suffix(&unlock_kwallet_switch);
+    storage_group.add(&unlock_kwallet_row);
+
     liveness_enabled_switch.connect_active_notify(glib::clone!(
         #[weak]
         liveness_threshold_row,
@@ -705,6 +718,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         &liveness_enabled_switch,
         &encrypt_templates_switch,
         &unlock_gnome_keyring_switch,
+        &unlock_kwallet_switch,
     ] {
         switch.connect_active_notify(glib::clone!(
             #[weak]
@@ -713,9 +727,12 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             encrypt_templates_switch,
             #[weak]
             unlock_gnome_keyring_switch,
+            #[weak]
+            unlock_kwallet_switch,
             move |_| {
                 set_keyring_config_sensitivity(
                     &unlock_gnome_keyring_switch,
+                    &unlock_kwallet_switch,
                     &liveness_enabled_switch,
                     &encrypt_templates_switch,
                 );
@@ -879,6 +896,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         encrypt_templates_switch,
         #[weak]
         unlock_gnome_keyring_switch,
+        #[weak]
+        unlock_kwallet_switch,
         #[strong]
         cameras,
         #[strong]
@@ -962,6 +981,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 AuthConfig::start_delay_scope_from_index(start_delay_scope_row.selected() as usize);
             cfg.storage.encrypt_templates = encrypt_templates_switch.is_active();
             cfg.storage.unlock_gnome_keyring = unlock_gnome_keyring_switch.is_active();
+            cfg.storage.unlock_kwallet = unlock_kwallet_switch.is_active();
 
             let cfg_to_apply = cfg.clone();
             drop(cfg);
@@ -1081,6 +1101,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         &require_confirm_elevation_switch,
         &encrypt_templates_switch,
         &unlock_gnome_keyring_switch,
+        &unlock_kwallet_switch,
     ] {
         switch.connect_active_notify(glib::clone!(
             #[strong]
@@ -1118,6 +1139,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         start_delay_scope: start_delay_scope_row.clone(),
         encrypt_templates: encrypt_templates_switch.clone(),
         unlock_gnome_keyring: unlock_gnome_keyring_switch.clone(),
+        unlock_kwallet: unlock_kwallet_switch.clone(),
     });
 
     {
@@ -1172,6 +1194,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         overlay,
         #[weak]
         unlock_gnome_keyring_row,
+        #[weak]
+        unlock_kwallet_row,
         #[strong]
         keyring_supported,
         move || {
@@ -1205,6 +1229,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 overlay,
                 #[weak]
                 unlock_gnome_keyring_row,
+                #[weak]
+                unlock_kwallet_row,
                 #[strong]
                 keyring_supported,
                 async move {
@@ -1216,8 +1242,9 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
                     match load_result {
                         Ok((cfg, supported)) => {
-                            keyring_supported.set(supported);
-                            unlock_gnome_keyring_row.set_visible(supported);
+                            keyring_supported.set(supported.gnome || supported.kwallet);
+                            unlock_gnome_keyring_row.set_visible(supported.gnome);
+                            unlock_kwallet_row.set_visible(supported.kwallet);
                             populate_config_rows(
                                 &cfg,
                                 &rows,
