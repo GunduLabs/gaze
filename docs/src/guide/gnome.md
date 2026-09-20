@@ -198,7 +198,7 @@ EOF
 sudo dconf update
 ```
 
-At the GDM login screen, Gaze still matches against the selected user's enrolled faces, but captures through the greeter's PipeWire camera session: while the greeter owns the seat it also holds the camera device access, so even a user session lingering in the background (after a logout or user switch) can no longer capture.
+At the GDM login screen, Gaze still matches against the selected user's enrolled faces, capturing the kernel camera device directly rather than through any user's PipeWire session: while the greeter owns the seat, the attempt is bound to the selected user, so a session lingering in the background (after a logout or user switch) cannot supply its own camera stream.
 
 ## Disable face at GDM login
 

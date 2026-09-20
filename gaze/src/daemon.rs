@@ -2871,7 +2871,6 @@ impl AuthDaemon {
         let username = claim.username.clone();
         Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let signal_destination = Self::signal_destination(&claim.sender)?;
-        let pipewire_uid = claim.pipewire_uid;
         self.cancel_active_tasks().await;
 
         UserDatabase::validate_face_name(&face_name).map_err(Self::map_user_db_error)?;
@@ -2950,7 +2949,6 @@ impl AuthDaemon {
                 let preview_tx_clone = preview_tx.clone();
 
                 rgb_thread = Some(std::thread::spawn(move || {
-                    gaze_vision::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, true);
                     let mut preview = if stream_preview {
                         PreviewStream::new(preview_tx_clone)
@@ -2977,7 +2975,7 @@ impl AuthDaemon {
                                 continue;
                             }
 
-                            let mut cam = match Camera::open(&rgb_device_clone) {
+                            let mut cam = match Camera::open_privileged(&rgb_device_clone) {
                                 Ok(c) => c,
                                 Err(e) => {
                                     dead_streams += 1;
@@ -3051,7 +3049,7 @@ impl AuthDaemon {
                         }
                     }
 
-                    let mut cam = match Camera::open(&rgb_device_clone) {
+                    let mut cam = match Camera::open_privileged(&rgb_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(EnrollMsg::Error(format!("RGB Camera open error: {e}")));
@@ -3142,7 +3140,6 @@ impl AuthDaemon {
                 let preview_tx_clone = preview_tx.clone();
 
                 ir_thread = Some(std::thread::spawn(move || {
-                    gaze_vision::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, true);
                     let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
                     let mut preview = if stream_preview {
@@ -3178,7 +3175,7 @@ impl AuthDaemon {
                                 &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                                 emitter_enabled
                             );
-                            let mut cam = match Camera::open_ir(&ir_device_clone) {
+                            let mut cam = match Camera::open_ir_privileged(&ir_device_clone) {
                                 Ok(c) => c,
                                 Err(e) => {
                                     dead_streams += 1;
@@ -3248,7 +3245,7 @@ impl AuthDaemon {
                         emitter_enabled
                     );
 
-                    let mut cam = match Camera::open_ir(&ir_device_clone) {
+                    let mut cam = match Camera::open_ir_privileged(&ir_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(EnrollMsg::Error(format!("IR Camera open error: {e}")));
@@ -3983,9 +3980,6 @@ impl AuthDaemon {
 
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
-        // From the claim just validated: the task below starts capture after awaits that a
-        // preempting claim can rebind across.
-        let pipewire_uid = claim.pipewire_uid;
         self.cancel_active_tasks().await;
 
         let (tx, mut rx) = oneshot::channel();
@@ -4140,7 +4134,6 @@ impl AuthDaemon {
                 let hybrid_policy_clone = hybrid_policy.clone();
 
                 rgb_thread = Some(std::thread::spawn(move || {
-                    gaze_vision::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     // Set on every exit path (incl. panic) once the RGB camera is released.
                     // Declared before `cam` so `cam` drops first and release precedes the signal.
                     struct RgbPhaseGuard(Arc<std::sync::atomic::AtomicBool>);
@@ -4156,7 +4149,7 @@ impl AuthDaemon {
                         .then(|| Instant::now() + VERIFY_SERIAL_RGB_BUDGET);
                     let mut yielded_to_ir = false;
 
-                    let mut cam = match Camera::open(&rgb_device_clone) {
+                    let mut cam = match Camera::open_privileged(&rgb_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(VerifyMsg::Error(format!("RGB Camera open error: {e}")));
@@ -4195,17 +4188,6 @@ impl AuthDaemon {
                                 (RgbFrameKind::Lit, _) => {}
                                 (RgbFrameKind::WarmupDark, _) => continue,
                                 (RgbFrameKind::SettledDark, luma) => {
-                                    if let Some(node) = cam.fall_back_to_v4l2() {
-                                        let message = format!(
-                                            "RGB stream stayed dark through PipeWire (mean_luma={luma}); retrying on {node}"
-                                        );
-                                        info!("{message}");
-                                        let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
-                                        let _ = tx.blocking_send(VerifyMsg::PhaseStarted(Spectrum::Rgb));
-                                        warmup = RgbWarmupGate::new(config_clone.cameras.dark_luma_threshold);
-                                        logged_dark_stream = false;
-                                        continue;
-                                    }
                                     if !logged_dark_stream {
                                         let message = format!(
                                             "RGB stream remains dark after warmup: mean_luma={luma}"
@@ -4356,7 +4338,6 @@ impl AuthDaemon {
                 let rgb_phase_done_clone = rgb_phase_done.clone();
 
                 ir_thread = Some(std::thread::spawn(move || {
-                    gaze_vision::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     // Wait for RGB to release its camera before opening IR and firing the emitter,
                     // so single-function devices keep one live stream. Bail if verify passed.
                     if ir_waits_for_rgb(run_rgb, serial_capture) {
@@ -4378,7 +4359,7 @@ impl AuthDaemon {
                         let _ = tx.blocking_send(VerifyMsg::Diagnostic(message.to_owned()));
                     }
 
-                    let mut cam = match Camera::open_ir(&ir_device_clone) {
+                    let mut cam = match Camera::open_ir_privileged(&ir_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(VerifyMsg::Error(format!("IR Camera open error: {e}")));

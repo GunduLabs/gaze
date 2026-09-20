@@ -80,18 +80,14 @@ so a scan started before the screen turned off runs to completion.
 
 ## Camera at the login screen
 
-Whether the greeter has a camera session depends on your systemd version. From
-systemd 256 a greeter session gets its own user manager, so it has a PipeWire
-socket like any other session and Gaze captures through it normally. On older
-systemd, or where that manager does not start, there is no socket to bind to and
-Gaze captures the seat's V4L2 device instead.
+Authentication always captures the kernel V4L2 device directly, so whether the
+greeter has a PipeWire session makes no difference to it. `gazed` opens the
+camera rather than the greeter, so the greeter's own confinement is not in
+the way.
 
-Both paths work without configuration. `gazed` opens the camera rather than the
-greeter, so the greeter's own confinement is not in the way.
-
-Pinning `cameras.rgb` to a `pipewiresrc` pipeline will not work on the V4L2 path.
-Leave it as `primary`, which falls back to a V4L2 node when PipeWire cannot be
-reached, or pin it to `usb:VVVV:PPPP` to skip the failed attempt. See
+Leave `cameras.rgb` as `primary` (the first color V4L2 node), pin it to
+`usb:VVVV:PPPP`, or pin it to a `pipewiresrc target-object=` value, which is
+resolved to the V4L2 node behind that same camera. See
 [Select Camera Source](/guide/configuration#select-camera-source).
 
 Gaze uses the greeter's camera only while the greeter is the active session on

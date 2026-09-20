@@ -85,13 +85,14 @@ lock you out of every virtual terminal.
 ## Camera at the login prompt
 
 No session exists before you log in, so there is no PipeWire to capture through
-and no ACL granting your user the camera. Gaze notices this and captures the
-seat's V4L2 device instead. `gazed` opens the camera, not the PAM module, so the
-confinement that applies to `login` itself is not in the way.
+and no ACL granting your user the camera. Gaze always captures the kernel V4L2
+device directly for authentication, so this environment needs no special case:
+`gazed` opens the camera, not the PAM module, so the confinement that applies
+to `login` itself is not in the way.
 
-Pinning `cameras.rgb` to a `pipewiresrc` pipeline will not work here. Leave it as
-`primary`, which falls back to a V4L2 node when PipeWire cannot be reached, or
-pin it to `usb:VVVV:PPPP` to skip the failed attempt entirely. See
+Leave `cameras.rgb` as `primary` (the first color V4L2 node), pin it to
+`usb:VVVV:PPPP`, or pin it to a `pipewiresrc target-object=` value, which is
+resolved to the V4L2 node behind that same camera. See
 [Select Camera Source](/guide/configuration#select-camera-source).
 
 ### When Gaze will not use the seat camera
