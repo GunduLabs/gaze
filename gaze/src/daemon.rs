@@ -3618,9 +3618,11 @@ impl AuthDaemon {
     #[zbus(property)]
     async fn set_pam_internal(
         &self,
-        #[zbus(header)] header: Header<'_>,
+        #[zbus(header)] header: Option<Header<'_>>,
         services: Vec<String>,
     ) -> fdo::Result<()> {
+        let header =
+            header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
         Self::ensure_pam_internal_write_access(&header).await?;
         let mut set = self.pam_internal.lock().await;
         set.clear();
