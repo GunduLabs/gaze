@@ -559,6 +559,8 @@ pub struct StorageConfig {
     pub encrypt_templates: bool,
     #[serde(default = "default_false")]
     pub unlock_gnome_keyring: bool,
+    #[serde(default = "default_false")]
+    pub unlock_kwallet: bool,
 }
 
 impl Config {
@@ -566,6 +568,7 @@ impl Config {
     pub fn clamp_keyring(&mut self) -> bool {
         if self.storage.validate_keyring(&self.liveness).is_err() {
             self.storage.unlock_gnome_keyring = false;
+            self.storage.unlock_kwallet = false;
             return true;
         }
         false
@@ -574,10 +577,10 @@ impl Config {
 
 impl StorageConfig {
     pub fn validate_keyring(&self, liveness: &LivenessConfig) -> anyhow::Result<()> {
-        if self.unlock_gnome_keyring && (!self.encrypt_templates || !liveness.enabled) {
-            anyhow::bail!(
-                "storage.unlock_gnome_keyring requires storage.encrypt_templates and liveness.enabled"
-            );
+        if (self.unlock_gnome_keyring || self.unlock_kwallet)
+            && (!self.encrypt_templates || !liveness.enabled)
+        {
+            anyhow::bail!("keyring unlock requires storage.encrypt_templates and liveness.enabled");
         }
         Ok(())
     }
@@ -2013,6 +2016,7 @@ mod tests {
             storage: StorageConfig {
                 encrypt_templates: true,
                 unlock_gnome_keyring: true,
+                unlock_kwallet: true,
             },
         };
 
@@ -2049,6 +2053,7 @@ mod tests {
         assert_eq!(loaded.liveness.max_seconds, 2.5);
         assert!(loaded.storage.encrypt_templates);
         assert!(loaded.storage.unlock_gnome_keyring);
+        assert!(loaded.storage.unlock_kwallet);
     }
 
     #[test]
@@ -2415,6 +2420,25 @@ level = "low""#,
         )
         .unwrap();
         assert!(!absent.storage.encrypt_templates);
+    }
+
+    #[test]
+    fn kwallet_is_independent_and_clamped_without_prerequisites() {
+        let mut config = Config::default();
+        assert!(!config.storage.unlock_kwallet);
+        assert!(unknown_config_keys("[storage]\nunlock_kwallet = true").is_empty());
+        for (encrypted, live) in [(false, true), (true, false), (false, false), (true, true)] {
+            config.storage.unlock_kwallet = true;
+            config.storage.encrypt_templates = encrypted;
+            config.liveness.enabled = live;
+            assert_eq!(
+                config.storage.validate_keyring(&config.liveness).is_ok(),
+                encrypted && live
+            );
+            assert_eq!(config.clamp_keyring(), !(encrypted && live));
+            assert_eq!(config.storage.unlock_kwallet, encrypted && live);
+            assert!(!config.storage.unlock_gnome_keyring);
+        }
     }
 
     #[test]

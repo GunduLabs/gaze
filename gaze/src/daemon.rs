@@ -263,6 +263,7 @@ fn validate_keyring_verification(
     gaze_core::config::StorageConfig {
         encrypt_templates: templates_encrypted,
         unlock_gnome_keyring: required,
+        unlock_kwallet: false,
     }
     .validate_keyring(liveness)
     .map_err(|e| fdo::Error::Failed(format!("Keyring verification unavailable: {e}")))
@@ -274,8 +275,8 @@ fn resolve_config(loaded: anyhow::Result<Config>, last_good: &mut Config) -> Con
             if config.clamp_keyring() {
                 warn!(
                     path = CONFIG_PATH,
-                    "storage.unlock_gnome_keyring needs storage.encrypt_templates and \
-                     liveness.enabled; ignoring it"
+                    "keyring unlock needs storage.encrypt_templates and liveness.enabled; \
+                     ignoring the keyring options"
                 );
             }
             *last_good = config.clone();
@@ -2826,6 +2827,29 @@ impl AuthDaemon {
             .await
     }
 
+    async fn verify_start_for_kwallet(
+        &self,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        pam_service: String,
+    ) -> fdo::Result<()> {
+        if !matches!(
+            pam_service.as_str(),
+            "sddm" | "plasmalogin" | "plasmalogin-fingerprint"
+        ) {
+            return Err(fdo::Error::InvalidArgs(
+                "KWallet requires a KDE login service".into(),
+            ));
+        }
+        self.start_verification(ctxt, header, Some(pam_service), true)
+            .await
+    }
+
+    async fn kwallet_enabled(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<bool> {
+        Self::ensure_config_read_access(&header).await?;
+        Ok(self.current_config().await.storage.unlock_kwallet)
+    }
+
     async fn keyring_enabled(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<bool> {
         Self::ensure_config_read_access(&header).await?;
         Ok(self.current_config().await.storage.unlock_gnome_keyring)
@@ -3631,14 +3655,15 @@ impl AuthDaemon {
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
 
         let mut new_config: Config = new_config.into();
-        // Legacy clients do not send this flag; preserve the existing opt-in.
-        new_config.storage.unlock_gnome_keyring =
-            self.current_config().await.storage.unlock_gnome_keyring;
+        // Legacy clients do not send these flags; preserve the existing opt-ins.
+        let storage = self.current_config().await.storage;
+        new_config.storage.unlock_gnome_keyring = storage.unlock_gnome_keyring;
+        new_config.storage.unlock_kwallet = storage.unlock_kwallet;
         // A legacy client cannot see or clear the flag, so treat it as turning the feature off
         // rather than rejecting every later write with an error it cannot act on.
         if new_config.clamp_keyring() {
             warn!(
-                "a legacy config update removed a keyring prerequisite; disabling GNOME Keyring unlock"
+                "a legacy config update removed a keyring prerequisite; disabling keyring unlock"
             );
         }
         self.apply_config(new_config).await
@@ -3652,7 +3677,32 @@ impl AuthDaemon {
         unlock_gnome_keyring: bool,
     ) -> fdo::Result<()> {
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
-        let config = gaze_core::dbus::config_update_from_property(config, unlock_gnome_keyring)
+        let mut config = gaze_core::dbus::config_update_from_property(config, unlock_gnome_keyring)
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        config.storage.unlock_kwallet = self.current_config().await.storage.unlock_kwallet;
+        // This older client cannot clear a KWallet opt-in when removing prerequisites.
+        if config.storage.validate_keyring(&config.liveness).is_err() {
+            config.storage.unlock_kwallet = false;
+        }
+        self.apply_config(config).await?;
+        self.config_invalidate(&ctxt).await.map_err(Into::into)
+    }
+
+    async fn set_config_with_wallets(
+        &self,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        config: zbus::zvariant::OwnedValue,
+        unlock_gnome_keyring: bool,
+        unlock_kwallet: bool,
+    ) -> fdo::Result<()> {
+        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
+        let mut config = gaze_core::dbus::config_update_from_property(config, unlock_gnome_keyring)
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        config.storage.unlock_kwallet = unlock_kwallet;
+        config
+            .storage
+            .validate_keyring(&config.liveness)
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
         self.apply_config(config).await?;
         self.config_invalidate(&ctxt).await.map_err(Into::into)

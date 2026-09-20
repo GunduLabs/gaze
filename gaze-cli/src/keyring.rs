@@ -2,12 +2,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use gaze_core::config::Config;
-use gaze_security::keyring::Zeroizing;
+use gaze_security::keyring::{Backend, Zeroizing};
 
-pub fn enroll(username: &str, config: &Config) -> anyhow::Result<()> {
+pub fn enroll(username: &str, config: &Config, backend: Backend) -> anyhow::Result<()> {
     anyhow::ensure!(
-        config.storage.unlock_gnome_keyring,
-        "enable GNOME Keyring unlock with gaze config first"
+        match backend {
+            Backend::Gnome => config.storage.unlock_gnome_keyring,
+            Backend::KWallet => config.storage.unlock_kwallet,
+        },
+        "enable {} unlock with gaze config first",
+        backend.name()
     );
     config.storage.validate_keyring(&config.liveness)?;
     // The interactive CLI owns this process; do not change dump policy in a PAM host.
@@ -21,14 +25,14 @@ pub fn enroll(username: &str, config: &Config) -> anyhow::Result<()> {
     );
     // Fail before prompting for an unusable account; enrollment checks again for account changes.
     gaze_security::keyring::Account::lookup(username)?;
-    println!("Enter the login keyring password for {username}.");
+    println!("Enter the {} password for {username}.", backend.name());
     let password = Zeroizing::new(
         dialoguer::Password::new()
-            .with_prompt("Login keyring password")
+            .with_prompt(format!("{} password", backend.name()))
             .with_confirmation("Confirm keyring password", "Passwords did not match")
             .interact()?,
     );
-    gaze_security::keyring::enroll(username, password.as_bytes())?;
-    println!("GNOME Keyring unlock enrolled for {username}.");
+    gaze_security::keyring::enroll_for(backend, username, password.as_bytes())?;
+    println!("{} unlock enrolled for {username}.", backend.name());
     Ok(())
 }
