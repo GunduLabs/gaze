@@ -3,7 +3,7 @@
 
 [package]
 name = "gaze-vision"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 description = "Camera capture, face detection, and inference for Gaze"
 categories.workspace = true
