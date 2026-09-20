@@ -37,18 +37,42 @@ gaze_configured_pam_file() {
 	return 1
 }
 
+first_auth_is_faillock_preauth() {
+	first_auth=$(grep -m1 -E '^[[:space:]]*-?auth[[:space:]]' "$1" 2>/dev/null || true)
+	case "$first_auth" in
+		*pam_faillock.so*preauth*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
 insert_pam_gaze() {
 	pam_file=$1
 	grep -q "pam_gaze" "$pam_file" 2>/dev/null && return 0
 
+	# A sufficient success skips the rest of the stack, so a faillock preauth
+	# gate must already have run. Requisite fails a locked-out account before
+	# face authentication; -auth tolerates a missing faillock module.
 	tmp=$(mktemp)
-	awk '
-		/^[[:space:]]*auth[[:space:]]/ && !done {
-			print "auth        sufficient    pam_gaze.so"
-			done = 1
-		}
-		{ print }
-	' "$pam_file" > "$tmp" && install -m 644 "$tmp" "$pam_file"
+	if first_auth_is_faillock_preauth "$pam_file"; then
+		awk '
+			/^[[:space:]]*-?auth[[:space:]]/ && !done {
+				print
+				print "auth        sufficient    pam_gaze.so"
+				done = 1
+				next
+			}
+			{ print }
+		' "$pam_file" > "$tmp" && install -m 644 "$tmp" "$pam_file"
+	else
+		awk '
+			/^[[:space:]]*-?auth[[:space:]]/ && !done {
+				print "-auth       requisite     pam_faillock.so preauth"
+				print "auth        sufficient    pam_gaze.so"
+				done = 1
+			}
+			{ print }
+		' "$pam_file" > "$tmp" && install -m 644 "$tmp" "$pam_file"
+	fi
 	rm -f "$tmp"
 
 	if grep -q "pam_gaze" "$pam_file" 2>/dev/null; then
@@ -57,7 +81,7 @@ insert_pam_gaze() {
 	fi
 
 	printf '\n\033[1;33m[Gaze Notice]\033[0m %s has no auth line, so pam_gaze.so was not added.\n' "$pam_file" >&2
-	printf 'Add "auth        sufficient    pam_gaze.so" to it by hand, then restart polkit.\n' >&2
+	printf 'Add a "-auth requisite pam_faillock.so preauth" gate and "auth sufficient pam_gaze.so" to it by hand, then restart polkit.\n' >&2
 	printf 'See https://gaze.gundulabs.com/guide/pam for the full stack.\n\n' >&2
 }
 
@@ -76,7 +100,7 @@ record_pam_sudo_optout() {
 }
 
 notice_pam_sudo_configured() {
-	printf '\n\033[1;33m[Gaze Notice]\033[0m Added "auth        sufficient    pam_gaze.so" to /etc/pam.d/sudo.\n' >&2
+	printf '\n\033[1;33m[Gaze Notice]\033[0m Added a faillock preauth gate and "auth sufficient pam_gaze.so" to /etc/pam.d/sudo.\n' >&2
 	printf 'That file belongs to the sudo package, so pacman now treats it as modified and\n' >&2
 	printf 'will write /etc/pam.d/sudo.pacnew on later sudo updates; merge those by hand.\n' >&2
 	printf 'To opt out, delete the pam_gaze.so line. Gaze will not put it back.\n' >&2
@@ -114,6 +138,7 @@ configure_pam_polkit() {
 
 	cat > "$pam_file" <<-EOF
 	#%PAM-1.0
+	-auth       requisite     pam_faillock.so preauth
 	auth       sufficient   pam_gaze.so
 	auth       include      system-auth
 	account    include      system-auth

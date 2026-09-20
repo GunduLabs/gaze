@@ -533,8 +533,21 @@ configure_pam_arch() {
         return 0
     fi
 
-    awk '
-        /^[[:space:]]*auth[[:space:]]/ && !done {
+    first_auth=$(grep -m1 -E '^[[:space:]]*-?auth[[:space:]]' "$pam_file" 2>/dev/null || true)
+    case "$first_auth" in
+        *pam_faillock.so*preauth*) gate=after ;;
+        *) gate=before ;;
+    esac
+
+    awk -v gate="$gate" '
+        /^[[:space:]]*-?auth[[:space:]]/ && !done {
+            if (gate == "after") {
+                print
+                print "auth        sufficient    pam_gaze.so"
+                done = 1
+                next
+            }
+            print "-auth       requisite     pam_faillock.so preauth"
             print "auth        sufficient    pam_gaze.so"
             done = 1
         }
@@ -544,13 +557,14 @@ configure_pam_arch() {
         ok "Configured $pam_file to use Gaze face authentication."
         say "$pam_file belongs to the sudo package, so pacman will report it as"
         say "modified and write .pacnew files on later sudo updates."
-        say "Delete the pam_gaze.so line to opt out; Gaze will not put it back."
+        say "Delete the pam_gaze.so and faillock gate lines to opt out; Gaze will not put them back."
         sudo mkdir -p /etc/gaze
         sudo grep -qxF "$pam_file" /etc/gaze/pam-arch.configured 2>/dev/null ||
             printf '%s\n' "$pam_file" | sudo tee -a /etc/gaze/pam-arch.configured >/dev/null
     } || {
         warn "Could not configure PAM for sudo automatically."
-        say "To enable Gaze for sudo, add before the auth line in $pam_file:"
+        say "To enable Gaze for sudo, add before the first auth line in $pam_file:"
+        cmd "-auth requisite pam_faillock.so preauth"
         cmd "auth    sufficient    pam_gaze.so"
         link "$PAM_DOCS_URL"
     }
