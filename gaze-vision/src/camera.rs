@@ -513,7 +513,7 @@ pub fn resolve_privileged_node(source: &str, want_color: bool) -> Option<String>
     }
     match v4l2_fallback_for(source) {
         V4l2Fallback::AnyDevice => first_v4l2_node(want_color),
-        V4l2Fallback::SameNode(target) => node_from_pipewire_target(target, want_color),
+        V4l2Fallback::SameNode(target) => node_from_pipewire_target(&target, want_color),
         V4l2Fallback::None => None,
     }
 }
@@ -1928,7 +1928,9 @@ mod tests {
 
     #[test]
     fn privileged_open_refuses_custom_pipelines_without_touching_hardware() {
-        let err = Camera::open_privileged("videotestsrc num-buffers=2").unwrap_err();
+        let err = Camera::open_privileged("videotestsrc num-buffers=2")
+            .err()
+            .expect("privileged open of a custom pipeline must fail");
         assert!(
             err.to_string().contains("refusing privileged capture"),
             "unexpected error: {err:#}"

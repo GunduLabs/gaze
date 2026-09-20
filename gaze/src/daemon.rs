@@ -473,6 +473,15 @@ impl AuthDaemon {
         }
     }
 
+    fn ssh_session_verdict(heuristic_is_ssh: bool, session_remote: Option<bool>) -> bool {
+        heuristic_is_ssh || session_remote.unwrap_or(false)
+    }
+
+    async fn caller_session_is_remote(pid: u32) -> Option<bool> {
+        let conn = system_bus().await.ok()?;
+        gaze_core::dbus::session_is_remote_on(&conn, pid).await.ok()
+    }
+
     fn lid_state_is_closed(state: &str) -> bool {
         state.to_ascii_lowercase().contains("closed")
     }
@@ -531,8 +540,13 @@ impl AuthDaemon {
         let abort_if_ssh = *self.abort_if_ssh.lock().await;
         if abort_if_ssh {
             let caller_pid = Self::caller_pid(header).await.ok();
-            let is_ssh = Self::caller_is_ssh_session_at(std::path::Path::new("/proc"), caller_pid);
-            if is_ssh {
+            let heuristic_is_ssh =
+                Self::caller_is_ssh_session_at(std::path::Path::new("/proc"), caller_pid);
+            let session_remote = match caller_pid {
+                Some(pid) if !heuristic_is_ssh => Self::caller_session_is_remote(pid).await,
+                _ => None,
+            };
+            if Self::ssh_session_verdict(heuristic_is_ssh, session_remote) {
                 warn!(caller_pid, "SSH session detected, aborting face auth");
                 return Err(fdo::Error::Failed("SSH session detected".into()));
             }
@@ -1438,6 +1452,27 @@ mod tests {
             proc.root(),
             Some(6001)
         ));
+    }
+
+    #[test]
+    fn detached_scrubbed_process_escapes_environ_ancestry_check() {
+        let proc = FakeProc::new("detached");
+        proc.add(1, 0, "systemd", b"PATH=/usr/bin\0");
+        proc.add(5000, 1, "gaze", b"PATH=/usr/bin\0");
+        assert!(!AuthDaemon::process_chain_is_ssh_at(proc.root(), 5000));
+        assert!(!AuthDaemon::caller_is_ssh_session_at(
+            proc.root(),
+            Some(5000)
+        ));
+    }
+
+    #[test]
+    fn ssh_verdict_combines_heuristic_with_logind_remote() {
+        assert!(AuthDaemon::ssh_session_verdict(true, None));
+        assert!(AuthDaemon::ssh_session_verdict(true, Some(false)));
+        assert!(AuthDaemon::ssh_session_verdict(false, Some(true)));
+        assert!(!AuthDaemon::ssh_session_verdict(false, Some(false)));
+        assert!(!AuthDaemon::ssh_session_verdict(false, None));
     }
 
     #[test]
