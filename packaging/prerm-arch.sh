@@ -8,12 +8,12 @@ flag=/etc/gaze/pam-arch.configured
 if [ -f "$flag" ]; then
     while IFS= read -r f; do
         [ -f "$f" ] || continue
-        sed -i '/pam_gaze/d' "$f" || true
+        sed -i '/pam_gaze/d; /^-auth       requisite     pam_faillock\.so preauth$/d' "$f" || true
     done < "$flag"
     rm -f "$flag" || true
 fi
 
-sed -i '/pam_gaze/d' /etc/pam.d/sudo 2>/dev/null || true
+sed -i '/pam_gaze/d; /^-auth       requisite     pam_faillock\.so preauth$/d' /etc/pam.d/sudo 2>/dev/null || true
 
 flag=/etc/gaze/pam-arch.polkit-configured
 if [ -f "$flag" ]; then
