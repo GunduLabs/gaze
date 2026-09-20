@@ -1689,6 +1689,17 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 Err(err) => {
                                     if dbus_is_file_not_found(&err) {
                                         Vec::new()
+                                    } else if dbus_is_not_activatable(&err)
+                                        && !gaze_core::cpu::supports_inference()
+                                    {
+                                        // Retrying cannot help: gazed exits on this CPU.
+                                        status_page.set_title("Unsupported CPU");
+                                        status_page.set_description(Some(
+                                            gaze_core::cpu::UNSUPPORTED_CPU_MESSAGE,
+                                        ));
+                                        status_page.set_visible(true);
+                                        face_list.set_visible(false);
+                                        return;
                                     } else if dbus_is_not_activatable(&err) {
                                         status_page.set_title("Daemon Starting");
                                         status_page.set_description(Some(

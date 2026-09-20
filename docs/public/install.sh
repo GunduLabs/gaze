@@ -674,6 +674,16 @@ aarch64) PKG_ARCH="aarch64" ;;
 *) die "Unsupported architecture: $ARCH" ;;
 esac
 
+# The prebuilt ONNX Runtime gazed links issues AVX2 unconditionally, so a miss is SIGILL
+# on every start rather than a recoverable error. Stop before enabling the service.
+if [ "$ARCH" = "x86_64" ] && ! grep -qw avx2 /proc/cpuinfo 2>/dev/null; then
+    fail "This CPU does not support AVX2, which the gazed daemon requires."
+    say "gazed would crash with an illegal instruction on every start (roughly pre-2013 Intel and pre-2015 AMD)."
+    say "Nothing has been installed."
+    link "https://gaze.gundulabs.com/guide/troubleshooting"
+    exit 1
+fi
+
 # ── distro detection ──────────────────────────────────────────────────────────
 
 if [ ! -f /etc/os-release ]; then
