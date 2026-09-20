@@ -36,6 +36,7 @@ const PLASMALOGIN_FACE_PAM_FILE: &str = "/etc/pam.d/plasmalogin-fingerprint";
 const VENDOR_PAM_DIR: &str = "/usr/lib/pam.d";
 const POLKIT_PAM_FILE: &str = "/etc/pam.d/polkit-1";
 const ELEVATION_PAM_SERVICE: &str = "sudo";
+const PAM_SUDO_OPTOUT_PATH: &str = "/etc/gaze/pam-sudo.optout";
 
 fn read_pam_service(path: &str) -> Option<String> {
     fs::read_to_string(path).ok().or_else(|| {
@@ -1226,6 +1227,17 @@ fn check_elevation_pam(report: &mut Report) {
         report.pass(
             "Elevation PAM",
             format!("the {ELEVATION_PAM_SERVICE} service reaches a Gaze module"),
+        );
+    } else if Path::new(PAM_SUDO_OPTOUT_PATH).exists() {
+        report.off(
+            "Elevation PAM",
+            format!(
+                "face authentication for {ELEVATION_PAM_SERVICE} is opted out, so terminal elevation always asks for a password"
+            ),
+            format!(
+                "Turn it back on: `sudo rm {PAM_SUDO_OPTOUT_PATH}`. {}",
+                shared_stack_hint()
+            ),
         );
     } else {
         report.warning(
