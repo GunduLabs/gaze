@@ -22,6 +22,7 @@ const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
 const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(25);
 const BENCHMARK_TIMEOUT: Duration = Duration::from_secs(30);
 const PAM_MODULES: [&str; 2] = ["pam_gaze.so", "pam_gaze_grosshack.so"];
+const GAZE_BUS_NAME: &str = "com.gundulabs.Gaze";
 const GNOME_EXTENSION_ID: &str = "gaze@gundulabs.com";
 const GNOME_EXTENSION_SCHEMA: &str = "org.gnome.shell.extensions.gaze";
 const GNOME_DOCS_URL: &str = "https://gaze.gundulabs.com/guide/gnome";
@@ -204,13 +205,13 @@ fn check_platform(report: &mut Report) {
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
-        if std::arch::is_x86_feature_detected!("avx2") {
+        if gaze_core::cpu::supports_inference() {
             report.pass("CPU", "AVX2 is available");
         } else {
             report.error(
                 "CPU",
-                "AVX2 is unavailable; gazed cannot run on this CPU",
-                "Use a machine with AVX2 support. The CLI can run here, but the daemon cannot.",
+                gaze_core::cpu::UNSUPPORTED_CPU_MESSAGE,
+                gaze_core::cpu::UNSUPPORTED_CPU_FIX,
             );
         }
     }
@@ -1981,16 +1982,39 @@ async fn read_daemon_config(proxy: &GazeProxy<'_>, ready_wait: Duration) -> zbus
     }
 }
 
+/// Whether `gazed` currently owns its well-known name, retrying for `ready_wait` so a
+/// daemon still downloading models is not mistaken for one that will never appear.
+/// Connecting to the system bus succeeds regardless, so only this distinguishes the two.
+async fn gaze_name_has_owner(proxy: &GazeProxy<'_>, ready_wait: Duration) -> bool {
+    let Ok(dbus) = zbus::fdo::DBusProxy::new(proxy.inner().connection()).await else {
+        return false;
+    };
+    let Ok(name) = zbus::names::BusName::try_from(GAZE_BUS_NAME) else {
+        return false;
+    };
+    let deadline = Instant::now() + ready_wait;
+    loop {
+        if let Ok(true) = dbus.name_has_owner(name.clone()).await {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
 async fn check_daemon(
     report: &mut Report,
     username: &str,
     config: Option<&Config>,
     benchmark: bool,
 ) {
-    let daemon_starting = matches!(
-        command_output("systemctl", &["is-active", "gazed"]),
-        Ok((true, ref state)) if state == "active"
-    );
+    let service_state = match command_output("systemctl", &["is-active", "gazed"]) {
+        Ok((_, state)) => state,
+        Err(_) => String::new(),
+    };
+    let daemon_starting = service_state == "active";
     let ready_wait = if daemon_starting {
         DAEMON_READY_TIMEOUT
     } else {
@@ -1998,15 +2022,12 @@ async fn check_daemon(
     };
 
     let proxy = match tokio::time::timeout(DAEMON_TIMEOUT, gaze_core::dbus::connect_gaze()).await {
-        Ok(Ok(proxy)) => {
-            report.pass("DBus", "com.gundulabs.Gaze is reachable on the system bus");
-            proxy
-        }
+        Ok(Ok(proxy)) => proxy,
         Ok(Err(err)) => {
             report.error(
                 "DBus",
-                format!("could not reach com.gundulabs.Gaze: {err}"),
-                "Run `systemctl status gazed` and `journalctl -u gazed -n 100 --no-pager`.",
+                format!("could not reach the system bus: {err}"),
+                "Run `systemctl status dbus` and confirm the system bus socket exists.",
             );
             check_cameras(report, config);
             return;
@@ -2014,13 +2035,56 @@ async fn check_daemon(
         Err(_) => {
             report.error(
                 "DBus",
-                "timed out waiting for com.gundulabs.Gaze",
-                "Run `systemctl status gazed` and inspect the daemon journal.",
+                "timed out connecting to the system bus",
+                "Run `systemctl status dbus` and confirm the system bus socket exists.",
             );
             check_cameras(report, config);
             return;
         }
     };
+
+    let name_wait_started = Instant::now();
+    let name_owned = gaze_name_has_owner(&proxy, ready_wait).await;
+    // gazed downloads models before it claims the name, so once it is on the bus the
+    // remaining budget is all the config call can need. Spend it once, not twice.
+    let ready_wait = ready_wait.saturating_sub(name_wait_started.elapsed());
+
+    if name_owned {
+        report.pass("DBus", "gazed owns com.gundulabs.Gaze on the system bus");
+    } else {
+        // Every later call would fail with the same "not activatable" error, so report the
+        // cause once instead of repeating it as a camera and an enrollment fault.
+        let (message, fix) = if !gaze_core::cpu::supports_inference() {
+            (
+                "gazed cannot run on this CPU (no AVX2), so it never reaches the system bus"
+                    .to_string(),
+                gaze_core::cpu::UNSUPPORTED_CPU_FIX.to_string(),
+            )
+        } else if daemon_starting {
+            (
+                "gazed is running but has not claimed com.gundulabs.Gaze yet (models may be downloading)"
+                    .to_string(),
+                "Wait for the first-run model download to finish, then re-run `gaze doctor`."
+                    .to_string(),
+            )
+        } else {
+            (
+                format!(
+                    "gazed is not on the system bus (the service is {})",
+                    if service_state.is_empty() {
+                        "not reporting a state"
+                    } else {
+                        service_state.as_str()
+                    }
+                ),
+                "Run `sudo systemctl start gazed`, then `journalctl -u gazed -n 100 --no-pager` if it does not stay up."
+                    .to_string(),
+            )
+        };
+        report.error("DBus", message, fix);
+        check_cameras(report, config);
+        return;
+    }
 
     let mut daemon_config = None;
     match tokio::time::timeout(
@@ -2039,10 +2103,11 @@ async fn check_daemon(
             }
             daemon_config = Some(loaded_config);
         }
+        // The name was owned a moment ago, so losing it here means gazed exited mid-check.
         Ok(Err(err)) if dbus_is_not_activatable(&err) => report.error(
             "Daemon",
-            "gazed is still starting up (models may be downloading)",
-            "Wait for the first-run model download to finish, then re-run `gaze doctor`.",
+            "gazed left the system bus while doctor was querying it",
+            "Run `journalctl -u gazed -n 100 --no-pager` to see why it exited.",
         ),
         Ok(Err(err)) => report.error(
             "Daemon",

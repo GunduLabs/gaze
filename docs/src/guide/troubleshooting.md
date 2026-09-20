@@ -525,9 +525,31 @@ your installed package predates the fix for Ubuntu 26.04's PAM module search pat
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 ```
 
-## 10. Crash on launch (SIGSEGV) on older CPUs
+## 10. Crash on launch (SIGSEGV or SIGILL) on older CPUs
 
-On CPUs without AVX2 (roughly pre-2013), older builds of `gaze` and `gaze-gui` crashed immediately with a segmentation fault because the ONNX Runtime they statically linked requires AVX2. Current packages no longer link ONNX Runtime into the client binaries, so update to the latest packages if you see this. The `gazed` daemon itself still requires a CPU with AVX2.
+On CPUs without AVX2 (roughly pre-2013 Intel, pre-2015 AMD), older builds of `gaze` and `gaze-gui` crashed immediately with a segmentation fault because the ONNX Runtime they statically linked requires AVX2. Current packages no longer link ONNX Runtime into the client binaries, so update to the latest packages if you see this.
+
+The `gazed` daemon still requires a CPU with AVX2 and cannot be made to work without one. Confirm with:
+
+```bash
+grep -qw avx2 /proc/cpuinfo && echo "AVX2 present" || echo "AVX2 missing"
+```
+
+Current `gazed` builds detect this at startup and exit with status 78 before reaching ONNX Runtime, and the systemd unit sets `RestartPreventExitStatus=78`, so the service stops in a failed state instead of restarting forever. The journal shows one line:
+
+```
+gazed: AVX2 is unavailable; gazed cannot run on this CPU. Use a machine with AVX2 support. The CLI can run here, but the daemon cannot.
+```
+
+Older builds (0.3.2 and earlier) instead died with `status=4/ILL` on every start and crash-looped, because `Restart=on-failure` kept rescheduling them:
+
+```
+WARNING: This CPU does not support AVX2, which is required by ort's prebuilt ONNX Runtime binaries.
+gazed.service: Main process exited, code=dumped, status=4/ILL
+gazed.service: Scheduled restart job, restart counter is at 63.
+```
+
+If you are stuck on such a build, `sudo systemctl disable --now gazed` stops the loop.
 
 ## 11. Daemon dumps core with "Failed to initialize ORT API"
 

@@ -5,11 +5,16 @@
 Description=Daemon for Gaze
 After=dbus.service
 Requires=dbus.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 ExecStart=/usr/bin/gazed
 Restart=on-failure
 RestartSec=5
+# 78 is gaze_core::cpu::EXIT_UNSUPPORTED_CPU: the CPU has no AVX2, so restarting
+# can only reproduce the same exit. Keep the two in step.
+RestartPreventExitStatus=78
 StateDirectory=gaze
 StateDirectoryMode=0700
 CacheDirectory=gaze

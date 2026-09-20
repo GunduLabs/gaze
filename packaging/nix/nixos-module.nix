@@ -305,6 +305,8 @@ in
           after = [ "dbus.service" ];
           requires = [ "dbus.service" ];
           wantedBy = [ "multi-user.target" ];
+          startLimitIntervalSec = 60;
+          startLimitBurst = 5;
           environment = {
             XDG_CACHE_HOME = "/var/cache/gaze";
           }
@@ -315,6 +317,8 @@ in
             ExecStart = "${cfg.package}/bin/gazed";
             Restart = "on-failure";
             RestartSec = 5;
+            # 78 is gaze_core::cpu::EXIT_UNSUPPORTED_CPU (no AVX2); restarting only repeats it.
+            RestartPreventExitStatus = 78;
             StateDirectory = "gaze";
             StateDirectoryMode = "0700";
             CacheDirectory = "gaze";

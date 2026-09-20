@@ -16,7 +16,7 @@ use daemon::AuthDaemon;
 use gaze_core::config::{Config, MODELS_DIR, USERS_DIR};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use zbus::connection::Builder;
 
@@ -60,6 +60,15 @@ async fn main() -> anyhow::Result<()> {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
+
+    if !gaze_core::cpu::supports_inference() {
+        error!(
+            "{}. {}",
+            gaze_core::cpu::UNSUPPORTED_CPU_MESSAGE,
+            gaze_core::cpu::UNSUPPORTED_CPU_FIX
+        );
+        std::process::exit(i32::from(gaze_core::cpu::EXIT_UNSUPPORTED_CPU));
+    }
 
     gaze_vision::inference::ensure_supported_runtime()?;
     if let Ok(version) = gaze_vision::inference::runtime_version() {

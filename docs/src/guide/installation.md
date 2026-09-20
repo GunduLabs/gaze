@@ -7,6 +7,18 @@ Use one of these paths. The one-line installer enables GNOME lock screen auth fo
 
 Supported installer targets on x86_64 and arm64: Ubuntu 24.04/25.10/26.04, Debian 13 and 14 (forky, currently testing), Fedora 42/43/44 and compatible distributions (including image-based OSTree distros such as Fedora Silverblue, Kinoite, and Bazzite), openSUSE Tumbleweed (x86_64), Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS.
 
+## CPU requirement
+
+On x86_64, the `gazed` daemon requires **AVX2** (Intel Haswell and newer, roughly 2013 onward; AMD Excavator and newer, roughly 2015 onward). The ONNX Runtime it links issues AVX2 instructions during startup, so on an older CPU the daemon exits immediately rather than running degraded.
+
+Check before installing:
+
+```bash
+grep -qw avx2 /proc/cpuinfo && echo "AVX2 present" || echo "AVX2 missing"
+```
+
+If AVX2 is missing, the one-line installer stops before touching your system, and the packages install the CLI and PAM modules but leave `gazed` stopped. `gaze doctor` reports the same thing. Face authentication is not available on these machines; there is no workaround short of a different CPU. See [troubleshooting](./troubleshooting) for details.
+
 ## Path A: one-line installer (recommended)
 
 ```bash
