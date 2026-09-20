@@ -151,8 +151,11 @@ config.
 ### Cameras
 
 Leave `settings.cameras.rgb` unset unless you have a specific reason to pin a
-camera: the default, `"primary"`, resolves the primary color camera at
-runtime. A pinned value must be a PipeWire node identity, not a device path;
+camera: the default, `"primary"`, means the first color `/dev/video` node at
+runtime. To pin a camera, prefer a stable identity: `usb:VVVV:PPPP` (hex
+VID:PID) or `pipewiresrc target-object=<pipewire-target>`, which authentication
+resolves to the V4L2 node behind that same camera. A fixed `/dev/videoN` path
+also works but can be renumbered across boots; note that
 `pipewiresrc target-object=/dev/video0` does not match anything. Run
 `gaze doctor` to see the sources PipeWire currently advertises, and copy one
 of those strings verbatim.
