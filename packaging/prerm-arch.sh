@@ -24,6 +24,7 @@ if [ -f "$flag" ]; then
 fi
 
 rm -f /etc/gaze/polkit-1.pam.bak || true
+rm -f /etc/gaze/pam-sudo.optout || true
 
 if [ -d /run/systemd/system ]; then
     systemctl restart polkit >/dev/null 2>&1 || true

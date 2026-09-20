@@ -4,6 +4,10 @@
 
 set -e
 
+PAM_STATE=/etc/gaze/pam-arch.configured
+PAM_POLKIT_STATE=/etc/gaze/pam-arch.polkit-configured
+PAM_SUDO_OPTOUT=/etc/gaze/pam-sudo.optout
+
 cpu_lacks_avx2() {
 	case "$(uname -m)" in
 		x86_64) ;;
@@ -23,9 +27,14 @@ warn_missing_avx2() {
 
 record_edited_pam_file() {
 	mkdir -p /etc/gaze
-	flag=/etc/gaze/pam-arch.configured
-	grep -qxF "$1" "$flag" 2>/dev/null && return 0
-	printf '%s\n' "$1" >> "$flag"
+	grep -qxF "$1" "$PAM_STATE" 2>/dev/null && return 0
+	printf '%s\n' "$1" >> "$PAM_STATE"
+}
+
+gaze_configured_pam_file() {
+	grep -qxF "$1" "$PAM_STATE" 2>/dev/null && return 0
+	grep -qxF "$1" "$PAM_POLKIT_STATE" 2>/dev/null && return 0
+	return 1
 }
 
 insert_pam_gaze() {
@@ -52,21 +61,56 @@ insert_pam_gaze() {
 	printf 'See https://gaze.gundulabs.com/guide/pam for the full stack.\n\n' >&2
 }
 
+record_pam_sudo_optout() {
+	mkdir -p /etc/gaze
+	[ -e "$PAM_SUDO_OPTOUT" ] && return 0
+	cat > "$PAM_SUDO_OPTOUT" <<-EOF
+	# Gaze leaves /etc/pam.d/sudo alone while this file exists.
+	# Delete it to let the next install or upgrade add pam_gaze.so back.
+	EOF
+	chmod 644 "$PAM_SUDO_OPTOUT"
+
+	printf '\n\033[1;33m[Gaze Notice]\033[0m pam_gaze.so is no longer in /etc/pam.d/sudo, so face\n' >&2
+	printf 'authentication for sudo stays off. Recorded in %s;\n' "$PAM_SUDO_OPTOUT" >&2
+	printf 'delete that file to let Gaze configure sudo again.\n\n' >&2
+}
+
+notice_pam_sudo_configured() {
+	printf '\n\033[1;33m[Gaze Notice]\033[0m Added "auth        sufficient    pam_gaze.so" to /etc/pam.d/sudo.\n' >&2
+	printf 'That file belongs to the sudo package, so pacman now treats it as modified and\n' >&2
+	printf 'will write /etc/pam.d/sudo.pacnew on later sudo updates; merge those by hand.\n' >&2
+	printf 'To opt out, delete the pam_gaze.so line. Gaze will not put it back.\n' >&2
+	printf 'See https://gaze.gundulabs.com/guide/pam\n\n' >&2
+}
+
 configure_pam_sudo() {
 	pam_file=/etc/pam.d/sudo
 	[ -f "$pam_file" ] || return 0
+	[ -e "$PAM_SUDO_OPTOUT" ] && return 0
+	grep -q "pam_gaze" "$pam_file" 2>/dev/null && return 0
+
+	if gaze_configured_pam_file "$pam_file"; then
+		record_pam_sudo_optout
+		return 0
+	fi
+
 	insert_pam_gaze "$pam_file"
+	grep -q "pam_gaze" "$pam_file" 2>/dev/null || return 0
+	notice_pam_sudo_configured
 }
 
 configure_pam_polkit() {
 	pam_file=/etc/pam.d/polkit-1
 	if [ -f "$pam_file" ]; then
 		grep -q "pam_gaze" "$pam_file" 2>/dev/null && return 0
+		gaze_configured_pam_file "$pam_file" && return 0
 		mkdir -p /etc/gaze
 		[ -f /etc/gaze/polkit-1.pam.bak ] || cp -p "$pam_file" /etc/gaze/polkit-1.pam.bak
 		insert_pam_gaze "$pam_file"
 		return 0
 	fi
+
+	gaze_configured_pam_file "$pam_file" && return 0
 
 	cat > "$pam_file" <<-EOF
 	#%PAM-1.0
@@ -79,7 +123,7 @@ configure_pam_polkit() {
 	chmod 644 "$pam_file"
 
 	mkdir -p /etc/gaze
-	printf '%s\n' "$pam_file" > /etc/gaze/pam-arch.polkit-configured
+	printf '%s\n' "$pam_file" > "$PAM_POLKIT_STATE"
 }
 
 check_deprecated_pam_grosshack() {

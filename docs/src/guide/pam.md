@@ -284,7 +284,7 @@ follow [Other distros (manual)](#other-distros-manual) and add
 
 ## Arch Linux / Manjaro
 
-The one-liner installer and the AUR package post-install script both configure `/etc/pam.d/sudo` automatically, inserting `pam_gaze.so` before the existing `auth include system-auth` line.
+The one-liner installer and the AUR package post-install script both configure `/etc/pam.d/sudo` automatically, inserting `pam_gaze.so` before the existing `auth include system-auth` line. They do this only once: if you take the line out again, upgrades leave it out. See [Opting out of the sudo change](#opting-out-of-the-sudo-change).
 
 If you need to apply or re-apply it manually:
 
@@ -307,6 +307,33 @@ sudo -v
 ::: warning pambase updates
 `/etc/pam.d/system-auth` is owned by the `pambase` package and gets overwritten on system upgrades. Gaze is added to `/etc/pam.d/sudo` directly to avoid this, but if you manually added `pam_gaze.so` to `system-auth` it will be lost on `pambase` updates.
 :::
+
+### Opting out of the sudo change
+
+`/etc/pam.d/sudo` belongs to the `sudo` package, not to Gaze. Once Gaze inserts its line pacman sees the file as locally modified and writes `/etc/pam.d/sudo.pacnew` on later `sudo` updates instead of replacing it, so those updates have to be merged by hand.
+
+To keep face authentication out of terminal elevation, delete the `pam_gaze.so` line:
+
+```bash
+sudo sed -i '/pam_gaze/d' /etc/pam.d/sudo
+```
+
+Gaze will not add it back. The next install or upgrade notices the line it wrote is gone, records the choice in `/etc/gaze/pam-sudo.optout`, and leaves the file alone from then on. Once that marker exists `gaze doctor` reports the sudo slot as off instead of warning about it.
+
+To skip the wait, or to keep Gaze away from `/etc/pam.d/sudo` from the very first install, write the marker yourself:
+
+```bash
+sudo mkdir -p /etc/gaze
+sudo touch /etc/gaze/pam-sudo.optout
+```
+
+To undo the opt-out, remove the marker and re-apply the line by hand with the `awk` command above:
+
+```bash
+sudo rm /etc/gaze/pam-sudo.optout
+```
+
+Removing the Gaze package deletes the marker along with the rest of `/etc/gaze`.
 
 ### Polkit (graphical "Authentication Required" prompts)
 
