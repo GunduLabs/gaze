@@ -44,6 +44,7 @@ rustPlatform.buildRustPackage {
       ../../pam-gaze
       ../../pam-gaze-grosshack
       ../../packaging/config
+      ../../packaging/nix/nixos-module.nix
     ];
   };
 
