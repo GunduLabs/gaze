@@ -484,10 +484,15 @@ fn semodule_lists(output: &str, module: &str) -> bool {
 enum GdmCameraPolicy {
     Loaded,
     NotLoaded,
+    NeedsRoot,
     Unverifiable(String),
 }
 
 fn gdm_camera_policy() -> GdmCameraPolicy {
+    if !running_as_root() {
+        return GdmCameraPolicy::NeedsRoot;
+    }
+
     match command_output("semodule", &["-l"]) {
         Ok((true, output)) if semodule_lists(&output, GDM_SELINUX_MODULE) => {
             GdmCameraPolicy::Loaded
@@ -513,7 +518,11 @@ fn check_gdm_selinux(report: &mut Report) {
         return;
     }
 
-    match gdm_camera_policy() {
+    report_gdm_camera_policy(report, gdm_camera_policy());
+}
+
+fn report_gdm_camera_policy(report: &mut Report, policy: GdmCameraPolicy) {
+    match policy {
         GdmCameraPolicy::Loaded => report.pass(
             "GDM camera SELinux policy",
             format!("{GDM_SELINUX_MODULE} is loaded, so the greeter can open the camera"),
@@ -525,11 +534,19 @@ fn check_gdm_selinux(report: &mut Report) {
             ),
             gdm_selinux_fix(),
         ),
+        GdmCameraPolicy::NeedsRoot => report.warning(
+            "GDM camera SELinux policy",
+            format!(
+                "SELinux is enforcing, and whether {GDM_SELINUX_MODULE} is loaded could not be \
+                 checked without root"
+            ),
+            "Run `sudo gaze doctor` to read the loaded module list.",
+        ),
         GdmCameraPolicy::Unverifiable(why) => report.warning(
             "GDM camera SELinux policy",
             format!("SELinux is enforcing, but the loaded module list could not be read: {why}"),
             format!(
-                "Run `sudo semodule -l | grep {GDM_SELINUX_MODULE}`; if it prints nothing, {}",
+                "Run `semodule -l | grep {GDM_SELINUX_MODULE}`; if it prints nothing, {}",
                 gdm_selinux_fix()
             ),
         ),
@@ -1284,6 +1301,10 @@ fn desktop_name() -> String {
     desktop_from_processes(owning_uid())
 }
 
+fn running_as_root() -> bool {
+    unsafe { libc::geteuid() == 0 }
+}
+
 /// The user whose session is being checked: the invoking user under `sudo`.
 fn owning_uid() -> u32 {
     std::env::var("SUDO_UID")
@@ -1777,7 +1798,7 @@ fn gdm_face_stack_passes_the_token(contents: &str) -> bool {
 }
 
 fn keyring_record_state(username: &str, backend: gaze_security::keyring::Backend) -> Option<bool> {
-    if unsafe { libc::geteuid() } != 0 {
+    if !running_as_root() {
         return None;
     }
     let uid = user_uid(username)?;
@@ -1846,7 +1867,15 @@ fn check_keyring(report: &mut Report, username: &str, config: Option<&Config>) {
         Some(_) => {}
     }
 
-    match keyring_record_state(username, gaze_security::keyring::Backend::Gnome) {
+    report_keyring_record(
+        report,
+        username,
+        keyring_record_state(username, gaze_security::keyring::Backend::Gnome),
+    );
+}
+
+fn report_keyring_record(report: &mut Report, username: &str, state: Option<bool>) {
+    match state {
         Some(true) => report.pass(
             "Keyring",
             format!("a TPM-protected keyring credential is enrolled for {username}"),
@@ -1856,12 +1885,13 @@ fn check_keyring(report: &mut Report, username: &str, config: Option<&Config>) {
             format!("GNOME Keyring unlock is enabled but {username} has no enrolled credential"),
             format!("Run `sudo gaze keyring --user {username}`."),
         ),
-        None => report.pass(
+        None => report.warning(
             "Keyring",
             format!(
-                "the {GDM_FACE_PAM_SERVICE} stack passes the token; run `sudo gaze doctor` to \
-                 also check whether {username} is enrolled"
+                "the {GDM_FACE_PAM_SERVICE} stack passes the token, but whether {username} has \
+                 an enrolled credential could not be checked without root"
             ),
+            "Run `sudo gaze doctor` to check the credential record.",
         ),
     }
 }
@@ -2809,6 +2839,84 @@ mod tests {
             !semodule_lists("something gaze-gdm-camera\n", GDM_SELINUX_MODULE),
             "only the first column names the module"
         );
+    }
+
+    #[test]
+    fn an_unreadable_module_store_is_never_reported_as_a_missing_policy() {
+        let reported = |policy| {
+            let mut report = Report::default();
+            report_gdm_camera_policy(&mut report, policy);
+            let check = report
+                .checks
+                .into_iter()
+                .find(|check| check.name == "GDM camera SELinux policy")
+                .expect("the SELinux check always reports once it runs");
+            (check.level, check.message, check.fix.unwrap_or_default())
+        };
+
+        let (level, _, _) = reported(GdmCameraPolicy::Loaded);
+        assert_eq!(level, Level::Pass);
+
+        let (level, _, _) = reported(GdmCameraPolicy::NotLoaded);
+        assert_eq!(
+            level,
+            Level::Error,
+            "a module store we read and found empty is a real failure"
+        );
+
+        let (level, message, fix) = reported(GdmCameraPolicy::NeedsRoot);
+        assert_eq!(level, Level::Warning);
+        assert!(
+            message.contains("without root"),
+            "an unprivileged run must say what it could not see: {message}"
+        );
+        assert!(
+            !message.contains("is not loaded"),
+            "an unchecked module must not be reported as absent: {message}"
+        );
+        assert!(
+            fix.contains("sudo gaze doctor"),
+            "the fix is to re-run as root, not to load the module: {fix}"
+        );
+        assert!(
+            !fix.contains("semodule -i"),
+            "loading a module that may already be there is not the remedy: {fix}"
+        );
+
+        let (level, _, _) = reported(GdmCameraPolicy::Unverifiable("broken".into()));
+        assert_eq!(level, Level::Warning);
+    }
+
+    #[test]
+    fn keyring_enrollment_that_could_not_be_read_is_not_a_checkmark() {
+        let reported = |state| {
+            let mut report = Report::default();
+            report_keyring_record(&mut report, "lambros", state);
+            let check = report
+                .checks
+                .into_iter()
+                .find(|check| check.name == "Keyring")
+                .expect("the keyring record always reports");
+            (check.level, check.message, check.fix.unwrap_or_default())
+        };
+
+        let (level, _, _) = reported(Some(true));
+        assert_eq!(level, Level::Pass);
+
+        let (level, _, _) = reported(Some(false));
+        assert_eq!(level, Level::Warning);
+
+        let (level, message, fix) = reported(None);
+        assert_eq!(
+            level,
+            Level::Warning,
+            "an unprivileged run never checked the record, so it cannot pass it"
+        );
+        assert!(
+            message.contains("without root"),
+            "say which half of the check ran: {message}"
+        );
+        assert!(fix.contains("sudo gaze doctor"), "{fix}");
     }
 
     #[test]

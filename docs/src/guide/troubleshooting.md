@@ -365,7 +365,10 @@ transaction, so a rejected policy leaves no trace beyond the greeter silently
 not scanning. openSUSE normally uses AppArmor; use this check there only if you
 have explicitly enabled SELinux.
 
-`gaze doctor` reports this as **GDM camera SELinux policy**. To check by hand:
+`gaze doctor` reports this as **GDM camera SELinux policy**, but only under
+`sudo`: reading the loaded module list needs root, so a plain `gaze doctor` says
+the check could not run rather than whether the module is there. To check by
+hand:
 
 ```bash
 sudo semodule -l | grep gaze-gdm-camera
