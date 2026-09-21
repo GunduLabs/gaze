@@ -47,6 +47,7 @@ through that shared stack. Add Gaze to `/etc/pam.d/login` directly instead:
 staged=$(sudo mktemp /etc/pam.d/login.gaze.XXXXXX) && \
   sudo awk -v out="$staged" '
     /^[[:space:]]*auth[[:space:]]+(include|substack)[[:space:]]/ && !inserted {
+        print "-auth       requisite     pam_faillock.so preauth" > out
         print "auth        sufficient    pam_gaze.so" > out
         inserted = 1
     }
@@ -60,11 +61,13 @@ sudo rm -f "$staged"
 Two details of that command matter, because a mangled `/etc/pam.d/login` locks
 you out of every terminal:
 
-- The Gaze line goes immediately above `auth include system-login`, which is the
+- The Gaze lines go immediately above `auth include system-login`, which is the
   line that pulls in the shared stack. Everything Arch puts before it, meaning
   `pam_nologin` and `pam_securetty` where it is used, is a veto that has to run
-  first. Gaze is `sufficient`, so a face match returns from the stack right there
-  and nothing printed after it runs.
+  first. The faillock preauth gate goes in with the Gaze line for the same
+  reason in the other direction: a sufficient face match returns from the stack
+  right there, so without the gate a locked-out account could still pass face
+  authentication and nothing printed after it runs.
 - `awk` writes the staged file itself rather than being piped into `tee`. A
   pipeline reports only the exit status of its last command, so a failing `awk`
   would still leave `tee` reporting success and `install` would happily replace
@@ -85,13 +88,14 @@ lock you out of every virtual terminal.
 ## Camera at the login prompt
 
 No session exists before you log in, so there is no PipeWire to capture through
-and no ACL granting your user the camera. Gaze notices this and captures the
-seat's V4L2 device instead. `gazed` opens the camera, not the PAM module, so the
-confinement that applies to `login` itself is not in the way.
+and no ACL granting your user the camera. Gaze always captures the kernel V4L2
+device directly for authentication, so this environment needs no special case:
+`gazed` opens the camera, not the PAM module, so the confinement that applies
+to `login` itself is not in the way.
 
-Pinning `cameras.rgb` to a `pipewiresrc` pipeline will not work here. Leave it as
-`primary`, which falls back to a V4L2 node when PipeWire cannot be reached, or
-pin it to `usb:VVVV:PPPP` to skip the failed attempt entirely. See
+Leave `cameras.rgb` as `primary` (the first color V4L2 node), pin it to
+`usb:VVVV:PPPP`, or pin it to a `pipewiresrc target-object=` value, which is
+resolved to the V4L2 node behind that same camera. See
 [Select Camera Source](/guide/configuration#select-camera-source).
 
 ### When Gaze will not use the seat camera

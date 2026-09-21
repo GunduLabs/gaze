@@ -349,13 +349,13 @@ face unlock back on. Use `enable --force` to undo it.
 ## Cameras at the login greeter
 
 The lock screen runs inside your session, so the camera works there exactly as it
-does for `sudo`. The login greeter does not: SDDM's and Plasma Login Manager's
-greeter accounts have no user session and therefore no PipeWire, unlike GDM's.
-Gaze captures the seat's V4L2 device directly in that case, so `rgb = "primary"`
-still works at the greeter.
+does for `sudo`. The login greeter does not run inside your session: SDDM's and
+Plasma Login Manager's greeter accounts have no user session and therefore no
+PipeWire, unlike GDM's. That makes no difference to authentication, which always
+captures the kernel V4L2 device directly, so `rgb = "primary"` still works at
+the greeter.
 
-If your camera is not picked up there, name it explicitly so resolution never
-depends on a session:
+If your camera is not picked up there, name it explicitly:
 
 ```toml
 [cameras]

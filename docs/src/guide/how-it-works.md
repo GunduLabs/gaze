@@ -44,8 +44,8 @@ same daemon code runs on every surface, so a problem you can reproduce with
 
 ### Before the camera opens
 
-1. The client claims the daemon over DBus. A claim binds the run to one user's PipeWire
-   session, and the client releases it when it finishes. A claim that is never released is
+1. The client claims the daemon over DBus. A claim binds the run to one user,
+   and the client releases it when it finishes. A claim that is never released is
    reclaimed after 5 minutes so the camera cannot be held hostage.
 2. Gaze checks three refusals in order: no suspend or resume since boot
    (`auth.abort_before_first_resume`), the caller sits inside an SSH session
@@ -62,15 +62,17 @@ same daemon code runs on every surface, so a problem you can reproduce with
 
 ### Opening the camera
 
-5. The configured source becomes a GStreamer pipeline. `primary` becomes a bare `pipewiresrc`,
-   a PipeWire target becomes `pipewiresrc target-object=...`, and a `/dev/videoN` path or USB
-   `vid:pid` becomes `v4l2src`. Under a claim, `pipewiresrc` is bound to the claiming user's
-   session socket rather than resolving one from the environment.
+5. The configured source resolves to a kernel `/dev/videoN` node, which is captured
+   directly with `v4l2src`. `primary` means the first color node, a PipeWire target
+   resolves to the node behind that same camera, and a `/dev/videoN` path or USB
+   `vid:pid` names its node outright. The user-session PipeWire socket is never
+   connected to: it is controlled by the user being authenticated. A source with
+   no kernel node — including a hand-written GStreamer pipeline — is refused.
 6. The pipeline gets 500 ms to reach the playing state. A slower camera is not treated as a
    failure: the frame loop reports any error that arrives later.
-7. If a PipeWire source fails to open at all, Gaze retries once through that camera's own V4L2
-   node. A pinned target retries only the node behind that same camera; `primary` may retry any
-   color camera it can reach.
+7. Unprivileged previews (for example the GUI camera view) may still open a
+   `pipewiresrc` pipeline in the user's own session, where trusting that session
+   is correct. Authentication and enrollment never do.
 
 ### Reading frames
 
@@ -83,10 +85,7 @@ same daemon code runs on every surface, so a problem you can reproduce with
    dark RGB frame would hand the camera straight to IR, so hybrid setups keep their immediate
    hand-off.
 9. **Dark gate.** A frame whose mean luma is below `cameras.dark_luma_threshold` (default 20)
-   is `TooDark` and never reaches the detector. If a PipeWire stream is still dark when its
-   warm-up expires, Gaze reopens the same camera once on its V4L2 node and gives the new stream
-   its own warm-up, which is how a camera that works through `/dev/videoN` but not through
-   PipeWire recovers on its own.
+   is `TooDark` and never reaches the detector.
 10. **Detection and matching.** The detector finds a face and landmarks, the face is aligned,
     the recognition model produces an embedding, and the embedding is compared against your
     enrolled templates. An embedding is only computed for a `Usable` frame, so a frame that is
@@ -175,8 +174,7 @@ deadlines above:
 | --- | --- |
 | `VerifyStart: sensing faces for user ...` | Capture is starting. Names the spectra, the liveness settings, and whether capture is serial. |
 | `Attempting to open GStreamer camera: ...` | The exact pipeline. Useful for confirming which source was actually used. |
-| `Opening the PipeWire camera failed ...; trying a direct V4L2 device` | The PipeWire source did not open, and the V4L2 retry is next. |
-| `RGB stream stayed dark through PipeWire ...; retrying on /dev/videoN` | The stream opened but never brightened, so the same camera is being reopened on its own node. |
+| `Opening the PipeWire camera failed ...; trying a direct V4L2 device` | A PipeWire source (unprivileged preview path) did not open, and the V4L2 retry is next. Privileged authentication captures V4L2 directly and never logs this. |
 | `RGB stream never brightened: mean_luma=0` | The stream is flat dark. A closed privacy shutter, a lens cap, or a genuinely dark room. |
 | `RGB face region: mean_luma=..., threshold=..., status=...` | The luma reading behind a status. The first frame of each distinct status is logged. |
 | `VerifyStart: giving up after 1000ms of dark frames` | The dark deadline. |

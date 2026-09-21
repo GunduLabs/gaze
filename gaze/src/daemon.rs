@@ -58,9 +58,6 @@ pub struct ClaimState {
     pub username: String,
     pub sender: String,
     pub epoch: u64,
-    /// The PipeWire session this claim may capture from, `None` for the seat device. Carried
-    /// here because a claim can be preempted before capture starts, and the replacement rebinds.
-    pub pipewire_uid: Option<u32>,
 }
 
 /// The single claim the daemon will honour, if any.
@@ -140,9 +137,6 @@ async fn release_claim_epoch(
         return false;
     }
     *state = None;
-    // Capture already under way carries its own copy of this, so dropping it here cuts nothing
-    // short; it only stops the next claim from inheriting this one's session.
-    clear_pipewire_session();
     let mut cancel = active_cancel.lock().await;
     if let Some(tx) = cancel.take() {
         let _ = tx.send(());
@@ -473,6 +467,15 @@ impl AuthDaemon {
         }
     }
 
+    fn ssh_session_verdict(heuristic_is_ssh: bool, session_remote: Option<bool>) -> bool {
+        heuristic_is_ssh || session_remote.unwrap_or(false)
+    }
+
+    async fn caller_session_is_remote(pid: u32) -> Option<bool> {
+        let conn = system_bus().await.ok()?;
+        gaze_core::dbus::session_is_remote_on(&conn, pid).await.ok()
+    }
+
     fn lid_state_is_closed(state: &str) -> bool {
         state.to_ascii_lowercase().contains("closed")
     }
@@ -531,8 +534,13 @@ impl AuthDaemon {
         let abort_if_ssh = *self.abort_if_ssh.lock().await;
         if abort_if_ssh {
             let caller_pid = Self::caller_pid(header).await.ok();
-            let is_ssh = Self::caller_is_ssh_session_at(std::path::Path::new("/proc"), caller_pid);
-            if is_ssh {
+            let heuristic_is_ssh =
+                Self::caller_is_ssh_session_at(std::path::Path::new("/proc"), caller_pid);
+            let session_remote = match caller_pid {
+                Some(pid) if !heuristic_is_ssh => Self::caller_session_is_remote(pid).await,
+                _ => None,
+            };
+            if Self::ssh_session_verdict(heuristic_is_ssh, session_remote) {
                 warn!(caller_pid, "SSH session detected, aborting face auth");
                 return Err(fdo::Error::Failed("SSH session detected".into()));
             }
@@ -596,6 +604,21 @@ impl AuthDaemon {
         }
         Err(fdo::Error::AccessDenied(
             "only root or the active session may read the Gaze configuration".into(),
+        ))
+    }
+
+    fn pam_internal_write_allowed(caller_uid: u32, active_uid: Option<u32>) -> bool {
+        caller_uid == 0 || active_uid == Some(caller_uid)
+    }
+
+    async fn ensure_pam_internal_write_access(header: &Header<'_>) -> fdo::Result<()> {
+        let caller_uid = Self::caller_uid(header).await?;
+        let active_uid = active_session_uid_and_class().await.map(|(uid, _)| uid);
+        if Self::pam_internal_write_allowed(caller_uid, active_uid) {
+            return Ok(());
+        }
+        Err(fdo::Error::AccessDenied(
+            "only root or the active session may modify the PAM internal services list".into(),
         ))
     }
 
@@ -804,9 +827,8 @@ impl AuthDaemon {
 mod tests {
     use super::{
         AuthDaemon, CameraBinding, ClaimState, ClaimStateHandle, and_policy_unsatisfiable,
-        auth_streams, bind_pipewire_session_for_uid, claim_has_epoch, clear_pipewire_session,
-        eyes_from_kpss, hybrid_auth_passed, ir_waits_for_rgb, is_vanish_of, release_claim_epoch,
-        rgb_yields_camera_on_budget, should_yield_rgb_to_ir,
+        auth_streams, claim_has_epoch, eyes_from_kpss, hybrid_auth_passed, ir_waits_for_rgb,
+        is_vanish_of, release_claim_epoch, rgb_yields_camera_on_budget, should_yield_rgb_to_ir,
     };
     use gaze_core::config::AuthSurface;
     use gaze_core::dbus::{ActiveSession, CaptureStatus};
@@ -976,18 +998,10 @@ mod tests {
     }
 
     #[test]
-    fn binding_a_missing_pipewire_session_leaves_capture_on_v4l2() {
-        // Greeters without a user manager have no socket; that must not fail the claim.
-        bind_pipewire_session_for_uid(u32::MAX);
-        clear_pipewire_session();
-    }
-
-    #[test]
     fn stale_claim_epoch_does_not_match_reclaimed_state() {
         let state = Some(ClaimState {
             username: "alice".to_string(),
             sender: ":1.42".to_string(),
-            pipewire_uid: None,
             epoch: 2,
         });
 
@@ -999,7 +1013,6 @@ mod tests {
         Arc::new(Mutex::new(Some(ClaimState {
             username: "alice".to_string(),
             sender: ":1.42".to_string(),
-            pipewire_uid: None,
             epoch,
         })))
     }
@@ -1016,6 +1029,20 @@ mod tests {
         assert!(!AuthDaemon::config_read_allowed(1001, Some(1000)));
         assert!(!AuthDaemon::config_read_allowed(1000, None));
         assert!(!AuthDaemon::config_read_allowed(65534, Some(1000)));
+    }
+
+    #[test]
+    fn root_and_the_active_session_may_modify_pam_internal() {
+        assert!(AuthDaemon::pam_internal_write_allowed(0, Some(1000)));
+        assert!(AuthDaemon::pam_internal_write_allowed(0, None));
+        assert!(AuthDaemon::pam_internal_write_allowed(1000, Some(1000)));
+    }
+
+    #[test]
+    fn other_local_users_may_not_modify_pam_internal() {
+        assert!(!AuthDaemon::pam_internal_write_allowed(1001, Some(1000)));
+        assert!(!AuthDaemon::pam_internal_write_allowed(1000, None));
+        assert!(!AuthDaemon::pam_internal_write_allowed(65534, Some(1000)));
     }
 
     fn hardened_config() -> gaze_core::config::Config {
@@ -1208,7 +1235,6 @@ mod tests {
         *claim_state.lock().await = Some(ClaimState {
             username: "alice".to_string(),
             sender: ":1.42".to_string(),
-            pipewire_uid: None,
             epoch: 12,
         });
 
@@ -1438,6 +1464,27 @@ mod tests {
             proc.root(),
             Some(6001)
         ));
+    }
+
+    #[test]
+    fn detached_scrubbed_process_escapes_environ_ancestry_check() {
+        let proc = FakeProc::new("detached");
+        proc.add(1, 0, "systemd", b"PATH=/usr/bin\0");
+        proc.add(5000, 1, "gaze", b"PATH=/usr/bin\0");
+        assert!(!AuthDaemon::process_chain_is_ssh_at(proc.root(), 5000));
+        assert!(!AuthDaemon::caller_is_ssh_session_at(
+            proc.root(),
+            Some(5000)
+        ));
+    }
+
+    #[test]
+    fn ssh_verdict_combines_heuristic_with_logind_remote() {
+        assert!(AuthDaemon::ssh_session_verdict(true, None));
+        assert!(AuthDaemon::ssh_session_verdict(true, Some(false)));
+        assert!(AuthDaemon::ssh_session_verdict(false, Some(true)));
+        assert!(!AuthDaemon::ssh_session_verdict(false, Some(false)));
+        assert!(!AuthDaemon::ssh_session_verdict(false, None));
     }
 
     #[test]
@@ -2013,8 +2060,6 @@ mod tests {
     }
 }
 
-pub use gaze_core::dbus::get_active_session_uid;
-
 /// The effective value in the GDM profile, which a NixOS config sets without our override file.
 fn gdm_face_auth_from_dconf() -> Option<bool> {
     if !std::path::Path::new(GDM_DCONF_PROFILE_PATH).exists() {
@@ -2049,16 +2094,6 @@ fn gdm_override_error(action: &str, path: &std::path::Path, err: std::io::Error)
         ));
     }
     fdo::Error::Failed(format!("Failed to {action} {}: {err}", path.display()))
-}
-
-/// Point capture at `uid`'s PipeWire session for the life of the claim. Each pipeline opens its
-/// own socket, so nothing is connected here and a missing socket is handled at open time.
-pub fn bind_pipewire_session_for_uid(uid: u32) {
-    gaze_vision::camera::set_pipewire_uid(Some(uid));
-}
-
-pub fn clear_pipewire_session() {
-    gaze_vision::camera::set_pipewire_uid(None);
 }
 
 async fn prepare_for_sleep_stream(conn: &zbus::Connection) -> zbus::Result<zbus::MessageStream> {
@@ -2687,22 +2722,11 @@ impl AuthDaemon {
             ?binding,
             "Claimed daemon"
         );
-        let pipewire_uid = match binding {
-            CameraBinding::Session(camera_uid) => {
-                bind_pipewire_session_for_uid(camera_uid);
-                Some(camera_uid)
-            }
-            CameraBinding::SeatDevice => {
-                clear_pipewire_session();
-                None
-            }
-        };
         let epoch = CLAIM_EPOCH.fetch_add(1, Ordering::Relaxed);
         *state = Some(ClaimState {
             username,
             sender: sender.clone(),
             epoch,
-            pipewire_uid,
         });
         drop(state);
 
@@ -2790,7 +2814,6 @@ impl AuthDaemon {
 
             self.cancel_active_tasks().await;
             *state = None;
-            clear_pipewire_session();
             info!(sender = %sender, "Released daemon");
             Ok(())
         } else {
@@ -2871,7 +2894,6 @@ impl AuthDaemon {
         let username = claim.username.clone();
         Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let signal_destination = Self::signal_destination(&claim.sender)?;
-        let pipewire_uid = claim.pipewire_uid;
         self.cancel_active_tasks().await;
 
         UserDatabase::validate_face_name(&face_name).map_err(Self::map_user_db_error)?;
@@ -2950,7 +2972,6 @@ impl AuthDaemon {
                 let preview_tx_clone = preview_tx.clone();
 
                 rgb_thread = Some(std::thread::spawn(move || {
-                    gaze_vision::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, true);
                     let mut preview = if stream_preview {
                         PreviewStream::new(preview_tx_clone)
@@ -2977,7 +2998,7 @@ impl AuthDaemon {
                                 continue;
                             }
 
-                            let mut cam = match Camera::open(&rgb_device_clone) {
+                            let mut cam = match Camera::open_privileged(&rgb_device_clone) {
                                 Ok(c) => c,
                                 Err(e) => {
                                     dead_streams += 1;
@@ -3051,7 +3072,7 @@ impl AuthDaemon {
                         }
                     }
 
-                    let mut cam = match Camera::open(&rgb_device_clone) {
+                    let mut cam = match Camera::open_privileged(&rgb_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(EnrollMsg::Error(format!("RGB Camera open error: {e}")));
@@ -3142,7 +3163,6 @@ impl AuthDaemon {
                 let preview_tx_clone = preview_tx.clone();
 
                 ir_thread = Some(std::thread::spawn(move || {
-                    gaze_vision::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, true);
                     let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
                     let mut preview = if stream_preview {
@@ -3178,7 +3198,7 @@ impl AuthDaemon {
                                 &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                                 emitter_enabled
                             );
-                            let mut cam = match Camera::open_ir(&ir_device_clone) {
+                            let mut cam = match Camera::open_ir_privileged(&ir_device_clone) {
                                 Ok(c) => c,
                                 Err(e) => {
                                     dead_streams += 1;
@@ -3248,7 +3268,7 @@ impl AuthDaemon {
                         emitter_enabled
                     );
 
-                    let mut cam = match Camera::open_ir(&ir_device_clone) {
+                    let mut cam = match Camera::open_ir_privileged(&ir_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(EnrollMsg::Error(format!("IR Camera open error: {e}")));
@@ -3596,7 +3616,14 @@ impl AuthDaemon {
     }
 
     #[zbus(property)]
-    async fn set_pam_internal(&self, services: Vec<String>) -> fdo::Result<()> {
+    async fn set_pam_internal(
+        &self,
+        #[zbus(header)] header: Option<Header<'_>>,
+        services: Vec<String>,
+    ) -> fdo::Result<()> {
+        let header =
+            header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
+        Self::ensure_pam_internal_write_access(&header).await?;
         let mut set = self.pam_internal.lock().await;
         set.clear();
         for s in services {
@@ -3609,7 +3636,12 @@ impl AuthDaemon {
         Ok(())
     }
 
-    async fn add_pam_internal(&self, service: String) -> fdo::Result<()> {
+    async fn add_pam_internal(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        service: String,
+    ) -> fdo::Result<()> {
+        Self::ensure_pam_internal_write_access(&header).await?;
         let normalized = Self::normalize_pam_service(&service);
         if !normalized.is_empty() {
             let mut set = self.pam_internal.lock().await;
@@ -3619,7 +3651,12 @@ impl AuthDaemon {
         Ok(())
     }
 
-    async fn remove_pam_internal(&self, service: String) -> fdo::Result<()> {
+    async fn remove_pam_internal(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        service: String,
+    ) -> fdo::Result<()> {
+        Self::ensure_pam_internal_write_access(&header).await?;
         let normalized = Self::normalize_pam_service(&service);
         if !normalized.is_empty() {
             let mut set = self.pam_internal.lock().await;
@@ -3629,7 +3666,8 @@ impl AuthDaemon {
         Ok(())
     }
 
-    async fn clear_pam_internal(&self) -> fdo::Result<()> {
+    async fn clear_pam_internal(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
+        Self::ensure_pam_internal_write_access(&header).await?;
         let mut set = self.pam_internal.lock().await;
         set.clear();
         info!("Cleared PAM internal services");
@@ -3983,9 +4021,6 @@ impl AuthDaemon {
 
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
-        // From the claim just validated: the task below starts capture after awaits that a
-        // preempting claim can rebind across.
-        let pipewire_uid = claim.pipewire_uid;
         self.cancel_active_tasks().await;
 
         let (tx, mut rx) = oneshot::channel();
@@ -4140,7 +4175,6 @@ impl AuthDaemon {
                 let hybrid_policy_clone = hybrid_policy.clone();
 
                 rgb_thread = Some(std::thread::spawn(move || {
-                    gaze_vision::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     // Set on every exit path (incl. panic) once the RGB camera is released.
                     // Declared before `cam` so `cam` drops first and release precedes the signal.
                     struct RgbPhaseGuard(Arc<std::sync::atomic::AtomicBool>);
@@ -4156,7 +4190,7 @@ impl AuthDaemon {
                         .then(|| Instant::now() + VERIFY_SERIAL_RGB_BUDGET);
                     let mut yielded_to_ir = false;
 
-                    let mut cam = match Camera::open(&rgb_device_clone) {
+                    let mut cam = match Camera::open_privileged(&rgb_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(VerifyMsg::Error(format!("RGB Camera open error: {e}")));
@@ -4195,17 +4229,6 @@ impl AuthDaemon {
                                 (RgbFrameKind::Lit, _) => {}
                                 (RgbFrameKind::WarmupDark, _) => continue,
                                 (RgbFrameKind::SettledDark, luma) => {
-                                    if let Some(node) = cam.fall_back_to_v4l2() {
-                                        let message = format!(
-                                            "RGB stream stayed dark through PipeWire (mean_luma={luma}); retrying on {node}"
-                                        );
-                                        info!("{message}");
-                                        let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
-                                        let _ = tx.blocking_send(VerifyMsg::PhaseStarted(Spectrum::Rgb));
-                                        warmup = RgbWarmupGate::new(config_clone.cameras.dark_luma_threshold);
-                                        logged_dark_stream = false;
-                                        continue;
-                                    }
                                     if !logged_dark_stream {
                                         let message = format!(
                                             "RGB stream remains dark after warmup: mean_luma={luma}"
@@ -4356,7 +4379,6 @@ impl AuthDaemon {
                 let rgb_phase_done_clone = rgb_phase_done.clone();
 
                 ir_thread = Some(std::thread::spawn(move || {
-                    gaze_vision::camera::bind_pipewire_uid_for_thread(pipewire_uid);
                     // Wait for RGB to release its camera before opening IR and firing the emitter,
                     // so single-function devices keep one live stream. Bail if verify passed.
                     if ir_waits_for_rgb(run_rgb, serial_capture) {
@@ -4378,7 +4400,7 @@ impl AuthDaemon {
                         let _ = tx.blocking_send(VerifyMsg::Diagnostic(message.to_owned()));
                     }
 
-                    let mut cam = match Camera::open_ir(&ir_device_clone) {
+                    let mut cam = match Camera::open_ir_privileged(&ir_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(VerifyMsg::Error(format!("IR Camera open error: {e}")));

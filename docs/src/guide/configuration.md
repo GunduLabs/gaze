@@ -166,22 +166,25 @@ The default camera source is:
 rgb = "primary"
 ```
 
-`primary` uses GStreamer `pipewiresrc`. To pin Gaze to a specific PipeWire camera, use `gaze config` or set `rgb` to a GStreamer source:
+`primary` resolves to the first color `/dev/video*` node. To pin Gaze to a specific PipeWire camera, use `gaze config` or set `rgb` to a GStreamer source:
 
 ```toml
 [cameras]
 rgb = "pipewiresrc target-object=<pipewire-target>"
 ```
 
-`pipewiresrc` needs a PipeWire session to attach to. GDM's greeter runs its own
-user session and provides one, but greeters like KDE's `plasmalogin`, SDDM,
-greetd, and a plain TTY do not. When the PipeWire source fails to open, Gaze logs
-`Opening the PipeWire camera failed` and falls back to the first matching V4L2
-node on its own, so `primary` still works in those greeters.
+For authentication and enrollment, the privileged daemon captures the backing
+kernel `/dev/video*` node directly with `v4l2src` and never connects to a
+user-session PipeWire socket: that socket — and every virtual camera it
+advertises — is controlled by the user being authenticated, so trusting it would
+let injected frames reach face authentication. A pinned PipeWire target is
+resolved to its own V4L2 node the same way, and a source with no kernel node
+(including a hand-written GStreamer pipeline) is refused. `primary` therefore
+works in greeters and on plain TTYs with no PipeWire session at all.
 
-Pinning `rgb` to the camera directly skips that fallback and uses `v4l2src`
-straight away. Prefer it when the machine has several cameras and you want a
-specific one, rather than as a workaround for a greeter without a session:
+Pinning `rgb` to the camera directly uses `v4l2src` straight away without
+resolving a PipeWire target first. Prefer it when the machine has several
+cameras and you want a specific one:
 
 ```toml
 [cameras]
@@ -247,7 +250,7 @@ parallel_capture = "auto"
 
 `auto` resolves each configured source to its `/dev/video*` node and compares the hardware function behind it (for USB cameras, the sysfs USB interface the node hangs off). Two nodes on the same function are substreams of one device that only streams one mode at a time, so they stay serial even though their node numbers differ. This is the BRIO case, where `/dev/video0` and `/dev/video2` share a single UVC function.
 
-The default `rgb = "primary"` names no node of its own: it means "whatever camera PipeWire hands out". Rather than guess which one that is, `auto` asks the question from the IR side: does the IR camera's own function also expose a colour node? If it does, the IR camera is a dual-sensor device that `primary` may well resolve to, so capture stays serial. If the IR function is infrared-only, it cannot be whatever `primary` turns out to be, and the two stream at once. A hand-written GStreamer pipeline in `rgb` is treated the same way. If nothing can be enumerated at all, `auto` keeps the serial path.
+The default `rgb = "primary"` means the first color `/dev/video*` node. Rather than guess which one that is, `auto` asks the question from the IR side: does the IR camera's own function also expose a colour node? If it does, the IR camera is a dual-sensor device that `primary` may well resolve to, so capture stays serial. If the IR function is infrared-only, it cannot be whatever `primary` turns out to be, and the two stream at once. An unresolvable `rgb` value is treated the same way. If nothing can be enumerated at all, `auto` keeps the serial path.
 
 Parallel capture only changes *when* each spectrum is captured, never whether both have to pass. `hybrid_policy` behaves identically in both modes. The speedup is also bounded by face detection, which both spectra share, so expect a real improvement rather than a halving.
 
@@ -281,7 +284,7 @@ start_delay_ms = 0
 start_delay_scope = "screen_lock"
 ```
 
-`abort_if_ssh` detects SSH sessions from the DBus caller process environment. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor.
+`abort_if_ssh` asks logind whether the D-Bus caller's session is remote, falling back to the caller process environment and ancestry where logind is unreachable. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor.
 
 Aborting face authentication when you type a password is not a key in this file. It is a property of the PAM stack: [simultaneous mode](/guide/pam#what-gaze-installs) (`pam_gaze.so simultaneous`) stands Gaze down as soon as you submit a password, and [retry mode](/guide/pam#retry-after-a-rejected-password) (`pam_gaze.so retry`) gives face auth one more attempt if that password turns out to be wrong.
 

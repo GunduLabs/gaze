@@ -516,6 +516,27 @@ pub async fn seat0_session_uids_on(connection: &zbus::Connection) -> anyhow::Res
     Ok(uids)
 }
 
+/// Whether logind flags the session owning `pid` as remote. `Err` means logind is
+/// unreachable or the pid belongs to no session, which is not a local session.
+pub async fn session_is_remote_on(connection: &zbus::Connection, pid: u32) -> anyhow::Result<bool> {
+    let proxy = zbus::Proxy::new(
+        connection,
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1",
+        "org.freedesktop.login1.Manager",
+    )
+    .await?;
+    let path: zbus::zvariant::OwnedObjectPath = proxy.call("GetSessionByPID", &(pid,)).await?;
+    let session_proxy = zbus::Proxy::new(
+        connection,
+        "org.freedesktop.login1",
+        path,
+        "org.freedesktop.login1.Session",
+    )
+    .await?;
+    Ok(session_proxy.get_property("Remote").await?)
+}
+
 /// The object path of every session logind currently knows about, on any seat.
 pub async fn session_paths_on(connection: &zbus::Connection) -> anyhow::Result<Vec<String>> {
     let proxy = zbus::Proxy::new(

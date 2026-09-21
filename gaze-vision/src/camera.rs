@@ -494,6 +494,30 @@ fn v4l2_fallback_for(src_element: &str) -> V4l2Fallback {
         })
 }
 
+pub fn resolve_privileged_node(source: &str, want_color: bool) -> Option<String> {
+    let source = source.trim();
+    if source.is_empty() {
+        return None;
+    }
+    if source == DEFAULT_RGB_CAMERA {
+        return first_v4l2_node(want_color);
+    }
+    if let Some((vid, pid)) = parse_usb_spec(source) {
+        return resolve_usb_video_node(vid, pid, want_color);
+    }
+    if source.starts_with("/dev/video") {
+        let is_node = source
+            .strip_prefix("/dev/video")
+            .is_some_and(|index| !index.is_empty() && index.chars().all(|c| c.is_ascii_digit()));
+        return is_node.then(|| source.to_string());
+    }
+    match v4l2_fallback_for(source) {
+        V4l2Fallback::AnyDevice => first_v4l2_node(want_color),
+        V4l2Fallback::SameNode(target) => node_from_pipewire_target(&target, want_color),
+        V4l2Fallback::None => None,
+    }
+}
+
 const V4L2_BY_PATH_DIR: &str = "/dev/v4l/by-path";
 
 /// PipeWire names a V4L2 camera `v4l2_input.<udev ID_PATH>` with `:` rewritten as `_`, and udev
@@ -643,6 +667,31 @@ impl Camera {
 
     pub fn open_ir(camera_source: &str) -> anyhow::Result<Self> {
         Self::open_kind(camera_source, false)
+    }
+
+    pub fn open_privileged(camera_source: &str) -> anyhow::Result<Self> {
+        Self::open_privileged_kind(camera_source, true)
+    }
+
+    pub fn open_ir_privileged(camera_source: &str) -> anyhow::Result<Self> {
+        Self::open_privileged_kind(camera_source, false)
+    }
+
+    fn open_privileged_kind(camera_source: &str, want_color: bool) -> anyhow::Result<Self> {
+        gstreamer::init()?;
+        let node = resolve_privileged_node(camera_source, want_color).ok_or_else(|| {
+            anyhow::anyhow!(
+                "refusing privileged capture of {camera_source:?}: no backing /dev/video node \
+                 (PipeWire sessions and custom pipelines are not trusted for authentication)"
+            )
+        })?;
+        let force_ir_yuy2 = node_requires_forced_ir_yuy2(&node, want_color);
+        Self::open_source_element(
+            &format!("v4l2src device={node}"),
+            camera_source,
+            force_ir_yuy2,
+            None,
+        )
     }
 
     fn open_kind(camera_source: &str, want_color: bool) -> anyhow::Result<Self> {
@@ -1840,6 +1889,54 @@ mod tests {
         for format in ["RGB", "BGR", "RGBA", "YUY2", "NV12", "DMA_DRM", ""] {
             assert!(!is_mono_format(format), "{format} should be color/unknown");
         }
+    }
+
+    #[test]
+    fn privileged_capture_keeps_canonical_kernel_nodes() {
+        assert_eq!(
+            resolve_privileged_node("/dev/video0", true),
+            Some("/dev/video0".to_string())
+        );
+        assert_eq!(
+            resolve_privileged_node("  /dev/video2  ", false),
+            Some("/dev/video2".to_string())
+        );
+    }
+
+    #[test]
+    fn privileged_capture_rejects_untrusted_or_malformed_sources() {
+        for source in [
+            "",
+            "videotestsrc num-buffers=2",
+            "v4l2src device=/dev/video0",
+            "/dev/video",
+            "/dev/video2 ! fakesink",
+            "/dev/videoX",
+            "usb:046d",
+            "usb:zzzz:085e",
+            "pipewiresrc fd=7",
+            "pipewiresrcfoo",
+            "pipewiresrc target-object=",
+        ] {
+            assert_eq!(
+                resolve_privileged_node(source, true),
+                None,
+                "{source:?} must not resolve for privileged capture"
+            );
+        }
+    }
+
+    #[test]
+    fn privileged_open_refuses_custom_pipelines_without_touching_hardware() {
+        let err = Camera::open_privileged("videotestsrc num-buffers=2")
+            .err()
+            .expect("privileged open of a custom pipeline must fail");
+        assert!(
+            err.to_string().contains("refusing privileged capture"),
+            "unexpected error: {err:#}"
+        );
+        assert!(Camera::open_privileged("").is_err());
+        assert!(Camera::open_ir_privileged("v4l2src device=/dev/video0").is_err());
     }
 
     fn sample_options() -> Vec<(String, String)> {
