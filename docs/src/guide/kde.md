@@ -259,6 +259,9 @@ unless you unlock it manually or enroll an optional TPM-protected credential.
 This works with `sddm`, `plasmalogin`, and `plasmalogin-fingerprint` in sequential
 PAM mode. Lock-screen unlocks do not need or release the wallet password.
 
+On **NixOS**, use [`services.gaze.kde.unlockKwallet`](/guide/nixos#kde-plasma)
+instead of the PAM helper below; the module manages the hooks declaratively.
+
 1. Install your distribution's KWallet PAM package providing `pam_kwallet5.so`
    (commonly `kwallet-pam` or `libpam-kwallet5`). Use a password-encrypted
    `kdewallet`; KWallet's PAM integration does not support GPG-encrypted wallets.
