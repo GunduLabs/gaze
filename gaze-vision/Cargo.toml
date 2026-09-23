@@ -34,6 +34,6 @@ ort = { version = "2.0.0-rc.13", optional = true, default-features = false, feat
     "api-21",
 ] }
 tracing = "0.1.44"
-gstreamer = "0.25.3"
+gstreamer = "0.25.4"
 gstreamer-app = "0.25.2"
-gstreamer-video = "0.25.3"
+gstreamer-video = "0.25.4"
