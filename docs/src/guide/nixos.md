@@ -112,6 +112,7 @@ input to a revision with a newer `onnxruntime` instead of overriding `follows`.
 | `services.gaze.gnome.gdmFaceLogin` | `false` | Also enable face auth at the GDM login screen (read the [GNOME guide](/guide/gnome) first) |
 | `services.gaze.kde.lockScreen` | `false` | Define `kde-fingerprint` so the Plasma lock screen starts face unlock with no key press |
 | `services.gaze.kde.loginScreen` | `false` | Also run face auth in the Plasma Login Manager / SDDM stack (submit-driven; see the [KDE guide](/guide/kde)) |
+| `services.gaze.kde.unlockKwallet` | `false` | Wire KWallet auth/session hooks for KDE face login; requires `kde.loginScreen`, runtime opt-in, and wallet enrollment (below) |
 | `services.gaze.tpm.tcti` | `null` | `TPM2TOOLS_TCTI` for the daemon, e.g. `"device:/dev/tpm0"`. Only needed when neither `/dev/tpmrm0` nor `/dev/tpm0` is the right node |
 
 The gaze PAM rule is inserted ahead of both `pam_fprintd` and `pam_unix`, so
@@ -239,8 +240,47 @@ biometric slot, so face auth only runs when the login form is submitted:
 services.gaze.kde.loginScreen = true;
 ```
 
-KWallet will ask for its password once per session after a face login, since
-there was no password to hand it. See the [KDE Plasma guide](/guide/kde).
+By default, KWallet asks for its password once per session after a face login.
+For optional TPM-backed wallet unlock, use the declarative PAM integration:
+
+```nix
+security.tpm2.enable = true;
+services.gaze = {
+  kde.loginScreen = true;
+  kde.unlockKwallet = true;
+  mutableConfig = false;
+  settings = {
+    storage.encrypt_templates = true;
+    storage.unlock_kwallet = true;
+    liveness.enabled = true;
+  };
+};
+```
+
+Rebuild, then enroll your wallet password as your normal user:
+
+```bash
+sudo nixos-rebuild switch
+gaze keyring --kwallet
+```
+
+Use a password-encrypted `kdewallet`; GPG-encrypted wallets are unsupported.
+Re-enroll after changing the wallet password. This makes the wallet accessible
+to anyone who passes your face and liveness checks; see the
+[KWallet security notes](/guide/kde#optional-tpm-backed-kwallet-unlock).
+
+`kde.unlockKwallet` wires the auth and session hooks with Nix store paths for
+SDDM, Plasma Login Manager, and its optional `plasmalogin-fingerprint` service.
+Do **not** run `gaze-kde-pam enable-login` on NixOS: PAM files are managed by the
+module. Face authentication must stay sequential, with the default `sufficient`
+control and no `gaze.retry` on the login services. A failed face attempt still
+falls back to the original password stack. Without an enrolled credential,
+face login still works and the wallet stays locked; lock-screen services never
+receive the wallet password.
+
+If you keep `mutableConfig = true`, enable the three runtime settings in
+`gaze config` instead: changing `services.gaze.settings` does not overwrite an
+existing config file.
 
 The System Settings entry ships in the `gaze-kde` package rather than the NixOS
 module, so on Nix use `gaze add-face` or `services.gaze.gui.enable`.

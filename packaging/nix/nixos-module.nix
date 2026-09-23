@@ -32,6 +32,8 @@ let
   );
 
   pamModule = "${cfg.package}/lib/security/pam_gaze.so";
+  pamPackage = config.security.pam.package;
+  kdeLoginServices = [ "sddm" "plasmalogin" ];
 
   gnomeExtensionUuid = cfg.gnome.extensionPackage.passthru.extensionUuid;
 in
@@ -173,10 +175,21 @@ in
         face authentication in the Plasma Login Manager / SDDM login stack. On a
         greeter without an up-front biometric service this only runs when the
         login form is submitted, exactly as a fingerprint reader does there, and
-        KWallet will ask for its password once because none was typed. It also
+        KWallet will ask for its password unless `kde.unlockKwallet` is enabled
+        and a wallet credential is enrolled. It also
         writes `plasmalogin-fingerprint`, which a Plasma Login Manager carrying
         plasma-login-manager!185 runs before you type. Read
         <https://gaze.gundulabs.com/guide/kde> before enabling
+      '';
+
+      unlockKwallet = lib.mkEnableOption ''
+        KWallet PAM credential handoff after a KDE face login. Requires
+        {option}`services.gaze.kde.loginScreen` and sequential PAM authentication.
+        Also enable `storage.unlock_kwallet`, TPM template encryption, and
+        liveness in Gaze's runtime configuration, then enroll with
+        `gaze keyring --kwallet`. This only wires PAM; it does not enroll a
+        credential or change the runtime security settings. Lock-screen services
+        never receive wallet credentials
       '';
     };
   };
@@ -187,6 +200,12 @@ in
     type = lib.types.attrsOf (
       lib.types.submodule (
         { name, config, ... }:
+        let
+          walletLogin =
+            cfg.enable && cfg.kde.unlockKwallet && lib.elem name kdeLoginServices && config.gaze.enable;
+          gazeOrder = config.rules.auth.gaze.order;
+          walletModule = "${config.kwallet.package}/lib/security/pam_kwallet5.so";
+        in
         {
           options.gaze = {
             enable = lib.mkOption {
@@ -265,12 +284,55 @@ in
                   lib.min unixOrder fprintdOrder;
             in
             {
-              control = config.gaze.control;
+              control = if walletLogin then "[success=1 default=ignore]" else config.gaze.control;
               modulePath = pamModule;
-              args = lib.optional config.gaze.simultaneous "simultaneous";
+              args =
+                lib.optional config.gaze.simultaneous "simultaneous"
+                ++ lib.optional walletLogin "kde-login";
               order = if config.gaze.order != null then config.gaze.order else fallbackOrder - 10;
             }
           );
+
+          # Keep the four handoff rules adjacent. A failed face attempt jumps
+          # over both KWallet and the success terminator to the original stack;
+          # success saves PAM_AUTHTOK without asking pam_unix for a password.
+          config.rules.auth.gazeWalletNologin = lib.mkIf walletLogin {
+            order = gazeOrder - 2;
+            control = "requisite";
+            modulePath = "${pamPackage}/lib/security/pam_nologin.so";
+          };
+          config.rules.auth.gazeWalletFaillock = lib.mkIf walletLogin {
+            order = gazeOrder - 1;
+            control = "requisite";
+            modulePath = "${pamPackage}/lib/security/pam_faillock.so";
+            args = [ "preauth" ];
+          };
+          config.rules.auth.gazeWalletFallback = lib.mkIf walletLogin {
+            order = gazeOrder + 1;
+            control = "[success=2 default=ignore]";
+            modulePath = "${pamPackage}/lib/security/pam_permit.so";
+          };
+          config.rules.auth.gazeWallet = lib.mkIf walletLogin {
+            order = gazeOrder + 2;
+            control = "optional";
+            modulePath = walletModule;
+          };
+          config.rules.auth.gazeWalletSuccess = lib.mkIf walletLogin {
+            order = gazeOrder + 3;
+            control = "[success=done default=ignore]";
+            modulePath = "${pamPackage}/lib/security/pam_permit.so";
+          };
+          # Run after the distro session stack has set up the user's session.
+          # An included login stack may also call KWallet; it tolerates repeats.
+          config.rules.session.gazeWallet = lib.mkIf walletLogin {
+            order =
+              10 + lib.foldl' lib.max 0 (
+                map (rule: rule.order) (lib.attrValues (removeAttrs config.rules.session [ "gazeWallet" ]))
+              );
+            control = "optional";
+            modulePath = walletModule;
+            args = [ "auto_start" ];
+          };
 
           config.rules.auth.gazeRetry = lib.mkIf (config.gaze.enable && config.gaze.retry) (
             let
@@ -291,6 +353,29 @@ in
   config = lib.mkIf cfg.enable (
     lib.mkMerge [
       {
+        assertions = lib.optionals cfg.kde.unlockKwallet (
+          [
+            {
+              assertion = cfg.kde.loginScreen;
+              message = "services.gaze.kde.unlockKwallet requires services.gaze.kde.loginScreen.";
+            }
+          ]
+          ++ lib.optionals cfg.kde.loginScreen (
+            map (
+              name:
+              let
+                pam = config.security.pam.services.${name};
+              in
+              {
+                assertion =
+                  !pam.gaze.enable
+                  || (!pam.gaze.simultaneous && !pam.gaze.retry && pam.gaze.control == "sufficient");
+                message = "services.gaze.kde.unlockKwallet requires sequential, sufficient Gaze auth without retry for ${name}.";
+              }
+            ) kdeLoginServices
+          )
+        );
+
         environment.systemPackages = [ cfg.package ];
 
         # Ships the com.gundulabs.Gaze system bus policy.
@@ -421,14 +506,31 @@ in
         # Plasma Login Manager runs this one alongside the password field instead
         # of after it, so face auth needs no submit. A greeter without
         # plasma-login-manager!185 never opens the service and ignores the file.
-        security.pam.services."plasmalogin-fingerprint".text = ''
-          auth       [success=done default=ignore]  ${cfg.package}/lib/security/pam_gaze.so
-          auth       required                       pam_deny.so
+        security.pam.services."plasmalogin-fingerprint".text =
+          if cfg.kde.unlockKwallet then
+            let
+              walletModule = "${config.security.pam.services.plasmalogin.kwallet.package}/lib/security/pam_kwallet5.so";
+            in
+            ''
+              auth       requisite                       ${pamPackage}/lib/security/pam_nologin.so
+              auth       requisite                       ${pamPackage}/lib/security/pam_faillock.so preauth
+              auth       [success=1 default=ignore]       ${pamModule} kde-login
+              auth       requisite                       ${pamPackage}/lib/security/pam_deny.so
+              auth       optional                        ${walletModule}
 
-          account    required                       pam_permit.so
-          password   required                       pam_deny.so
-          session    required                       pam_permit.so
-        '';
+              account    include                         plasmalogin
+              password   required                        ${pamPackage}/lib/security/pam_deny.so
+              session    include                         plasmalogin
+              session    optional                        ${walletModule} auto_start
+            ''
+          else ''
+            auth       [success=done default=ignore]  ${cfg.package}/lib/security/pam_gaze.so
+            auth       required                       pam_deny.so
+
+            account    required                       pam_permit.so
+            password   required                       pam_deny.so
+            session    required                       pam_permit.so
+          '';
       })
 
       (lib.mkIf cfg.gnome.enable {
