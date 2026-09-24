@@ -416,7 +416,7 @@ fn confirm_from_tty(prompt: PromptLine) -> Option<bool> {
         raw.c_lflag &= !(libc::ICANON | libc::ECHO);
         raw.c_cc[libc::VMIN] = 0;
         raw.c_cc[libc::VTIME] = TTY_CONFIRM_DECISECONDS;
-        if libc::tcsetattr(fd, libc::TCSANOW, &raw) != 0 {
+        if libc::tcsetattr(fd, libc::TCSAFLUSH, &raw) != 0 {
             return None;
         }
 
