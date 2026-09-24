@@ -577,9 +577,9 @@ pub unsafe fn stash_password_and_fallback(pamh: PamHandle, password: &str) -> c_
     let Ok(pw_cstr) = CString::new(password) else {
         return PAM_AUTH_ERR;
     };
-    let rc = unsafe {
+    unsafe {
         pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);
-    };
+    }
     // Linux-PAM copies the token on pam_set_item, so wipe our copy immediately.
     // This covers both the password fallback and the (empty) confirmation case.
     unsafe {
@@ -588,7 +588,6 @@ pub unsafe fn stash_password_and_fallback(pamh: PamHandle, password: &str) -> c_
         std::slice::from_raw_parts_mut(ptr, len).zeroize();
     }
     // pw_cstr drops here; its (now zeroed) allocation is freed.
-    let _ = rc;
     PAM_AUTHINFO_UNAVAIL
 }
 
