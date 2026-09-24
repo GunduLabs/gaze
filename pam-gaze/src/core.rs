@@ -14,6 +14,10 @@ use std::sync::Arc;
 use std::thread;
 
 use gaze_core::config::Config;
+use zeroize::{Zeroize, Zeroizing};
+
+/// Sensitive PAM responses (passwords). Wiped on drop.
+pub type SecretString = Zeroizing<String>;
 
 pub const PAM_SUCCESS: c_int = 0;
 pub const PAM_AUTH_ERR: c_int = 7;
@@ -240,7 +244,22 @@ pub unsafe fn read_first_pass_verdict(pamh: PamHandle) -> Option<FirstPassVerdic
     FirstPassVerdict::from_repr(unsafe { *(data as *const u8) })
 }
 
-pub unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<String> {
+/// Wipe a libc-allocated conversation response before freeing it, so a typed
+/// password never lingers in freed heap memory.
+unsafe fn free_conv_response(resp: *mut c_char) {
+    if resp.is_null() {
+        return;
+    }
+    unsafe {
+        let len = libc::strlen(resp);
+        if len > 0 {
+            std::slice::from_raw_parts_mut(resp as *mut u8, len).zeroize();
+        }
+        libc::free(resp as *mut c_void);
+    }
+}
+
+pub unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<SecretString> {
     unsafe {
         let mut item: *const c_void = ptr::null();
         if pam_get_item(pamh, PAM_CONV, &mut item) != PAM_SUCCESS || item.is_null() {
@@ -263,12 +282,14 @@ pub unsafe fn converse(pamh: PamHandle, msg_style: c_int, text: &str) -> Option<
             return None;
         }
 
-        let mut result = None;
+        let mut result: Option<SecretString> = None;
         if !resp_ptr.is_null() {
             let resp = (*resp_ptr).resp;
             if !resp.is_null() {
-                result = Some(CStr::from_ptr(resp).to_string_lossy().into_owned());
-                libc::free(resp as *mut c_void);
+                result = Some(Zeroizing::new(
+                    CStr::from_ptr(resp).to_string_lossy().into_owned(),
+                ));
+                free_conv_response(resp);
             }
             libc::free(resp_ptr as *mut c_void);
         }
@@ -429,20 +450,28 @@ pub fn has_interactive_tty() -> bool {
     open_interactive_tty().is_some()
 }
 
+/// Fallback prompt when there is no controlling terminal to read Enter from.
+/// Empty must never count as consent here: hosts that answer unknown prompts
+/// with "" would otherwise auto-confirm without the user pressing anything.
+pub const TYPED_CONFIRMATION_PROMPT: &str = "Face Verified. Type 'yes' to confirm.";
+
+pub fn typed_confirmation_accepted(response: Option<&str>) -> bool {
+    response.is_some_and(|resp| resp.trim().eq_ignore_ascii_case("yes"))
+}
+
 pub unsafe fn confirm_authentication(pamh: PamHandle, prompt: PromptLine) -> bool {
     if let Some(confirmed) = confirm_from_tty(prompt) {
         return confirmed;
     }
 
-    unsafe { converse(pamh, PAM_PROMPT_ECHO_ON, CONFIRMATION_PROMPT) }
-        .map(|resp| resp.is_empty())
-        .unwrap_or(false)
+    unsafe { converse(pamh, PAM_PROMPT_ECHO_ON, TYPED_CONFIRMATION_PROMPT) }
+        .is_some_and(|resp| typed_confirmation_accepted(Some(&resp)))
 }
 
 pub unsafe fn confirm_authentication_internal(pamh: PamHandle) -> bool {
     let resp = unsafe { converse(pamh, PAM_PROMPT_ECHO_ON, GAZE_REQUIRE_CONFIRMATION) }
         .or_else(|| unsafe { converse(pamh, PAM_PROMPT_ECHO_OFF, GAZE_REQUIRE_CONFIRMATION) });
-    internal_prompt_confirmation_accepted(resp.as_deref())
+    internal_prompt_confirmation_accepted(resp.as_ref().map(|s| s.as_str()))
 }
 
 pub fn confirmation_accepted(response: Option<&str>) -> bool {
@@ -458,7 +487,7 @@ pub fn confirmation_required(
 }
 
 pub struct AuthState {
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     pub started: bool,
     pub finished: bool,
 }
@@ -520,7 +549,7 @@ pub fn wait_for_prompt_finish(state: &SharedAuthState) {
     }
 }
 
-pub fn wait_for_prompt_response(state: &SharedAuthState) -> Option<String> {
+pub fn wait_for_prompt_response(state: &SharedAuthState) -> Option<SecretString> {
     let (lock, condvar) = &**state;
     let mut shared_state = lock.lock();
     while !shared_state.finished {
@@ -548,9 +577,18 @@ pub unsafe fn stash_password_and_fallback(pamh: PamHandle, password: &str) -> c_
     let Ok(pw_cstr) = CString::new(password) else {
         return PAM_AUTH_ERR;
     };
-    unsafe {
+    let rc = unsafe {
         pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);
+    };
+    // Linux-PAM copies the token on pam_set_item, so wipe our copy immediately.
+    // This covers both the password fallback and the (empty) confirmation case.
+    unsafe {
+        let ptr = pw_cstr.as_ptr() as *mut u8;
+        let len = pw_cstr.as_bytes_with_nul().len();
+        std::slice::from_raw_parts_mut(ptr, len).zeroize();
     }
+    // pw_cstr drops here; its (now zeroed) allocation is freed.
+    let _ = rc;
     PAM_AUTHINFO_UNAVAIL
 }
 
@@ -584,16 +622,17 @@ pub unsafe fn confirm_graphical_polkit(
     let Some(resp) = response else {
         return PAM_AUTH_ERR;
     };
+    let resp_str: &str = &resp;
     if is_internal {
-        if internal_confirmation_accepted(Some(&resp)) {
+        if internal_confirmation_accepted(Some(resp_str)) {
             PAM_SUCCESS
         } else {
-            unsafe { stash_password_and_fallback(pamh, &resp) }
+            unsafe { stash_password_and_fallback(pamh, resp_str) }
         }
-    } else if confirmation_accepted(Some(&resp)) {
+    } else if confirmation_accepted(Some(resp_str)) {
         PAM_SUCCESS
     } else {
-        unsafe { stash_password_and_fallback(pamh, &resp) }
+        unsafe { stash_password_and_fallback(pamh, resp_str) }
     }
 }
 
@@ -617,7 +656,7 @@ pub unsafe fn report(pamh: PamHandle, service: Option<&str>, text: &str) {
     }
 }
 
-pub unsafe fn prompt_password(pamh: PamHandle) -> Option<String> {
+pub unsafe fn prompt_password(pamh: PamHandle) -> Option<SecretString> {
     unsafe { converse(pamh, PAM_PROMPT_ECHO_OFF, "Password: ") }
 }
 
@@ -1339,6 +1378,23 @@ mod tests {
         assert!(!confirmation_accepted(Some("hunter2")));
         assert!(!confirmation_accepted(Some("confirm")));
         assert!(!confirmation_accepted(None));
+    }
+
+    #[test]
+    fn typed_confirmation_never_takes_an_empty_response() {
+        // Hosts that answer unknown prompts with "" must not auto-confirm.
+        assert!(!typed_confirmation_accepted(None));
+        assert!(!typed_confirmation_accepted(Some("")));
+        assert!(!typed_confirmation_accepted(Some("   ")));
+        assert!(!typed_confirmation_accepted(Some("\n")));
+
+        assert!(typed_confirmation_accepted(Some("yes")));
+        assert!(typed_confirmation_accepted(Some("YES")));
+        assert!(typed_confirmation_accepted(Some("  yes\n")));
+
+        assert!(!typed_confirmation_accepted(Some("y")));
+        assert!(!typed_confirmation_accepted(Some("confirm")));
+        assert!(!typed_confirmation_accepted(Some("hunter2")));
     }
 
     #[test]

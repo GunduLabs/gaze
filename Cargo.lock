@@ -1217,6 +1217,7 @@ dependencies = [
  "uuid",
  "zbus",
  "zbus_polkit",
+ "zeroize",
  "zip",
 ]
 
@@ -2576,6 +2577,7 @@ dependencies = [
  "parking_lot",
  "tokio",
  "zbus",
+ "zeroize",
 ]
 
 [[package]]
@@ -2590,6 +2592,7 @@ dependencies = [
  "parking_lot",
  "tokio",
  "zbus",
+ "zeroize",
 ]
 
 [[package]]

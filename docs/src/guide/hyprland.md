@@ -65,7 +65,11 @@ This uses `pam_gaze.so simultaneous`, running Gaze alongside the password prompt
 
 `hyprlock-gaze` is a PAM service that stacks `pam_gaze.so` on top of your
 system password stack (`system-auth` on Fedora/RHEL and Arch, `common-auth` on
-Debian/Ubuntu and openSUSE). The auth flow:
+Debian/Ubuntu and openSUSE), with `pam_nologin` and `pam_faillock preauth`
+running before Gaze. Those gates must come first because a `success=done`
+face match ends the whole auth stack and would otherwise skip the lockout and
+nologin checks the include pulls in (the same reason `gaze-kde-pam` carries
+them inside its own block). The auth flow:
 
 1. hyprlock calls PAM with service name `hyprlock-gaze`
 2. `pam_gaze.so` runs as the logged-in user, claims the camera via the `gazed` DBus service, and runs face verification
