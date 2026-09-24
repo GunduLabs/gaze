@@ -233,7 +233,7 @@ pub struct AuthDaemon {
     pub claim_state: ClaimStateHandle,
     pub active_cancel: ActiveCancelHandle,
     pub active_extensions: Arc<Mutex<std::collections::HashMap<u32, bool>>>,
-    pub pam_internal: Arc<Mutex<std::collections::HashSet<String>>>,
+    pub pam_internal: Arc<Mutex<std::collections::HashMap<u32, std::collections::HashSet<String>>>>,
     pub resume_pending: Arc<AtomicBool>,
     pub resume_seen: Arc<AtomicBool>,
     pub lock_epochs: LockEpochs,
@@ -604,11 +604,27 @@ impl AuthDaemon {
         caller_uid == 0 || active_uid == Some(caller_uid)
     }
 
-    async fn ensure_pam_internal_write_access(header: &Header<'_>) -> fdo::Result<()> {
+    // The PAM module runs as root and cannot say whose dialog it is feeding, so root is answered
+    // for the active session, the one whose shell renders the prompt.
+    fn pam_internal_owner(caller_uid: u32, active_uid: Option<u32>) -> u32 {
+        if caller_uid == 0 {
+            active_uid.unwrap_or(0)
+        } else {
+            caller_uid
+        }
+    }
+
+    async fn pam_internal_read_owner(header: &Header<'_>) -> fdo::Result<u32> {
+        let caller_uid = Self::caller_uid(header).await?;
+        let active_uid = active_session_uid_and_class().await.map(|(uid, _)| uid);
+        Ok(Self::pam_internal_owner(caller_uid, active_uid))
+    }
+
+    async fn pam_internal_write_owner(header: &Header<'_>) -> fdo::Result<u32> {
         let caller_uid = Self::caller_uid(header).await?;
         let active_uid = active_session_uid_and_class().await.map(|(uid, _)| uid);
         if Self::pam_internal_write_allowed(caller_uid, active_uid) {
-            return Ok(());
+            return Ok(Self::pam_internal_owner(caller_uid, active_uid));
         }
         Err(fdo::Error::AccessDenied(
             "only root or the active session may modify the PAM internal services list".into(),
@@ -995,6 +1011,15 @@ mod tests {
         assert!(AuthDaemon::pam_internal_write_allowed(0, Some(1000)));
         assert!(AuthDaemon::pam_internal_write_allowed(0, None));
         assert!(AuthDaemon::pam_internal_write_allowed(1000, Some(1000)));
+    }
+
+    #[test]
+    fn pam_internal_is_kept_per_session_user() {
+        assert_eq!(AuthDaemon::pam_internal_owner(1000, Some(1000)), 1000);
+        // Another user's registration never leaks into the active session's lookup.
+        assert_eq!(AuthDaemon::pam_internal_owner(1001, Some(1000)), 1001);
+        assert_eq!(AuthDaemon::pam_internal_owner(0, Some(1001)), 1001);
+        assert_eq!(AuthDaemon::pam_internal_owner(0, None), 0);
     }
 
     #[test]
@@ -3461,9 +3486,18 @@ impl AuthDaemon {
     }
 
     #[zbus(property)]
-    async fn pam_internal(&self) -> fdo::Result<Vec<String>> {
-        let set = self.pam_internal.lock().await;
-        let mut list: Vec<String> = set.iter().cloned().collect();
+    async fn pam_internal(
+        &self,
+        #[zbus(header)] header: Option<Header<'_>>,
+    ) -> fdo::Result<Vec<String>> {
+        let header =
+            header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
+        let owner = Self::pam_internal_read_owner(&header).await?;
+        let sets = self.pam_internal.lock().await;
+        let mut list: Vec<String> = sets
+            .get(&owner)
+            .map(|set| set.iter().cloned().collect())
+            .unwrap_or_default();
         list.sort();
         Ok(list)
     }
@@ -3476,8 +3510,9 @@ impl AuthDaemon {
     ) -> fdo::Result<()> {
         let header =
             header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
-        Self::ensure_pam_internal_write_access(&header).await?;
-        let mut set = self.pam_internal.lock().await;
+        let owner = Self::pam_internal_write_owner(&header).await?;
+        let mut sets = self.pam_internal.lock().await;
+        let set = sets.entry(owner).or_default();
         set.clear();
         for s in services {
             let normalized = Self::normalize_pam_service(&s);
@@ -3485,7 +3520,7 @@ impl AuthDaemon {
                 set.insert(normalized);
             }
         }
-        info!(services = ?set, "Updated PAM internal services list");
+        info!(uid = owner, services = ?set, "Updated PAM internal services list");
         Ok(())
     }
 
@@ -3494,12 +3529,12 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         service: String,
     ) -> fdo::Result<()> {
-        Self::ensure_pam_internal_write_access(&header).await?;
+        let owner = Self::pam_internal_write_owner(&header).await?;
         let normalized = Self::normalize_pam_service(&service);
         if !normalized.is_empty() {
-            let mut set = self.pam_internal.lock().await;
-            set.insert(normalized.clone());
-            info!(service = %normalized, "Added to PAM internal services");
+            let mut sets = self.pam_internal.lock().await;
+            sets.entry(owner).or_default().insert(normalized.clone());
+            info!(uid = owner, service = %normalized, "Added to PAM internal services");
         }
         Ok(())
     }
@@ -3509,21 +3544,22 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         service: String,
     ) -> fdo::Result<()> {
-        Self::ensure_pam_internal_write_access(&header).await?;
+        let owner = Self::pam_internal_write_owner(&header).await?;
         let normalized = Self::normalize_pam_service(&service);
         if !normalized.is_empty() {
-            let mut set = self.pam_internal.lock().await;
-            set.remove(&normalized);
-            info!(service = %normalized, "Removed from PAM internal services");
+            let mut sets = self.pam_internal.lock().await;
+            if let Some(set) = sets.get_mut(&owner) {
+                set.remove(&normalized);
+            }
+            info!(uid = owner, service = %normalized, "Removed from PAM internal services");
         }
         Ok(())
     }
 
     async fn clear_pam_internal(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
-        Self::ensure_pam_internal_write_access(&header).await?;
-        let mut set = self.pam_internal.lock().await;
-        set.clear();
-        info!("Cleared PAM internal services");
+        let owner = Self::pam_internal_write_owner(&header).await?;
+        self.pam_internal.lock().await.remove(&owner);
+        info!(uid = owner, "Cleared PAM internal services");
         Ok(())
     }
 
