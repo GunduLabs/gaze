@@ -512,10 +512,18 @@ fn wait_for_prompt_finish_within(state: &SharedAuthState, deadline: Duration) ->
     shared_state.finished
 }
 
+const TTY_CONVERSATION_SERVICES: [&str; 6] = ["sudo", "sudo-i", "su", "su-l", "doas", "login"];
+
 /// Whether a prompt started now could be unblocked again, rather than parking a thread inside
-/// the caller's conversation with no way back out.
-fn prompt_is_retirable() -> bool {
-    has_interactive_tty()
+/// the caller's conversation with no way back out. An open `/dev/tty` is not enough: a locker
+/// launched from a shell has one, but its conversation waits on a condition variable that
+/// neither an injected newline nor EINTR can end.
+fn prompt_is_retirable(service: Option<&str>) -> bool {
+    service_reads_the_tty(service) && has_interactive_tty()
+}
+
+fn service_reads_the_tty(service: Option<&str>) -> bool {
+    service.is_some_and(|s| TTY_CONVERSATION_SERVICES.contains(&s))
 }
 
 fn prompt_is_finished(state: &SharedAuthState) -> bool {
@@ -625,9 +633,9 @@ unsafe fn do_authenticate_simultaneous(
 
     let is_polkit = matches!(service, Some(ref s) if s == "polkit-1");
 
-    // Without a terminal a prompt can only be retired by signalling, and graphical conversations
-    // resume their own read on EINTR. Polkit is exempt: it consumes the prompt for confirmation.
-    if !prompt_is_retirable() && !is_polkit {
+    // Only a terminal conversation can be retired; any other one would resume its wait after
+    // every signal. Polkit is exempt: it consumes the prompt for confirmation.
+    if !prompt_is_retirable(service.as_deref()) && !is_polkit {
         let bio = rt.block_on(authenticate_biometric_with_timeout(
             &username,
             service.as_deref(),
@@ -950,6 +958,16 @@ mod tests {
             parse_pam_mode(["retry", "simultaneous"]),
             PamMode::Simultaneous
         );
+    }
+
+    #[test]
+    fn only_terminal_conversations_are_retirable() {
+        for service in TTY_CONVERSATION_SERVICES {
+            assert!(service_reads_the_tty(Some(service)));
+        }
+        assert!(!service_reads_the_tty(Some("hyprlock")));
+        assert!(!service_reads_the_tty(Some("polkit-1")));
+        assert!(!service_reads_the_tty(None));
     }
 
     #[test]
