@@ -1082,19 +1082,23 @@ impl Config {
         Self::load_from(CONFIG_PATH)
     }
 
+    pub fn migrate_file(path: &str) {
+        let Ok(contents) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let Some(migrated) = migrate_legacy_config_contents(&contents) else {
+            return;
+        };
+        match replace_file_atomically(Path::new(path), &migrated) {
+            Ok(()) => tracing::info!("Migrated legacy configuration in {path}"),
+            Err(e) => tracing::warn!("Failed to write migrated config to {path}: {e}"),
+        }
+    }
+
     pub fn load_from(path: &str) -> anyhow::Result<Self> {
         if Path::new(path).exists() {
             let contents = std::fs::read_to_string(path)?;
-            let contents = if let Some(migrated) = migrate_legacy_config_contents(&contents) {
-                if let Err(e) = replace_file_atomically(Path::new(path), &migrated) {
-                    tracing::warn!("Failed to write migrated config to {path}: {e}");
-                } else {
-                    tracing::info!("Migrated legacy configuration in {path}");
-                }
-                migrated
-            } else {
-                contents
-            };
+            let contents = migrate_legacy_config_contents(&contents).unwrap_or(contents);
             let config: Config = toml_edit::de::from_str(&contents)?;
             for key in unknown_config_keys(&contents) {
                 tracing::warn!(
@@ -1650,16 +1654,15 @@ mod tests {
         // Case 1: default 40 frames migrates to 2.0s.
         let temp = TempDir::new("legacy-max-frames-40");
         let path = temp.path().join("config.toml");
-        std::fs::write(
-            &path,
-            "[liveness]\nenabled = true\nthreshold = 0.85\nmax_frames = 40\n",
-        )
-        .unwrap();
+        let legacy = "[liveness]\nenabled = true\nthreshold = 0.85\nmax_frames = 40\n";
+        std::fs::write(&path, legacy).unwrap();
 
         let config = Config::load_from(path.to_str().unwrap()).unwrap();
         assert_eq!(config.liveness.max_seconds, 2.0);
         assert_eq!(config.liveness.threshold, 0.85);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), legacy);
 
+        Config::migrate_file(path.to_str().unwrap());
         let on_disk = std::fs::read_to_string(&path).unwrap();
         assert!(on_disk.contains("max_seconds = 2.0"));
         assert!(!on_disk.contains("max_frames"));
@@ -1676,6 +1679,7 @@ mod tests {
         let config2 = Config::load_from(path2.to_str().unwrap()).unwrap();
         assert_eq!(config2.liveness.max_seconds, 0.83);
 
+        Config::migrate_file(path2.to_str().unwrap());
         let on_disk2 = std::fs::read_to_string(&path2).unwrap();
         assert!(on_disk2.contains("max_seconds = 0.83"));
         assert!(!on_disk2.contains("max_frames"));
