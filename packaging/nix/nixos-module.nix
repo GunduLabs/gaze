@@ -342,6 +342,17 @@ in
             RestrictSUIDSGID = true;
             LockPersonality = true;
             SystemCallArchitectures = "native";
+            # Only D-Bus (AF_UNIX), netlink, and IP for model downloads.
+            RestrictAddressFamilies = [
+              "AF_UNIX"
+              "AF_NETLINK"
+              "AF_INET"
+              "AF_INET6"
+            ];
+            SystemCallFilter = "@system-service";
+            SystemCallErrorNumber = "EPERM";
+            # No ProtectProc: the SSH heuristic walks /proc/<pid>/environ up the
+            # caller chain, which needs other processes visible.
             CapabilityBoundingSet = [
               "CAP_DAC_READ_SEARCH"
               "CAP_DAC_OVERRIDE"
@@ -395,7 +406,12 @@ in
         {
           # A face-only stack, because a noninteractive slot must never reach a
           # module that prompts. Never the simultaneous option here for that reason.
+          # The gates run before Gaze: a `success=done` match ends the whole auth
+          # stack, so anything behind it (faillock, nologin) would otherwise be
+          # skipped by a face unlock. Mirrors gaze-kde-pam's managed block.
           security.pam.services.${slot}.text = ''
+            auth       requisite                      pam_nologin.so
+            auth       requisite                      pam_faillock.so preauth
             auth       [success=done default=ignore]  ${cfg.package}/lib/security/pam_gaze.so
           ''
           + lib.optionalString shareWithReader ''
@@ -421,7 +437,11 @@ in
         # Plasma Login Manager runs this one alongside the password field instead
         # of after it, so face auth needs no submit. A greeter without
         # plasma-login-manager!185 never opens the service and ignores the file.
+        # The gates run before Gaze for the same `success=done` reason as the
+        # lock-screen slot above.
         security.pam.services."plasmalogin-fingerprint".text = ''
+          auth       requisite                      pam_nologin.so
+          auth       requisite                      pam_faillock.so preauth
           auth       [success=done default=ignore]  ${cfg.package}/lib/security/pam_gaze.so
           auth       required                       pam_deny.so
 

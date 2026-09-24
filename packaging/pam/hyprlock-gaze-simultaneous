@@ -2,6 +2,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 #%PAM-1.0
+# A `success=done` match ends the whole auth stack, so these gates run before
+# Gaze rather than behind the `include`: otherwise a face unlock would skip the
+# faillock and nologin checks that include pulls in (see gaze-kde-pam).
+auth        requisite                                    pam_nologin.so
+auth        requisite                                    pam_faillock.so preauth
 auth        [success=done default=ignore]                pam_gaze.so simultaneous
 auth        include                                      system-auth
 account     include                                      system-auth
