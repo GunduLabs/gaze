@@ -801,9 +801,9 @@ impl AuthDaemon {
 #[cfg(test)]
 mod tests {
     use super::{
-        AuthDaemon, ClaimState, ClaimStateHandle, and_policy_unsatisfiable,
-        auth_streams, claim_has_epoch, eyes_from_kpss, hybrid_auth_passed, ir_waits_for_rgb,
-        is_vanish_of, release_claim_epoch, rgb_yields_camera_on_budget, should_yield_rgb_to_ir,
+        AuthDaemon, ClaimState, ClaimStateHandle, and_policy_unsatisfiable, auth_streams,
+        claim_has_epoch, eyes_from_kpss, hybrid_auth_passed, ir_waits_for_rgb, is_vanish_of,
+        release_claim_epoch, rgb_yields_camera_on_budget, should_yield_rgb_to_ir,
     };
     use gaze_core::config::AuthSurface;
     use gaze_core::dbus::{ActiveSession, CaptureStatus};
@@ -1480,13 +1480,23 @@ mod tests {
 
     #[test]
     fn camera_allows_a_root_caller_for_the_user_holding_the_seat() {
-        assert!(AuthDaemon::seat_camera_allowed(0, 1001, Some((1001, false)), false));
+        assert!(AuthDaemon::seat_camera_allowed(
+            0,
+            1001,
+            Some((1001, false)),
+            false
+        ));
     }
 
     #[test]
     fn camera_refuses_bystander_session_for_root_caller() {
         // su victim from the attacker's seat, whether or not the victim is logged in elsewhere.
-        assert!(!AuthDaemon::seat_camera_allowed(0, 1001, Some((1000, false)), false));
+        assert!(!AuthDaemon::seat_camera_allowed(
+            0,
+            1001,
+            Some((1000, false)),
+            false
+        ));
         // A failed logind lookup leaves the seat state unknown, so still refuse.
         assert!(!AuthDaemon::seat_camera_allowed(0, 1001, None, false));
     }
@@ -1513,25 +1523,50 @@ mod tests {
     #[test]
     fn camera_allows_login_greeter_for_root_caller() {
         // GDM login, where the target has no session yet and the active seat is the greeter.
-        assert!(AuthDaemon::seat_camera_allowed(0, 1001, Some((42, true)), false));
+        assert!(AuthDaemon::seat_camera_allowed(
+            0,
+            1001,
+            Some((42, true)),
+            false
+        ));
     }
 
     #[test]
     fn camera_answers_the_greeter_probing_for_itself() {
-        assert!(AuthDaemon::seat_camera_allowed(42, 42, Some((42, true)), false));
-        assert!(!AuthDaemon::seat_camera_allowed(1000, 1000, Some((42, true)), false));
+        assert!(AuthDaemon::seat_camera_allowed(
+            42,
+            42,
+            Some((42, true)),
+            false
+        ));
+        assert!(!AuthDaemon::seat_camera_allowed(
+            1000,
+            1000,
+            Some((42, true)),
+            false
+        ));
     }
 
     #[test]
     fn camera_allows_a_polkit_approved_caller_holding_the_seat() {
         // Admin (non-root) acting for another user after a polkit check, at their own seat.
-        assert!(AuthDaemon::seat_camera_allowed(1000, 1001, Some((1000, false)), false));
+        assert!(AuthDaemon::seat_camera_allowed(
+            1000,
+            1001,
+            Some((1000, false)),
+            false
+        ));
         assert!(!AuthDaemon::seat_camera_allowed(1000, 1001, None, false));
     }
 
     #[test]
     fn camera_refuses_a_background_session_probing_for_itself() {
-        assert!(!AuthDaemon::seat_camera_allowed(1002, 1002, Some((1000, false)), false));
+        assert!(!AuthDaemon::seat_camera_allowed(
+            1002,
+            1002,
+            Some((1000, false)),
+            false
+        ));
     }
 
     #[test]
@@ -1608,8 +1643,18 @@ mod tests {
     #[test]
     fn only_a_privileged_caller_at_a_greeter_reaches_the_seat_device() {
         // Must never let an unprivileged caller borrow a device for someone else.
-        assert!(!AuthDaemon::seat_camera_allowed(1000, 1001, Some((42, true)), false));
-        assert!(!AuthDaemon::seat_camera_allowed(0, 1001, Some((1000, false)), false));
+        assert!(!AuthDaemon::seat_camera_allowed(
+            1000,
+            1001,
+            Some((42, true)),
+            false
+        ));
+        assert!(!AuthDaemon::seat_camera_allowed(
+            0,
+            1001,
+            Some((1000, false)),
+            false
+        ));
     }
 
     #[test]
