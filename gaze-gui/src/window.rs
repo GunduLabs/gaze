@@ -32,6 +32,7 @@ use zbus_polkit::policykit1::{AuthorityProxy, CheckAuthorizationFlags, Subject};
 type RefreshCb = Rc<dyn Fn()>;
 
 const CONFIG_APPLY_DEBOUNCE: Duration = Duration::from_millis(400);
+const AUTH_PROMPT_PRESENTATION_DELAY: Duration = Duration::from_millis(300);
 
 fn load_auth_highlight_css() {
     static AUTH_HIGHLIGHT_CSS: OnceLock<()> = OnceLock::new();
@@ -75,6 +76,93 @@ fn add_dbus_error_toast(window: &libadwaita::ApplicationWindow, prefix: &str, er
 
 fn show_daemon_pending_toast(window: &libadwaita::ApplicationWindow) {
     add_toast(window, "Connecting to the Gaze daemon…");
+}
+
+async fn authorize_face_enrollment() -> anyhow::Result<()> {
+    let conn = Connection::system().await?;
+    let authority = AuthorityProxy::new(&conn).await?;
+    let subject = Subject::new_for_owner(std::process::id(), None, None)?;
+    let result = authority
+        .check_authorization(
+            &subject,
+            "com.gundulabs.gaze.manage-faces",
+            &HashMap::new(),
+            CheckAuthorizationFlags::AllowUserInteraction.into(),
+            "",
+        )
+        .await?;
+    if !result.is_authorized {
+        anyhow::bail!("authorization was cancelled or denied");
+    }
+    Ok(())
+}
+
+async fn begin_face_capture(
+    window: &libadwaita::ApplicationWindow,
+    username: &str,
+    face_name: Option<&str>,
+    proxy: &Rc<GazeProxy<'static>>,
+    refresh: &Rc<RefCell<Option<RefreshCb>>>,
+) {
+    // Start the Polkit request first. If it needs interaction, give the agent a moment to
+    // present its prompt, then warm the camera while the user authenticates.
+    let mut authorization = Box::pin(authorize_face_enrollment());
+    let authorization_done = match futures::future::select(
+        authorization.as_mut(),
+        glib::timeout_future(AUTH_PROMPT_PRESENTATION_DELAY),
+    )
+    .await
+    {
+        futures::future::Either::Left((Ok(()), _)) => true,
+        futures::future::Either::Left((Err(err), _)) => {
+            add_toast(window, format!("Face enrollment: {err}"));
+            return;
+        }
+        futures::future::Either::Right(_) => false,
+    };
+
+    let camera = match load_config_from_daemon(proxy).await {
+        Ok(cfg) => capture_dialog::CameraSetup::from_config(&cfg.cameras),
+        Err(_) => capture_dialog::CameraSetup::fallback(),
+    };
+    let feed = match capture_dialog::prepare_camera_feed(&camera) {
+        Ok(feed) => feed,
+        Err(err) => {
+            add_toast(window, format!("Failed to start camera: {err}"));
+            return;
+        }
+    };
+
+    if !authorization_done {
+        if let Err(err) = authorization.await {
+            feed.stop();
+            add_toast(window, format!("Face enrollment: {err}"));
+            return;
+        }
+    }
+    if let Err(err) = proxy.claim(username).await {
+        feed.stop();
+        add_dbus_error_toast(window, "Failed to claim device", &err);
+        return;
+    }
+
+    capture_dialog::show_capture_dialog(
+        window,
+        username,
+        face_name,
+        proxy,
+        &camera,
+        feed,
+        glib::clone!(
+            #[strong]
+            refresh,
+            move || {
+                if let Some(f) = refresh.borrow().as_ref() {
+                    f();
+                }
+            }
+        ),
+    );
 }
 
 fn set_custom_config_rows_visible(
@@ -1629,32 +1717,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 #[strong]
                 proxy,
                 async move {
-                    if let Err(err) = proxy.claim(&username).await {
-                        add_dbus_error_toast(&window, "Failed to claim device", &err);
-                        return;
-                    }
-
-                    let camera = match load_config_from_daemon(&proxy).await {
-                        Ok(cfg) => capture_dialog::CameraSetup::from_config(&cfg.cameras),
-                        Err(_) => capture_dialog::CameraSetup::fallback(),
-                    };
-
-                    capture_dialog::show_capture_dialog(
-                        &window,
-                        &username,
-                        None,
-                        &proxy,
-                        &camera,
-                        glib::clone!(
-                            #[strong]
-                            refresh,
-                            move || {
-                                if let Some(f) = refresh.borrow().as_ref() {
-                                    f();
-                                }
-                            }
-                        ),
-                    );
+                    begin_face_capture(&window, &username, None, &proxy, &refresh).await;
                 }
             ));
         }
@@ -1982,32 +2045,14 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                 #[strong]
                                                 proxy,
                                                 async move {
-                                                    if let Err(err) = proxy.claim(&username).await {
-                                                        add_dbus_error_toast(&window, "Failed to claim device", &err);
-                                                        return;
-                                                    }
-
-                                                    let camera = match load_config_from_daemon(&proxy).await {
-    Ok(cfg) => capture_dialog::CameraSetup::from_config(&cfg.cameras),
-    Err(_) => capture_dialog::CameraSetup::fallback(),
-};
-
-                                                     capture_dialog::show_capture_dialog(
+                                                    begin_face_capture(
                                                         &window,
                                                         &username,
                                                         Some(&face_name),
                                                         &proxy,
-                                                        &camera,
-                                                        glib::clone!(
-                                                            #[strong]
-                                                            refresh,
-                                                            move || {
-                                                                if let Some(f) = refresh.borrow().as_ref() {
-                                                                    f();
-                                                                }
-                                                            }
-                                                        ),
-                                                    );
+                                                        &refresh,
+                                                    )
+                                                    .await;
                                                 }
                                             ));
                                         }

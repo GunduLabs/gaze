@@ -12,7 +12,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
-use tracing::error;
 
 const PREVIEW_GRACE: Duration = Duration::from_secs(10);
 
@@ -41,29 +40,29 @@ impl CameraSetup {
     }
 }
 
+/// Begin warming the camera before the enrollment authorization dialog appears.
+pub fn prepare_camera_feed(camera: &CameraSetup) -> anyhow::Result<CameraFeed> {
+    let feed = if camera.is_ir {
+        CameraFeed::new_guidance_only()
+    } else {
+        CameraFeed::new(&camera.device)?
+    };
+    feed.start();
+    Ok(feed)
+}
+
 pub fn show_capture_dialog(
     parent: &impl IsA<gtk4::Widget>,
     username: &str,
     face_name: Option<&str>,
     proxy: &Rc<GazeProxy<'static>>,
     camera: &CameraSetup,
+    feed: CameraFeed,
     on_done: impl Fn() + 'static,
 ) {
     let is_ir = camera.is_ir;
     let can_share = camera.can_share;
 
-    let feed = if is_ir {
-        CameraFeed::new_guidance_only()
-    } else {
-        match CameraFeed::new(&camera.device) {
-            Ok(f) => f,
-            Err(err) => {
-                error!(%err, "Camera init failed");
-                return;
-            }
-        }
-    };
-    feed.start();
     let feed = Rc::new(feed);
     let on_done = Rc::new(on_done);
 

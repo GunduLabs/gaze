@@ -8,8 +8,6 @@
 set -e
 
 PKG_BASE_URL="https://packages.gundulabs.com"
-GNOME_DOCS_URL="https://gaze.gundulabs.com/guide/gnome"
-CINNAMON_DOCS_URL="https://gaze.gundulabs.com/guide/cinnamon"
 HYPRLAND_DOCS_URL="https://gaze.gundulabs.com/guide/hyprland"
 KDE_DOCS_URL="https://gaze.gundulabs.com/guide/kde"
 PAM_DOCS_URL="https://gaze.gundulabs.com/guide/pam"
@@ -1179,26 +1177,6 @@ fi
 
 printf '\n%s\n\n' "${GREEN}${BOLD}✓ Gaze installed successfully${RESET}"
 
-# Surface problems while the user is still watching. A fresh install always warns (nothing
-# enrolled, extension pending a reboot), so doctor's exit code must not abort the summary.
-if command -v gaze >/dev/null 2>&1; then
-    title "Health check (gaze doctor)"
-    say "${DIM}Warnings about enrollment or the GNOME extension are expected before the next steps below.${RESET}"
-    if command -v busctl >/dev/null 2>&1; then
-        say "${DIM}Waiting for the daemon to finish first-run model download...${RESET}"
-        i=0
-        while [ "$i" -lt 80 ]; do
-            if busctl --system status com.gundulabs.Gaze >/dev/null 2>&1; then
-                break
-            fi
-            sleep 0.5
-            i=$((i + 1))
-        done
-    fi
-    gaze doctor || true
-    say ""
-fi
-
 title "Next steps"
 say "  1. ${BOLD}gaze config${RESET}            ${DIM}configure your camera and security settings${RESET}"
 say "  2. ${BOLD}gaze add-face <name>${RESET}   ${DIM}enroll your face${RESET}"
@@ -1217,13 +1195,10 @@ fi
 say ""
 title "Desktop integration"
 if want_gnome_extension_package; then
-    ok "GNOME lock screen face unlock: enabled for this user (active after reboot)"
-    say "  ${DIM}GDM login face auth stays off until you enable it:${RESET}"
-    link "${GNOME_DOCS_URL}#optional-enable-face-at-gdm-login"
+    ok "GNOME lock screen face unlock: enabled after reboot"
+    say "  GDM login face auth: off"
 elif want_cinnamon_extension_package; then
     ok "Cinnamon extension: enabled for this user"
-    say "  ${DIM}Provides PolKit elevation confirmation and lock screen authentication:${RESET}"
-    link "$CINNAMON_DOCS_URL"
 elif is_kde_session; then
     if [ "${KDE_PACKAGES_INSTALLED:-0}" -eq 1 ]; then
         ok "KDE Plasma lock screen face unlock: gaze-kde installed"
@@ -1241,19 +1216,3 @@ if want_hyprlock_setup; then
     ok "hyprlock: configured (auth.pam.module = hyprlock-gaze)"
 fi
 say ""
-title "If something does not work"
-say "  ${BOLD}gaze doctor${RESET}            ${DIM}checks every part of the setup and prints the fix for each${RESET}"
-say "  ${DIM}A '○' there marks a feature that is off on purpose; the line below it turns it on.${RESET}"
-if want_gnome_extension_package; then
-    say ""
-    say "  ${DIM}If lock screen face unlock is still missing after the reboot, run from GNOME:${RESET}"
-    print_manual_gnome_enable
-    say "  ${DIM}\"Extension does not exist\" means GNOME Shell has not rescanned yet: reboot and retry.${RESET}"
-elif want_cinnamon_extension_package; then
-    say ""
-    say "  ${DIM}If the Cinnamon extension is not enabled, run from your Cinnamon session:${RESET}"
-    print_manual_cinnamon_enable
-fi
-say ""
-say "Docs:   ${CYAN}https://gaze.gundulabs.com${RESET}"
-say "GitHub: ${CYAN}https://github.com/GunduLabs/gaze${RESET} ${DIM}(issues and feature requests welcome)${RESET}"
