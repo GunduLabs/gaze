@@ -4,6 +4,7 @@
 mod doctor;
 mod keyring;
 mod polkit;
+mod selinux;
 mod tui;
 
 use clap::{CommandFactory, Parser, Subcommand};
@@ -1655,7 +1656,7 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     if which("semodule") {
         plan.push((
             "Remove SELinux policy",
-            "sudo semodule -r gaze-gdm-camera 2>/dev/null || true".into(),
+            "sudo semodule -r gaze-gdm-camera 2>/dev/null; sudo semodule -r gaze-greeter-keyring 2>/dev/null || true".into(),
         ));
     }
 

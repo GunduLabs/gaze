@@ -3,7 +3,7 @@
 
 use crate::core::*;
 use gaze_core::dbus::GazeProxy;
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::os::fd::AsRawFd;
 use std::os::raw::{c_char, c_int};
 use std::os::unix::thread::JoinHandleExt;
@@ -379,27 +379,60 @@ unsafe fn supply_keyring_token(
     username: &str,
     backend: gaze_security::keyring::Backend,
 ) -> Result<(), ()> {
-    if unsafe { libc::geteuid() } != 0 {
-        return Err(());
-    }
+    unsafe { keyring_token(pamh, username, backend) }
+        .map_err(|err| log_keyring_failure(username, backend, &err))
+}
+
+unsafe fn keyring_token(
+    pamh: PamHandle,
+    username: &str,
+    backend: gaze_security::keyring::Backend,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        unsafe { libc::geteuid() } == 0,
+        "the PAM host is not running as root"
+    );
     let mut existing = std::ptr::null();
-    if unsafe { pam_get_item(pamh, PAM_AUTHTOK, &mut existing) } != PAM_SUCCESS {
-        return Err(());
-    }
+    anyhow::ensure!(
+        unsafe { pam_get_item(pamh, PAM_AUTHTOK, &mut existing) } == PAM_SUCCESS,
+        "PAM_AUTHTOK could not be read"
+    );
     // GDM's empty password placeholder must not prevent the keyring hand-off.
     if unsafe { existing_token_has_password(existing.cast()) } {
         return Ok(());
     }
     // An unenrolled user has nothing to unlock: leave the keyring locked as before rather
     // than failing the face login for everyone who has not run `gaze keyring`.
-    let Some(secret) = gaze_security::keyring::load_for(backend, username).map_err(|_| ())? else {
+    let Some(secret) = gaze_security::keyring::load_for(backend, username)? else {
         return Ok(());
     };
     // Linux-PAM copies the token; our zeroizing buffer is dropped immediately afterwards.
-    if unsafe { pam_set_item(pamh, PAM_AUTHTOK, secret.as_ptr().cast()) } != PAM_SUCCESS {
-        return Err(());
-    }
+    anyhow::ensure!(
+        unsafe { pam_set_item(pamh, PAM_AUTHTOK, secret.as_ptr().cast()) } == PAM_SUCCESS,
+        "PAM_AUTHTOK could not be set"
+    );
     Ok(())
+}
+
+// The chain names the failing step (shadow record, credential file, TPM), never the secret.
+fn log_keyring_failure(
+    username: &str,
+    backend: gaze_security::keyring::Backend,
+    err: &anyhow::Error,
+) {
+    let Ok(message) = CString::new(format!(
+        "pam_gaze: {} unlock unavailable for {username}: {err:#}",
+        backend.name()
+    )) else {
+        return;
+    };
+    unsafe {
+        libc::syslog(
+            libc::LOG_AUTHPRIV | libc::LOG_WARNING,
+            c"%s".as_ptr(),
+            message.as_ptr(),
+        )
+    };
 }
 
 // A non-null token must point to readable PAM-owned memory.

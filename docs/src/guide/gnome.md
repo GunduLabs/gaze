@@ -126,6 +126,12 @@ gaze keyring
 The password is stored in a root-only TPM-protected record. It is not sent over
 DBus. Re-enroll it after changing the account or keyring password.
 
+On SELinux systems (Fedora, and openSUSE Tumbleweed installs made since early
+2025) the GDM session worker is confined and cannot read `/etc/shadow` or the
+TPM, both of which the unlock needs. `gaze keyring` loads the
+`gaze-greeter-keyring` policy module to allow this, and `sudo gaze doctor`
+reports it as **Keyring SELinux policy**.
+
 To remove the stored record, run `gaze keyring --forget`. `gaze clear-user` also
 removes it. An administrator can act on another account with
 `sudo gaze keyring --user <name>`.

@@ -277,6 +277,11 @@ The credential is separate from GNOME Keyring enrollment, so the two wallets can
 have different passwords. It lives encrypted under `/var/lib/gaze/kwallet` and
 is never sent over DBus. After face authentication and liveness succeed, the PAM
 module supplies it to KWallet's auth hook; the session hook opens the wallet.
+
+On SELinux systems the greeter's PAM worker is confined and cannot read
+`/etc/shadow` or the TPM, both of which the unlock needs. `gaze keyring
+--kwallet` loads the `gaze-greeter-keyring` policy module to allow this, and
+`sudo gaze doctor` reports it as **Keyring SELinux policy**.
 The helper preserves the distribution's password fallback and session setup.
 Users without an enrolled credential still log in by face and unlock the wallet
 inside their session, without an extra greeter password prompt.

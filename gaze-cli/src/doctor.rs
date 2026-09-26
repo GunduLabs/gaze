@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use crate::selinux::{self, ModuleState};
 use console::{Term, style};
 use gaze_core::config::{
     CONFIG_PATH, Config, MAX_LIVENESS_MAX_SECONDS, MAX_LIVENESS_THRESHOLD,
@@ -53,9 +54,6 @@ const GDM_DISABLE_EXTENSIONS_KEY: &str = "/org/gnome/shell/disable-user-extensio
 const GDM_HOME_DIRS: [&str; 2] = ["/var/lib/gdm", "/var/lib/gdm3"];
 const GDM_COMPILED_DB_PATH: &str = "/etc/dconf/db/gdm";
 const GDM_FACE_PAM_SERVICE: &str = "gdm-face";
-const SELINUX_ENFORCE_PATH: &str = "/sys/fs/selinux/enforce";
-const GDM_SELINUX_MODULE: &str = "gaze-gdm-camera";
-const GDM_SELINUX_POLICY_PATH: &str = "/usr/share/gaze/gaze-gdm-camera.pp";
 const TPM_DEVICES: [&str; 2] = ["/dev/tpmrm0", "/dev/tpm0"];
 /// Files that decide what runs as root or who may talk to the daemon. A writable entry here
 /// is a path to root, so they are held to the same ownership rule as the PAM stack.
@@ -196,6 +194,7 @@ pub async fn run(username: &str, benchmark: bool) -> anyhow::Result<bool> {
     check_tpm(&mut report, config.as_ref());
     check_keyring(&mut report, username, config.as_ref());
     check_kwallet(&mut report, username, config.as_ref());
+    check_greeter_keyring_selinux(&mut report, config.as_ref());
     check_daemon(&mut report, username, config.as_ref(), benchmark).await;
 
     report.print()?;
@@ -478,82 +477,50 @@ fn gdm_greeter_readiness() -> GdmGreeterReadiness {
     GdmGreeterReadiness::Ready
 }
 
-fn selinux_is_enforcing() -> bool {
-    fs::read_to_string(SELINUX_ENFORCE_PATH).is_ok_and(|value| value.trim() == "1")
-}
-
-fn semodule_lists(output: &str, module: &str) -> bool {
-    output
-        .lines()
-        .any(|line| line.split_whitespace().next() == Some(module))
-}
-
-enum GdmCameraPolicy {
-    Loaded,
-    NotLoaded,
-    NeedsRoot,
-    Unverifiable(String),
-}
-
-fn gdm_camera_policy() -> GdmCameraPolicy {
-    if !running_as_root() {
-        return GdmCameraPolicy::NeedsRoot;
-    }
-
-    match command_output("semodule", &["-l"]) {
-        Ok((true, output)) if semodule_lists(&output, GDM_SELINUX_MODULE) => {
-            GdmCameraPolicy::Loaded
-        }
-        Ok((true, _)) => GdmCameraPolicy::NotLoaded,
-        Ok((false, message)) => GdmCameraPolicy::Unverifiable(message),
-        Err(err) => GdmCameraPolicy::Unverifiable(err.to_string()),
-    }
-}
-
 fn gdm_selinux_fix() -> String {
-    if Path::new(GDM_SELINUX_POLICY_PATH).exists() {
-        format!("Run `sudo semodule -i {GDM_SELINUX_POLICY_PATH}`, then reboot.")
+    let path = selinux::policy_path(selinux::GDM_CAMERA_MODULE);
+    if Path::new(&path).exists() {
+        format!("Run `sudo semodule -i {path}`, then reboot.")
     } else {
-        format!(
-            "Reinstall the Gaze GNOME extension package to restore {GDM_SELINUX_POLICY_PATH}, then reboot."
-        )
+        format!("Reinstall the Gaze GNOME extension package to restore {path}, then reboot.")
     }
 }
 
 fn check_gdm_selinux(report: &mut Report) {
-    if !selinux_is_enforcing() {
+    if !selinux::is_enforcing() {
         return;
     }
 
-    report_gdm_camera_policy(report, gdm_camera_policy());
+    report_gdm_camera_policy(report, selinux::module_state(selinux::GDM_CAMERA_MODULE));
 }
 
-fn report_gdm_camera_policy(report: &mut Report, policy: GdmCameraPolicy) {
+fn report_gdm_camera_policy(report: &mut Report, policy: ModuleState) {
+    let module = selinux::GDM_CAMERA_MODULE;
     match policy {
-        GdmCameraPolicy::Loaded => report.pass(
+        ModuleState::Loaded => report.pass(
             "GDM camera SELinux policy",
-            format!("{GDM_SELINUX_MODULE} is loaded, so the greeter can open the camera"),
+            format!("{module} is loaded, so the greeter can open the camera"),
         ),
-        GdmCameraPolicy::NotLoaded => report.error(
+        ModuleState::NotLoaded => report.error(
             "GDM camera SELinux policy",
             format!(
-                "SELinux is enforcing and {GDM_SELINUX_MODULE} is not loaded, so the GDM greeter is denied the camera and the login screen never scans"
+                "SELinux is enforcing and {module} is not loaded, so the GDM greeter is denied the camera and the login screen never scans"
             ),
             gdm_selinux_fix(),
         ),
-        GdmCameraPolicy::NeedsRoot => report.warning(
+        ModuleState::NeedsRoot => report.warning(
             "GDM camera SELinux policy",
             format!(
-                "SELinux is enforcing, and whether {GDM_SELINUX_MODULE} is loaded could not be \
+                "SELinux is enforcing, and whether {module} is loaded could not be \
                  checked without root"
             ),
             "Run `sudo gaze doctor` to read the loaded module list.",
         ),
-        GdmCameraPolicy::Unverifiable(why) => report.warning(
+        ModuleState::Unverifiable(why) => report.warning(
             "GDM camera SELinux policy",
             format!("SELinux is enforcing, but the loaded module list could not be read: {why}"),
             format!(
-                "Run `semodule -l | grep {GDM_SELINUX_MODULE}`; if it prints nothing, {}",
+                "Run `semodule -l | grep {module}`; if it prints nothing, {}",
                 gdm_selinux_fix()
             ),
         ),
@@ -1924,6 +1891,54 @@ fn check_keyring(report: &mut Report, username: &str, config: Option<&Config>) {
     );
 }
 
+fn check_greeter_keyring_selinux(report: &mut Report, config: Option<&Config>) {
+    let Some(config) = config else { return };
+    let enabled = config.storage.unlock_gnome_keyring || config.storage.unlock_kwallet;
+    if !enabled || !selinux::is_enforcing() {
+        return;
+    }
+    report_greeter_keyring_policy(
+        report,
+        selinux::module_state(selinux::GREETER_KEYRING_MODULE),
+    );
+}
+
+fn report_greeter_keyring_policy(report: &mut Report, policy: ModuleState) {
+    const NAME: &str = "Keyring SELinux policy";
+    let module = selinux::GREETER_KEYRING_MODULE;
+    let fix = format!(
+        "Run `sudo semodule -i {}`, then retry the face login.",
+        selinux::policy_path(module)
+    );
+    match policy {
+        ModuleState::Loaded => report.pass(
+            NAME,
+            format!("{module} is loaded, so the login screen can read the keyring record"),
+        ),
+        ModuleState::NotLoaded => report.error(
+            NAME,
+            format!(
+                "SELinux is enforcing and {module} is not loaded, so the login screen cannot read \
+                 the shadow record or the TPM and every face login falls back to the password"
+            ),
+            fix,
+        ),
+        ModuleState::NeedsRoot => report.warning(
+            NAME,
+            format!(
+                "SELinux is enforcing, and whether {module} is loaded could not be checked \
+                 without root"
+            ),
+            "Run `sudo gaze doctor` to read the loaded module list.",
+        ),
+        ModuleState::Unverifiable(why) => report.warning(
+            NAME,
+            format!("SELinux is enforcing, but the loaded module list could not be read: {why}"),
+            format!("Run `semodule -l | grep {module}`; if it prints nothing, {fix}"),
+        ),
+    }
+}
+
 fn report_keyring_record(report: &mut Report, username: &str, state: Option<bool>) {
     match state {
         Some(true) => report.pass(
@@ -2877,21 +2892,6 @@ mod tests {
     }
 
     #[test]
-    fn a_loaded_selinux_module_is_matched_on_the_name_column() {
-        let listing = "gaze-gdm-camera\t1.0\nzoneminder\t1.0\n";
-        assert!(semodule_lists(listing, GDM_SELINUX_MODULE));
-        assert!(!semodule_lists("zoneminder\t1.0\n", GDM_SELINUX_MODULE));
-        assert!(
-            !semodule_lists("gaze-gdm-camera-extra\t1.0\n", GDM_SELINUX_MODULE),
-            "a longer module name sharing the prefix must not match"
-        );
-        assert!(
-            !semodule_lists("something gaze-gdm-camera\n", GDM_SELINUX_MODULE),
-            "only the first column names the module"
-        );
-    }
-
-    #[test]
     fn an_unreadable_module_store_is_never_reported_as_a_missing_policy() {
         let reported = |policy| {
             let mut report = Report::default();
@@ -2904,17 +2904,17 @@ mod tests {
             (check.level, check.message, check.fix.unwrap_or_default())
         };
 
-        let (level, _, _) = reported(GdmCameraPolicy::Loaded);
+        let (level, _, _) = reported(ModuleState::Loaded);
         assert_eq!(level, Level::Pass);
 
-        let (level, _, _) = reported(GdmCameraPolicy::NotLoaded);
+        let (level, _, _) = reported(ModuleState::NotLoaded);
         assert_eq!(
             level,
             Level::Error,
             "a module store we read and found empty is a real failure"
         );
 
-        let (level, message, fix) = reported(GdmCameraPolicy::NeedsRoot);
+        let (level, message, fix) = reported(ModuleState::NeedsRoot);
         assert_eq!(level, Level::Warning);
         assert!(
             message.contains("without root"),
@@ -2933,7 +2933,45 @@ mod tests {
             "loading a module that may already be there is not the remedy: {fix}"
         );
 
-        let (level, _, _) = reported(GdmCameraPolicy::Unverifiable("broken".into()));
+        let (level, _, _) = reported(ModuleState::Unverifiable("broken".into()));
+        assert_eq!(level, Level::Warning);
+    }
+
+    #[test]
+    fn a_missing_keyring_policy_is_only_an_error_once_the_module_store_was_read() {
+        let reported = |policy| {
+            let mut report = Report::default();
+            report_greeter_keyring_policy(&mut report, policy);
+            let check = report
+                .checks
+                .into_iter()
+                .find(|check| check.name == "Keyring SELinux policy")
+                .expect("the keyring SELinux check always reports once it runs");
+            (check.level, check.message, check.fix.unwrap_or_default())
+        };
+
+        let (level, _, _) = reported(ModuleState::Loaded);
+        assert_eq!(level, Level::Pass);
+
+        let (level, _, fix) = reported(ModuleState::NotLoaded);
+        assert_eq!(level, Level::Error);
+        assert!(
+            fix.contains("semodule -i /usr/share/gaze/gaze-greeter-keyring.pp"),
+            "the fix names the shipped module: {fix}"
+        );
+
+        let (level, message, fix) = reported(ModuleState::NeedsRoot);
+        assert_eq!(level, Level::Warning);
+        assert!(
+            !message.contains("is not loaded"),
+            "an unchecked module must not be reported as absent: {message}"
+        );
+        assert!(
+            fix.contains("sudo gaze doctor"),
+            "the fix is to re-run as root, not to load the module: {fix}"
+        );
+
+        let (level, _, _) = reported(ModuleState::Unverifiable("broken".into()));
         assert_eq!(level, Level::Warning);
     }
 

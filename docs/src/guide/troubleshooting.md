@@ -362,8 +362,9 @@ but the GDM login screen never opens the camera, SELinux may be denying the
 greeter the camera device. Gaze ships a policy module for this and the
 extension package loads it on install, but that step cannot fail the package
 transaction, so a rejected policy leaves no trace beyond the greeter silently
-not scanning. openSUSE normally uses AppArmor; use this check there only if you
-have explicitly enabled SELinux.
+not scanning. Fedora and openSUSE Tumbleweed installs made since early 2025
+enforce SELinux by default; older openSUSE installs use AppArmor, where this
+check does not apply.
 
 `gaze doctor` reports this as **GDM camera SELinux policy**, but only under
 `sudo`: reading the loaded module list needs root, so a plain `gaze doctor` says
@@ -380,6 +381,28 @@ If the module is not listed, load it and reboot:
 ```bash
 sudo semodule -i /usr/share/gaze/gaze-gdm-camera.pp
 sudo reboot
+```
+
+#### Keyring unlock never happens on SELinux systems
+
+If GDM or lock-screen face login works until you enable `unlock_gnome_keyring`
+(or `unlock_kwallet`), and then every attempt ends with "Keyring unlock
+unavailable. Enter your password.", the greeter's PAM worker is being denied
+what the hand-off needs. It runs confined as `xdm_t`, and the distribution
+policy hides its `/etc/shadow` reads behind a `dontaudit` rule, so nothing shows
+up in `ausearch`. Gaze ships a second policy module for this and `gaze keyring`
+loads it after enrolling a credential; `sudo gaze doctor` reports it as
+**Keyring SELinux policy**. The worker also logs the failing step:
+
+```bash
+sudo journalctl -b -g 'pam_gaze:'
+sudo semodule -l | grep gaze-greeter-keyring
+```
+
+If the module is not listed, load it and retry the face login:
+
+```bash
+sudo semodule -i /usr/share/gaze/gaze-greeter-keyring.pp
 ```
 
 ### Cinnamon
