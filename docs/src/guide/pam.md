@@ -229,6 +229,22 @@ The `--gaze` option is provided by the Gaze package's definition under
 that the base `gaze` package (not only `gaze-gui` or the GNOME extension) is
 installed.
 
+### sudo asks for the root password
+
+openSUSE's vendor `/usr/etc/sudoers` sets `Defaults targetpw`, so `sudo`
+authenticates the target user (root) rather than you. Root has no face
+enrollment, so the camera never starts and sudo asks for the root password even
+though `gaze auth` and `sudo -u "$USER" -v` work. `gaze doctor` reports this as
+**Sudo policy**. openSUSE ships a drop-in that exempts members of `wheel`:
+
+```bash
+sudo zypper install sudo-policy-wheel-auth-self
+```
+
+After that, `sudo` authenticates you with your own password or face. Outside
+`wheel`, drop `Defaults targetpw` with `visudo` or scope it with
+`Defaults:%<group> !targetpw`.
+
 ### Simultaneous mode on openSUSE
 
 There is no `pam-config` definition for simultaneous mode. The package ships

@@ -182,6 +182,7 @@ pub async fn run(username: &str, benchmark: bool) -> anyhow::Result<bool> {
     check_systemd(&mut report);
     let config = check_config(&mut report);
     check_pam(&mut report);
+    check_sudo_policy(&mut report, username);
     check_privileged_files(&mut report);
     check_desktop_integration(&mut report);
     check_kde_confirmation_bypass(
@@ -1239,6 +1240,144 @@ fn check_elevation_pam(report: &mut Report) {
             ),
             shared_stack_hint(),
         );
+    }
+}
+
+const SUDO_TARGET_OPTIONS: [&str; 3] = ["targetpw", "rootpw", "runaspw"];
+const SUSE_VENDOR_SUDOERS: &str = "/usr/etc/sudoers";
+const ADMIN_SUDOERS: &str = "/etc/sudoers";
+const SUSE_SELF_AUTH_DROPINS: [&str; 4] = [
+    "/etc/sudoers.d/50-wheel-auth-self",
+    "/usr/etc/sudoers.d/50-wheel-auth-self",
+    "/etc/sudoers.d/50-sudo-auth-self",
+    "/usr/etc/sudoers.d/50-sudo-auth-self",
+];
+
+enum SudoPolicy {
+    AuthenticatesInvoker,
+    AuthenticatesTarget(&'static str),
+    ProbablyTargetPw,
+    Unknown,
+}
+
+fn sudo_target_auth_option(listing: &str) -> Option<&'static str> {
+    let mut entries = String::new();
+    let mut in_defaults = false;
+    for line in listing.lines() {
+        if line.starts_with("Matching Defaults entries") {
+            in_defaults = true;
+            continue;
+        }
+        if in_defaults {
+            if line.trim().is_empty() {
+                break;
+            }
+            entries.push_str(line);
+            entries.push(',');
+        }
+    }
+    entries.split(',').map(str::trim).find_map(|entry| {
+        SUDO_TARGET_OPTIONS
+            .iter()
+            .copied()
+            .find(|option| entry == *option)
+    })
+}
+
+fn suse_self_auth_dropin_present() -> Option<bool> {
+    let mut present = false;
+    for path in SUSE_SELF_AUTH_DROPINS {
+        match fs::symlink_metadata(path) {
+            Ok(_) => present = true,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return None,
+        }
+    }
+    Some(present)
+}
+
+fn sudo_policy(username: &str) -> SudoPolicy {
+    if running_as_root() {
+        return match command_output_env(
+            "sudo",
+            &["-n", "-l", "-U", username],
+            &[("LC_ALL", OsStr::new("C"))],
+        ) {
+            Ok((true, listing)) => match sudo_target_auth_option(&listing) {
+                Some(option) => SudoPolicy::AuthenticatesTarget(option),
+                None => SudoPolicy::AuthenticatesInvoker,
+            },
+            _ => SudoPolicy::Unknown,
+        };
+    }
+    let vendor_default_in_force =
+        Path::new(SUSE_VENDOR_SUDOERS).exists() && !Path::new(ADMIN_SUDOERS).exists();
+    match suse_self_auth_dropin_present() {
+        Some(false) if vendor_default_in_force => SudoPolicy::ProbablyTargetPw,
+        _ => SudoPolicy::Unknown,
+    }
+}
+
+fn os_release_is_suse() -> bool {
+    fs::read_to_string("/etc/os-release")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .contains("suse")
+}
+
+fn check_sudo_policy(report: &mut Report, username: &str) {
+    if read_pam_service(&format!("/etc/pam.d/{ELEVATION_PAM_SERVICE}")).is_none() {
+        return;
+    }
+    report_sudo_policy(
+        report,
+        username,
+        sudo_policy(username),
+        os_release_is_suse(),
+    );
+}
+
+fn report_sudo_policy(report: &mut Report, username: &str, policy: SudoPolicy, suse: bool) {
+    const NAME: &str = "Sudo policy";
+    match policy {
+        SudoPolicy::AuthenticatesInvoker => report.pass(
+            NAME,
+            format!(
+                "sudo authenticates {username}, so their face enrollment covers terminal elevation"
+            ),
+        ),
+        SudoPolicy::AuthenticatesTarget(option) => {
+            let fix = if suse {
+                format!(
+                    "openSUSE ships this default. Let members of `wheel` authenticate as themselves \
+                     with `sudo zypper install sudo-policy-wheel-auth-self`, or drop `Defaults \
+                     {option}` with `visudo`."
+                )
+            } else {
+                format!(
+                    "Drop `Defaults {option}` with `visudo`, or exempt your admin group with \
+                     `Defaults:%wheel !{option}`."
+                )
+            };
+            report.warning(
+                NAME,
+                format!(
+                    "sudo is configured with `Defaults {option}`, so it authenticates the target \
+                     user (root) and never reaches {username}'s face enrollment"
+                ),
+                fix,
+            );
+        }
+        SudoPolicy::ProbablyTargetPw => report.warning(
+            NAME,
+            format!(
+                "openSUSE's default sudo policy (`Defaults targetpw`) authenticates root instead \
+                 of {username}, and no drop-in exempting `wheel` is installed"
+            ),
+            "Run `sudo gaze doctor` to confirm from the resolved policy, then \
+             `sudo zypper install sudo-policy-wheel-auth-self`.",
+        ),
+        SudoPolicy::Unknown => {}
     }
 }
 
@@ -2703,6 +2842,68 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_target_password_default_is_read_from_the_resolved_sudo_listing() {
+        let listing = "Matching Defaults entries for alice on host:\n    always_set_home, \
+                       env_reset, env_keep=\"LANG LC_ADDRESS\", !insults,\n    \
+                       secure_path=\"/usr/sbin:/usr/bin:/sbin:/bin\", targetpw\n\nUser alice \
+                       may run the following commands on host:\n    (ALL) ALL\n";
+        assert_eq!(sudo_target_auth_option(listing), Some("targetpw"));
+        assert_eq!(
+            sudo_target_auth_option(&listing.replace("targetpw", "!targetpw")),
+            None,
+            "a negated option means the invoking user is authenticated"
+        );
+        assert_eq!(
+            sudo_target_auth_option(&listing.replace("targetpw", "rootpw")),
+            Some("rootpw")
+        );
+        assert_eq!(
+            sudo_target_auth_option(
+                "User alice may run the following commands on host:\n    targetpw\n"
+            ),
+            None,
+            "only the Defaults block is consulted"
+        );
+    }
+
+    #[test]
+    fn sudo_policy_is_only_a_warning_and_names_the_distribution_remedy() {
+        let reported = |policy, suse| {
+            let mut report = Report::default();
+            report_sudo_policy(&mut report, "alice", policy, suse);
+            report
+                .checks
+                .into_iter()
+                .find(|check| check.name == "Sudo policy")
+        };
+
+        let check = reported(SudoPolicy::AuthenticatesInvoker, true).unwrap();
+        assert_eq!(check.level, Level::Pass);
+
+        let check = reported(SudoPolicy::AuthenticatesTarget("targetpw"), true).unwrap();
+        assert_eq!(check.level, Level::Warning);
+        assert!(
+            check
+                .fix
+                .unwrap_or_default()
+                .contains("sudo-policy-wheel-auth-self")
+        );
+
+        let check = reported(SudoPolicy::AuthenticatesTarget("rootpw"), false).unwrap();
+        assert_eq!(check.level, Level::Warning);
+        assert!(check.fix.unwrap_or_default().contains("visudo"));
+
+        let check = reported(SudoPolicy::ProbablyTargetPw, true).unwrap();
+        assert_eq!(check.level, Level::Warning);
+        assert!(
+            check.fix.unwrap_or_default().contains("sudo gaze doctor"),
+            "an unprivileged guess asks for confirmation before a package install"
+        );
+
+        assert!(reported(SudoPolicy::Unknown, false).is_none());
+    }
 
     #[test]
     fn pam_include_targets_are_read_from_both_include_forms() {
