@@ -205,8 +205,8 @@ fn resolve_bus(profile: &I2cIrProfile) -> Result<String, String> {
     }
 
     let name_path = video_sysfs_path(node, "name");
-    let capture_name = std::fs::read_to_string(&name_path)
-        .map_err(|e| format!("cannot read {name_path}: {e}"))?;
+    let capture_name =
+        std::fs::read_to_string(&name_path).map_err(|e| format!("cannot read {name_path}: {e}"))?;
     if capture_name.trim() != profile.capture_name {
         return Err(format!(
             "{name_path} is {:?}, expected {:?}",
@@ -216,8 +216,9 @@ fn resolve_bus(profile: &I2cIrProfile) -> Result<String, String> {
     }
 
     if let (Some(marker), Some(driver)) = (profile.source_marker, profile.source_driver) {
-        let source = std::fs::read_to_string(marker)
-            .map_err(|e| format!("cannot read bridge marker {marker}: {e}; is the IR bridge running?"))?;
+        let source = std::fs::read_to_string(marker).map_err(|e| {
+            format!("cannot read bridge marker {marker}: {e}; is the IR bridge running?")
+        })?;
         let source = source.trim();
         if !source.starts_with("/dev/video") || !is_char_device(source) {
             return Err(format!(

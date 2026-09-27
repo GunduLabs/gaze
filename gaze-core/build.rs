@@ -239,7 +239,11 @@ fn parse_i2c_profile(path: &Path) -> ProcessedI2cProfile {
         "{}: emitter.register does not fit in one byte",
         path.display()
     );
-    assert!(emitter.mask != 0, "{}: emitter.mask is zero", path.display());
+    assert!(
+        emitter.mask != 0,
+        "{}: emitter.mask is zero",
+        path.display()
+    );
     assert!(
         emitter.on & !emitter.mask == 0 && emitter.off & !emitter.mask == 0,
         "{}: emitter.on and emitter.off must only set bits inside emitter.mask",
@@ -251,10 +255,7 @@ fn parse_i2c_profile(path: &Path) -> ProcessedI2cProfile {
         path.display()
     );
 
-    ProcessedI2cProfile {
-        device,
-        emitter,
-    }
+    ProcessedI2cProfile { device, emitter }
 }
 
 fn render_i2c_profiles(profiles: &[ProcessedI2cProfile]) -> String {
