@@ -262,7 +262,9 @@ The Logitech BRIO 4K (`046d:085e`) is a known example. That's the original BRIO,
 
 Many IR cameras automatically light their infrared LED when streaming starts. If yours does not, set `emitter_enabled = true` to manually drive the emitter during authentication.
 
-Gaze resolves the underlying `/dev/video*` node from the PipeWire camera, matches it by USB VID:PID against a small built-in table, and also probes at runtime for the standard Microsoft Face Authentication control to send UVC toggle requests. If the emitter does not light even with `emitter_enabled = true`, the camera may need a profile added under `gaze-core/ir-profiles/`.
+Gaze resolves the underlying `/dev/video*` node from the PipeWire camera, matches USB cameras by VID:PID against a small built-in table, and probes for the standard Microsoft Face Authentication UVC control. The Surface Pro 4 OV7251 also has a hardware-specific I2C backend when Gaze is configured for the `Surface IR Camera` bridge output at `/dev/video42` and the companion Surface IR bridge has identified an IPU3/CIO2 source with the OV7251 driver. That backend is specific to the verified Surface Pro 4 wiring and must not be assumed to work on other Surface models or OV7251 devices.
+
+The files under `gaze-core/ir-profiles/` describe USB UVC extension-unit requests only; they cannot configure I2C emitters. Other non-USB cameras need a separately reviewed backend with hardware identification and verified on/off behavior.
 
 On the IR path, liveness uses eye-motion analysis across frames; the RGB MiniFASNet model is not applied to infrared.
 
