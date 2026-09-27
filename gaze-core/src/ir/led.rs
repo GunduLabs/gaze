@@ -4,10 +4,9 @@
 use crate::ir::devices::{
     CameraBus, IrControl, IrDevice, IrQuery, camera_bus, find_device, usb_ids_of,
 };
+use crate::ir::i2c::I2cEmitter;
 use std::collections::HashMap;
-use std::io::Write;
 use std::os::unix::io::AsRawFd;
-use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 // UVCIOC_CTRL_QUERY, i.e. _IOWR('u', 0x21, struct uvc_xu_control_query). Hardcoded because
@@ -23,21 +22,6 @@ const FACE_AUTH_LEN: usize = 9;
 const FACE_AUTH_ON_ALT_FRAME: [u8; FACE_AUTH_LEN] = [1, 3, 2, 0, 0, 0, 0, 0, 0];
 const FACE_AUTH_OFF_DISABLED: [u8; FACE_AUTH_LEN] = [1, 3, 1, 0, 0, 0, 0, 0, 0];
 const FACE_AUTH_PROBE_MAX_UNIT: u8 = 31;
-
-// Linux i2c-dev ioctl. The Surface Pro 4's OV7251 is an ACPI/IPU3 sensor, so
-// it has no UVC extension-unit node. This backend is enabled only after the
-// live IPU3 source and the ACPI OV7251 driver are both identified below.
-const I2C_SLAVE_FORCE: libc::c_ulong = 0x0706;
-const SURFACE_I2C_BUS: &str = "/dev/i2c-3";
-const SURFACE_I2C_ADDRESS: u16 = 0x60;
-const SURFACE_STROBE_REGISTER_HIGH: u8 = 0x30;
-const SURFACE_STROBE_REGISTER_LOW: u8 = 0x05;
-const SURFACE_STROBE_ON: u8 = 0x08;
-const SURFACE_STROBE_OFF: u8 = 0x00;
-const SURFACE_BRIDGE_NODE: &str = "/dev/video42";
-const SURFACE_BRIDGE_NAME: &str = "Surface IR Camera";
-const SURFACE_RUNTIME_INPUT: &str = "/run/surface_ir_bridge_dev";
-const SURFACE_OV7251_UEVENT: &str = "/sys/bus/i2c/devices/i2c-INT347E:00/uevent";
 
 #[repr(C)]
 struct XuCtrlQuery {
@@ -114,21 +98,15 @@ pub struct IrLed {
 
 enum IrLedBackend {
     Uvc(IrProfile),
-    SurfaceI2c(SurfaceI2cLed),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct SurfaceI2cLed {
-    bus: String,
-    address: u16,
+    I2c(I2cEmitter),
 }
 
 impl IrLed {
     pub fn for_path(node: &str) -> Option<Self> {
-        if let Some(surface_i2c) = surface_ov7251_backend(node) {
+        if let Some(i2c) = I2cEmitter::for_path(node) {
             return Some(Self {
                 node: node.to_string(),
-                backend: IrLedBackend::SurfaceI2c(surface_i2c),
+                backend: IrLedBackend::I2c(i2c),
             });
         }
 
@@ -153,13 +131,13 @@ impl IrLed {
     pub fn device_name(&self) -> &str {
         match &self.backend {
             IrLedBackend::Uvc(profile) => &profile.name,
-            IrLedBackend::SurfaceI2c(_) => "Surface Pro 4 OV7251 IR emitter (I2C)",
+            IrLedBackend::I2c(backend) => backend.name(),
         }
     }
 
     pub fn set(&self, on: bool) -> anyhow::Result<()> {
         match &self.backend {
-            IrLedBackend::SurfaceI2c(backend) => backend.set(on),
+            IrLedBackend::I2c(backend) => backend.set(on),
             IrLedBackend::Uvc(profile) => {
                 let sequence = if on {
                     &profile.on_sequence
@@ -208,98 +186,6 @@ impl IrLed {
             )
         })
     }
-}
-
-impl SurfaceI2cLed {
-    fn set(&self, on: bool) -> anyhow::Result<()> {
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&self.bus)
-            .map_err(|e| anyhow::anyhow!("open Surface IR emitter bus {}: {e}", self.bus))?;
-
-        let result = unsafe {
-            libc::ioctl(
-                file.as_raw_fd(),
-                I2C_SLAVE_FORCE,
-                self.address as libc::c_ulong,
-            )
-        };
-        if result < 0 {
-            return Err(anyhow::anyhow!(
-                "select Surface IR emitter address 0x{:02x} on {}: {}",
-                self.address,
-                self.bus,
-                std::io::Error::last_os_error()
-            ));
-        }
-
-        let value = if on {
-            SURFACE_STROBE_ON
-        } else {
-            SURFACE_STROBE_OFF
-        };
-        let bytes = [
-            SURFACE_STROBE_REGISTER_HIGH,
-            SURFACE_STROBE_REGISTER_LOW,
-            value,
-        ];
-        (&file).write_all(&bytes).map_err(|e| {
-            anyhow::anyhow!(
-                "write Surface OV7251 strobe register 0x3005=0x{value:02x} on {}: {e}",
-                self.bus
-            )
-        })?;
-        Ok(())
-    }
-}
-
-fn surface_ov7251_backend(node: &str) -> Option<SurfaceI2cLed> {
-    if !is_surface_bridge_node(
-        node,
-        &std::fs::read_to_string("/sys/class/video4linux/video42/name").ok()?,
-    ) || !Path::new(node).exists()
-    {
-        return None;
-    }
-
-    // The bridge records the current CIO2 source node at boot. Requiring the
-    // IPU3 driver here prevents a generic loopback or USB camera from being
-    // mistaken for this hardware-specific backend.
-    let source = std::fs::read_to_string(SURFACE_RUNTIME_INPUT).ok()?;
-    let source = source.trim();
-    if source.is_empty() || !Path::new(source).exists() {
-        return None;
-    }
-    let source_name = Path::new(source).file_name()?.to_str()?;
-    let driver = std::fs::read_link(format!(
-        "/sys/class/video4linux/{source_name}/device/driver"
-    ))
-    .ok()?;
-    if driver.file_name()?.to_str()? != "ipu3-cio2" {
-        return None;
-    }
-    let uevent = std::fs::read_to_string(SURFACE_OV7251_UEVENT).ok()?;
-    if !uevent.lines().any(|line| line.trim() == "DRIVER=ov7251") {
-        return None;
-    }
-    if !Path::new(SURFACE_I2C_BUS).exists() {
-        return None;
-    }
-
-    tracing::debug!(
-        node,
-        source,
-        "detected Surface Pro 4 OV7251 I2C emitter backend"
-    );
-    Some(SurfaceI2cLed {
-        bus: SURFACE_I2C_BUS.to_string(),
-        address: SURFACE_I2C_ADDRESS,
-    })
-}
-
-fn is_surface_bridge_node(node: &str, device_name: &str) -> bool {
-    Path::new(node) == Path::new(SURFACE_BRIDGE_NODE) && device_name.trim() == SURFACE_BRIDGE_NAME
 }
 
 fn xu_ioctl(
@@ -470,16 +356,6 @@ mod tests {
                 source: "unit test".to_string(),
             }),
         }
-    }
-
-    #[test]
-    fn surface_backend_only_matches_its_named_bridge_output() {
-        assert!(is_surface_bridge_node(
-            SURFACE_BRIDGE_NODE,
-            SURFACE_BRIDGE_NAME
-        ));
-        assert!(!is_surface_bridge_node("/dev/video2", SURFACE_BRIDGE_NAME));
-        assert!(!is_surface_bridge_node(SURFACE_BRIDGE_NODE, "USB Camera"));
     }
 
     #[test]
