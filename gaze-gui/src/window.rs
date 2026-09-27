@@ -133,12 +133,12 @@ async fn begin_face_capture(
         }
     };
 
-    if !authorization_done {
-        if let Err(err) = authorization.await {
-            feed.stop();
-            add_toast(window, format!("Face enrollment: {err}"));
-            return;
-        }
+    if !authorization_done
+        && let Err(err) = authorization.await
+    {
+        feed.stop();
+        add_toast(window, format!("Face enrollment: {err}"));
+        return;
     }
     if let Err(err) = proxy.claim(username).await {
         feed.stop();
