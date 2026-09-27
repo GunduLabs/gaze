@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 auth required pam_debug.so auth=authinfo_unavail {exclude if "with-fingerprint"}
 {continue if "with-fingerprint"}
 auth        required                                     pam_env.so

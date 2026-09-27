@@ -1,17 +1,14 @@
-# Linux build environment for building Gaze on a non-Linux host (e.g. macOS).
-#
-# Gaze targets Linux platform APIs (V4L2, PAM, TPM2/tss2, polkit, GTK4/libadwaita,
-# flatpak, SELinux) that do not exist on macOS, so the build cannot run natively.
-# This image reproduces the same toolchain the CD workflow uses (.github/workflows/cd.yml)
-# so the existing `just` targets run unchanged inside a Linux container.
-#
-# Built and driven by the `just docker <target>` recipe.
-FROM ubuntu:26.04@sha256:53958ec7b67c2c9355df922dd08dbf0360611f8c3cdb656875e81873db9ffdba
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Linux build environment for hosts that lack the platform APIs Gaze needs (V4L2, PAM, TPM2,
+# polkit, GTK4). Mirrors the CD workflow toolchain and is driven by `just docker <target>`.
+FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
 
 # amd64 | arm64. Auto-populated by buildkit; on the legacy builder it is empty,
 # so the RUN steps below fall back to `dpkg --print-architecture`.
 ARG TARGETARCH
-ARG JUST_VERSION=1.53.0
+ARG JUST_VERSION=1.58.0
 ARG NFPM_VERSION=2.47.0
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -23,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         build-essential \
+        dpkg-dev \
         clang \
         libclang-dev \
         libcairo2-dev \
@@ -30,6 +28,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgdk-pixbuf-2.0-dev \
         libgstreamer1.0-dev \
         libgstreamer-plugins-base1.0-dev \
+        gstreamer1.0-plugins-base \
+        gstreamer1.0-plugins-good \
+        gstreamer1.0-pipewire \
         libpango1.0-dev \
         libgraphene-1.0-dev \
         libopencv-dev \
@@ -84,12 +85,8 @@ RUN set -eux; \
     rm /tmp/nfpm.tar.gz; \
     nfpm --version
 
-# bindgen/clang-sys (pulled in by opencv and tss-esapi) locate libclang at runtime
-# via llvm-config, which isn't on PATH here. Point it at the multiarch dir where
-# libclang-dev ships libclang-*.so so discovery doesn't fail (matches cd.yml's Arch
-# step). Both triples are listed so this stays arch- and llvm-version-agnostic; only
-# the one matching the image's arch exists.
-ENV LIBCLANG_PATH=/usr/lib/aarch64-linux-gnu:/usr/lib/x86_64-linux-gnu
+# Leave LIBCLANG_PATH unset. clang-sys treats it as a single directory, so a path list becomes
+# one bogus entry; unset, it globs /usr/lib*/*/* and finds libclang whatever the arch or version.
 
 COPY entrypoint.sh /usr/local/bin/gaze-build-entry
 RUN chmod +x /usr/local/bin/gaze-build-entry

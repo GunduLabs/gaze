@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 debug
 target
 .cargo/
@@ -20,5 +23,9 @@ docs/.vitepress/.temp
 dist/
 
 index.scip
-.wrangler/
 docs/archive/
+
+# nix build outputs
+result
+result-*
+references/

@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Tumbleweed vendor definition for the retry-after-password slot in the managed
+# common-* stack. The priority puts it below pam_unix, so it is only reached
+# when the password was rejected.
+[pam_gaze_retry.so]
+Auth: auth	sufficient	pam_gaze.so retry
+Auth-Priority: 128

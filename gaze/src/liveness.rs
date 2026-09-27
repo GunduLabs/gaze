@@ -1,8 +1,16 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use image::RgbImage;
 use image::imageops::{FilterType, crop_imm, resize};
 use ndarray::Array4;
-use ort::{session::Session, session::builder::GraphOptimizationLevel, value::TensorRef};
+use ort::{session::Session, value::TensorRef};
 
+use gaze_core::config::InferenceConfig;
+use gaze_vision::inference::{InferenceRuntime, create_session};
+
+// Fixed by how MiniFASNet v2 was trained (upstream calls it scale_2.7_80x80). A tighter crop
+// or another resolution shifts the score distribution and the threshold stops meaning anything.
 const INPUT_SIZE: u32 = 80;
 const CROP_SCALE: f32 = 2.7;
 const SUSTAINED_SCORE_FRAMES: usize = 5;
@@ -10,16 +18,23 @@ const SUSTAINED_SCORE_RATIO: f32 = 0.85;
 
 pub struct LivenessDetector {
     session: Session,
+    inference_runtime: InferenceRuntime,
 }
 
 impl LivenessDetector {
-    pub fn new(model_path: &str) -> anyhow::Result<Self> {
-        let session = Session::builder()
-            .map_err(|e| anyhow::anyhow!("{e}"))?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| anyhow::anyhow!("{e}"))?
-            .commit_from_file(model_path)?;
-        Ok(Self { session })
+    pub fn new_with_inference(
+        model_path: &str,
+        inference: &InferenceConfig,
+    ) -> anyhow::Result<Self> {
+        let (session, inference_runtime) = create_session(model_path, inference)?;
+        Ok(Self {
+            session,
+            inference_runtime,
+        })
+    }
+
+    pub fn inference_runtime(&self) -> &InferenceRuntime {
+        &self.inference_runtime
     }
 
     // MiniFASNet expects BGR in raw 0-255 (upstream's ToTensor skips /255); RGB breaks scoring.
@@ -58,6 +73,8 @@ impl LivenessDetector {
         Ok(score)
     }
 
+    /// MiniFASNet emits three raw logits, not a probability, and the live class sits between the
+    /// two spoof classes. Softmax over all three, shifted by the max to keep exponentials finite.
     fn live_score_from_output(data: &[f32]) -> anyhow::Result<f32> {
         if data.len() != 3 {
             anyhow::bail!("liveness model produced {} scores, expected 3", data.len());
@@ -93,6 +110,8 @@ pub fn crop_face(img: &RgbImage, bbox: [f32; 4]) -> anyhow::Result<RgbImage> {
     let mut right = center_x + scaled_w / 2.0;
     let mut bottom = center_y + scaled_h / 2.0;
 
+    // Shift the whole crop back into the image rather than clipping its edges: clipping would
+    // change the face-to-context ratio expected by the model. Bounds here are inclusive.
     if left < 0.0 {
         right -= left;
         left = 0.0;
@@ -135,6 +154,8 @@ pub struct EyeMotion {
 pub fn eye_motion_is_live(landmarks: &[[(f32, f32); 5]], min_ratio: Option<f32>) -> EyeMotion {
     let threshold = min_ratio.unwrap_or(MIN_EYE_MOTION_RATIO);
 
+    // With no usable frame pairs, `live` means "not proven static", not confirmed motion.
+    // Callers requiring positive evidence must also check `pairs` via motion_confirms_live.
     let neutral = EyeMotion {
         live: true,
         motion_ratio: 0.0,
@@ -147,20 +168,22 @@ pub fn eye_motion_is_live(landmarks: &[[(f32, f32); 5]], min_ratio: Option<f32>)
 
     let dist = |a: (f32, f32), b: (f32, f32)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
 
-    let ratios: Vec<f32> = landmarks
+    // Divide displacement by eye separation to make it independent of face size. Keep the
+    // strongest pair so later still frames cannot erase motion already seen in this window.
+    let (pairs, motion_ratio) = landmarks
         .windows(2)
         .filter_map(|pair| {
             let motion = (dist(pair[0][0], pair[1][0]) + dist(pair[0][1], pair[1][1])) / 2.0;
             let ipd = (dist(pair[0][0], pair[0][1]) + dist(pair[1][0], pair[1][1])) / 2.0;
             (ipd > f32::EPSILON).then(|| motion / ipd)
         })
-        .collect();
+        .fold((0, 0.0_f32), |(pairs, max_ratio), ratio| {
+            (pairs + 1, max_ratio.max(ratio))
+        });
 
-    let pairs = ratios.len();
     if pairs == 0 {
         return neutral;
     }
-    let motion_ratio = ratios.iter().sum::<f32>() / pairs as f32;
 
     EyeMotion {
         live: motion_ratio >= threshold,
@@ -170,7 +193,13 @@ pub fn eye_motion_is_live(landmarks: &[[(f32, f32); 5]], min_ratio: Option<f32>)
 }
 
 pub fn confirmed_static(motion: &EyeMotion) -> bool {
-    motion.pairs >= 1 && !motion.live
+    motion.pairs >= MIN_MOTION_PAIRS && !motion.live
+}
+
+pub const MIN_MOTION_PAIRS: usize = 2;
+
+pub fn motion_confirms_live(motion: &EyeMotion, min_pairs: usize) -> bool {
+    motion.pairs >= min_pairs && motion.live
 }
 
 pub fn ir_liveness_passed(model_scores: &[f32], threshold: f32, motion: &EyeMotion) -> bool {
@@ -195,6 +224,8 @@ pub fn liveness_passes(scores: &[f32], threshold: f32) -> bool {
         return false;
     }
 
+    // If no single frame passes, allow the five strongest to average 85% of the threshold.
+    // These need not be consecutive; weaker frames do not dilute the accumulated evidence.
     finite_scores.sort_by(|a, b| b.total_cmp(a));
     let top_average = finite_scores
         .iter()
@@ -244,11 +275,16 @@ mod tests {
     }
 
     #[test]
-    fn confirmed_static_requires_a_measured_still_pair() {
+    fn confirmed_static_requires_accumulated_still_pairs() {
         assert!(!confirmed_static(&EyeMotion {
             live: true,
             motion_ratio: 0.0,
             pairs: 0
+        }));
+        assert!(!confirmed_static(&EyeMotion {
+            live: false,
+            motion_ratio: 0.0,
+            pairs: 1
         }));
         assert!(!confirmed_static(&EyeMotion {
             live: true,
@@ -293,6 +329,29 @@ mod tests {
         assert!(ir_liveness_passed(&[0.9], 0.8, &moving));
         assert!(!ir_liveness_passed(&[0.2], 0.8, &moving));
         assert!(!ir_liveness_passed(&[0.9], 0.8, &still));
+    }
+
+    #[test]
+    fn motion_confirms_live_needs_accumulated_moving_pairs() {
+        let neutral = eye_motion_is_live(&[eyes((100.0, 50.0), (140.0, 50.0))], None);
+        assert_eq!(neutral.pairs, 0);
+        assert!(!motion_confirms_live(&neutral, MIN_MOTION_PAIRS));
+
+        let frame = eyes((100.0, 50.0), (140.0, 50.0));
+        let still = eye_motion_is_live(&[frame, frame, frame], None);
+        assert!(still.pairs >= MIN_MOTION_PAIRS);
+        assert!(!motion_confirms_live(&still, MIN_MOTION_PAIRS));
+
+        let moving = eye_motion_is_live(
+            &[
+                eyes((100.0, 50.0), (140.0, 50.0)),
+                eyes((101.2, 50.8), (141.0, 50.6)),
+                eyes((100.5, 49.5), (140.3, 49.8)),
+            ],
+            None,
+        );
+        assert!(moving.pairs >= MIN_MOTION_PAIRS);
+        assert!(motion_confirms_live(&moving, MIN_MOTION_PAIRS));
     }
 
     #[test]
@@ -372,6 +431,23 @@ mod tests {
         ];
         let motion = eye_motion_is_live(&seq, None);
         assert!((motion.motion_ratio - 0.0601).abs() < 1e-3);
+    }
+
+    #[test]
+    fn motion_already_seen_survives_a_later_still_stretch() {
+        let frame = eyes((100.0, 50.0), (140.0, 50.0));
+        let seq = vec![
+            frame,
+            eyes((101.2, 50.8), (141.0, 50.6)),
+            frame,
+            frame,
+            frame,
+            frame,
+            frame,
+        ];
+        let motion = eye_motion_is_live(&seq, None);
+        assert!(motion.live);
+        assert!(!confirmed_static(&motion));
     }
 
     #[test]

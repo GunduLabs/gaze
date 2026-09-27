@@ -1,17 +1,20 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # GNOME Extension
 
-Gaze lock screen and GDM integration are GNOME-specific and require the `gaze-gnome-extension` package. The one-line installer tries to enable lock screen face unlock for the current GNOME user. Manual package installs only install the extension files.
+Gaze lock screen and GDM integration are GNOME-specific and require the `gaze-gnome-extension` package. The one-line installer tries to enable lock screen face unlock for the current GNOME user. Manual package installs only install the extension files. On openSUSE Tumbleweed, install the extension with `sudo zypper install gaze-gnome-extension` before enabling it.
 
 This extension starts the `gdm-face` PAM service inside GNOME Shell authentication flows.
 
 You do not need to enable this extension for the CLI, the GUI, or normal PAM prompts such as `sudo`. Leave it disabled on non-GNOME desktops.
 
 > [!IMPORTANT]
-> If you enable `require_confirmation = true` in `/etc/gaze/config.toml`, this GNOME Shell Extension **must** be enabled for face-authorization confirmation to function inside GNOME's graphical PolKit prompts and on the lock screen / GDM login screen.
-> 
-> **Why this is required:** Standard GNOME PolKit prompt windows do not natively allow clicking "Authenticate" with an empty or blank password field. The GNOME Shell Extension solves this by dynamically intercepting Gaze's confirmation signals, automatically hiding the password entry, displaying `"Face Verified. Click Authenticate to confirm."`, and enabling the native "Authenticate" button. On the lock screen, GNOME Shell drops prompts from background PAM services such as `gdm-face`, so the extension routes Gaze's confirmation request to the unlock prompt as `"Face Verified. Press Enter to confirm."`; pressing Enter with an empty password field confirms.
-> 
-> If the extension is **inactive/disabled** under GNOME while `require_confirmation = true` is set, Gaze's PAM modules will **safely bypass confirmation** (returning success instantly upon face match) to prevent empty input hangs and user lockouts.
+> If you enable `require_confirmation_lock_screen = true` or `require_confirmation_elevation = true` in `/etc/gaze/config.toml`, this GNOME Shell Extension **must** be enabled for face-authorization confirmation to function inside GNOME's graphical PolKit prompts and on the lock screen / GDM login screen.
+>
+> **Why this is required:** Standard GNOME PolKit prompt windows and lock screen prompts do not natively allow clicking confirmation buttons with an empty or blank password field. The GNOME Shell Extension solves this by dynamically intercepting Gaze's confirmation signals, automatically hiding the password entry, and focusing the confirmation button (the native "Authenticate" button in PolKit and a dedicated "Confirm Face Unlock" button on the lock screen and GDM login dialog).
+>
+> If the extension is **inactive/disabled** under GNOME while either toggle is set, Gaze's PAM modules will **safely bypass confirmation** (returning success instantly upon face match) to prevent empty input hangs and user lockouts.
 
 ## Should I enable it?
 
@@ -36,11 +39,72 @@ gsettings set org.gnome.shell enabled-extensions \
 gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
+### The extension disappears again after a logout
+
+Adding the UUID by hand names an extension the running GNOME Shell has never scanned. Shell drops UUIDs it does not recognise the next time it rewrites `enabled-extensions`, which it does when the session ends or when you toggle any other extension. So the setting can look correct right after install and be gone after the first logout, without anything having failed.
+
+Reboot rather than log out after installing, so Shell scans the extension before it rewrites the list.
+
+If it has already vanished, run the two commands under [Enable the extension](#enable-the-extension) from a GNOME session that started **after** the package was installed. `gaze doctor` reports this case as `GNOME extension: installed, but not enabled for the current user` and prints the same steps.
+
+The one-line installer also leaves a one-shot autostart entry, `~/.config/autostart/gaze-gnome-enable.desktop`, that re-applies the enable at your next GNOME login and then deletes itself along with its helper at `~/.local/share/gaze/gnome-enable.sh`. Both are safe to delete by hand if you would rather do it yourself.
+
+## Open the extension preferences
+
+```bash
+gnome-extensions prefs gaze@gundulabs.com
+```
+
+Or open the **Extensions** app (Extension Manager works too), find **Gaze**, and open its settings from the row.
+
+The window has a single **Behavior** page with two groups:
+
+| Group | Contains |
+|---|---|
+| **Face authentication** | `Enable face authentication (lock screen)`, `Face retry mode`, `Maximum face tries`. Applies to this session's lock screen only. |
+| **GDM login screen** | `Enable face auth at GDM login`. Applies to the login screen and asks for admin authorization. |
+
+## Retry behavior
+
+The extension decides how many times face authentication is retried within one
+authentication cycle. Both settings live under **Behavior → Face authentication**
+in the extension preferences, and both are per dconf profile, so GDM and your
+desktop session can differ.
+
+| Setting | dconf key | Values | Default |
+|---|---|---|---|
+| Face retry mode | `face-retry-mode` | `disabled`, `fixed`, `infinite` | `fixed` |
+| Maximum face tries | `max-face-tries` | 2 to 20 | 3 |
+
+- `disabled`: one attempt. After it fails, face auth stops for that cycle and you
+  finish with your password.
+- `fixed`: retries until `max-face-tries` failures, then stops for that cycle.
+- `infinite`: keeps retrying for as long as the prompt is open. The password entry
+  stays usable throughout.
+
+`max-face-tries` only applies in `fixed` mode, and the extension clamps it to a
+minimum of 2 even if dconf holds a lower value.
+
+From a terminal:
+
+```bash
+gsettings set org.gnome.shell.extensions.gaze face-retry-mode infinite
+gsettings set org.gnome.shell.extensions.gaze max-face-tries 5
+```
+
+To set these for the GDM login screen, write them into the same
+`/etc/dconf/db/gdm.d/99-gaze` override described below and run `sudo dconf update`.
+
 ## Create a face profile
 
-Open the Gaze extension settings from GNOME Extensions or Extension Manager, then use **Face profiles** to create or refine a profile for your current user. The profile name defaults to `default`, matching the CLI quick-start flow.
+Enrollment does not live in the extension preferences. Use the Gaze settings app or the CLI:
 
-Keep the settings window open while enrollment is running. Follow the camera prompts until the profile is saved, or press **Cancel** to stop enrollment.
+```bash
+gaze-gui             # Faces list, press + to enroll
+gaze add-face default
+```
+
+The profile name defaults to `default`, matching the CLI quick-start flow. Follow the camera prompts until the profile is saved.
 
 ## Login warning (GNOME keyring)
 
@@ -50,9 +114,77 @@ This is mostly about GNOME keyring behavior. GNOME keyring is normally unlocked 
 
 When that happens, apps that read saved secrets (browser credentials, git credentials, Wi-Fi secrets, chat clients, etc.) can keep prompting for a keyring password until you unlock it manually.
 
+### Optional TPM-backed keyring unlock
+
+Enable TPM template encryption, liveness, and GNOME Keyring unlock in `gaze config`.
+Then enroll the login keyring password:
+
+```bash
+gaze keyring
+```
+
+The password is stored in a root-only TPM-protected record. It is not sent over
+DBus. Re-enroll it after changing the account or keyring password.
+
+On SELinux systems (Fedora, and openSUSE Tumbleweed installs made since early
+2025) the GDM session worker is confined and cannot read `/etc/shadow` or the
+TPM, both of which the unlock needs. `gaze keyring` loads the
+`gaze-greeter-keyring` policy module to allow this, and `sudo gaze doctor`
+reports it as **Keyring SELinux policy**.
+
+To remove the stored record, run `gaze keyring --forget`. `gaze clear-user` also
+removes it. An administrator can act on another account with
+`sudo gaze keyring --user <name>`.
+
+Enable [GDM face login](#optional-enable-face-at-gdm-login) separately. If you
+maintain your own `gdm-face` file, use this auth order, and keep the session line:
+
+```pam
+auth    required   pam_env.so
+auth    [success=1 default=ignore] pam_gaze.so
+auth    requisite  pam_deny.so
+auth    optional   pam_gnome_keyring.so use_authtok
+
+session optional   pam_gnome_keyring.so auto_start
+```
+
+The auth hook saves the token; the `session` hook starts and unlocks the keyring. This only works with `pam_gaze.so` in its default sequential mode; the
+`simultaneous` option does not supply the token.
+
+Gaze sets `PAM_AUTHTOK` only after face and liveness authentication succeeds. If
+the TPM, record, or password binding is unavailable, GDM falls back to the normal
+password login. A user who has not run `gaze keyring` logs in normally and is
+prompted for the keyring as before. Clearing the TPM, or changing the account
+password, requires re-enrollment. Gaze cannot verify the keyring password during
+enrollment or detect a later keyring-only password change: an incorrect or stale
+password leaves the keyring locked and requires a manual unlock and re-enrollment.
+
+### What this changes about your security
+
+Read this before turning it on.
+
+- **The record is recoverable by root on this machine.** Sealing has no PCR
+  policy, so anyone who can run code as root here — including someone who boots
+  another OS from a USB stick against an unencrypted disk — can unseal the key
+  and recover the plaintext password. It protects a *stolen disk*, not a machine
+  someone else can boot. Enable full-disk encryption if that matters to you.
+- **The password becomes visible to the rest of the `gdm-face` stack.** Once
+  `PAM_AUTHTOK` is set, every later module in that service can read it, including
+  the distribution-managed `postlogin`, `system-auth` and `common-session`
+  includes. Linux-PAM wipes it when the service ends.
+- **Face becomes equivalent to your password at the login screen.** Without this
+  option a face login gives an attacker a desktop session; with it, it also gives
+  them everything in your keyring.
+
+### Upgrading from an earlier Gaze
+
+`/etc/pam.d/gdm-face` is preserved across package upgrades, so an existing
+install keeps the stack that predates this feature and the unlock silently never
+happens. Run `sudo gaze doctor`: it reports the stale file and how to replace it.
+
 ## Optional: enable face at GDM login
 
-The easiest way is the **Enable face auth at GDM login** switch in the Gaze extension preferences (Extensions app → Gaze → cog icon). Toggling it triggers a polkit prompt, then the daemon writes `/etc/dconf/db/gdm.d/99-gaze` and runs `dconf update` for you.
+The easiest way is the **Enable face auth at GDM login** switch, under **Behavior → GDM login screen** in the [extension preferences](#open-the-extension-preferences). Toggling it triggers a polkit prompt, then the daemon writes `/etc/dconf/db/gdm.d/99-gaze` and runs `dconf update` for you.
 
 Reboot to apply. Restarting GDM also works, but it immediately logs out active desktop sessions.
 
@@ -72,16 +204,39 @@ EOF
 sudo dconf update
 ```
 
-At the GDM login screen, Gaze still matches against the selected user's enrolled faces, but captures through the greeter's PipeWire camera session: while the greeter owns the seat it also holds the camera device access, so even a user session lingering in the background (after a logout or user switch) can no longer capture.
+At the GDM login screen, Gaze still matches against the selected user's enrolled faces, capturing the kernel camera device directly rather than through any user's PipeWire session: while the greeter owns the seat, the attempt is bound to the selected user, so a session lingering in the background (after a logout or user switch) cannot supply its own camera stream.
 
 ## Disable face at GDM login
 
-Flip the **Enable face auth at GDM login** switch back off in the extension preferences, or remove the override manually:
+Flip the **Enable face auth at GDM login** switch back off under **Behavior → GDM login screen**, or remove the override manually:
 
 ```bash
 sudo rm -f /etc/dconf/db/gdm.d/99-gaze*
 sudo dconf update
 ```
+
+## Nothing appears at the GDM login screen
+
+If the lock screen works but the login screen never offers face auth, and the GDM
+journal shows nothing, check whether the greeter has extensions switched off:
+
+```bash
+sudo env DCONF_PROFILE=gdm XDG_CONFIG_HOME=/var/lib/gdm/seat0/config \
+  gsettings get org.gnome.shell disable-user-extensions
+```
+
+`true` means GNOME Shell stops its whole extension system in the greeter, so Gaze
+never loads there however it is configured. GDM's own dconf database holds the key
+and outranks every keyfile Gaze installs under `/etc/dconf/db/gdm.d`, so clear it
+at the source and reboot:
+
+```bash
+sudo rm -f /var/lib/gdm/seat0/config/dconf/user
+```
+
+GDM writes the file again with its own defaults. On Debian and Ubuntu the path is
+under `/var/lib/gdm3`, and a machine with more than one seat has one directory per
+seat. `gaze doctor` reports this and names the file for you.
 
 ## Verify GNOME flow
 

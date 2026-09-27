@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Tumbleweed vendor definition for the managed common-* stack.
+[pam_gaze.so]
+Auth: auth	sufficient	pam_gaze.so
+Auth-Priority: 800

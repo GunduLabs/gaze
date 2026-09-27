@@ -1,0 +1,150 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Installation & packaging
+description: Install, upgrade, uninstall, repository, or dependency problem on a specific distribution.
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for anything that goes wrong before Gaze is running: the installer,
+        a package manager, a repository or GPG key, a missing shared library, a
+        conflicting package, or an upgrade that broke a working setup.
+
+        If Gaze installs fine but does not authenticate, use the Bug report template instead.
+
+        Paste command output verbatim rather than describing it. Package manager
+        errors are usually solved by the exact wording.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched [existing issues](https://github.com/GunduLabs/gaze/issues?q=is%3Aissue) and this is not a duplicate.
+          required: true
+        - label: I followed the [installation guide](https://gaze.gundulabs.com/guide/installation) for my distribution.
+          required: true
+        - label: I checked the [troubleshooting guide](https://gaze.gundulabs.com/guide/troubleshooting) sections on repositories, shared libraries, and AUR helpers.
+          required: true
+
+  - type: dropdown
+    id: operation
+    attributes:
+      label: What were you doing?
+      options:
+        - Fresh install
+        - Upgrade of an existing install
+        - Uninstall
+        - Switching install methods (for example AUR to the official repository)
+        - Adding a desktop integration package (gaze-kde, GNOME extension)
+        - Building from source
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Which install method?
+      options:
+        - One-line installer (install.sh)
+        - Gundu Labs apt repository (Debian / Ubuntu)
+        - Gundu Labs dnf repository (Fedora and compatible)
+        - rpm-ostree (Silverblue / Bazzite / Kinoite)
+        - Fedora Copr (@gundulabs/gaze)
+        - AUR (gaze-bin, gaze-gui-bin, gaze-kde-bin, gaze-gnome-extension-bin)
+        - Nix / NixOS module
+        - Flatpak (GUI only)
+        - Built from source
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution, version, and architecture
+      description: From `cat /etc/os-release` plus `uname -m`. Include the release codename on Debian and Ubuntu, since each apt suite carries only the builds for that release.
+      placeholder: Ubuntu 26.04 (resolute), x86_64
+    validations:
+      required: true
+
+  - type: input
+    id: desktop
+    attributes:
+      label: Desktop environment
+      description: The installer picks different packages per desktop, so this changes what it tries to install.
+      placeholder: KDE Plasma 6.4, Wayland
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and full output
+      description: The exact command you ran and everything it printed, including the error. Do not trim it to just the last line.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Gaze version
+      description: Output of `gaze --version` if anything installed at all, or the version you were trying to install. Write "nothing installed" if the install never got that far.
+      placeholder: 0.2.10
+    validations:
+      required: true
+
+  - type: textarea
+    id: packages
+    attributes:
+      label: Installed Gaze packages
+      description: |
+        Whichever applies to your system:
+
+        ```bash
+        apt list --installed 2>/dev/null | grep -i gaze
+        rpm -qa | grep -i gaze
+        pacman -Q | grep -i gaze
+        flatpak list | grep -i gaze
+        ```
+
+        On Arch this also catches the unrelated AUR package also named `gaze`, which silently replaces the official ones. If `pacman -Qi gaze` shows a file watcher rather than facial authentication, that is your problem.
+      render: shell
+
+  - type: textarea
+    id: repos
+    attributes:
+      label: Repository configuration
+      description: |
+        For repository, GPG key, or signature problems:
+
+        ```bash
+        cat /etc/apt/sources.list.d/gundulabs.list
+        cat /etc/yum.repos.d/gundulabs.repo
+        ```
+
+        Include whether you have both the Gundu Labs dnf repository and Copr enabled, since enabling both causes conflicts.
+      render: shell
+
+  - type: textarea
+    id: journal
+    attributes:
+      label: Daemon log
+      description: |
+        If the packages installed but `gazed` will not start:
+
+        ```bash
+        systemctl status gazed
+        journalctl -u gazed -b --no-pager | tail -200
+        ```
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Previous install methods you have used on this machine, manual changes to PAM or systemd files, custom repositories, or an unusual filesystem layout such as an immutable or atomic distribution.

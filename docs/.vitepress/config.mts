@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import { defineVersionedConfig } from "@viteplus/versions";
 import { createHighlighter } from "shiki";
 
@@ -29,7 +32,7 @@ export default defineVersionedConfig({
       },
     ],
   },
-  ignoreDeadLinks: true,
+  ignoreDeadLinks: false,
   title: "Gaze",
   description: "Facial authentication for Linux",
   head: [
@@ -67,6 +70,7 @@ export default defineVersionedConfig({
         items: [
           { text: "Getting Started", link: "/guide/getting-started" },
           { text: "Installation", link: "/guide/installation" },
+          { text: "Nix & NixOS", link: "/guide/nixos" },
           { text: "Development", link: "/guide/development" },
           { text: "Contributing", link: "/guide/contributing" },
           {
@@ -74,7 +78,11 @@ export default defineVersionedConfig({
             items: [
               { text: "PAM", link: "/guide/pam" },
               { text: "GNOME Extension", link: "/guide/gnome" },
+              { text: "Cinnamon Extension", link: "/guide/cinnamon" },
+              { text: "KDE Plasma", link: "/guide/kde" },
               { text: "Hyprland (hyprlock)", link: "/guide/hyprland" },
+              { text: "LightDM", link: "/guide/lightdm" },
+              { text: "Console login (TTY)", link: "/guide/console" },
             ],
           },
           { text: "GUI Guide", link: "/guide/gui" },

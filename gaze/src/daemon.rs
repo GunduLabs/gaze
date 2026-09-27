@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use futures::StreamExt;
 use ndarray::Array1;
 use opencv::core::Mat;
@@ -14,17 +17,18 @@ use zbus::{fdo, interface, message::Header, object_server::SignalEmitter};
 
 use crate::align::{align_face, mat_to_rgb};
 use crate::liveness::LivenessDetector;
+use crate::preview::PreviewStream;
 use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
-use gaze_core::camera::{Camera, CameraKind, resolve_configured_sources};
 use gaze_core::config::Config;
-use gaze_core::dbus::{CaptureStatus, EnrollPrompt, VerifyResult};
-use gaze_core::detect::FaceDetector;
-use gaze_core::face::{
-    EnrollmentPoseStability, FaceChecker, IrDarkFrameGate, IrFrameKind, Spectrum,
-    enrollment_pose_matches,
-};
+use gaze_core::dbus::{CaptureStatus, DbusConfig, EnrollPrompt, VerifyResult};
 use gaze_core::ir::led::IrLed;
+use gaze_vision::camera::{Camera, CameraKind, resolve_configured_sources};
+use gaze_vision::detect::FaceDetector;
+use gaze_vision::face::{
+    EnrollmentPoseStability, FaceChecker, IrDarkFrameGate, IrFrameKind, RgbFrameKind,
+    RgbWarmupGate, Spectrum, enrollment_pose_matches,
+};
 
 const CONFIG_PATH: &str = "/etc/gaze/config.toml";
 const POLKIT_ACTION_MANAGE_FACES: &str = "com.gundulabs.gaze.manage-faces";
@@ -33,13 +37,20 @@ const POLKIT_ACTION_MANAGE_GDM_PROFILE: &str = "com.gundulabs.gaze.manage-gdm-pr
 const GDM_DCONF_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
 const GDM_DCONF_OVERRIDE_CONTENT: &str =
     "[org/gnome/shell/extensions/gaze]\nenable-face-authentication=true\n";
+const GDM_DCONF_PROFILE: &str = "gdm";
+const GDM_DCONF_PROFILE_PATH: &str = "/etc/dconf/profile/gdm";
+const GDM_DCONF_FACE_AUTH_KEY: &str = "/org/gnome/shell/extensions/gaze/enable-face-authentication";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
 const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
-/// In hybrid (RGB+IR) verify the two spectra are captured one camera at a time so
-/// single-function UVC devices (e.g. Logitech Brio) that cannot stream both at once
-/// still work. This bounds the RGB phase so it yields the camera to IR even without a
-/// match. See `verify_start`.
+const LIVENESS_GATE_DIAGNOSTIC: &str = "Face matched, but the liveness check did not pass. Move slightly and try again, or lower liveness.threshold.";
+const VERIFY_NO_FACE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Bounds a face that stays badly framed: it refreshes the no-face deadline without ever
+/// yielding an embedding. Kept under `CAMERA_AUTH_TIMEOUT_SECS` in `pam-gaze`.
+const VERIFY_NO_USABLE_TIMEOUT: Duration = Duration::from_secs(8);
+/// Hybrid verify runs one camera at a time for single-function UVC devices (e.g. Logitech
+/// Brio). Caps the RGB phase so it yields to IR even without a match. See `verify_start`.
 const VERIFY_SERIAL_RGB_BUDGET: Duration = Duration::from_secs(4);
+const VERIFY_WATCHDOG_POLL: Duration = Duration::from_millis(250);
 const SSH_PROC_CHAIN_MAX_DEPTH: usize = 16;
 
 #[derive(Clone)]
@@ -49,10 +60,81 @@ pub struct ClaimState {
     pub epoch: u64,
 }
 
+/// The single claim the daemon will honour, if any.
+pub type ClaimStateHandle = Arc<Mutex<Option<ClaimState>>>;
+
+/// Cancellation channel for whatever task the current claim owns.
+pub type ActiveCancelHandle = Arc<Mutex<Option<oneshot::Sender<()>>>>;
+
 static CLAIM_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Interaction {
+    Allow,
+    Deny,
+}
+static SYSTEM_BUS: tokio::sync::OnceCell<zbus::Connection> = tokio::sync::OnceCell::const_new();
+static DBUS_PROXY: tokio::sync::OnceCell<fdo::DBusProxy<'static>> =
+    tokio::sync::OnceCell::const_new();
+
+pub async fn system_bus() -> fdo::Result<zbus::Connection> {
+    SYSTEM_BUS
+        .get_or_try_init(zbus::Connection::system)
+        .await
+        .cloned()
+        .map_err(|e| fdo::Error::Failed(format!("Failed to connect to system bus: {e}")))
+}
+
+async fn active_session() -> Option<gaze_core::dbus::ActiveSession> {
+    let conn = system_bus().await.ok()?;
+    gaze_core::dbus::active_session_on(&conn).await.ok()
+}
+
+async fn active_session_uid_and_class() -> Option<(u32, String)> {
+    let conn = system_bus().await.ok()?;
+    gaze_core::dbus::active_session_uid_and_class_on(&conn)
+        .await
+        .ok()
+}
+
+async fn dbus_proxy() -> fdo::Result<&'static fdo::DBusProxy<'static>> {
+    DBUS_PROXY
+        .get_or_try_init(|| async {
+            let conn = system_bus().await?;
+            fdo::DBusProxy::new(&conn)
+                .await
+                .map_err(|e| fdo::Error::Failed(format!("Failed to create DBus proxy: {e}")))
+        })
+        .await
+}
 
 fn claim_has_epoch(state: &Option<ClaimState>, epoch: u64) -> bool {
     matches!(state, Some(claim) if claim.epoch == epoch)
+}
+
+/// Whether a NameOwnerChanged signal says `watched` lost its owner. A `new_owner`
+/// means the name was acquired or handed on, not that the client went away.
+fn is_vanish_of(name: &str, new_owner: Option<&str>, watched: &str) -> bool {
+    name == watched && new_owner.is_none()
+}
+
+/// Drop the claim identified by `epoch`, cancel its task, and report whether this call
+/// is what dropped it. Epochs are unique per claim; unique names are not.
+async fn release_claim_epoch(
+    claim_state: &ClaimStateHandle,
+    active_cancel: &ActiveCancelHandle,
+    epoch: u64,
+) -> bool {
+    let mut state = claim_state.lock().await;
+    if !claim_has_epoch(&state, epoch) {
+        return false;
+    }
+    *state = None;
+    let mut cancel = active_cancel.lock().await;
+    if let Some(tx) = cancel.take() {
+        let _ = tx.send(());
+    }
+    true
 }
 
 pub struct FaceData {
@@ -68,26 +150,43 @@ pub struct FaceData {
 
 struct EmitterGuard {
     led: Option<IrLed>,
+    activation_message: Option<String>,
 }
 
 impl EmitterGuard {
     fn engage(kind: &CameraKind, enabled: bool) -> Self {
+        let mut activation_message = None;
         let led = match kind {
             CameraKind::Ir { node, .. } if enabled => match IrLed::for_path(node) {
                 Some(led) => {
                     if let Err(e) = led.set(true) {
                         warn!("IR emitter activate failed: {e}");
+                    } else {
+                        let message = format!(
+                            "IR emitter enabled via {} on {}",
+                            led.device_name(),
+                            led.node()
+                        );
+                        info!("{message}");
+                        activation_message = Some(message);
                     }
                     Some(led)
                 }
                 None => {
-                    warn!("no IR emitter profile for {node}; continuing without illumination");
+                    warn!("No IR emitter profile for {node}; continuing without illumination");
                     None
                 }
             },
             _ => None,
         };
-        Self { led }
+        Self {
+            led,
+            activation_message,
+        }
+    }
+
+    fn activation_message(&self) -> Option<&str> {
+        self.activation_message.as_deref()
     }
 }
 
@@ -120,30 +219,111 @@ pub struct AuthDaemon {
     pub liveness: Arc<Mutex<Option<LivenessDetector>>>,
     pub ir_liveness: Arc<Mutex<Option<LivenessDetector>>>,
     pub db: Arc<Mutex<UserDatabase>>,
-    pub threshold: Arc<Mutex<f32>>,
+    pub rgb_threshold: Arc<Mutex<f32>>,
+    pub ir_threshold: Arc<Mutex<f32>>,
     pub rgb_device: Arc<Mutex<String>>,
     pub ir_device: Arc<Mutex<String>>,
     pub ir_node: Arc<Mutex<String>>,
+    pub serial_capture: Arc<Mutex<bool>>,
     pub emitter_enabled: Arc<Mutex<bool>>,
     pub liveness_config: Arc<Mutex<gaze_core::config::LivenessConfig>>,
     pub hybrid_policy: Arc<Mutex<String>>,
     pub abort_if_ssh: Arc<Mutex<bool>>,
     pub abort_if_lid_closed: Arc<Mutex<bool>>,
-    pub claim_state: Arc<Mutex<Option<ClaimState>>>,
-    pub active_cancel: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    pub abort_before_first_resume: Arc<Mutex<bool>>,
+    pub claim_state: ClaimStateHandle,
+    pub active_cancel: ActiveCancelHandle,
     pub active_extensions: Arc<Mutex<std::collections::HashMap<u32, bool>>>,
+    pub pam_internal: Arc<Mutex<std::collections::HashMap<u32, std::collections::HashSet<String>>>>,
     pub resume_pending: Arc<AtomicBool>,
+    pub resume_seen: Arc<AtomicBool>,
+    pub lock_epochs: LockEpochs,
+    pub benchmark_running: Arc<AtomicBool>,
+    pub last_good_config: Arc<Mutex<Config>>,
     pub rt_handle: tokio::runtime::Handle,
 }
 
+fn validate_keyring_verification(
+    required: bool,
+    liveness: &gaze_core::config::LivenessConfig,
+    templates_encrypted: bool,
+) -> fdo::Result<()> {
+    gaze_core::config::StorageConfig {
+        encrypt_templates: templates_encrypted,
+        unlock_gnome_keyring: required,
+        unlock_kwallet: false,
+    }
+    .validate_keyring(liveness)
+    .map_err(|e| fdo::Error::Failed(format!("Keyring verification unavailable: {e}")))
+}
+
+fn resolve_config(loaded: anyhow::Result<Config>, last_good: &mut Config) -> Config {
+    match loaded {
+        Ok(mut config) => {
+            if config.clamp_keyring() {
+                warn!(
+                    path = CONFIG_PATH,
+                    "keyring unlock needs storage.encrypt_templates and liveness.enabled; \
+                     ignoring the keyring options"
+                );
+            }
+            *last_good = config.clone();
+            config
+        }
+        Err(e) => {
+            error!(
+                error = %e,
+                path = CONFIG_PATH,
+                "config is unreadable; keeping the last valid configuration"
+            );
+            last_good.clone()
+        }
+    }
+}
+
+/// When each logind session last became locked, keyed by session object path.
+pub type LockEpochs = Arc<Mutex<HashMap<String, std::time::Instant>>>;
+
+struct BenchmarkSlot(Arc<AtomicBool>);
+
+impl BenchmarkSlot {
+    fn acquire(flag: &Arc<AtomicBool>) -> Option<Self> {
+        flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| Self(flag.clone()))
+    }
+}
+
+impl Drop for BenchmarkSlot {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 impl AuthDaemon {
+    pub fn normalize_pam_service(service: &str) -> String {
+        let trimmed = service.trim();
+        std::path::Path::new(trimmed)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(trimmed)
+            .to_string()
+    }
+
+    async fn current_config(&self) -> Config {
+        let mut last_good = self.last_good_config.lock().await;
+        resolve_config(Config::load_from(CONFIG_PATH), &mut last_good)
+    }
+
     fn map_user_db_error(err: UserDbError) -> fdo::Error {
+        let message = err.to_string();
         match err {
-            UserDbError::UserNotFound(msg) => fdo::Error::FileNotFound(msg),
-            UserDbError::FaceNotFound(msg) => fdo::Error::FileNotFound(msg),
-            UserDbError::FaceExists(msg) => fdo::Error::FileExists(msg),
-            UserDbError::InvalidName(msg) => fdo::Error::InvalidArgs(msg),
-            UserDbError::Io(io_err) => fdo::Error::Failed(io_err.to_string()),
+            UserDbError::UserNotFound(_) | UserDbError::FaceNotFound(_) => {
+                fdo::Error::FileNotFound(message)
+            }
+            UserDbError::FaceExists(_) => fdo::Error::FileExists(message),
+            UserDbError::InvalidName(_) => fdo::Error::InvalidArgs(message),
+            UserDbError::Io(_) => fdo::Error::Failed(message),
         }
     }
 
@@ -211,13 +391,9 @@ impl AuthDaemon {
         let sender = header
             .sender()
             .ok_or_else(|| fdo::Error::AccessDenied("Missing DBus sender".into()))?;
-        let conn = zbus::Connection::system()
-            .await
-            .map_err(|e| fdo::Error::Failed(format!("Failed to connect to system bus: {e}")))?;
-        let dbus = fdo::DBusProxy::new(&conn)
-            .await
-            .map_err(|e| fdo::Error::Failed(format!("Failed to create DBus proxy: {e}")))?;
-        dbus.get_connection_unix_user(sender.to_owned().into())
+        dbus_proxy()
+            .await?
+            .get_connection_unix_user(sender.to_owned().into())
             .await
             .map_err(|e| fdo::Error::Failed(format!("Failed to get caller uid: {e}")))
     }
@@ -226,13 +402,9 @@ impl AuthDaemon {
         let sender = header
             .sender()
             .ok_or_else(|| fdo::Error::AccessDenied("Missing DBus sender".into()))?;
-        let conn = zbus::Connection::system()
-            .await
-            .map_err(|e| fdo::Error::Failed(format!("Failed to connect to system bus: {e}")))?;
-        let dbus = fdo::DBusProxy::new(&conn)
-            .await
-            .map_err(|e| fdo::Error::Failed(format!("Failed to create DBus proxy: {e}")))?;
-        dbus.get_connection_unix_process_id(sender.to_owned().into())
+        dbus_proxy()
+            .await?
+            .get_connection_unix_process_id(sender.to_owned().into())
             .await
             .map_err(|e| fdo::Error::Failed(format!("Failed to get caller pid: {e}")))
     }
@@ -246,6 +418,8 @@ impl AuthDaemon {
 
     fn read_ppid_at(base: &std::path::Path, pid: u32) -> Option<u32> {
         let stat = std::fs::read_to_string(base.join(pid.to_string()).join("stat")).ok()?;
+        // /proc/<pid>/stat encloses comm in parentheses, but comm itself may contain spaces
+        // and ')'. Split at the last ')' before counting the state and parent-PID fields.
         let after_comm = stat.rsplit_once(')')?.1;
         let mut fields = after_comm.split_whitespace();
         let _state = fields.next()?;
@@ -287,6 +461,15 @@ impl AuthDaemon {
         }
     }
 
+    fn ssh_session_verdict(heuristic_is_ssh: bool, session_remote: Option<bool>) -> bool {
+        heuristic_is_ssh || session_remote.unwrap_or(false)
+    }
+
+    async fn caller_session_is_remote(pid: u32) -> Option<bool> {
+        let conn = system_bus().await.ok()?;
+        gaze_core::dbus::session_is_remote_on(&conn, pid).await.ok()
+    }
+
     fn lid_state_is_closed(state: &str) -> bool {
         state.to_ascii_lowercase().contains("closed")
     }
@@ -307,7 +490,7 @@ impl AuthDaemon {
         present && closed
     }
     async fn lid_is_closed_via_upower() -> Option<bool> {
-        let conn = zbus::Connection::system().await.ok()?;
+        let conn = system_bus().await.ok()?;
         let proxy = zbus::Proxy::new(
             &conn,
             "org.freedesktop.UPower",
@@ -328,12 +511,30 @@ impl AuthDaemon {
         Self::is_lid_closed_at(std::path::Path::new("/proc/acpi/button/lid"))
     }
 
+    fn resume_gate_blocks(abort_before_first_resume: bool, resume_seen: bool) -> bool {
+        abort_before_first_resume && !resume_seen
+    }
+
     async fn ensure_auth_not_aborted(&self, header: &Header<'_>) -> fdo::Result<()> {
+        let abort_before_first_resume = *self.abort_before_first_resume.lock().await;
+        if Self::resume_gate_blocks(
+            abort_before_first_resume,
+            self.resume_seen.load(Ordering::SeqCst),
+        ) {
+            warn!("No suspend/resume since boot, aborting face auth");
+            return Err(fdo::Error::Failed("no suspend/resume since boot".into()));
+        }
+
         let abort_if_ssh = *self.abort_if_ssh.lock().await;
         if abort_if_ssh {
             let caller_pid = Self::caller_pid(header).await.ok();
-            let is_ssh = Self::caller_is_ssh_session_at(std::path::Path::new("/proc"), caller_pid);
-            if is_ssh {
+            let heuristic_is_ssh =
+                Self::caller_is_ssh_session_at(std::path::Path::new("/proc"), caller_pid);
+            let session_remote = match caller_pid {
+                Some(pid) if !heuristic_is_ssh => Self::caller_session_is_remote(pid).await,
+                _ => None,
+            };
+            if Self::ssh_session_verdict(heuristic_is_ssh, session_remote) {
                 warn!(caller_pid, "SSH session detected, aborting face auth");
                 return Err(fdo::Error::Failed("SSH session detected".into()));
             }
@@ -359,11 +560,78 @@ impl AuthDaemon {
             return Ok(());
         }
 
+        Self::ensure_authorized_with(header, action_id, Interaction::Deny).await
+    }
+
+    fn face_write_needs_authorization(caller_uid: u32) -> bool {
+        caller_uid != 0
+    }
+
+    fn benchmark_needs_authorization(caller_uid: u32) -> bool {
+        caller_uid != 0
+    }
+
+    async fn ensure_face_write_access(
+        header: &Header<'_>,
+        username: &str,
+        action_id: &str,
+    ) -> fdo::Result<()> {
+        Self::username_uid(username)?;
+        if !Self::face_write_needs_authorization(Self::caller_uid(header).await?) {
+            return Ok(());
+        }
+
         Self::ensure_authorized(header, action_id).await
     }
 
     // The GDM greeter asks which login users have faces and cannot answer an
     // interactive polkit challenge. `active` is (uid, is_greeter) for the seat.
+    fn config_read_allowed(caller_uid: u32, active_uid: Option<u32>) -> bool {
+        caller_uid == 0 || active_uid == Some(caller_uid)
+    }
+
+    async fn ensure_config_read_access(header: &Header<'_>) -> fdo::Result<()> {
+        let caller_uid = Self::caller_uid(header).await?;
+        let active_uid = active_session_uid_and_class().await.map(|(uid, _)| uid);
+        if Self::config_read_allowed(caller_uid, active_uid) {
+            return Ok(());
+        }
+        Err(fdo::Error::AccessDenied(
+            "only root or the active session may read the Gaze configuration".into(),
+        ))
+    }
+
+    fn pam_internal_write_allowed(caller_uid: u32, active_uid: Option<u32>) -> bool {
+        caller_uid == 0 || active_uid == Some(caller_uid)
+    }
+
+    // The PAM module runs as root and cannot say whose dialog it is feeding, so root is answered
+    // for the active session, the one whose shell renders the prompt.
+    fn pam_internal_owner(caller_uid: u32, active_uid: Option<u32>) -> u32 {
+        if caller_uid == 0 {
+            active_uid.unwrap_or(0)
+        } else {
+            caller_uid
+        }
+    }
+
+    async fn pam_internal_read_owner(header: &Header<'_>) -> fdo::Result<u32> {
+        let caller_uid = Self::caller_uid(header).await?;
+        let active_uid = active_session_uid_and_class().await.map(|(uid, _)| uid);
+        Ok(Self::pam_internal_owner(caller_uid, active_uid))
+    }
+
+    async fn pam_internal_write_owner(header: &Header<'_>) -> fdo::Result<u32> {
+        let caller_uid = Self::caller_uid(header).await?;
+        let active_uid = active_session_uid_and_class().await.map(|(uid, _)| uid);
+        if Self::pam_internal_write_allowed(caller_uid, active_uid) {
+            return Ok(Self::pam_internal_owner(caller_uid, active_uid));
+        }
+        Err(fdo::Error::AccessDenied(
+            "only root or the active session may modify the PAM internal services list".into(),
+        ))
+    }
+
     fn user_query_allowed(caller_uid: u32, target_uid: u32, active: Option<(u32, bool)>) -> bool {
         if caller_uid == 0 || caller_uid == target_uid {
             return true;
@@ -378,15 +646,14 @@ impl AuthDaemon {
     ) -> fdo::Result<()> {
         let caller_uid = Self::caller_uid(header).await?;
         let target_uid = Self::username_uid(username)?;
-        let active = match gaze_core::dbus::get_active_session_uid_and_class().await {
-            Ok((uid, class)) => Some((uid, class == "greeter")),
-            Err(_) => None,
-        };
+        let active = active_session_uid_and_class()
+            .await
+            .map(|(uid, class)| (uid, class == "greeter"));
         if Self::user_query_allowed(caller_uid, target_uid, active) {
             return Ok(());
         }
 
-        Self::ensure_authorized(header, action_id).await
+        Self::ensure_authorized_with(header, action_id, Interaction::Deny).await
     }
 
     fn signal_destination(sender: &str) -> fdo::Result<BusName<'static>> {
@@ -395,9 +662,15 @@ impl AuthDaemon {
     }
 
     async fn ensure_authorized(header: &Header<'_>, action_id: &str) -> fdo::Result<()> {
-        let conn = zbus::Connection::system()
-            .await
-            .map_err(|e| fdo::Error::Failed(format!("Failed to connect to system bus: {e}")))?;
+        Self::ensure_authorized_with(header, action_id, Interaction::Allow).await
+    }
+
+    async fn ensure_authorized_with(
+        header: &Header<'_>,
+        action_id: &str,
+        interaction: Interaction,
+    ) -> fdo::Result<()> {
+        let conn = system_bus().await?;
 
         let authority = zbus_polkit::policykit1::AuthorityProxy::new(&conn)
             .await
@@ -407,7 +680,12 @@ impl AuthDaemon {
             .map_err(|e| fdo::Error::Failed(format!("Failed to create polkit subject: {e}")))?;
 
         let details: HashMap<&str, &str> = HashMap::new();
-        let flags = zbus_polkit::policykit1::CheckAuthorizationFlags::AllowUserInteraction.into();
+        let flags = match interaction {
+            Interaction::Allow => {
+                zbus_polkit::policykit1::CheckAuthorizationFlags::AllowUserInteraction.into()
+            }
+            Interaction::Deny => Default::default(),
+        };
 
         let result = authority
             .check_authorization(&subject, action_id, &details, flags, "")
@@ -442,46 +720,51 @@ impl AuthDaemon {
         Err(fdo::Error::Failed("Daemon is not claimed".into()))
     }
 
-    fn has_pipewire_runtime(uid: u32) -> bool {
-        std::path::Path::new(&format!("/run/user/{uid}/pipewire-0")).exists()
-    }
-
-    // Bind capture to the target's own session; a bystander's camera must never authenticate
-    // another user. `active` is (uid, is_greeter, has_pipewire) for the active seat.
-    fn resolve_camera_uid(
+    // Every capture opens the seat's V4L2 device, so a bystander's camera must never
+    // authenticate another user: the target, or a caller vouching for them, has to hold the seat.
+    // `active` is (uid, is_greeter) for the active seat; `seat_unoccupied` is its own check.
+    fn seat_camera_allowed(
         caller_uid: u32,
         target_uid: u32,
-        target_has_pipewire: bool,
-        caller_has_pipewire: bool,
-        active: Option<(u32, bool, bool)>,
-    ) -> Option<u32> {
-        // An active greeter holds the seat's camera ACL, so it outranks the target's leftover PipeWire socket.
-        if caller_uid == 0
-            && let Some((active_uid, true, true)) = active
-        {
-            return Some(active_uid);
+        active: Option<(u32, bool)>,
+        seat_unoccupied: bool,
+    ) -> bool {
+        match active {
+            Some((active_uid, true)) => caller_uid == 0 || caller_uid == active_uid,
+            Some((active_uid, false)) => {
+                active_uid == target_uid || (caller_uid != 0 && caller_uid == active_uid)
+            }
+            // A console login runs before any session exists, so with the seat otherwise empty
+            // nobody's ACL can be taken. A failed lookup leaves this false and still refuses.
+            None => caller_uid == 0 && seat_unoccupied,
         }
-        if target_has_pipewire {
-            return Some(target_uid);
-        }
-        if caller_uid != 0 {
-            return caller_has_pipewire.then_some(caller_uid);
-        }
-        None
     }
 
-    async fn camera_runtime_uid(caller_uid: u32, target_uid: u32) -> Option<u32> {
-        let active = match gaze_core::dbus::get_active_session_uid_and_class().await {
-            Ok((uid, class)) => Some((uid, class == "greeter", Self::has_pipewire_runtime(uid))),
-            Err(_) => None,
+    /// Whether seat0 holds no session that belongs to anyone other than `target_uid`.
+    /// A failed enumeration is reported as occupied so the caller fails closed.
+    async fn seat_is_unoccupied(target_uid: u32) -> bool {
+        let uids = match system_bus().await {
+            Ok(conn) => gaze_core::dbus::seat0_session_uids_on(&conn).await,
+            Err(e) => Err(anyhow::anyhow!(e)),
         };
-        Self::resolve_camera_uid(
-            caller_uid,
-            target_uid,
-            Self::has_pipewire_runtime(target_uid),
-            Self::has_pipewire_runtime(caller_uid),
-            active,
-        )
+        match uids {
+            Ok(uids) => uids.iter().all(|uid| *uid == target_uid),
+            Err(_) => false,
+        }
+    }
+
+    async fn seat_camera_available(caller_uid: u32, target_uid: u32) -> bool {
+        let lookup = match system_bus().await {
+            Ok(conn) => gaze_core::dbus::active_session_lookup_on(&conn).await,
+            Err(e) => Err(anyhow::anyhow!(e)),
+        };
+        let (active, seat_idle) = match lookup {
+            Ok(Some(session)) => (Some((session.uid, session.class == "greeter")), false),
+            Ok(None) => (None, true),
+            Err(_) => (None, false),
+        };
+        let seat_unoccupied = seat_idle && Self::seat_is_unoccupied(target_uid).await;
+        Self::seat_camera_allowed(caller_uid, target_uid, active, seat_unoccupied)
     }
 
     async fn cancel_active_tasks(&self) {
@@ -490,27 +773,204 @@ impl AuthDaemon {
             let _ = sender.send(());
         }
     }
+
+    /// `gdm-face` serves the greeter as well as the lock screen.
+    fn classify_surface(
+        pam_service: Option<&str>,
+        active_session: Option<&gaze_core::dbus::ActiveSession>,
+    ) -> gaze_core::config::AuthSurface {
+        let surface = gaze_core::config::classify_pam_service(pam_service);
+        if surface == gaze_core::config::AuthSurface::ScreenLock
+            && active_session.is_some_and(|session| session.is_greeter())
+        {
+            return gaze_core::config::AuthSurface::Login;
+        }
+        surface
+    }
+
+    async fn lock_elapsed_ms(
+        &self,
+        active_session: Option<&gaze_core::dbus::ActiveSession>,
+    ) -> Option<u64> {
+        let session = active_session?;
+        let epochs = self.lock_epochs.lock().await;
+        let started = epochs.get(&session.path)?;
+        Some(started.elapsed().as_millis().min(u64::MAX as u128) as u64)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        AuthDaemon, ClaimState, auth_streams, claim_has_epoch, eyes_from_kpss, hybrid_auth_passed,
-        pipewire_runtime_update,
+        AuthDaemon, ClaimState, ClaimStateHandle, and_policy_unsatisfiable, auth_streams,
+        claim_has_epoch, eyes_from_kpss, hybrid_auth_passed, ir_waits_for_rgb, is_vanish_of,
+        release_claim_epoch, rgb_yields_camera_on_budget, should_yield_rgb_to_ir,
     };
-    use gaze_core::dbus::CaptureStatus;
+    use gaze_core::config::AuthSurface;
+    use gaze_core::dbus::{ActiveSession, CaptureStatus};
+    use std::sync::Arc;
+    use tokio::sync::oneshot::error::TryRecvError;
+    use tokio::sync::{Mutex, oneshot};
+
+    fn session(class: &str) -> ActiveSession {
+        ActiveSession {
+            uid: 1000,
+            class: class.to_string(),
+            path: "/org/freedesktop/login1/session/_32".to_string(),
+        }
+    }
 
     #[test]
-    fn pipewire_runtime_update_only_changes_on_a_new_uid() {
-        assert_eq!(pipewire_runtime_update(Some("/run/user/1000"), 1000), None);
+    fn the_resume_gate_only_blocks_before_the_first_resume() {
+        assert!(AuthDaemon::resume_gate_blocks(true, false));
+        assert!(!AuthDaemon::resume_gate_blocks(true, true));
+        assert!(!AuthDaemon::resume_gate_blocks(false, false));
+        assert!(!AuthDaemon::resume_gate_blocks(false, true));
+    }
+
+    #[test]
+    fn gdm_face_on_the_greeter_is_a_login_not_a_screen_lock() {
         assert_eq!(
-            pipewire_runtime_update(Some("/run/user/1000"), 1001),
-            Some("/run/user/1001".to_string())
+            AuthDaemon::classify_surface(Some("gdm-face"), Some(&session("greeter"))),
+            AuthSurface::Login
         );
         assert_eq!(
-            pipewire_runtime_update(None, 1000),
-            Some("/run/user/1000".to_string())
+            AuthDaemon::classify_surface(Some("gdm-face"), Some(&session("user"))),
+            AuthSurface::ScreenLock
         );
+        assert_eq!(
+            AuthDaemon::classify_surface(Some("gdm-face"), None),
+            AuthSurface::ScreenLock
+        );
+    }
+
+    #[test]
+    fn a_greeter_session_does_not_reclassify_elevation() {
+        assert_eq!(
+            AuthDaemon::classify_surface(Some("sudo"), Some(&session("greeter"))),
+            AuthSurface::Elevation
+        );
+    }
+
+    #[test]
+    fn watchdog_polls_faster_than_the_timeouts_it_guards() {
+        use super::{
+            VERIFY_NO_FACE_TIMEOUT, VERIFY_NO_USABLE_TIMEOUT, VERIFY_TOO_DARK_TIMEOUT,
+            VERIFY_WATCHDOG_POLL,
+        };
+
+        assert!(VERIFY_WATCHDOG_POLL < VERIFY_NO_FACE_TIMEOUT);
+        assert!(VERIFY_WATCHDOG_POLL < VERIFY_TOO_DARK_TIMEOUT);
+        assert!(VERIFY_WATCHDOG_POLL < VERIFY_NO_USABLE_TIMEOUT);
+        assert!(!VERIFY_WATCHDOG_POLL.is_zero());
+    }
+
+    #[test]
+    fn a_warming_camera_still_reports_dark_before_the_no_face_deadline() {
+        use super::{RgbWarmupGate, VERIFY_NO_FACE_TIMEOUT, VERIFY_TOO_DARK_TIMEOUT};
+
+        assert!(RgbWarmupGate::WARMUP + VERIFY_TOO_DARK_TIMEOUT < VERIFY_NO_FACE_TIMEOUT);
+    }
+
+    // A backstop that fired first would report a timeout for a run the daemon had already decided.
+    #[test]
+    fn every_daemon_deadline_lands_inside_the_client_backstop() {
+        use super::{VERIFY_NO_FACE_TIMEOUT, VERIFY_NO_USABLE_TIMEOUT, VERIFY_TOO_DARK_TIMEOUT};
+
+        let backstop = gaze_core::dbus::VERIFY_CLIENT_TIMEOUT;
+        for deadline in [
+            VERIFY_NO_FACE_TIMEOUT,
+            VERIFY_NO_USABLE_TIMEOUT,
+            VERIFY_TOO_DARK_TIMEOUT,
+        ] {
+            assert!(
+                deadline < backstop,
+                "{deadline:?} must fire before {backstop:?}"
+            );
+        }
+    }
+
+    // Before the usable deadline existed this case ran forever.
+    #[test]
+    fn a_face_that_never_becomes_usable_still_hits_a_deadline() {
+        use super::{VERIFY_NO_USABLE_TIMEOUT, VerifyGiveUp, verify_give_up};
+
+        let never_stale = std::time::Duration::ZERO;
+        assert_eq!(verify_give_up(never_stale, never_stale), None);
+        assert_eq!(
+            verify_give_up(never_stale, VERIFY_NO_USABLE_TIMEOUT),
+            Some(VerifyGiveUp::NoUsableFrame)
+        );
+    }
+
+    #[test]
+    fn a_vanished_face_still_reports_the_no_face_deadline_first() {
+        use super::{
+            VERIFY_NO_FACE_TIMEOUT, VERIFY_NO_USABLE_TIMEOUT, VerifyGiveUp, verify_give_up,
+        };
+
+        assert_eq!(
+            verify_give_up(VERIFY_NO_FACE_TIMEOUT, VERIFY_NO_USABLE_TIMEOUT),
+            Some(VerifyGiveUp::NoFace)
+        );
+        assert_eq!(
+            verify_give_up(VERIFY_NO_FACE_TIMEOUT, std::time::Duration::ZERO),
+            Some(VerifyGiveUp::NoFace)
+        );
+    }
+
+    // Every status that counts as a face but carries no embedding relies on the usable deadline.
+    #[test]
+    fn framing_hints_and_ready_count_as_a_face_without_being_usable() {
+        for status in [
+            CaptureStatus::Clipped,
+            CaptureStatus::NotCentered,
+            CaptureStatus::TooFar,
+            CaptureStatus::TooClose,
+            CaptureStatus::Ready,
+        ] {
+            assert!(
+                status.indicates_face(),
+                "{status:?} refreshes the no-face deadline"
+            );
+            assert_ne!(
+                status,
+                CaptureStatus::Usable,
+                "{status:?} never reaches the embedding path in process_frame_sync"
+            );
+        }
+    }
+
+    #[test]
+    fn a_stalled_capture_stream_still_reaches_the_no_face_deadline() {
+        use super::VERIFY_WATCHDOG_POLL;
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (_retained_tx, mut rx) = tokio::sync::mpsc::channel::<u32>(10);
+            let deadline = std::time::Duration::from_millis(500);
+            let started = std::time::Instant::now();
+            let mut gave_up = false;
+
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(VERIFY_WATCHDOG_POLL) => {
+                        if started.elapsed() >= deadline {
+                            gave_up = true;
+                            break;
+                        }
+                    }
+                    msg = rx.recv() => {
+                        if msg.is_none() {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            assert!(gave_up);
+            assert!(started.elapsed() < deadline * 4);
+        });
     }
 
     #[test]
@@ -523,6 +983,275 @@ mod tests {
 
         assert!(!claim_has_epoch(&state, 1));
         assert!(claim_has_epoch(&state, 2));
+    }
+
+    fn claim_at(epoch: u64) -> ClaimStateHandle {
+        Arc::new(Mutex::new(Some(ClaimState {
+            username: "alice".to_string(),
+            sender: ":1.42".to_string(),
+            epoch,
+        })))
+    }
+
+    #[test]
+    fn root_and_the_active_session_may_read_the_config() {
+        assert!(AuthDaemon::config_read_allowed(0, Some(1000)));
+        assert!(AuthDaemon::config_read_allowed(0, None));
+        assert!(AuthDaemon::config_read_allowed(1000, Some(1000)));
+    }
+
+    #[test]
+    fn other_local_users_may_not_read_the_config() {
+        assert!(!AuthDaemon::config_read_allowed(1001, Some(1000)));
+        assert!(!AuthDaemon::config_read_allowed(1000, None));
+        assert!(!AuthDaemon::config_read_allowed(65534, Some(1000)));
+    }
+
+    #[test]
+    fn root_and_the_active_session_may_modify_pam_internal() {
+        assert!(AuthDaemon::pam_internal_write_allowed(0, Some(1000)));
+        assert!(AuthDaemon::pam_internal_write_allowed(0, None));
+        assert!(AuthDaemon::pam_internal_write_allowed(1000, Some(1000)));
+    }
+
+    #[test]
+    fn pam_internal_is_kept_per_session_user() {
+        assert_eq!(AuthDaemon::pam_internal_owner(1000, Some(1000)), 1000);
+        // Another user's registration never leaks into the active session's lookup.
+        assert_eq!(AuthDaemon::pam_internal_owner(1001, Some(1000)), 1001);
+        assert_eq!(AuthDaemon::pam_internal_owner(0, Some(1001)), 1001);
+        assert_eq!(AuthDaemon::pam_internal_owner(0, None), 0);
+    }
+
+    #[test]
+    fn other_local_users_may_not_modify_pam_internal() {
+        assert!(!AuthDaemon::pam_internal_write_allowed(1001, Some(1000)));
+        assert!(!AuthDaemon::pam_internal_write_allowed(1000, None));
+        assert!(!AuthDaemon::pam_internal_write_allowed(65534, Some(1000)));
+    }
+
+    fn hardened_config() -> gaze_core::config::Config {
+        let mut config = gaze_core::config::Config::default();
+        config.security = gaze_core::config::SecurityLevel::maximum();
+        config.auth.require_confirmation_lock_screen = true;
+        config.auth.require_confirmation_elevation = true;
+        config
+    }
+
+    #[test]
+    fn keyring_verification_uses_active_state_even_when_disk_settings_are_enabled() {
+        let mut disk = gaze_core::config::Config::default();
+        disk.storage.encrypt_templates = true;
+        disk.storage.unlock_gnome_keyring = true;
+        disk.liveness.enabled = true;
+        assert!(disk.storage.validate_keyring(&disk.liveness).is_ok());
+
+        for liveness in [false, true] {
+            for encryption in [false, true] {
+                let active_liveness = gaze_core::config::LivenessConfig {
+                    enabled: liveness,
+                    ..disk.liveness.clone()
+                };
+                assert_eq!(
+                    super::validate_keyring_verification(true, &active_liveness, encryption)
+                        .is_ok(),
+                    liveness && encryption
+                );
+                assert!(
+                    super::validate_keyring_verification(false, &active_liveness, encryption)
+                        .is_ok()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_hand_edited_keyring_opt_in_is_ignored_rather_than_breaking_face_login() {
+        let mut on_disk = gaze_core::config::Config::default();
+        on_disk.storage.unlock_gnome_keyring = true;
+        on_disk.storage.encrypt_templates = false;
+        on_disk.liveness.enabled = true;
+
+        let mut last_good = gaze_core::config::Config::default();
+        let resolved = super::resolve_config(Ok(on_disk), &mut last_good);
+        assert!(!resolved.storage.unlock_gnome_keyring);
+        assert!(
+            !last_good.storage.unlock_gnome_keyring,
+            "the clamped value is what gets remembered"
+        );
+
+        let mut valid = gaze_core::config::Config::default();
+        valid.storage.unlock_gnome_keyring = true;
+        valid.storage.encrypt_templates = true;
+        valid.liveness.enabled = true;
+        let resolved = super::resolve_config(Ok(valid), &mut last_good);
+        assert!(resolved.storage.unlock_gnome_keyring);
+    }
+
+    #[test]
+    fn an_unreadable_config_keeps_the_last_good_one() {
+        let mut last_good = hardened_config();
+
+        let resolved = super::resolve_config(
+            Err(anyhow::anyhow!("expected `=` after key, found newline")),
+            &mut last_good,
+        );
+
+        assert_eq!(resolved.security.level, "maximum");
+        assert!(resolved.auth.require_confirmation_lock_screen);
+        assert!(resolved.auth.require_confirmation_elevation);
+        assert_eq!(last_good.security.level, "maximum");
+    }
+
+    #[test]
+    fn defaults_would_have_weakened_the_running_settings() {
+        let defaults = gaze_core::config::Config::default();
+        let hardened = hardened_config();
+
+        assert_ne!(defaults.security.level, hardened.security.level);
+        assert!(!defaults.auth.require_confirmation_lock_screen);
+        assert!(!defaults.auth.require_confirmation_elevation);
+    }
+
+    #[test]
+    fn a_readable_config_replaces_the_last_good_one() {
+        let mut last_good = hardened_config();
+        let mut updated = gaze_core::config::Config::default();
+        updated.liveness.threshold = 0.95;
+
+        let resolved = super::resolve_config(Ok(updated), &mut last_good);
+
+        assert_eq!(resolved.liveness.threshold, 0.95);
+        assert_eq!(last_good.liveness.threshold, 0.95);
+        assert_eq!(last_good.security.level, "medium");
+    }
+
+    #[tokio::test]
+    async fn system_bus_is_reused_across_calls() {
+        let Ok(first) = super::system_bus().await else {
+            return;
+        };
+        let second = super::system_bus().await.expect("cached bus");
+        assert_eq!(
+            first.unique_name(),
+            second.unique_name(),
+            "every caller must share one connection"
+        );
+
+        let fresh = zbus::Connection::system()
+            .await
+            .expect("a second connection must still be possible");
+        assert_ne!(
+            first.unique_name(),
+            fresh.unique_name(),
+            "a distinct connection is what the cache exists to avoid"
+        );
+    }
+
+    // The vanish watcher, the owner re-check, and the claim timeout all release here.
+    #[tokio::test]
+    async fn release_clears_and_cancels() {
+        let claim_state = claim_at(7);
+        let (tx, mut rx) = oneshot::channel();
+        let active_cancel = Arc::new(Mutex::new(Some(tx)));
+
+        assert!(release_claim_epoch(&claim_state, &active_cancel, 7).await);
+        assert!(claim_state.lock().await.is_none());
+        assert!(rx.try_recv().is_ok(), "the active task must be cancelled");
+    }
+
+    // A watcher spawned for an earlier claim must not revoke the one that replaced it.
+    #[tokio::test]
+    async fn stale_epoch_spares_newer_claim() {
+        let claim_state = claim_at(8);
+        let (tx, mut rx) = oneshot::channel();
+        let active_cancel = Arc::new(Mutex::new(Some(tx)));
+
+        assert!(!release_claim_epoch(&claim_state, &active_cancel, 7).await);
+        assert!(claim_has_epoch(&*claim_state.lock().await, 8));
+        // Empty, not just Err, because a dropped sender also reports Err but leaves the
+        // newer claim's task uncancellable.
+        assert!(
+            matches!(rx.try_recv(), Err(TryRecvError::Empty)),
+            "the newer claim's task must not be cancelled"
+        );
+    }
+
+    // The owner re-check and the signal handler can both fire for one claim.
+    #[tokio::test]
+    async fn double_release_is_idempotent() {
+        let claim_state = claim_at(9);
+        let (tx, _rx) = oneshot::channel();
+        let active_cancel = Arc::new(Mutex::new(Some(tx)));
+
+        assert!(release_claim_epoch(&claim_state, &active_cancel, 9).await);
+        assert!(!release_claim_epoch(&claim_state, &active_cancel, 9).await);
+        assert!(claim_state.lock().await.is_none());
+    }
+
+    // A claim held with no verification running still has to clear.
+    #[tokio::test]
+    async fn release_without_an_active_task_still_clears() {
+        let claim_state = claim_at(3);
+        let active_cancel = Arc::new(Mutex::new(None));
+
+        assert!(release_claim_epoch(&claim_state, &active_cancel, 3).await);
+        assert!(claim_state.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn release_on_an_unclaimed_daemon_is_a_noop() {
+        let claim_state = Arc::new(Mutex::new(None));
+        let (tx, mut rx) = oneshot::channel();
+        let active_cancel = Arc::new(Mutex::new(Some(tx)));
+
+        assert!(!release_claim_epoch(&claim_state, &active_cancel, 1).await);
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    // The case the epoch guard exists for, where one connection claims, releases, and
+    // claims again, so the same unique name backs two different claims.
+    #[tokio::test]
+    async fn same_sender_reclaiming_is_not_released_by_the_old_epoch() {
+        let claim_state = claim_at(11);
+        let active_cancel = Arc::new(Mutex::new(None));
+
+        assert!(release_claim_epoch(&claim_state, &active_cancel, 11).await);
+        *claim_state.lock().await = Some(ClaimState {
+            username: "alice".to_string(),
+            sender: ":1.42".to_string(),
+            epoch: 12,
+        });
+
+        assert!(!release_claim_epoch(&claim_state, &active_cancel, 11).await);
+        assert!(claim_has_epoch(&*claim_state.lock().await, 12));
+    }
+
+    // The re-check and the vanish signal race by design; exactly one may win.
+    #[tokio::test]
+    async fn concurrent_releases_elect_a_single_winner() {
+        let claim_state = claim_at(4);
+        let (tx, mut rx) = oneshot::channel();
+        let active_cancel = Arc::new(Mutex::new(Some(tx)));
+
+        let (a, b) = tokio::join!(
+            release_claim_epoch(&claim_state, &active_cancel, 4),
+            release_claim_epoch(&claim_state, &active_cancel, 4)
+        );
+
+        assert!(a ^ b, "exactly one caller must report the release");
+        assert!(claim_state.lock().await.is_none());
+        assert!(rx.try_recv().is_ok(), "the active task must be cancelled");
+    }
+
+    #[test]
+    fn vanish_needs_the_watched_name_and_no_new_owner() {
+        assert!(is_vanish_of(":1.42", None, ":1.42"));
+        // An acquisition or hand-off is not a disappearance.
+        assert!(!is_vanish_of(":1.42", Some(":1.42"), ":1.42"));
+        assert!(!is_vanish_of(":1.99", None, ":1.42"));
+        // Prefix collision, where ":1.4" vanishing must not release ":1.42".
+        assert!(!is_vanish_of(":1.4", None, ":1.42"));
     }
 
     #[test]
@@ -546,7 +1275,7 @@ mod tests {
         use opencv::core::{CV_8UC3, Mat, Scalar};
 
         let frame = Mat::new_rows_cols_with_default(480, 640, CV_8UC3, Scalar::all(255.0)).unwrap();
-        let padded = gaze_core::detect::FaceDetector::pad_to_square(&frame).unwrap();
+        let padded = gaze_vision::detect::FaceDetector::pad_to_square(&frame).unwrap();
 
         let data = FaceData {
             embedding: ndarray::Array1::zeros(512),
@@ -569,7 +1298,7 @@ mod tests {
     #[test]
     fn emitter_guard_is_inert_for_rgb_and_when_disabled() {
         use super::EmitterGuard;
-        use gaze_core::camera::CameraKind;
+        use gaze_vision::camera::CameraKind;
 
         assert!(
             EmitterGuard::engage(
@@ -723,6 +1452,27 @@ mod tests {
     }
 
     #[test]
+    fn detached_scrubbed_process_escapes_environ_ancestry_check() {
+        let proc = FakeProc::new("detached");
+        proc.add(1, 0, "systemd", b"PATH=/usr/bin\0");
+        proc.add(5000, 1, "gaze", b"PATH=/usr/bin\0");
+        assert!(!AuthDaemon::process_chain_is_ssh_at(proc.root(), 5000));
+        assert!(!AuthDaemon::caller_is_ssh_session_at(
+            proc.root(),
+            Some(5000)
+        ));
+    }
+
+    #[test]
+    fn ssh_verdict_combines_heuristic_with_logind_remote() {
+        assert!(AuthDaemon::ssh_session_verdict(true, None));
+        assert!(AuthDaemon::ssh_session_verdict(true, Some(false)));
+        assert!(AuthDaemon::ssh_session_verdict(false, Some(true)));
+        assert!(!AuthDaemon::ssh_session_verdict(false, Some(false)));
+        assert!(!AuthDaemon::ssh_session_verdict(false, None));
+    }
+
+    #[test]
     fn process_chain_walk_terminates_on_self_referential_ppid() {
         let proc = FakeProc::new("cycle");
         proc.add(4000, 4000, "bash", b"USER=alice\0");
@@ -730,28 +1480,103 @@ mod tests {
     }
 
     #[test]
-    fn camera_uses_target_own_session_when_logged_in() {
-        // su victim while victim is logged in -> victim's own camera, not the attacker's.
-        let attacker_active = Some((1000, false, true));
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, true, false, attacker_active),
-            Some(1001)
-        );
+    fn camera_allows_a_root_caller_for_the_user_holding_the_seat() {
+        assert!(AuthDaemon::seat_camera_allowed(
+            0,
+            1001,
+            Some((1001, false)),
+            false
+        ));
     }
 
     #[test]
     fn camera_refuses_bystander_session_for_root_caller() {
-        // su victim while victim has no session; the active seat is a regular user (attacker).
-        let attacker_active = Some((1000, false, true));
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, false, false, attacker_active),
-            None
-        );
-        // No active session info at all -> also refuse.
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, false, false, None),
-            None
-        );
+        // su victim from the attacker's seat, whether or not the victim is logged in elsewhere.
+        assert!(!AuthDaemon::seat_camera_allowed(
+            0,
+            1001,
+            Some((1000, false)),
+            false
+        ));
+        // A failed logind lookup leaves the seat state unknown, so still refuse.
+        assert!(!AuthDaemon::seat_camera_allowed(0, 1001, None, false));
+    }
+
+    #[test]
+    fn camera_uses_the_seat_device_at_a_console_login_prompt() {
+        // `login` on a free VT: no session exists yet, so nothing owns the seat camera.
+        assert!(AuthDaemon::seat_camera_allowed(0, 1001, None, true));
+    }
+
+    #[test]
+    fn camera_refuses_the_seat_device_while_another_user_holds_the_seat() {
+        // logind empties ActiveSession on a switch to a VT with no session, even while another
+        // user stays logged in on a background VT. Emptiness alone must not reach the device.
+        assert!(!AuthDaemon::seat_camera_allowed(0, 1001, None, false));
+    }
+
+    #[test]
+    fn camera_denies_the_seat_device_to_unprivileged_callers() {
+        // An idle seat is not a licence for a non-root caller to reach the device.
+        assert!(!AuthDaemon::seat_camera_allowed(1000, 1001, None, true));
+    }
+
+    #[test]
+    fn camera_allows_login_greeter_for_root_caller() {
+        // GDM login, where the target has no session yet and the active seat is the greeter.
+        assert!(AuthDaemon::seat_camera_allowed(
+            0,
+            1001,
+            Some((42, true)),
+            false
+        ));
+    }
+
+    #[test]
+    fn camera_answers_the_greeter_probing_for_itself() {
+        assert!(AuthDaemon::seat_camera_allowed(
+            42,
+            42,
+            Some((42, true)),
+            false
+        ));
+        assert!(!AuthDaemon::seat_camera_allowed(
+            1000,
+            1000,
+            Some((42, true)),
+            false
+        ));
+    }
+
+    #[test]
+    fn camera_allows_a_polkit_approved_caller_holding_the_seat() {
+        // Admin (non-root) acting for another user after a polkit check, at their own seat.
+        assert!(AuthDaemon::seat_camera_allowed(
+            1000,
+            1001,
+            Some((1000, false)),
+            false
+        ));
+        assert!(!AuthDaemon::seat_camera_allowed(1000, 1001, None, false));
+    }
+
+    #[test]
+    fn camera_refuses_a_background_session_probing_for_itself() {
+        assert!(!AuthDaemon::seat_camera_allowed(
+            1002,
+            1002,
+            Some((1000, false)),
+            false
+        ));
+    }
+
+    #[test]
+    fn seat_occupancy_ignores_the_target_and_fails_closed() {
+        // Only sessions belonging to somebody else count as occupancy.
+        assert!([1001, 1001].iter().all(|uid| *uid == 1001));
+        assert!(![1001, 1000].iter().all(|uid| *uid == 1001));
+        // An empty seat is unoccupied for any target.
+        assert!(Vec::<u32>::new().iter().all(|uid| *uid == 1001));
     }
 
     #[test]
@@ -771,47 +1596,66 @@ mod tests {
     }
 
     #[test]
-    fn camera_allows_login_greeter_for_root_caller() {
-        // GDM login: target has no session yet, active seat is the greeter.
-        let greeter_active = Some((42, true, true));
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, false, false, greeter_active),
-            Some(42)
-        );
-        // Greeter without a usable camera runtime -> refuse.
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, false, false, Some((42, true, false))),
-            None
-        );
+    fn face_writes_need_authorization_even_for_the_owning_user() {
+        assert!(AuthDaemon::face_write_needs_authorization(1000));
+        assert!(!AuthDaemon::face_write_needs_authorization(0));
     }
 
     #[test]
-    fn camera_prefers_active_greeter_over_target_leftover_runtime() {
-        // GDM login while the target's runtime lingers: the greeter owns the seat camera.
-        let greeter_active = Some((42, true, true));
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, true, false, greeter_active),
-            Some(42)
-        );
-        // Greeter active but without PipeWire -> fall back to the target's runtime.
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, true, false, Some((42, true, false))),
-            Some(1001)
-        );
+    fn benchmarks_need_authorization_for_every_non_root_caller() {
+        assert!(AuthDaemon::benchmark_needs_authorization(1000));
+        assert!(AuthDaemon::benchmark_needs_authorization(42));
+        assert!(!AuthDaemon::benchmark_needs_authorization(0));
     }
 
     #[test]
-    fn camera_uses_caller_session_for_polkit_approved_caller() {
-        // Admin (non-root) acting for another user after a polkit check uses their own camera.
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(1000, 1001, false, true, Some((1000, false, true))),
-            Some(1000)
-        );
-        // ...but refuse if even the caller has no camera session.
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(1000, 1001, false, false, None),
-            None
-        );
+    fn only_one_benchmark_slot_is_available_at_a_time() {
+        use super::BenchmarkSlot;
+        use std::sync::atomic::AtomicBool;
+
+        let flag = std::sync::Arc::new(AtomicBool::new(false));
+        let first = BenchmarkSlot::acquire(&flag).expect("first caller acquires");
+        assert!(BenchmarkSlot::acquire(&flag).is_none());
+
+        drop(first);
+        let second = BenchmarkSlot::acquire(&flag).expect("slot is released");
+        drop(second);
+        assert!(!flag.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn benchmark_slot_is_released_when_the_holder_panics() {
+        use super::BenchmarkSlot;
+        use std::sync::atomic::AtomicBool;
+
+        let flag = std::sync::Arc::new(AtomicBool::new(false));
+        let inner = flag.clone();
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let _ = std::panic::catch_unwind(move || {
+            let _slot = BenchmarkSlot::acquire(&inner).expect("acquired");
+            panic!("benchmark blew up");
+        });
+        std::panic::set_hook(previous);
+
+        assert!(BenchmarkSlot::acquire(&flag).is_some());
+    }
+
+    #[test]
+    fn only_a_privileged_caller_at_a_greeter_reaches_the_seat_device() {
+        // Must never let an unprivileged caller borrow a device for someone else.
+        assert!(!AuthDaemon::seat_camera_allowed(
+            1000,
+            1001,
+            Some((42, true)),
+            false
+        ));
+        assert!(!AuthDaemon::seat_camera_allowed(
+            0,
+            1001,
+            Some((1000, false)),
+            false
+        ));
     }
 
     #[test]
@@ -838,6 +1682,135 @@ mod tests {
         assert_eq!(auth_streams("", "/dev/video2", true, true), (false, true));
         assert_eq!(auth_streams("primary", "", true, true), (true, false));
         assert_eq!(auth_streams("", "", true, true), (false, false));
+    }
+
+    #[test]
+    fn independent_camera_functions_capture_both_spectra_at_once() {
+        assert!(!ir_waits_for_rgb(true, false));
+        assert!(!rgb_yields_camera_on_budget(true, false));
+    }
+
+    #[test]
+    fn a_shared_camera_function_still_serializes_the_two_phases() {
+        assert!(ir_waits_for_rgb(true, true));
+        assert!(rgb_yields_camera_on_budget(true, true));
+    }
+
+    #[test]
+    fn a_lone_spectrum_never_waits_on_the_other() {
+        for serial_capture in [true, false] {
+            assert!(!ir_waits_for_rgb(false, serial_capture), "{serial_capture}");
+            assert!(
+                !rgb_yields_camera_on_budget(false, serial_capture),
+                "{serial_capture}"
+            );
+        }
+    }
+
+    #[test]
+    fn parallel_capture_does_not_weaken_the_and_policy() {
+        for (rgb_success, ir_success) in [(true, false), (false, true), (false, false)] {
+            assert!(
+                !hybrid_auth_passed(
+                    "and",
+                    true,
+                    true,
+                    true,
+                    CaptureStatus::Usable,
+                    rgb_success,
+                    ir_success
+                ),
+                "{rgb_success} {ir_success}"
+            );
+        }
+        assert!(hybrid_auth_passed(
+            "and",
+            true,
+            true,
+            true,
+            CaptureStatus::Usable,
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    fn parallel_capture_keeps_rgb_latching_on_dark_for_the_fallback_policy() {
+        assert!(should_yield_rgb_to_ir(
+            "fallback_on_dark",
+            true,
+            CaptureStatus::TooDark
+        ));
+        assert!(hybrid_auth_passed(
+            "fallback_on_dark",
+            true,
+            true,
+            true,
+            CaptureStatus::TooDark,
+            false,
+            true
+        ));
+    }
+
+    #[test]
+    fn and_policy_refuses_to_degrade_to_one_spectrum() {
+        let (run_rgb, run_ir) = auth_streams("primary", "/dev/video2", true, false);
+        assert!(and_policy_unsatisfiable(
+            "and",
+            "primary",
+            "/dev/video2",
+            run_rgb,
+            run_ir
+        ));
+
+        let (run_rgb, run_ir) = auth_streams("primary", "/dev/video2", false, true);
+        assert!(and_policy_unsatisfiable(
+            "and",
+            "primary",
+            "/dev/video2",
+            run_rgb,
+            run_ir
+        ));
+    }
+
+    #[test]
+    fn and_policy_is_satisfiable_with_both_spectra_enrolled() {
+        let (run_rgb, run_ir) = auth_streams("primary", "/dev/video2", true, true);
+        assert!(!and_policy_unsatisfiable(
+            "and",
+            "primary",
+            "/dev/video2",
+            run_rgb,
+            run_ir
+        ));
+    }
+
+    #[test]
+    fn single_camera_hosts_are_not_blocked_by_the_and_policy() {
+        let (run_rgb, run_ir) = auth_streams("primary", "", true, false);
+        assert!(!and_policy_unsatisfiable(
+            "and", "primary", "", run_rgb, run_ir
+        ));
+
+        let (run_rgb, run_ir) = auth_streams("", "/dev/video2", false, true);
+        assert!(!and_policy_unsatisfiable(
+            "and",
+            "",
+            "/dev/video2",
+            run_rgb,
+            run_ir
+        ));
+    }
+
+    #[test]
+    fn other_policies_still_allow_a_single_spectrum() {
+        for policy in ["or", "fallback_on_dark", "default", ""] {
+            let (run_rgb, run_ir) = auth_streams("primary", "/dev/video2", true, false);
+            assert!(
+                !and_policy_unsatisfiable(policy, "primary", "/dev/video2", run_rgb, run_ir),
+                "{policy}"
+            );
+        }
     }
 
     #[test]
@@ -878,7 +1851,7 @@ mod tests {
             false,
             true
         ));
-        assert!(hybrid_auth_passed(
+        assert!(!hybrid_auth_passed(
             "fallback",
             true,
             true,
@@ -896,6 +1869,25 @@ mod tests {
             false,
             true
         ));
+    }
+
+    #[test]
+    fn hybrid_fallback_yields_dark_rgb_to_ir_immediately() {
+        for policy in ["fallback_on_dark", "default", ""] {
+            assert!(should_yield_rgb_to_ir(policy, true, CaptureStatus::TooDark));
+        }
+        assert!(!should_yield_rgb_to_ir(
+            "fallback_on_dark",
+            false,
+            CaptureStatus::TooDark
+        ));
+        assert!(!should_yield_rgb_to_ir(
+            "fallback_on_dark",
+            true,
+            CaptureStatus::NoFace
+        ));
+        assert!(!should_yield_rgb_to_ir("or", true, CaptureStatus::TooDark));
+        assert!(!should_yield_rgb_to_ir("and", true, CaptureStatus::TooDark));
     }
 
     #[test]
@@ -928,29 +1920,73 @@ mod tests {
             true
         ));
     }
-}
 
-pub use gaze_core::dbus::get_active_session_uid;
-
-static PIPEWIRE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn pipewire_runtime_update(current: Option<&str>, uid: u32) -> Option<String> {
-    let target = format!("/run/user/{uid}");
-    match current {
-        Some(existing) if existing == target => None,
-        _ => Some(target),
+    #[test]
+    fn pam_internal_service_normalization() {
+        assert_eq!(AuthDaemon::normalize_pam_service("polkit-1"), "polkit-1");
+        assert_eq!(
+            AuthDaemon::normalize_pam_service("  polkit-1  "),
+            "polkit-1"
+        );
+        assert_eq!(
+            AuthDaemon::normalize_pam_service("/etc/pam.d/polkit-1"),
+            "polkit-1"
+        );
+        assert_eq!(
+            AuthDaemon::normalize_pam_service("/etc/pam.d/gdm-face"),
+            "gdm-face"
+        );
+        assert_eq!(AuthDaemon::normalize_pam_service(""), "");
     }
-}
 
-pub fn set_pipewire_runtime_for_uid(uid: u32) {
-    let _guard = PIPEWIRE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let current = std::env::var("XDG_RUNTIME_DIR").ok();
-    if let Some(target) = pipewire_runtime_update(current.as_deref(), uid) {
-        unsafe {
-            std::env::set_var("XDG_RUNTIME_DIR", target);
+    #[test]
+    fn pam_internal_set_add_remove_clear_logic() {
+        let set = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+
+        {
+            let mut s = set.lock().unwrap();
+            let norm = AuthDaemon::normalize_pam_service("/etc/pam.d/polkit-1");
+            if !norm.is_empty() {
+                s.insert(norm);
+            }
+            let norm2 = AuthDaemon::normalize_pam_service("gdm-face");
+            if !norm2.is_empty() {
+                s.insert(norm2);
+            }
+        }
+
+        {
+            let s = set.lock().unwrap();
+            assert!(s.contains("polkit-1"));
+            assert!(s.contains("gdm-face"));
+            assert_eq!(s.len(), 2);
+        }
+
+        {
+            let mut s = set.lock().unwrap();
+            let norm = AuthDaemon::normalize_pam_service("polkit-1");
+            s.remove(&norm);
+        }
+
+        {
+            let s = set.lock().unwrap();
+            assert!(!s.contains("polkit-1"));
+            assert!(s.contains("gdm-face"));
+            assert_eq!(s.len(), 1);
+        }
+
+        {
+            let mut s = set.lock().unwrap();
+            s.clear();
+        }
+
+        {
+            let s = set.lock().unwrap();
+            assert!(s.is_empty());
         }
     }
 }
+
 
 pub fn load_ir_liveness_detector(enabled: bool) -> Option<LivenessDetector> {
     if !enabled {
@@ -971,6 +2007,43 @@ pub fn load_ir_liveness_detector(enabled: bool) -> Option<LivenessDetector> {
     }
 }
 
+/// The effective value in the GDM profile, which a NixOS config sets without our override file.
+fn gdm_face_auth_from_dconf() -> Option<bool> {
+    if !std::path::Path::new(GDM_DCONF_PROFILE_PATH).exists() {
+        return None;
+    }
+    let output = std::process::Command::new("dconf")
+        .arg("read")
+        .arg(GDM_DCONF_FACE_AUTH_KEY)
+        .env("DCONF_PROFILE", GDM_DCONF_PROFILE)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    match String::from_utf8_lossy(&output.stdout).trim() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+fn gdm_override_error(action: &str, path: &std::path::Path, err: std::io::Error) -> fdo::Error {
+    if matches!(
+        err.kind(),
+        std::io::ErrorKind::ReadOnlyFilesystem | std::io::ErrorKind::PermissionDenied
+    ) {
+        return fdo::Error::Failed(format!(
+            "Failed to {action} {}: {err}. The GDM dconf database is read-only, \
+             so it is managed by your system configuration rather than by Gaze; \
+             on NixOS set `services.gaze.gnome.gdmFaceLogin` instead.",
+            path.display()
+        ));
+    }
+    fdo::Error::Failed(format!("Failed to {action} {}: {err}", path.display()))
+}
+
+
 async fn prepare_for_sleep_stream(conn: &zbus::Connection) -> zbus::Result<zbus::MessageStream> {
     let rule = zbus::MatchRule::builder()
         .msg_type(zbus::message::Type::Signal)
@@ -982,7 +2055,11 @@ async fn prepare_for_sleep_stream(conn: &zbus::Connection) -> zbus::Result<zbus:
     zbus::MessageStream::for_match_rule(rule, conn, None).await
 }
 
-pub async fn watch_resume(conn: zbus::Connection, resume_pending: Arc<AtomicBool>) {
+pub async fn watch_resume(
+    conn: zbus::Connection,
+    resume_pending: Arc<AtomicBool>,
+    resume_seen: Arc<AtomicBool>,
+) {
     let mut stream = match prepare_for_sleep_stream(&conn).await {
         Ok(stream) => stream,
         Err(e) => {
@@ -994,14 +2071,176 @@ pub async fn watch_resume(conn: zbus::Connection, resume_pending: Arc<AtomicBool
     while let Some(Ok(msg)) = stream.next().await {
         if let Ok(false) = msg.body().deserialize::<bool>() {
             resume_pending.store(true, Ordering::SeqCst);
+            resume_seen.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+/// Subscribe to NameOwnerChanged, resolving only once the match rule is installed. Call it
+/// before requesting the well-known name, or a sender vanishing in between strands the claim.
+pub async fn subscribe_claim_owners(
+    conn: &zbus::Connection,
+) -> zbus::Result<fdo::NameOwnerChangedStream> {
+    fdo::DBusProxy::new(conn)
+        .await?
+        .receive_name_owner_changed()
+        .await
+}
+
+/// Release the active claim as soon as its owning D-Bus name loses its owner. One subscription
+/// for the daemon's lifetime, so no task or signal receiver is left behind per claim.
+pub async fn watch_claim_owner(
+    mut stream: fdo::NameOwnerChangedStream,
+    claim_state: ClaimStateHandle,
+    active_cancel: ActiveCancelHandle,
+) {
+    while let Some(signal) = stream.next().await {
+        let Ok(args) = signal.args() else {
+            continue;
+        };
+
+        let name = args.name().as_str();
+        let epoch = {
+            let state = claim_state.lock().await;
+            match &*state {
+                Some(claim)
+                    if is_vanish_of(
+                        name,
+                        args.new_owner().as_ref().map(|o| o.as_str()),
+                        &claim.sender,
+                    ) =>
+                {
+                    Some(claim.epoch)
+                }
+                _ => None,
+            }
+        };
+        let Some(epoch) = epoch else {
+            continue;
+        };
+
+        let name = name.to_string();
+        if release_claim_epoch(&claim_state, &active_cancel, epoch).await {
+            info!(sender = %name, "Sender vanished, auto-releasing claim");
+        }
+    }
+
+    error!("NameOwnerChanged stream ended; claims will only be released on timeout");
+}
+
+async fn session_properties_stream(conn: &zbus::Connection) -> zbus::Result<zbus::MessageStream> {
+    let rule = zbus::MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .sender("org.freedesktop.login1")?
+        .interface("org.freedesktop.DBus.Properties")?
+        .member("PropertiesChanged")?
+        .path_namespace(gaze_core::dbus::LOGIN_SESSION_PATH_PREFIX)?
+        .build();
+    zbus::MessageStream::for_match_rule(rule, conn, None).await
+}
+
+fn locked_hint_from_changed(body: &zbus::message::Body) -> Option<bool> {
+    let (interface, changed, _invalidated): (
+        String,
+        std::collections::HashMap<String, zbus::zvariant::Value>,
+        Vec<String>,
+    ) = body.deserialize().ok()?;
+
+    if interface != "org.freedesktop.login1.Session" {
+        return None;
+    }
+
+    match changed.get("LockedHint")? {
+        zbus::zvariant::Value::Bool(locked) => Some(*locked),
+        _ => None,
+    }
+}
+
+/// Records when each session locks, so the start delay can be measured from it.
+pub async fn watch_session_locks(conn: zbus::Connection, lock_epochs: LockEpochs) {
+    let mut stream = match session_properties_stream(&conn).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            warn!(
+                "Failed to subscribe to session LockedHint, start delay will apply per auth: {e}"
+            );
+            return;
+        }
+    };
+
+    while let Some(Ok(msg)) = stream.next().await {
+        let Some(path) = msg.header().path().map(|p| p.to_string()) else {
+            continue;
+        };
+        let Some(locked) = locked_hint_from_changed(&msg.body()) else {
+            continue;
+        };
+
+        let live = gaze_core::dbus::session_paths_on(&conn).await.ok();
+
+        let mut epochs = lock_epochs.lock().await;
+        if let Some(live) = live {
+            epochs.retain(|session, _| live.iter().any(|path| path == session));
+        }
+        if locked {
+            epochs.entry(path).or_insert_with(std::time::Instant::now);
+        } else {
+            epochs.remove(&path);
         }
     }
 }
 
 enum VerifyMsg {
-    Status(Spectrum, CaptureStatus, Option<ndarray::Array1<f32>>),
+    PhaseStarted(Spectrum),
+    Diagnostic(String),
+    Status(Spectrum, CaptureStatus, Option<ndarray::Array1<f32>>, f64),
     Success(Spectrum, ndarray::Array1<f32>),
     Error(String),
+}
+
+fn should_yield_rgb_to_ir(policy: &str, run_ir: bool, status: CaptureStatus) -> bool {
+    run_ir && !matches!(policy, "or" | "and") && matches!(status, CaptureStatus::TooDark)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VerifyGiveUp {
+    NoFace,
+    NoUsableFrame,
+}
+
+impl VerifyGiveUp {
+    fn reason(self) -> String {
+        match self {
+            Self::NoFace => format!(
+                "giving up after {}s without a detected face",
+                VERIFY_NO_FACE_TIMEOUT.as_secs()
+            ),
+            Self::NoUsableFrame => format!(
+                "giving up after {}s without a usable frame",
+                VERIFY_NO_USABLE_TIMEOUT.as_secs()
+            ),
+        }
+    }
+}
+
+/// Whether a verify run has spent either deadline. Both are needed: `Clipped` and `Ready` refresh
+/// `since_face` and never `since_usable`, so alone they keep a run alive with nothing to decide it.
+fn verify_give_up(since_face: Duration, since_usable: Duration) -> Option<VerifyGiveUp> {
+    if since_face >= VERIFY_NO_FACE_TIMEOUT {
+        return Some(VerifyGiveUp::NoFace);
+    }
+    if since_usable >= VERIFY_NO_USABLE_TIMEOUT {
+        return Some(VerifyGiveUp::NoUsableFrame);
+    }
+    None
+}
+
+fn ir_waits_for_rgb(run_rgb: bool, serial_capture: bool) -> bool {
+    run_rgb && serial_capture
+}
+
+fn rgb_yields_camera_on_budget(run_ir: bool, serial_capture: bool) -> bool {
+    run_ir && serial_capture
 }
 
 fn hybrid_auth_passed(
@@ -1017,10 +2256,11 @@ fn hybrid_auth_passed(
         (true, true) => match policy {
             "or" => rgb_success || ir_success,
             "and" => rgb_success && ir_success,
+            // Fallback policy: both spectra must pass unless RGB ran and was too dark to judge.
             _ => {
                 if !rgb_attempted {
                     rgb_success && ir_success
-                } else if matches!(rgb_status, CaptureStatus::TooDark | CaptureStatus::NoFace) {
+                } else if matches!(rgb_status, CaptureStatus::TooDark) {
                     ir_success
                 } else {
                     rgb_success && ir_success
@@ -1043,6 +2283,16 @@ fn auth_streams(
         !rgb_device.is_empty() && has_rgb_templates,
         !ir_device.is_empty() && has_ir_templates,
     )
+}
+
+fn and_policy_unsatisfiable(
+    policy: &str,
+    rgb_device: &str,
+    ir_device: &str,
+    run_rgb: bool,
+    run_ir: bool,
+) -> bool {
+    policy == "and" && !rgb_device.is_empty() && !ir_device.is_empty() && !(run_rgb && run_ir)
 }
 
 fn process_frame_sync(
@@ -1093,7 +2343,8 @@ fn process_frame_sync(
     }
 }
 
-// Strip the square padding first: its black bars read as a replay bezel to the anti-spoof model.
+// Strip the square padding first, since its black bars read as a replay bezel
+// to the anti-spoof model.
 fn crop_liveness_face(data: &FaceData) -> anyhow::Result<image::RgbImage> {
     let mat_rgb = data
         .liveness_frame
@@ -1115,19 +2366,22 @@ fn crop_liveness_face(data: &FaceData) -> anyhow::Result<image::RgbImage> {
     crate::liveness::crop_face(&content, bbox)
 }
 
+/// One row per enrolled face, holding (name, rgb_sim, rgb_pct, rgb_passed, ir_sim, ir_pct,
+/// ir_passed) and sorted best match first.
 fn build_hybrid_scores(
     db: &UserDatabase,
     username: &str,
-    threshold: f32,
+    rgb_threshold: f32,
+    ir_threshold: f32,
     rgb_embed: Option<&ndarray::Array1<f32>>,
     ir_embed: Option<&ndarray::Array1<f32>>,
 ) -> Vec<(String, f64, f64, bool, f64, f64, bool)> {
     let rgb_scores = rgb_embed.and_then(|embed| {
-        db.match_faces(username, embed, threshold, Spectrum::Rgb)
+        db.match_faces(username, embed, rgb_threshold, Spectrum::Rgb)
             .ok()
     });
     let ir_scores = ir_embed.and_then(|embed| {
-        db.match_faces(username, embed, threshold, Spectrum::Ir)
+        db.match_faces(username, embed, ir_threshold, Spectrum::Ir)
             .ok()
     });
 
@@ -1182,6 +2436,7 @@ const BENCHMARK_TIMED_ITERS: usize = 15;
 
 fn benchmark_component(
     component: &str,
+    runtime: &gaze_vision::inference::InferenceRuntime,
     mut run_once: impl FnMut() -> anyhow::Result<()>,
 ) -> anyhow::Result<gaze_core::dbus::BenchmarkResult> {
     for _ in 0..BENCHMARK_WARMUP_ITERS {
@@ -1204,6 +2459,11 @@ fn benchmark_component(
 
     Ok(gaze_core::dbus::BenchmarkResult {
         component: component.to_string(),
+        execution_provider: runtime.active_execution_provider.clone(),
+        device: runtime.active_device.clone(),
+        requested_execution_provider: runtime.requested_execution_provider.clone(),
+        requested_device: runtime.requested_device.clone(),
+        fallback_reason: runtime.fallback_reason.clone().unwrap_or_default(),
         mean_ms,
         p95_ms,
         min_ms,
@@ -1221,7 +2481,13 @@ fn run_inference_benchmark(
 
     {
         let mut detector = detector.lock().unwrap_or_else(|e| e.into_inner());
-        let result = benchmark_component("Face detector", || Ok(detector.benchmark_infer()?))
+        let runtime = detector.inference_runtime().clone();
+        let result =
+            benchmark_component(
+                "Face detector",
+                &runtime,
+                || Ok(detector.benchmark_infer()?),
+            )
             .map_err(|e| fdo::Error::Failed(format!("detector benchmark failed: {e}")))?;
         results.push(result);
     }
@@ -1230,7 +2496,8 @@ fn run_inference_benchmark(
 
     {
         let mut recognizer = recognizer_rgb.blocking_lock();
-        let result = benchmark_component("Face recognizer (RGB)", || {
+        let runtime = recognizer.inference_runtime().clone();
+        let result = benchmark_component("Face recognizer (RGB)", &runtime, || {
             recognizer.get_embedding(&synthetic_face).map(|_| ())
         })
         .map_err(|e| fdo::Error::Failed(format!("RGB recognizer benchmark failed: {e}")))?;
@@ -1239,7 +2506,8 @@ fn run_inference_benchmark(
 
     {
         let mut recognizer = recognizer_ir.blocking_lock();
-        let result = benchmark_component("Face recognizer (IR)", || {
+        let runtime = recognizer.inference_runtime().clone();
+        let result = benchmark_component("Face recognizer (IR)", &runtime, || {
             recognizer.get_embedding(&synthetic_face).map(|_| ())
         })
         .map_err(|e| fdo::Error::Failed(format!("IR recognizer benchmark failed: {e}")))?;
@@ -1249,7 +2517,8 @@ fn run_inference_benchmark(
     {
         let mut liveness_guard = liveness.blocking_lock();
         if let Some(detector) = liveness_guard.as_mut() {
-            let result = benchmark_component("Liveness (MiniFASNet)", || {
+            let runtime = detector.inference_runtime().clone();
+            let result = benchmark_component("Liveness (MiniFASNet)", &runtime, || {
                 detector.live_score(&synthetic_face).map(|_| ())
             })
             .map_err(|e| fdo::Error::Failed(format!("liveness benchmark failed: {e}")))?;
@@ -1263,11 +2532,23 @@ fn run_inference_benchmark(
 #[cfg(test)]
 mod benchmark_tests {
     use super::{BENCHMARK_TIMED_ITERS, BENCHMARK_WARMUP_ITERS, benchmark_component};
+    use gaze_vision::inference::InferenceRuntime;
+
+    fn cpu_runtime() -> InferenceRuntime {
+        InferenceRuntime {
+            requested_execution_provider: "cpu".to_string(),
+            requested_device: "cpu".to_string(),
+            active_execution_provider: "cpu".to_string(),
+            active_device: "cpu".to_string(),
+            fallback_reason: None,
+        }
+    }
 
     #[test]
     fn runs_warmup_then_timed_iterations_and_reports_ordered_stats() {
         let calls = std::cell::Cell::new(0usize);
-        let result = benchmark_component("Test model", || {
+        let runtime = cpu_runtime();
+        let result = benchmark_component("Test model", &runtime, || {
             calls.set(calls.get() + 1);
             Ok(())
         })
@@ -1275,6 +2556,7 @@ mod benchmark_tests {
 
         assert_eq!(calls.get(), BENCHMARK_WARMUP_ITERS + BENCHMARK_TIMED_ITERS);
         assert_eq!(result.component, "Test model");
+        assert!(result.ran_as_configured());
         assert!(result.min_ms <= result.mean_ms);
         assert!(result.min_ms <= result.p95_ms);
         assert!(result.fps >= 0.0);
@@ -1282,8 +2564,27 @@ mod benchmark_tests {
 
     #[test]
     fn propagates_the_first_error_from_warmup() {
-        let err = benchmark_component("Failing model", || anyhow::bail!("boom")).unwrap_err();
+        let runtime = cpu_runtime();
+        let err =
+            benchmark_component("Failing model", &runtime, || anyhow::bail!("boom")).unwrap_err();
         assert!(err.to_string().contains("boom"));
+    }
+
+    #[test]
+    fn reports_the_fallback_when_the_requested_device_is_not_in_use() {
+        let runtime = InferenceRuntime {
+            requested_execution_provider: "openvino".to_string(),
+            requested_device: "npu".to_string(),
+            active_execution_provider: "cpu".to_string(),
+            active_device: "cpu".to_string(),
+            fallback_reason: Some("no npu driver".to_string()),
+        };
+        let result = benchmark_component("Test model", &runtime, || Ok(())).unwrap();
+
+        assert!(!result.ran_as_configured());
+        assert_eq!(result.execution_provider, "cpu");
+        assert_eq!(result.requested_device, "npu");
+        assert_eq!(result.fallback_reason, "no npu driver");
     }
 }
 
@@ -1336,11 +2637,11 @@ impl AuthDaemon {
             Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_FACES).await?;
         }
 
-        let Some(camera_uid) = Self::camera_runtime_uid(caller_uid, target_uid).await else {
+        if !Self::seat_camera_available(caller_uid, target_uid).await {
             return Err(fdo::Error::AccessDenied(
-                "refusing face auth: no camera belongs to the target user's session".into(),
+                "refusing face auth: the seat camera belongs to another user's session".into(),
             ));
-        };
+        }
 
         let mut state = self.claim_state.lock().await;
         if let Some(existing) = &*state {
@@ -1366,10 +2667,8 @@ impl AuthDaemon {
             username = %username,
             target_uid,
             caller_uid,
-            camera_uid,
             "Claimed daemon"
         );
-        set_pipewire_runtime_for_uid(camera_uid);
         let epoch = CLAIM_EPOCH.fetch_add(1, Ordering::Relaxed);
         *state = Some(ClaimState {
             username,
@@ -1381,53 +2680,67 @@ impl AuthDaemon {
         let claim_state = self.claim_state.clone();
         let active_cancel = self.active_cancel.clone();
 
+        let timeout_sender = sender.clone();
         self.rt_handle.spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(CLAIM_TIMEOUT_SECS)).await;
-            let mut state = claim_state.lock().await;
-            if claim_has_epoch(&state, epoch) {
-                *state = None;
-                let mut cancel = active_cancel.lock().await;
-                if let Some(tx) = cancel.take() {
-                    let _ = tx.send(());
-                }
+            if release_claim_epoch(&claim_state, &active_cancel, epoch).await {
+                warn!(
+                    sender = %timeout_sender,
+                    timeout_secs = CLAIM_TIMEOUT_SECS,
+                    "Claim timed out and was reclaimed; the client never released it"
+                );
             }
         });
 
         let claim_state = self.claim_state.clone();
         let active_cancel = self.active_cancel.clone();
         let conn = conn.clone();
-        let sender_for_watcher = sender.clone();
+        let sender_for_check = sender.clone();
 
+        // The watcher may have handled this sender's disappearance while the claim was still
+        // being authorized, finding nothing to release, so confirm the owner once here.
         self.rt_handle.spawn(async move {
-            let Ok(dbus) = fdo::DBusProxy::new(&conn).await else {
-                return;
-            };
-
-            let Ok(mut stream) = dbus.receive_name_owner_changed().await else {
-                return;
-            };
-
-            while let Some(signal) = stream.next().await {
-                if let Ok(args) = signal.args()
-                    && args.name().as_str() == sender_for_watcher
-                    && args.new_owner().is_none()
-                {
-                    info!(
-                        sender = %sender_for_watcher,
-                        "Sender vanished, auto-releasing claim"
+            let dbus = match fdo::DBusProxy::new(&conn).await {
+                Ok(dbus) => dbus,
+                Err(e) => {
+                    warn!(
+                        sender = %sender_for_check,
+                        error = %e,
+                        "No DBus proxy to confirm the claim owner; this claim will hold \
+                         until it times out"
                     );
-                    let mut state = claim_state.lock().await;
-                    if let Some(claim) = &*state
-                        && claim.sender == sender_for_watcher
-                    {
-                        *state = None;
-                        let mut cancel = active_cancel.lock().await;
-                        if let Some(tx) = cancel.take() {
-                            let _ = tx.send(());
-                        }
-                    }
-                    break;
+                    return;
                 }
+            };
+
+            let watched = match BusName::try_from(sender_for_check.clone()) {
+                Ok(watched) => watched,
+                Err(e) => {
+                    warn!(
+                        sender = %sender_for_check,
+                        error = %e,
+                        "Unparsable claim sender; skipping the owner confirmation"
+                    );
+                    return;
+                }
+            };
+
+            match dbus.name_has_owner(watched).await {
+                Ok(false) => {
+                    if release_claim_epoch(&claim_state, &active_cancel, epoch).await {
+                        info!(
+                            sender = %sender_for_check,
+                            "Sender vanished while claiming, auto-releasing claim"
+                        );
+                    }
+                }
+                Ok(true) => {}
+                Err(e) => warn!(
+                    sender = %sender_for_check,
+                    error = %e,
+                    "Could not confirm the claim owner; a sender that vanished while \
+                     claiming will hold the claim until it times out"
+                ),
             }
         });
 
@@ -1461,549 +2774,57 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         _face_name: String,
     ) -> fdo::Result<()> {
-        let claim = self.check_claim(&header).await?;
-        self.ensure_auth_not_aborted(&header).await?;
+        self.start_verification(ctxt, header, None, false).await
+    }
 
-        if self.resume_pending.swap(false, Ordering::SeqCst) {
-            let grace = Duration::from_millis(
-                Config::load_from(CONFIG_PATH)
-                    .map(|c| c.auth.resume_grace_ms)
-                    .unwrap_or(0),
-            );
-            if !grace.is_zero() {
-                info!(
-                    ?grace,
-                    "Resumed from suspend, delaying face auth for display"
-                );
-                tokio::time::sleep(grace).await;
-            }
+    async fn verify_start_for(
+        &self,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        _face_name: String,
+        pam_service: String,
+    ) -> fdo::Result<()> {
+        self.start_verification(ctxt, header, Some(pam_service), false)
+            .await
+    }
+
+    async fn verify_start_for_keyring(
+        &self,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+    ) -> fdo::Result<()> {
+        self.start_verification(ctxt, header, Some("gdm-face".into()), true)
+            .await
+    }
+
+    async fn verify_start_for_kwallet(
+        &self,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        pam_service: String,
+    ) -> fdo::Result<()> {
+        if !matches!(
+            pam_service.as_str(),
+            "sddm" | "plasmalogin" | "plasmalogin-fingerprint"
+        ) {
+            return Err(fdo::Error::InvalidArgs(
+                "KWallet requires a KDE login service".into(),
+            ));
         }
+        self.start_verification(ctxt, header, Some(pam_service), true)
+            .await
+    }
 
-        let username = claim.username.clone();
-        let signal_destination = Self::signal_destination(&claim.sender)?;
-        self.cancel_active_tasks().await;
+    async fn kwallet_enabled(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<bool> {
+        Self::ensure_config_read_access(&header).await?;
+        Ok(self.current_config().await.storage.unlock_kwallet)
+    }
 
-        let (tx, mut rx) = oneshot::channel();
-        *self.active_cancel.lock().await = Some(tx);
 
-        let detector_arc = self.detector.clone();
-        let recognizer_rgb_arc = self.recognizer_rgb.clone();
-        let recognizer_ir_arc = self.recognizer_ir.clone();
-        let liveness_arc = self.liveness.clone();
-        let ir_liveness_arc = self.ir_liveness.clone();
-        let ir_model_enabled = ir_liveness_arc.lock().await.is_some();
-        let db_arc = self.db.clone();
-        let threshold_arc = self.threshold.clone();
+    async fn keyring_enabled(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<bool> {
+        Self::ensure_config_read_access(&header).await?;
+        Ok(self.current_config().await.storage.unlock_gnome_keyring)
 
-        let config = Config::load_from(CONFIG_PATH).unwrap_or_default();
-        let rgb_device = self.rgb_device.lock().await.clone();
-        let ir_device = self.ir_device.lock().await.clone();
-        let ir_node = self.ir_node.lock().await.clone();
-        let emitter_enabled = *self.emitter_enabled.lock().await;
-        let liveness_cfg = self.liveness_config.lock().await.clone();
-        let hybrid_policy = self.hybrid_policy.lock().await.clone();
-        let conn = ctxt.connection().clone();
-        let path = ctxt.path().to_owned();
-
-        self.rt_handle.spawn(async move {
-            let ctxt = match SignalEmitter::new(&conn, path) {
-                Ok(emitter) => emitter.set_destination(signal_destination),
-                Err(e) => {
-                    error!("Failed to create signal emitter: {e}");
-                    return;
-                }
-            };
-
-            let db = db_arc.lock().await;
-            let faces_list = db.list_faces(&username).unwrap_or_default();
-            let mut has_rgb_templates = false;
-            let mut has_ir_templates = false;
-            for (_, _, has_rgb, has_ir) in &faces_list {
-                if *has_rgb {
-                    has_rgb_templates = true;
-                }
-                if *has_ir {
-                    has_ir_templates = true;
-                }
-            }
-            drop(db);
-
-            let (run_rgb, run_ir) = auth_streams(
-                &rgb_device,
-                &ir_device,
-                has_rgb_templates,
-                has_ir_templates,
-            );
-
-            if !run_rgb && !run_ir {
-                error!("No matching templates or cameras configured for auth");
-                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
-                return;
-            }
-
-            info!(
-                liveness_enabled = liveness_cfg.enabled,
-                liveness_threshold = liveness_cfg.threshold,
-                run_rgb = run_rgb,
-                run_ir = run_ir,
-                "VerifyStart: sensing faces for user {}",
-                username
-            );
-
-            let (result_tx, mut result_rx) = tokio::sync::mpsc::channel::<VerifyMsg>(10);
-            let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            // Signals that the RGB capture phase has finished and released its camera, so
-            // the IR thread can then hold the camera. Lets single-function UVC devices
-            // (e.g. Logitech Brio) that cannot stream RGB+IR at once run hybrid verify.
-            let rgb_phase_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
-
-            let mut rgb_thread = None;
-            if run_rgb {
-                let stop_clone = stop_flag.clone();
-                let tx = result_tx.clone();
-                let detector_arc = detector_arc.clone();
-                let config_clone = config.clone();
-                let recognizer_rgb_arc = recognizer_rgb_arc.clone();
-                let liveness_arc = liveness_arc.clone();
-                let db_arc = db_arc.clone();
-                let username_clone = username.clone();
-                let threshold_arc = threshold_arc.clone();
-                let liveness_enabled = liveness_cfg.enabled;
-                let liveness_threshold = liveness_cfg.threshold;
-                let rgb_device_clone = rgb_device.clone();
-                let rgb_phase_done_clone = rgb_phase_done.clone();
-
-                rgb_thread = Some(std::thread::spawn(move || {
-                    // Set once the RGB camera is released, on every exit path (incl. panic),
-                    // so the IR thread can then safely open its stream. Declared before `cam`
-                    // so `cam` drops first, guaranteeing release precedes the signal.
-                    struct RgbPhaseGuard(Arc<std::sync::atomic::AtomicBool>);
-                    impl Drop for RgbPhaseGuard {
-                        fn drop(&mut self) {
-                            self.0.store(true, std::sync::atomic::Ordering::Relaxed);
-                        }
-                    }
-                    let _rgb_phase_guard = RgbPhaseGuard(rgb_phase_done_clone);
-                    // In serial mode (IR also runs) yield the camera after a budget even
-                    // without a match, so the IR spectrum can still be captured.
-                    let rgb_deadline = run_ir.then(|| Instant::now() + VERIFY_SERIAL_RGB_BUDGET);
-                    let mut yielded_to_ir = false;
-
-                    let mut cam = match Camera::open(&rgb_device_clone) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            let _ = tx.blocking_send(VerifyMsg::Error(format!("RGB Camera open error: {e}")));
-                            return;
-                        }
-                    };
-                    tracing::debug!("RGB camera opened successfully at: {}", rgb_device_clone);
-
-                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, false);
-                    let mut live_scores: Vec<f32> = Vec::new();
-                    let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
-
-                    while let Some(frame) = cam.next_interruptible(&stop_clone) {
-                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                            break;
-                        }
-                        if let Some(deadline) = rgb_deadline
-                            && Instant::now() >= deadline
-                        {
-                            // Serial mode: hand the camera to the IR phase even without a
-                            // match so hybrid auth can still capture the IR spectrum.
-                            yielded_to_ir = true;
-                            break;
-                        }
-
-                        let (status, embed_opt) = {
-                            let mut recognizer = recognizer_rgb_arc.blocking_lock();
-                            match process_frame_sync(&mut checker, &mut recognizer, &frame, liveness_enabled) {
-                                Ok(res) => res,
-                                Err(_) => (CaptureStatus::NoFace, None),
-                            }
-                        };
-                        tracing::debug!("Processed RGB frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
-
-                        let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
-                        let _ = tx.try_send(VerifyMsg::Status(Spectrum::Rgb, status, latest_embed));
-
-                        if status == CaptureStatus::Usable && let Some(data) = embed_opt {
-                            let threshold = *threshold_arc.blocking_lock();
-                            let db = db_arc.blocking_lock();
-                            let scores = match db.match_faces(&username_clone, &data.embedding, threshold, Spectrum::Rgb) {
-                                Ok(s) => s,
-                                Err(e) => {
-                                    let _ = tx.blocking_send(VerifyMsg::Error(format!("DB error: {e}")));
-                                    return;
-                                }
-                            };
-                            drop(db);
-
-                            tracing::debug!("RGB match scores: {:?}", scores);
-
-                            let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
-                            if matched {
-                                let mut liveness_passed = true;
-                                if liveness_enabled {
-                                    if let Some(eyes) = eyes_from_kpss(&data.kpss) {
-                                        landmark_seq.push(eyes);
-                                    }
-                                    let liveness_face = match crop_liveness_face(&data) {
-                                        Ok(face) => face,
-                                        Err(e) => {
-                                            error!("Liveness crop failed: {e}");
-                                            continue;
-                                        }
-                                    };
-                                    let mut live_guard = liveness_arc.blocking_lock();
-                                    let Some(detector) = live_guard.as_mut() else {
-                                        error!("Liveness is enabled but detector is unavailable");
-                                        return;
-                                    };
-                                    let live_score = match detector.live_score(&liveness_face) {
-                                        Ok(score) => score,
-                                        Err(e) => {
-                                            error!("Liveness inference failed: {e}");
-                                            return;
-                                        }
-                                    };
-                                    drop(live_guard);
-                                    live_scores.push(live_score);
-
-                                    let model_pass = crate::liveness::liveness_passes(&live_scores, liveness_threshold as f32);
-                                    let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
-                                    let confirmed_static = crate::liveness::confirmed_static(&motion);
-                                    liveness_passed = model_pass && !confirmed_static;
-
-                                    tracing::debug!(
-                                        "Liveness checked: score={:?}, pass={}, motion={:?}, confirmed_static={}, overall={}",
-                                        live_scores,
-                                        model_pass,
-                                        motion,
-                                        confirmed_static,
-                                        liveness_passed
-                                    );
-                                }
-
-                                if liveness_passed {
-                                    let _ = tx.blocking_send(VerifyMsg::Success(Spectrum::Rgb, data.embedding));
-                                    return;
-                                }
-                            }
-                        }
-                    }
-
-                    if !yielded_to_ir && !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                        let _ = tx.blocking_send(VerifyMsg::Error(
-                            "RGB camera stream stopped unexpectedly".into(),
-                        ));
-                    }
-                }));
-            }
-
-            let mut ir_thread = None;
-            if run_ir {
-                let stop_clone = stop_flag.clone();
-                let tx = result_tx.clone();
-                let detector_arc = detector_arc.clone();
-                let config_clone = config.clone();
-                let recognizer_ir_arc = recognizer_ir_arc.clone();
-                let ir_liveness_arc = ir_liveness_arc.clone();
-                let db_arc = db_arc.clone();
-                let username_clone = username.clone();
-                let threshold_arc = threshold_arc.clone();
-                let liveness_enabled = liveness_cfg.enabled;
-                let liveness_threshold = liveness_cfg.threshold;
-                let ir_device_clone = ir_device.clone();
-                let ir_node_clone = ir_node.clone();
-                let emitter_enabled = emitter_enabled;
-                let rgb_phase_done_clone = rgb_phase_done.clone();
-
-                ir_thread = Some(std::thread::spawn(move || {
-                    // Serial mode: wait for the RGB phase to release its camera before
-                    // opening IR (and firing the emitter), so only one stream is live at a
-                    // time on single-function UVC devices. Bail if verify already passed.
-                    if run_rgb {
-                        while !rgb_phase_done_clone.load(std::sync::atomic::Ordering::Relaxed)
-                            && !stop_clone.load(std::sync::atomic::Ordering::Relaxed)
-                        {
-                            std::thread::sleep(std::time::Duration::from_millis(20));
-                        }
-                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                            return;
-                        }
-                    }
-
-                    let _emitter = EmitterGuard::engage(
-                        &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
-                        emitter_enabled
-                    );
-
-                    let mut cam = match Camera::open_ir(&ir_device_clone) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            let _ = tx.blocking_send(VerifyMsg::Error(format!("IR Camera open error: {e}")));
-                            return;
-                        }
-                    };
-                    tracing::debug!("IR camera opened successfully at: {}", ir_device_clone);
-
-                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, false);
-                    let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
-                    let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
-                    let mut ir_live_scores: Vec<f32> = Vec::new();
-
-                    while let Some(frame) = cam.next_interruptible(&stop_clone) {
-                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                            break;
-                        }
-
-                        match dark_gate.classify(&frame) {
-                            IrFrameKind::Lit => {}
-                            IrFrameKind::StrobeDark => continue,
-                            IrFrameKind::EmitterDark => {
-                                let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, CaptureStatus::TooDark, None));
-                                continue;
-                            }
-                        }
-
-                        let (status, embed_opt) = {
-                            let mut recognizer = recognizer_ir_arc.blocking_lock();
-                            match process_frame_sync(&mut checker, &mut recognizer, &frame, ir_model_enabled) {
-                                Ok(res) => res,
-                                Err(_) => (CaptureStatus::NoFace, None),
-                            }
-                        };
-                        tracing::debug!("Processed IR frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
-
-                        let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
-                        let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, status, latest_embed));
-
-                        if status == CaptureStatus::Usable && let Some(data) = embed_opt {
-                            let threshold = *threshold_arc.blocking_lock();
-                            let db = db_arc.blocking_lock();
-                            let scores = match db.match_faces(&username_clone, &data.embedding, threshold, Spectrum::Ir) {
-                                Ok(s) => s,
-                                Err(e) => {
-                                    let _ = tx.blocking_send(VerifyMsg::Error(format!("DB error: {e}")));
-                                    return;
-                                }
-                            };
-                            drop(db);
-
-                            tracing::debug!("IR match scores: {:?}", scores);
-
-                            let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
-                            if matched {
-                                let mut liveness_passed = true;
-                                if liveness_enabled {
-                                    if let Some(eyes) = eyes_from_kpss(&data.kpss) {
-                                        landmark_seq.push(eyes);
-                                    }
-                                    let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
-                                    if ir_model_enabled {
-                                        let liveness_face = match crop_liveness_face(&data) {
-                                            Ok(face) => face,
-                                            Err(e) => {
-                                                error!("IR liveness crop failed: {e}");
-                                                continue;
-                                            }
-                                        };
-                                        let mut live_guard = ir_liveness_arc.blocking_lock();
-                                        if let Some(detector) = live_guard.as_mut() {
-                                            match detector.live_score(&liveness_face) {
-                                                Ok(score) => ir_live_scores.push(score),
-                                                Err(e) => {
-                                                    error!("IR liveness inference failed: {e}");
-                                                    return;
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    liveness_passed = crate::liveness::ir_liveness_passed(
-                                        &ir_live_scores,
-                                        liveness_threshold as f32,
-                                        &motion,
-                                    );
-
-                                    tracing::debug!(
-                                        "Liveness checked (IR): scores={:?}, motion={:?}, overall={}",
-                                        ir_live_scores,
-                                        motion,
-                                        liveness_passed
-                                    );
-                                }
-
-                                if liveness_passed {
-                                    let _ = tx.blocking_send(VerifyMsg::Success(Spectrum::Ir, data.embedding));
-                                    return;
-                                }
-                            }
-                        }
-                    }
-
-                    if !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                        let _ = tx.blocking_send(VerifyMsg::Error(
-                            "IR camera stream stopped unexpectedly".into(),
-                        ));
-                    }
-                }));
-            }
-
-            let mut last_emitted_status: Option<CaptureStatus> = None;
-            let mut rgb_status = CaptureStatus::Unused;
-            let mut ir_status = CaptureStatus::Unused;
-            let mut rgb_attempted = false;
-            let mut dark_since: Option<Instant> = None;
-            let mut frames_seen: u32 = 0;
-
-            let mut rgb_success_embed = None;
-            let mut ir_success_embed = None;
-            let mut rgb_latest_embed = None;
-            let mut ir_latest_embed = None;
-
-            macro_rules! emit_verify_with_scores {
-                ($result:expr) => {{
-                    let threshold = *threshold_arc.lock().await;
-                    let db = db_arc.lock().await;
-                    let final_scores = build_hybrid_scores(
-                        &db,
-                        &username,
-                        threshold,
-                        rgb_success_embed.as_ref().or(rgb_latest_embed.as_ref()),
-                        ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
-                    );
-                    drop(db);
-                    let _ = Self::verify_status(&ctxt, $result, final_scores, rgb_status, ir_status).await;
-                }};
-            }
-
-            macro_rules! finish_if_auth_passed {
-                () => {{
-                    if hybrid_auth_passed(
-                        &hybrid_policy,
-                        run_rgb,
-                        run_ir,
-                        rgb_attempted,
-                        rgb_status,
-                        rgb_success_embed.is_some(),
-                        ir_success_embed.is_some(),
-                    ) {
-                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                        emit_verify_with_scores!(VerifyResult::VerifyMatch);
-                        true
-                    } else {
-                        false
-                    }
-                }};
-            }
-
-            loop {
-                tokio::select! {
-                    _ = &mut rx => {
-                        info!("VerifyStart: cancelled");
-                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
-                        break;
-                    }
-                    msg_opt = result_rx.recv() => {
-                        let Some(msg) = msg_opt else { break };
-                        match msg {
-                            VerifyMsg::Status(spectrum, status, embed_opt) => {
-                                let has_face = embed_opt.is_some();
-                                match spectrum {
-                                    Spectrum::Rgb => {
-                                        rgb_status = status;
-                                        rgb_attempted = true;
-                                        if let Some(embed) = embed_opt {
-                                            rgb_latest_embed = Some(embed);
-                                        }
-                                    }
-                                    Spectrum::Ir => {
-                                        ir_status = status;
-                                        if let Some(embed) = embed_opt {
-                                            ir_latest_embed = Some(embed);
-                                        }
-                                    }
-                                }
-
-                                if has_face {
-                                    frames_seen += 1;
-                                    if frames_seen >= liveness_cfg.max_frames {
-                                        info!("VerifyStart: liveness gate timed out");
-                                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                        emit_verify_with_scores!(VerifyResult::VerifyNoMatch);
-                                        break;
-                                    }
-                                }
-
-                                Self::emit_effective_face_status(
-                                    &ctxt,
-                                    &mut last_emitted_status,
-                                    rgb_status,
-                                    ir_status,
-                                ).await;
-
-                                let both_dark = match (run_rgb, run_ir) {
-                                    (true, true) => rgb_status == CaptureStatus::TooDark && ir_status == CaptureStatus::TooDark,
-                                    (true, false) => rgb_status == CaptureStatus::TooDark,
-                                    (false, true) => ir_status == CaptureStatus::TooDark,
-                                    (false, false) => false,
-                                };
-
-                                if both_dark {
-                                    let started = *dark_since.get_or_insert_with(Instant::now);
-                                    if started.elapsed() >= VERIFY_TOO_DARK_TIMEOUT {
-                                        info!(
-                                            "VerifyStart: giving up after {}s of dark frames",
-                                            VERIFY_TOO_DARK_TIMEOUT.as_secs()
-                                        );
-                                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
-                                        break;
-                                    }
-                                } else {
-                                    dark_since = None;
-                                }
-
-                                if finish_if_auth_passed!() {
-                                    break;
-                                }
-                            }
-                            VerifyMsg::Success(spectrum, embedding) => {
-                                match spectrum {
-                                    Spectrum::Rgb => {
-                                        rgb_success_embed = Some(embedding);
-                                        rgb_attempted = true;
-                                    }
-                                    Spectrum::Ir => ir_success_embed = Some(embedding),
-                                }
-
-                                if finish_if_auth_passed!() {
-                                    break;
-                                }
-                            }
-                            VerifyMsg::Error(e) => {
-                                error!("VerifyStart loop error: {e}");
-                                stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            if let Some(t) = rgb_thread {
-                let _ = t.join();
-            }
-            if let Some(t) = ir_thread {
-                let _ = t.join();
-            }
-        });
-
-        Ok(())
     }
 
     async fn verify_stop(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
@@ -2020,6 +2841,7 @@ impl AuthDaemon {
     ) -> fdo::Result<()> {
         let claim = self.check_claim(&header).await?;
         let username = claim.username.clone();
+        Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let signal_destination = Self::signal_destination(&claim.sender)?;
         self.cancel_active_tasks().await;
 
@@ -2033,7 +2855,7 @@ impl AuthDaemon {
         let recognizer_ir_arc = self.recognizer_ir.clone();
         let db_arc = self.db.clone();
 
-        let config = Config::load_from(CONFIG_PATH).unwrap_or_default();
+        let config = self.current_config().await;
         let sources = resolve_configured_sources(&config.cameras);
         let rgb_device = sources.rgb;
         let ir_device = sources.ir;
@@ -2080,6 +2902,8 @@ impl AuthDaemon {
             let max_steps = 5u32;
 
             let (enroll_tx, mut enroll_rx) = tokio::sync::mpsc::channel::<EnrollMsg>(10);
+            let (preview_tx, mut preview_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(1);
+            let stream_preview = !gaze_vision::camera::preview_can_be_shared(&config.cameras);
             let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let completed_steps_atomic = Arc::new(std::sync::atomic::AtomicU32::new(0));
             let rgb_captured_for_step = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -2094,14 +2918,19 @@ impl AuthDaemon {
                 let completed_steps_clone = completed_steps_atomic.clone();
                 let rgb_device_clone = rgb_device.clone();
                 let rgb_captured_for_step_clone = rgb_captured_for_step.clone();
+                let preview_tx_clone = preview_tx.clone();
 
                 rgb_thread = Some(std::thread::spawn(move || {
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, true);
+                    let mut preview = if stream_preview {
+                        PreviewStream::new(preview_tx_clone)
+                    } else {
+                        PreviewStream::disabled()
+                    };
                     let mut pose_baseline = None;
 
-                    // Dual-spectrum mode holds one camera at a time: some cameras
-                    // (e.g. Logitech Brio 4K) cannot stream RGB and IR at once, so
-                    // the RGB camera is released as soon as a step is captured.
+                    // Cameras like the Logitech Brio 4K cannot stream RGB and IR at once, so
+                    // dual-spectrum mode releases the RGB camera once a step is captured.
                     if run_ir {
                         let mut dead_streams = 0u32;
 
@@ -2118,7 +2947,7 @@ impl AuthDaemon {
                                 continue;
                             }
 
-                            let mut cam = match Camera::open(&rgb_device_clone) {
+                            let mut cam = match Camera::open_privileged(&rgb_device_clone) {
                                 Ok(c) => c,
                                 Err(e) => {
                                     dead_streams += 1;
@@ -2143,6 +2972,8 @@ impl AuthDaemon {
                                 if current_step != step {
                                     continue 'steps;
                                 }
+
+                                preview.offer(&frame);
 
                                 let prompt = prompts[current_step];
 
@@ -2190,7 +3021,7 @@ impl AuthDaemon {
                         }
                     }
 
-                    let mut cam = match Camera::open(&rgb_device_clone) {
+                    let mut cam = match Camera::open_privileged(&rgb_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(EnrollMsg::Error(format!("RGB Camera open error: {e}")));
@@ -2221,6 +3052,8 @@ impl AuthDaemon {
                             std::thread::sleep(Duration::from_millis(100));
                             continue;
                         }
+
+                        preview.offer(&frame);
 
                         let prompt = prompts[current_step];
 
@@ -2276,14 +3109,19 @@ impl AuthDaemon {
                 let ir_device_clone = ir_device.clone();
                 let ir_node_clone = ir_node.clone();
                 let rgb_captured_for_step_clone = rgb_captured_for_step.clone();
+                let preview_tx_clone = preview_tx.clone();
 
                 ir_thread = Some(std::thread::spawn(move || {
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, true);
                     let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
+                    let mut preview = if stream_preview {
+                        PreviewStream::new(preview_tx_clone)
+                    } else {
+                        PreviewStream::disabled()
+                    };
 
-                    // Dual-spectrum mode: wait for RGB to capture and release the
-                    // camera, then hold the IR camera just long enough to grab one
-                    // lit usable frame; the pose was already validated over RGB.
+                    // Dual-spectrum mode waits for RGB to capture and release the camera, then
+                    // holds IR just long enough for one lit frame; RGB already checked the pose.
                     if run_rgb {
                         let mut captured_step = usize::MAX;
                         let mut dead_streams = 0u32;
@@ -2303,11 +3141,13 @@ impl AuthDaemon {
                                 continue;
                             }
 
+                            // Realtek switches mode before the exact IR stream format is
+                            // negotiated; changing format afterwards silently restores RGB.
                             let _emitter = EmitterGuard::engage(
                                 &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                                 emitter_enabled
                             );
-                            let mut cam = match Camera::open_ir(&ir_device_clone) {
+                            let mut cam = match Camera::open_ir_privileged(&ir_device_clone) {
                                 Ok(c) => c,
                                 Err(e) => {
                                     dead_streams += 1;
@@ -2340,6 +3180,8 @@ impl AuthDaemon {
                                         continue;
                                     }
                                 }
+
+                                preview.offer(&frame);
 
                                 let (status, result_opt) = {
                                     let mut recognizer = recognizer_ir_arc.blocking_lock();
@@ -2375,7 +3217,7 @@ impl AuthDaemon {
                         emitter_enabled
                     );
 
-                    let mut cam = match Camera::open_ir(&ir_device_clone) {
+                    let mut cam = match Camera::open_ir_privileged(&ir_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(EnrollMsg::Error(format!("IR Camera open error: {e}")));
@@ -2416,6 +3258,8 @@ impl AuthDaemon {
                                 continue;
                             }
                         }
+
+                        preview.offer(&frame);
 
                         let prompt = prompts[current_step];
 
@@ -2460,6 +3304,9 @@ impl AuthDaemon {
                 }));
             }
 
+            drop(enroll_tx);
+            drop(preview_tx);
+
             let mut completed_steps = 0;
             let mut has_rgb_for_step = false;
             let mut has_ir_for_step = false;
@@ -2472,6 +3319,7 @@ impl AuthDaemon {
             let mut last_emitted_status = None;
 
             let mut last_sent_prompt = None;
+            let mut aborted = false;
 
             while completed_steps < max_steps as usize {
                 let prompt = prompts[completed_steps];
@@ -2483,12 +3331,20 @@ impl AuthDaemon {
                 tokio::select! {
                     _ = &mut rx => {
                         info!("EnrollStart: cancelled");
-                        let _ = Self::enroll_status(&ctxt, &face_name, 0, max_steps, true, EnrollPrompt::Cancelled, -1.0).await;
-                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                        return;
+                        let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::Cancelled, -1.0).await;
+                        aborted = true;
+                        break;
+                    }
+                    Some(jpeg) = preview_rx.recv() => {
+                        let _ = Self::preview_frame(&ctxt, &jpeg).await;
                     }
                     msg_opt = enroll_rx.recv() => {
-                        let Some(msg) = msg_opt else { break };
+                        let Some(msg) = msg_opt else {
+                            warn!("EnrollStart: all capture threads exited before enrollment finished");
+                            let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::CameraFailed, -1.0).await;
+                            aborted = true;
+                            break;
+                        };
                         match msg {
                             EnrollMsg::Status(step, spectrum, status) => {
                                 if step != completed_steps {
@@ -2561,9 +3417,9 @@ impl AuthDaemon {
                             }
                             EnrollMsg::Error(e) => {
                                 error!("Enrollment error: {e}");
-                                let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::CameraFailed, -1.0).await;
-                                stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                return;
+                                let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::CameraFailed, -1.0).await;
+                                aborted = true;
+                                break;
                             }
                         }
                     }
@@ -2571,15 +3427,17 @@ impl AuthDaemon {
             }
 
             stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-            let mut db = db_arc.lock().await;
-            match db.add_template(&username, &face_name, &template_id, captured_embeddings) {
-                Ok(_) => {
-                    info!("Template saved successfully!");
-                    let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::Completed, 0.0).await;
-                }
-                Err(e) => {
-                    error!("DB error saving template: {}", e);
-                    let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::DbFailed, -1.0).await;
+            if !aborted {
+                let mut db = db_arc.lock().await;
+                match db.add_template(&username, &face_name, &template_id, captured_embeddings) {
+                    Ok(_) => {
+                        info!("Template saved successfully!");
+                        let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::Completed, 0.0).await;
+                    }
+                    Err(e) => {
+                        error!("DB error saving template: {}", e);
+                        let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::DbFailed, -1.0).await;
+                    }
                 }
             }
 
@@ -2623,12 +3481,23 @@ impl AuthDaemon {
 
     async fn is_camera_available(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<bool> {
         let caller_uid = Self::caller_uid(&header).await?;
-        Ok(Self::camera_runtime_uid(caller_uid, caller_uid)
-            .await
-            .is_some())
+        Ok(Self::seat_camera_available(caller_uid, caller_uid).await)
     }
 
-    async fn benchmark(&self) -> fdo::Result<Vec<gaze_core::dbus::BenchmarkResult>> {
+    async fn benchmark(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+    ) -> fdo::Result<Vec<gaze_core::dbus::BenchmarkResult>> {
+        if Self::benchmark_needs_authorization(Self::caller_uid(&header).await?) {
+            Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
+        }
+
+        let Some(_slot) = BenchmarkSlot::acquire(&self.benchmark_running) else {
+            return Err(fdo::Error::Failed(
+                "RETRYABLE: a benchmark is already running".into(),
+            ));
+        };
+
         let detector_arc = self.detector.clone();
         let recognizer_rgb_arc = self.recognizer_rgb.clone();
         let recognizer_ir_arc = self.recognizer_ir.clone();
@@ -2653,7 +3522,7 @@ impl AuthDaemon {
         username: String,
         face_name: String,
     ) -> fdo::Result<bool> {
-        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let mut db = self.db.lock().await;
         db.remove_face(&username, &face_name)
             .map_err(Self::map_user_db_error)?;
@@ -2667,7 +3536,7 @@ impl AuthDaemon {
         old_face_name: String,
         new_face_name: String,
     ) -> fdo::Result<bool> {
-        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let mut db = self.db.lock().await;
         db.rename_face(&username, &old_face_name, &new_face_name)
             .map_err(Self::map_user_db_error)?;
@@ -2679,33 +3548,260 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         username: String,
     ) -> fdo::Result<bool> {
-        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let mut db = self.db.lock().await;
         db.clear_user(&username).map_err(Self::map_user_db_error)?;
         Ok(true)
     }
 
     #[zbus(property)]
-    async fn config(&self) -> Config {
-        Config::load_from(CONFIG_PATH).unwrap_or_default()
+    async fn pam_internal(
+        &self,
+        #[zbus(header)] header: Option<Header<'_>>,
+    ) -> fdo::Result<Vec<String>> {
+        let header =
+            header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
+        let owner = Self::pam_internal_read_owner(&header).await?;
+        let sets = self.pam_internal.lock().await;
+        let mut list: Vec<String> = sets
+            .get(&owner)
+            .map(|set| set.iter().cloned().collect())
+            .unwrap_or_default();
+        list.sort();
+        Ok(list)
+    }
+
+    #[zbus(property)]
+    async fn set_pam_internal(
+        &self,
+        #[zbus(header)] header: Option<Header<'_>>,
+        services: Vec<String>,
+    ) -> fdo::Result<()> {
+        let header =
+            header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
+        let owner = Self::pam_internal_write_owner(&header).await?;
+        let mut sets = self.pam_internal.lock().await;
+        let set = sets.entry(owner).or_default();
+        set.clear();
+        for s in services {
+            let normalized = Self::normalize_pam_service(&s);
+            if !normalized.is_empty() {
+                set.insert(normalized);
+            }
+        }
+        info!(uid = owner, services = ?set, "Updated PAM internal services list");
+        Ok(())
+    }
+
+    async fn add_pam_internal(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        service: String,
+    ) -> fdo::Result<()> {
+        let owner = Self::pam_internal_write_owner(&header).await?;
+        let normalized = Self::normalize_pam_service(&service);
+        if !normalized.is_empty() {
+            let mut sets = self.pam_internal.lock().await;
+            sets.entry(owner).or_default().insert(normalized.clone());
+            info!(uid = owner, service = %normalized, "Added to PAM internal services");
+        }
+        Ok(())
+    }
+
+    async fn remove_pam_internal(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        service: String,
+    ) -> fdo::Result<()> {
+        let owner = Self::pam_internal_write_owner(&header).await?;
+        let normalized = Self::normalize_pam_service(&service);
+        if !normalized.is_empty() {
+            let mut sets = self.pam_internal.lock().await;
+            if let Some(set) = sets.get_mut(&owner) {
+                set.remove(&normalized);
+            }
+            info!(uid = owner, service = %normalized, "Removed from PAM internal services");
+        }
+        Ok(())
+    }
+
+    async fn clear_pam_internal(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
+        let owner = Self::pam_internal_write_owner(&header).await?;
+        self.pam_internal.lock().await.remove(&owner);
+        info!(uid = owner, "Cleared PAM internal services");
+        Ok(())
+    }
+
+    #[zbus(property(emits_changed_signal = "invalidates"))]
+    async fn config(&self, #[zbus(header)] header: Option<Header<'_>>) -> fdo::Result<DbusConfig> {
+        let header =
+            header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
+        Self::ensure_config_read_access(&header).await?;
+        Ok(self.current_config().await.into())
     }
 
     #[zbus(property)]
     async fn set_config(
         &self,
         #[zbus(header)] header: Option<Header<'_>>,
-        new_config: Config,
+        new_config: DbusConfig,
     ) -> fdo::Result<()> {
         let header =
             header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
 
+        let mut new_config: Config = new_config.into();
+        // Legacy clients do not send these flags; preserve the existing opt-ins.
+        let storage = self.current_config().await.storage;
+        new_config.storage.unlock_gnome_keyring = storage.unlock_gnome_keyring;
+        new_config.storage.unlock_kwallet = storage.unlock_kwallet;
+        // A legacy client cannot see or clear the flag, so treat it as turning the feature off
+        // rather than rejecting every later write with an error it cannot act on.
+        if new_config.clamp_keyring() {
+            warn!(
+                "a legacy config update removed a keyring prerequisite; disabling keyring unlock"
+            );
+        }
+        self.apply_config(new_config).await
+    }
+
+    async fn set_config_with_keyring(
+        &self,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        config: zbus::zvariant::OwnedValue,
+        unlock_gnome_keyring: bool,
+    ) -> fdo::Result<()> {
+        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
+        let mut config = gaze_core::dbus::config_update_from_property(config, unlock_gnome_keyring)
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        config.storage.unlock_kwallet = self.current_config().await.storage.unlock_kwallet;
+        // This older client cannot clear a KWallet opt-in when removing prerequisites.
+        if config.storage.validate_keyring(&config.liveness).is_err() {
+            config.storage.unlock_kwallet = false;
+        }
+        self.apply_config(config).await?;
+        self.config_invalidate(&ctxt).await.map_err(Into::into)
+    }
+
+    async fn set_config_with_wallets(
+        &self,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        config: zbus::zvariant::OwnedValue,
+        unlock_gnome_keyring: bool,
+        unlock_kwallet: bool,
+    ) -> fdo::Result<()> {
+        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
+        let mut config = gaze_core::dbus::config_update_from_property(config, unlock_gnome_keyring)
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        config.storage.unlock_kwallet = unlock_kwallet;
+        config
+            .storage
+            .validate_keyring(&config.liveness)
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        self.apply_config(config).await?;
+        self.config_invalidate(&ctxt).await.map_err(Into::into)
+    }
+
+    async fn get_gdm_face_auth(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<bool> {
+        Self::ensure_config_read_access(&header).await?;
+        if let Some(enabled) = gdm_face_auth_from_dconf() {
+            return Ok(enabled);
+        }
+        Ok(std::path::Path::new(GDM_DCONF_OVERRIDE_PATH).exists())
+    }
+
+    async fn set_gdm_face_auth(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        enabled: bool,
+    ) -> fdo::Result<bool> {
+        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_GDM_PROFILE).await?;
+
+        let path = std::path::Path::new(GDM_DCONF_OVERRIDE_PATH);
+        // Already in the requested state elsewhere, so don't write a read-only /etc.
+        if !path.exists() && gdm_face_auth_from_dconf() == Some(enabled) {
+            info!(enabled, "GDM face authentication already set outside Gaze");
+            return Ok(enabled);
+        }
+
+        if enabled {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| gdm_override_error("create", parent, e))?;
+            }
+            std::fs::write(path, GDM_DCONF_OVERRIDE_CONTENT)
+                .map_err(|e| gdm_override_error("write", path, e))?;
+        } else if path.exists() {
+            std::fs::remove_file(path).map_err(|e| gdm_override_error("remove", path, e))?;
+        }
+
+        let status = std::process::Command::new("dconf")
+            .arg("update")
+            .status()
+            .map_err(|e| fdo::Error::Failed(format!("Failed to run dconf update: {e}")))?;
+        if !status.success() {
+            return Err(fdo::Error::Failed(format!(
+                "dconf update exited with status {}",
+                status.code().unwrap_or(-1)
+            )));
+        }
+
+        info!(enabled, "Updated GDM face authentication override");
+        Ok(enabled)
+    }
+
+    #[zbus(signal)]
+    async fn verify_status(
+        ctxt: &SignalEmitter<'_>,
+        result: VerifyResult,
+        faces: Vec<(String, f64, f64, bool, f64, f64, bool)>,
+        rgb_status: CaptureStatus,
+        ir_status: CaptureStatus,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn verify_diagnostic(ctxt: &SignalEmitter<'_>, message: &str) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn face_status(ctxt: &SignalEmitter<'_>, status: CaptureStatus) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn preview_frame(ctxt: &SignalEmitter<'_>, jpeg: &[u8]) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn enroll_status(
+        ctxt: &SignalEmitter<'_>,
+        face_name: &str,
+        progress: u32,
+        max: u32,
+        is_done: bool,
+        msg: EnrollPrompt,
+        time_remaining: f64,
+    ) -> zbus::Result<()>;
+}
+
+impl AuthDaemon {
+    async fn apply_config(&self, new_config: Config) -> fdo::Result<()> {
         new_config
             .security
             .validate()
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
         new_config
             .enrollment
+            .validate()
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        new_config
+            .inference
+            .validate()
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        new_config
+            .liveness
+            .validate()
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        new_config
+            .cameras
             .validate()
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
 
@@ -2715,26 +3811,29 @@ impl AuthDaemon {
             let path = crate::models::ensure_liveness_model(gaze_core::config::MODELS_DIR)
                 .map_err(|e| fdo::Error::Failed(format!("Failed to ensure liveness model: {e}")))?;
             Some(
-                LivenessDetector::new(path.to_str().unwrap()).map_err(|e| {
-                    fdo::Error::Failed(format!("Failed to load liveness model: {e}"))
-                })?,
+                LivenessDetector::new_with_inference(path.to_str().unwrap(), &new_config.inference)
+                    .map_err(|e| {
+                        fdo::Error::Failed(format!("Failed to load liveness model: {e}"))
+                    })?,
             )
         } else {
             None
         };
 
+
         let new_ir_liveness_detector =
             load_ir_liveness_detector(new_config.liveness.enabled && new_config.liveness.ir_model);
 
-        let mut threshold = self.threshold.lock().await;
-        *threshold = new_config.security.threshold();
-        drop(threshold);
+        *self.rgb_threshold.lock().await = new_config.security.rgb_threshold();
+        *self.ir_threshold.lock().await = new_config.security.ir_threshold();
+
         *self.hybrid_policy.lock().await = new_config.security.hybrid_policy().to_string();
 
         let sources = resolve_configured_sources(&new_config.cameras);
         *self.rgb_device.lock().await = sources.rgb;
         *self.ir_device.lock().await = sources.ir;
         *self.ir_node.lock().await = sources.ir_node;
+        *self.serial_capture.lock().await = sources.serial_capture;
         *self.emitter_enabled.lock().await = new_config.cameras.emitter_enabled;
 
         let mut live_cfg = self.liveness_config.lock().await;
@@ -2755,6 +3854,9 @@ impl AuthDaemon {
         let mut abort_if_lid_closed = self.abort_if_lid_closed.lock().await;
         *abort_if_lid_closed = new_config.auth.abort_if_lid_closed;
 
+        let mut abort_before_first_resume = self.abort_before_first_resume.lock().await;
+        *abort_before_first_resume = new_config.auth.abort_before_first_resume;
+
         {
             let mut db = self.db.lock().await;
             db.set_max_templates(new_config.enrollment.max_templates as usize);
@@ -2764,6 +3866,8 @@ impl AuthDaemon {
         info!(
             detector = security.detector(),
             recognizer = security.recognizer(),
+            execution_provider = new_config.inference.execution_provider,
+            device = new_config.inference.device,
             "Hot-reloading models if needed"
         );
 
@@ -2778,7 +3882,10 @@ impl AuthDaemon {
 
         {
             let mut detector = self.detector.lock().unwrap_or_else(|e| e.into_inner());
-            match gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap()) {
+            match gaze_vision::detect::FaceDetector::new_with_inference(
+                det_path.to_str().unwrap(),
+                &new_config.inference,
+            ) {
                 Ok(det) => {
                     *detector = det;
                 }
@@ -2791,17 +3898,22 @@ impl AuthDaemon {
         {
             let mut recognizer_rgb = self.recognizer_rgb.lock().await;
             let mut recognizer_ir = self.recognizer_ir.lock().await;
-            match crate::recognize::FaceRecognizer::new(rec_path.to_str().unwrap()) {
+            match crate::recognize::FaceRecognizer::new_with_inference(
+                rec_path.to_str().unwrap(),
+                &new_config.inference,
+            ) {
                 Ok(rec_rgb) => {
-                    let rec_ir =
-                        match crate::recognize::FaceRecognizer::new(rec_path.to_str().unwrap()) {
-                            Ok(r) => r,
-                            Err(e) => {
-                                return Err(fdo::Error::Failed(format!(
-                                    "Failed to load IR recognizer: {e}"
-                                )));
-                            }
-                        };
+                    let rec_ir = match crate::recognize::FaceRecognizer::new_with_inference(
+                        rec_path.to_str().unwrap(),
+                        &new_config.inference,
+                    ) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            return Err(fdo::Error::Failed(format!(
+                                "Failed to load IR recognizer: {e}"
+                            )));
+                        }
+                    };
                     *recognizer_rgb = rec_rgb;
                     *recognizer_ir = rec_ir;
                 }
@@ -2861,68 +3973,734 @@ impl AuthDaemon {
         Ok(())
     }
 
-    async fn get_gdm_face_auth(&self) -> fdo::Result<bool> {
-        Ok(std::path::Path::new(GDM_DCONF_OVERRIDE_PATH).exists())
-    }
-
-    async fn set_gdm_face_auth(
+    async fn start_verification(
         &self,
-        #[zbus(header)] header: Header<'_>,
-        enabled: bool,
-    ) -> fdo::Result<bool> {
-        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_GDM_PROFILE).await?;
+        ctxt: SignalEmitter<'_>,
+        header: Header<'_>,
+        pam_service: Option<String>,
+        require_keyring: bool,
+    ) -> fdo::Result<()> {
+        let claim = self.check_claim(&header).await?;
+        self.ensure_auth_not_aborted(&header).await?;
 
-        let path = std::path::Path::new(GDM_DCONF_OVERRIDE_PATH);
-        if enabled {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    fdo::Error::Failed(format!("Failed to create {}: {e}", parent.display()))
-                })?;
+        let resumed = self.resume_pending.load(Ordering::SeqCst);
+        let resume_pending = self.resume_pending.clone();
+
+        let username = claim.username.clone();
+        let signal_destination = Self::signal_destination(&claim.sender)?;
+        self.cancel_active_tasks().await;
+
+        let (tx, mut rx) = oneshot::channel();
+        *self.active_cancel.lock().await = Some(tx);
+
+        let detector_arc = self.detector.clone();
+        let recognizer_rgb_arc = self.recognizer_rgb.clone();
+        let recognizer_ir_arc = self.recognizer_ir.clone();
+        let liveness_arc = self.liveness.clone();
+        let db_arc = self.db.clone();
+        let rgb_threshold_arc = self.rgb_threshold.clone();
+        let ir_threshold_arc = self.ir_threshold.clone();
+
+        let config = self.current_config().await;
+        let active_session = active_session().await;
+        let surface = Self::classify_surface(pam_service.as_deref(), active_session.as_ref());
+        let lock_elapsed_ms = self.lock_elapsed_ms(active_session.as_ref()).await;
+        let delay = Duration::from_millis(config.auth.start_delay_after_lock_ms(
+            resumed,
+            surface,
+            lock_elapsed_ms,
+        ));
+        info!(
+            service = pam_service.as_deref().unwrap_or("<unknown>"),
+            ?surface,
+            lock_elapsed_ms,
+            "Face auth requested"
+        );
+        let abort_if_lid_closed = *self.abort_if_lid_closed.lock().await;
+        let rgb_device = self.rgb_device.lock().await.clone();
+        let ir_device = self.ir_device.lock().await.clone();
+        let emitter_enabled = *self.emitter_enabled.lock().await;
+        let mut ir_node = self.ir_node.lock().await.clone();
+        if emitter_enabled
+            && ir_node.is_empty()
+            && let Some(resolved) = gaze_vision::camera::resolve_node(&ir_device)
+        {
+            *self.ir_node.lock().await = resolved.clone();
+            ir_node = resolved;
+        }
+        let liveness_cfg = self.liveness_config.lock().await.clone();
+        // Check the state used by this attempt, not the Config property (which reads disk).
+        // This exact liveness snapshot is moved into the verification task below.
+        validate_keyring_verification(
+            require_keyring,
+            &liveness_cfg,
+            self.db.lock().await.is_encrypted(),
+        )?;
+        let hybrid_policy = self.hybrid_policy.lock().await.clone();
+        let serial_capture = *self.serial_capture.lock().await;
+        let conn = ctxt.connection().clone();
+        let path = ctxt.path().to_owned();
+
+        self.rt_handle.spawn(async move {
+            let ctxt = match SignalEmitter::new(&conn, path) {
+                Ok(emitter) => emitter.set_destination(signal_destination),
+                Err(e) => {
+                    error!("Failed to create signal emitter: {e}");
+                    return;
+                }
+            };
+
+            let db = db_arc.lock().await;
+            let faces_list = db.list_faces(&username).unwrap_or_default();
+            let mut has_rgb_templates = false;
+            let mut has_ir_templates = false;
+            for (_, _, has_rgb, has_ir) in &faces_list {
+                if *has_rgb {
+                    has_rgb_templates = true;
+                }
+                if *has_ir {
+                    has_ir_templates = true;
+                }
             }
-            std::fs::write(path, GDM_DCONF_OVERRIDE_CONTENT).map_err(|e| {
-                fdo::Error::Failed(format!("Failed to write {GDM_DCONF_OVERRIDE_PATH}: {e}"))
-            })?;
-        } else if path.exists() {
-            std::fs::remove_file(path).map_err(|e| {
-                fdo::Error::Failed(format!("Failed to remove {GDM_DCONF_OVERRIDE_PATH}: {e}"))
-            })?;
-        }
+            drop(db);
 
-        let status = std::process::Command::new("dconf")
-            .arg("update")
-            .status()
-            .map_err(|e| fdo::Error::Failed(format!("Failed to run dconf update: {e}")))?;
-        if !status.success() {
-            return Err(fdo::Error::Failed(format!(
-                "dconf update exited with status {}",
-                status.code().unwrap_or(-1)
-            )));
-        }
+            let (run_rgb, run_ir) = auth_streams(
+                &rgb_device,
+                &ir_device,
+                has_rgb_templates,
+                has_ir_templates,
+            );
 
-        info!(enabled, "Updated GDM face authentication override");
-        Ok(enabled)
+            if !run_rgb && !run_ir {
+                error!("No matching templates or cameras configured for auth");
+                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                return;
+            }
+
+            if and_policy_unsatisfiable(&hybrid_policy, &rgb_device, &ir_device, run_rgb, run_ir) {
+                error!(
+                    run_rgb,
+                    run_ir,
+                    has_rgb_templates,
+                    has_ir_templates,
+                    "Hybrid policy \"and\" requires both spectra but {} has no {} templates; \
+                     refusing to authenticate on one spectrum. Re-enrol to cover both.",
+                    username,
+                    if has_rgb_templates { "IR" } else { "RGB" }
+                );
+                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                return;
+            }
+
+            if !delay.is_zero() {
+                info!(?delay, resumed, ?surface, "Delaying face auth before capture");
+                if tokio::time::timeout(delay, &mut rx).await.is_ok() {
+                    info!("VerifyStart: cancelled during start delay");
+                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                    return;
+                }
+                if abort_if_lid_closed && Self::is_lid_closed().await {
+                    warn!("Laptop lid is closed, aborting face auth");
+                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                    return;
+                }
+            }
+
+            resume_pending.store(false, Ordering::SeqCst);
+
+            info!(
+                liveness_enabled = liveness_cfg.enabled,
+                liveness_threshold = liveness_cfg.effective_threshold(),
+                run_rgb = run_rgb,
+                run_ir = run_ir,
+                serial_capture = serial_capture,
+                "VerifyStart: sensing faces for user {}",
+                username
+            );
+
+            let (result_tx, mut result_rx) = tokio::sync::mpsc::channel::<VerifyMsg>(10);
+            let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            // Signals that the RGB phase released its camera so the IR thread can take it,
+            // letting single-function UVC devices (e.g. Logitech Brio) run hybrid verify.
+            let rgb_phase_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+            let mut rgb_thread = None;
+            if run_rgb {
+                let stop_clone = stop_flag.clone();
+                let tx = result_tx.clone();
+                let detector_arc = detector_arc.clone();
+                let config_clone = config.clone();
+                let recognizer_rgb_arc = recognizer_rgb_arc.clone();
+                let liveness_arc = liveness_arc.clone();
+                let db_arc = db_arc.clone();
+                let username_clone = username.clone();
+                let rgb_threshold_arc = rgb_threshold_arc.clone();
+                let liveness_enabled = liveness_cfg.enabled;
+                let liveness_threshold = liveness_cfg.effective_threshold();
+                let rgb_device_clone = rgb_device.clone();
+                let rgb_phase_done_clone = rgb_phase_done.clone();
+                let hybrid_policy_clone = hybrid_policy.clone();
+
+                rgb_thread = Some(std::thread::spawn(move || {
+                    // Set on every exit path (incl. panic) once the RGB camera is released.
+                    // Declared before `cam` so `cam` drops first and release precedes the signal.
+                    struct RgbPhaseGuard(Arc<std::sync::atomic::AtomicBool>);
+                    impl Drop for RgbPhaseGuard {
+                        fn drop(&mut self) {
+                            self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
+                    }
+                    let _rgb_phase_guard = RgbPhaseGuard(rgb_phase_done_clone);
+                    // In serial mode (IR also runs) yield the camera after a budget even
+                    // without a match, so the IR spectrum can still be captured.
+                    let rgb_deadline = rgb_yields_camera_on_budget(run_ir, serial_capture)
+                        .then(|| Instant::now() + VERIFY_SERIAL_RGB_BUDGET);
+                    let mut yielded_to_ir = false;
+
+                    let mut cam = match Camera::open_privileged(&rgb_device_clone) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            let _ = tx.blocking_send(VerifyMsg::Error(format!("RGB Camera open error: {e}")));
+                            return;
+                        }
+                    };
+                    tracing::debug!("RGB camera opened successfully at: {}", rgb_device_clone);
+
+                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, false);
+                    let dark_hands_over_to_ir = should_yield_rgb_to_ir(
+                        &hybrid_policy_clone,
+                        run_ir,
+                        CaptureStatus::TooDark,
+                    );
+                    let mut warmup = RgbWarmupGate::new(config_clone.cameras.dark_luma_threshold);
+                    let mut logged_dark_stream = false;
+                    let mut logged_rgb_luma_statuses = Vec::new();
+                    let mut live_scores: Vec<f32> = Vec::new();
+                    let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
+
+                    while let Some(frame) = cam.next_interruptible(&stop_clone) {
+                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                            break;
+                        }
+                        if let Some(deadline) = rgb_deadline
+                            && Instant::now() >= deadline
+                        {
+                            // Serial mode hands the camera to the IR phase even without a
+                            // match, so hybrid auth can still capture the IR spectrum.
+                            yielded_to_ir = true;
+                            break;
+                        }
+
+                        if !dark_hands_over_to_ir {
+                            match warmup.classify_with_luma(&frame) {
+                                (RgbFrameKind::Lit, _) => {}
+                                (RgbFrameKind::WarmupDark, _) => continue,
+                                (RgbFrameKind::SettledDark, luma) => {
+                                    if !logged_dark_stream {
+                                        let message = format!(
+                                            "RGB stream remains dark after warmup: mean_luma={luma}"
+                                        );
+                                        info!("{message}");
+                                        let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
+                                        logged_dark_stream = true;
+                                    }
+                                }
+                                (RgbFrameKind::SteadyDark, luma) => {
+                                    if !logged_dark_stream {
+                                        let message = format!(
+                                            "RGB stream never brightened: mean_luma={luma}"
+                                        );
+                                        info!("{message}");
+                                        let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
+                                        logged_dark_stream = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        let (status, embed_opt) = {
+                            let mut recognizer = recognizer_rgb_arc.blocking_lock();
+                            match process_frame_sync(&mut checker, &mut recognizer, &frame, liveness_enabled) {
+                                Ok(res) => res,
+                                Err(_) => (CaptureStatus::NoFace, None),
+                            }
+                        };
+                        tracing::debug!("Processed RGB frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
+
+                        if let Some(luma) = checker.rgb_face_luma()
+                            && !logged_rgb_luma_statuses.contains(&status)
+                        {
+                            let message = format!(
+                                "RGB face region: mean_luma={}, rolling_mean_luma={:.1}, threshold={}, status={status:?}",
+                                luma.mean, luma.rolling_mean, luma.threshold
+                            );
+                            info!("{message}");
+                            let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
+                            logged_rgb_luma_statuses.push(status);
+                        }
+
+                        let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
+                        let _ = tx.try_send(VerifyMsg::Status(Spectrum::Rgb, status, latest_embed, cam.fps()));
+
+                        if should_yield_rgb_to_ir(&hybrid_policy_clone, run_ir, status) {
+                            yielded_to_ir = true;
+                            break;
+                        }
+
+                        if status == CaptureStatus::Usable && let Some(data) = embed_opt {
+                            let threshold = *rgb_threshold_arc.blocking_lock();
+                            let db = db_arc.blocking_lock();
+                            let scores = match db.match_faces(&username_clone, &data.embedding, threshold, Spectrum::Rgb) {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    let _ = tx.blocking_send(VerifyMsg::Error(format!("DB error: {e}")));
+                                    return;
+                                }
+                            };
+                            drop(db);
+
+                            tracing::debug!("RGB match scores: {:?}", scores);
+
+                            let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
+                            if matched {
+                                let mut liveness_passed = true;
+                                if liveness_enabled {
+                                    if let Some(eyes) = eyes_from_kpss(&data.kpss) {
+                                        landmark_seq.push(eyes);
+                                    }
+                                    let liveness_face = match crop_liveness_face(&data) {
+                                        Ok(face) => face,
+                                        Err(e) => {
+                                            error!("Liveness crop failed: {e}");
+                                            continue;
+                                        }
+                                    };
+                                    let mut live_guard = liveness_arc.blocking_lock();
+                                    let Some(detector) = live_guard.as_mut() else {
+                                        let _ = tx.blocking_send(VerifyMsg::Error(
+                                            "Liveness is enabled but the anti-spoof model is unavailable".to_string(),
+                                        ));
+                                        return;
+                                    };
+                                    let live_score = match detector.live_score(&liveness_face) {
+                                        Ok(score) => score,
+                                        Err(e) => {
+                                            let _ = tx.blocking_send(VerifyMsg::Error(format!(
+                                                "Liveness inference failed: {e}"
+                                            )));
+                                            return;
+                                        }
+                                    };
+                                    drop(live_guard);
+                                    live_scores.push(live_score);
+
+                                    let model_pass = crate::liveness::liveness_passes(&live_scores, liveness_threshold as f32);
+                                    let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
+                                    let confirmed_static = crate::liveness::confirmed_static(&motion);
+                                    liveness_passed = model_pass && !confirmed_static;
+
+                                    tracing::debug!(
+                                        "Liveness checked: score={:?}, pass={}, motion={:?}, confirmed_static={}, overall={}",
+                                        live_scores,
+                                        model_pass,
+                                        motion,
+                                        confirmed_static,
+                                        liveness_passed
+                                    );
+                                }
+
+                                if liveness_passed {
+                                    let _ = tx.blocking_send(VerifyMsg::Success(Spectrum::Rgb, data.embedding));
+                                    return;
+                                }
+                            }
+                        }
+                    }
+
+                    if !yielded_to_ir && !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                        // A device taken by another program only fails once it tries to stream,
+                        // so this is where "already in use" surfaces.
+                        let reason = cam.take_stream_error().unwrap_or_else(|| {
+                            "RGB camera stream stopped unexpectedly".to_string()
+                        });
+                        let _ = tx.blocking_send(VerifyMsg::Error(reason));
+                    }
+                }));
+            }
+
+            let mut ir_thread = None;
+            if run_ir {
+                let stop_clone = stop_flag.clone();
+                let tx = result_tx.clone();
+                let detector_arc = detector_arc.clone();
+                let config_clone = config.clone();
+                let recognizer_ir_arc = recognizer_ir_arc.clone();
+                let db_arc = db_arc.clone();
+                let username_clone = username.clone();
+                let ir_threshold_arc = ir_threshold_arc.clone();
+                let liveness_enabled = liveness_cfg.enabled;
+                let ir_device_clone = ir_device.clone();
+                let ir_node_clone = ir_node.clone();
+                let emitter_enabled = emitter_enabled;
+                let serial_capture = serial_capture;
+                let rgb_phase_done_clone = rgb_phase_done.clone();
+
+                ir_thread = Some(std::thread::spawn(move || {
+                    // Wait for RGB to release its camera before opening IR and firing the emitter,
+                    // so single-function devices keep one live stream. Bail if verify passed.
+                    if ir_waits_for_rgb(run_rgb, serial_capture) {
+                        while !rgb_phase_done_clone.load(std::sync::atomic::Ordering::Relaxed)
+                            && !stop_clone.load(std::sync::atomic::Ordering::Relaxed)
+                        {
+                            std::thread::sleep(std::time::Duration::from_millis(20));
+                        }
+                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                            return;
+                        }
+                    }
+
+                    let emitter = EmitterGuard::engage(
+                        &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
+                        emitter_enabled
+                    );
+                    if let Some(message) = emitter.activation_message() {
+                        let _ = tx.blocking_send(VerifyMsg::Diagnostic(message.to_owned()));
+                    }
+
+                    let mut cam = match Camera::open_ir_privileged(&ir_device_clone) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            let _ = tx.blocking_send(VerifyMsg::Error(format!("IR Camera open error: {e}")));
+                            return;
+                        }
+                    };
+                    tracing::debug!("IR camera opened successfully at: {}", ir_device_clone);
+
+                    let _ = tx.blocking_send(VerifyMsg::PhaseStarted(Spectrum::Ir));
+
+                    let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, false);
+                    let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
+                    let mut logged_lit_luma = false;
+                    let mut logged_dark_luma = false;
+                    let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
+
+                    while let Some(frame) = cam.next_interruptible(&stop_clone) {
+                        if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                            break;
+                        }
+
+                        let (frame_kind, luma) = dark_gate.classify_with_luma(&frame);
+                        match frame_kind {
+                            IrFrameKind::Lit => {
+                                if !logged_lit_luma {
+                                    let message = format!(
+                                        "IR stream produced a lit frame: mean_luma={luma}"
+                                    );
+                                    info!("{message}");
+                                    let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
+                                    logged_lit_luma = true;
+                                }
+                            }
+                            // A gap between emitter strobes, not a fault, so drop it silently.
+                            IrFrameKind::StrobeDark => continue,
+                            IrFrameKind::EmitterDark => {
+                                if !logged_dark_luma {
+                                    let message = format!(
+                                        "IR stream remains dark after emitter warmup: mean_luma={luma}"
+                                    );
+                                    info!("{message}");
+                                    let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
+                                    logged_dark_luma = true;
+                                }
+                                let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, CaptureStatus::TooDark, None, cam.fps()));
+                                continue;
+                            }
+                        }
+
+                        let (status, embed_opt) = {
+                            let mut recognizer = recognizer_ir_arc.blocking_lock();
+                            match process_frame_sync(&mut checker, &mut recognizer, &frame, false) {
+                                Ok(res) => res,
+                                Err(_) => (CaptureStatus::NoFace, None),
+                            }
+                        };
+                        tracing::debug!("Processed IR frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
+
+                        let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
+                        let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, status, latest_embed, cam.fps()));
+
+                        if status == CaptureStatus::Usable && let Some(data) = embed_opt {
+                            let threshold = *ir_threshold_arc.blocking_lock();
+                            let db = db_arc.blocking_lock();
+                            let scores = match db.match_faces(&username_clone, &data.embedding, threshold, Spectrum::Ir) {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    let _ = tx.blocking_send(VerifyMsg::Error(format!("DB error: {e}")));
+                                    return;
+                                }
+                            };
+                            drop(db);
+
+                            tracing::debug!("IR match scores: {:?}", scores);
+
+                            let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
+                            if matched {
+                                let mut liveness_passed = true;
+                                if liveness_enabled {
+                                    if let Some(eyes) = eyes_from_kpss(&data.kpss) {
+                                        landmark_seq.push(eyes);
+                                    }
+                                    let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
+                                    liveness_passed = crate::liveness::motion_confirms_live(
+                                        &motion,
+                                        crate::liveness::MIN_MOTION_PAIRS,
+                                    );
+
+                                    tracing::debug!(
+                                        "Liveness checked (IR): motion={:?}, overall={}",
+                                        motion,
+                                        liveness_passed
+                                    );
+                                }
+
+                                if liveness_passed {
+                                    let _ = tx.blocking_send(VerifyMsg::Success(Spectrum::Ir, data.embedding));
+                                    return;
+                                }
+                            }
+                        }
+                    }
+
+                    if !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                        let reason = cam.take_stream_error().unwrap_or_else(|| {
+                            "IR camera stream stopped unexpectedly".to_string()
+                        });
+                        let _ = tx.blocking_send(VerifyMsg::Error(reason));
+                    }
+                }));
+            }
+
+            drop(result_tx);
+
+            let mut last_emitted_status: Option<CaptureStatus> = None;
+            let mut rgb_status = CaptureStatus::Unused;
+            let mut ir_status = CaptureStatus::Unused;
+            let mut rgb_attempted = false;
+            let mut dark_since: Option<Instant> = None;
+            let mut last_face_at = Instant::now();
+            let mut last_usable_at = Instant::now();
+            let mut frames_seen: u32 = 0;
+
+            let mut rgb_success_embed = None;
+            let mut ir_success_embed = None;
+            let mut rgb_latest_embed = None;
+            let mut ir_latest_embed = None;
+
+            macro_rules! hybrid_scores {
+                () => {{
+                    let rgb_threshold = *rgb_threshold_arc.lock().await;
+                    let ir_threshold = *ir_threshold_arc.lock().await;
+                    let db = db_arc.lock().await;
+                    let final_scores = build_hybrid_scores(
+                        &db,
+                        &username,
+                        rgb_threshold,
+                        ir_threshold,
+                        rgb_success_embed.as_ref().or(rgb_latest_embed.as_ref()),
+                        ir_success_embed.as_ref().or(ir_latest_embed.as_ref()),
+                    );
+                    drop(db);
+                    final_scores
+                }};
+            }
+
+            macro_rules! emit_verify_with_scores {
+                ($result:expr) => {{
+                    let final_scores = hybrid_scores!();
+                    let _ = Self::verify_status(&ctxt, $result, final_scores, rgb_status, ir_status).await;
+                }};
+            }
+
+            macro_rules! finish_if_auth_passed {
+                () => {{
+                    if hybrid_auth_passed(
+                        &hybrid_policy,
+                        run_rgb,
+                        run_ir,
+                        rgb_attempted,
+                        rgb_status,
+                        rgb_success_embed.is_some(),
+                        ir_success_embed.is_some(),
+                    ) {
+                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        emit_verify_with_scores!(VerifyResult::VerifyMatch);
+                        true
+                    } else {
+                        false
+                    }
+                }};
+            }
+
+            loop {
+                tokio::select! {
+                    _ = &mut rx => {
+                        info!("VerifyStart: cancelled");
+                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        // Report the camera as idle, not as a rejection: a cancelled attempt
+                        // never decided anything, and a rejection counts toward lockout.
+                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
+                        break;
+                    }
+                    _ = tokio::time::sleep(VERIFY_WATCHDOG_POLL) => {
+                        if let Some(give_up) = verify_give_up(last_face_at.elapsed(), last_usable_at.elapsed()) {
+                            info!("VerifyStart: {}", give_up.reason());
+                            stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                            break;
+                        }
+                    }
+                    msg_opt = result_rx.recv() => {
+                        let Some(msg) = msg_opt else {
+                            warn!("VerifyStart: all capture threads exited without a result");
+                            stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                            break;
+                        };
+                        match msg {
+                            VerifyMsg::PhaseStarted(Spectrum::Ir) if serial_capture => {
+                                // RGB and IR run serially on single-function cameras. Give
+                                // IR a fresh no-face window after RGB releases the device.
+                                last_face_at = Instant::now();
+                                last_usable_at = Instant::now();
+                                frames_seen = 0;
+                                dark_since = None;
+                            }
+                            VerifyMsg::PhaseStarted(Spectrum::Rgb) => {
+                                last_face_at = Instant::now();
+                                last_usable_at = Instant::now();
+                                frames_seen = 0;
+                                dark_since = None;
+                            }
+                            VerifyMsg::PhaseStarted(_) => {}
+                            VerifyMsg::Diagnostic(message) => {
+                                let _ = Self::verify_diagnostic(&ctxt, &message).await;
+                            }
+                            VerifyMsg::Status(spectrum, status, embed_opt, fps) => {
+                                let has_face = embed_opt.is_some();
+                                match spectrum {
+                                    Spectrum::Rgb => {
+                                        rgb_status = status;
+                                        rgb_attempted = true;
+                                        if let Some(embed) = embed_opt {
+                                            rgb_latest_embed = Some(embed);
+                                        }
+                                    }
+                                    Spectrum::Ir => {
+                                        ir_status = status;
+                                        if let Some(embed) = embed_opt {
+                                            ir_latest_embed = Some(embed);
+                                        }
+                                    }
+                                }
+
+                                if status.indicates_face() {
+                                    last_face_at = Instant::now();
+                                }
+
+                                if has_face {
+                                    last_usable_at = Instant::now();
+                                    frames_seen += 1;
+                                    if frames_seen > liveness_cfg.effective_max_frames(fps) {
+                                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                        let final_scores = hybrid_scores!();
+                                        let matched = final_scores
+                                            .iter()
+                                            .any(|face| face.3 || face.6);
+                                        info!(matched, "VerifyStart: frame budget spent");
+                                        if matched {
+                                            let _ = Self::verify_diagnostic(&ctxt, LIVENESS_GATE_DIAGNOSTIC).await;
+                                        }
+                                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, final_scores, rgb_status, ir_status).await;
+                                        break;
+                                    }
+                                }
+
+                                Self::emit_effective_face_status(
+                                    &ctxt,
+                                    &mut last_emitted_status,
+                                    rgb_status,
+                                    ir_status,
+                                ).await;
+
+                                let both_dark = match (run_rgb, run_ir) {
+                                    (true, true) => rgb_status == CaptureStatus::TooDark && ir_status == CaptureStatus::TooDark,
+                                    (true, false) => rgb_status == CaptureStatus::TooDark,
+                                    (false, true) => ir_status == CaptureStatus::TooDark,
+                                    (false, false) => false,
+                                };
+
+                                if both_dark {
+                                    let started = *dark_since.get_or_insert_with(Instant::now);
+                                    if started.elapsed() >= VERIFY_TOO_DARK_TIMEOUT {
+                                        info!(
+                                            "VerifyStart: giving up after {}ms of dark frames",
+                                            VERIFY_TOO_DARK_TIMEOUT.as_millis()
+                                        );
+                                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                        break;
+                                    }
+                                } else {
+                                    dark_since = None;
+                                }
+
+                                if let Some(give_up) = verify_give_up(last_face_at.elapsed(), last_usable_at.elapsed()) {
+                                    info!("VerifyStart: {}", give_up.reason());
+                                    stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                    break;
+                                }
+
+                                if finish_if_auth_passed!() {
+                                    break;
+                                }
+                            }
+                            VerifyMsg::Success(spectrum, embedding) => {
+                                match spectrum {
+                                    Spectrum::Rgb => {
+                                        rgb_success_embed = Some(embedding);
+                                        rgb_attempted = true;
+                                    }
+                                    Spectrum::Ir => ir_success_embed = Some(embedding),
+                                }
+
+                                if finish_if_auth_passed!() {
+                                    break;
+                                }
+                            }
+                            VerifyMsg::Error(e) => {
+                                error!("VerifyStart loop error: {e}");
+                                stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                // The verdict alone reads as a face that was not found.
+                                let _ = Self::verify_diagnostic(&ctxt, &e).await;
+                                // Idle, not rejected: the run broke off instead of deciding, and
+                                // a hardware failure must not count against the lockout budget.
+                                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(t) = rgb_thread {
+                let _ = t.join();
+            }
+            if let Some(t) = ir_thread {
+                let _ = t.join();
+            }
+        });
+
+        Ok(())
     }
-
-    #[zbus(signal)]
-    async fn verify_status(
-        ctxt: &SignalEmitter<'_>,
-        result: VerifyResult,
-        faces: Vec<(String, f64, f64, bool, f64, f64, bool)>,
-        rgb_status: CaptureStatus,
-        ir_status: CaptureStatus,
-    ) -> zbus::Result<()>;
-
-    #[zbus(signal)]
-    async fn face_status(ctxt: &SignalEmitter<'_>, status: CaptureStatus) -> zbus::Result<()>;
-
-    #[zbus(signal)]
-    async fn enroll_status(
-        ctxt: &SignalEmitter<'_>,
-        face_name: &str,
-        progress: u32,
-        max: u32,
-        is_done: bool,
-        msg: EnrollPrompt,
-        time_remaining: f64,
-    ) -> zbus::Result<()>;
 }

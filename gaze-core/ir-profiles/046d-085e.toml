@@ -1,12 +1,16 @@
-# Scope: matches USB 046d:085e only — the original Logitech BRIO 4K family
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Scope: matches USB 046d:085e only (the original Logitech BRIO 4K family)
 # (BRIO Ultra HD Webcam / BRIO 4K Pro / BRIO 4K Stream Edition; identical
 # hardware). The newer Brio 300 / 500 / 100 report different product IDs and
 # are NOT covered by this profile; they would each need their own.
 #
 # NOTE: The BRIO 4K (046d:085e) is a single-function UVC device and cannot
 # stream its RGB (/dev/video0) and IR (/dev/video2) sensors simultaneously.
-# Run IR-only (leave [cameras] rgb empty) or parallel verification will drop
-# the IR stream. See docs/src/guide/troubleshooting.md.
+# Its two nodes share one UVC function, so cameras.parallel_capture = "auto"
+# detects this and keeps capture serial; do not set "always" on this device.
+# See docs/src/guide/troubleshooting.md.
 
 [device]
 vendor_id  = 0x046D

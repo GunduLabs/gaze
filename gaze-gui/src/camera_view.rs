@@ -1,5 +1,8 @@
-use gaze_core::camera::{Camera, frame_to_bytes};
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use gaze_core::dbus::CaptureStatus;
+use gaze_vision::camera::{Camera, frame_to_bytes};
 use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -19,6 +22,19 @@ struct FrameData {
     mat: opencv::core::Mat,
 }
 
+fn update_aspect(
+    frame_aspect: &Cell<f64>,
+    aspect_frame: &gtk4::AspectFrame,
+    width: i32,
+    height: i32,
+) {
+    if height > 0 {
+        let aspect = width as f64 / height as f64;
+        frame_aspect.set(aspect);
+        aspect_frame.set_ratio(aspect as f32);
+    }
+}
+
 pub struct CameraFeed {
     pub picture: gtk4::Picture,
     guide: gtk4::DrawingArea,
@@ -30,6 +46,7 @@ pub struct CameraFeed {
     is_active: Rc<RefCell<bool>>,
     frame_aspect: Rc<Cell<f64>>,
     aspect_frame: gtk4::AspectFrame,
+    timer: Rc<RefCell<Option<glib::SourceId>>>,
 }
 
 impl CameraFeed {
@@ -48,18 +65,16 @@ impl CameraFeed {
                 }
             };
 
-            for frame in &mut cam {
-                if stop_clone.load(Ordering::Relaxed) {
-                    break;
-                }
-
+            // `stop_and_wait` joins this thread from the GTK main loop, so poll interruptibly;
+            // plain iteration would block there until a frame arrives, forever on a dead camera.
+            while let Some(frame) = cam.next_interruptible(&stop_clone) {
                 let Ok(bytes) = frame_to_bytes(&frame) else {
                     continue;
                 };
                 // GTK's R8g8b8 texture format expects RGB, so swap each pixel.
 
                 let mut rgb = bytes;
-                for chunk in rgb.chunks_exact_mut(3) {
+                for chunk in rgb.as_chunks_mut::<3>().0 {
                     chunk.swap(0, 2);
                 }
 
@@ -73,10 +88,8 @@ impl CameraFeed {
                     height: size.height,
                     mat: frame,
                 };
-                match tx.try_send(frame_data) {
-                    Ok(()) => {}
-                    Err(TrySendError::Full(_)) => {}
-                    Err(TrySendError::Disconnected(_)) => break,
+                if matches!(tx.try_send(frame_data), Err(TrySendError::Disconnected(_))) {
+                    break;
                 }
             }
         });
@@ -211,6 +224,7 @@ impl CameraFeed {
             is_active,
             frame_aspect,
             aspect_frame,
+            timer: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -226,10 +240,27 @@ impl CameraFeed {
 
     pub fn stop(&self) {
         self.stop_flag.store(true, Ordering::Relaxed);
+        self.stop_pump();
         if let Some(handle) = self.thread_handle.borrow_mut().take() {
             thread::spawn(move || {
                 let _ = handle.join();
             });
+        }
+    }
+
+    /// Release the camera before another owner, such as `gazed`, opens it. Only called once a
+    /// live preview has proven frames arrive, so the join returns after at most one more frame.
+    pub fn stop_and_wait(&self) {
+        self.stop_flag.store(true, Ordering::Relaxed);
+        self.stop_pump();
+        if let Some(handle) = self.thread_handle.borrow_mut().take() {
+            let _ = handle.join();
+        }
+    }
+
+    fn stop_pump(&self) {
+        if let Some(source) = self.timer.borrow_mut().take() {
+            source.remove();
         }
     }
 
@@ -239,7 +270,7 @@ impl CameraFeed {
             return;
         };
 
-        glib::timeout_add_local(
+        let source = glib::timeout_add_local(
             std::time::Duration::from_millis(33),
             glib::clone!(
                 #[strong(rename_to = picture)]
@@ -250,10 +281,20 @@ impl CameraFeed {
                 self.frame_aspect,
                 #[strong(rename_to = aspect_frame)]
                 self.aspect_frame,
+                #[strong(rename_to = timer)]
+                self.timer,
                 move || {
                     let mut newest = None;
-                    while let Ok(frame) = rx.try_recv() {
-                        newest = Some(frame);
+                    let mut ended = false;
+                    loop {
+                        match rx.try_recv() {
+                            Ok(frame) => newest = Some(frame),
+                            Err(mpsc::TryRecvError::Empty) => break,
+                            Err(mpsc::TryRecvError::Disconnected) => {
+                                ended = true;
+                                break;
+                            }
+                        }
                     }
                     if let Some(frame) = newest {
                         let bytes = glib::Bytes::from(&frame.rgb_bytes);
@@ -264,18 +305,43 @@ impl CameraFeed {
                             &bytes,
                             (frame.width * 3) as usize,
                         );
-                        if frame.height > 0 {
-                            let aspect = frame.width as f64 / frame.height as f64;
-                            frame_aspect.set(aspect);
-                            aspect_frame.set_ratio(aspect as f32);
-                        }
+                        update_aspect(&frame_aspect, &aspect_frame, frame.width, frame.height);
                         picture.set_paintable(Some(&texture));
                         *latest_frame.borrow_mut() = Some(frame.mat);
+                    }
+                    if ended {
+                        let _ = timer.borrow_mut().take();
+                        return glib::ControlFlow::Break;
                     }
                     glib::ControlFlow::Continue
                 }
             ),
         );
+        *self.timer.borrow_mut() = Some(source);
+    }
+
+    pub fn show_remote_frame(&self, jpeg: &[u8]) {
+        let texture = match gdk::Texture::from_bytes(&glib::Bytes::from(jpeg)) {
+            Ok(texture) => texture,
+            Err(err) => {
+                error!(%err, "Decoding an enrollment preview frame failed");
+                return;
+            }
+        };
+
+        update_aspect(
+            &self.frame_aspect,
+            &self.aspect_frame,
+            texture.width(),
+            texture.height(),
+        );
+        self.picture.set_paintable(Some(&texture));
+        self.picture.set_visible(true);
+    }
+
+    pub fn hide_frame(&self) {
+        self.picture.set_paintable(gdk::Paintable::NONE);
+        self.picture.set_visible(false);
     }
 }
 

@@ -1,31 +1,54 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 [Unit]
 Description=Daemon for Gaze
 After=dbus.service
 Requires=dbus.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 ExecStart=/usr/bin/gazed
 Restart=on-failure
 RestartSec=5
+# 78 is gaze_core::cpu::EXIT_UNSUPPORTED_CPU: the CPU has no AVX2, so restarting
+# can only reproduce the same exit. Keep the two in step.
+RestartPreventExitStatus=78
 StateDirectory=gaze
 StateDirectoryMode=0700
 CacheDirectory=gaze
+Environment=XDG_CACHE_HOME=/var/cache/gaze
 UMask=0077
+LimitCORE=0
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 InaccessiblePaths=/home /root
+ProtectClock=yes
+ProtectHostname=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
+ProtectKernelLogs=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
 SystemCallArchitectures=native
-CapabilityBoundingSet=CAP_DAC_READ_SEARCH
-ReadWritePaths=/etc/gaze /etc/dconf/db
-# IR cameras are driven directly via V4L2 (v4l2src) and need read/write access to
-# their /dev/video* node for the UVC emitter control ioctl. /dev is left intact
-# (no PrivateDevices); the video group is added defensively for non-root setups.
+# The daemon only talks D-Bus (AF_UNIX), netlink (udev/logind), and IP for
+# model downloads: no Bluetooth, packet, or vsock sockets.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+# Broad system-service profile; violations fail with EPERM rather than killing
+# the daemon outright.
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# No ProtectProc: the SSH heuristic walks /proc/<pid>/environ and comm up the
+# caller chain, which needs other processes visible.
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
+ReadWritePaths=-/etc/gaze -/etc/dconf/db
+# The UVC emitter control ioctl needs read/write on the IR /dev/video* node, so /dev is left
+# intact (no PrivateDevices) and the video group is added defensively for non-root setups.
 SupplementaryGroups=video
 
 [Install]

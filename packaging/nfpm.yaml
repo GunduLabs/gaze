@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: "gaze"
 arch: "${ARCH}"
 platform: "linux"
@@ -9,7 +12,7 @@ maintainer: "Gundu Labs <maintainers@gundulabs.com>"
 description: "Daemon, CLI, and PAM integration for Gaze"
 vendor: "Gundu Labs"
 homepage: "https://gaze.gundulabs.com"
-license: "MIT"
+license: "GPL-3.0-or-later"
 
 contents:
   - src: "target/release/gazed"
@@ -28,16 +31,40 @@ contents:
   - src: "packaging/config/com.gundulabs.Gaze.conf"
     dst: "/etc/dbus-1/system.d/com.gundulabs.Gaze.conf"
     type: "config|noreplace"
+    file_info:
+      mode: 0644
   - src: "packaging/config/com.gundulabs.gaze.policy"
     dst: "/usr/share/polkit-1/actions/com.gundulabs.gaze.policy"
+    file_info:
+      mode: 0644
   - src: "packaging/config/gazed.service"
     dst: "/usr/lib/systemd/system/gazed.service"
+    file_info:
+      mode: 0644
+  # Lets a greeter running as xdm_t open the camera; both the GNOME and KDE
+  # packages load it, so the base package is the one place that ships it.
+  - src: "dist/selinux/gaze-gdm-camera.pp"
+    dst: "/usr/share/gaze/gaze-gdm-camera.pp"
+    packager: rpm
+    file_info:
+      mode: 0644
+  # Lets xdm_t read /etc/shadow and the TPM for the keyring hand-off. Loaded by
+  # `gaze keyring` once a credential exists, not at install time.
+  - src: "dist/selinux/gaze-greeter-keyring.pp"
+    dst: "/usr/share/gaze/gaze-greeter-keyring.pp"
+    packager: rpm
+    file_info:
+      mode: 0644
   - src: "target/release/libpam_gaze.so"
     dst: "/lib/${MULTIARCH}/security/pam_gaze.so"
     packager: deb
+    file_info:
+      mode: 0755
   - src: "target/release/libpam_gaze_grosshack.so"
     dst: "/lib/${MULTIARCH}/security/pam_gaze_grosshack.so"
     packager: deb
+    file_info:
+      mode: 0755
   # Ubuntu 26.04's libpam searches /usr/lib/security instead of the
   # multiarch directory used by older suites, so expose both paths.
   - src: "/lib/${MULTIARCH}/security/pam_gaze.so"
@@ -51,24 +78,43 @@ contents:
   - src: "target/release/libpam_gaze.so"
     dst: "/usr/lib64/security/pam_gaze.so"
     packager: rpm
+    file_info:
+      mode: 0755
   - src: "target/release/libpam_gaze_grosshack.so"
     dst: "/usr/lib64/security/pam_gaze_grosshack.so"
     packager: rpm
+    file_info:
+      mode: 0755
   - src: "target/release/libpam_gaze.so"
     dst: "/usr/lib/security/pam_gaze.so"
     packager: archlinux
+    file_info:
+      mode: 0755
   - src: "target/release/libpam_gaze_grosshack.so"
     dst: "/usr/lib/security/pam_gaze_grosshack.so"
     packager: archlinux
+    file_info:
+      mode: 0755
   - src: "packaging/pam/gaze"
     dst: "/usr/share/pam-configs/"
     packager: deb
+    file_info:
+      mode: 0644
   - src: "packaging/pam/gaze-simultaneous"
     dst: "/usr/share/pam-configs/"
     packager: deb
+    file_info:
+      mode: 0644
+  - src: "packaging/pam/gaze-retry"
+    dst: "/usr/share/pam-configs/"
+    packager: deb
+    file_info:
+      mode: 0644
   - src: "packaging/authselect/custom/gaze/"
     dst: "/usr/share/authselect/vendor/gaze/"
     packager: rpm
+    file_info:
+      mode: 0644
 
 deb:
   signature:
@@ -89,24 +135,32 @@ overrides:
       postinstall: "packaging/postinst-deb.sh"
       preremove: "packaging/prerm-deb.sh"
     depends:
-      - libopencv-dev
       - libpam0g
-      - libtss2-dev
+      - gstreamer1.0-plugins-base
+      - gstreamer1.0-plugins-good
+      - gstreamer1.0-pipewire
+${DEB_LIB_DEPENDS}
   rpm:
     scripts:
       postinstall: "packaging/postinst-rpm.sh"
+      preremove: "packaging/prerm-rpm.sh"
     depends:
-      - opencv
       - pam
-      - tpm2-tss
+      - gstreamer1-plugins-base
+      - gstreamer1-plugins-good
+      - pipewire-gstreamer
+${RPM_LIB_DEPENDS}
   archlinux:
     scripts:
       postinstall: "packaging/postinst-arch.sh"
+      preremove: "packaging/prerm-arch.sh"
     depends:
-      # Bounds computed by the Justfile `_nfpm` recipe from the libopencv_core
-      # soversion gazed linked against; Arch bumps the soname every opencv
-      # minor release, so an unbounded dep crash-loops after `pacman -Syu`.
+      # The Justfile `_nfpm` recipe computes these from the libopencv_core soversion gazed
+      # linked; Arch bumps that every minor release, so an unbounded dep dies on `pacman -Syu`.
       - "opencv>=${OPENCV_MIN}"
       - "opencv<${OPENCV_NEXT}"
       - pam
       - tpm2-tss
+      - gst-plugins-base
+      - gst-plugins-good
+      - gst-plugin-pipewire

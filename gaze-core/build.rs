@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use serde::Deserialize;
 use std::env;
 use std::fmt::Write as _;
@@ -16,16 +19,18 @@ struct Device {
     product_id: u16,
     name: String,
     source: Option<String>,
+    #[serde(default)]
+    requires_ir_yuy2: bool,
 }
 
 #[derive(Deserialize)]
 struct Emitter {
-    // Simple format
+    // Simple format.
     unit: Option<u8>,
     selector: Option<u8>,
     control_bytes: Option<Vec<u8>>,
     off_control_bytes: Option<Vec<u8>>,
-    // Multi-step format
+    // Multi-step format.
     on: Option<Vec<Step>>,
     off: Option<Vec<Step>>,
 }
@@ -51,6 +56,7 @@ struct ProcessedProfile {
     pid: u16,
     name: String,
     source: String,
+    requires_ir_yuy2: bool,
     on: Vec<ProcessedStep>,
     off: Vec<ProcessedStep>,
 }
@@ -106,7 +112,7 @@ fn parse_profile(path: &Path) -> ProcessedProfile {
     });
 
     let text = fs::read_to_string(path).unwrap();
-    let p: ProfileFile = toml::from_str(&text)
+    let p: ProfileFile = toml_edit::de::from_str(&text)
         .unwrap_or_else(|e| panic!("failed to parse TOML in {}: {e}", path.display()));
 
     if (p.device.vendor_id, p.device.product_id) != (file_vid, file_pid) {
@@ -179,6 +185,7 @@ fn parse_profile(path: &Path) -> ProcessedProfile {
             .device
             .source
             .unwrap_or_else(|| "gaze-core profile".into()),
+        requires_ir_yuy2: p.device.requires_ir_yuy2,
         on,
         off,
     }
@@ -227,6 +234,12 @@ fn render(profiles: &[ProcessedProfile]) -> String {
         writeln!(out, "        on_sequence: {}_ON,", profile.ident).unwrap();
         writeln!(out, "        off_sequence: {}_OFF,", profile.ident).unwrap();
         writeln!(out, "        source: {:?},", profile.source).unwrap();
+        writeln!(
+            out,
+            "        requires_ir_yuy2: {},",
+            profile.requires_ir_yuy2
+        )
+        .unwrap();
         writeln!(out, "    }},").unwrap();
     }
     writeln!(out, "];\n").unwrap();

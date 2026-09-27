@@ -1,8 +1,23 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Installation
 
-Use one of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible, and skips GNOME-specific packages on KDE Plasma and other non-GNOME desktops. Manual GNOME package installs still need GNOME settings commands afterward.
+Use one of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible, enables the Cinnamon extension on Cinnamon desktops, installs the KDE packages on KDE Plasma, and skips desktop-specific packages on other desktops. Manual GNOME/Cinnamon package installs still need extension settings commands afterward.
 
-Supported installer targets on x86_64 and arm64: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora 42/43/44 and compatible distributions with standard DNF package installation, such as Nobara and Ultramarine, Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS.
+Supported installer targets on x86_64 and arm64: Ubuntu 24.04/25.10/26.04, Debian 13 and 14 (forky, currently testing), Fedora 42/43/44 and compatible distributions (including image-based OSTree distros such as Fedora Silverblue, Kinoite, and Bazzite), openSUSE Tumbleweed (x86_64), Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS.
+
+## CPU requirement
+
+On x86_64, the `gazed` daemon requires **AVX2** (Intel Haswell and newer, roughly 2013 onward; AMD Excavator and newer, roughly 2015 onward). The ONNX Runtime it links issues AVX2 instructions during startup, so on an older CPU the daemon exits immediately rather than running degraded.
+
+Check before installing:
+
+```bash
+grep -qw avx2 /proc/cpuinfo && echo "AVX2 present" || echo "AVX2 missing"
+```
+
+If AVX2 is missing, the one-line installer stops before touching your system, and the packages install the CLI and PAM modules but leave `gazed` stopped. `gaze doctor` reports the same thing. Face authentication is not available on these machines; there is no workaround short of a different CPU. See [troubleshooting](./troubleshooting) for details.
 
 ## Path A: one-line installer (recommended)
 
@@ -15,14 +30,16 @@ This installs:
 - the Gaze daemon and CLI
 - `gaze-gui`
 - the GNOME Shell extension package only when a GNOME desktop session is detected
+- the Cinnamon extension package only when a Cinnamon desktop session is detected
 
-It also configures package updates where needed, enables the `gazed` daemon, and tries to enable lock screen face unlock for the current GNOME user when applicable. On KDE Plasma and other non-GNOME desktops, it skips the GNOME extension package so it does not pull in GNOME Shell.
+It also configures package updates where needed, enables the `gazed` daemon, and enables lock screen face unlock or PolKit confirmation for the current user when applicable. On KDE Plasma it installs `gaze-kde` instead, which wires up the lock screen. On Cinnamon it installs `gaze-cinnamon-extension`. On other desktops it skips the desktop extension packages. On OSTree systems (Silverblue, Bazzite, Kinoite), the installer automatically uses `rpm-ostree` layering. On openSUSE Tumbleweed, it uses `zypper` and the Tumbleweed-specific Gundu Labs RPM repository.
 
 Desktop behavior:
 
-- CLI, GUI, and normal PAM prompts work without the GNOME extension.
-- If the installer detects KDE Plasma, it installs the base packages and points you to the PAM guide for login/lock integration.
-- If you later want GNOME lock screen support, install the GNOME extension package manually from a GNOME session.
+- CLI, GUI, and normal PAM prompts work without desktop extensions.
+- If the installer detects Cinnamon, it installs `gaze-cinnamon-extension` and enables it for the session.
+- If the installer detects KDE Plasma, it installs `gaze-kde` alongside the base packages, so the lock screen starts face auth on its own and a Face Unlock entry appears in System Settings.
+- If you later want GNOME or Cinnamon lock screen support, install the appropriate extension package manually from your desktop session.
 - GDM loads the extension from package defaults when the extension package is installed, but GDM login face auth stays disabled unless you explicitly enable it.
 
 For non-interactive installs:
@@ -33,7 +50,11 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
 
 ## Path B: manual package install
 
-Use this if you prefer to configure package sources yourself. Debian/Ubuntu and Fedora-compatible systems with standard DNF package installation use Gundu Labs repositories. Arch Linux and Arch-compatible distributions such as Manjaro and CachyOS use the AUR packages.
+Use this if you prefer to configure package sources yourself. Debian/Ubuntu, Fedora-compatible systems, and openSUSE Tumbleweed use Gundu Labs repositories. Arch Linux and Arch-compatible distributions such as Manjaro and CachyOS use the AUR packages.
+
+Debian/Ubuntu packages are built per release, and each apt suite carries only the builds for that release: `noble` (Ubuntu 24.04), `questing` (Ubuntu 25.10), `resolute` (Ubuntu 26.04), `trixie` (Debian 13), and `forky` (Debian 14). The snippet below picks the suite matching your system; installing another release's package leaves `gazed` unable to load its OpenCV libraries.
+
+Debian 14 (forky) is still testing, so its libraries keep moving. The `forky` packages are built against whatever OpenCV and GTK sonames testing carried at release time, and a soname bump in testing can leave `gazed` unable to start until the next Gaze release rebuilds against it. Reinstalling from the `forky` suite after such a bump picks up the rebuilt package.
 
 If you are replacing an existing manual repository configuration, remove the current repo files first:
 
@@ -42,9 +63,15 @@ If you are replacing an existing manual repository configuration, remove the cur
 sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
 ```
 
-**Fedora and compatible DNF systems:**
+**Fedora and compatible DNF/rpm-ostree systems:**
 ```bash
 sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+```
+
+**openSUSE Tumbleweed:**
+
+```bash
+sudo rm -f /etc/zypp/repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
 ```
 
 ::: code-group
@@ -53,7 +80,8 @@ sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulab
 sudo mkdir -p --mode=0755 /usr/share/keyrings
 curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.gpg \
   | sudo tee /usr/share/keyrings/gundulabs-archive-keyring.gpg >/dev/null
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb stable main" \
+suite="$(. /etc/os-release && echo "${VERSION_CODENAME:-$UBUNTU_CODENAME}")"
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb $suite main" \
   | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 sudo apt update
 sudo apt install gaze gaze-gui
@@ -74,11 +102,72 @@ sudo dnf makecache
 sudo dnf install gaze gaze-gui
 ```
 
+```bash [Fedora OSTree (Silverblue / Bazzite / Kinoite)]
+sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<'EOF'
+[gundulabs]
+name=Gundu Labs
+baseurl=https://packages.gundulabs.com/rpm/fedora/$releasever/$basearch
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.gundulabs.com/keys/gundulabs-repo.asc
+EOF
+sudo rpm-ostree install gaze gaze-gui
+```
+
+```bash [Fedora via Copr]
+# Alternative to the Gundu Labs dnf repository above; do not enable both.
+# Copr builds and signs these packages on Fedora's own builders.
+sudo dnf install dnf-plugins-core
+sudo dnf copr enable @gundulabs/gaze
+sudo dnf install gaze gaze-gui
+```
+
+```bash [openSUSE Tumbleweed]
+sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
+sudo tee /etc/zypp/repos.d/gundulabs.repo >/dev/null <<'EOF'
+[gundulabs]
+name=Gundu Labs
+baseurl=https://packages.gundulabs.com/rpm/opensuse/tumbleweed/$basearch
+enabled=1
+autorefresh=1
+type=rpm-md
+gpgcheck=1
+gpgkey=https://packages.gundulabs.com/keys/gundulabs-repo.asc
+EOF
+sudo zypper refresh
+sudo zypper install gaze gaze-gui
+```
+
 ```bash [Arch Linux / Manjaro / CachyOS]
 # Requires an AUR helper such as yay or paru. yay shown here.
 yay -S --needed gaze-bin gaze-gui-bin
 ```
 
+:::
+
+The openSUSE RPM ships a `pam-config` definition and enables Gaze for `sudo`,
+GDM, and other services that include `common-auth` in its post-install script.
+To reapply the setting manually after changing PAM modules, run:
+
+```bash
+sudo pam-config --add --gaze
+sudo pam-config --update
+```
+
+The one-line installer also reapplies this setting after the package install
+when `pam-config` is available.
+
+::: warning Arch: install the `-bin` packages, not the release artifacts
+On Arch, install Gaze only through the AUR packages above. The
+`gaze-*.pkg.tar.zst` files attached to each GitHub release are the inputs the
+AUR wrappers unpack, not a supported install path: they carry the plain package
+names `gaze` and `gaze-gui`, and an unrelated AUR package is also named `gaze`
+(a file watcher). Installing them with `pacman -U` leaves a foreign `gaze` that
+the next `yay -Syu` or `paru -Syu` silently "upgrades" to the unrelated package,
+removing `gazed`, the PAM modules, and the systemd unit. See
+[Gaze disappears after an AUR helper upgrade](/guide/troubleshooting#gaze-disappears-after-an-aur-helper-upgrade-arch-linux)
+if this already happened to you.
 :::
 
 ## Path C: GUI-only via Flatpak
@@ -107,6 +196,10 @@ sudo apt install gaze-gnome-extension
 sudo dnf install gaze-gnome-extension
 ```
 
+```bash [openSUSE Tumbleweed]
+sudo zypper install gaze-gnome-extension
+```
+
 ```bash [Arch Linux / Manjaro / CachyOS]
 yay -S --needed gaze-gnome-extension-bin
 ```
@@ -118,17 +211,45 @@ gnome-extensions enable gaze@gundulabs.com
 gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
-Log out and back in once after installing or updating the extension if the lock screen does not pick it up immediately. GDM login face auth stays disabled unless you explicitly enable it; see the [GNOME Extension guide](/guide/gnome) before doing that.
+Reboot once after installing or updating the extension if the lock screen does not pick it up immediately. Run the two commands above from a session that started **after** the package was installed: GNOME Shell drops extension IDs it has not scanned yet, so enabling one from the session you installed in can look right and then be gone after the next logout. See [The extension disappears again after a logout](/guide/gnome#the-extension-disappears-again-after-a-logout).
+
+GDM login face auth stays disabled unless you explicitly enable it; see the [GNOME Extension guide](/guide/gnome) before doing that.
 
 ### KDE Plasma and other PAM-based desktops
 
-The one-line installer detects KDE Plasma and intentionally skips `gaze-gnome-extension`, because that package depends on GNOME Shell. Use the base `gaze` package's PAM modules for login or lock-screen integration. See the [PAM guide](/guide/pam) and keep password fallback enabled while testing.
+The one-line installer detects KDE Plasma and intentionally skips `gaze-gnome-extension`, because that package depends on GNOME Shell. It installs `gaze-kde` instead, which makes the KDE **lock screen** start face auth on its own with no key press and adds a Face Unlock entry to System Settings. Keep password fallback enabled while testing.
 
-Note that the KDE **lock screen** does not support hands-free face unlock: its screen locker only starts PAM authentication after you submit the password field, so the camera will not activate on its own. This is a KDE limitation — see the [PAM guide](/guide/pam#fedora-and-compatible-rpm-systems) for details.
+The KDE **login greeter** (Plasma Login Manager, or SDDM) is a separate program with no up-front biometric slot upstream, so face auth there starts when you submit the login form, exactly as a fingerprint reader does on the same screen. See the [KDE Plasma guide](/guide/kde#login-greeter).
+
+For other PAM-based desktops, use the base `gaze` package's PAM modules and see the [PAM guide](/guide/pam).
 
 ### Enable face unlock for hyprlock
 
 On Hyprland, install the `gaze-hyprlock` package (auto-installed by the one-line installer when Hyprland is detected) and point hyprlock at the Gaze PAM service. See the [Hyprland guide](/guide/hyprland).
+
+## Path D: Nix and NixOS
+
+Gaze ships a Nix flake with packages and a NixOS module that sets up the
+daemon, D-Bus/polkit policies, and PAM declaratively:
+
+```nix
+# flake.nix inputs
+inputs.gaze.url = "github:GunduLabs/gaze";
+```
+
+```nix
+# NixOS configuration
+imports = [ inputs.gaze.nixosModules.default ];
+services.gaze = {
+  enable = true;
+  gui.enable = true;
+};
+```
+
+On non-NixOS systems with Nix or home-manager you can install the CLI and GUI
+from the flake, but the daemon and PAM integration still need a system package
+(Path A or B). See the [Nix & NixOS guide](/guide/nixos) for module options,
+GNOME/hyprlock integration, and home-manager usage.
 
 ## Restart after install
 

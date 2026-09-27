@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Download archived docs for versioned tags
 set -euo pipefail
 
@@ -7,7 +10,7 @@ cd "$SCRIPT_DIR/.."
 
 echo "Preparing versioned documentation..."
 
-git fetch --tags || true
+git fetch --tags --force || true
 
 rm -rf docs/archive
 mkdir -p docs/archive

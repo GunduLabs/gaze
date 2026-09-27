@@ -1,9 +1,7 @@
-pub mod camera;
-pub mod config;
-pub mod dbus;
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
 
-#[cfg(feature = "detection")]
-pub mod detect;
-#[cfg(feature = "detection")]
-pub mod face;
+pub mod config;
+pub mod cpu;
+pub mod dbus;
 pub mod ir;

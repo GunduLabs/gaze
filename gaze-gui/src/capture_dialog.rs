@@ -1,35 +1,68 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use crate::camera_view::{CameraFeed, build_camera_widget};
 use futures::StreamExt;
+use gaze_core::config::{CameraConfig, DEFAULT_RGB_CAMERA};
 use gaze_core::dbus::{EnrollPrompt, GazeProxy};
 use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
-use tracing::error;
+use std::time::Duration;
+
+const PREVIEW_GRACE: Duration = Duration::from_secs(10);
+
+pub struct CameraSetup {
+    pub device: String,
+    pub is_ir: bool,
+    pub can_share: bool,
+}
+
+impl CameraSetup {
+    pub fn from_config(cameras: &CameraConfig) -> Self {
+        let (device, is_ir) = gaze_vision::camera::preferred_capture_source(cameras);
+        Self {
+            device,
+            is_ir,
+            can_share: gaze_vision::camera::preview_can_be_shared(cameras),
+        }
+    }
+
+    pub fn fallback() -> Self {
+        Self {
+            device: DEFAULT_RGB_CAMERA.to_string(),
+            is_ir: false,
+            can_share: false,
+        }
+    }
+}
+
+/// Begin warming the camera before the enrollment authorization dialog appears.
+pub fn prepare_camera_feed(camera: &CameraSetup) -> anyhow::Result<CameraFeed> {
+    let feed = if camera.is_ir {
+        CameraFeed::new_guidance_only()
+    } else {
+        CameraFeed::new(&camera.device)?
+    };
+    feed.start();
+    Ok(feed)
+}
 
 pub fn show_capture_dialog(
     parent: &impl IsA<gtk4::Widget>,
     username: &str,
     face_name: Option<&str>,
     proxy: &Rc<GazeProxy<'static>>,
-    camera_device: &str,
-    is_ir: bool,
+    camera: &CameraSetup,
+    feed: CameraFeed,
     on_done: impl Fn() + 'static,
 ) {
-    let feed = if is_ir {
-        CameraFeed::new_guidance_only()
-    } else {
-        match CameraFeed::new(camera_device) {
-            Ok(f) => f,
-            Err(err) => {
-                error!(%err, "Camera init failed");
-                return;
-            }
-        }
-    };
-    feed.start();
+    let is_ir = camera.is_ir;
+    let can_share = camera.can_share;
+
     let feed = Rc::new(feed);
     let on_done = Rc::new(on_done);
 
@@ -60,10 +93,15 @@ pub fn show_capture_dialog(
     body.set_margin_top(16);
     body.set_margin_bottom(16);
 
-    let camera_mode = gtk4::Label::new(Some(if is_ir {
-        "Infrared camera · live preview unavailable, look at the camera"
+    let camera_kind = if is_ir {
+        "Infrared camera"
     } else {
         "RGB camera"
+    };
+    let camera_mode = gtk4::Label::new(Some(if is_ir {
+        "Infrared camera · preview starts when capture does"
+    } else {
+        camera_kind
     }));
     camera_mode.add_css_class("caption");
     camera_mode.add_css_class("dim-label");
@@ -72,6 +110,7 @@ pub fn show_capture_dialog(
 
     let resolved_face = Rc::new(RefCell::new(face_name.unwrap_or("default").to_string()));
     let existing_face_names = Rc::new(RefCell::new(HashSet::<String>::new()));
+    let enrollment_completed = Rc::new(Cell::new(false));
     let face_name_valid = Rc::new(RefCell::new(is_refine));
     let mut face_name_entry: Option<libadwaita::EntryRow> = None;
 
@@ -95,13 +134,11 @@ pub fn show_capture_dialog(
     cam_widget.set_height_request(320);
     if is_ir {
         feed.picture.set_visible(false);
-        body.append(&cam_widget);
-    } else {
-        let cam_frame = gtk4::Frame::new(None);
-        cam_frame.set_child(Some(&cam_widget));
-        cam_frame.set_vexpand(true);
-        body.append(&cam_frame);
     }
+    let cam_frame = gtk4::Frame::new(None);
+    cam_frame.set_child(Some(&cam_widget));
+    cam_frame.set_vexpand(true);
+    body.append(&cam_frame);
 
     let prompt_label = gtk4::Label::new(None);
     prompt_label.add_css_class("title-4");
@@ -262,20 +299,38 @@ pub fn show_capture_dialog(
         on_done,
         #[strong]
         feed,
+        #[strong]
+        camera_mode,
+        #[strong]
+        enrollment_completed,
         move |btn| {
+            // The preview opens the RGB camera directly. PipeWire can back it and gazed's
+            // capture at once; anything else has to be released before gazed opens the device.
+            if can_share {
+                feed.set_active(true);
+            } else {
+                feed.stop_and_wait();
+                feed.hide_frame();
+                camera_mode.set_text(&format!("{camera_kind} · starting capture"));
+            }
+
             btn.set_visible(false);
             stop_btn.set_visible(true);
             prompt_label.set_visible(true);
             progress_label.set_visible(true);
             progress.set_visible(true);
             prompt_label.set_text("Starting enrollment...");
-            feed.set_active(true);
 
+            let preview_live = Rc::new(Cell::new(false));
             let face_name = resolved_face.borrow().clone();
 
             glib::MainContext::default().spawn_local(glib::clone!(
                 #[strong]
                 proxy,
+                #[strong]
+                camera_mode,
+                #[strong]
+                preview_live,
                 #[weak]
                 progress,
                 #[weak]
@@ -290,6 +345,8 @@ pub fn show_capture_dialog(
                 on_done,
                 #[strong]
                 feed,
+                #[strong]
+                enrollment_completed,
                 async move {
                     let mut enroll_stream = match proxy.receive_enroll_status().await {
                         Ok(s) => s,
@@ -309,10 +366,39 @@ pub fn show_capture_dialog(
                         }
                     };
 
+                    let mut preview_stream = if can_share {
+                        None
+                    } else {
+                        proxy.receive_preview_frame().await.ok()
+                    };
+
                     if proxy.enroll_start(&face_name).await.is_err() {
                         prompt_label.set_text("Daemon failed to start enrollment.");
                         let _ = proxy.release().await;
                         return;
+                    }
+
+                    if !can_share {
+                        glib::timeout_add_local_once(
+                            PREVIEW_GRACE,
+                            glib::clone!(
+                                #[strong]
+                                feed,
+                                #[strong]
+                                camera_mode,
+                                #[strong]
+                                preview_live,
+                                move || {
+                                    if preview_live.get() {
+                                        return;
+                                    }
+                                    feed.set_active(true);
+                                    camera_mode.set_text(&format!(
+                                        "{camera_kind} · live preview unavailable, look at the camera"
+                                    ));
+                                }
+                            ),
+                        );
                     }
 
                     loop {
@@ -346,6 +432,7 @@ pub fn show_capture_dialog(
                                     }
 
                                     if is_done && raw_msg == EnrollPrompt::Completed {
+                                        enrollment_completed.set(true);
                                         prompt_label.set_text("✓ Enrollment Complete!");
                                         stop_btn.set_visible(false);
                                         on_done();
@@ -370,6 +457,20 @@ pub fn show_capture_dialog(
                                     let status = *args.status();
                                     feed.set_face_status(status);
                                 }
+                            }
+                            Some(signal) = async { preview_stream.as_mut()?.next().await } => {
+                                if let Ok(args) = signal.args() {
+                                    if !preview_live.replace(true) {
+                                        feed.set_active(true);
+                                        camera_mode.set_text(camera_kind);
+                                    }
+                                    feed.show_remote_frame(args.jpeg());
+                                }
+                            }
+                            else => {
+                                prompt_label.set_text("Lost contact with the Gaze daemon.");
+                                stop_btn.set_visible(false);
+                                break;
                             }
                         }
                     }
@@ -399,8 +500,10 @@ pub fn show_capture_dialog(
         proxy,
         #[strong]
         show_cancel_confirmation,
+        #[strong]
+        enrollment_completed,
         move |dialog| {
-            if stop_btn.get_visible() && !prompt_label.text().contains("Complete") {
+            if stop_btn.get_visible() && !enrollment_completed.get() {
                 show_cancel_confirmation(dialog.clone().upcast());
                 glib::Propagation::Stop
             } else {

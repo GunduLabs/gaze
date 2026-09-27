@@ -1,18 +1,22 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 mod align;
 mod crypto;
 mod daemon;
 mod liveness;
 pub mod models;
+mod preview;
 mod recognize;
 mod tpm;
 pub mod users;
 
 use crate::users::UserDatabase;
 use daemon::AuthDaemon;
-use gaze_core::config::{Config, MODELS_DIR, USERS_DIR};
+use gaze_core::config::{CONFIG_PATH, Config, MODELS_DIR, USERS_DIR};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use zbus::connection::Builder;
 
@@ -26,21 +30,26 @@ fn warn_on_ir_misconfig(cameras: &gaze_core::config::CameraConfig) {
         }
         return;
     }
-    if let Some(node) = gaze_core::camera::resolve_node(ir)
-        && cameras.emitter_enabled
-    {
-        if !std::path::Path::new(&node).exists() {
-            warn!(
-                node = ir,
-                resolved = node,
-                "resolved cameras.ir device node does not exist; IR capture will fail until it appears"
-            );
+    match gaze_vision::camera::resolve_node(ir) {
+        // A missing node breaks IR capture whether or not the emitter is driven.
+        Some(node) => {
+            if !std::path::Path::new(&node).exists() {
+                warn!(
+                    node = ir,
+                    resolved = node,
+                    "resolved cameras.ir device node does not exist; IR capture will fail until it appears"
+                );
+            }
         }
-    } else {
-        warn!(
-            node = ir,
-            "could not resolve a physical V4L2 device node for cameras.ir; the IR emitter will not be driven"
-        );
+        // Only the emitter needs a physical V4L2 node, so stay quiet when it is off.
+        None => {
+            if cameras.emitter_enabled {
+                warn!(
+                    node = ir,
+                    "could not resolve a physical V4L2 device node for cameras.ir; the IR emitter will not be driven"
+                );
+            }
+        }
     }
 }
 
@@ -51,6 +60,20 @@ async fn main() -> anyhow::Result<()> {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
+
+    if !gaze_core::cpu::supports_inference() {
+        error!(
+            "{}. {}",
+            gaze_core::cpu::UNSUPPORTED_CPU_MESSAGE,
+            gaze_core::cpu::UNSUPPORTED_CPU_FIX
+        );
+        std::process::exit(i32::from(gaze_core::cpu::EXIT_UNSUPPORTED_CPU));
+    }
+
+    gaze_vision::inference::ensure_supported_runtime()?;
+    if let Ok(version) = gaze_vision::inference::runtime_version() {
+        info!(version, "Loaded ONNX Runtime");
+    }
 
     let _initialized = ort::init()
         .with_name("gazed")
@@ -65,12 +88,9 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Initializing Gaze Daemon...");
 
-    if let Ok(uid) = daemon::get_active_session_uid().await {
-        daemon::set_pipewire_runtime_for_uid(uid);
-    }
-
     let t_load = std::time::Instant::now();
 
+    Config::migrate_file(CONFIG_PATH);
     let config = Config::load()?;
     let security = &config.security;
 
@@ -78,24 +98,42 @@ async fn main() -> anyhow::Result<()> {
         level = ?security,
         detector = security.detector(),
         recognizer = security.recognizer(),
-        threshold = security.threshold(),
+        rgb_threshold = security.rgb_threshold(),
+        ir_threshold = security.ir_threshold(),
         "Loaded security config"
+    );
+    info!(
+        execution_provider = config.inference.execution_provider,
+        device = config.inference.device,
+        "Loaded inference config"
     );
 
     let (det_path, rec_path) =
         models::ensure_models(MODELS_DIR, security.detector(), security.recognizer())?;
 
-    let detector = gaze_core::detect::FaceDetector::new(det_path.to_str().unwrap())
-        .expect("Failed to load detection model");
+    let detector = gaze_vision::detect::FaceDetector::new_with_inference(
+        det_path.to_str().unwrap(),
+        &config.inference,
+    )
+    .expect("Failed to load detection model");
 
-    let recognizer_rgb = recognize::FaceRecognizer::new(rec_path.to_str().unwrap())
-        .expect("Failed to load recognition model");
-    let recognizer_ir = recognize::FaceRecognizer::new(rec_path.to_str().unwrap())
-        .expect("Failed to load recognition model");
+    let recognizer_rgb = recognize::FaceRecognizer::new_with_inference(
+        rec_path.to_str().unwrap(),
+        &config.inference,
+    )
+    .expect("Failed to load recognition model");
+    let recognizer_ir = recognize::FaceRecognizer::new_with_inference(
+        rec_path.to_str().unwrap(),
+        &config.inference,
+    )
+    .expect("Failed to load recognition model");
 
     let liveness_detector = if config.liveness.enabled {
         let path = models::ensure_liveness_model(MODELS_DIR)?;
-        Some(liveness::LivenessDetector::new(path.to_str().unwrap())?)
+        Some(liveness::LivenessDetector::new_with_inference(
+            path.to_str().unwrap(),
+            &config.inference,
+        )?)
     } else {
         None
     };
@@ -118,24 +156,37 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let encrypt_templates = config.storage.encrypt_templates;
-    let db =
+    let mut db =
         UserDatabase::new_with_cipher(USERS_DIR, config.enrollment.max_templates as usize, cipher)?;
-    if encrypt_templates {
+    if encrypt_templates && !db.has_encrypted_templates()? {
         match db.migrate_plaintext_to_encrypted() {
             Ok(0) => {}
-            Ok(n) => info!(
-                migrated = n,
-                "Encrypted existing plaintext templates at rest"
-            ),
-            Err(e) => warn!("Could not migrate some plaintext templates to encrypted: {e}"),
+            Ok(n) => {
+                info!(
+                    migrated = n,
+                    "Encrypted existing plaintext templates at rest"
+                );
+                db.load_all()?;
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "template encryption is enabled ([storage] encrypt_templates) but the \
+                     existing templates could not be encrypted, so the daemon is refusing to \
+                     start on a database it would only be able to read in part: {e}"
+                ));
+            }
         }
     }
 
     warn_on_ir_misconfig(&config.cameras);
 
-    let sources = gaze_core::camera::resolve_configured_sources(&config.cameras);
+    let sources = gaze_vision::camera::resolve_configured_sources(&config.cameras);
 
     let resume_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let resume_seen = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let lock_epochs: daemon::LockEpochs = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let claim_state: daemon::ClaimStateHandle = Arc::new(Mutex::new(None));
+    let active_cancel: daemon::ActiveCancelHandle = Arc::new(Mutex::new(None));
 
     let daemon = AuthDaemon {
         detector: Arc::new(std::sync::Mutex::new(detector)),
@@ -144,31 +195,54 @@ async fn main() -> anyhow::Result<()> {
         liveness: Arc::new(Mutex::new(liveness_detector)),
         ir_liveness: Arc::new(Mutex::new(ir_liveness_detector)),
         db: Arc::new(Mutex::new(db)),
-        threshold: Arc::new(Mutex::new(security.threshold())),
+        rgb_threshold: Arc::new(Mutex::new(security.rgb_threshold())),
+        ir_threshold: Arc::new(Mutex::new(security.ir_threshold())),
         rgb_device: Arc::new(Mutex::new(sources.rgb)),
         ir_device: Arc::new(Mutex::new(sources.ir)),
         ir_node: Arc::new(Mutex::new(sources.ir_node)),
+        serial_capture: Arc::new(Mutex::new(sources.serial_capture)),
         emitter_enabled: Arc::new(Mutex::new(config.cameras.emitter_enabled)),
         liveness_config: Arc::new(Mutex::new(config.liveness.clone())),
         hybrid_policy: Arc::new(Mutex::new(security.hybrid_policy().to_string())),
         abort_if_ssh: Arc::new(Mutex::new(config.auth.abort_if_ssh)),
         abort_if_lid_closed: Arc::new(Mutex::new(config.auth.abort_if_lid_closed)),
-        claim_state: Arc::new(Mutex::new(None)),
-        active_cancel: Arc::new(Mutex::new(None)),
+        abort_before_first_resume: Arc::new(Mutex::new(config.auth.abort_before_first_resume)),
+        claim_state: claim_state.clone(),
+        active_cancel: active_cancel.clone(),
         active_extensions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        pam_internal: Arc::new(Mutex::new(std::collections::HashMap::new())),
         resume_pending: resume_pending.clone(),
+        resume_seen: resume_seen.clone(),
+        lock_epochs: lock_epochs.clone(),
+        benchmark_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        last_good_config: Arc::new(Mutex::new(config.clone())),
         rt_handle: tokio::runtime::Handle::current(),
     };
 
     info!(elapsed = ?t_load.elapsed(), "Models & user DB loaded");
 
     let conn = Builder::system()?
-        .name("com.gundulabs.Gaze")?
         .serve_at("/com/gundulabs/Gaze", daemon)?
         .build()
         .await?;
 
-    tokio::spawn(daemon::watch_resume(conn.clone(), resume_pending));
+    tokio::spawn(daemon::watch_resume(
+        conn.clone(),
+        resume_pending,
+        resume_seen,
+    ));
+    tokio::spawn(daemon::watch_session_locks(conn.clone(), lock_epochs));
+
+    // No client can claim before the well-known name exists, so subscribing here is what makes
+    // the watcher airtight. Fatal by design, so systemd restarts rather than stranding claims.
+    let claim_owners = daemon::subscribe_claim_owners(&conn).await?;
+    tokio::spawn(daemon::watch_claim_owner(
+        claim_owners,
+        claim_state,
+        active_cancel,
+    ));
+
+    conn.request_name("com.gundulabs.Gaze").await?;
 
     info!("Gaze Daemon listening on System Bus");
     std::future::pending::<()>().await;

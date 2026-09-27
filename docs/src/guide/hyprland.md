@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Hyprland (hyprlock)
 
 Gaze integrates with [hyprlock](https://github.com/hyprwm/hyprlock), the Hyprland screen locker, via a dedicated PAM service. The `gaze-hyprlock` package installs `/etc/pam.d/hyprlock-gaze`, leaving the distro's own `/etc/pam.d/hyprlock` untouched.
@@ -18,6 +21,10 @@ sudo apt-get install gaze-hyprlock
 
 ```bash [Fedora and compatible]
 sudo dnf install gaze-hyprlock
+```
+
+```bash [openSUSE Tumbleweed]
+sudo zypper install gaze-hyprlock
 ```
 
 ```bash [Arch]
@@ -52,11 +59,17 @@ auth {
 }
 ```
 
-This uses `pam_gaze_grosshack.so`, a PAM shim that lets Gaze run alongside the password prompt instead of blocking it.
+This uses `pam_gaze.so simultaneous`, running Gaze alongside the password prompt instead of blocking it.
 
 ## How it works
 
-`hyprlock-gaze` is a PAM service that stacks `pam_gaze.so` on top of your system password stack (`system-auth` on RPM/Arch, `common-auth` on Debian/Ubuntu). The auth flow:
+`hyprlock-gaze` is a PAM service that stacks `pam_gaze.so` on top of your
+system password stack (`system-auth` on Fedora/RHEL and Arch, `common-auth` on
+Debian/Ubuntu and openSUSE), with `pam_nologin` and `pam_faillock preauth`
+running before Gaze. Those gates must come first because a `success=done`
+face match ends the whole auth stack and would otherwise skip the lockout and
+nologin checks the include pulls in (the same reason `gaze-kde-pam` carries
+them inside its own block). The auth flow:
 
 1. hyprlock calls PAM with service name `hyprlock-gaze`
 2. `pam_gaze.so` runs as the logged-in user, claims the camera via the `gazed` DBus service, and runs face verification
@@ -86,6 +99,10 @@ sudo apt-get remove gaze-hyprlock
 sudo dnf remove gaze-hyprlock
 ```
 
+```bash [openSUSE Tumbleweed]
+sudo zypper remove gaze-hyprlock
+```
+
 ```bash [Arch]
 yay -R gaze-hyprlock-bin
 ```
@@ -95,5 +112,6 @@ yay -R gaze-hyprlock-bin
 ## Troubleshooting
 
 - **Falls back to password every time**: daemon may not be running, or no faces enrolled for the current user. Check `systemctl status gazed` and `gaze list-faces`.
+- **Unlocks itself right after you lock manually**: hyprlock starts its PAM stack as soon as it launches, so face authentication runs while you are still in front of the camera. Set [`auth.start_delay_ms`](/guide/configuration) to give yourself time to step away, and `auth.start_delay_scope = "screen_lock"` so the delay does not also slow down `sudo` and polkit prompts. Note that hyprlock's own `general:grace` / `--grace` option will not help here; it unlocks on any keypress or cursor movement within the window rather than delaying authentication.
 - **Camera busy**: another Gaze client (GUI, GNOME extension) may hold the camera. Close it and retry.
 - **PAM error in logs**: check `journalctl -u gazed` and `journalctl --user -t hyprlock`.

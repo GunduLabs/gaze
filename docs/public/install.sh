@@ -1,13 +1,17 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Gaze installer: https://gaze.gundulabs.com/install.sh
 # Usage: curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 #        curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
 set -e
 
 PKG_BASE_URL="https://packages.gundulabs.com"
-GNOME_DOCS_URL="https://gaze.gundulabs.com/guide/gnome"
 HYPRLAND_DOCS_URL="https://gaze.gundulabs.com/guide/hyprland"
+KDE_DOCS_URL="https://gaze.gundulabs.com/guide/kde"
 PAM_DOCS_URL="https://gaze.gundulabs.com/guide/pam"
+PAM_SUDO_OPTOUT="/etc/gaze/pam-sudo.optout"
 REPO_KEY_FPR="505AC1C71AFEDBD5555235F6CB4FA24E5C1C7C98"
 AUTO_YES=0
 
@@ -111,8 +115,19 @@ is_kde_session() {
     return 1
 }
 
+is_cinnamon_session() {
+    case "${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}" in
+    *X-Cinnamon* | *Cinnamon* | *cinnamon*) return 0 ;;
+    esac
+    return 1
+}
+
 want_gnome_extension_package() {
     is_gnome_session
+}
+
+want_cinnamon_extension_package() {
+    is_cinnamon_session
 }
 
 is_hyprland_session() {
@@ -133,6 +148,10 @@ want_hyprlock_setup() {
 print_manual_gnome_enable() {
     cmd "gnome-extensions enable gaze@gundulabs.com"
     cmd "gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true"
+}
+
+print_manual_cinnamon_enable() {
+    cmd "gsettings set org.cinnamon enabled-extensions \"['gaze@gundulabs.com']\""
 }
 
 configure_hyprlock_conf() {
@@ -243,6 +262,76 @@ _gsettings_enable_face_auth() {
     gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 }
 
+GNOME_ENABLE_HELPER="${XDG_DATA_HOME:-$HOME/.local/share}/gaze/gnome-enable.sh"
+GNOME_ENABLE_AUTOSTART="${XDG_CONFIG_HOME:-$HOME/.config}/autostart/gaze-gnome-enable.desktop"
+
+# GNOME Shell only scans extension directories at session start, so the dconf write above
+# names a UUID this session has never seen. Shell drops unknown UUIDs the next time it
+# rewrites enabled-extensions, which is why a fresh install can look enabled right up
+# until the first logout. This one-shot autostart re-runs the enable from inside the next
+# session, where Shell does know the extension, and then deletes itself.
+arm_gnome_first_login_enable() {
+    mkdir -p "$(dirname "$GNOME_ENABLE_HELPER")" "$(dirname "$GNOME_ENABLE_AUTOSTART")" || return 1
+
+    cat >"$GNOME_ENABLE_HELPER" <<'HELPER' || return 1
+#!/bin/sh
+# Written by the Gaze installer. Runs at the first GNOME login after install to
+# finish enabling the Gaze extension, then removes itself. Safe to delete.
+EXT_ID="gaze@gundulabs.com"
+autostart="$1"
+
+retire() {
+    rm -f "$autostart" "$0"
+    exit 0
+}
+
+case "${XDG_CURRENT_DESKTOP:-}" in
+*GNOME*) ;;
+*) exit 0 ;;
+esac
+
+# The package is gone; stop trying.
+installed=0
+for dir in "${XDG_DATA_HOME:-$HOME/.local/share}" /usr/local/share /usr/share; do
+    if [ -f "$dir/gnome-shell/extensions/$EXT_ID/metadata.json" ]; then
+        installed=1
+        break
+    fi
+done
+[ "$installed" -eq 1 ] || retire
+
+command -v gnome-extensions >/dev/null 2>&1 || exit 0
+
+# Shell answers queries a little after the session starts.
+i=0
+while [ "$i" -lt 20 ]; do
+    gnome-extensions info "$EXT_ID" >/dev/null 2>&1 && break
+    sleep 1
+    i=$((i + 1))
+done
+
+# Still unscanned: leave the autostart in place and retry next login.
+gnome-extensions info "$EXT_ID" >/dev/null 2>&1 || exit 0
+
+gnome-extensions enable "$EXT_ID" >/dev/null 2>&1 || exit 0
+gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true >/dev/null 2>&1 || true
+
+retire
+HELPER
+    chmod +x "$GNOME_ENABLE_HELPER" || return 1
+
+    cat >"$GNOME_ENABLE_AUTOSTART" <<EOF || return 1
+[Desktop Entry]
+Type=Application
+Name=Gaze face unlock setup
+Comment=Finishes enabling the Gaze GNOME Shell extension after installation
+Exec="$GNOME_ENABLE_HELPER" "$GNOME_ENABLE_AUTOSTART"
+OnlyShowIn=GNOME;
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+EOF
+}
+
 enable_gnome_extension() {
     if [ "$(id -u)" -eq 0 ]; then
         warn "Running as root; not changing per-user GNOME extension settings."
@@ -260,10 +349,8 @@ enable_gnome_extension() {
 
     EXT_ID="gaze@gundulabs.com"
 
-    # gnome-extensions enable works immediately when Shell already knows the extension.
-    # Newly installed system extensions are not scanned until Shell restarts, so it
-    # often fails on first install. Fall back to gsettings which writes directly to
-    # dconf and takes effect on the next login without needing Shell to know the ext.
+    # Shell does not scan newly installed system extensions until it restarts, so
+    # `gnome-extensions enable` usually fails here and gsettings writes dconf directly.
     if command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions enable "$EXT_ID" >/dev/null 2>&1 && _gsettings_enable_face_auth; then
         ok "Enabled GNOME lock screen face unlock for this user."
     elif _gsettings_add_extension "$EXT_ID" && _gsettings_enable_face_auth; then
@@ -274,28 +361,145 @@ enable_gnome_extension() {
         say "Reboot, then from your GNOME session run:"
         print_manual_gnome_enable
     fi
+
+    if arm_gnome_first_login_enable; then
+        say "${DIM}GNOME Shell forgets extensions it has not scanned yet, so a logout before the${RESET}"
+        say "${DIM}first reboot can undo the step above. A one-shot autostart entry re-applies it${RESET}"
+        say "${DIM}at your next GNOME login and then deletes itself.${RESET}"
+    fi
 }
 
-explain_gnome_extension_skipped() {
-    if want_gnome_extension_package; then
+enable_cinnamon_extension() {
+    if [ "$(id -u)" -eq 0 ]; then
+        warn "Running as root; not changing per-user Cinnamon extension settings."
+        say "For Cinnamon lock screen and PolKit elevation confirmation, run as your desktop user:"
+        print_manual_cinnamon_enable
         return 0
     fi
 
-    if is_kde_session; then
-        say "KDE Plasma desktop detected; skipping the GNOME Shell extension package."
-    else
-        say "GNOME desktop session not detected; skipping the GNOME Shell extension package."
+    if ! is_cinnamon_session; then
+        warn "Cinnamon desktop session not detected; leaving the extension disabled for this user."
+        say "For Cinnamon lock screen and PolKit elevation confirmation, from your Cinnamon session:"
+        print_manual_cinnamon_enable
+        return 0
     fi
+
+    ext_id="gaze@gundulabs.com"
+    if ! command -v gsettings >/dev/null 2>&1; then
+        warn "Could not enable the Cinnamon extension automatically (gsettings not found)."
+        print_manual_cinnamon_enable
+        return 0
+    fi
+
+    current=$(gsettings get org.cinnamon enabled-extensions 2>/dev/null) || current=""
+    case "$current" in
+    *"$ext_id"*)
+        ok "Cinnamon extension is already enabled."
+        ;;
+    "@as []" | "[]" | "")
+        if gsettings set org.cinnamon enabled-extensions "['$ext_id']" 2>/dev/null; then
+            ok "Enabled Cinnamon Gaze extension."
+        else
+            warn "Could not enable the Cinnamon extension automatically."
+            print_manual_cinnamon_enable
+        fi
+        ;;
+    *)
+        new_list=$(printf '%s' "$current" | sed "s/]$/, '$ext_id']/")
+        if gsettings set org.cinnamon enabled-extensions "$new_list" 2>/dev/null; then
+            ok "Enabled Cinnamon Gaze extension."
+        else
+            warn "Could not enable the Cinnamon extension automatically."
+            print_manual_cinnamon_enable
+        fi
+        ;;
+    esac
+}
+
+explain_desktop_extension_skipped() {
+    if want_gnome_extension_package || want_cinnamon_extension_package; then
+        return 0
+    fi
+
+    say "GNOME or Cinnamon desktop session not detected; skipping desktop extension packages."
     say "CLI, GUI, and PAM modules are still installed."
-    say "For non-GNOME desktop/login integration, see:"
+    say "For other desktop/login integration, see:"
     link "$PAM_DOCS_URL"
+}
+
+explain_gnome_extension_skipped() {
+    explain_desktop_extension_skipped
+}
+
+# Non-fatal: a package missing from the repo must not fail the whole install.
+#
+# Output stays visible. On Arch this call hands off to an AUR helper that builds from
+# source and escalates through sudo, so silencing it turns a normal multi-minute build
+# into what looks like a hung installer.
+install_kde_packages() {
+    if [ "$#" -eq 0 ]; then
+        return 0
+    fi
+    if "$@"; then
+        KDE_PACKAGES_INSTALLED=1
+        return 0
+    fi
+    KDE_PACKAGES_INSTALLED=0
+    echo ""
+    warn "Could not install the KDE Plasma packages ($KDE_PKGS)."
+    say "  The rest of Gaze is installed and working; only the KDE lock screen"
+    say "  integration is missing. This is expected if your distribution's Gaze"
+    say "  packages predate the KDE package. Retry once it is available:"
+    link "$KDE_DOCS_URL"
+}
+
+# Something is already installed under the bare name `gaze`. That is either our own
+# release artifact installed with `pacman -U` (unsupported: an AUR helper later
+# "upgrades" it to the unrelated package below) or the unrelated AUR `gaze`, a file
+# watcher. The wrapper declares conflicts=('gaze'), so pacman replaces either one
+# cleanly, but which one it was changes what the user should do about it.
+warn_replacing_bare_gaze_package() {
+    command -v pacman >/dev/null 2>&1 || return 0
+    pacman -Qq gaze >/dev/null 2>&1 || return 0
+
+    installed_url="$(pacman -Qi gaze 2>/dev/null | awk -F ': ' '/^URL/ { print $2; exit }')"
+
+    case "$installed_url" in
+    *gundulabs*)
+        warn "Gaze is installed under the bare name 'gaze' (from a release artifact)."
+        say "  That name is not safe on Arch: an AUR helper treats the unrelated 'gaze'"
+        say "  package as an upgrade for it. Switching you to gaze-bin, which is."
+        ;;
+    *)
+        warn "A package named 'gaze' is already installed and is not Gaze face unlock."
+        say "  That is an unrelated AUR package (a file watcher) using the same name."
+        say "  Installing gaze-bin replaces it. Reinstall it afterwards if you use it."
+        ;;
+    esac
+}
+
+enable_kde() {
+    if [ "${KDE_PACKAGES_INSTALLED:-0}" -ne 1 ]; then
+        return 0
+    fi
+    ok "KDE Plasma lock screen face unlock: enabled by gaze-kde"
+    say "  ${DIM}Face auth runs in the slot KScreenLocker starts for biometrics, alongside${RESET}"
+    say "  ${DIM}the password field, so a match unlocks without pressing a key.${RESET}"
+    say "  ${DIM}Lock your screen and look at the camera to try it.${RESET}"
+    say "  ${DIM}Find Face Unlock in System Settings, or run gaze-gui.${RESET}"
+    say "  ${DIM}The login greeter is off by default: sudo gaze-kde-pam enable-login${RESET}"
+    link "$KDE_DOCS_URL"
 }
 
 enable_desktop_integrations() {
     if want_gnome_extension_package; then
         enable_gnome_extension
+    elif want_cinnamon_extension_package; then
+        enable_cinnamon_extension
+    elif is_kde_session; then
+        enable_kde
     else
-        explain_gnome_extension_skipped
+        explain_desktop_extension_skipped
     fi
     enable_hyprlock
 }
@@ -310,13 +514,38 @@ configure_pam_arch() {
         return 0
     fi
 
+    if sudo test -e "$PAM_SUDO_OPTOUT"; then
+        say "Leaving $pam_file alone ($PAM_SUDO_OPTOUT exists)."
+        return 0
+    fi
+
     if grep -q "pam_gaze" "$pam_file" 2>/dev/null; then
         ok "Gaze already configured in $pam_file."
         return 0
     fi
 
-    awk '
-        /^[[:space:]]*auth[[:space:]]/ && !done {
+    if sudo grep -qxF "$pam_file" /etc/gaze/pam-arch.configured 2>/dev/null; then
+        say "Gaze was removed from $pam_file by hand; leaving it that way."
+        say "Delete $PAM_SUDO_OPTOUT and re-run to undo."
+        record_pam_sudo_optout
+        return 0
+    fi
+
+    first_auth=$(grep -m1 -E '^[[:space:]]*-?auth[[:space:]]' "$pam_file" 2>/dev/null || true)
+    case "$first_auth" in
+        *pam_faillock.so*preauth*) gate=after ;;
+        *) gate=before ;;
+    esac
+
+    awk -v gate="$gate" '
+        /^[[:space:]]*-?auth[[:space:]]/ && !done {
+            if (gate == "after") {
+                print
+                print "auth        sufficient    pam_gaze.so"
+                done = 1
+                next
+            }
+            print "-auth       requisite     pam_faillock.so preauth"
             print "auth        sufficient    pam_gaze.so"
             done = 1
         }
@@ -324,14 +553,29 @@ configure_pam_arch() {
     ' "$pam_file" >"$TMP/pam-sudo" &&
         sudo install -m 644 "$TMP/pam-sudo" "$pam_file" && {
         ok "Configured $pam_file to use Gaze face authentication."
+        say "$pam_file belongs to the sudo package, so pacman will report it as"
+        say "modified and write .pacnew files on later sudo updates."
+        say "Delete the pam_gaze.so and faillock gate lines to opt out; Gaze will not put them back."
         sudo mkdir -p /etc/gaze
-        printf '%s\n' "$pam_file" | sudo tee /etc/gaze/pam-arch.configured >/dev/null
+        sudo grep -qxF "$pam_file" /etc/gaze/pam-arch.configured 2>/dev/null ||
+            printf '%s\n' "$pam_file" | sudo tee -a /etc/gaze/pam-arch.configured >/dev/null
     } || {
         warn "Could not configure PAM for sudo automatically."
-        say "To enable Gaze for sudo, add before the auth line in $pam_file:"
+        say "To enable Gaze for sudo, add before the first auth line in $pam_file:"
+        cmd "-auth requisite pam_faillock.so preauth"
         cmd "auth    sufficient    pam_gaze.so"
         link "$PAM_DOCS_URL"
     }
+}
+
+record_pam_sudo_optout() {
+    sudo test -e "$PAM_SUDO_OPTOUT" && return 0
+    sudo mkdir -p /etc/gaze
+    printf '%s\n%s\n' \
+        "# Gaze leaves /etc/pam.d/sudo alone while this file exists." \
+        "# Delete it to let the next install or upgrade add pam_gaze.so back." |
+        sudo tee "$PAM_SUDO_OPTOUT" >/dev/null
+    sudo chmod 644 "$PAM_SUDO_OPTOUT" || true
 }
 
 configure_authselect() {
@@ -372,6 +616,55 @@ configure_authselect() {
     fi
 }
 
+configure_pam_opensuse() {
+    if ! command -v pam-config >/dev/null 2>&1; then
+        warn "pam-config is not installed; skipping openSUSE PAM configuration."
+        say "Install pam-config and re-run this installer, or configure the Gaze PAM module manually."
+        link "$PAM_DOCS_URL"
+        return 0
+    fi
+
+    # Query output contains auth: only when a module is active. Preserve the
+    # user's selected mode when the installer runs again.
+    gaze_config="$(sudo pam-config -q --gaze </dev/null 2>/dev/null || true)"
+    grosshack_config="$(sudo pam-config -q --gaze_grosshack </dev/null 2>/dev/null || true)"
+    gaze_active=0
+    grosshack_active=0
+    if printf '%s\n' "$gaze_config" | grep -qE '^[[:space:]]*auth:'; then
+        gaze_active=1
+    fi
+    if printf '%s\n' "$grosshack_config" | grep -qE '^[[:space:]]*auth:'; then
+        grosshack_active=1
+    fi
+
+    if [ "$gaze_active" -eq 1 ] || [ "$grosshack_active" -eq 1 ]; then
+        if [ "$gaze_active" -eq 1 ] && [ "$grosshack_active" -eq 1 ]; then
+            ok "Gaze PAM sequential and grosshack modules are already enabled through pam-config."
+        elif [ "$grosshack_active" -eq 1 ]; then
+            ok "Gaze PAM grosshack module is already enabled through pam-config."
+        else
+            ok "Gaze PAM module is already enabled through pam-config."
+        fi
+        return 0
+    fi
+
+    # Enable the default mode and regenerate common-*.
+    pam_config_error="$TMP/pam-config.err"
+    if sudo pam-config --add --gaze </dev/null 2>"$pam_config_error" &&
+        sudo pam-config --update </dev/null 2>>"$pam_config_error"; then
+        ok "Enabled the Gaze PAM module through pam-config."
+    else
+        warn "Could not enable the Gaze PAM module through pam-config."
+        while IFS= read -r line; do
+            [ -n "$line" ] && say "  $line"
+        done <"$pam_config_error"
+        say "After installation, run:"
+        cmd "sudo pam-config --add --gaze"
+        cmd "sudo pam-config --update"
+        link "$PAM_DOCS_URL"
+    fi
+}
+
 need curl
 need grep
 need uname
@@ -381,8 +674,24 @@ need gpg
 
 fetch_repo_key() {
     key_path="$TMP/gundulabs-repo.asc"
-    curl -fsSL "${PKG_BASE_URL}/keys/gundulabs-repo.asc" -o "$key_path"
-    actual_fpr="$(gpg --show-keys --with-colons "$key_path" | awk -F: '$1 == "fpr" { print $10; exit }')"
+    if ! curl -fsSL "${PKG_BASE_URL}/keys/gundulabs-repo.asc" -o "$key_path"; then
+        die "Could not download the repository signing key."
+    fi
+    key_info="$TMP/gundulabs-repo.key-info"
+    if ! gpg --batch --show-keys --with-colons "$key_path" >"$key_info"; then
+        die "Could not read the repository signing key."
+    fi
+    # Validate the sole primary key while allowing its subkeys.
+    # The `if` preserves the mismatch error under `set -e`.
+    if actual_fpr="$(awk -F: '
+        $1 == "pub" { pubs++; primary = 1; next }
+        primary && $1 == "fpr" { print $10; primary = 0 }
+        END { if (pubs != 1) exit 1 }
+    ' "$key_info")"; then
+        :
+    else
+        actual_fpr=""
+    fi
     if [ "$actual_fpr" != "$REPO_KEY_FPR" ]; then
         fail "Repository signing key fingerprint mismatch."
         fail "Expected: $REPO_KEY_FPR"
@@ -403,6 +712,16 @@ x86_64) PKG_ARCH="x86_64" ;;
 aarch64) PKG_ARCH="aarch64" ;;
 *) die "Unsupported architecture: $ARCH" ;;
 esac
+
+# The prebuilt ONNX Runtime gazed links issues AVX2 unconditionally, so a miss is SIGILL
+# on every start rather than a recoverable error. Stop before enabling the service.
+if [ "$ARCH" = "x86_64" ] && ! grep -qw avx2 /proc/cpuinfo 2>/dev/null; then
+    fail "This CPU does not support AVX2, which the gazed daemon requires."
+    say "gazed would crash with an illegal instruction on every start (roughly pre-2013 Intel and pre-2015 AMD)."
+    say "Nothing has been installed."
+    link "https://gaze.gundulabs.com/guide/troubleshooting"
+    exit 1
+fi
 
 # ── distro detection ──────────────────────────────────────────────────────────
 
@@ -428,7 +747,15 @@ is_ostree_system() {
     [ -e /run/ostree-booted ]
 }
 
+is_opensuse_tumbleweed() {
+    case "$DISTRO_ID" in
+    opensuse-tumbleweed | opensuse_tumbleweed | tumbleweed) return 0 ;;
+    esac
+    return 1
+}
+
 is_rpm() {
+    is_opensuse_tumbleweed && return 0
     case "$DISTRO_ID $DISTRO_LIKE" in
     *fedora* | *rhel* | *centos* | *rocky* | *alma*) return 0 ;;
     esac
@@ -451,7 +778,7 @@ is_arch() {
 
 supported_deb_suite() {
     case "$1" in
-    noble | questing | resolute | trixie) return 0 ;;
+    noble | questing | resolute | trixie | forky) return 0 ;;
     esac
     return 1
 }
@@ -465,7 +792,7 @@ supported_fedora_compatible_version() {
 
 if ! is_rpm && ! is_deb && ! is_arch; then
     fail "Unsupported distribution: $DISTRO_ID"
-    say "Supported: Ubuntu 24.04/25.10/26.04, Debian 13, Fedora-compatible 42/43/44 systems with standard DNF package installation, Arch Linux, and Arch-compatible AUR distros"
+    say "Supported: Ubuntu 24.04/25.10/26.04, Debian 13 and 14 (forky/testing), Fedora-compatible 42/43/44 systems (including rpm-ostree image-based distros like Silverblue, Bazzite, and Kinoite), openSUSE Tumbleweed, Arch Linux, and Arch-compatible AUR distros"
     exit 1
 fi
 
@@ -480,20 +807,13 @@ fi
 
 if is_deb && ! supported_deb_suite "$DISTRO_CODENAME"; then
     fail "Unsupported Debian/Ubuntu release: ${DISTRO_CODENAME:-unknown}"
-    say "Supported apt suites: noble, questing, resolute, trixie"
+    say "Supported apt suites: noble, questing, resolute, trixie, forky"
     exit 1
 fi
 
-if is_rpm && ! is_fedora_compatible; then
+if is_rpm && ! is_fedora_compatible && ! is_opensuse_tumbleweed; then
     fail "Unsupported RPM distribution: ${NAME:-$DISTRO_ID}"
-    say "This installer supports RPM distributions that identify as Fedora-compatible in /etc/os-release."
-    exit 1
-fi
-
-if is_fedora_compatible && is_ostree_system; then
-    fail "Image-based Fedora-compatible system detected: ${NAME:-$DISTRO_ID}"
-    say "This installer currently supports systems that install packages directly with DNF (also called mutable or non-image-based systems)."
-    say "Systems that use rpm-ostree, such as Bazzite, Fedora Silverblue, and Fedora Kinoite, are not yet supported."
+    say "This installer supports Fedora-compatible RPM distributions and openSUSE Tumbleweed."
     exit 1
 fi
 
@@ -502,6 +822,48 @@ if is_fedora_compatible && ! supported_fedora_compatible_version; then
     say "Fedora-compatible packages are currently available for versions 42, 43, and 44."
     exit 1
 fi
+
+if is_opensuse_tumbleweed && [ "$ARCH" != "x86_64" ]; then
+    fail "Unsupported openSUSE Tumbleweed architecture: $ARCH"
+    say "openSUSE Tumbleweed packages are currently available for x86_64 only."
+    exit 1
+fi
+
+# ── repository availability ───────────────────────────────────────────────────
+
+repo_metadata_url() {
+    if is_deb; then
+        printf '%s\n' "${PKG_BASE_URL}/deb/dists/${DISTRO_CODENAME}/Release"
+    elif is_opensuse_tumbleweed; then
+        printf '%s\n' "${PKG_BASE_URL}/rpm/opensuse/tumbleweed/${PKG_ARCH}/repodata/repomd.xml"
+    elif is_rpm; then
+        printf '%s\n' "${PKG_BASE_URL}/rpm/fedora/${DISTRO_VERSION_ID}/${PKG_ARCH}/repodata/repomd.xml"
+    fi
+}
+
+require_published_repository() {
+    metadata_url="$(repo_metadata_url)"
+    if [ -z "$metadata_url" ]; then
+        return 0
+    fi
+
+    metadata_status="$(curl -sS -I -o /dev/null -w '%{http_code}' --max-time 20 "$metadata_url" 2>/dev/null || true)"
+    case "$metadata_status" in
+    404 | 403)
+        fail "No Gaze package repository has been published for this platform yet."
+        say "Expected repository metadata at:"
+        link "$metadata_url"
+        say ""
+        say "This platform is supported by the installer, but its packages have not"
+        say "shipped in a release yet. Nothing has been changed on this system."
+        say "Please report it so a release can be cut:"
+        link "https://github.com/GunduLabs/gaze/issues"
+        exit 1
+        ;;
+    esac
+}
+
+require_published_repository
 
 # ── plan ──────────────────────────────────────────────────────────────────────
 
@@ -516,10 +878,13 @@ if is_deb; then
     if want_gnome_extension_package; then
         plan "Install gaze, gaze-gui, and gaze-gnome-extension"
         plan "Enable GNOME lock screen auth for this user when possible"
+    elif want_cinnamon_extension_package; then
+        plan "Install gaze, gaze-gui, and gaze-cinnamon-extension"
+        plan "Enable Cinnamon extension for this user when possible"
     elif is_kde_session; then
-        plan "Install gaze and gaze-gui (KDE Plasma detected; skip GNOME Shell extension)"
+        plan "Install gaze, gaze-gui, and gaze-kde (hands-free KDE lock screen face unlock)"
     else
-        plan "Install gaze and gaze-gui (skip GNOME Shell extension; GNOME not detected)"
+        plan "Install gaze and gaze-gui (skip desktop extension; GNOME/Cinnamon not detected)"
     fi
     if want_hyprlock_setup; then
         plan "Install gaze-hyprlock and configure hyprlock"
@@ -527,28 +892,41 @@ if is_deb; then
     plan "Set up the PAM modules through pam-auth-update if available"
     plan "Enable the Gaze daemon"
 elif is_rpm; then
-    if command -v dnf >/dev/null 2>&1; then
+    if is_opensuse_tumbleweed; then
+        need zypper
+        need rpm
+        RPM_TOOL="zypper"
+    elif is_ostree_system && command -v rpm-ostree >/dev/null 2>&1; then
+        RPM_TOOL="rpm-ostree"
+    elif command -v dnf >/dev/null 2>&1; then
         RPM_TOOL="dnf"
     else
         RPM_TOOL="yum"
     fi
-    say "Detected platform: ${BOLD}${NAME:-Fedora} ${DISTRO_VERSION_ID}${RESET} (${PKG_ARCH}), package manager: ${RPM_TOOL}"
+    say "Detected platform: ${BOLD}${NAME:-RPM-compatible distribution} ${DISTRO_VERSION_ID}${RESET} (${PKG_ARCH}), package manager: ${RPM_TOOL}"
     STEP_TOTAL=6
     echo ""
     title "This will:"
-    plan "Configure the dnf repository"
+    plan "Configure the package repository"
     if want_gnome_extension_package; then
         plan "Install gaze, gaze-gui, and gaze-gnome-extension"
         plan "Enable GNOME lock screen auth for this user when possible"
+    elif want_cinnamon_extension_package; then
+        plan "Install gaze, gaze-gui, and gaze-cinnamon-extension"
+        plan "Enable Cinnamon extension for this user when possible"
     elif is_kde_session; then
-        plan "Install gaze and gaze-gui (KDE Plasma detected; skip GNOME Shell extension)"
+        plan "Install gaze, gaze-gui, and gaze-kde (hands-free KDE lock screen face unlock)"
     else
-        plan "Install gaze and gaze-gui (skip GNOME Shell extension; GNOME not detected)"
+        plan "Install gaze and gaze-gui (skip desktop extension; GNOME/Cinnamon not detected)"
     fi
     if want_hyprlock_setup; then
         plan "Install gaze-hyprlock and configure hyprlock"
     fi
-    plan "Enable the Gaze PAM profile through authselect if available"
+    if is_opensuse_tumbleweed; then
+        plan "Enable the Gaze PAM module through pam-config if available"
+    else
+        plan "Enable the Gaze PAM profile through authselect if available"
+    fi
     plan "Enable the Gaze daemon"
 elif is_arch; then
     say "Detected platform: ${BOLD}Arch-compatible${RESET} (${PKG_ARCH}), package manager: AUR helper (yay/paru)"
@@ -558,10 +936,13 @@ elif is_arch; then
     if want_gnome_extension_package; then
         plan "Install gaze-bin, gaze-gui-bin, and gaze-gnome-extension-bin from the AUR"
         plan "Enable GNOME lock screen auth for this user when possible"
+    elif want_cinnamon_extension_package; then
+        plan "Install gaze-bin, gaze-gui-bin, and gaze-cinnamon-extension-bin from the AUR"
+        plan "Enable Cinnamon extension for this user when possible"
     elif is_kde_session; then
-        plan "Install gaze-bin and gaze-gui-bin from the AUR (KDE Plasma detected; skip GNOME Shell extension)"
+        plan "Install gaze-bin, gaze-gui-bin, and gaze-kde-bin from the AUR (hands-free KDE lock screen face unlock)"
     else
-        plan "Install gaze-bin and gaze-gui-bin from the AUR (skip GNOME Shell extension; GNOME not detected)"
+        plan "Install gaze-bin and gaze-gui-bin from the AUR (skip desktop extension; GNOME/Cinnamon not detected)"
     fi
     if want_hyprlock_setup; then
         plan "Install gaze-hyprlock-bin and configure hyprlock"
@@ -579,9 +960,11 @@ if is_deb; then
         sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
     fi
 elif is_rpm; then
-    if [ -f /etc/yum.repos.d/gundulabs.repo ] || [ -f /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs ]; then
+    if [ -f /etc/yum.repos.d/gundulabs.repo ] ||
+        [ -f /etc/zypp/repos.d/gundulabs.repo ] ||
+        [ -f /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs ]; then
         say "Refreshing repository configuration..."
-        sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+        sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/zypp/repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
     fi
 fi
 
@@ -596,10 +979,8 @@ if is_deb; then
     sudo mkdir -p -m 0755 /usr/share/keyrings
     sudo cp "$TMP/gundulabs-archive-keyring.gpg" /usr/share/keyrings/gundulabs-archive-keyring.gpg
     sudo chmod 0644 /usr/share/keyrings/gundulabs-archive-keyring.gpg
-    # Pin to the detected release suite so each distro gets the package built
-    # against its own toolchain/glibc; supported_deb_suite
-    # above already guaranteed DISTRO_CODENAME is one we publish.
-    # Restrict to the host arch so apt skips foreign arches like i386.
+    # Pin to the detected suite (already vetted by supported_deb_suite) so each distro gets
+    # the package built against its own glibc, and to the host arch so apt skips i386.
     DEB_ARCH="$(dpkg --print-architecture)"
     printf '%s\n' "deb [arch=${DEB_ARCH} signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] ${PKG_BASE_URL}/deb ${DISTRO_CODENAME} main" |
         sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
@@ -612,10 +993,17 @@ if is_deb; then
     if want_gnome_extension_package; then
         DEB_PKGS="$DEB_PKGS gaze-gnome-extension"
     fi
+    if want_cinnamon_extension_package; then
+        DEB_PKGS="$DEB_PKGS gaze-cinnamon-extension"
+    fi
     if want_hyprlock_setup; then
         DEB_PKGS="$DEB_PKGS gaze-hyprlock"
     fi
     sudo apt-get install -y $DEB_PKGS </dev/null
+    if is_kde_session; then
+        KDE_PKGS="gaze-kde"
+        install_kde_packages sudo apt-get install -y $KDE_PKGS </dev/null
+    fi
 
     step "Desktop integration"
     enable_desktop_integrations
@@ -624,8 +1012,35 @@ if is_deb; then
     sudo systemctl enable --now gazed </dev/null 2>/dev/null || true
 
 elif is_rpm; then
-    step "Configuring dnf repository"
-    sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
+    step "Configuring repository"
+    # Verify and install the key before configuring the repository.
+    KEY_PATH="$(fetch_repo_key)"
+    if [ "$RPM_TOOL" != "rpm-ostree" ]; then
+        if is_opensuse_tumbleweed; then
+            sudo mkdir -p /etc/pki/rpm-gpg
+            sudo cp "$KEY_PATH" /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+            sudo chmod 0644 /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+            sudo rpm --import "$KEY_PATH"
+        else
+            sudo rpm --import "$KEY_PATH" 2>/dev/null || true
+        fi
+    fi
+    if is_opensuse_tumbleweed; then
+        # Stock zypper reads repositories from /etc/zypp/repos.d.
+        sudo mkdir -p /etc/zypp/repos.d
+        sudo tee /etc/zypp/repos.d/gundulabs.repo >/dev/null <<EOF
+[gundulabs]
+name=Gundu Labs
+baseurl=${PKG_BASE_URL}/rpm/opensuse/tumbleweed/\$basearch
+enabled=1
+autorefresh=1
+type=rpm-md
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+EOF
+    else
+        sudo mkdir -p /etc/yum.repos.d
+        sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
 [gundulabs]
 name=Gundu Labs
 baseurl=${PKG_BASE_URL}/rpm/fedora/\$releasever/\$basearch
@@ -634,14 +1049,14 @@ gpgcheck=1
 repo_gpgcheck=1
 gpgkey=${PKG_BASE_URL}/keys/gundulabs-repo.asc
 EOF
-
-    # Import the fingerprint-verified key up front so repo_gpgcheck does not drop
-    # into an interactive "import key? [y/N]" prompt that reads the piped script.
-    KEY_PATH="$(fetch_repo_key)"
-    sudo rpm --import "$KEY_PATH"
+    fi
 
     step "Refreshing repository metadata"
-    if command -v dnf >/dev/null 2>&1; then
+    if [ "$RPM_TOOL" = "zypper" ]; then
+        sudo zypper --non-interactive refresh gundulabs </dev/null
+    elif [ "$RPM_TOOL" = "rpm-ostree" ]; then
+        sudo rpm-ostree refresh-md </dev/null 2>/dev/null || true
+    elif command -v dnf >/dev/null 2>&1; then
         sudo dnf makecache </dev/null
     else
         sudo yum makecache </dev/null
@@ -649,20 +1064,50 @@ EOF
 
     step "Installing packages"
     RPM_PKGS="gaze gaze-gui"
+    if is_opensuse_tumbleweed; then
+        # Minimal Tumbleweed installations may not include pam-config.
+        RPM_PKGS="$RPM_PKGS pam-config"
+    fi
     if want_gnome_extension_package; then
         RPM_PKGS="$RPM_PKGS gaze-gnome-extension"
+    fi
+    if want_cinnamon_extension_package; then
+        RPM_PKGS="$RPM_PKGS gaze-cinnamon-extension"
     fi
     if want_hyprlock_setup; then
         RPM_PKGS="$RPM_PKGS gaze-hyprlock"
     fi
-    if command -v dnf >/dev/null 2>&1; then
+    if [ "$RPM_TOOL" = "rpm-ostree" ]; then
+        if sudo rpm-ostree install --idempotent --apply-live $RPM_PKGS </dev/null 2>/dev/null; then
+            ok "Layered and live-applied packages via rpm-ostree."
+        else
+            sudo rpm-ostree install --idempotent $RPM_PKGS </dev/null
+            ok "Layered packages via rpm-ostree (system reboot required to activate)."
+        fi
+    elif [ "$RPM_TOOL" = "zypper" ]; then
+        sudo zypper --non-interactive install $RPM_PKGS </dev/null
+    elif command -v dnf >/dev/null 2>&1; then
         sudo dnf install -y $RPM_PKGS </dev/null
     else
         sudo yum install -y $RPM_PKGS </dev/null
     fi
+    if is_kde_session; then
+        KDE_PKGS="gaze-kde"
+        if [ "$RPM_TOOL" = "zypper" ]; then
+            install_kde_packages sudo zypper --non-interactive install $KDE_PKGS </dev/null
+        elif command -v dnf >/dev/null 2>&1; then
+            install_kde_packages sudo dnf install -y $KDE_PKGS </dev/null
+        else
+            install_kde_packages sudo yum install -y $KDE_PKGS </dev/null
+        fi
+    fi
 
     step "Configuring PAM"
-    configure_authselect
+    if is_opensuse_tumbleweed; then
+        configure_pam_opensuse
+    else
+        configure_authselect
+    fi
 
     step "Desktop integration"
     enable_desktop_integrations
@@ -697,14 +1142,26 @@ elif is_arch; then
     ok "Found AUR helper: $AUR_HELPER"
 
     step "Installing packages from AUR"
+    warn_replacing_bare_gaze_package
     AUR_PKGS="gaze-bin gaze-gui-bin"
     if want_gnome_extension_package; then
         AUR_PKGS="$AUR_PKGS gaze-gnome-extension-bin"
     fi
+    if want_cinnamon_extension_package; then
+        AUR_PKGS="$AUR_PKGS gaze-cinnamon-extension-bin"
+    fi
     if want_hyprlock_setup; then
         AUR_PKGS="$AUR_PKGS gaze-hyprlock-bin"
     fi
-    "$AUR_HELPER" -S --noconfirm $AUR_PKGS
+    # --needed skips anything already at this version, so re-running the installer does
+    # not rebuild from source. stdin is the piped installer itself, so close it the way
+    # the apt/dnf paths do: a helper that reads a prompt from there would eat the rest of
+    # this script. sudo still reads its password from the terminal.
+    "$AUR_HELPER" -S --needed --noconfirm $AUR_PKGS </dev/null
+    if is_kde_session; then
+        KDE_PKGS="gaze-kde-bin"
+        install_kde_packages "$AUR_HELPER" -S --needed --noconfirm $KDE_PKGS </dev/null
+    fi
 
     step "Configuring PAM"
     configure_pam_arch
@@ -720,53 +1177,42 @@ fi
 
 printf '\n%s\n\n' "${GREEN}${BOLD}✓ Gaze installed successfully${RESET}"
 
-# Surface problems while the user is still looking at the terminal. Expect a
-# few warnings on a fresh install (nothing enrolled yet, extension loads after
-# a reboot); doctor's exit code must not abort the summary.
-if command -v gaze >/dev/null 2>&1; then
-    title "Health check (gaze doctor)"
-    say "${DIM}Warnings about enrollment or the GNOME extension are expected before the next steps below.${RESET}"
-    if command -v busctl >/dev/null 2>&1; then
-        say "${DIM}Waiting for the daemon to finish first-run model download...${RESET}"
-        i=0
-        while [ "$i" -lt 80 ]; do
-            if busctl --system status com.gundulabs.Gaze >/dev/null 2>&1; then
-                break
-            fi
-            sleep 0.5
-            i=$((i + 1))
-        done
-    fi
-    gaze doctor || true
-    say ""
-fi
-
 title "Next steps"
 say "  1. ${BOLD}gaze config${RESET}            ${DIM}configure your camera and security settings${RESET}"
 say "  2. ${BOLD}gaze add-face <name>${RESET}   ${DIM}enroll your face${RESET}"
+say "  3. ${BOLD}gaze auth${RESET}              ${DIM}test it in the terminal${RESET}"
 if want_gnome_extension_package; then
-    say "  3. ${BOLD}Reboot${RESET}                 ${DIM}GNOME Shell and GDM only pick up the new extension at startup${RESET}"
+    say "  4. ${BOLD}Reboot${RESET}                 ${DIM}GNOME Shell and GDM only pick up the new extension at startup${RESET}"
+elif want_cinnamon_extension_package; then
+    say "  4. ${BOLD}Restart Cinnamon${RESET}       ${DIM}Press Alt+F2, type r, and press Enter to reload Cinnamon${RESET}"
 fi
 say ""
 title "Try it"
-say "  ${BOLD}gaze auth${RESET}              ${DIM}test face authentication in the terminal${RESET}"
 say "  ${BOLD}gaze-gui${RESET}               ${DIM}open the settings app${RESET}"
+if want_gnome_extension_package || want_cinnamon_extension_package || is_kde_session || want_hyprlock_setup; then
+    say "  ${BOLD}Lock your screen${RESET}       ${DIM}then look at the camera${RESET}"
+fi
 say ""
 title "Desktop integration"
 if want_gnome_extension_package; then
-    ok "GNOME lock screen face unlock: enabled for this user (active after reboot)"
-    say "  ${DIM}GDM login face auth stays off until you enable it:${RESET}"
-    link "${GNOME_DOCS_URL}#optional-enable-face-at-gdm-login"
+    ok "GNOME lock screen face unlock: enabled after reboot"
+    say "  GDM login face auth: off"
+elif want_cinnamon_extension_package; then
+    ok "Cinnamon extension: enabled for this user"
 elif is_kde_session; then
-    say "  KDE Plasma: GNOME extension skipped; see the PAM guide for lock/login integration:"
-    link "$PAM_DOCS_URL"
+    if [ "${KDE_PACKAGES_INSTALLED:-0}" -eq 1 ]; then
+        ok "KDE Plasma lock screen face unlock: gaze-kde installed"
+        say "  ${DIM}Login greeter stays off until you enable it:${RESET}"
+    else
+        warn "KDE Plasma lock screen face unlock: gaze-kde not installed"
+        say "  ${DIM}Install it to get hands-free lock screen face unlock:${RESET}"
+    fi
+    link "$KDE_DOCS_URL"
 else
-    say "  GNOME extension skipped (GNOME desktop not detected); see the PAM guide:"
+    say "  Desktop extension skipped (GNOME/Cinnamon desktop not detected); see the PAM guide:"
     link "$PAM_DOCS_URL"
 fi
 if want_hyprlock_setup; then
     ok "hyprlock: configured (auth.pam.module = hyprlock-gaze)"
 fi
 say ""
-say "Docs:   ${CYAN}https://gaze.gundulabs.com${RESET}"
-say "GitHub: ${CYAN}https://github.com/GunduLabs/gaze${RESET} ${DIM}(issues and feature requests welcome)${RESET}"

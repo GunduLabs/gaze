@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Security level determines which InsightFace models and threshold to use.
 #
 # Preset levels:
@@ -9,6 +12,16 @@
 # Models are automatically downloaded from the official InsightFace GitHub
 # releases if not already present in the models directory.
 
+[inference]
+# "cpu" uses the normal ONNX Runtime CPU execution provider.
+# "openvino" requires a Gaze build compiled with the openvino Cargo feature
+# and keeps the ONNX models while sending supported work through OpenVINO.
+execution_provider = "cpu"
+# "cpu" is the only value the released packages accept. "gpu" and "npu" require
+# a Gaze build compiled with the openvino-config Cargo feature, and need
+# execution_provider = "openvino".
+device = "cpu"
+
 [security]
 level = "medium"
 
@@ -16,7 +29,8 @@ level = "medium"
 # level = "custom"
 # detector = "accurate"          # "standard" or "accurate"
 # recognizer = "accurate"        # "standard" or "accurate"
-# threshold = 0.45
+# rgb_threshold = 0.45
+# ir_threshold = 0.45
 # hybrid_policy = "fallback_on_dark"  # optional; default, or, fallback_on_dark, and
 
 [cameras]
@@ -27,17 +41,48 @@ rgb = "primary"
 # Drive the camera's IR emitter (turn the IR LED on during auth). Requires `ir`.
 # emitter_enabled = false
 # Reject frames whose mean brightness (0-255) is below this value as too dark.
-dark_luma_threshold = 30
+dark_luma_threshold = 20
+# Capture RGB and IR at the same time during hybrid auth. "never" (default) captures
+# RGB then IR, which every camera supports; "auto" goes parallel only when the two
+# sensors are separate hardware functions; "always" forces it. Requires `ir`.
+# parallel_capture = "never"
 
 [auth]
 abort_if_ssh = true
 abort_if_lid_closed = true
-# Require manual intent confirmation (Press Enter to confirm, Esc to cancel) after successful face auth
-require_confirmation = false
+# Skip face auth until the machine has suspended and resumed at least once. The first
+# unlock after boot then falls through to the password, which is what unlocks the
+# session keyring on GNOME; every unlock after a suspend uses your face. Reset whenever
+# gazed restarts.
+abort_before_first_resume = false
+# Ask for an explicit confirmation after a face match on lock/login screens.
+# Note: the KDE biometric slots (kde-fingerprint, kde-smartcard,
+# plasmalogin-fingerprint) cannot be prompted — nothing routes a response back —
+# so the toggle is silently ignored there by design (asking would hang the slot
+# for the rest of the lock). See `gaze doctor` and the KDE guide.
+require_confirmation_lock_screen = false
+require_confirmation_elevation = false
 # Delay face auth by this many milliseconds on the first unlock after resuming from
 # suspend, so the display has time to come back instead of unlocking behind a black
 # screen. 0 disables it. Increase (e.g. 3000) if your GPU is slow to repaint.
 resume_grace_ms = 0
+# Wait this many milliseconds before face auth starts. Lockers such as hyprlock
+# begin authenticating the instant they launch, so without a delay Gaze can unlock
+# you again immediately after you lock manually and are still in front of the
+# camera. 0 disables it.
+#
+# The wait is measured from the moment the session locked, not from each
+# authentication, so a retry on the same lock screen does not pay it again.
+#
+# When resuming from suspend, whichever of this and resume_grace_ms is longer
+# applies; they do not stack.
+start_delay_ms = 0
+# Which prompts wait for start_delay_ms.
+#   "screen_lock" screen lockers only; sudo, polkit, su and greeters skip it
+#   "all"         every face authentication, sudo and polkit included
+# Gaze reads the PAM service name to tell these apart. A service it does not
+# recognize counts as a screen lock, so an unusual locker still gets the delay.
+start_delay_scope = "screen_lock"
 
 [enrollment]
 max_templates = 2
@@ -50,8 +95,15 @@ min_face_size_ratio = 0.25
 [liveness]
 enabled = true
 threshold = 0.8
-max_frames = 40
+max_seconds = 2.0
 
 [storage]
 # Encrypt face templates at rest with a TPM-sealed key (requires a TPM 2.0). See docs.
 encrypt_templates = false
+# Opt-in GNOME Keyring unlock on gdm-face. Requires TPM encryption and liveness.
+# Enroll each user's keyring password with `gaze keyring`; no secrets go in this file.
+unlock_gnome_keyring = false
+# Opt-in KDE KWallet unlock on SDDM / Plasma Login Manager (sequential PAM only).
+# Same TPM/liveness requirements. Run `gaze keyring --kwallet` and
+# `sudo gaze-kde-pam enable-login`; install your distro's KWallet PAM package.
+unlock_kwallet = false

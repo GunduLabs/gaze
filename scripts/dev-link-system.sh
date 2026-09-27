@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 set -eu
 
 usage() {
@@ -13,8 +16,10 @@ Run as root after building release artifacts as your normal user:
     sudo scripts/dev-link-system.sh enable
 
 This links:
-  - /usr/bin/gazed, /usr/bin/gaze, /usr/bin/gaze-gui
+  - /usr/bin/gazed, /usr/bin/gaze, and /usr/bin/gaze-gui when the GUI was built
   - installed PAM modules
+  - the hyprlock-gaze / hyprlock-gaze-simultaneous PAM services (for hyprlock)
+  - the KDE lock screen biometric slot (pam_gaze in /etc/pam.d/kde-fingerprint)
   - system and current-user GNOME extension files
   - the installed GNOME settings schema
 
@@ -58,13 +63,36 @@ LOCAL_BIN_DIR=/usr/local/bin
 SYSTEMD_DROPIN=/etc/systemd/system/gazed.service.d/zz-gaze-dev-checkout.conf
 LEGACY_SYSTEMD_DROPIN=/etc/systemd/system/gazed.service.d/dev-checkout.conf
 SYSTEM_EXTENSION_DIR=/usr/share/gnome-shell/extensions/gaze@gundulabs.com
+SYSTEM_CINNAMON_EXTENSION_DIR=/usr/share/cinnamon/extensions/gaze@gundulabs.com
 SCHEMA_SRC="$REPO/packaging/config/org.gnome.shell.extensions.gaze.gschema.xml"
 SCHEMA_DST=/usr/share/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml
 POLKIT_POLICY_SRC="$REPO/packaging/config/com.gundulabs.gaze.policy"
 POLKIT_POLICY_DST=/usr/share/polkit-1/actions/com.gundulabs.gaze.policy
+# system-auth variants, matching the polkit PAM config this script writes.
+HYPRLOCK_PAM_SRC="$REPO/packaging/pam/hyprlock-gaze"
+HYPRLOCK_PAM_DST=/etc/pam.d/hyprlock-gaze
+HYPRLOCK_SIMUL_PAM_SRC="$REPO/packaging/pam/hyprlock-gaze-simultaneous"
+HYPRLOCK_SIMUL_PAM_DST=/etc/pam.d/hyprlock-gaze-simultaneous
+KDE_PAM_HELPER_SRC="$REPO/packaging/kde/gaze-kde-pam"
+KDE_PAM_HELPER_DST=/usr/bin/gaze-kde-pam
+KDE_PAM_SLOTS="/etc/pam.d/kde-fingerprint /etc/pam.d/kde-smartcard"
 
 artifact() {
     printf '%s/%s' "$TARGET" "$1"
+}
+
+# The GUI is optional: `GAZE_GUI=0 just build-rust` never produces it, and a
+# TUI-only install has nothing to link. Absent artifact means absent feature,
+# not a broken build.
+have_gui() {
+    [ -e "$(artifact gaze-gui)" ]
+}
+
+is_gui_path() {
+    case "$1" in
+    */gaze-gui) return 0 ;;
+    esac
+    return 1
 }
 
 require_artifacts() {
@@ -72,7 +100,6 @@ require_artifacts() {
     for file in \
         "$(artifact gazed)" \
         "$(artifact gaze)" \
-        "$(artifact gaze-gui)" \
         "$(artifact libpam_gaze.so)" \
         "$(artifact libpam_gaze_grosshack.so)"
     do
@@ -92,7 +119,7 @@ existing package install; it does not install the package itself.
 
 Build and install a package once first, e.g.:
     just package rpm
-    sudo <your package manager> install dist/packages/gazed-*.rpm
+    sudo <your package manager> install dist/packages/gaze-*.rpm
 
 then re-run: just dev-link-system"
 }
@@ -176,10 +203,14 @@ restore_or_remove() {
 link_binaries() {
     backup_and_install "$(artifact gazed)" "$LOCAL_BIN_DIR/gazed" 0755
     backup_and_install "$(artifact gaze)" "$LOCAL_BIN_DIR/gaze" 0755
-    backup_and_install "$(artifact gaze-gui)" "$LOCAL_BIN_DIR/gaze-gui" 0755
     backup_and_link "$LOCAL_BIN_DIR/gazed" /usr/bin/gazed
     backup_and_link "$LOCAL_BIN_DIR/gaze" /usr/bin/gaze
-    backup_and_link "$LOCAL_BIN_DIR/gaze-gui" /usr/bin/gaze-gui
+    if have_gui; then
+        backup_and_install "$(artifact gaze-gui)" "$LOCAL_BIN_DIR/gaze-gui" 0755
+        backup_and_link "$LOCAL_BIN_DIR/gaze-gui" /usr/bin/gaze-gui
+    else
+        printf 'skipping gaze-gui: not built\n'
+    fi
 }
 
 restore_binaries() {
@@ -236,24 +267,61 @@ link_pam_modules() {
     [ "$linked" -eq 1 ] || die "Could not find a PAM security module directory."
 }
 
-link_pam_config() {
-    pam_file=/etc/pam.d/sudo
-    [ -f "$pam_file" ] || return 0
+record_edited_pam_file() {
+    mkdir -p /etc/gaze
+    flag=/etc/gaze/pam-arch.dev-configured
+    grep -qxF "$1" "$flag" 2>/dev/null && return 0
+    printf '%s\n' "$1" >> "$flag"
+}
+
+first_auth_is_faillock_preauth() {
+    first_auth=$(grep -m1 -E '^[[:space:]]*-?auth[[:space:]]' "$1" 2>/dev/null || true)
+    case "$first_auth" in
+        *pam_faillock.so*preauth*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+insert_pam_gaze() {
+    pam_file=$1
     grep -q "pam_gaze" "$pam_file" 2>/dev/null && { printf 'PAM already configured: %s\n' "$pam_file"; return 0; }
 
     tmp=$(mktemp)
-    awk '
-        /^[[:space:]]*auth[[:space:]]/ && !done {
-            print "auth        sufficient    pam_gaze.so"
-            done = 1
-        }
-        { print }
-    ' "$pam_file" > "$tmp" && install -m 644 "$tmp" "$pam_file" && \
-        printf 'configured PAM: %s\n' "$pam_file"
+    if first_auth_is_faillock_preauth "$pam_file"; then
+        awk '
+            /^[[:space:]]*-?auth[[:space:]]/ && !done {
+                print
+                print "auth        sufficient    pam_gaze.so"
+                done = 1
+                next
+            }
+            { print }
+        ' "$pam_file" > "$tmp" && install -m 644 "$tmp" "$pam_file"
+    else
+        awk '
+            /^[[:space:]]*-?auth[[:space:]]/ && !done {
+                print "-auth       requisite     pam_faillock.so preauth"
+                print "auth        sufficient    pam_gaze.so"
+                done = 1
+            }
+            { print }
+        ' "$pam_file" > "$tmp" && install -m 644 "$tmp" "$pam_file"
+    fi
     rm -f "$tmp"
 
-    mkdir -p /etc/gaze
-    printf '%s\n' "$pam_file" > /etc/gaze/pam-arch.dev-configured
+    if grep -q "pam_gaze" "$pam_file" 2>/dev/null; then
+        record_edited_pam_file "$pam_file"
+        printf 'configured PAM: %s\n' "$pam_file"
+        return 0
+    fi
+
+    printf 'WARNING: %s has no auth line, so pam_gaze.so was not added\n' "$pam_file" >&2
+}
+
+link_pam_config() {
+    pam_file=/etc/pam.d/sudo
+    [ -f "$pam_file" ] || return 0
+    insert_pam_gaze "$pam_file"
 }
 
 restore_pam_config() {
@@ -262,18 +330,39 @@ restore_pam_config() {
 
     while IFS= read -r pam_file; do
         [ -f "$pam_file" ] || continue
-        sed -i '/pam_gaze/d' "$pam_file" && printf 'restored PAM: %s\n' "$pam_file"
+        sed -i '/pam_gaze/d; /^-auth       requisite     pam_faillock\.so preauth$/d' "$pam_file" && printf 'restored PAM: %s\n' "$pam_file"
     done < "$flag"
 
     rm -f "$flag"
 }
 
+is_arch() {
+    [ -r /etc/os-release ] || return 1
+    (
+        . /etc/os-release
+        case " ${ID:-} ${ID_LIKE:-} " in
+            *" arch "*) exit 0 ;;
+            *) exit 1 ;;
+        esac
+    )
+}
+
 link_polkit_pam_config() {
     pam_file=/etc/pam.d/polkit-1
-    [ -f "$pam_file" ] && { printf 'PAM already configured: %s\n' "$pam_file"; return 0; }
+    if ! is_arch; then
+        printf 'skipping %s: Arch-only override, this distro ships its own polkit PAM stack\n' "$pam_file"
+        return 0
+    fi
+    if [ -f "$pam_file" ]; then
+        mkdir -p /etc/gaze
+        [ -f /etc/gaze/polkit-1.pam.dev.bak ] || cp -p "$pam_file" /etc/gaze/polkit-1.pam.dev.bak
+        insert_pam_gaze "$pam_file"
+        return 0
+    fi
 
     cat > "$pam_file" <<-EOF
 	#%PAM-1.0
+	-auth       requisite     pam_faillock.so preauth
 	auth       sufficient   pam_gaze.so
 	auth       include      system-auth
 	account    include      system-auth
@@ -288,6 +377,8 @@ link_polkit_pam_config() {
 }
 
 restore_polkit_pam_config() {
+    rm -f /etc/gaze/polkit-1.pam.dev.bak
+
     flag=/etc/gaze/pam-arch.polkit-dev-configured
     [ -f "$flag" ] || return 0
 
@@ -328,6 +419,30 @@ restore_polkit_policy() {
     systemctl reload polkit >/dev/null 2>&1 || true
 }
 
+link_hyprlock_pam() {
+    backup_and_install "$HYPRLOCK_PAM_SRC" "$HYPRLOCK_PAM_DST" 0644
+    backup_and_install "$HYPRLOCK_SIMUL_PAM_SRC" "$HYPRLOCK_SIMUL_PAM_DST" 0644
+}
+
+restore_hyprlock_pam() {
+    restore_or_remove "$HYPRLOCK_PAM_DST"
+    restore_or_remove "$HYPRLOCK_SIMUL_PAM_DST"
+}
+
+# The helper edits kde-fingerprint in place, so `disable` asks it to undo that.
+link_kde_pam() {
+    backup_and_install "$KDE_PAM_HELPER_SRC" "$KDE_PAM_HELPER_DST" 0755
+    "$KDE_PAM_HELPER_DST" enable || printf 'KDE lock screen PAM setup failed; run `gaze-kde-pam enable` by hand.\n' >&2
+}
+
+restore_kde_pam() {
+    if [ -x "$KDE_PAM_HELPER_DST" ]; then
+        "$KDE_PAM_HELPER_DST" disable >/dev/null 2>&1 || true
+        "$KDE_PAM_HELPER_DST" disable-login >/dev/null 2>&1 || true
+    fi
+    restore_or_remove "$KDE_PAM_HELPER_DST"
+}
+
 link_extension_files() {
     dir=$1
     install -d "$dir"
@@ -347,6 +462,64 @@ sudo_user_home() {
     [ -n "${SUDO_USER:-}" ] || return 1
     [ "$SUDO_USER" != root ] || return 1
     getent passwd "$SUDO_USER" | cut -d: -f6
+}
+
+# Best-effort desktop of the user invoking sudo, from their running processes.
+# Echoes: gnome | hyprland | kde | other. Used only to tailor closing hints.
+detect_session_desktop() {
+    user=${SUDO_USER:-}
+    [ -n "$user" ] && [ "$user" != root ] || { printf 'other'; return; }
+    if pgrep -u "$user" -x gnome-shell >/dev/null 2>&1; then
+        printf 'gnome'
+    elif pgrep -u "$user" -x cinnamon >/dev/null 2>&1; then
+        printf 'cinnamon'
+    elif pgrep -u "$user" -x Hyprland >/dev/null 2>&1 || pgrep -u "$user" -x hyprland >/dev/null 2>&1; then
+        printf 'hyprland'
+    elif pgrep -u "$user" -x plasmashell >/dev/null 2>&1; then
+        printf 'kde'
+    else
+        printf 'other'
+    fi
+}
+
+link_cinnamon_files() {
+    dir="$1"
+    install -d "$dir"
+    backup_and_install "$REPO/cinnamon-extension/metadata.json" "$dir/metadata.json" 0644
+    backup_and_install "$REPO/cinnamon-extension/extension.js" "$dir/extension.js" 0644
+    backup_and_install "$REPO/cinnamon-extension/settings-schema.json" "$dir/settings-schema.json" 0644
+}
+
+restore_cinnamon_files() {
+    dir="$1"
+    restore_or_remove "$dir/metadata.json"
+    restore_or_remove "$dir/extension.js"
+    restore_or_remove "$dir/settings-schema.json"
+    rmdir "$dir" 2>/dev/null || true
+}
+
+link_cinnamon_extension() {
+    [ -d /usr/share/cinnamon ] || return 0
+    link_cinnamon_files "$SYSTEM_CINNAMON_EXTENSION_DIR"
+
+    if home=$(sudo_user_home); then
+        user_cinnamon_dir="$home/.local/share/cinnamon/extensions/gaze@gundulabs.com"
+        sudo_user_group=$(id -gn "$SUDO_USER")
+        install -d -o "$SUDO_USER" -g "$sudo_user_group" "$user_cinnamon_dir"
+        link_cinnamon_files "$user_cinnamon_dir"
+        chown "$SUDO_USER:$sudo_user_group" \
+            "$user_cinnamon_dir/metadata.json" \
+            "$user_cinnamon_dir/extension.js" \
+            "$user_cinnamon_dir/settings-schema.json"
+    fi
+}
+
+restore_cinnamon_extension() {
+    restore_cinnamon_files "$SYSTEM_CINNAMON_EXTENSION_DIR"
+
+    if home=$(sudo_user_home); then
+        restore_cinnamon_files "$home/.local/share/cinnamon/extensions/gaze@gundulabs.com"
+    fi
 }
 
 link_gnome_extension() {
@@ -392,6 +565,9 @@ ExecStart=/usr/bin/gazed
 
 # The packaged unit hides /home, but dev symlink targets live in the checkout.
 InaccessiblePaths=
+
+# Dev builds default to verbose logging.
+Environment=RUST_LOG=debug
 EOF
     rm -f "$LEGACY_SYSTEMD_DROPIN"
     systemctl daemon-reload
@@ -417,17 +593,36 @@ show_status() {
         "$SYSTEM_EXTENSION_DIR/extension.js" \
         "$SYSTEM_EXTENSION_DIR/prefs.js" \
         "$SCHEMA_DST" \
-        "$POLKIT_POLICY_DST"
+        "$POLKIT_POLICY_DST" \
+        "$HYPRLOCK_PAM_DST" \
+        "$HYPRLOCK_SIMUL_PAM_DST" \
+        "$KDE_PAM_HELPER_DST"
     do
         if [ -L "$path" ]; then
             printf '%s -> %s\n' "$path" "$(readlink "$path")"
         elif [ -e "$path" ]; then
             printf '%s is not a symlink\n' "$path"
+        elif is_gui_path "$path" && ! have_gui; then
+            printf '%s is absent: gaze-gui not built\n' "$path"
         else
             printf '%s is missing\n' "$path"
         fi
     done
     systemctl show gazed -p DropInPaths -p ExecStart -p InaccessiblePaths 2>/dev/null || true
+
+    if [ -x "$KDE_PAM_HELPER_DST" ]; then
+        "$KDE_PAM_HELPER_DST" status || true
+    else
+        # No helper to ask, so read the slots rather than guessing about them.
+        for slot in $KDE_PAM_SLOTS; do
+            [ -e "$slot" ] || continue
+            if grep -qE '^[[:space:]]*-?auth[[:space:]].*pam_gaze' "$slot" 2>/dev/null; then
+                printf '%s: runs pam_gaze (gaze-kde-pam is not installed to manage it)\n' "$slot"
+            else
+                printf '%s: does not run pam_gaze\n' "$slot"
+            fi
+        done
+    fi
 
     if tpm_present; then tpm=$([ -e /dev/tpmrm0 ] && echo /dev/tpmrm0 || echo /dev/tpm0); else tpm=none; fi
     printf 'tpm device: %s\n' "$tpm"
@@ -511,10 +706,26 @@ case "$cmd" in
         link_polkit_pam_config
         link_polkit_policy
         link_gnome_extension
+        link_cinnamon_extension
+        link_hyprlock_pam
+        link_kde_pam
         setup_tpm_encryption
         install_systemd_dropin
         printf '\nGaze is linked to this checkout. Rebuild after switching branches, then restart gazed.\n'
-        printf 'Restart GNOME Shell or log out/in for extension.js changes. Reopen preferences for prefs.js changes.\n'
+        case "$(detect_session_desktop)" in
+            gnome)
+                printf 'Restart GNOME Shell or log out/in for extension.js changes. Reopen preferences for prefs.js changes.\n'
+                ;;
+            cinnamon)
+                printf 'Restart Cinnamon (Alt+F2, r, Enter) for extension changes.\n'
+                ;;
+            hyprland)
+                printf 'Set `pam_module = hyprlock-gaze` in ~/.config/hypr/hyprlock.conf to test hyprlock face unlock.\n'
+                ;;
+            kde)
+                printf 'Lock your screen and look at the camera to test KDE face unlock. Add the login greeter with `gaze-kde-pam enable-login`.\n'
+                ;;
+        esac
         ;;
     disable)
         need_root
@@ -524,6 +735,9 @@ case "$cmd" in
         restore_polkit_pam_config
         restore_polkit_policy
         restore_gnome_extension
+        restore_cinnamon_extension
+        restore_hyprlock_pam
+        restore_kde_pam
         teardown_tpm_encryption
         remove_systemd_dropin
         ;;

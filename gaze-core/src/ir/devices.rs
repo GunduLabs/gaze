@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use std::fs;
 use std::path::Path;
 
@@ -23,6 +26,9 @@ pub struct IrDevice {
     pub on_sequence: &'static [IrControl],
     pub off_sequence: &'static [IrControl],
     pub source: &'static str,
+    /// Single-node RGB/IR modules that silently remain in RGB mode unless
+    /// the IR stream is negotiated as uncompressed 640x480 YUY2.
+    pub requires_ir_yuy2: bool,
 }
 
 include!(concat!(env!("OUT_DIR"), "/ir_devices.rs"));
@@ -51,6 +57,12 @@ pub fn camera_bus(node: &str) -> CameraBus {
         Some(driver) => bus_of_driver(&driver),
         None => CameraBus::Other,
     }
+}
+
+pub fn camera_function_of(node: &str) -> Option<String> {
+    let dir = sysfs_device_dir(node)?;
+    let canonical = fs::canonicalize(dir).ok()?;
+    Some(canonical.to_str()?.to_string())
 }
 
 fn sysfs_device_dir(node: &str) -> Option<String> {
@@ -110,6 +122,7 @@ mod tests {
         on_sequence: SAMPLE_ON,
         off_sequence: SAMPLE_OFF,
         source: "unit test",
+        requires_ir_yuy2: false,
     }];
 
     #[test]

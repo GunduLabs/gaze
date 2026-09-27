@@ -1,8 +1,19 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # CLI Guide
 
 Use the `gaze` command for enrollment, testing, and managing face profiles.
 
 All commands talk to the running `gazed` daemon over DBus.
+
+## Commands that need privileges
+
+An enrolled face is a login credential, so creating, changing, or deleting one requires root, even on your own account. You never type `sudo` yourself: `gaze add-face`, `gaze refine-face`, `gaze remove-face`, `gaze rename-face`, `gaze clear-user`, `gaze config`, and `gaze keyring` re-run themselves through `sudo` and prompt for your password. They still act on the account that invoked them, not on `root`, so `gaze add-face default` enrolls a face for you; pass `-u root` if you really want root's own enrollment.
+
+`gaze auth`, `gaze list-faces`, `gaze doctor`, and `gaze config --show` are read-only and stay unprivileged.
+
+The `gazed` daemon enforces this independently of the CLI: a non-root DBus caller must pass a polkit check for `com.gundulabs.gaze.manage-faces` or `com.gundulabs.gaze.manage-config`. That is how the [GUI](/guide/gui) authorizes the same operations, and it means calling the DBus methods directly does not bypass the requirement.
 
 ## Most common workflow
 
@@ -30,8 +41,9 @@ It checks:
 - access to the current PipeWire session and visibility of configured RGB/IR cameras
 - face enrollment and RGB/IR capture coverage for the current user
 - PAM module installation, permissions, and active PAM stack references
-- GNOME or hyprlock integration when running those desktops
+- GNOME, KDE, or hyprlock integration when running those desktops (on KDE it reports which biometric slot runs Gaze, and whether the login greeter scans before you type or on submit)
 - TPM availability when encrypted template storage is enabled
+- GNOME Keyring unlock: whether it is on, whether its prerequisites are met, whether `/etc/pam.d/gdm-face` still passes the token, and whether the user has a credential enrolled
 
 Every warning or error includes a suggested next step. Errors that can prevent Gaze from working make the command exit with status `1`; warnings are advisory and leave the exit status at `0`.
 
@@ -42,8 +54,6 @@ gaze doctor --user alice
 ```
 
 The camera checks enumerate devices but do not capture frames. Use `gaze auth` when you need an end-to-end camera and recognition test.
-
-The very first time you run any `gaze` command, this diagnostic runs automatically so problems surface right after install. It waits for the daemon to finish its one-time model download before checking it, and it will not run automatically again.
 
 To measure model inference speed on the current hardware:
 
@@ -64,14 +74,46 @@ Useful options:
 ```bash
 gaze auth -v          # show detailed authentication metrics (short form)
 gaze auth --verbose   # same
+gaze auth -s          # run silently and report the result via exit code (short form)
+gaze auth --silent    # same
 ```
+
+`--verbose` and `--silent` are mutually exclusive.
 
 Result meanings:
 
 - `✓ Authenticated as: <face> (XX.X%, XXXms)`: pass: matched face name, score percentage, and elapsed time
 - `✗ Authentication failed (XXXms)`: no face passed the current threshold or liveness check
 
-With `--verbose`, a per-face table is printed before the result showing similarity score, match percentage, passed/failed, and template count for each enrolled face.
+With `--verbose`, a per-face table is printed before the result showing the per-spectrum (RGB and IR) similarity score, match percentage, and pass/fail for each enrolled face.
+
+### Exit codes
+
+`gaze auth` reports its outcome through the exit status, so it can be used directly in scripts and `if` conditions:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | A face matched and the user was authenticated |
+| `1` | Authentication failed, no faces are enrolled, or the daemon could not be reached |
+| `130` | Cancelled from the terminal UI |
+
+This applies with and without `--silent`. Earlier releases exited `0` on a failed authentication, so scripts that only checked the exit status need to be re-checked.
+
+### Silent mode
+
+`gaze auth --silent` skips the terminal UI entirely and writes nothing to stdout or stderr; the exit code is the only result. Use it in PAM helpers, scripts, and other headless contexts where no TTY is attached:
+
+```bash
+if gaze auth --silent; then
+  echo "welcome back"
+fi
+```
+
+Because silent mode is non-interactive, it cannot be cancelled from the terminal UI and it does not start a polkit agent, so authenticating another user with `--user` fails instead of prompting. Silent mode has no timeout of its own, wrap it in `timeout(1)` if the caller needs a deadline:
+
+```bash
+timeout 15 gaze auth --silent
+```
 
 ## Enroll a new face profile
 
@@ -104,7 +146,15 @@ gaze rename-face <old> <new>
 gaze remove-face <name>
 ```
 
-`gaze list-faces` prints all enrolled face profiles for the user, showing how many template captures each face has, and displaying `[RGB]` and `[IR]` status badges in green/red to indicate which camera spectrums are enrolled for that profile.
+`gaze list-faces` prints all enrolled face profiles for the user, showing how many template captures each face has, and displaying `[RGB]` and `[IR]` badges for the camera spectra enrolled in that profile:
+
+| Badge | Meaning |
+|---|---|
+| Green | The profile has captures for that spectrum. |
+| Amber | A camera is configured for that spectrum, but this profile has no captures from it. Run `gaze refine-face <name>`. |
+| Grey | No camera is configured for that spectrum, so there is nothing to enrol. |
+
+An RGB-only machine therefore shows a green `[RGB]` and a grey `[IR]`, not a failure.
 
 ## Delete all faces for current user
 
@@ -113,6 +163,32 @@ gaze clear-user
 ```
 
 This is destructive.
+
+## Unlock the GNOME Keyring after a GDM face login
+
+A face login supplies no password, so the GNOME login keyring normally stays
+locked. `gaze keyring` stores the account password in a root-only TPM-protected
+record that `pam_gaze.so` replays to `pam_gnome_keyring` after a successful face
+and liveness check:
+
+```bash
+gaze keyring                    # enroll or replace the credential
+gaze keyring --forget           # remove the stored GNOME credential
+gaze keyring --kwallet          # enroll or replace the KDE wallet credential
+gaze keyring --kwallet --forget # remove only the KDE wallet credential
+sudo gaze keyring --user alice  # act on another account
+```
+
+For KDE, use `--kwallet` with `storage.unlock_kwallet = true` and the
+[managed KDE login PAM hooks](/guide/kde#optional-tpm-backed-kwallet-unlock).
+The two backends have separate credentials; `gaze clear-user` removes both.
+
+GNOME enrollment needs `storage.unlock_gnome_keyring = true`, which in turn needs
+`storage.encrypt_templates = true` and `liveness.enabled = true`. `gaze
+clear-user` removes the record along with the rest of the user's data.
+
+Read [What this changes about your security](/guide/gnome#what-this-changes-about-your-security)
+before enabling it: the stored password is recoverable by root on this machine.
 
 ## Uninstall Gaze completely
 
@@ -141,7 +217,32 @@ Show-only mode:
 gaze config --show
 ```
 
-Prints all current config values (security level, detector and recognizer model, threshold, camera sources, emitter state, dark-frame threshold, auth behavior, hybrid combining policy, enrollment limit and minimum face-size ratio, and liveness settings) without opening the editor.
+Prints all current config values without opening the editor: inference execution provider and device, security level, detector and recognizer model, RGB and IR thresholds, hybrid combining policy (both the raw value and what it resolves to), camera sources, emitter state, parallel capture mode, dark-frame threshold, auth behavior, enrollment limit and minimum face-size ratio, liveness settings, and whether template encryption and GNOME Keyring unlock are on.
+
+## Shell completions
+
+`gaze` generates its own completions at runtime, including the names of your
+enrolled faces for commands that take one. Add the line for your shell to its
+startup file:
+
+::: code-group
+
+```bash [bash]
+echo 'source <(COMPLETE=bash gaze)' >> ~/.bashrc
+```
+
+```zsh [zsh]
+echo 'source <(COMPLETE=zsh gaze)' >> ~/.zshrc
+```
+
+```fish [fish]
+echo 'COMPLETE=fish gaze | source' >> ~/.config/fish/config.fish
+```
+
+:::
+
+Start a new shell to pick them up. Nothing is installed to disk, so there is no
+completion file to keep in sync when you enroll or rename a face.
 
 ## Manage another user
 

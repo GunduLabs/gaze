@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+blank_issues_enabled: false
+
+contact_links:
+  - name: Troubleshooting checklist
+    url: https://gaze.gundulabs.com/guide/troubleshooting
+    about: Daemon won't start, camera not detected, lock screen not triggering, PAM problems. Work through this first, since most reports are already answered here.
+
+  - name: Installation guide
+    url: https://gaze.gundulabs.com/guide/installation
+    about: Per-distro install paths, repository setup, and post-install verification.
+
+  - name: Desktop integration guides
+    url: https://gaze.gundulabs.com/guide/pam
+    about: PAM, GNOME, KDE Plasma, hyprlock, LightDM, and TTY console login setup.
+
+  - name: Configuration reference
+    url: https://gaze.gundulabs.com/guide/configuration
+    about: Every key in /etc/gaze/config.toml, including camera sources, thresholds, and confirmation behavior.
+
+  - name: Security issues
+    url: https://github.com/GunduLabs/gaze/security/advisories/new
+    about: Do not open a public issue for a vulnerability in authentication, PAM, or template storage. Report it privately here.

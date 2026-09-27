@@ -1,8 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 [package]
 name = "pam-gaze"
-version = "0.2.6"
+version = "0.3.3"
 edition = "2024"
-description = "Sequential facial authentication PAM module for Gaze"
+description = "Facial authentication PAM module for Gaze"
 categories.workspace = true
 homepage.workspace = true
 keywords.workspace = true
@@ -15,9 +18,15 @@ repository.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-pam-gaze-core = { path = "../pam-gaze-core" }
-gaze-core = { path = "../gaze-core", default-features = false }
+gaze-security = { path = "../gaze-security" }
+gaze-core = { path = "../gaze-core" }
 libc = "0.2.189"
-zbus = "5.18.0"
+zbus = "5.19.0"
 tokio = { version = "1.53.1", features = ["full"] }
-futures = "0.3.33"
+parking_lot = "0.12.5"
+anyhow = "1.0.104"
+futures = "0.3.34"
+zeroize = "1.9.0"
+
+[dev-dependencies]
+tokio = { version = "=1.53.1", features = ["full", "test-util"] }

@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Uninstallation
 
 This guide covers completely removing Gaze and all its components from your system.
@@ -8,7 +11,23 @@ This guide covers completely removing Gaze and all its components from your syst
 gaze uninstall
 ```
 
-This runs the full cleanup sequence: reset GNOME/GDM lock and login settings, remove system and per-user copies of the GNOME extension, revert PAM, stop the daemon, remove packages (including AUR `-debug` split packages) and the repo, delete `gazed` core dumps, and wipe `/etc/gaze`, `/var/cache/gaze`, and `/var/lib/gaze`. It prints the plan and asks for confirmation first. Useful flags:
+This runs the full cleanup sequence on supported Debian/Ubuntu, Fedora,
+openSUSE, and Arch package-manager installs: reset GNOME/GDM lock and login settings, remove
+system and per-user copies of the GNOME extension, revert PAM, stop the daemon,
+remove packages (including AUR `-debug` split packages) and the repo, delete
+`gazed` core dumps, and wipe `/etc/gaze`, `/var/cache/gaze`, and
+`/var/lib/gaze`. On openSUSE it also removes the `pam-config` entries, native
+packages, Tumbleweed repository, and repository signing key.
+It prints the plan and asks for confirmation first.
+
+::: warning `gaze uninstall` does not remove `gaze-cinnamon-extension`
+The package list it drives covers `gaze`, `gaze-gui`, `gaze-gnome-extension`,
+`gaze-hyprlock`, and `gaze-kde`. If you installed the Cinnamon extension,
+remove it yourself with your package manager and follow
+[Reset Cinnamon lock screen settings](#reset-cinnamon-lock-screen-settings).
+:::
+
+Useful flags:
 
 - `--keep-data`: preserve `/var/lib/gaze` (enrolled faces)
 - `--dry-run`: print the plan without running anything
@@ -27,9 +46,34 @@ gnome-extensions disable gaze@gundulabs.com 2>/dev/null || true
 gnome-extensions uninstall gaze@gundulabs.com 2>/dev/null || true
 gsettings reset-recursively org.gnome.shell.extensions.gaze
 rm -rf ~/.local/share/gnome-shell/extensions/gaze@gundulabs.com
+rm -f ~/.config/autostart/gaze-gnome-enable.desktop ~/.local/share/gaze/gnome-enable.sh
 ```
 
-Repeat this for each desktop user who enabled lock screen face unlock. The last command removes any per-user copy of the extension (left by `gnome-extensions install` or a development checkout); without it GNOME keeps listing the extension as disabled.
+Repeat this for each desktop user who enabled lock screen face unlock. The `rm -rf` removes any per-user copy of the extension (left by `gnome-extensions install` or a development checkout); without it GNOME keeps listing the extension as disabled. The last line removes the one-shot autostart entry the installer leaves behind to finish enabling the extension at the next login; it normally deletes itself once it has run.
+
+### Reset Cinnamon lock screen settings
+
+```bash
+gsettings set org.cinnamon enabled-extensions \
+  "$(gsettings get org.cinnamon enabled-extensions | sed "s/, *'gaze@gundulabs.com'//; s/'gaze@gundulabs.com', *//; s/\['gaze@gundulabs.com'\]/@as []/")"
+rm -rf ~/.local/share/cinnamon/extensions/gaze@gundulabs.com
+rm -rf ~/.cinnamon/configs/gaze@gundulabs.com
+```
+
+Repeat this for each desktop user who enabled it, then reload Cinnamon
+(`Alt + F2`, `r`, Enter). The last line removes the extension's saved settings,
+which Cinnamon keeps outside dconf.
+
+### Revert KDE face unlock
+
+Removing `gaze-kde` strips Gaze from `/etc/pam.d/kde-fingerprint` and, if you enabled it, from the login greeter stacks. To undo it without removing the package:
+
+```bash
+sudo gaze-kde-pam disable
+sudo gaze-kde-pam disable-login
+```
+
+A `pam_gaze` line you added to those files by hand, outside Gaze's marked block, is left in place, so remove it yourself.
 
 ### Revert hyprlock face unlock
 
@@ -42,7 +86,7 @@ sed -i.bak '/^\s*module\s*=\s*hyprlock-gaze/d' "${XDG_CONFIG_HOME:-$HOME/.config
 ### Remove GDM login defaults and overrides
 
 ```bash
-sudo rm -f /etc/dconf/db/gdm.d/00-gaze-defaults* /etc/dconf/db/gdm.d/99-gaze*
+sudo rm -f /etc/dconf/db/gdm.d/*gaze*
 sudo dconf update
 ```
 
@@ -64,14 +108,20 @@ else
 fi
 ```
 
+```bash [openSUSE Tumbleweed]
+sudo pam-config --delete --gaze --gaze_grosshack 2>/dev/null || true
+sudo pam-config --update 2>/dev/null || true
+```
+
 ```bash [Arch Linux]
 sudo sed -i '/pam_gaze/d' /etc/pam.d/sudo
 ```
 
 ```bash [Manual PAM setup]
-# Remove any pam_gaze.so or pam_gaze_grosshack.so lines
-# from /etc/pam.d/system-auth or wherever you added them.
-sudo nano /etc/pam.d/system-auth
+# Remove Gaze lines from the stack where you added them.
+# Use common-auth-pc on openSUSE or system-auth on Fedora/Arch.
+sudo nano /etc/pam.d/common-auth-pc  # openSUSE
+# sudo nano /etc/pam.d/system-auth   # Fedora/Arch
 ```
 
 :::
@@ -88,16 +138,23 @@ sudo systemctl disable gazed
 ::: code-group
 
 ```bash [Debian/Ubuntu]
-sudo apt remove --purge gaze gaze-gui gaze-gnome-extension gaze-hyprlock
+sudo apt remove --purge gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde
 sudo apt autoremove
 ```
 
 ```bash [Fedora and compatible]
-sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-hyprlock
+sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde
+```
+
+```bash [openSUSE Tumbleweed]
+sudo zypper remove gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde
 ```
 
 ```bash [Arch Linux / Manjaro]
-sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin gaze-hyprlock-bin
+# Drop any name that isn't installed; -Rns errors out on an unknown package.
+sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin gaze-hyprlock-bin gaze-kde-bin
+# If you installed the Cinnamon extension, remove it too (check the exact name with `pacman -Qs gaze`):
+sudo pacman -Rns gaze-cinnamon-extension-bin
 # AUR builds may also have installed -debug split packages:
 pacman -Q | awk '/^gaze.*-debug /{print $1}' | xargs -r sudo pacman -Rns --noconfirm
 ```
@@ -121,6 +178,19 @@ sudo apt update
 ```bash [Fedora and compatible]
 sudo rm /etc/yum.repos.d/gundulabs.repo
 sudo rpm -e gpg-pubkey-$(rpm -qa gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n' | grep -i gundulabs | awk '{print $1}' | sed 's/gpg-pubkey-//')
+sudo dnf makecache
+```
+
+```bash [openSUSE Tumbleweed]
+sudo zypper removerepo gundulabs 2>/dev/null || true
+sudo rm -f /etc/zypp/repos.d/gundulabs.repo
+sudo rm -f /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+sudo rpm -e gpg-pubkey-$(rpm -qa gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n' | grep -i gundulabs | awk '{print $1}' | sed 's/gpg-pubkey-//') 2>/dev/null || true
+sudo zypper refresh
+```
+
+```bash [Fedora via Copr]
+sudo dnf copr disable @gundulabs/gaze
 sudo dnf makecache
 ```
 
@@ -150,6 +220,9 @@ sudo glib-compile-schemas /usr/share/glib-2.0/schemas
 ```
 
 ### Face enrollment data
+
+`/var/lib/gaze` holds the enrolled templates (`users/`), the TPM-sealed template
+key (`tpm/`), and any TPM-protected GNOME Keyring credentials (`keyring/`):
 
 ```bash
 sudo rm -rf /var/lib/gaze
@@ -183,10 +256,13 @@ If `gazed` ever crashed, systemd may have saved core dumps. These can contain de
 sudo find /var/lib/systemd/coredump \( -name 'core.gazed.*' -o -name 'core.gaze.*' -o -name 'core.gaze-gui.*' \) -delete
 ```
 
-### SELinux policy (Fedora/RPM systems only)
+### SELinux policy (RPM installs with SELinux enabled)
 
 ```bash
-sudo semodule -r gaze-gdm-camera
+if command -v semodule >/dev/null 2>&1; then
+  sudo semodule -r gaze-gdm-camera
+  sudo semodule -r gaze-greeter-keyring
+fi
 ```
 
 ## Step 5: Reload system services

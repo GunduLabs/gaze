@@ -1,5 +1,70 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 set -e
+
+cpu_lacks_avx2() {
+	case "$(uname -m)" in
+		x86_64) ;;
+		*) return 1 ;;
+	esac
+	! grep -qw avx2 /proc/cpuinfo 2>/dev/null
+}
+
+warn_missing_avx2() {
+	cpu_lacks_avx2 || return 0
+	printf '\n\033[1;33m[Gaze Notice]\033[0m This CPU does not support AVX2.\n' >&2
+	printf 'The gazed daemon cannot run here: it would crash with an illegal instruction\n' >&2
+	printf 'on every start. The CLI and PAM modules are installed, but face authentication\n' >&2
+	printf 'will not work. gazed has been left stopped.\n' >&2
+	printf 'See https://gaze.gundulabs.com/guide/troubleshooting\n\n' >&2
+}
+
+check_deprecated_pam_grosshack() {
+	if [ -d /etc/pam.d ] && grep -rnE '^[[:space:]]*[^#].*pam_gaze_grosshack\.so' /etc/pam.d/ >/dev/null 2>&1; then
+		printf '\n\033[1;33m[Gaze Notice]\033[0m Found legacy pam_gaze_grosshack.so in /etc/pam.d/:\n' >&2
+		grep -rnE '^[[:space:]]*[^#].*pam_gaze_grosshack\.so' /etc/pam.d/ 2>/dev/null | head -n 5 | sed 's/^/  /' >&2
+		printf 'This module is deprecated and will be removed in a future release.\n' >&2
+		printf 'Please update your PAM configuration to use: pam_gaze.so simultaneous\n' >&2
+		printf 'Run "gaze doctor" for more information.\n\n' >&2
+	fi
+}
+
+check_deprecated_pam_grosshack
+warn_missing_avx2
+
+# Tumbleweed manages common-* with pam-config instead of authselect.
+# Keep the shared RPM script valid for both distro families.
+is_suse() {
+	[ -r /etc/os-release ] || return 1
+	(
+		# shellcheck disable=SC1091
+		. /etc/os-release
+		case "${ID:-} ${ID_LIKE:-}" in
+			*opensuse*|*suse*) exit 0 ;;
+			*) exit 1 ;;
+		esac
+	)
+}
+
+configure_pam_suse() {
+	# Only SUSE builds install this vendor definition.
+	command -v pam-config >/dev/null 2>&1 || return 0
+	[ -f /usr/lib/pam-config.d/gaze.conf ] || return 0
+
+	# Preserve an active mode on upgrades, otherwise enable sequential mode.
+	# Query status is always zero, so detect the auth: output.
+	if ! pam-config -q --gaze 2>/dev/null | grep -q '^auth:' &&
+		! pam-config -q --gaze_grosshack 2>/dev/null | grep -q '^auth:'; then
+		if ! pam_config_error="$(pam-config -a --gaze 2>&1)"; then
+			printf '\n\033[1;33m[Gaze Notice]\033[0m Could not add Gaze to the common PAM stack:\n' >&2
+			printf '%s\n' "$pam_config_error" | sed 's/^/  /' >&2
+			printf 'sudo and polkit will not use face authentication until this succeeds.\n' >&2
+			printf 'Run "sudo pam-config -a --gaze" and then "gaze doctor".\n\n' >&2
+		fi
+	fi
+}
 
 # Regenerate PAM files after a Gaze profile update, but only when Gaze is
 # already selected. Never replace another active authselect profile.
@@ -8,8 +73,29 @@ if command -v authselect >/dev/null 2>&1 &&
 	authselect apply-changes >/dev/null 2>&1 || true
 fi
 
+if is_suse; then
+	configure_pam_suse
+fi
+
+# A display-manager greeter runs as xdm_t, which SELinux denies the camera by
+# default; the denial is silent and reads like a broken camera. Loaded here
+# because the base package owns the policy, whichever desktop is installed.
+if [ -f /usr/share/gaze/gaze-gdm-camera.pp ] && command -v semodule >/dev/null 2>&1; then
+	semodule -i /usr/share/gaze/gaze-gdm-camera.pp >/dev/null 2>&1 || true
+fi
+
+# The keyring policy widens xdm_t to /etc/shadow and the TPM, so `gaze keyring`
+# loads it on demand; an upgrade only refreshes a copy that is already loaded.
+if [ -f /usr/share/gaze/gaze-greeter-keyring.pp ] && command -v semodule >/dev/null 2>&1 \
+	&& semodule -l 2>/dev/null | grep -Eq '^gaze-greeter-keyring([[:space:]]|$)'; then
+	semodule -i /usr/share/gaze/gaze-greeter-keyring.pp >/dev/null 2>&1 || true
+fi
+
 if [ -d /run/systemd/system ]; then
-	systemctl daemon-reload >/dev/null 2>&1
+	systemctl daemon-reload >/dev/null 2>&1 || true
 	dbus-send --system --type=method_call --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig >/dev/null 2>&1 || true
 	systemctl restart polkit >/dev/null 2>&1 || true
+	if ! cpu_lacks_avx2; then
+		systemctl try-restart gazed >/dev/null 2>&1 || true
+	fi
 fi

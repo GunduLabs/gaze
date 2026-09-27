@@ -1,7 +1,0 @@
-[tools]
-bun = "latest"
-just = "latest"
-nfpm = "latest"
-node = "latest"
-rust = "latest"
-rust-analyzer = "latest"

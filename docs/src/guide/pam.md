@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # PAM
 
 This page is about normal PAM integration (`sudo`, polkit, shared auth stacks).
@@ -8,11 +11,31 @@ If you specifically want GNOME lock screen or GDM login behavior, use the [GNOME
 
 ## What Gaze installs
 
-- `pam_gaze.so` (sequential mode, recommended)
-- `pam_gaze_grosshack.so` (simultaneous mode)
+- `pam_gaze.so` (supports sequential, simultaneous, and retry modes)
 
-Sequential means face auth runs first, then password fallback.
-Simultaneous means face auth and password prompt run in parallel.
+`pam_gaze_grosshack.so` also still ships on openSUSE as a compatibility shim for
+old configurations. It is deprecated, prints a notice on every authentication,
+and will be removed; it does nothing that `pam_gaze.so simultaneous` does not.
+
+Sequential (the default) means face auth runs first, then password fallback.
+Simultaneous (enabled via the `simultaneous` option, e.g. `pam_gaze.so simultaneous`) means face auth and password prompt run in parallel.
+Retry (enabled via the `retry` option, e.g. `pam_gaze.so retry`) is a second Gaze
+entry placed *below* the password module, so face auth gets one more attempt
+after a rejected password. See [Retry after a rejected password](#retry-after-a-rejected-password).
+
+### Network logins are skipped
+
+A camera attached to this machine cannot see whoever is at the other end of a
+network login, so Gaze steps aside for them. When the calling service sets
+`PAM_RHOST` to anything other than loopback, `pam_gaze.so` returns `PAM_IGNORE`
+immediately and the stack falls through to the next module, normally the
+password check. Services that authenticate remote clients set this item:
+`sshd`, `dovecot`, `vsftpd`, and Samba among them.
+
+This matters on Debian and Ubuntu, where enabling a Gaze profile through
+`pam-auth-update` puts Gaze in `common-auth`, and `common-auth` is included by
+nearly every service on the system, not just the desktop ones. Those services
+keep authenticating by password exactly as before.
 
 ## Debian / Ubuntu
 
@@ -32,6 +55,126 @@ sudo -v
 
 If camera opens and face auth runs, PAM wiring is active.
 
+### Selective setup: password at GDM, face authentication for sudo and Polkit
+
+On GNOME systems, some users may want to keep password authentication at
+the initial GDM login so that GNOME Keyring is unlocked normally (see
+[Login warning](/guide/gnome#login-warning-gnome-keyring)), while still using
+Gaze for privilege elevation and graphical Polkit prompts.
+
+Enabling the Debian/Ubuntu Gaze profile through `pam-auth-update` adds Gaze to
+the shared `common-auth` stack. Because `gdm-password` also includes
+`common-auth`, this may make Gaze run during the initial desktop login.
+
+The following setup was manually verified on Ubuntu 26.04 with GNOME 50.
+
+::: warning
+PAM configuration errors can prevent authentication. Keep an active root
+shell open, keep password authentication enabled, and create backups before
+editing these files.
+:::
+
+First disable the shared Gaze profiles:
+
+```bash
+sudo pam-auth-update --disable gaze gaze-simultaneous gaze-retry
+```
+
+`--disable` (rather than `--remove`) records the choice, so the
+`pam-auth-update --package` call in the Gaze package's post-install script will
+not re-enable the profile on the next upgrade.
+
+Verify that Gaze is no longer present in the shared stack:
+
+```bash
+grep -n pam_gaze /etc/pam.d/common-auth \
+  || echo "Gaze is not enabled in common-auth"
+```
+
+Keep the GDM face-login switch disabled. The switch lives in the Gaze extension
+preferences (see
+[Disable face at GDM login](/guide/gnome#disable-face-at-gdm-login)); the daemon
+writes the override below when it is on, so remove it if it is already present:
+
+```bash
+sudo rm -f /etc/dconf/db/gdm.d/99-gaze*
+sudo dconf update
+```
+
+#### sudo
+
+Back up `/etc/pam.d/sudo`, then add this line immediately before
+`@include common-auth`:
+
+```text
+auth    sufficient    pam_gaze.so
+```
+
+The relevant part should look like:
+
+```text
+auth    sufficient    pam_gaze.so
+@include common-auth
+```
+
+Test it with:
+
+```bash
+sudo -k
+sudo -v
+```
+
+The same change can be applied to `/etc/pam.d/sudo-i` if face authentication
+is also wanted for `sudo -i`.
+
+Both files are dpkg conffiles, so a `sudo` package upgrade may prompt about the
+local modification. Keep the modified version to retain face authentication.
+
+#### Polkit
+
+If `/etc/pam.d/polkit-1` does not exist but the vendor file is available,
+create a local override:
+
+```bash
+sudo install -o root -g root -m 0644 \
+  /usr/lib/pam.d/polkit-1 \
+  /etc/pam.d/polkit-1
+```
+
+Add the following line immediately before `@include common-auth`:
+
+```text
+auth    sufficient    pam_gaze.so
+```
+
+Restart Polkit and test a graphical authentication request:
+
+```bash
+sudo systemctl restart polkit
+pkexec /usr/bin/true
+```
+
+A file in `/etc/pam.d` shadows the vendor file permanently, so this override
+will not pick up upstream changes to the Polkit stack. Diff it against
+`/usr/lib/pam.d/polkit-1` after Polkit upgrades.
+
+Finally, confirm Gaze still sees a live PAM wiring. `gaze doctor` scans every
+file in `/etc/pam.d`, so a per-service setup satisfies its PAM check:
+
+```bash
+gaze doctor
+```
+
+With this arrangement:
+
+- GDM login uses the normal account password.
+- GNOME Keyring is unlocked during login.
+- `sudo` and `sudo -i` can use face authentication.
+- GNOME Settings, package-management applications, and other Polkit clients
+  can use face authentication.
+- The GNOME extension can remain enabled for face unlock on the lock screen.
+- Password authentication remains available as a fallback.
+
 ## Fedora and compatible RPM systems
 
 RPM packages install an authselect profile at:
@@ -40,8 +183,8 @@ RPM packages install an authselect profile at:
 
 The profile adds Gaze to both shared authentication stacks: `system-auth`, used by tools such as `sudo`, and `password-auth`, used by KDE's lock screen, SDDM, and Plasma Login Manager. RPM upgrades refresh these generated PAM files automatically when the Gaze profile is active.
 
-::: warning KDE lock screen is not hands-free
-Being in `password-auth` means Gaze runs when KDE's lock screen authenticates, but it does not make face unlock automatic. KDE's screen locker only starts PAM authentication after you submit the password field, so the camera does not activate until you enter (or submit an empty) password. Hands-free face unlock on the KDE lock screen is not currently supported — unlike GNOME, which drives it through the Gaze Shell extension. Face auth still works for `sudo`, polkit, and other PAM prompts.
+::: tip KDE lock screen needs `gaze-kde` to be hands-free
+Being in `password-auth` means Gaze runs when KDE's lock screen authenticates, but on its own that only happens once you submit the password field. For face unlock that starts by itself, install `gaze-kde`, which runs Gaze in the slot KScreenLocker starts up front for biometrics. It also stops Gaze running twice on one lock screen, since `/etc/pam.d/kde` includes `password-auth`. See the [KDE Plasma guide](/guide/kde).
 :::
 
 Enable it:
@@ -56,6 +199,12 @@ Or simultaneous mode:
 sudo authselect select gaze with-face-simultaneous with-silent-lastlog --force
 ```
 
+Add a retry after a rejected password to either of the above:
+
+```bash
+sudo authselect enable-feature with-face-retry
+```
+
 Verify profile + PAM behavior:
 
 ```bash
@@ -63,21 +212,113 @@ sudo authselect current
 sudo -v
 ```
 
+## openSUSE Tumbleweed
+
+The openSUSE package ships a `pam-config` definition for Gaze and enables it
+in its post-install script. This adds Gaze to the managed `common-auth` stack,
+covering `sudo`, GDM, the GNOME lock screen, and other PAM services that include
+`common-auth`. To apply it again after changing PAM modules, run:
+
+```bash
+sudo pam-config --add --gaze
+sudo pam-config --update
+```
+
+The `--gaze` option is provided by the Gaze package's definition under
+`/usr/lib/pam-config.d`. If `pam-config` reports an unknown option, confirm
+that the base `gaze` package (not only `gaze-gui` or the GNOME extension) is
+installed.
+
+### sudo asks for the root password
+
+openSUSE's vendor `/usr/etc/sudoers` sets `Defaults targetpw`, so `sudo`
+authenticates the target user (root) rather than you. Root has no face
+enrollment, so the camera never starts and sudo asks for the root password even
+though `gaze auth` and `sudo -u "$USER" -v` work. `gaze doctor` reports this as
+**Sudo policy**. openSUSE ships a drop-in that exempts members of `wheel`:
+
+```bash
+sudo zypper install sudo-policy-wheel-auth-self
+```
+
+After that, `sudo` authenticates you with your own password or face. Outside
+`wheel`, drop `Defaults targetpw` with `visudo` or scope it with
+`Defaults:%<group> !targetpw`.
+
+### Simultaneous mode on openSUSE
+
+There is no `pam-config` definition for simultaneous mode. The package ships
+only `--gaze` (sequential) and `--gaze_retry`, so add the `simultaneous` option
+by hand: run `sudo pam-config --add --gaze && sudo pam-config --update`, then
+edit the generated `/etc/pam.d/common-auth-pc` so the Gaze line reads
+
+```text
+auth    sufficient    pam_gaze.so simultaneous
+```
+
+`pam-config --update` regenerates that file, so re-apply the edit after any
+later `pam-config` run.
+
+::: warning `pam_gaze_grosshack.so` is deprecated
+Older openSUSE instructions used `sudo pam-config --add --gaze_grosshack`. That
+definition is no longer shipped, and the module it enabled prints a deprecation
+notice on every authentication and will be removed in a future release. If
+`/etc/pam.d` still references it, drop it with
+`sudo pam-config --delete --gaze_grosshack` and use `pam_gaze.so simultaneous`
+instead. `gaze doctor` reports a stack that still loads it.
+:::
+
+To add a retry after a rejected password, enable the retry definition alongside
+whichever of the above you use:
+
+```bash
+sudo pam-config --add --gaze_retry
+sudo pam-config --update
+```
+
+::: warning
+The openSUSE retry definition is newer than the others and has had less testing
+on Tumbleweed than the Debian and Fedora profiles. Check the generated
+`/etc/pam.d/common-auth` afterwards and confirm the `pam_gaze.so retry` line
+landed *below* `pam_unix.so`. If it did not, remove it with
+`sudo pam-config --delete --gaze_retry` and add the line by hand instead.
+:::
+
+Check that the managed file contains Gaze and that the common-auth link still
+points at the generated file:
+
+```bash
+grep pam_gaze /etc/pam.d/common-auth-pc
+readlink -f /etc/pam.d/common-auth
+gaze doctor
+```
+
+Keep a root shell open while testing changes to the shared authentication
+stack. If `common-auth` is not managed by `pam-config` on your installation,
+follow [Other distros (manual)](#other-distros-manual) and add
+`pam_gaze.so` to the service-specific PAM files instead.
+
 ## Arch Linux / Manjaro
 
-The one-liner installer and the AUR package post-install script both configure `/etc/pam.d/sudo` automatically, inserting `pam_gaze.so` before the existing `auth include system-auth` line.
+The one-liner installer and the AUR package post-install script both configure `/etc/pam.d/sudo` automatically, inserting a faillock preauth gate and `pam_gaze.so` before the existing `auth include system-auth` line. The gate runs first so a locked-out account is rejected before face authentication can succeed; they do this only once: if you take the lines out again, upgrades leave them out. See [Opting out of the sudo change](#opting-out-of-the-sudo-change).
 
 If you need to apply or re-apply it manually:
 
 ```bash
 sudo awk '
     /^[[:space:]]*auth[[:space:]]/ && !done {
+        print "-auth       requisite     pam_faillock.so preauth"
         print "auth        sufficient    pam_gaze.so"
         done = 1
     }
     { print }
 ' /etc/pam.d/sudo | sudo tee /tmp/pam-sudo-new && sudo install -m 644 /tmp/pam-sudo-new /etc/pam.d/sudo
 ```
+
+A successful face authentication skips the rest of the stack, so the preauth
+gate must come first: without it a locked-out account could still pass face
+authentication. If the file's first `auth` line is already a faillock preauth,
+add only the `pam_gaze.so` line below it.
 
 Then test:
 
@@ -89,12 +330,40 @@ sudo -v
 `/etc/pam.d/system-auth` is owned by the `pambase` package and gets overwritten on system upgrades. Gaze is added to `/etc/pam.d/sudo` directly to avoid this, but if you manually added `pam_gaze.so` to `system-auth` it will be lost on `pambase` updates.
 :::
 
+### Opting out of the sudo change
+
+`/etc/pam.d/sudo` belongs to the `sudo` package, not to Gaze. Once Gaze inserts its line pacman sees the file as locally modified and writes `/etc/pam.d/sudo.pacnew` on later `sudo` updates instead of replacing it, so those updates have to be merged by hand.
+
+To keep face authentication out of terminal elevation, delete the `pam_gaze.so` line and the faillock gate above it:
+
+```bash
+sudo sed -i '/pam_gaze/d; /^-auth       requisite     pam_faillock\.so preauth$/d' /etc/pam.d/sudo
+```
+
+Gaze will not add it back. The next install or upgrade notices the line it wrote is gone, records the choice in `/etc/gaze/pam-sudo.optout`, and leaves the file alone from then on. Once that marker exists `gaze doctor` reports the sudo slot as off instead of warning about it.
+
+To skip the wait, or to keep Gaze away from `/etc/pam.d/sudo` from the very first install, write the marker yourself:
+
+```bash
+sudo mkdir -p /etc/gaze
+sudo touch /etc/gaze/pam-sudo.optout
+```
+
+To undo the opt-out, remove the marker and re-apply the line by hand with the `awk` command above:
+
+```bash
+sudo rm /etc/gaze/pam-sudo.optout
+```
+
+Removing the Gaze package deletes the marker along with the rest of `/etc/gaze`.
+
 ### Polkit (graphical "Authentication Required" prompts)
 
-Arch's `polkit` package ships no `/etc/pam.d/polkit-1`, so the `polkit-1` PAM service falls back to the vendor default at `/usr/lib/pam.d/polkit-1`, which just does `include system-auth`. Since Gaze avoids patching `system-auth` (see above), graphical polkit prompts (`pkexec`, GNOME Settings, package manager GUIs, etc.) don't get face auth unless a `/etc/pam.d/polkit-1` override is installed too. The installer and `dev-link-system.sh` now create one automatically:
+Arch's `polkit` package ships no `/etc/pam.d/polkit-1`, so the `polkit-1` PAM service falls back to the vendor default at `/usr/lib/pam.d/polkit-1`, which just does `include system-auth`. Since Gaze avoids patching `system-auth` (see above), graphical polkit prompts (`pkexec`, GNOME Settings, package manager GUIs, etc.) don't get face auth unless a `/etc/pam.d/polkit-1` override is installed too. The Arch package and `dev-link-system.sh` create one automatically, and only on Arch:
 
 ```text
 #%PAM-1.0
+-auth       requisite     pam_faillock.so preauth
 auth       sufficient   pam_gaze.so
 auth       include      system-auth
 account    include      system-auth
@@ -109,9 +378,15 @@ sudo systemctl restart polkit
 pkexec true
 ```
 
+Some Arch derivatives (Omarchy, for one) do ship an `/etc/pam.d/polkit-1` of their own. There the package adds only the `pam_gaze.so` line, above the first `auth` line, and keeps the rest of the file as it is; the original is copied to `/etc/gaze/polkit-1.pam.bak` first (`dev-link-system.sh` does the same, to `polkit-1.pam.dev.bak`). Removing Gaze strips that line back out and leaves the file in place, rather than deleting a file Gaze did not create.
+
+Debian/Ubuntu and Fedora ship their own `polkit-1` PAM service and do not use `system-auth` the way Arch does, so Gaze never writes this file there. On those systems polkit picks up face auth through the shared auth stack (`pam-auth-update` on Debian/Ubuntu, the `gaze` authselect feature on Fedora). Recent Debian and Ubuntu releases ship that file as a vendor default in `/usr/lib/pam.d/polkit-1` instead of `/etc/pam.d/polkit-1`, but it still includes `common-auth`, so the shared-stack route works either way. An explicit `/etc/pam.d/polkit-1` override is only needed there if you deliberately took Gaze out of the shared stack, as in [Selective setup](#selective-setup-password-at-gdm-face-authentication-for-sudo-and-polkit).
+
 ## Other distros (manual)
 
-Edit your shared auth stack (for example `/etc/pam.d/system-auth`) and place Gaze before `pam_unix.so`.
+Edit your shared auth stack (for example `/etc/pam.d/system-auth` on Fedora or
+Arch, or `/etc/pam.d/common-auth-pc` on openSUSE when `pam-config` is not
+available) and place Gaze before `pam_unix.so`.
 
 Sequential:
 
@@ -123,11 +398,115 @@ auth    sufficient    pam_unix.so try_first_pass nullok
 Simultaneous:
 
 ```text
-auth    sufficient    pam_gaze_grosshack.so
+auth    sufficient    pam_gaze.so simultaneous
 auth    sufficient    pam_unix.so try_first_pass nullok
 ```
 
 Then test with `sudo -v`.
+
+## Retry after a rejected password
+
+By default a typed password ends the Gaze attempt. In simultaneous mode Gaze
+stands down as soon as you submit one, and if that password turns out to be
+wrong the whole authentication fails: there is no second look at the camera.
+
+The `retry` option adds one. It is a *second* `pam_gaze.so` line placed below
+the password module, so it is only reached when the password was rejected:
+
+```text
+auth    sufficient    pam_gaze.so simultaneous
+auth    sufficient    pam_unix.so try_first_pass nullok
+auth    sufficient    pam_gaze.so retry
+```
+
+The first line still gives you face-or-password. The third line is what catches
+a typo: the password is rejected, and Gaze looks once more instead of failing
+the attempt outright.
+
+Retry composes with either mode, so `pam_gaze.so` on its own works as the first
+line too.
+
+### It does not repeat a decided verdict
+
+A retry entry is not a second full camera run in every case. When the first
+Gaze entry already saw a face and decided it was not yours, the retry entry
+stands down immediately rather than spending another camera timeout on a
+question that has been answered. It only looks again when the first pass was
+undecided: no face found, too dark, timed out, camera unavailable, or a
+password submitted before the camera reached a verdict.
+
+### Enabling it
+
+On Debian and Ubuntu the profile is shipped but off by default:
+
+```bash
+sudo pam-auth-update --enable gaze-retry
+```
+
+On Fedora it is an authselect feature:
+
+```bash
+sudo authselect enable-feature with-face-retry
+```
+
+### Lockout counters
+
+A rejected password is still a rejected password. On distributions that use
+`pam_faillock`, the failed attempt may be tallied even when the face retry then
+succeeds. The shipped Fedora profile places the retry entry *above*
+`pam_faillock.so authfail` so a successful retry short-circuits before the tally
+is written, but stacks you assemble by hand will not do this unless you order
+them the same way.
+
+If you type passwords wrong often and rely on the retry, check `faillock --user
+$USER` after a few attempts to confirm your stack behaves the way you expect.
+
+## Browser extensions through Polkit (Bitwarden)
+
+A browser extension cannot call PAM directly. Bitwarden's browser extension
+hands an unlock request to the running Bitwarden desktop app through native
+messaging. On Linux, the desktop app asks Polkit to authorize the
+`com.bitwarden.Bitwarden.unlock` action, and the graphical Polkit agent runs the
+normal `polkit-1` PAM service. Gaze therefore needs no Firefox-, Chromium-, or
+Zen-specific hook: if Gaze is in the `polkit-1` stack, the request follows the
+same path as any other graphical authentication prompt.
+
+Set up and test the layers in order:
+
+1. Follow the Polkit setup for your distribution above, then check that a plain
+   Polkit request starts Gaze:
+
+   ```bash
+   gaze doctor
+   pkexec /usr/bin/true
+   ```
+
+2. In the Bitwarden desktop app, enable **Unlock with system authentication**
+   and **Allow browser integration**. Keep the desktop app running, logged in,
+   and unlocked while setting up the extension.
+3. In the browser extension, open **Settings → Account security**, enable
+   **Unlock with biometrics**, and approve the connection in the desktop app.
+   See [Bitwarden's biometric unlock guide](https://bitwarden.com/help/biometrics/)
+   for browser and package-specific requirements.
+
+If desktop unlock already uses Gaze but the browser extension never opens a
+Polkit dialog, the request has not reached PAM. Check the native-messaging setup,
+whether the desktop app is running and logged in, and whether Bitwarden supports
+that browser and installation method. Adding another Gaze PAM entry cannot fix a
+native-messaging failure.
+
+If a Polkit prompt appears but Gaze does not run, return to the distribution's
+Polkit setup above. `pkexec /usr/bin/true` must use Gaze first. To confirm that a
+Bitwarden attempt reached the daemon through the expected service, check:
+
+```bash
+sudo journalctl -u gazed -b --no-pager | grep 'service="polkit-1"'
+```
+
+Do not add a Polkit rule that automatically authorizes Bitwarden or a browser.
+That would bypass authentication rather than route it to Gaze. Bitwarden owns
+the desktop/native-messaging trust boundary; Gaze only supplies face
+authentication when Polkit invokes PAM.
 
 ## Safety notes
 

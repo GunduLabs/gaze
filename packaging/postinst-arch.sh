@@ -1,31 +1,144 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 set -e
+
+PAM_STATE=/etc/gaze/pam-arch.configured
+PAM_POLKIT_STATE=/etc/gaze/pam-arch.polkit-configured
+PAM_SUDO_OPTOUT=/etc/gaze/pam-sudo.optout
+
+cpu_lacks_avx2() {
+	case "$(uname -m)" in
+		x86_64) ;;
+		*) return 1 ;;
+	esac
+	! grep -qw avx2 /proc/cpuinfo 2>/dev/null
+}
+
+warn_missing_avx2() {
+	cpu_lacks_avx2 || return 0
+	printf '\n\033[1;33m[Gaze Notice]\033[0m This CPU does not support AVX2.\n' >&2
+	printf 'The gazed daemon cannot run here: it would crash with an illegal instruction\n' >&2
+	printf 'on every start. The CLI and PAM modules are installed, but face authentication\n' >&2
+	printf 'will not work. gazed has been left stopped.\n' >&2
+	printf 'See https://gaze.gundulabs.com/guide/troubleshooting\n\n' >&2
+}
+
+record_edited_pam_file() {
+	mkdir -p /etc/gaze
+	grep -qxF "$1" "$PAM_STATE" 2>/dev/null && return 0
+	printf '%s\n' "$1" >> "$PAM_STATE"
+}
+
+gaze_configured_pam_file() {
+	grep -qxF "$1" "$PAM_STATE" 2>/dev/null && return 0
+	grep -qxF "$1" "$PAM_POLKIT_STATE" 2>/dev/null && return 0
+	return 1
+}
+
+first_auth_is_faillock_preauth() {
+	first_auth=$(grep -m1 -E '^[[:space:]]*-?auth[[:space:]]' "$1" 2>/dev/null || true)
+	case "$first_auth" in
+		*pam_faillock.so*preauth*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+insert_pam_gaze() {
+	pam_file=$1
+	grep -q "pam_gaze" "$pam_file" 2>/dev/null && return 0
+
+	# A sufficient success skips the rest of the stack, so a faillock preauth
+	# gate must already have run. Requisite fails a locked-out account before
+	# face authentication; -auth tolerates a missing faillock module.
+	tmp=$(mktemp)
+	if first_auth_is_faillock_preauth "$pam_file"; then
+		awk '
+			/^[[:space:]]*-?auth[[:space:]]/ && !done {
+				print
+				print "auth        sufficient    pam_gaze.so"
+				done = 1
+				next
+			}
+			{ print }
+		' "$pam_file" > "$tmp" && install -m 644 "$tmp" "$pam_file"
+	else
+		awk '
+			/^[[:space:]]*-?auth[[:space:]]/ && !done {
+				print "-auth       requisite     pam_faillock.so preauth"
+				print "auth        sufficient    pam_gaze.so"
+				done = 1
+			}
+			{ print }
+		' "$pam_file" > "$tmp" && install -m 644 "$tmp" "$pam_file"
+	fi
+	rm -f "$tmp"
+
+	if grep -q "pam_gaze" "$pam_file" 2>/dev/null; then
+		record_edited_pam_file "$pam_file"
+		return 0
+	fi
+
+	printf '\n\033[1;33m[Gaze Notice]\033[0m %s has no auth line, so pam_gaze.so was not added.\n' "$pam_file" >&2
+	printf 'Add a "-auth requisite pam_faillock.so preauth" gate and "auth sufficient pam_gaze.so" to it by hand, then restart polkit.\n' >&2
+	printf 'See https://gaze.gundulabs.com/guide/pam for the full stack.\n\n' >&2
+}
+
+record_pam_sudo_optout() {
+	mkdir -p /etc/gaze
+	[ -e "$PAM_SUDO_OPTOUT" ] && return 0
+	cat > "$PAM_SUDO_OPTOUT" <<-EOF
+	# Gaze leaves /etc/pam.d/sudo alone while this file exists.
+	# Delete it to let the next install or upgrade add pam_gaze.so back.
+	EOF
+	chmod 644 "$PAM_SUDO_OPTOUT"
+
+	printf '\n\033[1;33m[Gaze Notice]\033[0m pam_gaze.so is no longer in /etc/pam.d/sudo, so face\n' >&2
+	printf 'authentication for sudo stays off. Recorded in %s;\n' "$PAM_SUDO_OPTOUT" >&2
+	printf 'delete that file to let Gaze configure sudo again.\n\n' >&2
+}
+
+notice_pam_sudo_configured() {
+	printf '\n\033[1;33m[Gaze Notice]\033[0m Added a faillock preauth gate and "auth sufficient pam_gaze.so" to /etc/pam.d/sudo.\n' >&2
+	printf 'That file belongs to the sudo package, so pacman now treats it as modified and\n' >&2
+	printf 'will write /etc/pam.d/sudo.pacnew on later sudo updates; merge those by hand.\n' >&2
+	printf 'To opt out, delete the pam_gaze.so line. Gaze will not put it back.\n' >&2
+	printf 'See https://gaze.gundulabs.com/guide/pam\n\n' >&2
+}
 
 configure_pam_sudo() {
 	pam_file=/etc/pam.d/sudo
 	[ -f "$pam_file" ] || return 0
+	[ -e "$PAM_SUDO_OPTOUT" ] && return 0
 	grep -q "pam_gaze" "$pam_file" 2>/dev/null && return 0
 
-	tmp=$(mktemp)
-	awk '
-		/^[[:space:]]*auth[[:space:]]/ && !done {
-			print "auth        sufficient    pam_gaze.so"
-			done = 1
-		}
-		{ print }
-	' "$pam_file" > "$tmp" && install -m 644 "$tmp" "$pam_file"
-	rm -f "$tmp"
+	if gaze_configured_pam_file "$pam_file"; then
+		record_pam_sudo_optout
+		return 0
+	fi
 
-	mkdir -p /etc/gaze
-	printf '%s\n' "$pam_file" > /etc/gaze/pam-arch.configured
+	insert_pam_gaze "$pam_file"
+	grep -q "pam_gaze" "$pam_file" 2>/dev/null || return 0
+	notice_pam_sudo_configured
 }
 
 configure_pam_polkit() {
 	pam_file=/etc/pam.d/polkit-1
-	[ -f "$pam_file" ] && return 0
+	if [ -f "$pam_file" ]; then
+		grep -q "pam_gaze" "$pam_file" 2>/dev/null && return 0
+		gaze_configured_pam_file "$pam_file" && return 0
+		mkdir -p /etc/gaze
+		[ -f /etc/gaze/polkit-1.pam.bak ] || cp -p "$pam_file" /etc/gaze/polkit-1.pam.bak
+		insert_pam_gaze "$pam_file"
+		return 0
+	fi
+
+	gaze_configured_pam_file "$pam_file" && return 0
 
 	cat > "$pam_file" <<-EOF
 	#%PAM-1.0
+	-auth       requisite     pam_faillock.so preauth
 	auth       sufficient   pam_gaze.so
 	auth       include      system-auth
 	account    include      system-auth
@@ -35,14 +148,29 @@ configure_pam_polkit() {
 	chmod 644 "$pam_file"
 
 	mkdir -p /etc/gaze
-	printf '%s\n' "$pam_file" > /etc/gaze/pam-arch.polkit-configured
+	printf '%s\n' "$pam_file" > "$PAM_POLKIT_STATE"
 }
 
+check_deprecated_pam_grosshack() {
+	if [ -d /etc/pam.d ] && grep -rnE '^[[:space:]]*[^#].*pam_gaze_grosshack\.so' /etc/pam.d/ >/dev/null 2>&1; then
+		printf '\n\033[1;33m[Gaze Notice]\033[0m Found legacy pam_gaze_grosshack.so in /etc/pam.d/:\n' >&2
+		grep -rnE '^[[:space:]]*[^#].*pam_gaze_grosshack\.so' /etc/pam.d/ 2>/dev/null | head -n 5 | sed 's/^/  /' >&2
+		printf 'This module is deprecated and will be removed in a future release.\n' >&2
+		printf 'Please update your PAM configuration to use: pam_gaze.so simultaneous\n' >&2
+		printf 'Run "gaze doctor" for more information.\n\n' >&2
+	fi
+}
+
+check_deprecated_pam_grosshack
+warn_missing_avx2
 configure_pam_sudo
 configure_pam_polkit
 
 if [ -d /run/systemd/system ]; then
-	systemctl daemon-reload >/dev/null 2>&1
+	systemctl daemon-reload >/dev/null 2>&1 || true
 	dbus-send --system --type=method_call --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig >/dev/null 2>&1 || true
 	systemctl restart polkit >/dev/null 2>&1 || true
+	if ! cpu_lacks_avx2; then
+		systemctl try-restart gazed >/dev/null 2>&1 || true
+	fi
 fi

@@ -1,6 +1,9 @@
-use crate::config::Config;
-use crate::dbus::{CaptureStatus, EnrollPrompt};
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use crate::detect::{DetectError, FaceDetector};
+use gaze_core::config::Config;
+use gaze_core::dbus::{CaptureStatus, EnrollPrompt};
 use opencv::core::Mat;
 use opencv::prelude::*;
 use std::sync::{Mutex, MutexGuard};
@@ -12,7 +15,7 @@ const ENROLL_STABLE_PITCH_RANGE: f32 = 0.06;
 const ENROLL_HORIZONTAL_POSE_DELTA: f32 = 0.16;
 const ENROLL_VERTICAL_POSE_DELTA: f32 = 0.07;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Spectrum {
     Rgb,
     Ir,
@@ -26,6 +29,13 @@ pub struct CaptureResult {
     pub mat_rgb: Option<opencv::core::Mat>,
     pub yaw: f32,
     pub pitch: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RgbFaceLuma {
+    pub mean: u8,
+    pub rolling_mean: f64,
+    pub threshold: u8,
 }
 
 fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -79,6 +89,8 @@ fn geometry_status(
     }
 }
 
+/// Yaw and pitch here are unitless landmark ratios, not angles. Yaw is the nose offset in eye
+/// widths and pitch in eye-to-mouth heights, so every threshold comparing them is a ratio too.
 pub fn estimate_head_pose(kps: &ndarray::Array3<f32>) -> Option<(f32, f32)> {
     let shape = kps.shape();
     if shape[0] < 1 || shape[1] < 5 || shape[2] < 2 {
@@ -158,6 +170,8 @@ impl EnrollmentPoseStability {
 
         let stable_yaw = max_yaw - min_yaw < ENROLL_STABLE_YAW_RANGE;
         let stable_pitch = max_pitch - min_pitch < ENROLL_STABLE_PITCH_RANGE;
+        // Directional prompts allow movement along the requested axis; only the other axis
+        // must settle. Requiring both would reject the turn the user was asked to make.
         match prompt {
             EnrollPrompt::LookStraight => stable_yaw && stable_pitch,
             EnrollPrompt::LookUp | EnrollPrompt::LookDown => stable_yaw,
@@ -174,6 +188,8 @@ pub enum IrFrameKind {
     EmitterDark,
 }
 
+/// Windows Hello emitters strobe, lighting only alternate frames, so an isolated dark frame is
+/// normal and only an unbroken streak means the emitter never fired.
 pub struct IrDarkFrameGate {
     threshold: u8,
     consecutive_dark: u32,
@@ -191,6 +207,15 @@ impl IrDarkFrameGate {
 
     pub fn classify(&mut self, frame: &Mat) -> IrFrameKind {
         let luma = frame_mean_luma(frame).unwrap_or(0);
+        self.classify_luma(luma)
+    }
+
+    pub fn classify_with_luma(&mut self, frame: &Mat) -> (IrFrameKind, u8) {
+        let luma = frame_mean_luma(frame).unwrap_or(0);
+        (self.classify_luma(luma), luma)
+    }
+
+    fn classify_luma(&mut self, luma: u8) -> IrFrameKind {
         if luma >= self.threshold {
             self.consecutive_dark = 0;
             return IrFrameKind::Lit;
@@ -201,6 +226,73 @@ impl IrDarkFrameGate {
         } else {
             IrFrameKind::StrobeDark
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RgbFrameKind {
+    Lit,
+    WarmupDark,
+    SettledDark,
+    SteadyDark,
+}
+
+pub struct RgbWarmupGate {
+    threshold: u8,
+    first_frame_at: Option<std::time::Instant>,
+    baseline: Option<u8>,
+    brightest: u8,
+    frames: u32,
+    lit_once: bool,
+}
+
+impl RgbWarmupGate {
+    pub const WARMUP: std::time::Duration = std::time::Duration::from_secs(2);
+    const TREND_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
+    const TREND_FRAMES: u32 = 8;
+    const RISE_MARGIN: u8 = 2;
+
+    pub fn new(threshold: u8) -> Self {
+        Self {
+            threshold,
+            first_frame_at: None,
+            baseline: None,
+            brightest: 0,
+            frames: 0,
+            lit_once: false,
+        }
+    }
+
+    pub fn classify_with_luma(&mut self, frame: &Mat) -> (RgbFrameKind, u8) {
+        let luma = frame_mean_luma(frame).unwrap_or(0);
+        (self.classify_luma(luma, std::time::Instant::now()), luma)
+    }
+
+    fn classify_luma(&mut self, luma: u8, now: std::time::Instant) -> RgbFrameKind {
+        let first_frame_at = *self.first_frame_at.get_or_insert(now);
+        let baseline = *self.baseline.get_or_insert(luma);
+        self.brightest = self.brightest.max(luma);
+        self.frames = self.frames.saturating_add(1);
+
+        if luma >= self.threshold {
+            self.lit_once = true;
+            return RgbFrameKind::Lit;
+        }
+        if self.lit_once {
+            return RgbFrameKind::SteadyDark;
+        }
+
+        let elapsed = now.duration_since(first_frame_at);
+        if elapsed >= Self::WARMUP {
+            return RgbFrameKind::SettledDark;
+        }
+
+        let rising = self.brightest.saturating_sub(baseline) >= Self::RISE_MARGIN;
+        if !rising && elapsed >= Self::TREND_GRACE && self.frames >= Self::TREND_FRAMES {
+            return RgbFrameKind::SteadyDark;
+        }
+
+        RgbFrameKind::WarmupDark
     }
 }
 
@@ -236,6 +328,7 @@ pub struct FaceChecker {
     pub detector: std::sync::Arc<std::sync::Mutex<FaceDetector>>,
     pub dark_luma_threshold: u8,
     pub rgb_luma_history: std::collections::VecDeque<u8>,
+    last_rgb_face_luma: Option<RgbFaceLuma>,
     pub spectrum: Spectrum,
     pub check_centering_and_proximity: bool,
     pub min_face_size_ratio: f32,
@@ -252,6 +345,7 @@ impl FaceChecker {
             detector,
             dark_luma_threshold: config.cameras.dark_luma_threshold,
             rgb_luma_history: std::collections::VecDeque::new(),
+            last_rgb_face_luma: None,
             spectrum,
             check_centering_and_proximity,
             min_face_size_ratio: config.enrollment.effective_min_face_size_ratio(),
@@ -278,10 +372,28 @@ impl FaceChecker {
         })
     }
 
+    pub fn dark_gate(spectrum: Spectrum, threshold: u8, frame: &Mat) -> Option<CaptureStatus> {
+        match spectrum {
+            Spectrum::Rgb if frame_is_too_dark(frame, threshold) => Some(CaptureStatus::TooDark),
+            _ => None,
+        }
+    }
+
     pub fn capture_status(
         &mut self,
         frame: &Mat,
     ) -> anyhow::Result<(CaptureStatus, Option<CaptureResult>)> {
+        self.last_rgb_face_luma = None;
+
+        if let Some(status) = Self::dark_gate(self.spectrum, self.dark_luma_threshold, frame) {
+            tracing::debug!(
+                "frame too dark: luma={} threshold={}",
+                frame_mean_luma(frame).unwrap_or(0),
+                self.dark_luma_threshold
+            );
+            return Ok((status, None));
+        }
+
         let detection = {
             let mut detector = lock_recover(&self.detector);
             detector.detect(frame)
@@ -318,8 +430,8 @@ impl FaceChecker {
                 let w = frame.cols() as f32;
                 let h = frame.rows() as f32;
                 let max_dim = w.max(h);
-                let top = (max_dim - h) / 2.0;
-                let left = (max_dim - w) / 2.0;
+                let top = ((max_dim - h) / 2.0).floor();
+                let left = ((max_dim - w) / 2.0).floor();
 
                 let x1_unpadded = x1 - left;
                 let y1_unpadded = y1 - top;
@@ -343,7 +455,13 @@ impl FaceChecker {
                     let is_current_frame_dark = (luma as f64) < threshold;
                     let is_avg_dark = avg_luma < threshold;
 
-                    tracing::debug!("luma: {} avg_luma: {}", luma, avg_luma);
+                    self.last_rgb_face_luma = Some(RgbFaceLuma {
+                        mean: luma,
+                        rolling_mean: avg_luma,
+                        threshold: self.dark_luma_threshold,
+                    });
+
+                    tracing::debug!("Luma: {luma} avg_luma: {avg_luma}");
 
                     if !is_current_frame_dark {
                         CaptureStatus::Usable
@@ -372,6 +490,14 @@ impl FaceChecker {
             )?),
         ))
     }
+
+    pub fn rgb_face_luma(&self) -> Option<RgbFaceLuma> {
+        self.last_rgb_face_luma
+    }
+}
+
+fn frame_is_too_dark(frame: &Mat, threshold: u8) -> bool {
+    frame_mean_luma(frame).unwrap_or(0) < threshold
 }
 
 pub fn frame_mean_luma(frame: &Mat) -> anyhow::Result<u8> {
@@ -429,6 +555,36 @@ mod tests {
             Mat::new_rows_cols_with_default(12, 12, core::CV_8UC3, Scalar::all(0.0)).unwrap();
 
         assert!(frame_mean_luma(&frame).unwrap() < 30);
+    }
+
+    #[test]
+    fn dark_gate_rejects_a_dark_rgb_frame_before_detection() {
+        let black = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(0.0)).unwrap();
+        assert_eq!(
+            FaceChecker::dark_gate(Spectrum::Rgb, 20, &black),
+            Some(CaptureStatus::TooDark)
+        );
+    }
+
+    #[test]
+    fn dark_gate_passes_a_lit_rgb_frame_through_to_detection() {
+        let lit = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(120.0)).unwrap();
+        assert_eq!(FaceChecker::dark_gate(Spectrum::Rgb, 20, &lit), None);
+    }
+
+    #[test]
+    fn dark_gate_never_rejects_an_ir_frame() {
+        let black = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(0.0)).unwrap();
+        assert_eq!(FaceChecker::dark_gate(Spectrum::Ir, 20, &black), None);
+    }
+
+    #[test]
+    fn blackout_frames_read_as_too_dark_while_lit_ones_do_not() {
+        let black = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(0.0)).unwrap();
+        let lit = Mat::new_rows_cols_with_default(8, 8, core::CV_8UC3, Scalar::all(120.0)).unwrap();
+
+        assert!(frame_is_too_dark(&black, 30));
+        assert!(!frame_is_too_dark(&lit, 30));
     }
 
     #[test]
@@ -646,6 +802,108 @@ mod tests {
         assert_eq!(gate.classify(&gate_frame(2.0)), IrFrameKind::EmitterDark);
         assert_eq!(gate.classify(&gate_frame(120.0)), IrFrameKind::Lit);
         assert_eq!(gate.classify(&gate_frame(2.0)), IrFrameKind::StrobeDark);
+    }
+
+    #[test]
+    fn rgb_warmup_gate_passes_lit_frames() {
+        let mut gate = RgbWarmupGate::new(30);
+        assert_eq!(
+            gate.classify_with_luma(&gate_frame(120.0)).0,
+            RgbFrameKind::Lit
+        );
+        assert_eq!(
+            gate.classify_with_luma(&gate_frame(30.0)).0,
+            RgbFrameKind::Lit
+        );
+    }
+
+    fn frame_at(offset_ms: u64) -> std::time::Duration {
+        std::time::Duration::from_millis(offset_ms)
+    }
+
+    #[test]
+    fn rgb_warmup_gate_holds_dark_frames_while_the_sensor_brightens() {
+        let mut gate = RgbWarmupGate::new(30);
+        let start = std::time::Instant::now();
+
+        for step in 0..20u64 {
+            assert_eq!(
+                gate.classify_luma(step as u8, start + frame_at(step * 60)),
+                RgbFrameKind::WarmupDark
+            );
+        }
+        assert_eq!(
+            gate.classify_luma(120, start + frame_at(1300)),
+            RgbFrameKind::Lit
+        );
+    }
+
+    #[test]
+    fn rgb_warmup_gate_gives_a_stream_that_never_brightens_no_grace() {
+        let mut gate = RgbWarmupGate::new(30);
+        let start = std::time::Instant::now();
+
+        for step in 0..16u64 {
+            assert_eq!(
+                gate.classify_luma(0, start + frame_at(step * 60)),
+                RgbFrameKind::WarmupDark
+            );
+        }
+        assert_eq!(
+            gate.classify_luma(0, start + RgbWarmupGate::TREND_GRACE),
+            RgbFrameKind::SteadyDark
+        );
+    }
+
+    #[test]
+    fn rgb_warmup_gate_waits_for_enough_frames_before_calling_a_stream_flat() {
+        let mut gate = RgbWarmupGate::new(30);
+        let start = std::time::Instant::now();
+
+        assert_eq!(gate.classify_luma(0, start), RgbFrameKind::WarmupDark);
+        assert_eq!(
+            gate.classify_luma(0, start + RgbWarmupGate::TREND_GRACE),
+            RgbFrameKind::WarmupDark
+        );
+    }
+
+    #[test]
+    fn rgb_warmup_gate_reports_a_brightening_stream_that_never_arrives() {
+        let mut gate = RgbWarmupGate::new(30);
+        let start = std::time::Instant::now();
+
+        for step in 0..20u64 {
+            assert_eq!(
+                gate.classify_luma(step as u8, start + frame_at(step * 60)),
+                RgbFrameKind::WarmupDark
+            );
+        }
+        assert_eq!(
+            gate.classify_luma(20, start + RgbWarmupGate::WARMUP),
+            RgbFrameKind::SettledDark
+        );
+    }
+
+    #[test]
+    fn rgb_warmup_gate_spends_its_grace_on_the_first_lit_frame() {
+        let mut gate = RgbWarmupGate::new(30);
+        let start = std::time::Instant::now();
+
+        assert_eq!(gate.classify_luma(120, start), RgbFrameKind::Lit);
+        assert_eq!(gate.classify_luma(2, start), RgbFrameKind::SteadyDark);
+    }
+
+    #[test]
+    fn rgb_warmup_gate_times_the_grace_from_the_first_frame() {
+        let mut gate = RgbWarmupGate::new(30);
+        let first_frame = std::time::Instant::now() + frame_at(10_000);
+
+        for step in 0..20u64 {
+            assert_eq!(
+                gate.classify_luma(step as u8, first_frame + frame_at(step * 60)),
+                RgbFrameKind::WarmupDark
+            );
+        }
     }
 
     #[test]

@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 <schemalist>
   <schema id="org.gnome.shell.extensions.gaze" path="/org/gnome/shell/extensions/gaze/">
     <key name="enable-face-authentication" type="b">

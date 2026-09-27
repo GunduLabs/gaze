@@ -1,0 +1,65 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Select Tumbleweed's common-* and postlogin-* PAM files at build time.
+# Keeping a separate manifest prevents broken service files during upgrades.
+name: "gaze-gnome-extension"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+release: "${PACKAGE_RELEASE}"
+section: "admin"
+priority: "optional"
+maintainer: "Gundu Labs <maintainers@gundulabs.com>"
+description: "GNOME Shell extension for Gaze"
+vendor: "Gundu Labs"
+homepage: "https://gaze.gundulabs.com"
+license: "GPL-3.0-or-later"
+
+contents:
+  - src: "gnome-shell-extension/metadata.json"
+    dst: "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/metadata.json"
+    file_info:
+      mode: 0644
+  - src: "gnome-shell-extension/extension.js"
+    dst: "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/extension.js"
+    file_info:
+      mode: 0644
+  - src: "gnome-shell-extension/prefs.js"
+    dst: "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/prefs.js"
+    file_info:
+      mode: 0644
+  - src: "packaging/config/org.gnome.shell.extensions.gaze.gschema.xml"
+    dst: "/usr/share/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml"
+    file_info:
+      mode: 0644
+  - src: "packaging/gdm/00-gaze-defaults"
+    dst: "/etc/dconf/db/gdm.d/00-gaze-defaults"
+    type: "config|noreplace"
+    file_info:
+      mode: 0644
+  - src: "packaging/gdm/profile"
+    dst: "/usr/share/gaze/dconf-profile-gdm"
+    file_info:
+      mode: 0644
+  - src: "packaging/pam/gdm-face.suse"
+    dst: "/etc/pam.d/gdm-face"
+    type: "config|noreplace"
+    packager: rpm
+    file_info:
+      mode: 0644
+
+rpm:
+  signature:
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+scripts:
+  postinstall: "packaging/postinst-gnome-extension.sh"
+  postremove: "packaging/postrm-gnome-extension.sh"
+
+depends:
+  - gnome-shell
+
+recommends:
+  - gaze
+  - policycoreutils

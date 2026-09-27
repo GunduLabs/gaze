@@ -1,6 +1,10 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use image::RgbImage;
 use nalgebra::Matrix3;
 
+/// Standard 112x112 ArcFace alignment template, from InsightFace's `arcface_dst` in face_align.py.
 pub const ARCFACE_SRC_PTS: [[f32; 2]; 5] = [
     [38.2946, 51.6963],
     [73.5318, 51.5014],
@@ -9,7 +13,18 @@ pub const ARCFACE_SRC_PTS: [[f32; 2]; 5] = [
     [70.7299, 92.2041],
 ];
 
+/// Least-squares similarity transform from Umeyama 1991, the same estimator scikit-image and
+/// InsightFace use. Returns the 3x3 matrix taking `src` onto `dst` with uniform scale.
 pub fn umeyama(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> Option<Matrix3<f32>> {
+    if src
+        .iter()
+        .chain(dst.iter())
+        .flatten()
+        .any(|value| !value.is_finite())
+    {
+        return None;
+    }
+
     let num_pts = src.len() as f32;
 
     let mut src_mean = [0.0; 2];
@@ -44,14 +59,16 @@ pub fn umeyama(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> Option<Matrix3<f32>>
     }
     a /= num_pts;
 
+    // Flipping the sign on the smallest singular value keeps the result a rotation. Without it a
+    // negative determinant yields a mirrored face, which the recognizer scores as a stranger.
     let mut d_vec = nalgebra::Vector2::new(1.0, 1.0);
     if a.determinant() < 0.0 {
         d_vec[1] = -1.0;
     }
 
     let svd = a.svd(true, true);
-    let u = svd.u.unwrap();
-    let v_t = svd.v_t.unwrap();
+    let u = svd.u?;
+    let v_t = svd.v_t?;
     let s = svd.singular_values;
 
     let d_mat = nalgebra::Matrix2::from_diagonal(&d_vec);
@@ -74,11 +91,13 @@ pub fn umeyama(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> Option<Matrix3<f32>>
         t[(i, 2)] = dst_mean[i] - scale * (r[(i, 0)] * src_mean[0] + r[(i, 1)] * src_mean[1]);
     }
 
-    Some(t)
+    t.iter().all(|value| value.is_finite()).then_some(t)
 }
 
 pub fn warp_affine(img: &RgbImage, transform: &Matrix3<f32>, width: u32, height: u32) -> RgbImage {
     let mut out = RgbImage::new(width, height);
+    // The transform maps camera coordinates to the aligned face; sample through its inverse
+    // so every output pixel gets a source location instead of leaving gaps when scaling up.
     let inv = transform.try_inverse().unwrap_or(Matrix3::identity());
 
     for y in 0..height {
@@ -99,18 +118,32 @@ pub fn warp_affine(img: &RgbImage, transform: &Matrix3<f32>, width: u32, height:
     out
 }
 
-pub fn mat_to_rgb(mat: &opencv::core::Mat) -> anyhow::Result<image::RgbImage> {
-    use opencv::prelude::*;
-    let mut img_bytes = Vec::new();
+/// Rejects anything that is not a tightly packed 8-bit 3-channel buffer. A strided or
+/// narrower `Mat` would otherwise be read past its allocation.
+pub fn mat_to_rgb(
+    mat: &impl opencv::prelude::MatTraitConstManual,
+) -> anyhow::Result<image::RgbImage> {
     let sz = mat.size()?;
-    let total_bytes = (sz.width * sz.height * 3) as usize;
-    img_bytes.resize(total_bytes, 0);
-    unsafe {
-        std::ptr::copy_nonoverlapping(mat.data(), img_bytes.as_mut_ptr(), total_bytes);
-    }
-    let img = image::RgbImage::from_raw(sz.width as u32, sz.height as u32, img_bytes)
-        .ok_or_else(|| anyhow::anyhow!("Failed to create RgbImage from Mat raw bytes"))?;
-    Ok(img)
+    anyhow::ensure!(
+        mat.typ() == opencv::core::CV_8UC3,
+        "expected an 8-bit 3-channel Mat, got type {}",
+        mat.typ()
+    );
+    anyhow::ensure!(mat.is_continuous(), "Mat rows are not tightly packed");
+
+    let bytes = mat.data_bytes()?;
+    let expected = (sz.width as usize)
+        .checked_mul(sz.height as usize)
+        .and_then(|pixels| pixels.checked_mul(3))
+        .ok_or_else(|| anyhow::anyhow!("Mat dimensions overflow a byte count"))?;
+    anyhow::ensure!(
+        bytes.len() == expected,
+        "Mat holds {} bytes, expected {expected}",
+        bytes.len()
+    );
+
+    image::RgbImage::from_raw(sz.width as u32, sz.height as u32, bytes.to_vec())
+        .ok_or_else(|| anyhow::anyhow!("Failed to create RgbImage from Mat raw bytes"))
 }
 
 pub fn align_face(
@@ -132,6 +165,38 @@ mod tests {
     use super::*;
     use image::Rgb;
     use nalgebra::Matrix3;
+    use opencv::core::{CV_8UC1, CV_8UC3, Mat, Rect, Scalar};
+    use opencv::prelude::*;
+
+    #[test]
+    fn a_packed_bgr_mat_converts_to_an_image_of_the_same_size() {
+        let mat = Mat::new_rows_cols_with_default(4, 6, CV_8UC3, Scalar::all(200.0)).unwrap();
+        let img = mat_to_rgb(&mat).unwrap();
+        assert_eq!((img.width(), img.height()), (6, 4));
+        assert!(img.pixels().all(|p| p.0 == [200, 200, 200]));
+    }
+
+    // A region of interest keeps the parent's stride, so a packed read would run off the end.
+    #[test]
+    fn a_strided_region_of_interest_is_refused() {
+        let parent = Mat::new_rows_cols_with_default(40, 40, CV_8UC3, Scalar::all(0.0)).unwrap();
+        let roi = Mat::roi(&parent, Rect::new(0, 0, 8, 8)).unwrap();
+        assert!(!roi.is_continuous());
+        assert!(mat_to_rgb(&roi).is_err());
+        // The same pixels, copied into their own packed buffer, are accepted.
+        assert!(mat_to_rgb(&roi.clone_pointee()).is_ok());
+    }
+
+    #[test]
+    fn a_single_channel_mat_is_refused() {
+        let gray = Mat::new_rows_cols_with_default(4, 6, CV_8UC1, Scalar::all(120.0)).unwrap();
+        assert!(mat_to_rgb(&gray).is_err());
+    }
+
+    #[test]
+    fn an_empty_mat_is_refused() {
+        assert!(mat_to_rgb(&Mat::default()).is_err());
+    }
 
     fn assert_close(actual: f32, expected: f32) {
         assert!(
@@ -200,6 +265,53 @@ mod tests {
         assert_eq!(*out.get_pixel(0, 0), Rgb([0, 0, 0]));
         assert_eq!(*out.get_pixel(1, 0), Rgb([1, 0, 0]));
         assert_eq!(*out.get_pixel(2, 0), Rgb([2, 0, 0]));
+    }
+
+    #[test]
+    fn umeyama_rejects_non_finite_landmarks() {
+        let base = [
+            [38.3, 51.7],
+            [73.5, 51.5],
+            [56.0, 71.7],
+            [41.5, 92.4],
+            [70.7, 92.2],
+        ];
+
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut src = base;
+            src[0][0] = bad;
+            assert!(umeyama(&src, &ARCFACE_SRC_PTS).is_none(), "{bad}");
+
+            let mut dst = base;
+            dst[2][1] = bad;
+            assert!(umeyama(&base, &dst).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn umeyama_rejects_degenerate_coincident_landmarks() {
+        assert!(umeyama(&[[10.0, 10.0]; 5], &ARCFACE_SRC_PTS).is_none());
+    }
+
+    #[test]
+    fn umeyama_still_solves_well_formed_landmarks() {
+        let transform = umeyama(&ARCFACE_SRC_PTS, &ARCFACE_SRC_PTS).unwrap();
+        assert!(transform.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn align_face_surfaces_an_error_for_non_finite_landmarks() {
+        let mut kpss = ndarray::Array3::<f32>::zeros((1, 5, 2));
+        kpss[[0, 0, 0]] = f32::NAN;
+        let mat = opencv::core::Mat::new_rows_cols_with_default(
+            8,
+            8,
+            opencv::core::CV_8UC3,
+            opencv::core::Scalar::all(128.0),
+        )
+        .unwrap();
+
+        assert!(align_face(&mat, &kpss, 0).is_err());
     }
 
     #[test]

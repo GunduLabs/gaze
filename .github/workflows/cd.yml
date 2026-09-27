@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: CD
 
 on:
@@ -20,7 +23,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  JUST_VERSION: 1.57.0
+  JUST_VERSION: 1.58.0
   NFPM_VERSION: v2.47.0
 
 jobs:
@@ -30,8 +33,6 @@ jobs:
     container: ${{ matrix.container }}
     env:
       DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
-      # ort-sys extracts ONNX Runtime here and links it by absolute path, so
-      # it must be a path rust-cache persists (default ~/.cache is not).
       ORT_CACHE_DIR: /github/home/.ort-cache
     strategy:
       fail-fast: false
@@ -125,6 +126,28 @@ jobs:
             rpm_distro: ""
             rpm_version: ""
             package_release: "1~debian13"
+          - id: debian-forky-amd64
+            name: deb (Debian 14 forky, amd64)
+            runner: ubuntu-latest
+            container: debian:forky
+            format: deb
+            distro: debian
+            distro_version: "14"
+            deb_suite: forky
+            rpm_distro: ""
+            rpm_version: ""
+            package_release: "1~debian14"
+          - id: debian-forky-arm64
+            name: deb (Debian 14 forky, arm64)
+            runner: ubuntu-24.04-arm
+            container: debian:forky
+            format: deb
+            distro: debian
+            distro_version: "14"
+            deb_suite: forky
+            rpm_distro: ""
+            rpm_version: ""
+            package_release: "1~debian14"
           - id: fedora-42-amd64
             name: rpm (Fedora 42, amd64)
             runner: ubuntu-latest
@@ -191,6 +214,17 @@ jobs:
             rpm_distro: fedora
             rpm_version: "44"
             package_release: "1.fc44"
+          - id: opensuse-tumbleweed-amd64
+            name: rpm (openSUSE Tumbleweed, amd64)
+            runner: ubuntu-latest
+            container: opensuse/tumbleweed:latest
+            format: rpm
+            distro: opensuse
+            distro_version: tumbleweed
+            deb_suite: ""
+            rpm_distro: opensuse
+            rpm_version: tumbleweed
+            package_release: "1.opensuse.tumbleweed"
           - id: arch
             name: archlinux (Arch Linux)
             runner: ubuntu-latest
@@ -205,7 +239,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -218,6 +252,7 @@ jobs:
             ca-certificates \
             curl \
             build-essential \
+            dpkg-dev \
             clang \
             libclang-dev \
             libcairo2-dev \
@@ -225,6 +260,9 @@ jobs:
             libgdk-pixbuf-2.0-dev \
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-pipewire \
             libpango1.0-dev \
             libgraphene-1.0-dev \
             libopencv-dev \
@@ -258,6 +296,9 @@ jobs:
             libadwaita-devel \
             gstreamer1-devel \
             gstreamer1-plugins-base-devel \
+            gstreamer1-plugins-base \
+            gstreamer1-plugins-good \
+            pipewire-gstreamer \
             openssl-devel \
             gnupg2 \
             rpm-sign \
@@ -265,11 +306,61 @@ jobs:
             gettext \
             gcc
 
+      - name: Install openSUSE Tumbleweed dependencies
+        if: ${{ matrix.distro == 'opensuse' }}
+        run: |
+          export ZYPP_MEDIA_CURL_IPRESOLVE=4
+          zypper --non-interactive modifyrepo --disable repo-openh264 || true
+          retry() {
+            for attempt in 1 2 3; do
+              if "$@"; then
+                return 0
+              fi
+              echo "::warning::'$*' failed (attempt $attempt/3)"
+              if [ "$attempt" -lt 3 ]; then
+                sleep $((attempt * 15))
+              fi
+            done
+            echo "::error::'$*' failed after 3 attempts"
+            return 1
+          }
+          retry zypper --non-interactive refresh
+          retry zypper --non-interactive dist-upgrade --no-recommends --allow-vendor-change
+          retry zypper --non-interactive install --no-recommends \
+            git \
+            ca-certificates \
+            curl \
+            clang \
+            clang-devel \
+            opencv-devel \
+            libv4l-devel \
+            pam-devel \
+            tpm2-0-tss-devel \
+            checkpolicy \
+            policycoreutils \
+            gtk4-devel \
+            libadwaita-devel \
+            gstreamer-devel \
+            gstreamer-plugins-base-devel \
+            gstreamer-plugins-base \
+            gstreamer-plugins-good \
+            gstreamer-plugin-pipewire \
+            libopenssl-devel \
+            gpg2 \
+            pkgconf-pkg-config \
+            envsubst \
+            gcc \
+            gcc-c++ \
+            binutils \
+            bash
+          echo "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" >>"$GITHUB_ENV"
+
       - name: Install Arch dependencies
         if: ${{ matrix.format == 'archlinux' }}
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm \
+            base-devel \
             git \
             ca-certificates \
             curl \
@@ -283,6 +374,8 @@ jobs:
             libadwaita \
             gstreamer \
             gst-plugins-base \
+            gst-plugins-good \
+            gst-plugin-pipewire \
             openssl \
             gnupg \
             pkgconf \
@@ -290,18 +383,35 @@ jobs:
             gcc
 
       - name: Install Rust toolchain
+        if: ${{ matrix.distro != 'opensuse' }}
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install just
+        if: ${{ matrix.distro != 'opensuse' }}
         uses: extractions/setup-just@v4
         with:
           just-version: ${{ env.JUST_VERSION }}
 
+      - name: Install Rust toolchain and just on openSUSE
+        if: ${{ matrix.distro == 'opensuse' }}
+        run: |
+          case "$(uname -m)" in
+            x86_64) just_target="x86_64-unknown-linux-musl" ;;
+            aarch64|arm64) just_target="aarch64-unknown-linux-musl" ;;
+            *) echo "Unsupported just install architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
+            | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
+          curl -fsSL "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${just_target}.tar.gz" \
+            -o /tmp/just.tar.gz
+          tar -xzf /tmp/just.tar.gz -C /usr/local/bin just
+          echo "PATH=$HOME/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" >>"$GITHUB_ENV"
+          "$HOME/.cargo/bin/rustc" --version
+          just --version
+
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          # v2: v1 caches predate ORT_CACHE_DIR and can replay ort-sys link
-          # paths into a directory that no longer exists.
           shared-key: cd-${{ matrix.id }}-v2
           cache-on-failure: true
           cache-directories: ${{ env.ORT_CACHE_DIR }}
@@ -383,47 +493,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: amd64
+          - arch: x86_64
             runner: ubuntu-latest
-          - arch: arm64
+          - arch: aarch64
             runner: ubuntu-24.04-arm
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - name: Install flatpak tooling
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install just
-        uses: extractions/setup-just@v4
+      - name: Set up Flatpak build environment
+        uses: ./.github/actions/setup-flatpak
         with:
           just-version: ${{ env.JUST_VERSION }}
-
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: cd-flatpak-vendor-${{ matrix.arch }}-v1
-          cache-on-failure: true
-
-      - name: Add flathub remote
-        run: flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-
-      - name: Install Flatpak GNOME SDK
-        run: flatpak install --user -y flathub org.gnome.Sdk//49 org.gnome.Platform//49
-
-      - name: Install Flatpak Rust SDK extension
-        run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.rust-stable//25.08
-
-      - name: Install Flatpak LLVM SDK extension
-        run: flatpak install --user -y flathub org.freedesktop.Sdk.Extension.llvm20//25.08
 
       - name: Import GPG key for flatpak signing
         id: import_gpg
@@ -445,7 +529,7 @@ jobs:
           path: dist/packages/*.flatpak
 
       - name: Upload flatpak remote metadata
-        if: ${{ matrix.arch == 'amd64' }}
+        if: ${{ matrix.arch == 'x86_64' }}
         uses: actions/upload-artifact@v7
         with:
           name: packages-flatpak-metadata
@@ -453,17 +537,73 @@ jobs:
             dist/packages/*.flatpakref
             dist/packages/*.flatpakrepo
 
+  build-srpm:
+    name: Build source RPM for Copr
+    runs-on: ubuntu-latest
+    container: fedora:45
+    env:
+      DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Install srpm tooling
+        run: |
+          dnf install -y \
+            git \
+            ca-certificates \
+            curl \
+            tar \
+            gzip \
+            zstd \
+            gettext \
+            gnupg2 \
+            rpm-build \
+            rpm-sign
+
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Trust workspace for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+
+      - name: Import signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+        run: |
+          if [ -n "$GPG_PRIVATE_KEY" ]; then
+            printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+            fingerprint="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/ { print $10; exit }')"
+            echo "RPM_SIGN_KEY=$fingerprint" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build source RPM
+        run: |
+          VERSION="${DEPLOY_REF_NAME#v}" just srpm
+          ls -lh dist/packages/
+
+      - name: Upload source RPM artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-srpm
+          path: |
+            dist/packages/*.src.rpm
+            dist/packages/copr-target.env
+
   dispatch-packages:
     name: Dispatch packages to self-hosted repo
     runs-on: ubuntu-latest
-    # Must wait for build-flatpak too: the packages repo downloads ALL of this
-    # run's artifacts by run_id when the dispatch lands, so every artifact
-    # (deb/rpm/arch AND the flatpak bundles) has to be uploaded first.
-    needs: [build-packages, build-flatpak]
+    needs: [build-packages, build-flatpak, build-srpm]
 
     steps:
-      # No checkout or artifact download needed: GunduLabs/packages pulls the
-      # packages-* artifacts itself by run_id and builds the apt/rpm/flatpak/aur repos.
       - name: Trigger GunduLabs/packages publish
         uses: peter-evans/repository-dispatch@v4
         with:
@@ -475,7 +615,7 @@ jobs:
   release-github:
     name: Upload packages to GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-packages, build-flatpak]
+    needs: [build-packages, build-flatpak, build-srpm]
     env:
       DEPLOY_REF_NAME: ${{ inputs.tag || github.ref_name }}
 
@@ -493,12 +633,8 @@ jobs:
           files: |
             dist/packages/**/*.deb
             dist/packages/**/*.rpm
+            dist/packages/**/*.src.rpm
             dist/packages/**/*.pkg.tar.*
             dist/packages/**/*.flatpak
             dist/packages/**/*.flatpakref
             dist/packages/**/*.flatpakrepo
-
-  # AUR publishing lives in GunduLabs/packages (its publish-repos.yml builds the
-  # Arch binary repo and pushes the AUR wrapper packages from the artifacts it
-  # downloads via the dispatch above). Publishing it from here too raced the
-  # packages repo on aur.archlinux.org, so it was removed.

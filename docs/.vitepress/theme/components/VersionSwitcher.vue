@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 <script setup lang="ts">
 import { computed } from 'vue'
 import UpstreamVersionSwitcher from '@viteplus/versions/components/version-switcher.component.vue'
@@ -28,8 +31,10 @@ const sortedVersioningPlugin = computed(() => ({
 </script>
 
 <template>
-  <UpstreamVersionSwitcher
-    :versioning-plugin="sortedVersioningPlugin"
-    :screen-menu="screenMenu"
-  />
+  <ClientOnly>
+    <UpstreamVersionSwitcher
+      :versioning-plugin="sortedVersioningPlugin"
+      :screen-menu="screenMenu"
+    />
+  </ClientOnly>
 </template>

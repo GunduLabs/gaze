@@ -1,34 +1,46 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Configuration
 
 Gaze is configured with `/etc/gaze/config.toml`.
 
 Most users only need to change camera source or security level.
 
-::: tip Editing config requires admin authorization
-`gaze config` writes settings through the daemon, which is guarded by
-PolicyKit, so you are prompted for an administrator password when saving. Over
-SSH or on a plain TTY, `gaze` registers a terminal agent (`pkttyagent`) so the
-prompt appears in your shell; make sure the `polkit` package is installed. In a
-graphical session the desktop's password dialog is used instead.
+::: tip Editing config requires admin privileges
+Settings are written through the daemon, which refuses unauthorized writes.
+`gaze config` re-runs itself through `sudo` and prompts for your password;
+`gaze config --show` is read-only and needs no privileges. The GUI settings
+window instead authorizes through PolicyKit and uses the desktop's password
+dialog, so make sure the `polkit` package is installed.
 :::
 
 ## Default config
 
 ```toml
+[inference]
+execution_provider = "cpu"
+device = "cpu"
+
 [security]
 level = "medium"
 
 [cameras]
 rgb = "primary"
-# ir = "/dev/video2"        # optional infrared camera; direct nodes are allowed only for IR
+# ir = "/dev/video2"        # optional infrared camera (direct /dev/video* node or usb:VVVV:PPPP)
 # emitter_enabled = false   # drive the IR emitter (requires ir)
-dark_luma_threshold = 30
+# parallel_capture = "never" # "never", "auto", or "always" (requires ir)
+dark_luma_threshold = 20
 
 [auth]
 abort_if_ssh = true
 abort_if_lid_closed = true
-require_confirmation = false
+abort_before_first_resume = false
+require_confirmation_lock_screen = false
+require_confirmation_elevation = false
 resume_grace_ms = 0
+start_delay_ms = 0
+start_delay_scope = "screen_lock"
 
 [enrollment]
 max_templates = 2
@@ -37,10 +49,12 @@ min_face_size_ratio = 0.25
 [liveness]
 enabled = true
 threshold = 0.8
-max_frames = 40
+max_seconds = 2.0
 
 [storage]
 encrypt_templates = false
+unlock_kwallet = false # optional TPM-backed KDE wallet unlock
+unlock_gnome_keyring = false
 ```
 
 ## Upgrades
@@ -52,11 +66,51 @@ dpkg keeps your file and asks before replacing it. Any option missing from
 your config uses its built-in default, so you don't need to merge new options
 after upgrading.
 
+## Select the inference device
+
+Gaze always loads its `.onnx` models through ONNX Runtime.
+
+The default uses the ONNX Runtime CPU execution provider:
+
+```toml
+[inference]
+execution_provider = "cpu"
+device = "cpu"
+```
+
+OpenVINO does not select a fixed device at build time. The same
+OpenVINO-enabled Gaze binary can use an Intel CPU, GPU, or NPU. Select the
+device in `/etc/gaze/config.toml`.
+
+An installation with OpenVINO support should select the Intel NPU by default:
+
+```toml
+[inference]
+execution_provider = "openvino"
+device = "npu"
+```
+
+Change `device` to `"gpu"` to use the Intel GPU. This does not require
+recompiling Gaze.
+
+The Gaze daemon must also be compiled with the `openvino` Cargo feature. On a
+CPU-only build, `gaze config` and the GUI refuse to set
+`execution_provider = "openvino"`. A config file that already contains it does
+not stop the daemon: it logs a warning and runs on the CPU, the same way every
+other unusable value in `/etc/gaze/config.toml` is handled.
+
+The values stay lowercase in the config. Gaze converts the device name only
+when it calls OpenVINO. ONNX Runtime keeps its CPU execution provider after
+OpenVINO. It runs unsupported model operations on the CPU. If Gaze cannot
+create an OpenVINO session, it logs the error and creates a CPU session.
+`gaze doctor --benchmark` reports the execution provider and device each model
+actually uses, and warns when that is not the configured one.
+
 ## Change security level
 
 `level` (under `[security]`) controls model choice and match strictness.
 
-| Level | Detector | Recognizer | Threshold | Hybrid Policy | Notes |
+| Level | Detector | Recognizer | RGB / IR Threshold | Hybrid Policy | Notes |
 |---|---|---|---|---|---|
 | `low` | SCRFD-500M | MobileFaceNet | 0.30 | `or` | Fastest |
 | `medium` | SCRFD-500M | MobileFaceNet | 0.40 | `fallback_on_dark` | Default |
@@ -76,19 +130,32 @@ Practical guidance:
 level = "custom"
 detector = "accurate"   # "standard" or "accurate"
 recognizer = "accurate" # "standard" or "accurate"
-threshold = 0.55
+rgb_threshold = 0.55
+ir_threshold = 0.45
 hybrid_policy = "or"    # optional; default, or, fallback_on_dark, and
 ```
+
+RGB and IR similarity thresholds are independent for the custom level. The legacy `threshold` key remains accepted and supplies both values when the spectrum-specific keys are absent.
 
 ### Hybrid combining policy
 
 `hybrid_policy` (under `[security]`, only configurable when `level = "custom"`) controls how RGB and IR (infrared) authentication results are combined when templates are enrolled for both modes and both cameras are available.
 
 Supported policies:
-- `default`: uses the policy shown in the table above for the active level.
 - `or`: auth succeeds if either RGB or IR matches.
 - `fallback_on_dark`: requires both, unless RGB is too dark (below `dark_luma_threshold`), in which case only IR is required.
 - `and`: auth succeeds only if both RGB and IR match.
+- `default`: a synonym for `fallback_on_dark`. It does not resolve to the policy
+  the table above lists for the active level.
+
+To get the policy the table lists for a level, omit `hybrid_policy` entirely.
+The key is only read when `level = "custom"`, and a custom level with the key
+absent also resolves to `fallback_on_dark`.
+
+Both `fallback_on_dark` and `default` require RGB and IR to match when RGB was
+never attempted at all, for example when the RGB camera could not be opened.
+Only a frame that was captured and measured as too dark relaxes the requirement
+to IR alone.
 
 ## Select Camera Source
 
@@ -99,18 +166,25 @@ The default camera source is:
 rgb = "primary"
 ```
 
-`primary` uses GStreamer `pipewiresrc`. To pin Gaze to a specific PipeWire camera, use `gaze config` or set `rgb` to a GStreamer source:
+`primary` resolves to the first color `/dev/video*` node. To pin Gaze to a specific PipeWire camera, use `gaze config` or set `rgb` to a GStreamer source:
 
 ```toml
 [cameras]
 rgb = "pipewiresrc target-object=<pipewire-target>"
 ```
 
-`pipewiresrc` needs a PipeWire session to attach to. GDM's greeter runs its own
-user session and provides one, but greeters like KDE's `plasmalogin`, SDDM,
-greetd, and a plain TTY do not, so `primary` cannot capture RGB there. For those
-setups, point `rgb` at the camera directly, which uses `v4l2src` and needs no
-session:
+For authentication and enrollment, the privileged daemon captures the backing
+kernel `/dev/video*` node directly with `v4l2src` and never connects to a
+user-session PipeWire socket: that socket — and every virtual camera it
+advertises — is controlled by the user being authenticated, so trusting it would
+let injected frames reach face authentication. A pinned PipeWire target is
+resolved to its own V4L2 node the same way, and a source with no kernel node
+(including a hand-written GStreamer pipeline) is refused. `primary` therefore
+works in greeters and on plain TTYs with no PipeWire session at all.
+
+Pinning `rgb` to the camera directly uses `v4l2src` straight away without
+resolving a PipeWire target first. Prefer it when the machine has several
+cameras and you want a specific one:
 
 ```toml
 [cameras]
@@ -130,14 +204,14 @@ Gaze rejects frames that are too dark before running face detection:
 
 ```toml
 [cameras]
-dark_luma_threshold = 30
+dark_luma_threshold = 20
 ```
 
-With the default, a frame is skipped when its mean luminance (0-255, BT.601 weighted) falls below 30. Raise it to reject dimmer scenes, lower it to be more permissive.
+With the default, a frame is skipped when its mean luminance (0-255, BT.601 weighted) falls below 20. Raise it to reject dimmer scenes, lower it to be more permissive.
 
 ## Infrared (IR) camera
 
-Gaze supports Windows Hello-style infrared (IR) cameras to enable multi-camera hybrid authentication. Unlike the RGB setting, `ir` may point directly to the IR camera's `/dev/video*` node:
+Gaze supports Windows Hello-style infrared (IR) cameras to enable multi-camera hybrid authentication. The `ir` setting may point directly to the IR camera's `/dev/video*` node:
 
 ```toml
 [cameras]
@@ -154,9 +228,33 @@ ir = "usb:046d:085e"
 # ir = "pipewiresrc target-object=<pipewire-target>"
 ```
 
-When `ir` is configured, Gaze captures from both the RGB and IR cameras. During enrollment, both cameras capture templates. During verification, Gaze captures from the two cameras one at a time (RGB, then IR) and combines the results according to the configured `hybrid_policy`. Capturing sequentially rather than concurrently lets single-function webcams that cannot stream their RGB and IR sensors at once (for example the Logitech BRIO 4K, `046d:085e`) still use hybrid authentication.
+When `ir` is configured, Gaze captures from both the RGB and IR cameras. During enrollment, both cameras capture templates. During verification, Gaze combines the results according to the configured `hybrid_policy`.
 
-Some Windows Hello webcams expose their RGB and IR sensors as a single USB Video Class function and can't stream both at once. Enrollment still works since it only needs short bursts, but parallel RGB+IR verification drops the IR stream mid-loop (`IR camera stream stopped unexpectedly`) and auth falls back to password. If you hit this, run IR-only: leave `rgb` unset (`rgb = ""`) and configure `ir` alone.
+### Parallel RGB + IR capture
+
+By default, verification captures the two cameras one at a time (RGB, then IR). Capturing sequentially rather than concurrently lets single-function webcams that cannot stream their RGB and IR sensors at once (for example the Logitech BRIO 4K, `046d:085e`) still use hybrid authentication, at the cost of latency: with `hybrid_policy = "and"` both spectra always run, so the two capture phases add up.
+
+If your camera can stream both sensors at once, `parallel_capture` restores the concurrent behavior:
+
+```toml
+[cameras]
+ir = "/dev/video2"
+parallel_capture = "auto"
+```
+
+| Value | Behavior |
+| --- | --- |
+| `never` (default) | Always capture RGB, then IR. Works on every camera. |
+| `auto` | Capture in parallel only when RGB and IR are separate hardware functions. |
+| `always` | Always capture in parallel. Use only if you know your camera supports it. |
+
+`auto` resolves each configured source to its `/dev/video*` node and compares the hardware function behind it (for USB cameras, the sysfs USB interface the node hangs off). Two nodes on the same function are substreams of one device that only streams one mode at a time, so they stay serial even though their node numbers differ. This is the BRIO case, where `/dev/video0` and `/dev/video2` share a single UVC function.
+
+The default `rgb = "primary"` means the first color `/dev/video*` node. Rather than guess which one that is, `auto` asks the question from the IR side: does the IR camera's own function also expose a colour node? If it does, the IR camera is a dual-sensor device that `primary` may well resolve to, so capture stays serial. If the IR function is infrared-only, it cannot be whatever `primary` turns out to be, and the two stream at once. An unresolvable `rgb` value is treated the same way. If nothing can be enumerated at all, `auto` keeps the serial path.
+
+Parallel capture only changes *when* each spectrum is captured, never whether both have to pass. `hybrid_policy` behaves identically in both modes. The speedup is also bounded by face detection, which both spectra share, so expect a real improvement rather than a halving.
+
+Some Windows Hello webcams expose their RGB and IR sensors as a single USB Video Class function and can't stream both at once. Enrollment still works since it only needs short bursts, but parallel RGB+IR verification drops the IR stream mid-loop (`IR camera stream stopped unexpectedly`) and auth falls back to password. If you hit this after setting `parallel_capture`, set it back to `never`. Enrollment always captures one camera at a time regardless of this setting.
 
 The Logitech BRIO 4K (`046d:085e`) is a known example. That's the original BRIO, not the newer Brio 300/500/100, which use different product IDs.
 
@@ -178,30 +276,89 @@ Gaze skips face authentication in sessions where the camera is unlikely or unsaf
 [auth]
 abort_if_ssh = true
 abort_if_lid_closed = true
-require_confirmation = false
+abort_before_first_resume = false
+require_confirmation_lock_screen = false
+require_confirmation_elevation = false
 resume_grace_ms = 0
+start_delay_ms = 0
+start_delay_scope = "screen_lock"
 ```
 
-`abort_if_ssh` detects SSH sessions from the DBus caller process environment. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor.
+`abort_if_ssh` asks logind whether the D-Bus caller's session is remote, falling back to the caller process environment and ancestry where logind is unreachable. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor.
 
-Setting `require_confirmation = true` adds a manual intent check step after a successful face match. Both PAM modules honor it.
+Aborting face authentication when you type a password is not a key in this file. It is a property of the PAM stack: [simultaneous mode](/guide/pam#what-gaze-installs) (`pam_gaze.so simultaneous`) stands Gaze down as soon as you submit a password, and [retry mode](/guide/pam#retry-after-a-rejected-password) (`pam_gaze.so retry`) gives face auth one more attempt if that password turns out to be wrong.
 
-With the standard `pam-gaze` module (e.g. `sudo`, `gdm-face`):
+`abort_before_first_resume` refuses face authentication until the machine has suspended and woken at least once, so the first authentication of a boot always falls through to the password. On GNOME that password is what unlocks the login keyring; authenticating with your face instead leaves the keyring locked and GNOME asks for the password again a moment later. With this enabled you type the password once at the GDM login and then unlock with your face for the rest of the session.
+
+Gaze arms the gate from logind's `PrepareForSleep` signal, the same signal `resume_grace_ms` uses, so hibernation counts as well as suspend. The state lives in `gazed` and is not persisted: if the daemon restarts, the next authentication is blocked again until the next resume. It applies to every surface, including `gaze auth` and the GUI's test button, so a test right after boot will report a failure until you suspend once.
+
+`require_confirmation_lock_screen` and `require_confirmation_elevation` each add a manual intent check step after a successful face match, and can be toggled independently. `require_confirmation_lock_screen` covers the lock screen and login/greeter screens (e.g. GDM); `require_confirmation_elevation` covers elevated auth prompts (`sudo`, `su`, `doas`, `run0`, polkit, `pkexec`). Both PAM modules honor them.
+
+When confirmation is disabled, a successful match replaces the camera prompt with "Face Verified." and authentication continues immediately without waiting for input.
+
+With the standard sequential `pam_gaze` mode (e.g. `sudo`, `gdm-face`):
 - In a text-based (TTY) environment such as `sudo` in a terminal, it asks for text confirmation after the face match ("Press Enter to confirm, Esc to cancel").
-- On the GNOME lock screen and GDM login screen (with the Gaze Extension active), it shows "Face Verified. Press Enter to confirm." below the password field; press Enter with the field empty to confirm. If the extension is inactive, the login is denied, because the extension is the expected confirmation channel on GNOME and Gaze will not silently skip the confirmation you asked for.
-- In other graphical prompts without a TTY (e.g. the KDE lock screen, `hyprlock`), there is no channel to answer the prompt, so confirmation is bypassed and the face match alone unlocks. If you need the confirmation step enforced there, use the `pam-gaze-grosshack` module, which drives a graphical confirm dialog.
+- On the GNOME lock screen, GDM login screen, and unified Cinnamon lock screen (with the Gaze Extension active), it shows "Face Verified. Press Enter to confirm." below the password field (or presents a dedicated "Confirm Face Unlock" button); press Enter or click the button to confirm. If the extension is inactive, the login is denied, because the extension is the expected confirmation channel on GNOME and Gaze will not silently skip the confirmation you asked for.
+- Where there is no controlling terminal but the PAM conversation can still prompt (e.g. `hyprlock`), it asks "Face Verified. Type 'yes' to confirm." An empty answer never counts as consent there: hosts that answer unknown prompts with `""` would otherwise auto-confirm without the user doing anything.
+- On the KDE lock screen biometric slots (`kde-fingerprint`, `kde-smartcard`) and the `plasmalogin-fingerprint` greeter helper, there is no channel that could answer at all, so the face match unlocks on its own and `require_confirmation_lock_screen` is silently ignored there by design. Asking would not reach anybody: the greeter never delivers a response to a noninteractive slot, so the request would hang that slot for the rest of the lock. `gaze doctor` warns when the toggle is on and one of those slots is wired. If you want the confirmation step enforced on a surface that can show a dialog, use simultaneous mode (`pam_gaze.so simultaneous`).
+- A **login greeter** is the exception: it never bypasses. GDM always runs GNOME with the Gaze Extension, so confirmation is enforced there or the login is denied.
 
-With the `pam-gaze-grosshack` module:
+A "text-based (TTY) environment" means Gaze can open the process's controlling terminal (`/dev/tty`), which is how `sudo` itself finds the terminal to prompt on. Redirected standard input does not change that, so `echo 1 | sudo tee /tmp/1` still confirms from the keyboard. When there is no controlling terminal at all (a management console such as Cockpit that drives PAM over a framed stdio protocol, or a service started without one), nobody can press a key, so Gaze neither prints a terminal banner nor waits for one; the face match is refused and the stack falls through to the password.
+
+Callers that set the PAM `PAM_SILENT` flag, `sudo` among them, receive no messages through their own conversation. Gaze still writes the camera prompt and the verdict to the controlling terminal when there is one, so a terminal user keeps the "Please look at the camera" / "Face Verified." feedback; graphical callers with no terminal stay silent.
+
+With simultaneous mode (`pam_gaze.so simultaneous`):
 - The password prompt still comes up immediately so you are never blocked.
 - If face verification succeeds before you finish entering your password:
   - In a text-based (TTY) environment, it cancels the password prompt and asks for text confirmation ("Press Enter to confirm, Esc to cancel").
   - In a graphical Polkit environment:
-    - On **GNOME** (with the Gaze Extension active), it hides the password field, activates the "Authenticate" button, and lets you confirm with a single click. If the extension is inactive, it bypasses confirmation entirely to avoid locking you out.
+    - On **GNOME and Cinnamon** (with the Gaze Extension active), it hides the password field, focuses the "Authenticate" button, and lets you confirm by pressing Enter or clicking the button. If the extension is inactive, it bypasses confirmation entirely to avoid locking you out.
     - On **KDE Plasma & LXQt**, it prompts you to press "OK" to confirm.
     - On **Hyprland**, it prompts you to press "Authenticate" to confirm.
     - On other graphical environments, it prompts you to press "Enter" to confirm.
 
 `resume_grace_ms` delays face verification on system resume by the specified number of milliseconds (e.g. `3000` ms) to allow slower displays/GPUs to initialize and repaint, preventing verification from occurring behind a blank screen. Set to `0` to disable the delay.
+
+`start_delay_ms` delays face verification by the specified number of milliseconds, not only after suspend. Set to `0` to disable the delay.
+
+Use it when your lock screen unlocks itself the moment you lock it manually. Lockers differ in when they start authenticating: hyprlock starts its PAM stack as soon as it launches, and KDE's lock screen starts as soon as its UI appears, so if you are still sitting in front of the camera when you lock, Gaze matches your face and unlocks again immediately. A delay of `3000`-`5000` ms gives you time to step away. The GNOME lock screen does not need this, because face authentication there only begins once you dismiss the lock shield.
+
+The delay is measured from when the session locked, not from each attempt, so a
+second try during the same lock does not wait all over again. Gaze learns the lock
+time from logind's `LockedHint`, which GNOME, KScreenLocker and hyprlock all set.
+Where nothing sets it, every attempt waits the full delay.
+
+`start_delay_scope` controls which prompts wait:
+
+| Value | Effect |
+| --- | --- |
+| `all` | Every face authentication prompt waits, `sudo` and polkit prompts included. |
+| `screen_lock` (default) | Only screen lockers wait. `sudo`, `su`, `doas`, `run0`, polkit, `pkexec` and display-manager greeters start scanning immediately. |
+
+Neither scope delays `gaze auth` or the GUI's test button. Those call the daemon directly, with no PAM prompt and no locker to step away from, so they always start scanning at once. The `resume_grace_ms` wait still applies to them, because that one is about the camera and display settling after suspend.
+
+The default `screen_lock` scope gives you the delay on your lock screen without a slow `sudo`:
+
+```toml
+[auth]
+start_delay_ms = 3000
+start_delay_scope = "screen_lock"
+```
+
+Gaze tells these apart by the PAM service name of the prompt, which is the only signal that works everywhere. On GNOME, for example, the same process drives both the lock screen and polkit dialogs, so nothing about the caller itself distinguishes them. A service Gaze does not recognize counts as a screen lock, so an unusual locker keeps the delay you configured rather than silently losing it. `gdm-face` counts as a screen lock by name, because GDM uses it for both the greeter and the lock screen; when the active session is a greeter the daemon reclassifies it as a login so the greeter does not wait.
+
+To see what your prompts report, watch the daemon while you trigger one:
+
+```bash
+journalctl -u gazed -f | grep 'Face auth requested'
+```
+
+Four things to keep in mind:
+
+- The scope is only honored by a daemon new enough to know about it. Package upgrades restart `gazed` if it was already running, but if you built or installed Gaze some other way and the old daemon is still live, the delay keeps applying to every prompt. Run `sudo systemctl restart gazed` if `screen_lock` appears to be ignored.
+- On resume from suspend, Gaze waits for whichever of `start_delay_ms` and `resume_grace_ms` is longer. The two do not stack.
+- `resume_grace_ms` ignores `start_delay_scope`. It exists so the display can repaint after suspend, which has nothing to do with which prompt is asking, so it still applies to the first authentication after a resume whatever that prompt is.
+- With a sequential PAM stack (`hyprlock-gaze`, the default), `pam_gaze.so` runs before the password module, so the delay also postpones the point at which a typed password is accepted. You can type during the delay, but your first Enter may be consumed while PAM is still inside Gaze, requiring a second press. This is the same behavior as the existing wait while a face scan is in progress. The simultaneous stack (`hyprlock-gaze-simultaneous`) prompts for the password in parallel and avoids it.
 
 After changing config:
 
@@ -258,6 +415,24 @@ Apply changes with:
 sudo systemctl restart gazed
 ```
 
+## Unlock GNOME Keyring after a GDM face login
+
+`storage.unlock_gnome_keyring` defaults to `false`. It requires TPM template
+encryption and liveness; if either is missing the option is ignored and the
+daemon logs why. Run `gaze keyring` for each user after enabling it — users who
+skip it keep logging in with face and are prompted for the keyring as before.
+Read the security notes in
+[GNOME Keyring setup](/guide/gnome#optional-tpm-backed-keyring-unlock) first:
+the stored password is recoverable by root on this machine.
+
+## Unlock KWallet after a KDE face login
+
+`storage.unlock_kwallet` also defaults to `false` and requires both TPM template
+encryption and liveness. Enable it for KDE login wallet unlock, then run
+`gaze keyring --kwallet` and `sudo gaze-kde-pam enable-login`. Its credential is
+independent of GNOME Keyring. See [KWallet setup](/guide/kde#optional-tpm-backed-kwallet-unlock)
+for supported login services, PAM setup, and re-enrollment requirements.
+
 ## Enrollment behavior
 
 ```toml
@@ -287,8 +462,8 @@ Gaze supports enrolling face profiles for both RGB and IR cameras. Depending on 
 
 ### Upgrading Existing Profiles
 
-If you connect or configure an IR camera after you have already enrolled a face, your existing face profiles will only contain RGB captures. 
-- You can see which capture types exist for each face profile in the CLI (`gaze list-faces`) and the GUI settings window, which display `[RGB]` and `[IR]` status badges.
+If you connect or configure an IR camera after you have already enrolled a face, your existing face profiles will only contain RGB captures.
+- You can see which capture types exist for each face profile in the CLI (`gaze list-faces`) and the GUI settings window, which display `[RGB]` and `[IR]` badges: green when the profile covers that spectrum, amber when a camera is configured for it but the profile has no captures from it, and grey when no camera is configured for that spectrum at all.
 - To add the missing IR captures to an existing profile, ensure your IR camera is configured, and run:
   ```bash
   gaze refine-face <profile-name>
@@ -301,12 +476,14 @@ If you connect or configure an IR camera after you have already enrolled a face,
 [liveness]
 enabled = true
 threshold = 0.8
-max_frames = 40
+max_seconds = 2.0
 ```
 
 When enabled, Gaze runs a local MiniFASNet-V2 anti-spoofing model on the detected face crop after a recognition match. Authentication succeeds only when the face matches and either one frame reaches `threshold` or the best few frames show sustained near-threshold liveness.
 
-`max_frames` caps how many valid face frames Gaze will try before returning no match.
+Alongside the model, Gaze watches how far your eyes travel between frames, measured against the distance between them so it does not depend on how close you sit. A run that has accumulated several frame pairs and never seen movement above that floor is treated as a still object and refused even when the model is confident. Moving normally (breathing, blinking, small head shifts) clears it; once any pair shows movement, holding still afterwards does not undo it. On IR cameras this movement check is the whole liveness test, since the anti-spoof model is trained on colour frames.
+
+`max_seconds` caps how long (in seconds of usable face frames) Gaze examines the camera before giving up and falling back to your password. It bounds the whole attempt, not just the liveness stage: an unrecognised face spends the same budget. Gaze calculates the frame budget dynamically using your camera's actual frame rate (e.g. 2.0 seconds corresponds to 60 frames on a 30fps webcam, or 120 frames on a 60fps camera). Frames only count while a usable face is in view, and the RGB and IR phases each get the full budget. Raise it if authentication gives up before you are ready; `gaze auth --verbose` reports when a run ends this way.
 
 ## Recommended tuning workflow
 

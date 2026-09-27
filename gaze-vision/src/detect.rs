@@ -1,7 +1,13 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use opencv::core::Mat;
 use opencv::prelude::*;
-use ort::{session::Session, session::builder::GraphOptimizationLevel, value::TensorRef};
+use ort::{session::Session, value::TensorRef};
 use std::fmt;
+
+use crate::inference::{InferenceRuntime, create_session};
+use gaze_core::config::InferenceConfig;
 
 #[derive(Debug)]
 pub enum DetectError {
@@ -50,25 +56,31 @@ pub type DetectResult = (ndarray::Array2<f32>, Option<ndarray::Array3<f32>>, Mat
 
 pub struct FaceDetector {
     session: Session,
+    inference_runtime: InferenceRuntime,
     input_size: (usize, usize), // (width, height)
     conf_threshold: f32,
     iou_threshold: f32,
 }
 
 impl FaceDetector {
-    pub fn new(model_path: &str) -> Result<Self, DetectError> {
-        let session = Session::builder()
-            .map_err(|e| DetectError::InitFailed(e.to_string()))?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| DetectError::InitFailed(e.to_string()))?
-            .commit_from_file(model_path)?;
+    pub fn new_with_inference(
+        model_path: &str,
+        inference: &InferenceConfig,
+    ) -> Result<Self, DetectError> {
+        let (session, inference_runtime) = create_session(model_path, inference)
+            .map_err(|error| DetectError::InitFailed(error.to_string()))?;
 
         Ok(Self {
             session,
+            inference_runtime,
             input_size: (320, 320),
             conf_threshold: 0.1,
             iou_threshold: 0.4,
         })
+    }
+
+    pub fn inference_runtime(&self) -> &InferenceRuntime {
+        &self.inference_runtime
     }
 
     pub fn pad_to_square(img: &Mat) -> Result<Mat, DetectError> {
@@ -155,6 +167,8 @@ impl FaceDetector {
             )));
         }
 
+        // SCRFD emits one tensor per stride per head, laid out as scores, then boxes, then
+        // optional keypoints, so head `i` for a stride lives at i, i+3 and i+6. Two anchors a cell.
         let has_kps = num_outputs == 9;
         let strides = [8, 16, 32];
         let num_anchors = 2;
@@ -181,6 +195,20 @@ impl FaceDetector {
                 None
             };
 
+            let points = grid_h * grid_w * num_anchors;
+            if score_data.len() < points
+                || bbox_data.len() < points * 4
+                || kps_data.is_some_and(|data| data.len() < points * 10)
+            {
+                return Err(DetectError::InferenceFailed(format!(
+                    "detector heads for stride {stride} are too small for a {grid_w}x{grid_h} \
+                     grid with {num_anchors} anchors: scores {}, boxes {}, keypoints {:?}",
+                    score_data.len(),
+                    bbox_data.len(),
+                    kps_data.map(<[f32]>::len)
+                )));
+            }
+
             for y in 0..grid_h {
                 for x in 0..grid_w {
                     let anchor_x = (x * stride) as f32;
@@ -191,6 +219,8 @@ impl FaceDetector {
 
                         let score = score_data[point_idx];
                         if score >= self.conf_threshold {
+                            // Anchor-free FCOS encoding, so the four values are distances from
+                            // the anchor point to each edge in stride units, not corner offsets.
                             let b_idx = point_idx * 4;
                             let l = bbox_data[b_idx] * (*stride as f32);
                             let t = bbox_data[b_idx + 1] * (*stride as f32);
@@ -233,6 +263,8 @@ impl FaceDetector {
             return Err(DetectError::NoFacesDetected);
         }
 
+        // Keep boxes and landmarks in the padded image's coordinates: callers crop and align
+        // against the returned mat_rgb, so subtracting the padding here would misplace them.
         let scale_x = (mat_square.cols() as f32) / (w as f32);
         let scale_y = (mat_square.rows() as f32) / (h as f32);
 
@@ -287,14 +319,7 @@ fn nms(boxes: &[[f32; 4]], scores: &[f32], iou_threshold: f32) -> Vec<usize> {
     while !indices.is_empty() {
         let current = indices[0];
         keep.push(current);
-
-        let mut next_indices = Vec::new();
-        for &idx in indices.iter().skip(1) {
-            if iou(&boxes[current], &boxes[idx]) < iou_threshold {
-                next_indices.push(idx);
-            }
-        }
-        indices = next_indices;
+        indices.retain(|&idx| idx != current && iou(&boxes[current], &boxes[idx]) < iou_threshold);
     }
 
     keep
@@ -324,6 +349,11 @@ fn iou(box1: &[f32; 4], box2: &[f32; 4]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opencv::core::{CV_8UC3, Scalar};
+
+    fn filled(cols: i32, rows: i32, value: f64) -> Mat {
+        Mat::new_rows_cols_with_default(rows, cols, CV_8UC3, Scalar::all(value)).unwrap()
+    }
 
     #[test]
     fn test_iou() {
@@ -360,5 +390,144 @@ mod tests {
         let keep = nms(&boxes, &scores, 0.4);
         assert_eq!(keep.len(), 3);
         assert!(keep.contains(&1));
+    }
+
+    #[test]
+    fn iou_of_a_box_with_itself_is_one() {
+        let square = [10.0, 10.0, 20.0, 20.0];
+        assert!((iou(&square, &square) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn iou_is_symmetric() {
+        let a = [0.0, 0.0, 10.0, 10.0];
+        let b = [5.0, 5.0, 15.0, 15.0];
+        assert_eq!(iou(&a, &b), iou(&b, &a));
+    }
+
+    #[test]
+    fn iou_of_a_fully_contained_box_is_the_area_ratio() {
+        let outer = [0.0, 0.0, 10.0, 10.0];
+        let inner = [0.0, 0.0, 5.0, 5.0];
+        assert!((iou(&outer, &inner) - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn boxes_that_only_touch_along_an_edge_do_not_overlap() {
+        let left = [0.0, 0.0, 10.0, 10.0];
+        let right = [10.0, 0.0, 20.0, 10.0];
+        assert_eq!(iou(&left, &right), 0.0);
+    }
+
+    #[test]
+    fn degenerate_boxes_score_zero_instead_of_dividing_by_zero() {
+        let point = [5.0, 5.0, 5.0, 5.0];
+        assert_eq!(iou(&point, &point), 0.0);
+        assert!(iou(&point, &[0.0, 0.0, 10.0, 10.0]).is_finite());
+    }
+
+    #[test]
+    fn nms_on_no_candidates_keeps_nothing() {
+        assert!(nms(&[], &[], 0.4).is_empty());
+    }
+
+    #[test]
+    fn nms_keeps_a_lone_candidate() {
+        assert_eq!(nms(&[[0.0, 0.0, 10.0, 10.0]], &[0.5], 0.4), vec![0]);
+    }
+
+    #[test]
+    fn nms_returns_survivors_in_descending_score_order() {
+        let boxes = vec![
+            [0.0, 0.0, 10.0, 10.0],
+            [100.0, 100.0, 110.0, 110.0],
+            [200.0, 200.0, 210.0, 210.0],
+        ];
+        let scores = vec![0.1, 0.9, 0.5];
+
+        let keep = nms(&boxes, &scores, 0.4);
+
+        assert_eq!(keep, vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn nms_suppresses_an_overlap_that_exactly_reaches_the_threshold() {
+        // Half of the taller box is covered by the shorter one, so their IoU is exactly 0.5.
+        let boxes = vec![[0.0, 0.0, 10.0, 10.0], [0.0, 0.0, 10.0, 5.0]];
+        let scores = vec![0.9, 0.8];
+
+        assert_eq!(iou(&boxes[0], &boxes[1]), 0.5);
+        assert_eq!(nms(&boxes, &scores, 0.5), vec![0]);
+        assert_eq!(nms(&boxes, &scores, 0.51), vec![0, 1]);
+    }
+
+    #[test]
+    fn pad_to_square_centres_a_wide_frame_between_top_and_bottom_bars() {
+        let padded = FaceDetector::pad_to_square(&filled(4, 2, 200.0)).unwrap();
+
+        assert_eq!((padded.cols(), padded.rows()), (4, 4));
+        let bytes = padded.data_bytes().unwrap();
+        let row = 4 * 3;
+        assert!(
+            bytes[..row].iter().all(|b| *b == 0),
+            "top bar must be black"
+        );
+        assert!(bytes[row..row * 2].iter().all(|b| *b == 200));
+        assert!(bytes[row * 2..row * 3].iter().all(|b| *b == 200));
+        assert!(
+            bytes[row * 3..].iter().all(|b| *b == 0),
+            "bottom bar must be black"
+        );
+    }
+
+    #[test]
+    fn pad_to_square_gives_an_odd_remainder_to_the_bottom_and_right() {
+        let padded = FaceDetector::pad_to_square(&filled(5, 2, 200.0)).unwrap();
+        assert_eq!((padded.cols(), padded.rows()), (5, 5));
+
+        let bytes = padded.data_bytes().unwrap();
+        let row = 5 * 3;
+        // top = (5 - 2) / 2 = 1, bottom = 5 - 2 - 1 = 2.
+        assert!(bytes[..row].iter().all(|b| *b == 0));
+        assert!(bytes[row..row * 3].iter().all(|b| *b == 200));
+        assert!(bytes[row * 3..].iter().all(|b| *b == 0));
+    }
+
+    #[test]
+    fn pad_to_square_widens_a_tall_frame() {
+        let padded = FaceDetector::pad_to_square(&filled(2, 5, 200.0)).unwrap();
+        assert_eq!((padded.cols(), padded.rows()), (5, 5));
+    }
+
+    #[test]
+    fn pad_to_square_leaves_an_already_square_frame_alone() {
+        let padded = FaceDetector::pad_to_square(&filled(3, 3, 200.0)).unwrap();
+
+        assert_eq!((padded.cols(), padded.rows()), (3, 3));
+        assert!(padded.data_bytes().unwrap().iter().all(|b| *b == 200));
+    }
+
+    #[test]
+    fn detect_errors_describe_themselves() {
+        assert_eq!(
+            DetectError::InitFailed("no model".to_string()).to_string(),
+            "detector init failed: no model"
+        );
+        assert_eq!(
+            DetectError::NoFacesDetected.to_string(),
+            "no faces detected"
+        );
+        assert_eq!(
+            DetectError::InferenceFailed("bad shape".to_string()).to_string(),
+            "inference failed: bad shape"
+        );
+        let io = DetectError::Io(std::io::Error::from(std::io::ErrorKind::NotFound));
+        assert!(io.to_string().starts_with("IO: "));
+    }
+
+    #[test]
+    fn an_io_failure_converts_into_the_io_variant() {
+        let err: DetectError = std::io::Error::from(std::io::ErrorKind::PermissionDenied).into();
+        assert!(matches!(err, DetectError::Io(_)));
     }
 }

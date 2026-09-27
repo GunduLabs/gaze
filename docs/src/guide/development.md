@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Development
 
 This page covers source builds, tests, packaging, and Flatpak workflows for contributors.
@@ -7,18 +10,40 @@ For pull request workflow, testing expectations, and safety notes, see [Contribu
 ## Prerequisites
 
 Gaze targets Linux platform APIs (V4L2, PAM, TPM2/tss2, polkit, GTK4/libadwaita, Flatpak,
-SELinux) that do not exist on macOS or Windows, so none of this builds natively there. If
-you're not on Linux, skip straight to [Building without a Linux host (Docker)](#building-without-a-linux-host-docker).
+SELinux) that do not exist on macOS or Windows, so none of this builds natively there.
 
-- Rust 1.85+ (or install current stable via `rustup`)
-- `just` 1.51+ (https://github.com/casey/just) for task automation
-- `nfpm` (https://nfpm.goreleaser.com) for packaging
-- `flatpak` and `flatpak-builder` (https://github.com/flatpak/flatpak-builder) for the Flatpak build, plus the Flathub remote and GNOME/Rust/LLVM SDKs. See [Flatpak build](#flatpak-build) below.
+There are three ways to get an environment, and they all end at the same `just` recipes. Take
+whichever asks the least of you.
 
-The repo pins versions for `rust`, `just`, `nfpm`, plus `bun`/`node` (used by the docs site) and
-`rust-analyzer`, in `mise.toml`. If you use [mise](https://mise.jdx.dev), `mise trust && mise
-install` from the repo root installs all of the above at the pinned versions instead of doing it
-by hand. Either way you still need the distro system libraries below; mise doesn't manage those.
+### Nix, the shortest path
+
+```bash
+nix develop
+```
+
+That is the entire setup. The shell has the Rust toolchain and every native dependency (OpenCV,
+GStreamer, GTK4, ONNX Runtime, tpm2-tss) already wired up. See the [Nix & NixOS guide](/guide/nixos).
+
+### Docker, if you are not on Linux
+
+```bash
+just docker build-rust
+```
+
+Any recipe also runs inside a container that mirrors CI, so the host needs nothing but Docker.
+See [Building without a Linux host](#building-without-a-linux-host-docker).
+
+### Distro packages
+
+Install the tooling:
+
+- Rust 1.85+, via [rustup](https://rustup.rs)
+- [`just`](https://github.com/casey/just) 1.51+, the task runner everything below goes through
+- [`nfpm`](https://nfpm.goreleaser.com), only for `just package`
+- [`flatpak-builder`](https://github.com/flatpak/flatpak-builder), only for `just build-flatpak`
+
+CI pins its own versions in `.github/workflows/ci.yml` if you need to match them exactly. Then
+the system libraries:
 
 ::: code-group
 
@@ -29,6 +54,7 @@ sudo apt install build-essential pkg-config clang libclang-dev \
   libcairo2-dev libglib2.0-dev libgdk-pixbuf-2.0-dev \
   libpango1.0-dev libgraphene-1.0-dev \
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+  gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire \
   gettext-base \
   flatpak flatpak-builder elfutils
 ```
@@ -38,8 +64,19 @@ sudo dnf install @development-tools pkg-config clang clang-devel \
   opencv-devel libv4l-devel pam-devel tpm2-tss-devel openssl-devel \
   gtk4-devel libadwaita-devel \
   gstreamer1-devel gstreamer1-plugins-base-devel \
+  gstreamer1-plugins-base gstreamer1-plugins-good pipewire-gstreamer \
   checkpolicy policycoreutils \
   gettext \
+  flatpak flatpak-builder elfutils
+```
+
+```bash [openSUSE Tumbleweed]
+sudo zypper install --no-recommends \
+  clang clang-devel opencv-devel libv4l-devel pam-devel tpm2-0-tss-devel \
+  libopenssl-devel gtk4-devel libadwaita-devel \
+  gstreamer-devel gstreamer-plugins-base-devel \
+  gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugin-pipewire \
+  checkpolicy policycoreutils pkgconf-pkg-config envsubst gcc gcc-c++ \
   flatpak flatpak-builder elfutils
 ```
 
@@ -47,21 +84,33 @@ sudo dnf install @development-tools pkg-config clang clang-devel \
 sudo pacman -S base-devel pkgconf clang llvm \
   opencv v4l-utils pam tpm2-tss openssl \
   gtk4 libadwaita \
-  gstreamer gst-plugins-base \
+  gstreamer gst-plugins-base gst-plugins-good gst-plugin-pipewire \
   gettext \
   flatpak flatpak-builder elfutils
 ```
 
 :::
 
-`libtss2-dev`/`tpm2-tss-devel`/`tpm2-tss` and `libssl-dev`/`openssl-devel`/`openssl` back the
+`libtss2-dev`/`tpm2-tss-devel`/`tpm2-tss`/`tpm2-0-tss-devel` and `libssl-dev`/`openssl-devel`/`openssl`/`libopenssl-devel` back the
 `tss-esapi` and `openssl-sys` crates (the daemon seals the face-template key to the TPM);
-`gettext-base`/`gettext` provides `envsubst`, which the `package` recipe below needs.
+`gettext-base`/`gettext`/`envsubst` provides `envsubst`, which the `package` recipe below needs.
 
 Both OpenCV 4 and 5 work. On distros that ship OpenCV 5 (such as Arch Linux),
 the `just` recipes automatically point the `opencv` crate at the `opencv5`
 pkg-config name; when running `cargo` directly, set
 `OPENCV_PKGCONFIG_NAME=opencv5` yourself.
+
+Only `gaze-gui` needs gtk4 and libadwaita (`libgtk-4-dev`/`gtk4-devel`/`gtk4`,
+`libadwaita-1-dev`/`libadwaita-devel`/`libadwaita`, and on Debian/Ubuntu the
+cairo, glib, gdk-pixbuf, pango, and graphene headers listed with them). For a
+TUI-only checkout, set `GAZE_GUI=0` (also `false`, `no`, or `off`) and skip
+those packages: `build-rust`, `build-rust-openvino`, `test`, and `lint` then
+leave `gaze-gui` out, and `dev-link-system` skips the binary it never built.
+The daemon, the `gaze` TUI, the CLI, and the PAM modules are unaffected. Like
+`OPENCV_PKGCONFIG_NAME`, this only covers those `just` recipes: a bare `cargo
+build`/`cargo test` still builds every workspace member, and the packaging paths
+(`package`, `build-flatpak`, and the spec `srpm` feeds) always include the GUI,
+so building packages still needs the GUI dependencies installed.
 
 ## Setup
 
@@ -69,8 +118,11 @@ pkg-config name; when running `cargo` directly, set
 git clone https://github.com/gundulabs/gaze
 cd gaze
 just setup-hooks
-just --list
+just build-rust
+just test
 ```
+
+That is a full working checkout. `just --list` shows every other recipe.
 
 Git hooks are local to each clone. `just setup-hooks` points Git at the tracked hook scripts so pre-commit checks stay up to date when the repo changes. CI still runs the same required checks for pushes and pull requests.
 
@@ -78,9 +130,12 @@ Git hooks are local to each clone. `just setup-hooks` points Git at the tracked 
 
 - `gaze`: the `gazed` daemon, ML pipeline, and user database.
 - `gaze-cli`: the `gaze` CLI binary. It lives in its own crate so the client binary does not statically link ONNX Runtime (see warning below).
-- `gaze-core`: shared camera/config/DBus library. Face detection sits behind the `detection` cargo feature (on by default); client crates opt out with `default-features = false`.
-- `pam-gaze`, `pam-gaze-grosshack`: `cdylib` PAM modules; shared FFI/auth logic lives in `pam-gaze-core`.
-- `gaze-gui`: GTK4/libadwaita app. `gnome-shell-extension/` is packaged separately.
+- `gaze-core`: shared config/DBus/IR library. Deliberately light: no OpenCV, GStreamer, or ONNX Runtime, so the PAM modules can depend on it.
+- `gaze-security`: TPM sealing and the GNOME Keyring credential store. Links tpm2-tss plus pure-Rust crypto (`aes-gcm`, `sha2`) and nothing heavier, so `pam-gaze` can depend on it.
+- `gaze-vision`: camera capture, face detection, and inference. Detection sits behind the `detection` cargo feature (on by default); the CLI and GUI opt out with `default-features = false` and get camera support alone.
+- `pam-gaze`: `cdylib` PAM module. Depends on `gaze-core` and `gaze-security` for TPM keyring unsealing, never `gaze-vision`; `just check-pam-link` enforces its library allowlist (see warning below).
+- `pam-gaze-grosshack`: deprecated `cdylib` compatibility shim that forces `PamMode::Simultaneous` and prints a deprecation notice. It `#[path]`-includes `pam-gaze`'s own modules rather than duplicating them. Shipped on openSUSE only, and slated for removal; new work belongs in `pam-gaze`.
+- `gaze-gui`: GTK4/libadwaita app. `gnome-shell-extension/` and `cinnamon-extension/` are packaged separately.
 
 ## Build and test rust components
 
@@ -89,12 +144,85 @@ just build-rust
 just test
 just lint
 just fmt-check
-just audit        # check dependencies for known CVEs
-just fmt          # apply formatting (fmt-check only checks)
+just audit             # check dependencies for known CVEs
+just check-pam-link    # check the PAM modules' shared-library footprint
+just fmt               # apply formatting (fmt-check only checks)
 ```
+
+The default build supports CPU inference only. To build the daemon and
+configuration tools with OpenVINO support, provide an OpenVINO-enabled system
+ONNX Runtime and run:
+
+```bash
+ORT_STRATEGY=system \
+ORT_LIB_LOCATION=/path/to/onnxruntime/lib \
+ORT_PREFER_DYNAMIC_LINK=1 \
+just build-rust-openvino
+```
+
+The `openvino` Cargo feature is explicit. The build fails when that feature is
+enabled without a matching ONNX Runtime library.
+
+::: warning Keep the `api-21` feature on the `ort` dependency
+`gaze` and `gaze-vision` depend on `ort` with `default-features = false` and
+`api-21`, which pins the ONNX Runtime C API version the binaries ask for. `ort`
+defaults to the newest API its release targets, and a runtime older than that
+makes ONNX Runtime hand back a null API pointer, which `ort` turns into a panic
+during process teardown and a core dump. Anything that links a system runtime
+(Nix, Flatpak, RPM source builds, `ORT_STRATEGY=system` in CI) can be as old as
+ONNX Runtime 1.21, so an `ort` upgrade must keep the `api-21` feature rather than
+inherit the new default. `gazed` also checks the loaded runtime before touching
+`ort`, and `gaze-vision`'s `inference::` tests fail against a runtime that is too
+old.
+
+`api-21` is also the newest API level Gaze can ask for safely. From `api-22` on,
+`ort`'s session builder sets an automatic execution-provider selection policy on
+every session, which makes ONNX Runtime pick execution providers from the
+platform's hardware device list instead of installing the built-in CPU provider.
+ONNX Runtime 1.22 has no device discovery on Linux, so that list is empty and the
+selection code dereferences it unchecked and aborts the process, even though Gaze
+only ever asked for CPU inference. Gaze uses nothing that needs API 22 or newer,
+so staying on `api-21` keeps session creation on the path that installs the CPU
+provider directly.
+:::
+
+The OpenVINO-enabled binary supports Intel CPU, GPU, and NPU devices. The
+`device` value in `/etc/gaze/config.toml` selects the device at run time; GPU
+and NPU do not require separate builds. An installation with OpenVINO support
+should set `execution_provider = "openvino"` and `device = "npu"` in its
+installed configuration. If OpenVINO setup fails at run time, Gaze still falls
+back to the ONNX Runtime CPU provider.
+
+::: warning OpenVINO is a source build only
+The released `.deb`, `.rpm`, Arch, and Flatpak packages are all produced by
+`just build-rust`, so none of them include OpenVINO. Getting it means building
+from source with `just build-rust-openvino` against your own OpenVINO-enabled
+ONNX Runtime.
+:::
+
+CI does not cover the OpenVINO features either: `just lint`, `just test`, and
+`just build-rust` all build CPU-only. Run `just test-openvino`,
+`just lint-openvino`, and `just build-rust-openvino` by hand before changing
+anything behind the `openvino` or `openvino-config` features. `just test` does
+compile `gaze-core` with `openvino-config` alone, which is what the CLI and GUI
+ship with, but that path needs no OpenVINO runtime.
 
 ::: warning Build with `just build-rust`, not `cargo build --workspace`
 `just build-rust` builds the daemon and the clients in separate cargo invocations so feature unification cannot link ONNX Runtime into the CLI, GUI, or PAM modules. ONNX Runtime's startup code requires AVX2, and a single workspace build would silently reintroduce crashes on older CPUs.
+:::
+
+::: warning Never give the PAM modules a `gaze-vision` dependency
+`pam_gaze.so` is dlopened into every process that authenticates through
+`common-auth`, including network services such as `sshd` and `dovecot`. Linking
+the vision stack there pulls in OpenCV, which pulls in OpenBLAS, whose ELF
+constructor reserves per-thread buffers sized for every core. Services that cap
+address space then abort on load: this broke IMAP authentication in
+[#607](https://github.com/GunduLabs/gaze/issues/607). A crate boundary, not a
+cargo feature, is what keeps this out, because features unify across packages
+built in one `cargo build` invocation. `just check-pam-link` verifies the built
+modules link only basic system libraries and, for the main PAM module, the TPM
+libraries needed for keyring unsealing. It runs as part of `just build-rust` and
+every package build.
 :::
 
 ## Run a locally-built daemon
@@ -111,7 +239,7 @@ It also owns `com.gundulabs.Gaze` on the **system** DBus bus, which requires roo
 
 This overlays your checkout onto an *existing* package install; it does not install the
 package itself. If you've never installed Gaze on this machine, build and install a package
-once first (`just package rpm` and `sudo <package manager> install dist/packages/gazed-*.rpm`,
+once first (`just package rpm` and `sudo <package manager> install dist/packages/gaze-*.rpm`,
 or the `deb`/`archlinux` equivalent); `dev-link-system` fails fast with a pointer back here if
 `gazed.service` isn't installed yet.
 
@@ -122,8 +250,9 @@ just dev-link-system    # runs scripts/dev-link-system.sh under sudo itself
 
 `dev-link-system` (`scripts/dev-link-system.sh enable`) does more than swap binaries:
 
-- Links `/usr/bin/gazed`, `/usr/bin/gaze`, `/usr/bin/gaze-gui`, the PAM modules, the polkit
-  policy, and the GNOME extension (system-wide and current-user) over the package-installed files.
+- Links `/usr/bin/gazed`, `/usr/bin/gaze`, the PAM modules, the polkit policy, and the GNOME
+  extension (system-wide and current-user) over the package-installed files. `/usr/bin/gaze-gui`
+  is linked too when the build produced it, and skipped after a `GAZE_GUI=0` build.
 - Adds a `pam_gaze.so` line to `/etc/pam.d/sudo` if one isn't already there.
 - Installs a systemd drop-in for `gazed` that clears `InaccessiblePaths=/home /root` so the
   packaged unit can execute a binary linked from your checkout, then restarts `gazed`.
@@ -163,10 +292,15 @@ The CLI and GUI need no special setup; they talk to whichever `gazed` currently 
 
 ## Iterating on the PAM module
 
-`pam-gaze` and `pam-gaze-grosshack` build as `cdylib`s. After `just build-rust` you'll have:
+`pam-gaze` builds as a `cdylib`. After `just build-rust` you'll have:
 
 - `target/release/libpam_gaze.so`
-- `target/release/libpam_gaze_grosshack.so`
+- `target/release/libpam_gaze_grosshack.so` (the deprecated shim; only the openSUSE packages install it)
+
+`just build-rust` also runs `just check-pam-link` over it, which fails the build
+if the module links anything beyond libc, libgcc, libm, the dynamic loader, and
+the keyring's `libtss2-esys.so.0`, `libtss2-mu.so.0`, and `libtss2-tctildr.so.0`.
+The TPM exception applies only to `libpam_gaze.so`, not the compatibility shim.
 
 To exercise them through real PAM, copy into the system PAM library directory (path is distro-specific):
 
@@ -220,6 +354,53 @@ journalctl -f /usr/bin/gnome-shell
 
 For the unlock-dialog session mode (lock screen), changes only take effect after a fresh lock, not a shell reload.
 
+## Iterating on the Cinnamon extension
+
+The extension source lives in `cinnamon-extension/`. Cinnamon reads its settings
+schema from the extension directory, so no `glib-compile-schemas` step is needed:
+
+```bash
+mkdir -p ~/.local/share/cinnamon/extensions
+ln -sfn "$PWD/cinnamon-extension" \
+  ~/.local/share/cinnamon/extensions/gaze@gundulabs.com
+```
+
+Reload Cinnamon with `Alt + F2`, `r`, Enter, then enable it from
+**System Settings → Extensions**. Watch its logs with:
+
+```bash
+journalctl -f /usr/bin/cinnamon
+```
+
+`just dev-link-system` also links this extension system-wide and for the
+invoking user when `/usr/share/cinnamon` exists, so an installed checkout picks
+it up without the symlink above.
+
+## Building the docs
+
+The site is VitePress, driven through `bun`:
+
+```bash
+just build-docs        # bun install && bun run docs:build
+bun run docs:dev       # live preview at http://localhost:5173
+```
+
+`scripts/prepare-docs.sh` runs first in both cases and stages the archived
+versions under `docs/archive/`. Edit `docs/src/`; never edit generated output
+under `docs/.vitepress/dist`.
+
+## Checking the KDE lock screen without Plasma
+
+`just kde-harness` drives a PAM service exactly the way KScreenLocker's greeter
+drives its noninteractive biometric slot: it renders error messages, discards
+info messages, and fails loudly if the module issues a prompt (which would hang
+the real greeter for the rest of the lock). Pass a service and a round count to
+emulate re-arming after a wrong password:
+
+```bash
+just kde-harness kde-fingerprint 2
+```
+
 ## Packaging
 
 ```bash
@@ -232,22 +413,9 @@ Package output:
 
 ## Flatpak build
 
-The `flatpak`/`flatpak-builder` packages above are not enough on their own. The manifest
-(`packaging/flatpak/com.gundulabs.Gaze.yml`) also needs the Flathub remote and the exact
-GNOME runtime/SDK plus the Rust and LLVM SDK extensions it builds against. These versions
-must match `.github/workflows/cd.yml` and `packaging/docker/entrypoint.sh`, so bump all
-three together.
-
-```bash
-flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user -y flathub \
-  org.gnome.Sdk//49 \
-  org.gnome.Platform//49 \
-  org.freedesktop.Sdk.Extension.rust-stable//25.08 \
-  org.freedesktop.Sdk.Extension.llvm20//25.08
-```
-
-Then build:
+The build recipe adds the Flathub remote and installs or updates the GNOME runtime/SDK
+and Rust/LLVM extensions declared by the manifest, so their versions have a single source
+of truth. Build with:
 
 ```bash
 just build-flatpak
@@ -295,8 +463,8 @@ Notes:
   automatically on first use.
 - Cargo registry, build target, and Flatpak state persist in named Docker volumes across
   runs, so repeat builds don't re-download crates or the GNOME SDK.
-- For `build-flatpak`, the entrypoint lazily adds the Flathub remote and installs the same
-  GNOME/Rust/LLVM SDKs listed above into a volume the first time a `flatpak` target runs.
+- For `build-flatpak`, the recipe installs the manifest's GNOME/Rust/LLVM dependencies into
+  a volume the first time the target runs.
 - If your checkout lives on a sshfs-backed mount (e.g. a Colima VM on an external/network
   drive), Flatpak's ostree repo can't live on that mount. The wrapper already redirects
   `flatpak-builder`'s state/build/repo dirs to an in-VM Docker volume, so this works out of

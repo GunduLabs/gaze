@@ -4,4 +4,4 @@ Conflicts: gaze
 Priority: 801
 Auth-Type: Primary
 Auth:
-        [success=end default=ignore]    pam_gaze_grosshack.so
+        [success=end default=ignore]    pam_gaze.so simultaneous
