@@ -135,6 +135,10 @@ impl IrLed {
         }
     }
 
+    pub fn needs_stream_refresh(&self) -> bool {
+        matches!(self.backend, IrLedBackend::I2c(_))
+    }
+
     pub fn set(&self, on: bool) -> anyhow::Result<()> {
         match &self.backend {
             IrLedBackend::I2c(backend) => backend.set(on),

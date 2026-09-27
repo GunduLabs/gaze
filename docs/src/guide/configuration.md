@@ -262,9 +262,15 @@ The Logitech BRIO 4K (`046d:085e`) is a known example. That's the original BRIO,
 
 Many IR cameras automatically light their infrared LED when streaming starts. If yours does not, set `emitter_enabled = true` to manually drive the emitter during authentication.
 
-Gaze resolves the underlying `/dev/video*` node from the PipeWire camera, matches USB cameras by VID:PID against a small built-in table, and probes for the standard Microsoft Face Authentication UVC control. Non-USB I2C emitters use a separate transport backend and the reviewed profiles in `gaze-core/i2c-ir-profiles/`. The Surface Pro 4 OV7251 profile matches the `Surface IR Camera` bridge output at `/dev/video42` and the companion bridge's IPU3/CIO2 source and OV7251 driver. Its register sequence is specific to the verified Surface Pro 4 wiring and must not be assumed to work on other Surface models or OV7251 devices.
+Gaze resolves the underlying `/dev/video*` node from the PipeWire camera, matches USB cameras by VID:PID against a small built-in table, and probes for the standard Microsoft Face Authentication UVC control. The files under `gaze-core/ir-profiles/` describe USB UVC extension-unit requests only.
 
-The files under `gaze-core/ir-profiles/` describe USB UVC extension-unit requests only; they cannot configure I2C emitters. Other non-USB cameras need a separately reviewed backend with hardware identification and verified on/off behavior.
+Non-USB emitters driven over I2C use the reviewed profiles in `gaze-core/i2c-ir-profiles/`, which are compiled into Gaze and never read from user configuration. The only one today is the Surface Pro 4 OV7251 sensor. It needs:
+
+- The `i2c-dev` kernel module loaded, so the sensor's `/dev/i2c-*` bus exists. To load it at every boot, run `echo i2c-dev | sudo tee /etc/modules-load.d/i2c-dev.conf`.
+- A userspace bridge that relays the IPU3/CIO2 IR stream into a v4l2loopback device at `/dev/video42` named `Surface IR Camera`, and writes the path of the CIO2 source node to `/run/surface_ir_bridge_dev`. Point `cameras.ir` at `/dev/video42`.
+- The `ov7251` driver bound to `i2c-INT347E:00`.
+
+Gaze takes the I2C bus from the adapter the bound sensor sits on, refuses to write unless a driver has claimed the sensor's address on that bus, and changes only the emitter bit of the register before reading it back. `gaze doctor` reports which of these checks fails. The register value is specific to the verified Surface Pro 4 wiring; do not assume it works on other Surface models or OV7251 devices.
 
 On the IR path, liveness uses eye-motion analysis across frames; the RGB MiniFASNet model is not applied to infrared.
 

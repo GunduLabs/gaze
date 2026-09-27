@@ -69,12 +69,14 @@ struct ProcessedStep {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct I2cProfileFile {
     device: I2cDevice,
     emitter: I2cEmitterSpec,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct I2cDevice {
     name: String,
     source: String,
@@ -82,20 +84,22 @@ struct I2cDevice {
     capture_name: String,
     source_marker: Option<String>,
     source_driver: Option<String>,
-    sensor_uevent: Option<String>,
-    sensor_driver: Option<String>,
-    i2c_bus: String,
+    sensor_device: String,
+    sensor_driver: String,
     i2c_address: u16,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct I2cEmitterSpec {
-    on: Vec<Vec<u8>>,
-    off: Vec<Vec<u8>>,
+    register: u16,
+    register_width: u8,
+    mask: u8,
+    on: u8,
+    off: u8,
 }
 
 struct ProcessedI2cProfile {
-    ident: String,
     device: I2cDevice,
     emitter: I2cEmitterSpec,
 }
@@ -148,6 +152,16 @@ fn main() {
             println!("cargo:rerun-if-changed={}", path.display());
             i2c_profiles.push(parse_i2c_profile(&path));
         }
+
+        let mut seen_nodes = std::collections::HashSet::new();
+        for profile in &i2c_profiles {
+            if !seen_nodes.insert(profile.device.capture_node.as_str()) {
+                panic!(
+                    "duplicate I2C IR profile for capture node {}",
+                    profile.device.capture_node
+                );
+            }
+        }
     }
     fs::write(
         out_dir.join("i2c_ir_profiles.rs"),
@@ -158,6 +172,14 @@ fn main() {
 
 fn parse_i2c_profile(path: &Path) -> ProcessedI2cProfile {
     let stem = path.file_stem().unwrap().to_str().unwrap();
+    assert!(
+        !stem.is_empty()
+            && stem
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+        "{}: I2C profile file names must use only lowercase letters, digits, and '-'",
+        path.display()
+    );
     let text = fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
     let profile: I2cProfileFile = toml_edit::de::from_str(&text)
@@ -165,34 +187,33 @@ fn parse_i2c_profile(path: &Path) -> ProcessedI2cProfile {
 
     let device = profile.device;
     let emitter = profile.emitter;
+    for (field, value) in [
+        ("device.name", &device.name),
+        ("device.source", &device.source),
+        ("device.capture_name", &device.capture_name),
+        ("device.sensor_driver", &device.sensor_driver),
+    ] {
+        assert!(
+            !value.trim().is_empty(),
+            "{}: {field} is empty",
+            path.display()
+        );
+    }
     assert!(
         device.capture_node.starts_with("/dev/video"),
         "{}: device.capture_node must be a /dev/video* path",
         path.display()
     );
     assert!(
-        !device.name.trim().is_empty(),
-        "{}: device.name is empty",
+        !device.sensor_device.is_empty()
+            && !device.sensor_device.contains('/')
+            && !device.sensor_device.starts_with('.'),
+        "{}: device.sensor_device must be a bare /sys/bus/i2c/devices entry name",
         path.display()
     );
     assert!(
-        !device.source.trim().is_empty(),
-        "{}: device.source is empty",
-        path.display()
-    );
-    assert!(
-        !device.capture_name.trim().is_empty(),
-        "{}: device.capture_name is empty",
-        path.display()
-    );
-    assert!(
-        device.i2c_bus.starts_with("/dev/i2c-"),
-        "{}: device.i2c_bus must be a /dev/i2c-* path",
-        path.display()
-    );
-    assert!(
-        device.i2c_address <= 0x7f,
-        "{}: I2C address must be 7-bit",
+        (0x08..=0x77).contains(&device.i2c_address),
+        "{}: device.i2c_address must be a non-reserved 7-bit address (0x08..=0x77)",
         path.display()
     );
     assert!(
@@ -201,40 +222,36 @@ fn parse_i2c_profile(path: &Path) -> ProcessedI2cProfile {
         path.display()
     );
     assert!(
-        device.sensor_uevent.is_some() == device.sensor_driver.is_some(),
-        "{}: sensor_uevent and sensor_driver must be specified together",
+        device
+            .source_marker
+            .as_deref()
+            .is_none_or(|marker| marker.starts_with("/run/")),
+        "{}: device.source_marker must live under /run",
         path.display()
     );
     assert!(
-        device.source_driver.is_some() || device.sensor_driver.is_some(),
-        "{}: specify source and/or sensor driver identity",
+        matches!(emitter.register_width, 1 | 2),
+        "{}: emitter.register_width must be 1 or 2",
         path.display()
     );
     assert!(
-        !emitter.on.is_empty(),
-        "{}: emitter.on is empty",
+        emitter.register_width == 2 || emitter.register <= 0xff,
+        "{}: emitter.register does not fit in one byte",
+        path.display()
+    );
+    assert!(emitter.mask != 0, "{}: emitter.mask is zero", path.display());
+    assert!(
+        emitter.on & !emitter.mask == 0 && emitter.off & !emitter.mask == 0,
+        "{}: emitter.on and emitter.off must only set bits inside emitter.mask",
         path.display()
     );
     assert!(
-        !emitter.off.is_empty(),
-        "{}: emitter.off is empty",
-        path.display()
-    );
-    assert!(
-        emitter
-            .on
-            .iter()
-            .chain(emitter.off.iter())
-            .all(|write| !write.is_empty()),
-        "{}: I2C write entries must not be empty",
+        emitter.on != emitter.off,
+        "{}: emitter.on and emitter.off are identical",
         path.display()
     );
 
     ProcessedI2cProfile {
-        ident: format!(
-            "I2C_PROFILE_{}",
-            stem.replace('-', "_").to_ascii_uppercase()
-        ),
         device,
         emitter,
     }
@@ -249,14 +266,10 @@ fn render_i2c_profiles(profiles: &[ProcessedI2cProfile]) -> String {
     )
     .unwrap();
 
-    for profile in profiles {
-        render_i2c_writes(&mut out, &profile.ident, "ON", &profile.emitter.on);
-        render_i2c_writes(&mut out, &profile.ident, "OFF", &profile.emitter.off);
-    }
-
     writeln!(out, "pub const I2C_IR_PROFILES: &[I2cIrProfile] = &[").unwrap();
     for profile in profiles {
         let device = &profile.device;
+        let emitter = &profile.emitter;
         writeln!(out, "    I2cIrProfile {{").unwrap();
         writeln!(out, "        name: {:?},", device.name).unwrap();
         writeln!(out, "        source: {:?},", device.source).unwrap();
@@ -264,37 +277,18 @@ fn render_i2c_profiles(profiles: &[ProcessedI2cProfile]) -> String {
         writeln!(out, "        capture_name: {:?},", device.capture_name).unwrap();
         render_optional_string(&mut out, "source_marker", device.source_marker.as_deref());
         render_optional_string(&mut out, "source_driver", device.source_driver.as_deref());
-        render_optional_string(&mut out, "sensor_uevent", device.sensor_uevent.as_deref());
-        render_optional_string(&mut out, "sensor_driver", device.sensor_driver.as_deref());
-        writeln!(out, "        bus: {:?},", device.i2c_bus).unwrap();
+        writeln!(out, "        sensor_device: {:?},", device.sensor_device).unwrap();
+        writeln!(out, "        sensor_driver: {:?},", device.sensor_driver).unwrap();
         writeln!(out, "        address: 0x{:02x},", device.i2c_address).unwrap();
-        writeln!(out, "        on: {}_ON,", profile.ident).unwrap();
-        writeln!(out, "        off: {}_OFF,", profile.ident).unwrap();
+        writeln!(out, "        register: 0x{:04x},", emitter.register).unwrap();
+        writeln!(out, "        register_width: {},", emitter.register_width).unwrap();
+        writeln!(out, "        mask: 0x{:02x},", emitter.mask).unwrap();
+        writeln!(out, "        on: 0x{:02x},", emitter.on).unwrap();
+        writeln!(out, "        off: 0x{:02x},", emitter.off).unwrap();
         writeln!(out, "    }},").unwrap();
     }
     writeln!(out, "];\n").unwrap();
     out
-}
-
-fn render_i2c_writes(out: &mut String, ident: &str, kind: &str, writes: &[Vec<u8>]) {
-    for (index, bytes) in writes.iter().enumerate() {
-        write!(out, "const {ident}_{kind}_{index}: &[u8] = &[").unwrap();
-        for (byte_index, byte) in bytes.iter().enumerate() {
-            if byte_index != 0 {
-                write!(out, ", ").unwrap();
-            }
-            write!(out, "0x{byte:02x}").unwrap();
-        }
-        writeln!(out, "];").unwrap();
-    }
-    write!(out, "const {ident}_{kind}: &[&[u8]] = &[").unwrap();
-    for index in 0..writes.len() {
-        if index != 0 {
-            write!(out, ", ").unwrap();
-        }
-        write!(out, "{ident}_{kind}_{index}").unwrap();
-    }
-    writeln!(out, "];\n").unwrap();
 }
 
 fn render_optional_string(out: &mut String, field: &str, value: Option<&str>) {
