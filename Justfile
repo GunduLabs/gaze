@@ -67,10 +67,12 @@ build-selinux:
     set -euo pipefail
     mkdir -p dist/selinux
     if command -v checkmodule >/dev/null 2>&1 && command -v semodule_package >/dev/null 2>&1; then
-        checkmodule -M -m -o dist/selinux/gaze-gdm-camera.mod packaging/selinux/gaze-gdm-camera.te
-        semodule_package -o dist/selinux/gaze-gdm-camera.pp -m dist/selinux/gaze-gdm-camera.mod
-        rm -f dist/selinux/gaze-gdm-camera.mod
-        echo "Built dist/selinux/gaze-gdm-camera.pp"
+        for module in gaze-gdm-camera gaze-greeter-keyring; do
+            checkmodule -M -m -o "dist/selinux/$module.mod" "packaging/selinux/$module.te"
+            semodule_package -o "dist/selinux/$module.pp" -m "dist/selinux/$module.mod"
+            rm -f "dist/selinux/$module.mod"
+            echo "Built dist/selinux/$module.pp"
+        done
     else
         echo "WARNING: SELinux tools not found. Skipping SELinux policy build." >&2
     fi
@@ -490,7 +492,7 @@ _verify-package format:
         ;;
     rpm)
         want_files /usr/lib64/security/pam_gaze.so /usr/lib64/security/pam_gaze_grosshack.so \
-            /usr/share/gaze/gaze-gdm-camera.pp
+            /usr/share/gaze/gaze-gdm-camera.pp /usr/share/gaze/gaze-greeter-keyring.pp
         want_size /usr/lib64/security/pam_gaze.so 20000
         want_size /usr/lib64/security/pam_gaze_grosshack.so 20000
         if [ -n "$suse" ]; then

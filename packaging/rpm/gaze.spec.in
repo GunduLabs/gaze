@@ -178,6 +178,8 @@ RUSTFLAGS="-Cdebuginfo=0" \
 
 checkmodule -M -m -o gaze-gdm-camera.mod packaging/selinux/gaze-gdm-camera.te
 semodule_package -o gaze-gdm-camera.pp -m gaze-gdm-camera.mod
+checkmodule -M -m -o gaze-greeter-keyring.mod packaging/selinux/gaze-greeter-keyring.te
+semodule_package -o gaze-greeter-keyring.pp -m gaze-greeter-keyring.mod
 
 %install
 install -Dpm 0755 target/release/gazed %{buildroot}%{_bindir}/gazed
@@ -217,6 +219,7 @@ install -Dpm 0644 packaging/pam/gdm-face.suse %{buildroot}%{_sysconfdir}/pam.d/g
 install -Dpm 0644 packaging/pam/gdm-face %{buildroot}%{_sysconfdir}/pam.d/gdm-face
 %endif
 install -Dpm 0644 gaze-gdm-camera.pp %{buildroot}%{_datadir}/gaze/gaze-gdm-camera.pp
+install -Dpm 0644 gaze-greeter-keyring.pp %{buildroot}%{_datadir}/gaze/gaze-greeter-keyring.pp
 
 install -Dpm 0644 cinnamon-extension/metadata.json %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/metadata.json
 install -Dpm 0644 cinnamon-extension/extension.js %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/extension.js
@@ -291,6 +294,7 @@ ${SCRIPTLET_HYPRLOCK_POSTUN}
 %endif
 %dir %{_datadir}/gaze
 %{_datadir}/gaze/gaze-gdm-camera.pp
+%{_datadir}/gaze/gaze-greeter-keyring.pp
 %dir %{ort_libdir}
 %{ort_libdir}/libonnxruntime.so*
 

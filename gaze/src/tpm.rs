@@ -12,13 +12,17 @@ use tss_esapi::traits::{Marshall, UnMarshall};
 use tss_esapi::{Context, TctiNameConf};
 
 use crate::crypto::KEY_LEN;
+use gaze_security::tpm::SealedKey;
+use zeroize::Zeroizing;
 
 pub const STATE_DIR: &str = "/var/lib/gaze/tpm";
 
 const PUB_FILE: &str = "dek.pub";
 const PRIV_FILE: &str = "dek.priv";
 
-pub fn load_or_create_dek(state_dir: &Path) -> anyhow::Result<[u8; KEY_LEN]> {
+/// The DEK never leaves a Zeroizing wrapper: callers borrow it for cipher
+/// setup and it is wiped on drop instead of lingering in freed memory.
+pub fn load_or_create_dek(state_dir: &Path) -> anyhow::Result<SealedKey> {
     if present_devices().is_empty() && !tcti_override_present() {
         return Err(anyhow!(
             "no TPM device found (looked for {TPM_RM_DEVICE} and {TPM_RAW_DEVICE})"
@@ -46,11 +50,11 @@ pub fn load_or_create_dek(state_dir: &Path) -> anyhow::Result<[u8; KEY_LEN]> {
             "could not unseal the template key; if the TPM was cleared, delete the TPM state \
              directory and re-enrol",
         )?;
-        return Ok(*dek);
+        return Ok(dek);
     }
 
-    let mut dek = [0u8; KEY_LEN];
-    getrandom::fill(&mut dek)
+    let mut dek = Zeroizing::new([0u8; KEY_LEN]);
+    getrandom::fill(&mut *dek)
         .map_err(|e| anyhow!("failed to draw a random data-encryption key: {e}"))?;
 
     let (public, private) =

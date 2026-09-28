@@ -48,6 +48,13 @@ contents:
     packager: rpm
     file_info:
       mode: 0644
+  # Lets xdm_t read /etc/shadow and the TPM for the keyring hand-off. Loaded by
+  # `gaze keyring` once a credential exists, not at install time.
+  - src: "dist/selinux/gaze-greeter-keyring.pp"
+    dst: "/usr/share/gaze/gaze-greeter-keyring.pp"
+    packager: rpm
+    file_info:
+      mode: 0644
   - src: "target/release/libpam_gaze.so"
     dst: "/lib/${MULTIARCH}/security/pam_gaze.so"
     packager: deb

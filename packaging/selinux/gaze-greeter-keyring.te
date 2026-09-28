@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+module gaze-greeter-keyring 1.0;
+
+require {
+    type xdm_t;
+    type shadow_t;
+    type tpm_device_t;
+    class file { open read getattr };
+    class chr_file { open read write ioctl getattr };
+}
+
+# pam_gaze binds the keyring record to the account's shadow hash and unseals it
+# with the TPM inside the greeter's session worker. The distribution policy only
+# dontaudits xdm_t's shadow reads, so without this the hand-off fails silently.
+allow xdm_t shadow_t:file { open read getattr };
+allow xdm_t tpm_device_t:chr_file { open read write ioctl getattr };

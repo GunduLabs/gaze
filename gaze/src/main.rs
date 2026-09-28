@@ -13,7 +13,7 @@ pub mod users;
 
 use crate::users::UserDatabase;
 use daemon::AuthDaemon;
-use gaze_core::config::{Config, MODELS_DIR, USERS_DIR};
+use gaze_core::config::{CONFIG_PATH, Config, MODELS_DIR, USERS_DIR};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
@@ -90,6 +90,7 @@ async fn main() -> anyhow::Result<()> {
 
     let t_load = std::time::Instant::now();
 
+    Config::migrate_file(CONFIG_PATH);
     let config = Config::load()?;
     let security = &config.security;
 
@@ -205,7 +206,7 @@ async fn main() -> anyhow::Result<()> {
         claim_state: claim_state.clone(),
         active_cancel: active_cancel.clone(),
         active_extensions: Arc::new(Mutex::new(std::collections::HashMap::new())),
-        pam_internal: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        pam_internal: Arc::new(Mutex::new(std::collections::HashMap::new())),
         resume_pending: resume_pending.clone(),
         resume_seen: resume_seen.clone(),
         lock_epochs: lock_epochs.clone(),

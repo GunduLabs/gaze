@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use crate::selinux::{self, ModuleState};
 use console::{Term, style};
 use gaze_core::config::{
     CONFIG_PATH, Config, MAX_LIVENESS_MAX_SECONDS, MAX_LIVENESS_THRESHOLD,
@@ -53,9 +54,6 @@ const GDM_DISABLE_EXTENSIONS_KEY: &str = "/org/gnome/shell/disable-user-extensio
 const GDM_HOME_DIRS: [&str; 2] = ["/var/lib/gdm", "/var/lib/gdm3"];
 const GDM_COMPILED_DB_PATH: &str = "/etc/dconf/db/gdm";
 const GDM_FACE_PAM_SERVICE: &str = "gdm-face";
-const SELINUX_ENFORCE_PATH: &str = "/sys/fs/selinux/enforce";
-const GDM_SELINUX_MODULE: &str = "gaze-gdm-camera";
-const GDM_SELINUX_POLICY_PATH: &str = "/usr/share/gaze/gaze-gdm-camera.pp";
 const TPM_DEVICES: [&str; 2] = ["/dev/tpmrm0", "/dev/tpm0"];
 /// Files that decide what runs as root or who may talk to the daemon. A writable entry here
 /// is a path to root, so they are held to the same ownership rule as the PAM stack.
@@ -184,11 +182,20 @@ pub async fn run(username: &str, benchmark: bool) -> anyhow::Result<bool> {
     check_systemd(&mut report);
     let config = check_config(&mut report);
     check_pam(&mut report);
+    check_sudo_policy(&mut report, username);
     check_privileged_files(&mut report);
     check_desktop_integration(&mut report);
+    check_kde_confirmation_bypass(
+        &mut report,
+        config.as_ref(),
+        read_pam_service(KDE_FACE_PAM_FILE).as_deref(),
+        read_pam_service(KDE_SMARTCARD_PAM_FILE).as_deref(),
+        read_pam_service(PLASMALOGIN_FACE_PAM_FILE).as_deref(),
+    );
     check_tpm(&mut report, config.as_ref());
     check_keyring(&mut report, username, config.as_ref());
     check_kwallet(&mut report, username, config.as_ref());
+    check_greeter_keyring_selinux(&mut report, config.as_ref());
     check_daemon(&mut report, username, config.as_ref(), benchmark).await;
 
     report.print()?;
@@ -471,82 +478,50 @@ fn gdm_greeter_readiness() -> GdmGreeterReadiness {
     GdmGreeterReadiness::Ready
 }
 
-fn selinux_is_enforcing() -> bool {
-    fs::read_to_string(SELINUX_ENFORCE_PATH).is_ok_and(|value| value.trim() == "1")
-}
-
-fn semodule_lists(output: &str, module: &str) -> bool {
-    output
-        .lines()
-        .any(|line| line.split_whitespace().next() == Some(module))
-}
-
-enum GdmCameraPolicy {
-    Loaded,
-    NotLoaded,
-    NeedsRoot,
-    Unverifiable(String),
-}
-
-fn gdm_camera_policy() -> GdmCameraPolicy {
-    if !running_as_root() {
-        return GdmCameraPolicy::NeedsRoot;
-    }
-
-    match command_output("semodule", &["-l"]) {
-        Ok((true, output)) if semodule_lists(&output, GDM_SELINUX_MODULE) => {
-            GdmCameraPolicy::Loaded
-        }
-        Ok((true, _)) => GdmCameraPolicy::NotLoaded,
-        Ok((false, message)) => GdmCameraPolicy::Unverifiable(message),
-        Err(err) => GdmCameraPolicy::Unverifiable(err.to_string()),
-    }
-}
-
 fn gdm_selinux_fix() -> String {
-    if Path::new(GDM_SELINUX_POLICY_PATH).exists() {
-        format!("Run `sudo semodule -i {GDM_SELINUX_POLICY_PATH}`, then reboot.")
+    let path = selinux::policy_path(selinux::GDM_CAMERA_MODULE);
+    if Path::new(&path).exists() {
+        format!("Run `sudo semodule -i {path}`, then reboot.")
     } else {
-        format!(
-            "Reinstall the Gaze GNOME extension package to restore {GDM_SELINUX_POLICY_PATH}, then reboot."
-        )
+        format!("Reinstall the Gaze GNOME extension package to restore {path}, then reboot.")
     }
 }
 
 fn check_gdm_selinux(report: &mut Report) {
-    if !selinux_is_enforcing() {
+    if !selinux::is_enforcing() {
         return;
     }
 
-    report_gdm_camera_policy(report, gdm_camera_policy());
+    report_gdm_camera_policy(report, selinux::module_state(selinux::GDM_CAMERA_MODULE));
 }
 
-fn report_gdm_camera_policy(report: &mut Report, policy: GdmCameraPolicy) {
+fn report_gdm_camera_policy(report: &mut Report, policy: ModuleState) {
+    let module = selinux::GDM_CAMERA_MODULE;
     match policy {
-        GdmCameraPolicy::Loaded => report.pass(
+        ModuleState::Loaded => report.pass(
             "GDM camera SELinux policy",
-            format!("{GDM_SELINUX_MODULE} is loaded, so the greeter can open the camera"),
+            format!("{module} is loaded, so the greeter can open the camera"),
         ),
-        GdmCameraPolicy::NotLoaded => report.error(
+        ModuleState::NotLoaded => report.error(
             "GDM camera SELinux policy",
             format!(
-                "SELinux is enforcing and {GDM_SELINUX_MODULE} is not loaded, so the GDM greeter is denied the camera and the login screen never scans"
+                "SELinux is enforcing and {module} is not loaded, so the GDM greeter is denied the camera and the login screen never scans"
             ),
             gdm_selinux_fix(),
         ),
-        GdmCameraPolicy::NeedsRoot => report.warning(
+        ModuleState::NeedsRoot => report.warning(
             "GDM camera SELinux policy",
             format!(
-                "SELinux is enforcing, and whether {GDM_SELINUX_MODULE} is loaded could not be \
+                "SELinux is enforcing, and whether {module} is loaded could not be \
                  checked without root"
             ),
             "Run `sudo gaze doctor` to read the loaded module list.",
         ),
-        GdmCameraPolicy::Unverifiable(why) => report.warning(
+        ModuleState::Unverifiable(why) => report.warning(
             "GDM camera SELinux policy",
             format!("SELinux is enforcing, but the loaded module list could not be read: {why}"),
             format!(
-                "Run `semodule -l | grep {GDM_SELINUX_MODULE}`; if it prints nothing, {}",
+                "Run `semodule -l | grep {module}`; if it prints nothing, {}",
                 gdm_selinux_fix()
             ),
         ),
@@ -1268,6 +1243,144 @@ fn check_elevation_pam(report: &mut Report) {
     }
 }
 
+const SUDO_TARGET_OPTIONS: [&str; 3] = ["targetpw", "rootpw", "runaspw"];
+const SUSE_VENDOR_SUDOERS: &str = "/usr/etc/sudoers";
+const ADMIN_SUDOERS: &str = "/etc/sudoers";
+const SUSE_SELF_AUTH_DROPINS: [&str; 4] = [
+    "/etc/sudoers.d/50-wheel-auth-self",
+    "/usr/etc/sudoers.d/50-wheel-auth-self",
+    "/etc/sudoers.d/50-sudo-auth-self",
+    "/usr/etc/sudoers.d/50-sudo-auth-self",
+];
+
+enum SudoPolicy {
+    AuthenticatesInvoker,
+    AuthenticatesTarget(&'static str),
+    ProbablyTargetPw,
+    Unknown,
+}
+
+fn sudo_target_auth_option(listing: &str) -> Option<&'static str> {
+    let mut entries = String::new();
+    let mut in_defaults = false;
+    for line in listing.lines() {
+        if line.starts_with("Matching Defaults entries") {
+            in_defaults = true;
+            continue;
+        }
+        if in_defaults {
+            if line.trim().is_empty() {
+                break;
+            }
+            entries.push_str(line);
+            entries.push(',');
+        }
+    }
+    entries.split(',').map(str::trim).find_map(|entry| {
+        SUDO_TARGET_OPTIONS
+            .iter()
+            .copied()
+            .find(|option| entry == *option)
+    })
+}
+
+fn suse_self_auth_dropin_present() -> Option<bool> {
+    let mut present = false;
+    for path in SUSE_SELF_AUTH_DROPINS {
+        match fs::symlink_metadata(path) {
+            Ok(_) => present = true,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return None,
+        }
+    }
+    Some(present)
+}
+
+fn sudo_policy(username: &str) -> SudoPolicy {
+    if running_as_root() {
+        return match command_output_env(
+            "sudo",
+            &["-n", "-l", "-U", username],
+            &[("LC_ALL", OsStr::new("C"))],
+        ) {
+            Ok((true, listing)) => match sudo_target_auth_option(&listing) {
+                Some(option) => SudoPolicy::AuthenticatesTarget(option),
+                None => SudoPolicy::AuthenticatesInvoker,
+            },
+            _ => SudoPolicy::Unknown,
+        };
+    }
+    let vendor_default_in_force =
+        Path::new(SUSE_VENDOR_SUDOERS).exists() && !Path::new(ADMIN_SUDOERS).exists();
+    match suse_self_auth_dropin_present() {
+        Some(false) if vendor_default_in_force => SudoPolicy::ProbablyTargetPw,
+        _ => SudoPolicy::Unknown,
+    }
+}
+
+fn os_release_is_suse() -> bool {
+    fs::read_to_string("/etc/os-release")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .contains("suse")
+}
+
+fn check_sudo_policy(report: &mut Report, username: &str) {
+    if read_pam_service(&format!("/etc/pam.d/{ELEVATION_PAM_SERVICE}")).is_none() {
+        return;
+    }
+    report_sudo_policy(
+        report,
+        username,
+        sudo_policy(username),
+        os_release_is_suse(),
+    );
+}
+
+fn report_sudo_policy(report: &mut Report, username: &str, policy: SudoPolicy, suse: bool) {
+    const NAME: &str = "Sudo policy";
+    match policy {
+        SudoPolicy::AuthenticatesInvoker => report.pass(
+            NAME,
+            format!(
+                "sudo authenticates {username}, so their face enrollment covers terminal elevation"
+            ),
+        ),
+        SudoPolicy::AuthenticatesTarget(option) => {
+            let fix = if suse {
+                format!(
+                    "openSUSE ships this default. Let members of `wheel` authenticate as themselves \
+                     with `sudo zypper install sudo-policy-wheel-auth-self`, or drop `Defaults \
+                     {option}` with `visudo`."
+                )
+            } else {
+                format!(
+                    "Drop `Defaults {option}` with `visudo`, or exempt your admin group with \
+                     `Defaults:%wheel !{option}`."
+                )
+            };
+            report.warning(
+                NAME,
+                format!(
+                    "sudo is configured with `Defaults {option}`, so it authenticates the target \
+                     user (root) and never reaches {username}'s face enrollment"
+                ),
+                fix,
+            );
+        }
+        SudoPolicy::ProbablyTargetPw => report.warning(
+            NAME,
+            format!(
+                "openSUSE's default sudo policy (`Defaults targetpw`) authenticates root instead \
+                 of {username}, and no drop-in exempting `wheel` is installed"
+            ),
+            "Run `sudo gaze doctor` to confirm from the resolved policy, then \
+             `sudo zypper install sudo-policy-wheel-auth-self`.",
+        ),
+        SudoPolicy::Unknown => {}
+    }
+}
+
 fn check_polkit_pam(report: &mut Report) {
     if read_pam_service(POLKIT_PAM_FILE).is_none() {
         return;
@@ -1660,6 +1773,49 @@ fn check_kde_login_greeter(report: &mut Report, plasmalogin_face: Option<&str>) 
     }
 }
 
+/// The KDE biometric slots start without anything to route a response back, so
+/// `require_confirmation_lock_screen` is silently ignored there by design:
+/// prompting would hang the slot for the rest of the lock rather than ask
+/// anybody anything. Say so when the toggle is on and a slot is wired, instead
+/// of letting the setting imply a confirmation that never happens.
+fn check_kde_confirmation_bypass(
+    report: &mut Report,
+    config: Option<&Config>,
+    kde_fingerprint: Option<&str>,
+    kde_smartcard: Option<&str>,
+    plasmalogin_face: Option<&str>,
+) {
+    const NAME: &str = "KDE confirmation";
+    let Some(config) = config else {
+        return;
+    };
+    if !config.auth.require_confirmation_lock_screen {
+        return;
+    }
+    let mut bypassed = Vec::new();
+    if slot_status(kde_fingerprint) == KdeLockStatus::Wired {
+        bypassed.push(KDE_FACE_PAM_FILE.trim_start_matches("/etc/pam.d/"));
+    }
+    if slot_status(kde_smartcard) == KdeLockStatus::Wired {
+        bypassed.push(KDE_SMARTCARD_PAM_FILE.trim_start_matches("/etc/pam.d/"));
+    }
+    if plasmalogin_face.is_some_and(|contents| slot_status(Some(contents)) == KdeLockStatus::Wired)
+    {
+        bypassed.push(PLASMALOGIN_FACE_PAM_FILE.trim_start_matches("/etc/pam.d/"));
+    }
+    if bypassed.is_empty() {
+        return;
+    }
+    report.warning(
+        NAME,
+        format!(
+            "require_confirmation_lock_screen is on, but {} cannot be prompted, so a face match unlocks without confirmation there",
+            bypassed.join(", ")
+        ),
+        "This is by design: the greeter never delivers a response to a noninteractive slot, so asking would hang it for the rest of the lock. Leave the toggle for surfaces that can prompt (sudo with a TTY, polkit, GNOME), or turn it off if the KDE bypass surprises you. See the KDE guide.",
+    );
+}
+
 fn hyprlock_selects_gaze(contents: &str) -> bool {
     contents.lines().any(|line| {
         let line = line.split('#').next().unwrap_or_default();
@@ -1872,6 +2028,54 @@ fn check_keyring(report: &mut Report, username: &str, config: Option<&Config>) {
         username,
         keyring_record_state(username, gaze_security::keyring::Backend::Gnome),
     );
+}
+
+fn check_greeter_keyring_selinux(report: &mut Report, config: Option<&Config>) {
+    let Some(config) = config else { return };
+    let enabled = config.storage.unlock_gnome_keyring || config.storage.unlock_kwallet;
+    if !enabled || !selinux::is_enforcing() {
+        return;
+    }
+    report_greeter_keyring_policy(
+        report,
+        selinux::module_state(selinux::GREETER_KEYRING_MODULE),
+    );
+}
+
+fn report_greeter_keyring_policy(report: &mut Report, policy: ModuleState) {
+    const NAME: &str = "Keyring SELinux policy";
+    let module = selinux::GREETER_KEYRING_MODULE;
+    let fix = format!(
+        "Run `sudo semodule -i {}`, then retry the face login.",
+        selinux::policy_path(module)
+    );
+    match policy {
+        ModuleState::Loaded => report.pass(
+            NAME,
+            format!("{module} is loaded, so the login screen can read the keyring record"),
+        ),
+        ModuleState::NotLoaded => report.error(
+            NAME,
+            format!(
+                "SELinux is enforcing and {module} is not loaded, so the login screen cannot read \
+                 the shadow record or the TPM and every face login falls back to the password"
+            ),
+            fix,
+        ),
+        ModuleState::NeedsRoot => report.warning(
+            NAME,
+            format!(
+                "SELinux is enforcing, and whether {module} is loaded could not be checked \
+                 without root"
+            ),
+            "Run `sudo gaze doctor` to read the loaded module list.",
+        ),
+        ModuleState::Unverifiable(why) => report.warning(
+            NAME,
+            format!("SELinux is enforcing, but the loaded module list could not be read: {why}"),
+            format!("Run `semodule -l | grep {module}`; if it prints nothing, {fix}"),
+        ),
+    }
 }
 
 fn report_keyring_record(report: &mut Report, username: &str, state: Option<bool>) {
@@ -2633,11 +2837,96 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
             "Run `gaze auth` to verify that the IR source produces frames.",
         );
     }
+
+    if config.cameras.emitter_enabled {
+        check_i2c_emitter(report, ir);
+    }
+}
+
+fn check_i2c_emitter(report: &mut Report, ir: &str) {
+    let Some(node) = gaze_vision::camera::resolve_node(ir) else {
+        return;
+    };
+    match gaze_core::ir::i2c::I2cEmitter::diagnose(&node) {
+        None => {}
+        Some(Ok(emitter)) => report.pass(
+            "IR emitter",
+            format!("{} matches {node} on {}", emitter.name(), emitter.bus()),
+        ),
+        Some(Err(reason)) => report.warning(
+            "IR emitter",
+            format!("the I2C emitter profile for {node} does not apply: {reason}"),
+            "Load the i2c-dev module, make sure the IR bridge is running, and check that the \
+             sensor driver is bound. Authentication continues without illumination until then.",
+        ),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_target_password_default_is_read_from_the_resolved_sudo_listing() {
+        let listing = "Matching Defaults entries for alice on host:\n    always_set_home, \
+                       env_reset, env_keep=\"LANG LC_ADDRESS\", !insults,\n    \
+                       secure_path=\"/usr/sbin:/usr/bin:/sbin:/bin\", targetpw\n\nUser alice \
+                       may run the following commands on host:\n    (ALL) ALL\n";
+        assert_eq!(sudo_target_auth_option(listing), Some("targetpw"));
+        assert_eq!(
+            sudo_target_auth_option(&listing.replace("targetpw", "!targetpw")),
+            None,
+            "a negated option means the invoking user is authenticated"
+        );
+        assert_eq!(
+            sudo_target_auth_option(&listing.replace("targetpw", "rootpw")),
+            Some("rootpw")
+        );
+        assert_eq!(
+            sudo_target_auth_option(
+                "User alice may run the following commands on host:\n    targetpw\n"
+            ),
+            None,
+            "only the Defaults block is consulted"
+        );
+    }
+
+    #[test]
+    fn sudo_policy_is_only_a_warning_and_names_the_distribution_remedy() {
+        let reported = |policy, suse| {
+            let mut report = Report::default();
+            report_sudo_policy(&mut report, "alice", policy, suse);
+            report
+                .checks
+                .into_iter()
+                .find(|check| check.name == "Sudo policy")
+        };
+
+        let check = reported(SudoPolicy::AuthenticatesInvoker, true).unwrap();
+        assert_eq!(check.level, Level::Pass);
+
+        let check = reported(SudoPolicy::AuthenticatesTarget("targetpw"), true).unwrap();
+        assert_eq!(check.level, Level::Warning);
+        assert!(
+            check
+                .fix
+                .unwrap_or_default()
+                .contains("sudo-policy-wheel-auth-self")
+        );
+
+        let check = reported(SudoPolicy::AuthenticatesTarget("rootpw"), false).unwrap();
+        assert_eq!(check.level, Level::Warning);
+        assert!(check.fix.unwrap_or_default().contains("visudo"));
+
+        let check = reported(SudoPolicy::ProbablyTargetPw, true).unwrap();
+        assert_eq!(check.level, Level::Warning);
+        assert!(
+            check.fix.unwrap_or_default().contains("sudo gaze doctor"),
+            "an unprivileged guess asks for confirmation before a package install"
+        );
+
+        assert!(reported(SudoPolicy::Unknown, false).is_none());
+    }
 
     #[test]
     fn pam_include_targets_are_read_from_both_include_forms() {
@@ -2827,21 +3116,6 @@ mod tests {
     }
 
     #[test]
-    fn a_loaded_selinux_module_is_matched_on_the_name_column() {
-        let listing = "gaze-gdm-camera\t1.0\nzoneminder\t1.0\n";
-        assert!(semodule_lists(listing, GDM_SELINUX_MODULE));
-        assert!(!semodule_lists("zoneminder\t1.0\n", GDM_SELINUX_MODULE));
-        assert!(
-            !semodule_lists("gaze-gdm-camera-extra\t1.0\n", GDM_SELINUX_MODULE),
-            "a longer module name sharing the prefix must not match"
-        );
-        assert!(
-            !semodule_lists("something gaze-gdm-camera\n", GDM_SELINUX_MODULE),
-            "only the first column names the module"
-        );
-    }
-
-    #[test]
     fn an_unreadable_module_store_is_never_reported_as_a_missing_policy() {
         let reported = |policy| {
             let mut report = Report::default();
@@ -2854,17 +3128,17 @@ mod tests {
             (check.level, check.message, check.fix.unwrap_or_default())
         };
 
-        let (level, _, _) = reported(GdmCameraPolicy::Loaded);
+        let (level, _, _) = reported(ModuleState::Loaded);
         assert_eq!(level, Level::Pass);
 
-        let (level, _, _) = reported(GdmCameraPolicy::NotLoaded);
+        let (level, _, _) = reported(ModuleState::NotLoaded);
         assert_eq!(
             level,
             Level::Error,
             "a module store we read and found empty is a real failure"
         );
 
-        let (level, message, fix) = reported(GdmCameraPolicy::NeedsRoot);
+        let (level, message, fix) = reported(ModuleState::NeedsRoot);
         assert_eq!(level, Level::Warning);
         assert!(
             message.contains("without root"),
@@ -2883,7 +3157,45 @@ mod tests {
             "loading a module that may already be there is not the remedy: {fix}"
         );
 
-        let (level, _, _) = reported(GdmCameraPolicy::Unverifiable("broken".into()));
+        let (level, _, _) = reported(ModuleState::Unverifiable("broken".into()));
+        assert_eq!(level, Level::Warning);
+    }
+
+    #[test]
+    fn a_missing_keyring_policy_is_only_an_error_once_the_module_store_was_read() {
+        let reported = |policy| {
+            let mut report = Report::default();
+            report_greeter_keyring_policy(&mut report, policy);
+            let check = report
+                .checks
+                .into_iter()
+                .find(|check| check.name == "Keyring SELinux policy")
+                .expect("the keyring SELinux check always reports once it runs");
+            (check.level, check.message, check.fix.unwrap_or_default())
+        };
+
+        let (level, _, _) = reported(ModuleState::Loaded);
+        assert_eq!(level, Level::Pass);
+
+        let (level, _, fix) = reported(ModuleState::NotLoaded);
+        assert_eq!(level, Level::Error);
+        assert!(
+            fix.contains("semodule -i /usr/share/gaze/gaze-greeter-keyring.pp"),
+            "the fix names the shipped module: {fix}"
+        );
+
+        let (level, message, fix) = reported(ModuleState::NeedsRoot);
+        assert_eq!(level, Level::Warning);
+        assert!(
+            !message.contains("is not loaded"),
+            "an unchecked module must not be reported as absent: {message}"
+        );
+        assert!(
+            fix.contains("sudo gaze doctor"),
+            "the fix is to re-run as root, not to load the module: {fix}"
+        );
+
+        let (level, _, _) = reported(ModuleState::Unverifiable("broken".into()));
         assert_eq!(level, Level::Warning);
     }
 
@@ -3134,6 +3446,49 @@ mod tests {
             Level::Warning
         );
         assert_eq!(level(None, None), Level::Warning);
+    }
+
+    #[test]
+    fn kde_confirmation_bypass_is_reported_when_the_toggle_is_on_and_a_slot_is_wired() {
+        let check = |confirmation: bool,
+                     fingerprint: Option<&str>,
+                     smartcard: Option<&str>,
+                     face: Option<&str>| {
+            let mut config = Config::default();
+            config.auth.require_confirmation_lock_screen = confirmation;
+            let mut report = Report::default();
+            check_kde_confirmation_bypass(&mut report, Some(&config), fingerprint, smartcard, face);
+            report
+                .checks
+                .iter()
+                .find(|check| check.name == "KDE confirmation")
+                .map(|check| (check.level, check.message.clone()))
+        };
+
+        // Off means nothing to say, even when a slot is wired.
+        assert!(check(false, Some("auth sufficient pam_gaze.so"), None, None).is_none());
+        // On with nothing wired means nothing is bypassed.
+        assert!(check(true, None, None, None).is_none());
+        assert!(check(true, Some("auth required pam_fprintd.so"), None, None).is_none());
+
+        let (level, message) = check(true, Some("auth sufficient pam_gaze.so"), None, None)
+            .expect("a wired slot with confirmation on must warn");
+        assert_eq!(level, Level::Warning);
+        assert!(message.contains("kde-fingerprint"), "{message}");
+        assert!(
+            message.contains("require_confirmation_lock_screen"),
+            "{message}"
+        );
+
+        let (_, message) = check(
+            true,
+            None,
+            Some("auth sufficient pam_gaze.so"),
+            Some("auth sufficient pam_gaze.so"),
+        )
+        .expect("both smartcard and greeter slots must warn");
+        assert!(message.contains("kde-smartcard"), "{message}");
+        assert!(message.contains("plasmalogin-fingerprint"), "{message}");
     }
 
     #[test]

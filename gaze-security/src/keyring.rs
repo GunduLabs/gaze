@@ -104,9 +104,11 @@ impl Account {
             )
         };
         ensure!(
-            status == 0 && !result.is_null(),
-            "a readable shadow password record is required"
+            status == 0,
+            "shadow password record is unreadable: {}",
+            std::io::Error::from_raw_os_error(status)
         );
+        ensure!(!result.is_null(), "no shadow password record");
         let shadow = unsafe { &*result };
         ensure!(
             !shadow.sp_pwdp.is_null() && shadow.sp_lstchg != 0,

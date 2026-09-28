@@ -4,6 +4,7 @@
 use crate::ir::devices::{
     CameraBus, IrControl, IrDevice, IrQuery, camera_bus, find_device, usb_ids_of,
 };
+use crate::ir::i2c::I2cEmitter;
 use std::collections::HashMap;
 use std::os::unix::io::AsRawFd;
 use std::sync::{Mutex, OnceLock};
@@ -92,11 +93,23 @@ impl IrProfile {
 
 pub struct IrLed {
     node: String,
-    profile: IrProfile,
+    backend: IrLedBackend,
+}
+
+enum IrLedBackend {
+    Uvc(IrProfile),
+    I2c(I2cEmitter),
 }
 
 impl IrLed {
     pub fn for_path(node: &str) -> Option<Self> {
+        if let Some(i2c) = I2cEmitter::for_path(node) {
+            return Some(Self {
+                node: node.to_string(),
+                backend: IrLedBackend::I2c(i2c),
+            });
+        }
+
         let (vid, pid) = usb_ids_of(node)?;
 
         let profile = if let Some(dev) = find_device(vid, pid) {
@@ -107,7 +120,7 @@ impl IrLed {
 
         Some(Self {
             node: node.to_string(),
-            profile,
+            backend: IrLedBackend::Uvc(profile),
         })
     }
 
@@ -116,21 +129,33 @@ impl IrLed {
     }
 
     pub fn device_name(&self) -> &str {
-        &self.profile.name
+        match &self.backend {
+            IrLedBackend::Uvc(profile) => &profile.name,
+            IrLedBackend::I2c(backend) => backend.name(),
+        }
+    }
+
+    pub fn needs_stream_refresh(&self) -> bool {
+        matches!(self.backend, IrLedBackend::I2c(_))
     }
 
     pub fn set(&self, on: bool) -> anyhow::Result<()> {
-        let sequence = if on {
-            &self.profile.on_sequence
-        } else {
-            &self.profile.off_sequence
-        };
+        match &self.backend {
+            IrLedBackend::I2c(backend) => backend.set(on),
+            IrLedBackend::Uvc(profile) => {
+                let sequence = if on {
+                    &profile.on_sequence
+                } else {
+                    &profile.off_sequence
+                };
 
-        if sequence.is_empty() {
-            return Ok(());
+                if sequence.is_empty() {
+                    return Ok(());
+                }
+
+                self.write_sequence(sequence)
+            }
         }
-
-        self.write_sequence(sequence)
     }
 
     fn write_sequence(&self, sequence: &[RuntimeControl]) -> anyhow::Result<()> {
@@ -304,13 +329,16 @@ mod tests {
     fn led_keeps_profile_metadata() {
         let led = IrLed {
             node: "/dev/null".to_string(),
-            profile: IrProfile::from_static(&TEST_DEVICE),
+            backend: IrLedBackend::Uvc(IrProfile::from_static(&TEST_DEVICE)),
         };
         assert_eq!(led.node(), "/dev/null");
         assert_eq!(led.device_name(), "Sample IR Camera");
-        assert_eq!(led.profile.source, "unit test");
-        assert_eq!(led.profile.on_sequence[0].payload, &[1, 2, 3, 4]);
-        assert_eq!(led.profile.off_sequence[0].payload, &[0, 0, 0, 0]);
+        let IrLedBackend::Uvc(profile) = led.backend else {
+            panic!("expected UVC backend");
+        };
+        assert_eq!(profile.source, "unit test");
+        assert_eq!(profile.on_sequence[0].payload, &[1, 2, 3, 4]);
+        assert_eq!(profile.off_sequence[0].payload, &[0, 0, 0, 0]);
     }
 
     #[test]
@@ -325,12 +353,12 @@ mod tests {
     fn led_with(node: &str, on: Vec<RuntimeControl>, off: Vec<RuntimeControl>) -> IrLed {
         IrLed {
             node: node.to_string(),
-            profile: IrProfile {
+            backend: IrLedBackend::Uvc(IrProfile {
                 name: "Test".to_string(),
                 on_sequence: on,
                 off_sequence: off,
                 source: "unit test".to_string(),
-            },
+            }),
         }
     }
 

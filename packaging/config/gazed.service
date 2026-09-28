@@ -36,6 +36,15 @@ RestrictRealtime=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
 SystemCallArchitectures=native
+# The daemon only talks D-Bus (AF_UNIX), netlink (udev/logind), and IP for
+# model downloads: no Bluetooth, packet, or vsock sockets.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+# Broad system-service profile; violations fail with EPERM rather than killing
+# the daemon outright.
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# No ProtectProc: the SSH heuristic walks /proc/<pid>/environ and comm up the
+# caller chain, which needs other processes visible.
 CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
 ReadWritePaths=-/etc/gaze -/etc/dconf/db
 # The UVC emitter control ioctl needs read/write on the IR /dev/video* node, so /dev is left

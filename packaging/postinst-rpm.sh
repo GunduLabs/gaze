@@ -84,6 +84,13 @@ if [ -f /usr/share/gaze/gaze-gdm-camera.pp ] && command -v semodule >/dev/null 2
 	semodule -i /usr/share/gaze/gaze-gdm-camera.pp >/dev/null 2>&1 || true
 fi
 
+# The keyring policy widens xdm_t to /etc/shadow and the TPM, so `gaze keyring`
+# loads it on demand; an upgrade only refreshes a copy that is already loaded.
+if [ -f /usr/share/gaze/gaze-greeter-keyring.pp ] && command -v semodule >/dev/null 2>&1 \
+	&& semodule -l 2>/dev/null | grep -Eq '^gaze-greeter-keyring([[:space:]]|$)'; then
+	semodule -i /usr/share/gaze/gaze-greeter-keyring.pp >/dev/null 2>&1 || true
+fi
+
 if [ -d /run/systemd/system ]; then
 	systemctl daemon-reload >/dev/null 2>&1 || true
 	dbus-send --system --type=method_call --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig >/dev/null 2>&1 || true

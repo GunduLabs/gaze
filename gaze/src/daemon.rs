@@ -66,13 +66,6 @@ pub type ClaimStateHandle = Arc<Mutex<Option<ClaimState>>>;
 /// Cancellation channel for whatever task the current claim owns.
 pub type ActiveCancelHandle = Arc<Mutex<Option<oneshot::Sender<()>>>>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CameraBinding {
-    Session(u32),
-    /// No PipeWire session to bind to; capture the seat's V4L2 device directly.
-    SeatDevice,
-}
-
 static CLAIM_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -158,24 +151,44 @@ pub struct FaceData {
 struct EmitterGuard {
     led: Option<IrLed>,
     activation_message: Option<String>,
+    refresh_pending: bool,
+}
+
+static EMITTER_USERS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, usize>>> =
+    std::sync::OnceLock::new();
+
+fn emitter_users() -> std::sync::MutexGuard<'static, HashMap<String, usize>> {
+    EMITTER_USERS
+        .get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
 }
 
 impl EmitterGuard {
     fn engage(kind: &CameraKind, enabled: bool) -> Self {
         let mut activation_message = None;
+        let mut refresh_pending = false;
         let led = match kind {
             CameraKind::Ir { node, .. } if enabled => match IrLed::for_path(node) {
                 Some(led) => {
-                    if let Err(e) = led.set(true) {
-                        warn!("IR emitter activate failed: {e}");
-                    } else {
-                        let message = format!(
-                            "IR emitter enabled via {} on {}",
-                            led.device_name(),
-                            led.node()
-                        );
-                        info!("{message}");
-                        activation_message = Some(message);
+                    *emitter_users().entry(led.node().to_string()).or_insert(0) += 1;
+                    refresh_pending = led.needs_stream_refresh();
+                    match led.set(true) {
+                        Err(e) if refresh_pending => {
+                            info!(
+                                "IR emitter not yet reachable, retrying once the stream starts: {e}"
+                            );
+                        }
+                        Err(e) => warn!("IR emitter activate failed: {e}"),
+                        Ok(()) => {
+                            let message = format!(
+                                "IR emitter enabled via {} on {}",
+                                led.device_name(),
+                                led.node()
+                            );
+                            info!("{message}");
+                            activation_message = Some(message);
+                        }
                     }
                     Some(led)
                 }
@@ -189,17 +202,48 @@ impl EmitterGuard {
         Self {
             led,
             activation_message,
+            refresh_pending,
         }
     }
 
     fn activation_message(&self) -> Option<&str> {
         self.activation_message.as_deref()
     }
+
+    fn stream_started(&mut self) {
+        if !std::mem::take(&mut self.refresh_pending) {
+            return;
+        }
+        if let Some(led) = &self.led {
+            match led.set(true) {
+                Ok(()) => info!(
+                    "IR emitter re-applied via {} after the stream started",
+                    led.device_name()
+                ),
+                Err(e) => warn!("IR emitter activate failed after the stream started: {e}"),
+            }
+        }
+    }
 }
 
 impl Drop for EmitterGuard {
     fn drop(&mut self) {
-        if let Some(led) = &self.led
+        let Some(led) = &self.led else {
+            return;
+        };
+        let mut users = emitter_users();
+        let remaining = match users.get_mut(led.node()) {
+            Some(count) if *count > 1 => {
+                *count -= 1;
+                *count
+            }
+            _ => {
+                users.remove(led.node());
+                0
+            }
+        };
+        drop(users);
+        if remaining == 0
             && let Err(e) = led.set(false)
         {
             warn!("IR emitter deactivate failed: {e}");
@@ -240,7 +284,7 @@ pub struct AuthDaemon {
     pub claim_state: ClaimStateHandle,
     pub active_cancel: ActiveCancelHandle,
     pub active_extensions: Arc<Mutex<std::collections::HashMap<u32, bool>>>,
-    pub pam_internal: Arc<Mutex<std::collections::HashSet<String>>>,
+    pub pam_internal: Arc<Mutex<std::collections::HashMap<u32, std::collections::HashSet<String>>>>,
     pub resume_pending: Arc<AtomicBool>,
     pub resume_seen: Arc<AtomicBool>,
     pub lock_epochs: LockEpochs,
@@ -611,11 +655,27 @@ impl AuthDaemon {
         caller_uid == 0 || active_uid == Some(caller_uid)
     }
 
-    async fn ensure_pam_internal_write_access(header: &Header<'_>) -> fdo::Result<()> {
+    // The PAM module runs as root and cannot say whose dialog it is feeding, so root is answered
+    // for the active session, the one whose shell renders the prompt.
+    fn pam_internal_owner(caller_uid: u32, active_uid: Option<u32>) -> u32 {
+        if caller_uid == 0 {
+            active_uid.unwrap_or(0)
+        } else {
+            caller_uid
+        }
+    }
+
+    async fn pam_internal_read_owner(header: &Header<'_>) -> fdo::Result<u32> {
+        let caller_uid = Self::caller_uid(header).await?;
+        let active_uid = active_session_uid_and_class().await.map(|(uid, _)| uid);
+        Ok(Self::pam_internal_owner(caller_uid, active_uid))
+    }
+
+    async fn pam_internal_write_owner(header: &Header<'_>) -> fdo::Result<u32> {
         let caller_uid = Self::caller_uid(header).await?;
         let active_uid = active_session_uid_and_class().await.map(|(uid, _)| uid);
         if Self::pam_internal_write_allowed(caller_uid, active_uid) {
-            return Ok(());
+            return Ok(Self::pam_internal_owner(caller_uid, active_uid));
         }
         Err(fdo::Error::AccessDenied(
             "only root or the active session may modify the PAM internal services list".into(),
@@ -710,44 +770,24 @@ impl AuthDaemon {
         Err(fdo::Error::Failed("Daemon is not claimed".into()))
     }
 
-    fn has_pipewire_runtime(uid: u32) -> bool {
-        std::path::Path::new(&format!("/run/user/{uid}/pipewire-0")).exists()
-    }
-
-    // A bystander's camera must never authenticate another user. `active` is
-    // (uid, is_greeter, has_pipewire) for the active seat; `seat_unoccupied` is its own check.
-    fn resolve_camera_uid(
+    // Every capture opens the seat's V4L2 device, so a bystander's camera must never
+    // authenticate another user: the target, or a caller vouching for them, has to hold the seat.
+    // `active` is (uid, is_greeter) for the active seat; `seat_unoccupied` is its own check.
+    fn seat_camera_allowed(
         caller_uid: u32,
         target_uid: u32,
-        target_has_pipewire: bool,
-        caller_has_pipewire: bool,
-        active: Option<(u32, bool, bool)>,
+        active: Option<(u32, bool)>,
         seat_unoccupied: bool,
-    ) -> Option<CameraBinding> {
-        if let Some((active_uid, true, has_pipewire)) = active
-            && (caller_uid == 0 || caller_uid == active_uid)
-        {
-            // An active greeter holds the seat's camera ACL, so it outranks the target's
-            // leftover PipeWire socket.
-            return Some(if has_pipewire {
-                CameraBinding::Session(active_uid)
-                // SDDM and Plasma Login Manager greeters have no `/run/user/<uid>` to bind to.
-            } else {
-                CameraBinding::SeatDevice
-            });
+    ) -> bool {
+        match active {
+            Some((active_uid, true)) => caller_uid == 0 || caller_uid == active_uid,
+            Some((active_uid, false)) => {
+                active_uid == target_uid || (caller_uid != 0 && caller_uid == active_uid)
+            }
+            // A console login runs before any session exists, so with the seat otherwise empty
+            // nobody's ACL can be taken. A failed lookup leaves this false and still refuses.
+            None => caller_uid == 0 && seat_unoccupied,
         }
-        if target_has_pipewire {
-            return Some(CameraBinding::Session(target_uid));
-        }
-        if caller_uid != 0 {
-            return caller_has_pipewire.then_some(CameraBinding::Session(caller_uid));
-        }
-        // A console login runs before any session exists, so with the seat otherwise empty
-        // nobody's ACL can be taken. A failed lookup leaves this false and still refuses.
-        if seat_unoccupied {
-            return Some(CameraBinding::SeatDevice);
-        }
-        None
     }
 
     /// Whether seat0 holds no session that belongs to anyone other than `target_uid`.
@@ -763,32 +803,18 @@ impl AuthDaemon {
         }
     }
 
-    async fn camera_runtime_uid(caller_uid: u32, target_uid: u32) -> Option<CameraBinding> {
+    async fn seat_camera_available(caller_uid: u32, target_uid: u32) -> bool {
         let lookup = match system_bus().await {
             Ok(conn) => gaze_core::dbus::active_session_lookup_on(&conn).await,
             Err(e) => Err(anyhow::anyhow!(e)),
         };
         let (active, seat_idle) = match lookup {
-            Ok(Some(session)) => (
-                Some((
-                    session.uid,
-                    session.class == "greeter",
-                    Self::has_pipewire_runtime(session.uid),
-                )),
-                false,
-            ),
+            Ok(Some(session)) => (Some((session.uid, session.class == "greeter")), false),
             Ok(None) => (None, true),
             Err(_) => (None, false),
         };
         let seat_unoccupied = seat_idle && Self::seat_is_unoccupied(target_uid).await;
-        Self::resolve_camera_uid(
-            caller_uid,
-            target_uid,
-            Self::has_pipewire_runtime(target_uid),
-            Self::has_pipewire_runtime(caller_uid),
-            active,
-            seat_unoccupied,
-        )
+        Self::seat_camera_allowed(caller_uid, target_uid, active, seat_unoccupied)
     }
 
     async fn cancel_active_tasks(&self) {
@@ -826,9 +852,9 @@ impl AuthDaemon {
 #[cfg(test)]
 mod tests {
     use super::{
-        AuthDaemon, CameraBinding, ClaimState, ClaimStateHandle, and_policy_unsatisfiable,
-        auth_streams, claim_has_epoch, eyes_from_kpss, hybrid_auth_passed, ir_waits_for_rgb,
-        is_vanish_of, release_claim_epoch, rgb_yields_camera_on_budget, should_yield_rgb_to_ir,
+        AuthDaemon, ClaimState, ClaimStateHandle, and_policy_unsatisfiable, auth_streams,
+        claim_has_epoch, eyes_from_kpss, hybrid_auth_passed, ir_waits_for_rgb, is_vanish_of,
+        release_claim_epoch, rgb_yields_camera_on_budget, should_yield_rgb_to_ir,
     };
     use gaze_core::config::AuthSurface;
     use gaze_core::dbus::{ActiveSession, CaptureStatus};
@@ -1036,6 +1062,15 @@ mod tests {
         assert!(AuthDaemon::pam_internal_write_allowed(0, Some(1000)));
         assert!(AuthDaemon::pam_internal_write_allowed(0, None));
         assert!(AuthDaemon::pam_internal_write_allowed(1000, Some(1000)));
+    }
+
+    #[test]
+    fn pam_internal_is_kept_per_session_user() {
+        assert_eq!(AuthDaemon::pam_internal_owner(1000, Some(1000)), 1000);
+        // Another user's registration never leaks into the active session's lookup.
+        assert_eq!(AuthDaemon::pam_internal_owner(1001, Some(1000)), 1001);
+        assert_eq!(AuthDaemon::pam_internal_owner(0, Some(1001)), 1001);
+        assert_eq!(AuthDaemon::pam_internal_owner(0, None), 0);
     }
 
     #[test]
@@ -1495,47 +1530,94 @@ mod tests {
     }
 
     #[test]
-    fn camera_uses_target_own_session_when_logged_in() {
-        // su victim while victim is logged in -> victim's own camera, not the attacker's.
-        let attacker_active = Some((1000, false, true));
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, true, false, attacker_active, false),
-            Some(CameraBinding::Session(1001))
-        );
+    fn camera_allows_a_root_caller_for_the_user_holding_the_seat() {
+        assert!(AuthDaemon::seat_camera_allowed(
+            0,
+            1001,
+            Some((1001, false)),
+            false
+        ));
     }
 
     #[test]
     fn camera_refuses_bystander_session_for_root_caller() {
-        // su victim while victim has no session; the active seat is a regular user (attacker).
-        let attacker_active = Some((1000, false, true));
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, false, false, attacker_active, false),
-            None
-        );
+        // su victim from the attacker's seat, whether or not the victim is logged in elsewhere.
+        assert!(!AuthDaemon::seat_camera_allowed(
+            0,
+            1001,
+            Some((1000, false)),
+            false
+        ));
         // A failed logind lookup leaves the seat state unknown, so still refuse.
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, false, false, None, false),
-            None
-        );
+        assert!(!AuthDaemon::seat_camera_allowed(0, 1001, None, false));
     }
 
     #[test]
     fn camera_uses_the_seat_device_at_a_console_login_prompt() {
         // `login` on a free VT: no session exists yet, so nothing owns the seat camera.
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, false, false, None, true),
-            Some(CameraBinding::SeatDevice)
-        );
+        assert!(AuthDaemon::seat_camera_allowed(0, 1001, None, true));
     }
 
     #[test]
     fn camera_refuses_the_seat_device_while_another_user_holds_the_seat() {
         // logind empties ActiveSession on a switch to a VT with no session, even while another
         // user stays logged in on a background VT. Emptiness alone must not reach the device.
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, false, false, None, false),
-            None
-        );
+        assert!(!AuthDaemon::seat_camera_allowed(0, 1001, None, false));
+    }
+
+    #[test]
+    fn camera_denies_the_seat_device_to_unprivileged_callers() {
+        // An idle seat is not a licence for a non-root caller to reach the device.
+        assert!(!AuthDaemon::seat_camera_allowed(1000, 1001, None, true));
+    }
+
+    #[test]
+    fn camera_allows_login_greeter_for_root_caller() {
+        // GDM login, where the target has no session yet and the active seat is the greeter.
+        assert!(AuthDaemon::seat_camera_allowed(
+            0,
+            1001,
+            Some((42, true)),
+            false
+        ));
+    }
+
+    #[test]
+    fn camera_answers_the_greeter_probing_for_itself() {
+        assert!(AuthDaemon::seat_camera_allowed(
+            42,
+            42,
+            Some((42, true)),
+            false
+        ));
+        assert!(!AuthDaemon::seat_camera_allowed(
+            1000,
+            1000,
+            Some((42, true)),
+            false
+        ));
+    }
+
+    #[test]
+    fn camera_allows_a_polkit_approved_caller_holding_the_seat() {
+        // Admin (non-root) acting for another user after a polkit check, at their own seat.
+        assert!(AuthDaemon::seat_camera_allowed(
+            1000,
+            1001,
+            Some((1000, false)),
+            false
+        ));
+        assert!(!AuthDaemon::seat_camera_allowed(1000, 1001, None, false));
+    }
+
+    #[test]
+    fn camera_refuses_a_background_session_probing_for_itself() {
+        assert!(!AuthDaemon::seat_camera_allowed(
+            1002,
+            1002,
+            Some((1000, false)),
+            false
+        ));
     }
 
     #[test]
@@ -1545,24 +1627,6 @@ mod tests {
         assert!(![1001, 1000].iter().all(|uid| *uid == 1001));
         // An empty seat is unoccupied for any target.
         assert!(Vec::<u32>::new().iter().all(|uid| *uid == 1001));
-    }
-
-    #[test]
-    fn camera_prefers_a_real_session_over_the_seat_device() {
-        // An idle seat must not override a target who does have a live PipeWire session.
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, true, false, None, true),
-            Some(CameraBinding::Session(1001))
-        );
-    }
-
-    #[test]
-    fn camera_denies_the_seat_device_to_unprivileged_callers() {
-        // An idle seat is not a licence for a non-root caller to reach the device.
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(1000, 1001, false, false, None, true),
-            None
-        );
     }
 
     #[test]
@@ -1628,107 +1692,20 @@ mod tests {
     }
 
     #[test]
-    fn camera_allows_login_greeter_for_root_caller() {
-        // GDM login, where the target has no session yet and the active seat is the greeter.
-        let greeter_active = Some((42, true, true));
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, false, false, greeter_active, false),
-            Some(CameraBinding::Session(42))
-        );
-    }
-
-    #[test]
-    fn a_pipewireless_greeter_captures_the_seat_device_instead_of_refusing() {
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, false, false, Some((42, true, false)), false),
-            Some(CameraBinding::SeatDevice)
-        );
-        // A leftover runtime dir for the target loses to the live greeter.
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, true, false, Some((42, true, false)), false),
-            Some(CameraBinding::SeatDevice)
-        );
-    }
-
-    #[test]
-    fn camera_answers_the_greeter_probing_for_itself() {
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(42, 42, false, false, Some((42, true, false)), false),
-            Some(CameraBinding::SeatDevice)
-        );
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(42, 42, true, true, Some((42, true, true)), false),
-            Some(CameraBinding::Session(42))
-        );
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(
-                1000,
-                1000,
-                false,
-                false,
-                Some((42, true, false)),
-                false
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn camera_prefers_active_greeter_over_target_leftover_runtime() {
-        // GDM login while the target's runtime lingers, so the greeter owns the seat camera.
-        let greeter_active = Some((42, true, true));
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(0, 1001, true, false, greeter_active, false),
-            Some(CameraBinding::Session(42))
-        );
-    }
-
-    #[test]
-    fn camera_uses_caller_session_for_polkit_approved_caller() {
-        // Admin (non-root) acting for another user after a polkit check uses their own camera.
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(
-                1000,
-                1001,
-                false,
-                true,
-                Some((1000, false, true)),
-                false
-            ),
-            Some(CameraBinding::Session(1000))
-        );
-        // ...but refuse if even the caller has no camera session.
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(1000, 1001, false, false, None, false),
-            None
-        );
-    }
-
-    #[test]
     fn only_a_privileged_caller_at_a_greeter_reaches_the_seat_device() {
         // Must never let an unprivileged caller borrow a device for someone else.
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(
-                1000,
-                1001,
-                false,
-                false,
-                Some((42, true, false)),
-                false
-            ),
-            None
-        );
-        assert_eq!(
-            AuthDaemon::resolve_camera_uid(
-                0,
-                1001,
-                false,
-                false,
-                Some((1000, false, false)),
-                false
-            ),
-            None
-        );
+        assert!(!AuthDaemon::seat_camera_allowed(
+            1000,
+            1001,
+            Some((42, true)),
+            false
+        ));
+        assert!(!AuthDaemon::seat_camera_allowed(
+            0,
+            1001,
+            Some((1000, false)),
+            false
+        ));
     }
 
     #[test]
@@ -2689,11 +2666,11 @@ impl AuthDaemon {
             Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_FACES).await?;
         }
 
-        let Some(binding) = Self::camera_runtime_uid(caller_uid, target_uid).await else {
+        if !Self::seat_camera_available(caller_uid, target_uid).await {
             return Err(fdo::Error::AccessDenied(
-                "refusing face auth: no camera belongs to the target user's session".into(),
+                "refusing face auth: the seat camera belongs to another user's session".into(),
             ));
-        };
+        }
 
         let mut state = self.claim_state.lock().await;
         if let Some(existing) = &*state {
@@ -2719,7 +2696,6 @@ impl AuthDaemon {
             username = %username,
             target_uid,
             caller_uid,
-            ?binding,
             "Claimed daemon"
         );
         let epoch = CLAIM_EPOCH.fetch_add(1, Ordering::Relaxed);
@@ -3194,7 +3170,7 @@ impl AuthDaemon {
 
                             // Realtek switches mode before the exact IR stream format is
                             // negotiated; changing format afterwards silently restores RGB.
-                            let _emitter = EmitterGuard::engage(
+                            let mut emitter = EmitterGuard::engage(
                                 &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                                 emitter_enabled
                             );
@@ -3215,6 +3191,7 @@ impl AuthDaemon {
                                 if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
                                     return;
                                 }
+                                emitter.stream_started();
                                 let current_step = completed_steps_clone.load(std::sync::atomic::Ordering::Relaxed) as usize;
                                 if current_step >= max_steps as usize {
                                     return;
@@ -3263,7 +3240,7 @@ impl AuthDaemon {
                         }
                     }
 
-                    let _emitter = EmitterGuard::engage(
+                    let mut emitter = EmitterGuard::engage(
                         &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                         emitter_enabled
                     );
@@ -3285,6 +3262,7 @@ impl AuthDaemon {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
                             break;
                         }
+                        emitter.stream_started();
                         let current_step = completed_steps_clone.load(std::sync::atomic::Ordering::Relaxed) as usize;
                         if current_step >= max_steps as usize {
                             break;
@@ -3532,9 +3510,7 @@ impl AuthDaemon {
 
     async fn is_camera_available(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<bool> {
         let caller_uid = Self::caller_uid(&header).await?;
-        Ok(Self::camera_runtime_uid(caller_uid, caller_uid)
-            .await
-            .is_some())
+        Ok(Self::seat_camera_available(caller_uid, caller_uid).await)
     }
 
     async fn benchmark(
@@ -3608,9 +3584,18 @@ impl AuthDaemon {
     }
 
     #[zbus(property)]
-    async fn pam_internal(&self) -> fdo::Result<Vec<String>> {
-        let set = self.pam_internal.lock().await;
-        let mut list: Vec<String> = set.iter().cloned().collect();
+    async fn pam_internal(
+        &self,
+        #[zbus(header)] header: Option<Header<'_>>,
+    ) -> fdo::Result<Vec<String>> {
+        let header =
+            header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
+        let owner = Self::pam_internal_read_owner(&header).await?;
+        let sets = self.pam_internal.lock().await;
+        let mut list: Vec<String> = sets
+            .get(&owner)
+            .map(|set| set.iter().cloned().collect())
+            .unwrap_or_default();
         list.sort();
         Ok(list)
     }
@@ -3623,8 +3608,9 @@ impl AuthDaemon {
     ) -> fdo::Result<()> {
         let header =
             header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
-        Self::ensure_pam_internal_write_access(&header).await?;
-        let mut set = self.pam_internal.lock().await;
+        let owner = Self::pam_internal_write_owner(&header).await?;
+        let mut sets = self.pam_internal.lock().await;
+        let set = sets.entry(owner).or_default();
         set.clear();
         for s in services {
             let normalized = Self::normalize_pam_service(&s);
@@ -3632,7 +3618,7 @@ impl AuthDaemon {
                 set.insert(normalized);
             }
         }
-        info!(services = ?set, "Updated PAM internal services list");
+        info!(uid = owner, services = ?set, "Updated PAM internal services list");
         Ok(())
     }
 
@@ -3641,12 +3627,12 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         service: String,
     ) -> fdo::Result<()> {
-        Self::ensure_pam_internal_write_access(&header).await?;
+        let owner = Self::pam_internal_write_owner(&header).await?;
         let normalized = Self::normalize_pam_service(&service);
         if !normalized.is_empty() {
-            let mut set = self.pam_internal.lock().await;
-            set.insert(normalized.clone());
-            info!(service = %normalized, "Added to PAM internal services");
+            let mut sets = self.pam_internal.lock().await;
+            sets.entry(owner).or_default().insert(normalized.clone());
+            info!(uid = owner, service = %normalized, "Added to PAM internal services");
         }
         Ok(())
     }
@@ -3656,21 +3642,22 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         service: String,
     ) -> fdo::Result<()> {
-        Self::ensure_pam_internal_write_access(&header).await?;
+        let owner = Self::pam_internal_write_owner(&header).await?;
         let normalized = Self::normalize_pam_service(&service);
         if !normalized.is_empty() {
-            let mut set = self.pam_internal.lock().await;
-            set.remove(&normalized);
-            info!(service = %normalized, "Removed from PAM internal services");
+            let mut sets = self.pam_internal.lock().await;
+            if let Some(set) = sets.get_mut(&owner) {
+                set.remove(&normalized);
+            }
+            info!(uid = owner, service = %normalized, "Removed from PAM internal services");
         }
         Ok(())
     }
 
     async fn clear_pam_internal(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
-        Self::ensure_pam_internal_write_access(&header).await?;
-        let mut set = self.pam_internal.lock().await;
-        set.clear();
-        info!("Cleared PAM internal services");
+        let owner = Self::pam_internal_write_owner(&header).await?;
+        self.pam_internal.lock().await.remove(&owner);
+        info!(uid = owner, "Cleared PAM internal services");
         Ok(())
     }
 
@@ -4392,7 +4379,7 @@ impl AuthDaemon {
                         }
                     }
 
-                    let emitter = EmitterGuard::engage(
+                    let mut emitter = EmitterGuard::engage(
                         &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                         emitter_enabled
                     );
@@ -4421,6 +4408,7 @@ impl AuthDaemon {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
                             break;
                         }
+                        emitter.stream_started();
 
                         let (frame_kind, luma) = dark_gate.classify_with_luma(&frame);
                         match frame_kind {

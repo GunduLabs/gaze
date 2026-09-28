@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[device]
+name = "Surface Pro 4 OV7251 IR emitter (I2C)"
+source = "verified on Surface Pro 4: OV7251 at 0x60, register 0x3005 bit 3 drives the IR strobe"
+capture_node = "/dev/video42"
+capture_name = "Surface IR Camera"
+source_marker = "/run/surface_ir_bridge_dev"
+source_driver = "ipu3-cio2"
+sensor_device = "i2c-INT347E:00"
+sensor_driver = "ov7251"
+i2c_address = 0x60
+
+[emitter]
+register = 0x3005
+register_width = 2
+mask = 0x08
+on = 0x08
+off = 0x00

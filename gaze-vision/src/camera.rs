@@ -8,7 +8,7 @@ use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use gaze_core::config::{CameraConfig, DEFAULT_RGB_CAMERA};
 use gaze_core::ir::devices::{camera_function_of, find_device, usb_ids_of};
@@ -402,6 +402,7 @@ const INTERRUPTIBLE_POLL_TIMEOUT_MS: u64 = 100;
 /// Long enough for a busy device to reject the stream, short enough not to sit through a live
 /// source that has simply not produced its first buffer. Later failures are the frame loop's.
 const PIPELINE_START_TIMEOUT_MS: u64 = 500;
+const PIPELINE_STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 enum FramePoll {
     Frame(Mat),
@@ -605,28 +606,53 @@ pub struct Camera {
     v4l2_retry: Option<V4l2Retry>,
 }
 
+fn stop_pipeline(pipeline: &gstreamer::Pipeline) {
+    if let Err(err) = pipeline.set_state(gstreamer::State::Null) {
+        warn!("Failed to stop camera pipeline: {err}");
+        return;
+    }
+
+    let (result, current, pending) = pipeline.state(Some(gstreamer::ClockTime::from_seconds(2)));
+    if let Err(err) = result {
+        warn!(
+            ?current,
+            ?pending,
+            "Camera pipeline did not stop cleanly: {err}"
+        );
+    } else if current != gstreamer::State::Null {
+        warn!(
+            ?current,
+            ?pending,
+            "Camera pipeline did not reach the Null state"
+        );
+    }
+}
+
 impl Drop for Camera {
     fn drop(&mut self) {
-        if let Err(err) = self.pipeline.set_state(gstreamer::State::Null) {
-            warn!("Failed to stop camera pipeline: {err}");
+        let pipeline = self.pipeline.clone();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("gaze-camera-stop".into())
+            .spawn(move || {
+                stop_pipeline(&pipeline);
+                let _ = done_tx.send(());
+            });
+        if let Err(err) = spawned {
+            warn!("Could not spawn camera stop thread ({err}); stopping inline");
+            stop_pipeline(&self.pipeline);
             return;
         }
 
-        let (result, current, pending) = self
-            .pipeline
-            .state(Some(gstreamer::ClockTime::from_seconds(2)));
-        if let Err(err) = result {
-            warn!(
-                ?current,
-                ?pending,
-                "Camera pipeline did not stop cleanly: {err}"
+        // pipewiresrc can block set_state(Null) forever when stopped mid-renegotiation
+        // (gst-plugin-pipewire 1.6.9), which would otherwise hang the capture thread silently.
+        if done_rx.recv_timeout(PIPELINE_STOP_TIMEOUT).is_err() {
+            error!(
+                timeout_ms = PIPELINE_STOP_TIMEOUT.as_millis() as u64,
+                "Camera pipeline is stuck stopping; abandoning it so capture can continue"
             );
-        } else if current != gstreamer::State::Null {
-            warn!(
-                ?current,
-                ?pending,
-                "Camera pipeline did not reach the Null state"
-            );
+            // The stuck pipeline still uses this socket, and pw_core is cached by fd number.
+            std::mem::forget(self._pipewire.take());
         }
     }
 }

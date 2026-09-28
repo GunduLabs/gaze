@@ -34,5 +34,19 @@ pub fn enroll(username: &str, config: &Config, backend: Backend) -> anyhow::Resu
     );
     gaze_security::keyring::enroll_for(backend, username, password.as_bytes())?;
     println!("{} unlock enrolled for {username}.", backend.name());
+    // The greeter's PAM worker is confined as xdm_t, which the distribution policy keeps
+    // away from /etc/shadow and the TPM, so the record just written is unusable there.
+    if crate::selinux::is_enforcing() {
+        let module = crate::selinux::GREETER_KEYRING_MODULE;
+        match crate::selinux::load_module(module) {
+            Ok(()) => println!("Loaded the {module} SELinux policy for the login screen."),
+            Err(err) => eprintln!(
+                "Warning: the {module} SELinux policy could not be loaded ({err}). Face login \
+                 cannot unlock {} until you run `sudo semodule -i {}`.",
+                backend.name(),
+                crate::selinux::policy_path(module)
+            ),
+        }
+    }
     Ok(())
 }

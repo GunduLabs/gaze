@@ -261,6 +261,7 @@ sudo find /var/lib/systemd/coredump \( -name 'core.gazed.*' -o -name 'core.gaze.
 ```bash
 if command -v semodule >/dev/null 2>&1; then
   sudo semodule -r gaze-gdm-camera
+  sudo semodule -r gaze-greeter-keyring
 fi
 ```
 
