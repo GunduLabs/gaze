@@ -2837,6 +2837,29 @@ fn check_cameras(report: &mut Report, config: Option<&Config>) {
             "Run `gaze auth` to verify that the IR source produces frames.",
         );
     }
+
+    if config.cameras.emitter_enabled {
+        check_i2c_emitter(report, ir);
+    }
+}
+
+fn check_i2c_emitter(report: &mut Report, ir: &str) {
+    let Some(node) = gaze_vision::camera::resolve_node(ir) else {
+        return;
+    };
+    match gaze_core::ir::i2c::I2cEmitter::diagnose(&node) {
+        None => {}
+        Some(Ok(emitter)) => report.pass(
+            "IR emitter",
+            format!("{} matches {node} on {}", emitter.name(), emitter.bus()),
+        ),
+        Some(Err(reason)) => report.warning(
+            "IR emitter",
+            format!("the I2C emitter profile for {node} does not apply: {reason}"),
+            "Load the i2c-dev module, make sure the IR bridge is running, and check that the \
+             sensor driver is bound. Authentication continues without illumination until then.",
+        ),
+    }
 }
 
 #[cfg(test)]

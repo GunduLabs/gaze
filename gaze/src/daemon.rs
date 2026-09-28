@@ -151,24 +151,44 @@ pub struct FaceData {
 struct EmitterGuard {
     led: Option<IrLed>,
     activation_message: Option<String>,
+    refresh_pending: bool,
+}
+
+static EMITTER_USERS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, usize>>> =
+    std::sync::OnceLock::new();
+
+fn emitter_users() -> std::sync::MutexGuard<'static, HashMap<String, usize>> {
+    EMITTER_USERS
+        .get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
 }
 
 impl EmitterGuard {
     fn engage(kind: &CameraKind, enabled: bool) -> Self {
         let mut activation_message = None;
+        let mut refresh_pending = false;
         let led = match kind {
             CameraKind::Ir { node, .. } if enabled => match IrLed::for_path(node) {
                 Some(led) => {
-                    if let Err(e) = led.set(true) {
-                        warn!("IR emitter activate failed: {e}");
-                    } else {
-                        let message = format!(
-                            "IR emitter enabled via {} on {}",
-                            led.device_name(),
-                            led.node()
-                        );
-                        info!("{message}");
-                        activation_message = Some(message);
+                    *emitter_users().entry(led.node().to_string()).or_insert(0) += 1;
+                    refresh_pending = led.needs_stream_refresh();
+                    match led.set(true) {
+                        Err(e) if refresh_pending => {
+                            info!(
+                                "IR emitter not yet reachable, retrying once the stream starts: {e}"
+                            );
+                        }
+                        Err(e) => warn!("IR emitter activate failed: {e}"),
+                        Ok(()) => {
+                            let message = format!(
+                                "IR emitter enabled via {} on {}",
+                                led.device_name(),
+                                led.node()
+                            );
+                            info!("{message}");
+                            activation_message = Some(message);
+                        }
                     }
                     Some(led)
                 }
@@ -182,17 +202,48 @@ impl EmitterGuard {
         Self {
             led,
             activation_message,
+            refresh_pending,
         }
     }
 
     fn activation_message(&self) -> Option<&str> {
         self.activation_message.as_deref()
     }
+
+    fn stream_started(&mut self) {
+        if !std::mem::take(&mut self.refresh_pending) {
+            return;
+        }
+        if let Some(led) = &self.led {
+            match led.set(true) {
+                Ok(()) => info!(
+                    "IR emitter re-applied via {} after the stream started",
+                    led.device_name()
+                ),
+                Err(e) => warn!("IR emitter activate failed after the stream started: {e}"),
+            }
+        }
+    }
 }
 
 impl Drop for EmitterGuard {
     fn drop(&mut self) {
-        if let Some(led) = &self.led
+        let Some(led) = &self.led else {
+            return;
+        };
+        let mut users = emitter_users();
+        let remaining = match users.get_mut(led.node()) {
+            Some(count) if *count > 1 => {
+                *count -= 1;
+                *count
+            }
+            _ => {
+                users.remove(led.node());
+                0
+            }
+        };
+        drop(users);
+        if remaining == 0
             && let Err(e) = led.set(false)
         {
             warn!("IR emitter deactivate failed: {e}");
@@ -3119,7 +3170,7 @@ impl AuthDaemon {
 
                             // Realtek switches mode before the exact IR stream format is
                             // negotiated; changing format afterwards silently restores RGB.
-                            let _emitter = EmitterGuard::engage(
+                            let mut emitter = EmitterGuard::engage(
                                 &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                                 emitter_enabled
                             );
@@ -3140,6 +3191,7 @@ impl AuthDaemon {
                                 if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
                                     return;
                                 }
+                                emitter.stream_started();
                                 let current_step = completed_steps_clone.load(std::sync::atomic::Ordering::Relaxed) as usize;
                                 if current_step >= max_steps as usize {
                                     return;
@@ -3188,7 +3240,7 @@ impl AuthDaemon {
                         }
                     }
 
-                    let _emitter = EmitterGuard::engage(
+                    let mut emitter = EmitterGuard::engage(
                         &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                         emitter_enabled
                     );
@@ -3210,6 +3262,7 @@ impl AuthDaemon {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
                             break;
                         }
+                        emitter.stream_started();
                         let current_step = completed_steps_clone.load(std::sync::atomic::Ordering::Relaxed) as usize;
                         if current_step >= max_steps as usize {
                             break;
@@ -4326,7 +4379,7 @@ impl AuthDaemon {
                         }
                     }
 
-                    let emitter = EmitterGuard::engage(
+                    let mut emitter = EmitterGuard::engage(
                         &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                         emitter_enabled
                     );
@@ -4355,6 +4408,7 @@ impl AuthDaemon {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
                             break;
                         }
+                        emitter.stream_started();
 
                         let (frame_kind, luma) = dark_gate.classify_with_luma(&frame);
                         match frame_kind {

@@ -5,6 +5,10 @@
 
 Each `*.toml` file maps a USB UVC camera VID:PID to the raw UVC extension-unit control sequence needed to enable and disable its IR emitter.
 
+These profiles cover USB UVC controls only. Non-USB emitters controlled over
+I2C use the separately validated profiles in [`i2c-ir-profiles/`](../i2c-ir-profiles/README.md)
+and the I2C transport backend.
+
 File names are lowercase hex without `0x`: `vvvv-pppp.toml`.
 
 ## Simple single-control format
