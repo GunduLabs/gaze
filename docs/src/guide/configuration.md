@@ -79,22 +79,31 @@ device = "cpu"
 ```
 
 OpenVINO does not select a fixed device at build time. The same
-OpenVINO-enabled Gaze binary can use an Intel CPU, GPU, or NPU. Select the
-device in `/etc/gaze/config.toml`.
+OpenVINO-enabled Gaze binary can use an Intel CPU, Intel GPU, or Intel NPU.
+Select the device in `/etc/gaze/config.toml`.
 
-An installation with OpenVINO support should select the Intel NPU by default:
+> **Hardware limitation:** `device = "npu"` means an Intel NPU. Gaze's OpenVINO
+> execution provider does not support AMD Ryzen AI/XDNA NPUs or AMD GPUs, so
+> setting this option on a Ryzen laptop will not use its NPU. Use the CPU
+> provider on AMD hardware.
+
+For supported Intel hardware, select the device like this:
 
 ```toml
 [inference]
 execution_provider = "openvino"
-device = "npu"
+device = "npu" # or "gpu" for an Intel GPU, "cpu" for an Intel CPU
 ```
 
-Change `device` to `"gpu"` to use the Intel GPU. This does not require
-recompiling Gaze.
+The shipped packages are CPU-only. Using OpenVINO requires both an ONNX Runtime
+built with its OpenVINO execution provider and a Gaze daemon compiled with the
+`openvino` Cargo feature; changing the config alone cannot enable it. See the
+[OpenVINO build instructions](/guide/development#build-and-test-rust-components).
+The Intel accelerator's Linux driver/runtime must also be installed for OpenVINO
+to discover and use it. Switching between supported devices does not require
+recompiling Gaze once you have an OpenVINO-enabled build.
 
-The Gaze daemon must also be compiled with the `openvino` Cargo feature. On a
-CPU-only build, `gaze config` and the GUI refuse to set
+On a CPU-only build, `gaze config` and the GUI refuse to set
 `execution_provider = "openvino"`. A config file that already contains it does
 not stop the daemon: it logs a warning and runs on the CPU, the same way every
 other unusable value in `/etc/gaze/config.toml` is handled.
