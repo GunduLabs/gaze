@@ -4,7 +4,7 @@
   "workspaces": {
     "": {
       "devDependencies": {
-        "@viteplus/versions": "2.0.9",
+        "@viteplus/versions": "2.1.0",
         "esbuild": "0.28.2",
         "vitepress": "2.0.0-alpha.20",
       },
@@ -87,6 +87,8 @@
 
     "@remotex-labs/xansi": ["@remotex-labs/xansi@1.3.7", "", {}, "sha512-U7pzj4bWxQF16MPGnwf9uWnxV/pyFmjppzsbCsEEEtCrBS/gAJMURkYHsLz5rW0+mT9RCA55l2BjTp9SPLYQoQ=="],
 
+    "@remotex-labs/xinject": ["@remotex-labs/xinject@1.0.0", "", {}, "sha512-GomxD8PobHh2ajXJNo2KhzTnv1gAyxA2bEyrCnBjjsTakyb9DSQfpbRpDEJrE+uLuyR88aZVlquaFSRCKcMujw=="],
+
     "@rolldown/binding-android-arm-eabi": ["@rolldown/binding-android-arm-eabi@1.2.11", "", { "os": "android", "cpu": "arm" }, "sha512-A5kXfGKvKWWZE0TtPrfsvT+q4Y5d1QG8gGUzpYjGydM+fARM9MuX90PrXYXe0XbsDVgyxxNzHo6giCj90bsFNw=="],
 
     "@rolldown/binding-android-arm64": ["@rolldown/binding-android-arm64@1.2.11", "", { "os": "android", "cpu": "arm64" }, "sha512-z6cTycz+iJ4PVkuL4HHW4DfTfoeU/2nqYYuSOrTmH7yHK5Y0LCOnA03V4ZNxavyVaU1oOqUgIg2klN/s+USGOA=="],
@@ -155,7 +157,7 @@
 
     "@vitejs/plugin-vue": ["@vitejs/plugin-vue@6.0.9", "", { "dependencies": { "@rolldown/pluginutils": "^1.0.1" }, "peerDependencies": { "vite": "^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0", "vue": "^3.2.25" } }, "sha512-rD/MORlhaZMlXWW0rEn4FB4wMinWC0z/D7Ye160S5+Rs1mC8ZDAdcDp4SjKfUhG5t8q1ktcPVw4xuTkPRlzrSA=="],
 
-    "@viteplus/versions": ["@viteplus/versions@2.0.9", "", { "dependencies": { "@remotex-labs/xansi": "^1.3.7" }, "peerDependencies": { "vitepress": "^1.6.4 || ^2.0.0" }, "optionalPeers": ["vitepress"] }, "sha512-U1CG95SJT1xX8rarL4AyY8ZfxFZUqyfY+neo57YhX38pDO9l6gXwLOfMtWBt7dufTlUxS4MSKz61Uq5//Riafw=="],
+    "@viteplus/versions": ["@viteplus/versions@2.1.0", "", { "dependencies": { "@remotex-labs/xansi": "^1.3.7", "@remotex-labs/xinject": "^1.0.0" }, "peerDependencies": { "vitepress": "^1.6.4 || ^2.0.0" }, "optionalPeers": ["vitepress"] }, "sha512-izXX4zTfFy/UElbTMJtYFVg1PelCuu6mn/P/a1eqUTUeq/fLO2i+3IkxlBGLIaq69N8u/j0e0jVnI+IIH/S6/Q=="],
 
     "@vue/compiler-core": ["@vue/compiler-core@3.5.43", "", { "dependencies": { "@babel/parser": "^7.29.8", "@vue/shared": "3.5.43", "entities": "^7.0.1", "estree-walker": "^2.0.2", "source-map-js": "^1.2.1" } }, "sha512-zdiLhnbe1QQqgDT8xZMpNmyqZ3qlI+/Q/FHQco57Kwl/b05HhCzN6eVGN9QU9rbga4CrS0H5SYY8VGHZCt/1Hg=="],
 
