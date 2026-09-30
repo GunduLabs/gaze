@@ -3,8 +3,15 @@
 
 import { defineVersionedConfig } from "@viteplus/versions";
 import { createHighlighter } from "shiki";
+import fs from "node:fs";
 
 const INSTALL_CMD = "curl -fsSL https://gaze.gundulabs.com/install.sh | sh";
+
+const vueCompilerFs = {
+  fileExists: fs.existsSync,
+  readFile: (file: string) => fs.readFileSync(file, "utf8"),
+  realpath: fs.realpathSync,
+};
 
 const highlightedInstall = await createHighlighter({
   themes: ["github-light", "github-dark"],
@@ -18,6 +25,9 @@ const highlightedInstall = await createHighlighter({
 );
 
 export default defineVersionedConfig({
+  vue: {
+    script: { fs: vueCompilerFs },
+  },
   vite: {
     plugins: [
       {
