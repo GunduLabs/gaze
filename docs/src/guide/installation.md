@@ -119,7 +119,7 @@ sudo rpm-ostree install gaze gaze-gui
 # Alternative to the Gundu Labs dnf repository above; do not enable both.
 # Copr builds and signs these packages on Fedora's own builders.
 sudo dnf install dnf-plugins-core
-sudo dnf copr enable @gundulabs/gaze
+sudo dnf copr enable gundulabs/gaze
 sudo dnf install gaze gaze-gui
 ```
 

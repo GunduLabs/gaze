@@ -92,7 +92,7 @@ sudo rpm-ostree install gaze gaze-gui
 
 ```bash
 sudo dnf install dnf-plugins-core
-sudo dnf copr enable @gundulabs/gaze
+sudo dnf copr enable gundulabs/gaze
 sudo dnf install gaze gaze-gui
 ```
 
