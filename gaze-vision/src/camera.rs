@@ -528,6 +528,12 @@ fn v4l2_by_path_for_target(target: &str) -> Option<String> {
     (!by_path.is_empty()).then(|| by_path.replace('_', ":"))
 }
 
+fn without_dedup_suffix(by_path: &str) -> Option<&str> {
+    let (base, counter) = by_path.rsplit_once('.')?;
+    (!base.is_empty() && !counter.is_empty() && counter.chars().all(|c| c.is_ascii_digit()))
+        .then_some(base)
+}
+
 /// The nodes udev links for one `by-path`, lowest `video-index` first.
 fn nodes_for_by_path(by_path: &str) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(V4L2_BY_PATH_DIR) else {
@@ -559,7 +565,13 @@ fn nodes_for_by_path(by_path: &str) -> Vec<String> {
 /// The V4L2 node behind a pinned PipeWire target. A device that links several nodes also links
 /// ones that cannot be captured from, such as a metadata node, so the caps decide between them.
 fn node_from_pipewire_target(target: &str, want_color: bool) -> Option<String> {
-    let nodes = nodes_for_by_path(&v4l2_by_path_for_target(target)?);
+    let by_path = v4l2_by_path_for_target(target)?;
+    let mut nodes = nodes_for_by_path(&by_path);
+    if nodes.is_empty()
+        && let Some(base) = without_dedup_suffix(&by_path)
+    {
+        nodes = nodes_for_by_path(base);
+    }
     if let [only] = nodes.as_slice() {
         return Some(only.clone());
     }
@@ -1377,6 +1389,18 @@ mod tests {
         assert_eq!(v4l2_by_path_for_target("alsa_input.pci-0000_00_1f.3"), None);
         assert_eq!(v4l2_by_path_for_target("51"), None);
         assert_eq!(v4l2_by_path_for_target("v4l2_input."), None);
+    }
+
+    #[test]
+    fn a_deduplicated_pipewire_target_falls_back_to_its_udev_path() {
+        let by_path = v4l2_by_path_for_target("v4l2_input.pci-0000_0d_00.4-usb-0_1_1.0.2").unwrap();
+        assert_eq!(by_path, "pci-0000:0d:00.4-usb-0:1:1.0.2");
+        assert_eq!(
+            without_dedup_suffix(&by_path),
+            Some("pci-0000:0d:00.4-usb-0:1:1.0")
+        );
+        assert_eq!(without_dedup_suffix("platform-camera"), None);
+        assert_eq!(without_dedup_suffix("pci-0000:0d:00.4-usb-0:1:1.x"), None);
     }
 
     #[test]
