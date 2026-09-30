@@ -190,7 +190,7 @@ sudo zypper refresh
 ```
 
 ```bash [Fedora via Copr]
-sudo dnf copr disable @gundulabs/gaze
+sudo dnf copr disable gundulabs/gaze
 sudo dnf makecache
 ```
 
