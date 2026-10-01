@@ -67,17 +67,17 @@ pub fn camera_auth_timeout(
     std::time::Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS)
         + std::time::Duration::from_millis(auth.effective_start_delay_ms(true, surface))
 }
-pub const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to cancel.";
+pub const CONFIRMATION_PROMPT: &str = "人脸已验证。按 Enter 确认，按 Esc 取消。";
 
-pub const LOOK_PROMPT: &str = "Please look at the camera";
-pub const LOOK_OR_PASSWORD_PROMPT: &str = "Please look at the camera or enter password";
-pub const LOOK_AFTER_PASSWORD_PROMPT: &str = "Password incorrect. Please look at the camera";
-pub const FACE_VERIFIED: &str = "Face Verified.";
-pub const FACE_NOT_RECOGNIZED: &str = "Face not recognized. Enter your password.";
-pub const FACE_NOT_DETECTED: &str = "Face not detected. Enter your password.";
-pub const FACE_TOO_DARK: &str = "Too dark for face authentication. Enter your password.";
-pub const FACE_TIMED_OUT: &str = "Face authentication timed out. Enter your password.";
-pub const FACE_UNAVAILABLE: &str = "Face authentication unavailable. Enter your password.";
+pub const LOOK_PROMPT: &str = "请看摄像头";
+pub const LOOK_OR_PASSWORD_PROMPT: &str = "请看摄像头或输入密码";
+pub const LOOK_AFTER_PASSWORD_PROMPT: &str = "密码错误。请看摄像头";
+pub const FACE_VERIFIED: &str = "人脸已验证。";
+pub const FACE_NOT_RECOGNIZED: &str = "未识别到匹配人脸。请输入密码。";
+pub const FACE_NOT_DETECTED: &str = "未检测到人脸。请输入密码。";
+pub const FACE_TOO_DARK: &str = "光线过暗，无法人脸认证。请输入密码。";
+pub const FACE_TIMED_OUT: &str = "人脸认证超时。请输入密码。";
+pub const FACE_UNAVAILABLE: &str = "人脸认证不可用。请输入密码。";
 
 pub use gaze_core::dbus::{
     GAZE_CANCEL, GAZE_CONFIRMED, GAZE_MSG_FACE_NOT_DETECTED, GAZE_MSG_FACE_NOT_RECOGNIZED,
@@ -453,7 +453,7 @@ pub fn has_interactive_tty() -> bool {
 /// Fallback prompt when there is no controlling terminal to read Enter from.
 /// Empty must never count as consent here: hosts that answer unknown prompts
 /// with "" would otherwise auto-confirm without the user pressing anything.
-pub const TYPED_CONFIRMATION_PROMPT: &str = "Face Verified. Type 'yes' to confirm.";
+pub const TYPED_CONFIRMATION_PROMPT: &str = "人脸已验证。输入 yes 以确认。";
 
 pub fn typed_confirmation_accepted(response: Option<&str>) -> bool {
     response.is_some_and(|resp| resp.trim().eq_ignore_ascii_case("yes"))
@@ -611,7 +611,7 @@ pub unsafe fn confirm_graphical_polkit(
     let prompt = if is_internal {
         GAZE_REQUIRE_CONFIRMATION
     } else {
-        "Face Verified. Press Enter to confirm."
+        "人脸已验证。按 Enter 确认。"
     };
     unsafe { say(pamh, prompt) };
 
@@ -958,6 +958,14 @@ pub fn caller_is_remote(rhost: Option<&str>) -> bool {
     }
 }
 
+/// KRDP authenticates RDP clients using the generic "login" PAM service without
+/// setting PAM_RHOST. Identify the installed server executable, not argv[0] or
+/// the service name alone, so console login and local biometrics keep working.
+/// Skipping Gaze returns PAM_IGNORE; the password/account stack still decides.
+pub fn is_krdp_network_login(service: Option<&str>, executable: Option<&std::path::Path>) -> bool {
+    service == Some("login") && executable == Some(std::path::Path::new("/usr/bin/krdpserver"))
+}
+
 pub fn service_defers_to_face_service(service: Option<&str>) -> bool {
     match service {
         Some(name) => name.starts_with("gdm-") && name != FACE_PAM_SERVICE,
@@ -1080,6 +1088,43 @@ mod tests {
         ] {
             assert!(!caller_is_remote(rhost), "{rhost:?}");
         }
+    }
+
+    #[test]
+    fn krdp_without_remote_host_does_not_use_the_local_camera() {
+        assert!(is_krdp_network_login(
+            Some("login"),
+            Some(std::path::Path::new("/usr/bin/krdpserver"))
+        ));
+    }
+
+    #[test]
+    fn console_login_and_local_biometric_services_keep_face_authentication() {
+        for executable in [
+            "/usr/bin/login",
+            "/usr/bin/plasmalogin",
+            "/usr/libexec/kscreenlocker_greet",
+            "/usr/bin/sudo",
+            "/tmp/krdpserver",
+        ] {
+            assert!(!is_krdp_network_login(
+                Some("login"),
+                Some(std::path::Path::new(executable))
+            ));
+        }
+        for service in [
+            None,
+            Some("sudo"),
+            Some("polkit-1"),
+            Some("kde-fingerprint"),
+            Some("plasmalogin"),
+        ] {
+            assert!(!is_krdp_network_login(
+                service,
+                Some(std::path::Path::new("/usr/bin/krdpserver"))
+            ));
+        }
+        assert!(!is_krdp_network_login(Some("login"), None));
     }
 
     // The escape moves up a line and clears it, so it must only run when a line was printed.
@@ -1412,9 +1457,9 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(output).unwrap(),
-            "\x1B[1A\x1B[2K\rFace Verified."
+            "\x1B[1A\x1B[2K\r人脸已验证。"
         );
-        assert!(!FACE_VERIFIED.contains("confirm"));
+        assert!(!FACE_VERIFIED.contains("确认"));
     }
 
     #[test]
@@ -1423,7 +1468,7 @@ mod tests {
 
         replace_previous_line(&mut output, PromptLine::Absent, FACE_VERIFIED).unwrap();
 
-        assert_eq!(String::from_utf8(output).unwrap(), "\rFace Verified.");
+        assert_eq!(String::from_utf8(output).unwrap(), "\r人脸已验证。");
     }
 
     #[test]
@@ -1445,10 +1490,10 @@ mod tests {
         ] {
             let message = give_up_message(status);
             assert!(
-                !message.starts_with("Please look at the camera"),
+                !message.starts_with("请看摄像头"),
                 "{status:?}"
             );
-            assert!(message.contains("password"), "{status:?}");
+            assert!(message.contains("密码"), "{status:?}");
         }
     }
 

@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/gundulabs/gaze",
+  "tag": "v0.3.5",
+  "commit": "0c3be4a8639633a039c846d1a0c69f55fec43f11",
+  "license": "GPL-3.0-or-later",
+  "patch_order": [
+    "patches/0001-zh-cn-pam.patch",
+    "patches/0002-krdp-skip-face-auth.patch"
+  ]
+}

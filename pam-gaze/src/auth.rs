@@ -314,7 +314,7 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, options: Pam
                 pamh,
                 service.as_deref(),
                 silent,
-                "Keyring unlock unavailable. Enter your password.",
+                "钥匙环解锁不可用。请输入密码。",
                 is_internal,
             )
         };
@@ -758,9 +758,13 @@ pub unsafe fn do_authenticate(pamh: PamHandle, flags: c_int, options: PamOptions
     if caller_is_remote(unsafe { get_pam_rhost(pamh) }.as_deref()) {
         return PAM_IGNORE;
     }
+    let service = unsafe { get_pam_service(pamh) };
+    if is_krdp_network_login(service.as_deref(), std::env::current_exe().ok().as_deref()) {
+        return PAM_IGNORE;
+    }
     // The managed login entry owns the scan. Shared distro stacks may contain another
     // Gaze entry (including simultaneous/retry); reaching it on fallback must not scan again.
-    if is_kwallet_login(unsafe { get_pam_service(pamh) }.as_deref()) {
+    if is_kwallet_login(service.as_deref()) {
         let mut attempted = std::ptr::null();
         if unsafe { pam_get_data(pamh, c"gaze_kde_login_attempted".as_ptr(), &mut attempted) }
             == PAM_SUCCESS

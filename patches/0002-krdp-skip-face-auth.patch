@@ -1,0 +1,78 @@
+--- a/pam-gaze/src/auth.rs
++++ b/pam-gaze/src/auth.rs
+@@ -758,9 +758,13 @@
+     if caller_is_remote(unsafe { get_pam_rhost(pamh) }.as_deref()) {
+         return PAM_IGNORE;
+     }
++    let service = unsafe { get_pam_service(pamh) };
++    if is_krdp_network_login(service.as_deref(), std::env::current_exe().ok().as_deref()) {
++        return PAM_IGNORE;
++    }
+     // The managed login entry owns the scan. Shared distro stacks may contain another
+     // Gaze entry (including simultaneous/retry); reaching it on fallback must not scan again.
+-    if is_kwallet_login(unsafe { get_pam_service(pamh) }.as_deref()) {
++    if is_kwallet_login(service.as_deref()) {
+         let mut attempted = std::ptr::null();
+         if unsafe { pam_get_data(pamh, c"gaze_kde_login_attempted".as_ptr(), &mut attempted) }
+             == PAM_SUCCESS
+--- a/pam-gaze/src/core.rs
++++ b/pam-gaze/src/core.rs
+@@ -958,6 +958,14 @@
+     }
+ }
+ 
++/// KRDP authenticates RDP clients using the generic "login" PAM service without
++/// setting PAM_RHOST. Identify the installed server executable, not argv[0] or
++/// the service name alone, so console login and local biometrics keep working.
++/// Skipping Gaze returns PAM_IGNORE; the password/account stack still decides.
++pub fn is_krdp_network_login(service: Option<&str>, executable: Option<&std::path::Path>) -> bool {
++    service == Some("login") && executable == Some(std::path::Path::new("/usr/bin/krdpserver"))
++}
++
+ pub fn service_defers_to_face_service(service: Option<&str>) -> bool {
+     match service {
+         Some(name) => name.starts_with("gdm-") && name != FACE_PAM_SERVICE,
+@@ -1080,6 +1088,43 @@
+         ] {
+             assert!(!caller_is_remote(rhost), "{rhost:?}");
+         }
++    }
++
++    #[test]
++    fn krdp_without_remote_host_does_not_use_the_local_camera() {
++        assert!(is_krdp_network_login(
++            Some("login"),
++            Some(std::path::Path::new("/usr/bin/krdpserver"))
++        ));
++    }
++
++    #[test]
++    fn console_login_and_local_biometric_services_keep_face_authentication() {
++        for executable in [
++            "/usr/bin/login",
++            "/usr/bin/plasmalogin",
++            "/usr/libexec/kscreenlocker_greet",
++            "/usr/bin/sudo",
++            "/tmp/krdpserver",
++        ] {
++            assert!(!is_krdp_network_login(
++                Some("login"),
++                Some(std::path::Path::new(executable))
++            ));
++        }
++        for service in [
++            None,
++            Some("sudo"),
++            Some("polkit-1"),
++            Some("kde-fingerprint"),
++            Some("plasmalogin"),
++        ] {
++            assert!(!is_krdp_network_login(
++                service,
++                Some(std::path::Path::new("/usr/bin/krdpserver"))
++            ));
++        }
++        assert!(!is_krdp_network_login(Some("login"), None));
+     }
+ 
+     // The escape moves up a line and clears it, so it must only run when a line was printed.

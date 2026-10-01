@@ -1,312 +1,78 @@
-<!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+# Gaze 中文 PAM 提示与 KRDP 登录修复
 
-<div align="center">
+基于 [gundulabs/gaze v0.3.5](https://github.com/gundulabs/gaze/tree/v0.3.5) 的源码分支，包含 PAM 认证提示汉化，以及 KDE 远程桌面登录时跳过本机人脸扫描的修复。
 
-<img src="packaging/gui/com.gundulabs.Gaze.svg" alt="Gaze icon" width="120" />
+本项目独立于远程桌面网页认证项目，可单独查看、构建或提取补丁。源代码已经应用下面两份补丁，不需要再次应用。
 
-# Gaze
+## 改动
 
-**Facial authentication for Linux**
+### 中文 PAM 认证提示
 
-[![CI](https://github.com/gundulabs/gaze/actions/workflows/ci.yml/badge.svg)](https://github.com/gundulabs/gaze/actions/workflows/ci.yml)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+将 PAM 层面向用户的提示改为中文，包括看向摄像头、输入密码、人脸已验证、未识别到人脸、光线不足、超时以及钥匙环解锁提示；同步调整相关测试。
 
-[Documentation](https://gaze.gundulabs.com) · [Install](https://gaze.gundulabs.com/guide/installation) · [Development](https://gaze.gundulabs.com/guide/development)
+汉化范围集中在 `pam-gaze/src/auth.rs` 和 `pam-gaze/src/core.rs` 的认证交互提示。Gaze 的 GUI、CLI 和上游文档不属于本次完整汉化范围。
 
-</div>
+### KRDP 远程登录修复
 
----
+部分 KRDP 版本通过通用的 `login` PAM 服务认证，却不设置 `PAM_RHOST`，导致 Gaze 误把网络登录当成本地登录，启动摄像头并等待识别。
 
-> [!NOTE]
-> Gaze includes local liveness anti-spoofing and support for infrared (IR) cameras to secure authentication against spoofing attacks. For high-security environments, it is recommended to keep standard system authentication active as a fallback.
+补丁仅在 PAM 服务为 `login` 且实际运行的可执行文件路径为 `/usr/bin/krdpserver` 时，让 Gaze 返回 `PAM_IGNORE`。之后继续由原 PAM 密码与账户栈判定登录结果；补丁本身不会直接授予登录权限。本地控制台、锁屏、sudo 等仍走各自原有认证流程。
 
-Facial authentication for Linux with on-device face recognition, PAM integration, and tools for login, lock screen, sudo, and desktop management.
+## 文件
 
-## Install
+| 文件 | 说明 |
+| --- | --- |
+| `pam-gaze/src/auth.rs`、`pam-gaze/src/core.rs` | 已应用汉化和修复的源文件 |
+| `patches/0001-zh-cn-pam.patch` | 相对上游 v0.3.5 的中文 PAM 提示补丁 |
+| `patches/0002-krdp-skip-face-auth.patch` | 在第一份补丁之后应用的 KRDP 修复 |
+| `patches/series` | 补丁应用顺序 |
+| `UPSTREAM.json` | 上游地址、精确提交和许可证 |
+| `docs/upstream-readme.md` | 原始上游项目介绍 |
+| `LICENSE` | 上游 GPL 许可证全文 |
 
-```bash
-curl -fsSL https://gaze.gundulabs.com/install.sh | sh
-```
+仓库保留上游 Rust 工作区、依赖锁文件、打包和构建脚本；不包含本机人脸数据、PAM 配置、账户密码、旧二进制、Git 历史、下载的编译依赖或 `target/` 目录。上游发布工作流未复制，避免新仓库误用原项目的发布配置。
 
-The installer installs the Gaze daemon, CLI, and GUI. It supports openSUSE Tumbleweed on x86_64 through its native `zypper` package manager and a Tumbleweed-specific RPM repository. It installs the GNOME Shell extension only when it detects a GNOME desktop session; on Cinnamon it installs `gaze-cinnamon-extension`, on KDE Plasma it installs `gaze-kde`, and on other desktops it skips the desktop extension packages so it does not pull in GNOME Shell. If you installed the GNOME extension manually or automatic enablement was not possible, reboot (so GNOME Shell scans the new extension) and then run from GNOME:
+## 构建与测试
 
-```bash
-gnome-extensions enable gaze@gundulabs.com
-gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
-```
-
-> Running `gnome-extensions enable` before rebooting will return `Extension "gaze@gundulabs.com" does not exist`. Shell only rescans extension directories at session start, and it drops extension IDs it has not scanned, so an enable applied before the reboot can vanish at the next logout. Reboot first, then run the commands. `gaze doctor` reports this case and prints the steps.
-
-<details>
-<summary>Manual install (Debian/Ubuntu, Fedora/openSUSE RPM systems, Arch/Manjaro/CachyOS)</summary>
-
-**Debian / Ubuntu**
-
-Each apt suite carries only the builds for that release: `noble` (Ubuntu 24.04), `questing` (Ubuntu 25.10), `resolute` (Ubuntu 26.04), `trixie` (Debian 13), `forky` (Debian 14, testing).
+使用支持 Rust 2024 edition 的工具链，推荐通过 rustup 安装当前稳定版。PAM 模块的构建需要 C 编译工具、pkg-config 和 PAM 开发库。Fedora 可先安装：
 
 ```bash
-sudo mkdir -p --mode=0755 /usr/share/keyrings
-curl -fsSL https://packages.gundulabs.com/keys/gundulabs-repo.gpg \
-  | sudo tee /usr/share/keyrings/gundulabs-archive-keyring.gpg >/dev/null
-suite="$(. /etc/os-release && echo "${VERSION_CODENAME:-$UBUNTU_CODENAME}")"
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] https://packages.gundulabs.com/deb $suite main" \
-  | sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
-sudo apt update
-sudo apt install gaze gaze-gui
+sudo dnf install gcc pkgconf-pkg-config pam-devel
+cargo build --release --locked -p pam-gaze
+cargo test --locked -p pam-gaze
 ```
 
-**Fedora and compatible DNF systems**
+其他发行版请安装对应的 PAM 开发包，例如 Debian/Ubuntu 的 `libpam0g-dev`。构建产物为 `target/release/libpam_gaze.so`。如果要构建整个 Gaze，请参考[上游构建说明](https://gaze.gundulabs.com/guide/development)与仓库 `Justfile`，其他组件可能需要额外依赖。
+
+本次补丁开发时，PAM 模块的 74 项测试通过；导出时再次校验了两份补丁按顺序应用到上游基线后，与本项目两个修改后的 Rust 文件逐字节一致。
+
+## 安装到已经运行 Gaze 的主机
+
+以下针对 Fedora x86_64，假设已有兼容的 Gaze v0.3.5 和正常的 PAM 配置。PAM 属于登录组件，替换前请保留一个可用的管理员终端，并备份现有模块。示例不修改系统 PAM 策略，也不安装整套 Gaze。
 
 ```bash
-sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
-sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<'EOF'
-[gundulabs]
-name=Gundu Labs
-baseurl=https://packages.gundulabs.com/rpm/fedora/$releasever/$basearch
-enabled=1
-gpgcheck=1
-repo_gpgcheck=1
-gpgkey=https://packages.gundulabs.com/keys/gundulabs-repo.asc
-EOF
-sudo dnf makecache
-sudo dnf install gaze gaze-gui
+gaze_backup_dir="/var/backups/gaze-zh-rdp-$(date +%Y%m%d-%H%M%S)"
+sudo install -d -m 700 "$gaze_backup_dir"
+sudo cp -a /usr/lib64/security/pam_gaze.so "$gaze_backup_dir/pam_gaze.so"
+sudo install -o root -g root -m 755 target/release/libpam_gaze.so /usr/lib64/security/pam_gaze.so
+sudo restorecon -F /usr/lib64/security/pam_gaze.so
 ```
 
-**Fedora OSTree (Silverblue / Bazzite / Kinoite)**
+其他发行版应使用实际 PAM 模块目录。安装后在保留的管理员会话之外验证本地认证和新的远程桌面登录。已经运行的进程可能仍映射旧模块，需要结束旧会话或重启对应 KRDP 用户服务后再验证。
+
+恢复时，将备份的 `pam_gaze.so` 复制回同一路径并恢复 SELinux 标签。发行版或上游更新 Gaze 软件包可能覆盖本地模块，升级后需重新核对补丁兼容性。
+
+## 将补丁应用到上游源码
+
+从上游检出 `UPSTREAM.json` 记录的 v0.3.5 提交，在该上游工作区中按顺序执行：
 
 ```bash
-sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<'EOF'
-[gundulabs]
-name=Gundu Labs
-baseurl=https://packages.gundulabs.com/rpm/fedora/$releasever/$basearch
-enabled=1
-gpgcheck=1
-repo_gpgcheck=1
-gpgkey=https://packages.gundulabs.com/keys/gundulabs-repo.asc
-EOF
-sudo rpm-ostree install gaze gaze-gui
+git apply /path/to/gaze-zh-rdp/patches/0001-zh-cn-pam.patch
+git apply /path/to/gaze-zh-rdp/patches/0002-krdp-skip-face-auth.patch
 ```
 
-**Fedora via Copr** (alternative to the repository above; do not enable both)
+随后重新构建。其他上游版本可能需要调整补丁。KRDP 如果安装在不同路径，应先核实实际可执行文件路径，再修改 `is_krdp_network_login` 并同步测试；不要仅根据进程名或所有 `login` PAM 请求跳过人脸识别。
 
-```bash
-sudo dnf install dnf-plugins-core
-sudo dnf copr enable gundulabs/gaze
-sudo dnf install gaze gaze-gui
-```
+## 许可证
 
-**openSUSE Tumbleweed (x86_64)**
-
-```bash
-sudo rpm --import https://packages.gundulabs.com/keys/gundulabs-repo.asc
-sudo tee /etc/zypp/repos.d/gundulabs.repo >/dev/null <<'EOF'
-[gundulabs]
-name=Gundu Labs
-baseurl=https://packages.gundulabs.com/rpm/opensuse/tumbleweed/$basearch
-enabled=1
-autorefresh=1
-type=rpm-md
-gpgcheck=1
-gpgkey=https://packages.gundulabs.com/keys/gundulabs-repo.asc
-EOF
-sudo zypper refresh
-sudo zypper install gaze gaze-gui
-```
-
-**Arch / Manjaro / CachyOS**
-
-```bash
-# Requires an AUR helper such as yay or paru. yay shown here.
-yay -S --needed gaze-bin gaze-gui-bin
-```
-
-**Flatpak (GUI only; also install one of the system packages above for the `gazed` daemon)**
-
-```bash
-flatpak install --from https://packages.gundulabs.com/flatpak/com.gundulabs.Gaze.flatpakref
-```
-
-On openSUSE Tumbleweed, the RPM post-install script enables the shared PAM stack; reapply it manually with `sudo pam-config --add --gaze && sudo pam-config --update` if needed. For GNOME lock screen face unlock after manual package installation, also install `gaze-gnome-extension` (`gaze-gnome-extension-bin` on Arch), reboot, then from your GNOME session run `gnome-extensions enable gaze@gundulabs.com` and `gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true`. On Cinnamon, install `gaze-cinnamon-extension` and enable it from **System Settings → Extensions**; see the [Cinnamon guide](https://gaze.gundulabs.com/guide/cinnamon). On KDE Plasma, install `gaze-kde` (`gaze-kde-bin` on Arch) for hands-free lock screen face unlock and a Face Unlock entry in System Settings; see the [KDE guide](https://gaze.gundulabs.com/guide/kde).
-
-</details>
-
-<details>
-<summary>Nix / NixOS (flake)</summary>
-
-The repo is a Nix flake with packages (`gaze`, `gaze-gui`, `gaze-gnome-extension`, `gaze-cinnamon-extension`) and a NixOS module that configures the daemon, D-Bus/polkit, and PAM declaratively:
-
-```nix
-# flake.nix inputs
-inputs.gaze.url = "github:GunduLabs/gaze";
-
-# NixOS configuration
-imports = [ inputs.gaze.nixosModules.default ];
-services.gaze = {
-  enable = true;
-  gui.enable = true;
-};
-```
-
-See the [Nix & NixOS guide](https://gaze.gundulabs.com/guide/nixos) for module options, GNOME lock screen setup, hyprlock, and home-manager usage.
-
-</details>
-
-After installation (any method), reboot once to ensure all system-level changes are fully applied.
-
-```bash
-sudo reboot
-```
-
-## Quick start
-
-```bash
-# Enroll your face
-gaze add-face default
-
-# Test authentication
-gaze auth
-
-# Or use the GUI
-gaze-gui
-```
-
-## How it works
-
-Gaze runs a daemon (`gazed`) that communicates over DBus. When authentication is requested (by PAM at login, the GNOME extension on the lock screen, or the CLI), the daemon captures a frame from your webcam, detects and aligns the face, computes an embedding using an ONNX model, and compares it against stored enrollments.
-
-All processing happens locally. Face embeddings are stored on disk, not transmitted anywhere.
-
-```
-Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Match → Liveness (MiniFASNet-V2)
-```
-
-## Components
-
-| Component | Description |
-|-----------|-------------|
-| `gazed` | System daemon exposing `com.gundulabs.Gaze` on DBus |
-| `gaze` | CLI for enrollment and authentication (crate: `gaze-cli`) |
-| `gaze-gui` | GTK4/Adwaita graphical application |
-| `pam-gaze` | PAM module for login/lock screen integration. Asks `gazed` over DBus; links no camera or inference code |
-| `gaze-security` | TPM sealing and the privileged credential store behind template encryption and keyring unlock |
-| `gaze-gnome-extension` | GNOME Shell extension for lock screen and GDM auth |
-| `gaze-cinnamon-extension` | Cinnamon Spices extension for lock screen and PolKit auth |
-| `gaze-kde` | KDE Plasma lock screen wiring and a Face Unlock entry in System Settings |
-| `gaze-hyprlock` | PAM service for hyprlock face unlock on Hyprland |
-
-## Configuration
-
-```toml
-# /etc/gaze/config.toml
-[inference]
-execution_provider = "cpu" # cpu | openvino (requires an OpenVINO build)
-device = "cpu"             # cpu, or gpu | npu on an OpenVINO build
-
-[security]
-level = "medium"    # low | medium | high | maximum | custom
-
-[cameras]
-rgb = "primary"
-dark_luma_threshold = 20
-
-[auth]
-abort_if_ssh = true
-abort_if_lid_closed = true
-
-[enrollment]
-max_templates = 2
-min_face_size_ratio = 0.25
-
-[liveness]
-enabled = true
-threshold = 0.8
-
-[storage]
-encrypt_templates = false   # seal face templates to the TPM
-unlock_kwallet = false # optional TPM-backed KDE wallet unlock
-unlock_gnome_keyring = false # unlock the GNOME keyring after a GDM face login
-```
-
-OpenVINO selects its device at run time. An OpenVINO-enabled installation
-should use `execution_provider = "openvino"` and `device = "npu"` to select the
-Intel NPU. The same binary can select the Intel GPU by changing `device` to
-`"gpu"`. The released packages are CPU-only; OpenVINO requires building from
-source with `just build-rust-openvino`.
-
-See the [configuration guide](https://gaze.gundulabs.com/guide/configuration) for all options.
-
-## CLI usage
-
-```
-gaze add-face <name>         Enroll a new face
-gaze refine-face <name>      Add samples to an existing enrollment
-gaze auth                    Authenticate
-gaze auth --verbose          Authenticate with detailed metrics
-gaze auth --silent           Authenticate silently (exit code only)
-gaze list-faces              List enrolled faces
-gaze rename-face <old> <new> Rename a face
-gaze remove-face <name>      Remove a face
-gaze clear-user              Remove all face data for current user
-gaze config                  Interactive configuration editor
-gaze config --show           Print current config and exit
-gaze keyring                 Enroll optional TPM-backed GNOME Keyring unlock
-gaze keyring --forget        Remove the stored GNOME Keyring credential
-gaze keyring --kwallet       Enroll optional TPM-backed KDE KWallet unlock
-gaze doctor                  Check config, daemon, cameras, enrollments, PAM, and TPM
-gaze doctor --benchmark      Also measure detector/recognizer/liveness inference speed
-gaze uninstall               Completely remove Gaze (packages, PAM, config, models, data)
-gaze uninstall -y            Skip confirmation prompt
-```
-
-Enrollment first captures a straight-on reference, then asks for small up, down,
-left, and right movements relative to that reference.
-
-## Building from source
-
-**Dependencies:** Rust 1.85+, [`just` 1.51+](https://github.com/casey/just), [`nfpm`](https://nfpm.goreleaser.com)
-
-```bash
-# Ubuntu/Debian
-sudo apt install build-essential pkg-config clang libclang-dev \
-  libopencv-dev libv4l-dev libpam0g-dev libtss2-dev libssl-dev \
-  libgtk-4-dev libadwaita-1-dev \
-  libcairo2-dev libglib2.0-dev libgdk-pixbuf-2.0-dev libpango1.0-dev libgraphene-1.0-dev \
-  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-  gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire \
-  gettext-base
-
-# Build
-just build-rust
-
-# Build with OpenVINO support (requires an OpenVINO-enabled system ONNX Runtime)
-just build-rust-openvino
-
-# Package
-just package <deb | rpm | archlinux>
-```
-
-See the [development guide](https://gaze.gundulabs.com/guide/development) for more.
-
-## License
-
-Gaze is free software licensed under the [GNU General Public License, version 3 or later](LICENSE) (`GPL-3.0-or-later`).
-
-```
-Gaze - Facial authentication for Linux
-Copyright (C) 2026 Gundu Labs <maintainers@gundulabs.com>
-
-This program is free software: you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation, either version 3 of the License, or (at your option) any later
-version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY
-WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
-PARTICULAR PURPOSE. See the GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License along with
-this program. If not, see <https://www.gnu.org/licenses/>.
-```
-
-Contributions are accepted under the same license.
+沿用上游 **GPL-3.0-or-later**，保留源文件中的 Gundu Labs 版权与 SPDX 声明。汉化和远程登录修复也按相同许可证提供。项目没有改变或代表上游的官方发布。

@@ -1,0 +1,95 @@
+--- a/pam-gaze/src/auth.rs
++++ b/pam-gaze/src/auth.rs
+@@ -314,7 +314,7 @@
+                 pamh,
+                 service.as_deref(),
+                 silent,
+-                "Keyring unlock unavailable. Enter your password.",
++                "钥匙环解锁不可用。请输入密码。",
+                 is_internal,
+             )
+         };
+--- a/pam-gaze/src/core.rs
++++ b/pam-gaze/src/core.rs
+@@ -67,17 +67,17 @@
+     std::time::Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS)
+         + std::time::Duration::from_millis(auth.effective_start_delay_ms(true, surface))
+ }
+-pub const CONFIRMATION_PROMPT: &str = "Face Verified. Press Enter to confirm, Esc to cancel.";
+-
+-pub const LOOK_PROMPT: &str = "Please look at the camera";
+-pub const LOOK_OR_PASSWORD_PROMPT: &str = "Please look at the camera or enter password";
+-pub const LOOK_AFTER_PASSWORD_PROMPT: &str = "Password incorrect. Please look at the camera";
+-pub const FACE_VERIFIED: &str = "Face Verified.";
+-pub const FACE_NOT_RECOGNIZED: &str = "Face not recognized. Enter your password.";
+-pub const FACE_NOT_DETECTED: &str = "Face not detected. Enter your password.";
+-pub const FACE_TOO_DARK: &str = "Too dark for face authentication. Enter your password.";
+-pub const FACE_TIMED_OUT: &str = "Face authentication timed out. Enter your password.";
+-pub const FACE_UNAVAILABLE: &str = "Face authentication unavailable. Enter your password.";
++pub const CONFIRMATION_PROMPT: &str = "人脸已验证。按 Enter 确认，按 Esc 取消。";
++
++pub const LOOK_PROMPT: &str = "请看摄像头";
++pub const LOOK_OR_PASSWORD_PROMPT: &str = "请看摄像头或输入密码";
++pub const LOOK_AFTER_PASSWORD_PROMPT: &str = "密码错误。请看摄像头";
++pub const FACE_VERIFIED: &str = "人脸已验证。";
++pub const FACE_NOT_RECOGNIZED: &str = "未识别到匹配人脸。请输入密码。";
++pub const FACE_NOT_DETECTED: &str = "未检测到人脸。请输入密码。";
++pub const FACE_TOO_DARK: &str = "光线过暗，无法人脸认证。请输入密码。";
++pub const FACE_TIMED_OUT: &str = "人脸认证超时。请输入密码。";
++pub const FACE_UNAVAILABLE: &str = "人脸认证不可用。请输入密码。";
+ 
+ pub use gaze_core::dbus::{
+     GAZE_CANCEL, GAZE_CONFIRMED, GAZE_MSG_FACE_NOT_DETECTED, GAZE_MSG_FACE_NOT_RECOGNIZED,
+@@ -453,7 +453,7 @@
+ /// Fallback prompt when there is no controlling terminal to read Enter from.
+ /// Empty must never count as consent here: hosts that answer unknown prompts
+ /// with "" would otherwise auto-confirm without the user pressing anything.
+-pub const TYPED_CONFIRMATION_PROMPT: &str = "Face Verified. Type 'yes' to confirm.";
++pub const TYPED_CONFIRMATION_PROMPT: &str = "人脸已验证。输入 yes 以确认。";
+ 
+ pub fn typed_confirmation_accepted(response: Option<&str>) -> bool {
+     response.is_some_and(|resp| resp.trim().eq_ignore_ascii_case("yes"))
+@@ -611,7 +611,7 @@
+     let prompt = if is_internal {
+         GAZE_REQUIRE_CONFIRMATION
+     } else {
+-        "Face Verified. Press Enter to confirm."
++        "人脸已验证。按 Enter 确认。"
+     };
+     unsafe { say(pamh, prompt) };
+ 
+@@ -1412,9 +1412,9 @@
+ 
+         assert_eq!(
+             String::from_utf8(output).unwrap(),
+-            "\x1B[1A\x1B[2K\rFace Verified."
+-        );
+-        assert!(!FACE_VERIFIED.contains("confirm"));
++            "\x1B[1A\x1B[2K\r人脸已验证。"
++        );
++        assert!(!FACE_VERIFIED.contains("确认"));
+     }
+ 
+     #[test]
+@@ -1423,7 +1423,7 @@
+ 
+         replace_previous_line(&mut output, PromptLine::Absent, FACE_VERIFIED).unwrap();
+ 
+-        assert_eq!(String::from_utf8(output).unwrap(), "\rFace Verified.");
++        assert_eq!(String::from_utf8(output).unwrap(), "\r人脸已验证。");
+     }
+ 
+     #[test]
+@@ -1445,10 +1445,10 @@
+         ] {
+             let message = give_up_message(status);
+             assert!(
+-                !message.starts_with("Please look at the camera"),
++                !message.starts_with("请看摄像头"),
+                 "{status:?}"
+             );
+-            assert!(message.contains("password"), "{status:?}");
++            assert!(message.contains("密码"), "{status:?}");
+         }
+     }
+ 
