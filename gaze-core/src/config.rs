@@ -594,6 +594,8 @@ pub struct LivenessConfig {
     pub threshold: f64,
     #[serde(default = "default_max_seconds")]
     pub max_seconds: f64,
+    #[serde(default = "default_false")]
+    pub ir_model: bool,
 }
 
 fn default_liveness_enabled() -> bool {
@@ -612,6 +614,7 @@ impl Default for LivenessConfig {
             enabled: default_liveness_enabled(),
             threshold: default_liveness_threshold(),
             max_seconds: default_max_seconds(),
+            ir_model: false,
         }
     }
 }
@@ -2016,6 +2019,7 @@ mod tests {
                 enabled: true,
                 threshold: 0.9,
                 max_seconds: 2.5,
+                ir_model: true,
             },
             storage: StorageConfig {
                 encrypt_templates: true,
@@ -2055,6 +2059,7 @@ mod tests {
         assert!(loaded.liveness.enabled);
         assert_eq!(loaded.liveness.threshold, 0.9);
         assert_eq!(loaded.liveness.max_seconds, 2.5);
+        assert!(loaded.liveness.ir_model);
         assert!(loaded.storage.encrypt_templates);
         assert!(loaded.storage.unlock_gnome_keyring);
         assert!(loaded.storage.unlock_kwallet);
@@ -2087,6 +2092,7 @@ mod tests {
         assert!(config.liveness.enabled);
         assert!((config.liveness.threshold - 0.8).abs() < f64::EPSILON);
         assert_eq!(config.liveness.max_seconds, DEFAULT_LIVENESS_MAX_SECONDS);
+        assert!(!config.liveness.ir_model);
     }
 
     #[test]

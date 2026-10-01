@@ -268,6 +268,7 @@ pub struct AuthDaemon {
     pub recognizer_rgb: Arc<Mutex<FaceRecognizer>>,
     pub recognizer_ir: Arc<Mutex<FaceRecognizer>>,
     pub liveness: Arc<Mutex<Option<LivenessDetector>>>,
+    pub ir_liveness: Arc<Mutex<Option<LivenessDetector>>>,
     pub db: Arc<Mutex<UserDatabase>>,
     pub rgb_threshold: Arc<Mutex<f32>>,
     pub ir_threshold: Arc<Mutex<f32>>,
@@ -2037,6 +2038,26 @@ mod tests {
     }
 }
 
+
+pub fn load_ir_liveness_detector(enabled: bool) -> Option<LivenessDetector> {
+    if !enabled {
+        return None;
+    }
+    match crate::models::ensure_ir_liveness_model(gaze_core::config::MODELS_DIR) {
+        Ok(path) => match LivenessDetector::new(path.to_str().unwrap()) {
+            Ok(detector) => Some(detector),
+            Err(e) => {
+                warn!("IR anti-spoof model failed to load, using passive IR liveness: {e}");
+                None
+            }
+        },
+        Err(e) => {
+            warn!("IR anti-spoof model unavailable, using passive IR liveness: {e}");
+            None
+        }
+    }
+}
+
 /// The effective value in the GDM profile, which a NixOS config sets without our override file.
 fn gdm_face_auth_from_dconf() -> Option<bool> {
     if !std::path::Path::new(GDM_DCONF_PROFILE_PATH).exists() {
@@ -2072,6 +2093,7 @@ fn gdm_override_error(action: &str, path: &std::path::Path, err: std::io::Error)
     }
     fdo::Error::Failed(format!("Failed to {action} {}: {err}", path.display()))
 }
+
 
 async fn prepare_for_sleep_stream(conn: &zbus::Connection) -> zbus::Result<zbus::MessageStream> {
     let rule = zbus::MatchRule::builder()
@@ -2849,9 +2871,11 @@ impl AuthDaemon {
         Ok(self.current_config().await.storage.unlock_kwallet)
     }
 
+
     async fn keyring_enabled(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<bool> {
         Self::ensure_config_read_access(&header).await?;
         Ok(self.current_config().await.storage.unlock_gnome_keyring)
+
     }
 
     async fn verify_stop(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
@@ -3849,8 +3873,13 @@ impl AuthDaemon {
             None
         };
 
+
+        let new_ir_liveness_detector =
+            load_ir_liveness_detector(new_config.liveness.enabled && new_config.liveness.ir_model);
+
         *self.rgb_threshold.lock().await = new_config.security.rgb_threshold();
         *self.ir_threshold.lock().await = new_config.security.ir_threshold();
+
         *self.hybrid_policy.lock().await = new_config.security.hybrid_policy().to_string();
 
         let sources = resolve_configured_sources(&new_config.cameras);
@@ -3867,6 +3896,10 @@ impl AuthDaemon {
         let mut liveness_slot = self.liveness.lock().await;
         *liveness_slot = new_liveness_detector;
         drop(liveness_slot);
+
+        let mut ir_liveness_slot = self.ir_liveness.lock().await;
+        *ir_liveness_slot = new_ir_liveness_detector;
+        drop(ir_liveness_slot);
 
         let mut abort_if_ssh = self.abort_if_ssh.lock().await;
         *abort_if_ssh = new_config.auth.abort_if_ssh;
