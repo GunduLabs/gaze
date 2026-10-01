@@ -194,6 +194,7 @@ The bug form collects all of this, but if you are adding to an existing issue, t
 - Which surfaces are affected, and which ones work. A face match that succeeds under `gaze auth` and fails at a greeter points somewhere very different from one that fails everywhere.
 - For camera, IR, or recognition problems: `gaze config --show`, `gaze auth --verbose`, and the camera's vendor and model IDs from `udevadm info -q property -n /dev/video0`. Those IDs are what tell us whether your hardware needs a dedicated IR-emitter profile.
 - For KDE: `gaze-kde-pam status` and your PAM stacks. On Fedora the vendor copy lives under `/usr/lib/pam.d` and only appears in `/etc/pam.d` once something has customized it, so include both paths.
+- For Omarchy: `gaze-omarchy doctor`, `omarchy-shell lock status`, and `/etc/pam.d/gaze-omarchy-face`.
 - Whether you have run `gaze uninstall` at any point. It deliberately removes `/etc/gaze/config.toml`, so a reinstall afterwards gives you a default config, which looks exactly like a bug that lost your settings.
 - Whether this ever worked, and the last version that did.
 

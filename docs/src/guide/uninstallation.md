@@ -22,7 +22,7 @@ It prints the plan and asks for confirmation first.
 
 ::: warning `gaze uninstall` does not remove `gaze-cinnamon-extension`
 The package list it drives covers `gaze`, `gaze-gui`, `gaze-gnome-extension`,
-`gaze-hyprlock`, and `gaze-kde`. If you installed the Cinnamon extension,
+`gaze-hyprlock`, `gaze-kde`, and `gaze-omarchy`. If you installed the Cinnamon extension,
 remove it yourself with your package manager and follow
 [Reset Cinnamon lock screen settings](#reset-cinnamon-lock-screen-settings).
 :::
@@ -74,6 +74,14 @@ sudo gaze-kde-pam disable-login
 ```
 
 A `pam_gaze` line you added to those files by hand, outside Gaze's marked block, is left in place, so remove it yourself.
+
+### Restore Omarchy's stock lock
+
+Run `gaze-omarchy disable` from each user's unlocked desktop before removing
+`gaze-omarchy` or `gaze-omarchy-bin`. This restores the stock lock and removes
+only Gaze's package-owned plugin link. `gaze uninstall` performs this step for
+the current user and stops before removal if it fails. See the
+[Omarchy guide](/guide/omarchy#disable-and-uninstall).
 
 ### Revert hyprlock face unlock
 

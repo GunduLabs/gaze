@@ -1,0 +1,34 @@
+{
+  "profiles": [
+    {
+      "ref": "v4.0.2",
+      "sha256": {
+        "shell/plugins/lock/Service.qml": "3f0a265a09f7957e8f5d74666595d3136ec64899c414426190460f9e2098e701",
+        "shell/plugins/lock/LockView.qml": "9b174cf3ba8569dede528968be38994491ac73d9ca708f7e9451beeec7b4d066",
+        "shell/plugins/lock/manifest.json": "4a0658bff8ac1cb8d428cf32e7eb05027709e2d49beed0b2482c63cca9c5b3f4",
+        "shell/shell.qml": "9f1db77dcc3c111ceccc860ac472d19b35d385958a63d270ea51e413ab86f1f0",
+        "shell/services/PluginRegistry.qml": "63371e4224f948e5444531282ad9f7c74ca2e578470b549f4c6b898c3a15c50f",
+        "shell/Commons/Border.qml": "b98c82530126fc10a287845e8df574ae26fa05b6064d93451d93d0ee9c3f7166",
+        "shell/Commons/Color.qml": "cc9b62e2eaf8c307aa02206d9320c3d0ca349cf8feed452a6eddf387adaa5320",
+        "shell/Commons/Style.qml": "f5901092617ae62645597199270afd4dfb0644d596bdfff16e1834fca6ad7243",
+        "shell/Commons/Util.qml": "6894c63190973b5dbe50b13b3f7a99dd5770e143699f3aae1650fb65ca3ebe9b",
+        "shell/Ui/BorderSurface.qml": "e17d8150d0b0e60f431bd6df5e661f5d9fe1f5eec9c2e2420f6eff2179a45baf"
+      }
+    },
+    {
+      "ref": "v4.0.3",
+      "sha256": {
+        "shell/plugins/lock/Service.qml": "3f0a265a09f7957e8f5d74666595d3136ec64899c414426190460f9e2098e701",
+        "shell/plugins/lock/LockView.qml": "9b174cf3ba8569dede528968be38994491ac73d9ca708f7e9451beeec7b4d066",
+        "shell/plugins/lock/manifest.json": "58af8610a79045dfc09b541a5c2fdfd2e8886624549a49114ba424b4833cc546",
+        "shell/shell.qml": "4a4b7694e5b9e0bd952ce0efa2d6dc2cea44cdfa98cc2f442e40fe41cbc1beab",
+        "shell/services/PluginRegistry.qml": "8466127c53037b80b582544610b0bdf78a86764e4f037a3b9ce360d107359803",
+        "shell/Commons/Border.qml": "b98c82530126fc10a287845e8df574ae26fa05b6064d93451d93d0ee9c3f7166",
+        "shell/Commons/Color.qml": "cc9b62e2eaf8c307aa02206d9320c3d0ca349cf8feed452a6eddf387adaa5320",
+        "shell/Commons/Style.qml": "f5901092617ae62645597199270afd4dfb0644d596bdfff16e1834fca6ad7243",
+        "shell/Commons/Util.qml": "6894c63190973b5dbe50b13b3f7a99dd5770e143699f3aae1650fb65ca3ebe9b",
+        "shell/Ui/BorderSurface.qml": "e17d8150d0b0e60f431bd6df5e661f5d9fe1f5eec9c2e2420f6eff2179a45baf"
+      }
+    }
+  ]
+}

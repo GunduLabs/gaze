@@ -39,7 +39,7 @@ body:
         - Upgrade of an existing install
         - Uninstall
         - Switching install methods (for example AUR to the official repository)
-        - Adding a desktop integration package (gaze-kde, GNOME extension)
+        - Adding a desktop integration package (gaze-kde, gaze-omarchy, GNOME extension)
         - Building from source
     validations:
       required: true
@@ -54,7 +54,7 @@ body:
         - Gundu Labs dnf repository (Fedora and compatible)
         - rpm-ostree (Silverblue / Bazzite / Kinoite)
         - Fedora Copr (@gundulabs/gaze)
-        - AUR (gaze-bin, gaze-gui-bin, gaze-kde-bin, gaze-gnome-extension-bin)
+        - AUR (gaze-bin, gaze-gui-bin, gaze-kde-bin, gaze-omarchy-bin, gaze-gnome-extension-bin)
         - Nix / NixOS module
         - Flatpak (GUI only)
         - Built from source

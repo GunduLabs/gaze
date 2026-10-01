@@ -1415,9 +1415,9 @@ fn remove_arch_pam_configuration_cmd() -> String {
 }
 
 fn remove_rpm_ostree_packages_cmd() -> String {
-    "sudo rpm-ostree uninstall gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde \
+    "sudo rpm-ostree uninstall gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde \
       2>/dev/null || \
-      for pkg in gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde; do \
+      for pkg in gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde; do \
       sudo rpm-ostree uninstall \"$pkg\" 2>/dev/null || true; \
       done"
         .into()
@@ -1426,7 +1426,7 @@ fn remove_rpm_ostree_packages_cmd() -> String {
 fn remove_pacman_packages_cmd() -> String {
     // AUR builds split off `-debug` packages; remove those first since they can
     // depend on the base package.
-    "for base in gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde gaze-bin gaze-gui-bin \
+    "for base in gaze-omarchy-bin gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde gaze-bin gaze-gui-bin \
       gaze-gnome-extension-bin gaze-hyprlock-bin gaze-kde-bin; do \
       for pkg in \"$base-debug\" \"$base\"; do \
       if pacman -Q \"$pkg\" >/dev/null 2>&1; then \
@@ -1439,7 +1439,7 @@ fn remove_pacman_packages_cmd() -> String {
 
 fn remove_zypper_packages_cmd() -> String {
     // Include every optional openSUSE integration package.
-    "sudo zypper --non-interactive remove --no-confirm gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
+    "sudo zypper --non-interactive remove --no-confirm gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
         .into()
 }
 
@@ -1493,7 +1493,7 @@ fn append_package_manager_uninstall_steps(
         PackageManager::Apt => {
             plan.push((
                 "Remove apt packages",
-                "sudo apt-get remove --purge -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
+                "sudo apt-get remove --purge -y gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
                     .into(),
             ));
             plan.push((
@@ -1516,7 +1516,7 @@ fn append_package_manager_uninstall_steps(
         PackageManager::Dnf => {
             plan.push((
                 "Remove dnf packages",
-                "sudo dnf remove -y gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
+                "sudo dnf remove -y gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
                     .into(),
             ));
             plan.push((
@@ -1580,8 +1580,14 @@ fn detect_package_manager() -> Option<PackageManager> {
     )
 }
 
+const RESTORE_OMARCHY_LOCK_STEP: &str = "Restore the stock Omarchy lock before removing Gaze";
+
 fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     let mut plan: Vec<(&'static str, String)> = Vec::new();
+
+    if which("gaze-omarchy") {
+        plan.push((RESTORE_OMARCHY_LOCK_STEP, "gaze-omarchy disable".into()));
+    }
 
     if which("gnome-extensions") {
         plan.push((
@@ -1753,6 +1759,11 @@ fn handle_uninstall(yes: bool, keep_data: bool, dry_run: bool) -> anyhow::Result
                 term.write_line(&format!("  {} done", style("✓").green()))?;
             }
             Ok(s) => {
+                if *desc == RESTORE_OMARCHY_LOCK_STEP {
+                    anyhow::bail!(
+                        "Omarchy lock restoration failed; Gaze has not been removed. Run gaze-omarchy disable from your unlocked desktop first."
+                    );
+                }
                 term.write_line(&format!(
                     "  {} step exited with {} (continuing)",
                     style("!").yellow(),
@@ -1760,6 +1771,11 @@ fn handle_uninstall(yes: bool, keep_data: bool, dry_run: bool) -> anyhow::Result
                 ))?;
             }
             Err(e) => {
+                if *desc == RESTORE_OMARCHY_LOCK_STEP {
+                    anyhow::bail!(
+                        "Cannot restore the Omarchy lock: {e}. Gaze has not been removed."
+                    );
+                }
                 term.write_line(&format!(
                     "  {} failed to spawn: {} (continuing)",
                     style("!").yellow(),
@@ -2261,9 +2277,21 @@ mod tests {
     }
 
     #[test]
+    fn omarchy_plugin_version_matches_release() {
+        let manifest = include_str!("../../omarchy-plugin/manifest.json");
+        let expected = format!("\"version\": \"{}\"", env!("CARGO_PKG_VERSION"));
+        assert!(
+            manifest.contains(&expected),
+            "omarchy-plugin/manifest.json must carry version {}",
+            env!("CARGO_PKG_VERSION")
+        );
+    }
+
+    #[test]
     fn pacman_removal_covers_debug_split_packages() {
         let command = remove_pacman_packages_cmd();
         assert!(command.contains("gaze-bin"));
+        assert!(command.starts_with("for base in gaze-omarchy-bin gaze-omarchy gaze "));
         assert!(command.contains("\"$base-debug\" \"$base\""));
 
         let output = std::process::Command::new("sh")
@@ -2288,6 +2316,7 @@ mod tests {
             "gaze-gnome-extension",
             "gaze-hyprlock",
             "gaze-kde",
+            "gaze-omarchy",
         ] {
             assert!(
                 command.contains(package),

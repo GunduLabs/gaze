@@ -20,6 +20,7 @@ This links:
   - installed PAM modules
   - the hyprlock-gaze / hyprlock-gaze-simultaneous PAM services (for hyprlock)
   - the KDE lock screen biometric slot (pam_gaze in /etc/pam.d/kde-fingerprint)
+  - the Omarchy lock plugin, gaze-omarchy helper, and gaze-omarchy-face PAM service
   - system and current-user GNOME extension files
   - the installed GNOME settings schema
 
@@ -76,6 +77,12 @@ HYPRLOCK_SIMUL_PAM_DST=/etc/pam.d/hyprlock-gaze-simultaneous
 KDE_PAM_HELPER_SRC="$REPO/packaging/kde/gaze-kde-pam"
 KDE_PAM_HELPER_DST=/usr/bin/gaze-kde-pam
 KDE_PAM_SLOTS="/etc/pam.d/kde-fingerprint /etc/pam.d/kde-smartcard"
+OMARCHY_HELPER_SRC="$REPO/packaging/omarchy/gaze-omarchy"
+OMARCHY_HELPER_DST=/usr/bin/gaze-omarchy
+OMARCHY_PAM_SRC="$REPO/packaging/pam/gaze-omarchy-face"
+OMARCHY_PAM_DST=/etc/pam.d/gaze-omarchy-face
+OMARCHY_PLUGIN_DIR=/usr/share/gaze/omarchy
+OMARCHY_PLUGIN_FILES="Service.qml LockView.qml manifest.json upstream-lock.json THIRD_PARTY_NOTICES.md"
 
 artifact() {
     printf '%s/%s' "$TARGET" "$1"
@@ -443,6 +450,24 @@ restore_kde_pam() {
     restore_or_remove "$KDE_PAM_HELPER_DST"
 }
 
+link_omarchy() {
+    backup_and_install "$OMARCHY_HELPER_SRC" "$OMARCHY_HELPER_DST" 0755
+    backup_and_install "$OMARCHY_PAM_SRC" "$OMARCHY_PAM_DST" 0644
+    install -d "$OMARCHY_PLUGIN_DIR"
+    for file in $OMARCHY_PLUGIN_FILES; do
+        backup_and_install "$REPO/omarchy-plugin/$file" "$OMARCHY_PLUGIN_DIR/$file" 0644
+    done
+}
+
+restore_omarchy() {
+    for file in $OMARCHY_PLUGIN_FILES; do
+        restore_or_remove "$OMARCHY_PLUGIN_DIR/$file"
+    done
+    rmdir "$OMARCHY_PLUGIN_DIR" 2>/dev/null || true
+    restore_or_remove "$OMARCHY_PAM_DST"
+    restore_or_remove "$OMARCHY_HELPER_DST"
+}
+
 link_extension_files() {
     dir=$1
     install -d "$dir"
@@ -596,7 +621,9 @@ show_status() {
         "$POLKIT_POLICY_DST" \
         "$HYPRLOCK_PAM_DST" \
         "$HYPRLOCK_SIMUL_PAM_DST" \
-        "$KDE_PAM_HELPER_DST"
+        "$KDE_PAM_HELPER_DST" \
+        "$OMARCHY_HELPER_DST" \
+        "$OMARCHY_PAM_DST"
     do
         if [ -L "$path" ]; then
             printf '%s -> %s\n' "$path" "$(readlink "$path")"
@@ -709,6 +736,7 @@ case "$cmd" in
         link_cinnamon_extension
         link_hyprlock_pam
         link_kde_pam
+        link_omarchy
         setup_tpm_encryption
         install_systemd_dropin
         printf '\nGaze is linked to this checkout. Rebuild after switching branches, then restart gazed.\n'
@@ -720,7 +748,11 @@ case "$cmd" in
                 printf 'Restart Cinnamon (Alt+F2, r, Enter) for extension changes.\n'
                 ;;
             hyprland)
-                printf 'Set `pam_module = hyprlock-gaze` in ~/.config/hypr/hyprlock.conf to test hyprlock face unlock.\n'
+                if [ -f /usr/share/omarchy/shell/plugins/lock/manifest.json ]; then
+                    printf 'Run `gaze-omarchy enable` from your unlocked desktop, without sudo, to test Omarchy face unlock.\n'
+                else
+                    printf 'Set `pam_module = hyprlock-gaze` in ~/.config/hypr/hyprlock.conf to test hyprlock face unlock.\n'
+                fi
                 ;;
             kde)
                 printf 'Lock your screen and look at the camera to test KDE face unlock. Add the login greeter with `gaze-kde-pam enable-login`.\n'
@@ -738,6 +770,7 @@ case "$cmd" in
         restore_cinnamon_extension
         restore_hyprlock_pam
         restore_kde_pam
+        restore_omarchy
         teardown_tpm_encryption
         remove_systemd_dropin
         ;;

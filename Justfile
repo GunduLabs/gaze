@@ -577,6 +577,19 @@ _verify-package format:
     fi
     ok "$base ships the PAM helper and System Settings entry, and claims no plasma-owned file"
 
+    load gaze-omarchy
+    want_files /usr/bin/gaze-omarchy /etc/pam.d/gaze-omarchy-face \
+        /usr/share/gaze/omarchy/Service.qml /usr/share/gaze/omarchy/LockView.qml \
+        /usr/share/gaze/omarchy/manifest.json /usr/share/gaze/omarchy/upstream-lock.json \
+        /usr/share/gaze/omarchy/THIRD_PARTY_NOTICES.md
+    want_config /etc/pam.d/gaze-omarchy-face
+    want_size /usr/bin/gaze-omarchy 1000
+    want_scripts "$post" "$preun"
+    if [ "{{ format }}" = archlinux ]; then
+        want_scripts post_upgrade
+    fi
+    ok "$base ships the Omarchy lock plugin, user manager and dedicated face PAM lane"
+
     unique_versions=$(printf '%s\n' "${versions[@]}" | sort -u)
     [ "$(wc -l <<< "$unique_versions")" -eq 1 ] \
         || fail "packages disagree on version: $(tr '\n' ' ' <<< "$unique_versions"); dist/packages holds stale artifacts"
@@ -620,9 +633,9 @@ package-prebuilt format: _dist-packages
     # Use SUSE manifests together so packages do not mix PAM stack formats.
     # Other RPM hosts keep the existing manifests.
 
-    configs=(packaging/nfpm.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension.yaml packaging/nfpm-cinnamon-extension.yaml packaging/nfpm-hyprlock.yaml packaging/nfpm-kde.yaml)
+    configs=(packaging/nfpm.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension.yaml packaging/nfpm-cinnamon-extension.yaml packaging/nfpm-hyprlock.yaml packaging/nfpm-kde.yaml packaging/nfpm-omarchy.yaml)
     if [ "{{ format }}" = rpm ] && is_suse; then
-        configs=(packaging/nfpm-opensuse.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension-opensuse.yaml packaging/nfpm-cinnamon-extension.yaml packaging/nfpm-hyprlock-opensuse.yaml packaging/nfpm-kde.yaml)
+        configs=(packaging/nfpm-opensuse.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension-opensuse.yaml packaging/nfpm-cinnamon-extension.yaml packaging/nfpm-hyprlock-opensuse.yaml packaging/nfpm-kde.yaml packaging/nfpm-omarchy.yaml)
     fi
 
     for config in "${configs[@]}"; do {{ quote(just_executable()) }} _nfpm "$config" "{{ format }}"; done
@@ -670,6 +683,8 @@ srpm: _dist-packages _srpm-sources
     export SCRIPTLET_MAIN_POST="$(cat packaging/postinst-rpm.sh)"
     export SCRIPTLET_EXTENSION_POST="$(cat packaging/postinst-gnome-extension.sh)"
     export SCRIPTLET_EXTENSION_POSTUN="$(cat packaging/postrm-gnome-extension.sh)"
+    export SCRIPTLET_OMARCHY_PREUN="$(cat packaging/prerm-omarchy.sh)"
+    export SCRIPTLET_OMARCHY_POST="$(cat packaging/postinst-omarchy.sh)"
     export SCRIPTLET_KDE_POST="$(cat packaging/postinst-kde.sh)"
     export SCRIPTLET_KDE_POSTUN="$(cat packaging/postrm-kde.sh)"
     export SCRIPTLET_HYPRLOCK_POST="$(cat packaging/postinst-hyprlock.sh)"

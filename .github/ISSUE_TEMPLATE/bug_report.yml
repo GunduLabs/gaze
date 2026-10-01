@@ -115,7 +115,7 @@ body:
         - Gundu Labs dnf repository (Fedora and compatible)
         - rpm-ostree (Silverblue / Bazzite / Kinoite)
         - Fedora Copr (@gundulabs/gaze)
-        - AUR (gaze-bin, gaze-gui-bin, gaze-kde-bin, gaze-gnome-extension-bin)
+        - AUR (gaze-bin, gaze-gui-bin, gaze-kde-bin, gaze-omarchy-bin, gaze-gnome-extension-bin)
         - Nix / NixOS module
         - Flatpak (GUI only)
         - Built from source
@@ -219,6 +219,20 @@ body:
         ```
 
         On Fedora the vendor stack lives under `/usr/lib/pam.d` and only appears in `/etc/pam.d` once something has customized it, so please include both paths.
+      render: text
+
+  - type: textarea
+    id: omarchy
+    attributes:
+      label: Omarchy details
+      description: |
+        Omarchy only. Paste the output of:
+
+        ```bash
+        gaze-omarchy doctor
+        omarchy-shell lock status
+        cat /etc/pam.d/gaze-omarchy-face
+        ```
       render: text
 
   - type: dropdown

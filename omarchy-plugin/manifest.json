@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "com.gundulabs.gaze.lock",
+  "name": "Gaze Face Unlock",
+  "version": "0.3.5",
+  "author": "Gundu Labs",
+  "description": "Gaze face authentication alongside Omarchy password and fingerprint unlock.",
+  "kinds": [
+    "service"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml"
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.lock"
+  }
+}

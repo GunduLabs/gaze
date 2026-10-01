@@ -3,6 +3,9 @@
 
 # Hyprland (hyprlock)
 
+For Omarchy releases using the Quickshell lock screen, use the
+[Omarchy integration](/guide/omarchy). The PAM configuration below applies to hyprlock.
+
 Gaze integrates with [hyprlock](https://github.com/hyprwm/hyprlock), the Hyprland screen locker, via a dedicated PAM service. The `gaze-hyprlock` package installs `/etc/pam.d/hyprlock-gaze`, leaving the distro's own `/etc/pam.d/hyprlock` untouched.
 
 You opt in by pointing `hyprlock.conf` at the Gaze PAM service.

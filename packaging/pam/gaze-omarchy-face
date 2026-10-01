@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+#%PAM-1.0
+# Separate face lane: no password prompts or fallthrough to another auth method.
+# PAM_IGNORE (unenrolled user), errors and an unavailable daemon reach pam_deny.
+auth        requisite                                    pam_nologin.so
+auth        requisite                                    pam_faillock.so preauth
+auth        sufficient                                   pam_gaze.so
+auth        required                                     pam_deny.so
+account     required                                     pam_nologin.so
+account     required                                     pam_unix.so
+password    required                                     pam_deny.so

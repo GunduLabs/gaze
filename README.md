@@ -29,7 +29,7 @@ Facial authentication for Linux with on-device face recognition, PAM integration
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 ```
 
-The installer installs the Gaze daemon, CLI, and GUI. It supports openSUSE Tumbleweed on x86_64 through its native `zypper` package manager and a Tumbleweed-specific RPM repository. It installs the GNOME Shell extension only when it detects a GNOME desktop session; on Cinnamon it installs `gaze-cinnamon-extension`, on KDE Plasma it installs `gaze-kde`, and on other desktops it skips the desktop extension packages so it does not pull in GNOME Shell. If you installed the GNOME extension manually or automatic enablement was not possible, reboot (so GNOME Shell scans the new extension) and then run from GNOME:
+The installer installs the Gaze daemon, CLI, and GUI. It supports openSUSE Tumbleweed on x86_64 through its native `zypper` package manager and a Tumbleweed-specific RPM repository. It installs the GNOME Shell extension only when it detects a GNOME desktop session; on Cinnamon it installs `gaze-cinnamon-extension`, on KDE Plasma it installs `gaze-kde`, on Quickshell Omarchy it selects `gaze-omarchy`, and on other desktops it skips the desktop extension packages so it does not pull in GNOME Shell. If you installed the GNOME extension manually or automatic enablement was not possible, reboot (so GNOME Shell scans the new extension) and then run from GNOME:
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
@@ -193,6 +193,7 @@ Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Matc
 | `gaze-gnome-extension` | GNOME Shell extension for lock screen and GDM auth |
 | `gaze-cinnamon-extension` | Cinnamon Spices extension for lock screen and PolKit auth |
 | `gaze-kde` | KDE Plasma lock screen wiring and a Face Unlock entry in System Settings |
+| `gaze-omarchy` | Omarchy Quickshell lock plugin with independent password, fingerprint and face authentication |
 | `gaze-hyprlock` | PAM service for hyprlock face unlock on Hyprland |
 
 ## Configuration

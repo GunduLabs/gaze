@@ -1,0 +1,193 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -eu
+
+PLUGIN_ID=com.gundulabs.gaze.lock
+SOURCE=/usr/share/gaze/omarchy
+HOST=/usr/share/omarchy
+PAM_FILE=/etc/pam.d/gaze-omarchy-face
+PLUGIN_LINK="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/$PLUGIN_ID"
+
+usage() {
+	cat <<'HELP'
+Usage: gaze-omarchy enable|disable|doctor|ready
+
+enable   Enable Gaze's lock plugin from an unlocked Omarchy desktop.
+disable  Restore the stock lock before removing the integration package.
+doctor   Report host compatibility, PAM, enrollment and lock readiness.
+ready    Check face readiness silently, without opening the camera.
+
+Run as your desktop user, without sudo.
+HELP
+}
+
+fail() {
+	printf 'Gaze Omarchy: %s\n' "$*" >&2
+	exit 1
+}
+
+run() {
+	timeout --kill-after=1s 8s "$@"
+}
+
+compatible() {
+	[ -r "$SOURCE/upstream-lock.json" ] || return 1
+	jq -e '.profiles | type == "array" and length > 0 and
+		all(.[]; (.sha256 | type) == "object" and (.sha256 | length) > 0)' \
+		"$SOURCE/upstream-lock.json" >/dev/null || return 1
+	profiles=$(jq -er '.profiles | keys[]' "$SOURCE/upstream-lock.json") || return 1
+	for profile in $profiles; do
+		if jq -er --argjson profile "$profile" \
+			'.profiles[$profile].sha256 | to_entries[] | [.value, .key] | @tsv' \
+			"$SOURCE/upstream-lock.json" |
+			while read -r digest relative_path; do
+				[ -f "$HOST/$relative_path" ] || exit 1
+				actual=$(sha256sum <"$HOST/$relative_path") || exit 1
+				[ "${actual%% *}" = "$digest" ] || exit 1
+			done; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+trusted_file() {
+	[ -f "$1" ] || return 1
+	trusted_path=$1
+	while :; do
+		[ ! -L "$trusted_path" ] || return 1
+		owner=$(stat -c '%u' "$trusted_path") || return 1
+		mode=$(stat -c '%a' "$trusted_path") || return 1
+		[ "$owner" = 0 ] && [ "$((0$mode & 022))" -eq 0 ] || return 1
+		[ "$trusted_path" != / ] || break
+		trusted_path=$(dirname "$trusted_path")
+	done
+}
+
+pam_ready() {
+	trusted_file "$PAM_FILE" || return 1
+	rules=$(awk 'NF && $1 !~ /^#/ { $1=$1; print }' "$PAM_FILE") || return 1
+	[ "$rules" = 'auth requisite pam_nologin.so
+auth requisite pam_faillock.so preauth
+auth sufficient pam_gaze.so
+auth required pam_deny.so
+account required pam_nologin.so
+account required pam_unix.so
+password required pam_deny.so' ]
+}
+
+owns_link() {
+	[ -L "$PLUGIN_LINK" ] && [ "$(readlink "$PLUGIN_LINK")" = "$SOURCE" ]
+}
+
+enrolled() {
+	current_user=$(id -un) || return 1
+	result=$(run /usr/bin/busctl --system --timeout=2s call \
+		com.gundulabs.Gaze /com/gundulabs/Gaze com.gundulabs.Gaze \
+		HasEnrolledFaces s "$current_user") || return 1
+	[ "$result" = 'b true' ]
+}
+
+unlocked_status() {
+	status=$(run omarchy-shell lock status) || fail 'Cannot query the Omarchy lock.'
+	printf '%s\n' "$status" | jq -e '.locked == false and .passwordPam == true' >/dev/null ||
+		fail 'Unlock your desktop and restore working password authentication first.'
+}
+
+enable_plugin() {
+	unlocked_status
+	compatible || fail 'This Omarchy version needs review. Supported baselines: 4.0.2 and 4.0.3.'
+	pam_ready || fail 'Reinstall gaze-omarchy: its dedicated face PAM service is missing or modified.'
+	catalog=$(run omarchy-plugin-catalog) || fail 'Cannot query the Omarchy plugin catalog.'
+	printf '%s\n' "$catalog" | jq -e 'type == "array"' >/dev/null || fail 'Invalid plugin catalog.'
+	if printf '%s\n' "$catalog" | jq -e --arg id "$PLUGIN_ID" \
+		'any(.[]; .enabled == true and (.clonedFrom // .omarchy.clonedFrom) == "omarchy.lock" and .id != $id)' >/dev/null; then
+		fail 'Disable your other custom lock plugin before enabling Gaze.'
+	fi
+	if [ -e "$PLUGIN_LINK" ] || [ -L "$PLUGIN_LINK" ]; then
+		owns_link || fail "Preserving existing plugin directory: $PLUGIN_LINK"
+	else
+		mkdir -p "$(dirname "$PLUGIN_LINK")"
+		ln -s "$SOURCE" "$PLUGIN_LINK"
+	fi
+	run omarchy plugin enable "$PLUGIN_ID" || fail 'Plugin enable failed. Run gaze-omarchy disable to restore the stock locker.'
+	# Recheck before restarting an authentication service.
+	unlocked_status
+	run omarchy restart shell || fail 'Restart the Omarchy shell while unlocked to load the plugin.'
+	printf 'Gaze Omarchy lock enabled. Enroll with gaze add-face default, then run gaze auth.\n'
+}
+
+wait_for_stock() {
+	remaining=10
+	while [ "$remaining" -gt 0 ]; do
+		if status=$(timeout --kill-after=1s 1s omarchy-shell lock status 2>/dev/null) &&
+			printf '%s\n' "$status" | jq -e --arg id "$PLUGIN_ID" \
+				'.pluginId != $id and .passwordPam == true' >/dev/null; then
+			return 0
+		fi
+		remaining=$((remaining - 1))
+		sleep 0.2
+	done
+	return 1
+}
+
+disable_plugin() {
+	if [ ! -e "$PLUGIN_LINK" ] && [ ! -L "$PLUGIN_LINK" ]; then
+		printf 'Gaze Omarchy is not installed for this user.\n'
+		return 0
+	fi
+	unlocked_status
+	owns_link || fail 'No package-managed Gaze plugin link; preserving the existing directory.'
+	run omarchy plugin disable "$PLUGIN_ID" || fail 'Cannot disable Gaze; the plugin link has been preserved.'
+	run omarchy plugin enable omarchy.lock || fail 'Cannot enable the stock locker; the plugin link has been preserved.'
+	unlocked_status
+	run omarchy restart shell || fail 'Restart the shell while unlocked before removing gaze-omarchy.'
+	wait_for_stock || fail 'Stock locker has not loaded; the Gaze plugin link has been preserved.'
+	rm "$PLUGIN_LINK"
+	printf "Omarchy's stock lock restored. Gaze enrollments are retained.\n"
+}
+
+issue() {
+	printf '%s\n' "$*"
+	doctor_failed=1
+}
+
+doctor() {
+	doctor_failed=0
+	compatible || issue 'Omarchy host differs from the reviewed baseline; update gaze-omarchy.'
+	pam_ready || issue 'Dedicated face PAM is missing, modified or untrusted; reinstall gaze-omarchy.'
+	enrolled || issue 'No enrollment or daemon unavailable; run gaze add-face default and gaze auth.'
+	owns_link || issue 'Plugin is not installed for this user; run gaze-omarchy enable while unlocked.'
+	catalog=$(run omarchy-plugin-catalog 2>/dev/null) || catalog=
+	printf '%s\n' "$catalog" | jq -e --arg id "$PLUGIN_ID" \
+		'any(.[]; .id == $id and .enabled == true)' >/dev/null 2>&1 ||
+		issue 'Gaze plugin is disabled or the catalog is unavailable; run gaze-omarchy enable while unlocked.'
+	status=$(run omarchy-shell lock status 2>/dev/null) || status=
+	expected=$(jq -er '.version' "$SOURCE/manifest.json") || expected=
+	printf '%s\n' "$status" | jq -e --arg id "$PLUGIN_ID" --arg version "$expected" \
+		'.pluginId == $id and .pluginVersion == $version' >/dev/null 2>&1 ||
+		issue 'Running locker differs from installed Gaze; run gaze-omarchy enable while unlocked.'
+	printf '%s\n' "$status" | jq -e '.passwordPam == true' >/dev/null 2>&1 ||
+		issue 'Omarchy password PAM is unavailable; restore password unlock.'
+	printf '%s\n' "$status" | jq -e '.face == true' >/dev/null 2>&1 ||
+		issue 'Face lane is not ready; retry after enrollment and shell restart.'
+	if [ "$doctor_failed" -eq 0 ]; then
+		printf 'Gaze Omarchy integration is ready.\n'
+	fi
+	return "$doctor_failed"
+}
+
+case "${1:-}" in
+-h | --help) usage; exit 0 ;;
+enable | disable | doctor | ready) action=$1 ;;
+*) usage >&2; exit 1 ;;
+esac
+[ "$#" -eq 1 ] || fail 'Expected one action.'
+[ "$(id -u)" -ne 0 ] || fail 'Run as your desktop user, without sudo.'
+case "$action" in
+ready) compatible >/dev/null 2>&1 && pam_ready >/dev/null 2>&1 && enrolled >/dev/null 2>&1 ;;
+enable) enable_plugin ;;
+disable) disable_plugin ;;
+doctor) doctor ;;
+esac
