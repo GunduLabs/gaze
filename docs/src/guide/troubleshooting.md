@@ -221,7 +221,7 @@ rgb = "pipewiresrc target-object=<pipewire-target>"
 
 You can also point `rgb` at a camera directly with a `/dev/video*` node or a `usb:VVVV:PPPP` id, which name the kernel node outright.
 
-For authentication, the daemon always captures the kernel `/dev/video*` node directly and never needs a PipeWire session — not even on the GDM login screen. `rgb = "primary"` means the first color node; set `rgb` to a specific `/dev/video*` node or `usb:VVVV:PPPP` id if that picks the wrong camera. A `pipewiresrc target-object=` value is resolved to the V4L2 node behind that same camera.
+For authentication, the daemon always captures the kernel `/dev/video*` node directly and never needs a PipeWire session, not even on the GDM login screen. `rgb = "primary"` means the first color node; set `rgb` to a specific `/dev/video*` node or `usb:VVVV:PPPP` id if that picks the wrong camera. A `pipewiresrc target-object=` value is resolved to the V4L2 node behind that same camera.
 
 Then restart daemon:
 

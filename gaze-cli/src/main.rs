@@ -585,7 +585,7 @@ async fn run_config_wizard(
     config.storage.unlock_gnome_keyring =
         if keyring_supported.gnome && config.storage.encrypt_templates && config.liveness.enabled {
             Confirm::with_theme(&theme)
-                .with_prompt("Enable TPM-backed GNOME Keyring unlock for GDM face logins")
+                .with_prompt("Enable TPM-backed GNOME Keyring unlock for GDM or greetd face logins")
                 .default(config.storage.unlock_gnome_keyring)
                 .interact()?
         } else {

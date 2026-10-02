@@ -56,6 +56,7 @@ pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
 pub const TTY_CONFIRM_DECISECONDS: libc::cc_t = 200;
 const _: () = assert!(TTY_CONFIRM_DECISECONDS > 0);
 pub const FACE_PAM_SERVICE: &str = "gdm-face";
+pub const GREETD_PAM_SERVICE: &str = "greetd";
 
 /// Camera budget plus the daemon's pre-auth delay, which PAM also blocks through, so it must be
 /// added rather than absorbed. Assumes the resumed delay, which PAM cannot predict.

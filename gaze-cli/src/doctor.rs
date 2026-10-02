@@ -54,6 +54,7 @@ const GDM_DISABLE_EXTENSIONS_KEY: &str = "/org/gnome/shell/disable-user-extensio
 const GDM_HOME_DIRS: [&str; 2] = ["/var/lib/gdm", "/var/lib/gdm3"];
 const GDM_COMPILED_DB_PATH: &str = "/etc/dconf/db/gdm";
 const GDM_FACE_PAM_SERVICE: &str = "gdm-face";
+const GREETD_PAM_FILE: &str = "/etc/pam.d/greetd";
 const TPM_DEVICES: [&str; 2] = ["/dev/tpmrm0", "/dev/tpm0"];
 /// Files that decide what runs as root or who may talk to the daemon. A writable entry here
 /// is a path to root, so they are held to the same ownership rule as the PAM stack.
@@ -1939,7 +1940,11 @@ fn gdm_face_stack_passes_the_token(contents: &str) -> bool {
                 .split_ascii_whitespace()
                 .any(|option| option == "auto_start" || option.starts_with("only_if="))
     });
-    let session = entries.iter().any(|&(kind, control, module, options)| {
+    handoff && starts_keyring_session(&entries)
+}
+
+fn starts_keyring_session(entries: &[(&str, &str, &str, &str)]) -> bool {
+    entries.iter().any(|&(kind, control, module, options)| {
         kind == "session"
             && matches!(control, "optional" | "required")
             && module == "pam_gnome_keyring.so"
@@ -1949,8 +1954,50 @@ fn gdm_face_stack_passes_the_token(contents: &str) -> bool {
             && !options
                 .split_ascii_whitespace()
                 .any(|option| option.starts_with("only_if="))
+    })
+}
+
+/// greetd has no token-only service like `gdm-face`, so the keyring line just has to come after
+/// whatever runs `pam_gaze.so` without a face match jumping over it. A match then hands it the
+/// released credential and a typed password hands it the one `pam_unix` read.
+fn greetd_stack_passes_the_token(contents: &str) -> bool {
+    let entries: Vec<_> = contents.lines().filter_map(pam_entry).collect();
+    let auth: Vec<_> = entries.iter().filter(|entry| entry.0 == "auth").collect();
+    let Some(keyring) = auth.iter().position(|entry| {
+        entry.1 == "optional"
+            && entry.2 == "pam_gnome_keyring.so"
+            && entry
+                .3
+                .split_ascii_whitespace()
+                .any(|option| option == "use_authtok")
+    }) else {
+        return false;
+    };
+    let before = &auth[..keyring];
+    let reaches_gaze = before
+        .iter()
+        .any(|entry| entry.2 == "pam_gaze.so" || matches!(entry.1, "substack" | "include"));
+    let skips_keyring = before.iter().enumerate().any(|(index, entry)| {
+        entry.2 == "pam_gaze.so"
+            && success_skip(entry.1).is_some_and(|skip| skip >= keyring - index)
     });
-    handoff && session
+    reaches_gaze && !skips_keyring && starts_keyring_session(&entries)
+}
+
+/// How many lines a successful match skips, with `usize::MAX` for the controls that end the
+/// auth section. Gaze ships those for the shared stacks, so they are easy to copy into greetd.
+fn success_skip(control: &str) -> Option<usize> {
+    if control == "sufficient" {
+        return Some(usize::MAX);
+    }
+    match control
+        .trim_matches(['[', ']'])
+        .split_ascii_whitespace()
+        .find_map(|field| field.strip_prefix("success="))?
+    {
+        "done" | "end" => Some(usize::MAX),
+        count => count.parse().ok(),
+    }
 }
 
 fn keyring_record_state(username: &str, backend: gaze_security::keyring::Backend) -> Option<bool> {
@@ -1972,7 +2019,7 @@ fn check_keyring(report: &mut Report, username: &str, config: Option<&Config>) {
     if !config.storage.unlock_gnome_keyring {
         report.off(
             "Keyring",
-            "GNOME Keyring unlock after a GDM face login is off",
+            "GNOME Keyring unlock after a GDM or greetd face login is off",
             format!(
                 "Turn it on: set `unlock_gnome_keyring = true` under [storage] in {CONFIG_PATH} \
                  (it also needs `encrypt_templates = true` and [liveness] `enabled = true`), \
@@ -1994,8 +2041,34 @@ fn check_keyring(report: &mut Report, username: &str, config: Option<&Config>) {
         return;
     }
 
-    match read_pam_service(&format!("/etc/pam.d/{GDM_FACE_PAM_SERVICE}")) {
-        Some(contents) if !gdm_face_stack_passes_the_token(&contents) => {
+    // The distribution ships greetd's stack, so an unedited vendor copy on a machine that does
+    // not use greetd is not something the user can or should fix.
+    let greetd_stack = read_pam_service(GREETD_PAM_FILE);
+    let greetd_in_use = Path::new(GREETD_PAM_FILE).is_file()
+        || matches!(
+            command_output("systemctl", &["is-active", "greetd"]),
+            Ok((true, state)) if state == "active"
+        );
+    if greetd_in_use
+        && greetd_stack
+            .as_deref()
+            .is_some_and(|contents| !greetd_stack_passes_the_token(contents))
+    {
+        report.error(
+            "Keyring",
+            format!("{GREETD_PAM_FILE} does not hand the keyring the authentication token"),
+            "Add `use_authtok` to the existing `auth optional pam_gnome_keyring.so` line and \
+             keep `session optional pam_gnome_keyring.so auto_start`. The keyring line must come \
+             after system-auth, and no pam_gaze.so line above it may end the auth section on a \
+             match (`sufficient` or `[success=done ...]`). This file belongs to the distribution, \
+             so Gaze does not edit it.",
+        );
+        return;
+    }
+
+    let gdm_face_stack = read_pam_service(&format!("/etc/pam.d/{GDM_FACE_PAM_SERVICE}"));
+    match &gdm_face_stack {
+        Some(contents) if !gdm_face_stack_passes_the_token(contents) => {
             report.error(
                 "Keyring",
                 format!(
@@ -2012,15 +2085,19 @@ fn check_keyring(report: &mut Report, username: &str, config: Option<&Config>) {
             );
             return;
         }
-        None => {
+        None if greetd_stack.is_none() => {
             report.error(
                 "Keyring",
-                format!("GNOME Keyring unlock is enabled but /etc/pam.d/{GDM_FACE_PAM_SERVICE} is missing"),
-                "Install the Gaze GNOME extension package, which ships the gdm-face PAM stack.",
+                format!(
+                    "GNOME Keyring unlock is enabled but neither /etc/pam.d/{GDM_FACE_PAM_SERVICE} \
+                     nor {GREETD_PAM_FILE} exists"
+                ),
+                "Install the Gaze GNOME extension package, which ships the gdm-face PAM stack, \
+                 or set up greetd as described in the greetd guide.",
             );
             return;
         }
-        Some(_) => {}
+        _ => {}
     }
 
     report_keyring_record(
@@ -4008,5 +4085,80 @@ mod tests {
             !gdm_face_stack_passes_the_token(commented_out),
             "a commented-out keyring line must not count"
         );
+    }
+
+    #[test]
+    fn the_greetd_keyring_line_must_follow_the_stack_that_runs_gaze() {
+        let valid = "auth substack system-auth\n\
+            auth optional pam_gnome_keyring.so use_authtok\n\
+            session optional pam_gnome_keyring.so auto_start\n";
+        assert!(greetd_stack_passes_the_token(valid));
+        assert!(greetd_stack_passes_the_token(
+            &valid.replace("session optional", "session required")
+        ));
+        for jumps_the_password_step in [
+            "auth [success=1 default=ignore] pam_gaze.so\n\
+             auth substack system-auth\n\
+             auth optional pam_gnome_keyring.so use_authtok\n\
+             session optional pam_gnome_keyring.so auto_start\n",
+            "auth [success=2 default=ignore] pam_gaze.so\n\
+             auth substack system-auth\n\
+             auth requisite pam_deny.so\n\
+             auth optional pam_gnome_keyring.so use_authtok\n\
+             session optional pam_gnome_keyring.so auto_start\n",
+        ] {
+            assert!(
+                greetd_stack_passes_the_token(jumps_the_password_step),
+                "{jumps_the_password_step}"
+            );
+        }
+
+        let fedora = "auth       substack    system-auth\n\
+            auth       optional    pam_gnome_keyring.so use_authtok\n\
+            -auth       optional    pam_kwallet5.so\n\
+            -auth       optional    pam_kwallet.so\n\
+            auth       include     postlogin\n\
+            account    required    pam_sepermit.so\n\
+            account    include     system-auth\n\
+            session    optional    pam_keyinit.so force revoke\n\
+            session    include     system-auth\n\
+            session    optional    pam_gnome_keyring.so auto_start\n\
+            session    include     postlogin\n";
+        assert!(greetd_stack_passes_the_token(fedora));
+        assert!(!greetd_stack_passes_the_token(
+            &fedora.replace("use_authtok", "")
+        ));
+
+        for broken in [
+            "auth [success=1 default=ignore] pam_gaze.so\n\
+             auth optional pam_gnome_keyring.so use_authtok\n\
+             session optional pam_gnome_keyring.so auto_start\n",
+            "auth sufficient pam_gaze.so\n\
+             auth sufficient pam_unix.so nullok\n\
+             auth optional pam_gnome_keyring.so use_authtok\n\
+             session optional pam_gnome_keyring.so auto_start\n",
+            "auth [success=done default=ignore] pam_gaze.so\n\
+             auth include system-auth\n\
+             auth optional pam_gnome_keyring.so use_authtok\n\
+             session optional pam_gnome_keyring.so auto_start\n",
+            "auth [success=end default=ignore] pam_gaze.so\n\
+             auth include system-auth\n\
+             auth optional pam_gnome_keyring.so use_authtok\n\
+             session optional pam_gnome_keyring.so auto_start\n",
+            "auth optional pam_gnome_keyring.so use_authtok\n\
+             auth substack system-auth\n\
+             session optional pam_gnome_keyring.so auto_start\n",
+        ] {
+            assert!(!greetd_stack_passes_the_token(broken), "{broken}");
+        }
+        for broken in [
+            valid.replace("use_authtok", "only_if=login"),
+            valid.replace("use_authtok", ""),
+            valid.replace("auto_start", "auto_start only_if=login"),
+            valid.replace("session optional pam_gnome_keyring.so auto_start\n", ""),
+            valid.replace("session optional", "# session optional"),
+        ] {
+            assert!(!greetd_stack_passes_the_token(&broken), "{broken}");
+        }
     }
 }

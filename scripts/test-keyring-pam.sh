@@ -50,4 +50,23 @@ for template in "$repo"/packaging/pam/gdm-face{,.arch,.deb,.suse}; do
         done
     done
 done
-echo 'PASS: 32 GDM PAM cases; only biometric success reaches keyring, with or without a token.'
+
+# greetd has no pam_deny gate, so its keyring line runs on every login. It must see a token
+# exactly when Gaze released one. `required` stands in for the system-auth substack, and the
+# auth result is not asserted because the real stack's password modules are not modelled.
+for result in 0 7 9 25; do
+    for token in token absent; do
+        marker="$test_dir/called"
+        rm -f -- "$marker"
+        printf '%s\n' \
+            "auth required $test_dir/mock.so gaze $result $token" \
+            "auth optional $test_dir/mock.so keyring $marker $token" \
+            > "$test_dir/gdm-face"
+        "$test_dir/driver" "$test_dir" success || true
+        expected=invalid
+        if [ "$result" -eq 0 ] || [ "$token" = absent ]; then expected=valid; fi
+        test "$(< "$marker")" = "$expected"
+    done
+done
+
+echo 'PASS: 32 GDM and 8 greetd PAM cases; only biometric success hands the keyring a token.'

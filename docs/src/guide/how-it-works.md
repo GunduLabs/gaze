@@ -67,7 +67,7 @@ same daemon code runs on every surface, so a problem you can reproduce with
    resolves to the node behind that same camera, and a `/dev/videoN` path or USB
    `vid:pid` names its node outright. The user-session PipeWire socket is never
    connected to: it is controlled by the user being authenticated. A source with
-   no kernel node — including a hand-written GStreamer pipeline — is refused.
+   no kernel node, including a hand-written GStreamer pipeline, is refused.
 6. The pipeline gets 500 ms to reach the playing state. A slower camera is not treated as a
    failure: the frame loop reports any error that arrives later.
 7. Unprivileged previews (for example the GUI camera view) may still open a

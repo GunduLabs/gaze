@@ -771,7 +771,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     unlock_gnome_keyring_row.set_visible(false);
     unlock_gnome_keyring_row.set_title("Unlock GNOME Keyring");
     unlock_gnome_keyring_row
-        .set_subtitle("Use an enrolled password after liveness-protected GDM face login");
+        .set_subtitle("Use an enrolled password after liveness-protected GDM or greetd face login");
     let unlock_gnome_keyring_switch = gtk4::Switch::new();
     unlock_gnome_keyring_switch.set_valign(gtk4::Align::Center);
     unlock_gnome_keyring_row.add_suffix(&unlock_gnome_keyring_switch);
