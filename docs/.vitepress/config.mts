@@ -93,6 +93,7 @@ export default defineVersionedConfig({
               { text: "Hyprland (hyprlock)", link: "/guide/hyprland" },
               { text: "Omarchy", link: "/guide/omarchy" },
               { text: "LightDM", link: "/guide/lightdm" },
+              { text: "greetd", link: "/guide/greetd" },
               { text: "Console login (TTY)", link: "/guide/console" },
             ],
           },

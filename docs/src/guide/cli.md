@@ -164,7 +164,7 @@ gaze clear-user
 
 This is destructive.
 
-## Unlock the GNOME Keyring after a GDM face login
+## Unlock the GNOME Keyring after a GDM or greetd face login
 
 A face login supplies no password, so the GNOME login keyring normally stays
 locked. `gaze keyring` stores the account password in a root-only TPM-protected

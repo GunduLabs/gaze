@@ -164,8 +164,8 @@ password leaves the keyring locked and requires a manual unlock and re-enrollmen
 Read this before turning it on.
 
 - **The record is recoverable by root on this machine.** Sealing has no PCR
-  policy, so anyone who can run code as root here — including someone who boots
-  another OS from a USB stick against an unencrypted disk — can unseal the key
+  policy, so anyone who can run code as root here, including someone who boots
+  another OS from a USB stick against an unencrypted disk, can unseal the key
   and recover the plaintext password. It protects a *stolen disk*, not a machine
   someone else can boot. Enable full-disk encryption if that matters to you.
 - **The password becomes visible to the rest of the `gdm-face` stack.** Once

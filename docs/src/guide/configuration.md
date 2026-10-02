@@ -184,8 +184,8 @@ rgb = "pipewiresrc target-object=<pipewire-target>"
 
 For authentication and enrollment, the privileged daemon captures the backing
 kernel `/dev/video*` node directly with `v4l2src` and never connects to a
-user-session PipeWire socket: that socket — and every virtual camera it
-advertises — is controlled by the user being authenticated, so trusting it would
+user-session PipeWire socket: that socket, and every virtual camera it
+advertises, is controlled by the user being authenticated, so trusting it would
 let injected frames reach face authentication. A pinned PipeWire target is
 resolved to its own V4L2 node the same way, and a source with no kernel node
 (including a hand-written GStreamer pipeline) is refused. `primary` therefore
@@ -432,11 +432,11 @@ Apply changes with:
 sudo systemctl restart gazed
 ```
 
-## Unlock GNOME Keyring after a GDM face login
+## Unlock GNOME Keyring after a GDM or greetd face login
 
 `storage.unlock_gnome_keyring` defaults to `false`. It requires TPM template
 encryption and liveness; if either is missing the option is ignored and the
-daemon logs why. Run `gaze keyring` for each user after enabling it — users who
+daemon logs why. Run `gaze keyring` for each user after enabling it. Users who
 skip it keep logging in with face and are prompted for the keyring as before.
 Read the security notes in
 [GNOME Keyring setup](/guide/gnome#optional-tpm-backed-keyring-unlock) first:

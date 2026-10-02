@@ -76,8 +76,8 @@ compiled with the `openvino-config` Cargo feature. See
 - Encrypt face templates, which seals enrolled templates with the TPM. See
   [How it works](/guide/how-it-works) for what that protects against.
 - Unlock GNOME Keyring, which replays an enrolled password after a
-  liveness-protected GDM face login. It needs template encryption and liveness
-  on, and each user still has to run `gaze keyring`. Read
+  liveness-protected GDM or greetd face login. It needs template encryption and
+  liveness on, and each user still has to run `gaze keyring`. Read
   [what it changes about your security](/guide/gnome#what-this-changes-about-your-security)
   first.
 

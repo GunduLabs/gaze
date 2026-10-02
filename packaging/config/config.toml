@@ -57,8 +57,8 @@ abort_if_lid_closed = true
 abort_before_first_resume = false
 # Ask for an explicit confirmation after a face match on lock/login screens.
 # Note: the KDE biometric slots (kde-fingerprint, kde-smartcard,
-# plasmalogin-fingerprint) cannot be prompted — nothing routes a response back —
-# so the toggle is silently ignored there by design (asking would hang the slot
+# plasmalogin-fingerprint) cannot be prompted because nothing routes a response
+# back, so the toggle is silently ignored there by design (asking would hang the slot
 # for the rest of the lock). See `gaze doctor` and the KDE guide.
 require_confirmation_lock_screen = false
 require_confirmation_elevation = false
