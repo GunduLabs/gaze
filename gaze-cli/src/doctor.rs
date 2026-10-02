@@ -1624,7 +1624,24 @@ fn check_desktop_integration(report: &mut Report) {
         }
     }
 
-    if desktop.contains("hyprland") {
+    let omarchy = desktop.contains("hyprland")
+        && Path::new("/usr/share/omarchy/shell/plugins/lock/manifest.json").exists();
+    if omarchy {
+        match command_output("gaze-omarchy", &["doctor"]) {
+            Ok((true, output)) => report.pass("Omarchy lock", output),
+            Ok((false, output)) => report.warning(
+                "Omarchy lock",
+                output,
+                "Run `gaze-omarchy enable` from your unlocked desktop. See https://gaze.gundulabs.com/guide/omarchy",
+            ),
+            Err(_) => report.warning(
+                "Omarchy lock",
+                "Gaze Omarchy integration is not installed",
+                "Install `gaze-omarchy` (`gaze-omarchy-bin` on Arch), then run `gaze-omarchy enable` without sudo.",
+            ),
+        }
+    }
+    if desktop.contains("hyprland") && !omarchy {
         let config_home = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")));

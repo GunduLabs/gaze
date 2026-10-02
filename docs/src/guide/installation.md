@@ -3,7 +3,7 @@
 
 # Installation
 
-Use one of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible, enables the Cinnamon extension on Cinnamon desktops, installs the KDE packages on KDE Plasma, and skips desktop-specific packages on other desktops. Manual GNOME/Cinnamon package installs still need extension settings commands afterward.
+Use one of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible, enables the Cinnamon extension on Cinnamon desktops, installs the KDE packages on KDE Plasma, selects the Omarchy lock integration on Quickshell Omarchy, and skips desktop-specific packages on other desktops. Manual GNOME/Cinnamon package installs still need extension settings commands afterward.
 
 Supported installer targets on x86_64 and arm64: Ubuntu 24.04/25.10/26.04, Debian 13 and 14 (forky, currently testing), Fedora 42/43/44 and compatible distributions (including image-based OSTree distros such as Fedora Silverblue, Kinoite, and Bazzite), openSUSE Tumbleweed (x86_64), Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS.
 
@@ -32,13 +32,14 @@ This installs:
 - the GNOME Shell extension package only when a GNOME desktop session is detected
 - the Cinnamon extension package only when a Cinnamon desktop session is detected
 
-It also configures package updates where needed, enables the `gazed` daemon, and enables lock screen face unlock or PolKit confirmation for the current user when applicable. On KDE Plasma it installs `gaze-kde` instead, which wires up the lock screen. On Cinnamon it installs `gaze-cinnamon-extension`. On other desktops it skips the desktop extension packages. On OSTree systems (Silverblue, Bazzite, Kinoite), the installer automatically uses `rpm-ostree` layering. On openSUSE Tumbleweed, it uses `zypper` and the Tumbleweed-specific Gundu Labs RPM repository.
+It also configures package updates where needed, enables the `gazed` daemon, and enables lock screen face unlock or PolKit confirmation for the current user when applicable. On KDE Plasma it installs `gaze-kde` instead, which wires up the lock screen. On Cinnamon it installs `gaze-cinnamon-extension`. On Quickshell Omarchy it selects `gaze-omarchy`; see the [Omarchy guide](/guide/omarchy) for setup and supported versions. On other desktops it skips the desktop extension packages. On OSTree systems (Silverblue, Bazzite, Kinoite), the installer automatically uses `rpm-ostree` layering. On openSUSE Tumbleweed, it uses `zypper` and the Tumbleweed-specific Gundu Labs RPM repository.
 
 Desktop behavior:
 
 - CLI, GUI, and normal PAM prompts work without desktop extensions.
 - If the installer detects Cinnamon, it installs `gaze-cinnamon-extension` and enables it for the session.
 - If the installer detects KDE Plasma, it installs `gaze-kde` alongside the base packages, so the lock screen starts face auth on its own and a Face Unlock entry appears in System Settings.
+- On Quickshell Omarchy, it installs the Gaze lock plugin and enables it from the unlocked desktop user session.
 - If you later want GNOME or Cinnamon lock screen support, install the appropriate extension package manually from your desktop session.
 - GDM loads the extension from package defaults when the extension package is installed, but GDM login face auth stays disabled unless you explicitly enable it.
 
@@ -223,9 +224,13 @@ The KDE **login greeter** (Plasma Login Manager, or SDDM) is a separate program 
 
 For other PAM-based desktops, use the base `gaze` package's PAM modules and see the [PAM guide](/guide/pam).
 
+### Omarchy Quickshell lock
+
+Use the [Omarchy guide](/guide/omarchy). The `gaze-omarchy` package provides independent face, password and fingerprint PAM conversations. After installation, run `gaze-omarchy enable` without sudo from your unlocked desktop. It supports Omarchy 4.0.2/4.0.3 and checks the shell files before enablement.
+
 ### Enable face unlock for hyprlock
 
-On Hyprland, install the `gaze-hyprlock` package (auto-installed by the one-line installer when Hyprland is detected) and point hyprlock at the Gaze PAM service. See the [Hyprland guide](/guide/hyprland).
+On Hyprland using hyprlock, install the `gaze-hyprlock` package (auto-installed by the one-line installer when Hyprland is detected) and point hyprlock at the Gaze PAM service. See the [Hyprland guide](/guide/hyprland).
 
 ## Path D: Nix and NixOS
 

@@ -1057,10 +1057,15 @@ pub const KDE_SMARTCARD_PAM_FILE: &str = "/etc/pam.d/kde-smartcard";
 pub const PLASMALOGIN_FACE_PAM_SERVICE: &str = "plasmalogin-fingerprint";
 pub const PLASMALOGIN_FACE_PAM_FILE: &str = "/etc/pam.d/plasmalogin-fingerprint";
 
+pub const OMARCHY_FACE_PAM_SERVICE: &str = "gaze-omarchy-face";
+pub const OMARCHY_FACE_PAM_FILE: &str = "/etc/pam.d/gaze-omarchy-face";
+
 /// The interactive services driving the password field, which reach Gaze through
 /// the shared stack it installs into.
 const KDE_INTERACTIVE_SERVICE: &str = "kde";
 const PLASMALOGIN_INTERACTIVE_SERVICE: &str = "plasmalogin";
+const OMARCHY_PASSWORD_SERVICE: &str = "omarchy-lock-password";
+const OMARCHY_FINGERPRINT_SERVICE: &str = "omarchy-lock-fingerprint";
 
 fn is_kde_noninteractive_service(service: Option<&str>) -> bool {
     matches!(
@@ -1106,6 +1111,7 @@ fn face_slots_outranking(service: Option<&str>) -> &'static [&'static str] {
         Some(KDE_INTERACTIVE_SERVICE) => &[KDE_FACE_PAM_FILE, KDE_SMARTCARD_PAM_FILE],
         Some(KDE_SMARTCARD_PAM_SERVICE) => &[KDE_FACE_PAM_FILE],
         Some(PLASMALOGIN_INTERACTIVE_SERVICE) => &[PLASMALOGIN_FACE_PAM_FILE],
+        Some(OMARCHY_PASSWORD_SERVICE | OMARCHY_FINGERPRINT_SERVICE) => &[OMARCHY_FACE_PAM_FILE],
         _ => &[],
     }
 }
@@ -1195,6 +1201,13 @@ mod tests {
 
     #[test]
     fn face_slots_are_outranked_in_one_direction_only() {
+        for service in [OMARCHY_PASSWORD_SERVICE, OMARCHY_FINGERPRINT_SERVICE] {
+            assert_eq!(
+                face_slots_outranking(Some(service)),
+                [OMARCHY_FACE_PAM_FILE]
+            );
+        }
+        assert!(face_slots_outranking(Some(OMARCHY_FACE_PAM_SERVICE)).is_empty());
         assert_eq!(
             face_slots_outranking(Some("kde")),
             [KDE_FACE_PAM_FILE, KDE_SMARTCARD_PAM_FILE],

@@ -1,0 +1,77 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: "gaze-omarchy"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+release: "${PACKAGE_RELEASE}"
+section: "admin"
+priority: "optional"
+maintainer: "Gundu Labs <maintainers@gundulabs.com>"
+description: "Omarchy Quickshell lock screen integration for Gaze"
+vendor: "Gundu Labs"
+homepage: "https://gaze.gundulabs.com"
+license: "GPL-3.0-or-later"
+
+contents:
+  - src: "packaging/omarchy/gaze-omarchy"
+    dst: "/usr/bin/gaze-omarchy"
+    file_info:
+      mode: 0755
+  - src: "omarchy-plugin/Service.qml"
+    dst: "/usr/share/gaze/omarchy/Service.qml"
+    file_info:
+      mode: 0644
+  - src: "omarchy-plugin/LockView.qml"
+    dst: "/usr/share/gaze/omarchy/LockView.qml"
+    file_info:
+      mode: 0644
+  - src: "omarchy-plugin/manifest.json"
+    dst: "/usr/share/gaze/omarchy/manifest.json"
+    file_info:
+      mode: 0644
+  - src: "omarchy-plugin/upstream-lock.json"
+    dst: "/usr/share/gaze/omarchy/upstream-lock.json"
+    file_info:
+      mode: 0644
+  - src: "omarchy-plugin/THIRD_PARTY_NOTICES.md"
+    dst: "/usr/share/gaze/omarchy/THIRD_PARTY_NOTICES.md"
+    file_info:
+      mode: 0644
+  - src: "packaging/pam/gaze-omarchy-face"
+    dst: "/etc/pam.d/gaze-omarchy-face"
+    type: "config|noreplace"
+    file_info:
+      mode: 0644
+
+deb:
+  signature:
+    method: debsign
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+rpm:
+  signature:
+    key_file: "${NFPM_SIGNING_KEY_FILE}"
+
+archlinux:
+  scripts:
+    postupgrade: "packaging/postinst-omarchy.sh"
+
+scripts:
+  postinstall: "packaging/postinst-omarchy.sh"
+  preremove: "packaging/prerm-omarchy.sh"
+
+overrides:
+  deb:
+    depends:
+      - gaze
+      - jq
+  rpm:
+    depends:
+      - gaze
+      - jq
+  archlinux:
+    depends:
+      - gaze
+      - jq

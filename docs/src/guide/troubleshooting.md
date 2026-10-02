@@ -447,6 +447,20 @@ unless the greeter ships an up-front biometric service, starts only when the log
 form is submitted: press Enter with the password field empty, exactly as you would
 for a fingerprint reader there. See the [KDE Plasma guide](/guide/kde).
 
+### Omarchy
+
+Check the "Omarchy lock" line in `gaze doctor`, then from your unlocked desktop:
+
+```bash
+gaze-omarchy doctor
+gaze-omarchy enable
+```
+
+`gaze-omarchy doctor` reports which piece is missing: host compatibility, the
+`/etc/pam.d/gaze-omarchy-face` service, enrollment, or the running lock plugin.
+After an Omarchy update changes the shell files, face scans stop until
+`gaze-omarchy` is updated. See the [Omarchy guide](/guide/omarchy).
+
 ## 5. PAM auth flow seems broken
 
 Reinstall packages (recommended):
@@ -608,4 +622,4 @@ journalctl -u gazed -n 300 --no-pager
 gaze auth --verbose
 ```
 
-Include the complete `gaze doctor` output, distro version, and desktop environment (GNOME/KDE/etc.) when reporting issues. On KDE, add `gaze-kde-pam status` and the contents of `/etc/pam.d/kde-fingerprint`.
+Include the complete `gaze doctor` output, distro version, and desktop environment (GNOME/KDE/etc.) when reporting issues. On KDE, add `gaze-kde-pam status` and the contents of `/etc/pam.d/kde-fingerprint`. On Omarchy, add `gaze-omarchy doctor` and `omarchy-shell lock status`.

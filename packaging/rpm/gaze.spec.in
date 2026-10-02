@@ -139,6 +139,15 @@ Recommends:     %{name}%{?_isa} = %{version}-%{release}
 PAM service files that let hyprlock authenticate with Gaze, either on its own
 or simultaneously with a password.
 
+%package omarchy
+Summary:        Omarchy Quickshell lock screen integration for Gaze
+Requires:       %{name}%{?_isa} = %{version}-%{release}
+Requires:       jq
+
+%description omarchy
+A Gaze lock plugin with independent password, fingerprint and face PAM lanes.
+Enable with gaze-omarchy enable from an unlocked Omarchy desktop.
+
 %package kde
 Summary:        KDE Plasma lock screen and System Settings integration for Gaze
 Recommends:     %{name}%{?_isa} = %{version}-%{release}
@@ -225,6 +234,11 @@ install -Dpm 0644 cinnamon-extension/metadata.json %{buildroot}%{_datadir}/cinna
 install -Dpm 0644 cinnamon-extension/extension.js %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/extension.js
 install -Dpm 0644 cinnamon-extension/settings-schema.json %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/settings-schema.json
 
+install -Dpm 0755 packaging/omarchy/gaze-omarchy %{buildroot}%{_bindir}/gaze-omarchy
+install -Dpm 0644 packaging/pam/gaze-omarchy-face %{buildroot}%{_sysconfdir}/pam.d/gaze-omarchy-face
+mkdir -p %{buildroot}%{_datadir}/gaze/omarchy
+install -pm 0644 omarchy-plugin/* %{buildroot}%{_datadir}/gaze/omarchy/
+
 install -Dpm 0755 packaging/kde/gaze-kde-pam %{buildroot}%{_bindir}/gaze-kde-pam
 install -Dpm 0644 packaging/kde/gaze-face-unlock.desktop %{buildroot}%{_datadir}/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop
 
@@ -268,6 +282,12 @@ ${SCRIPTLET_KDE_POST}
 
 %postun kde
 ${SCRIPTLET_KDE_POSTUN}
+
+%post omarchy
+${SCRIPTLET_OMARCHY_POST}
+
+%preun omarchy
+${SCRIPTLET_OMARCHY_PREUN}
 
 %post hyprlock
 ${SCRIPTLET_HYPRLOCK_POST}
@@ -321,6 +341,12 @@ ${SCRIPTLET_HYPRLOCK_POSTUN}
 %license LICENSE
 %config(noreplace) %{_sysconfdir}/pam.d/hyprlock-gaze
 %config(noreplace) %{_sysconfdir}/pam.d/hyprlock-gaze-simultaneous
+
+%files omarchy
+%license LICENSE
+%{_bindir}/gaze-omarchy
+%config(noreplace) %{_sysconfdir}/pam.d/gaze-omarchy-face
+%{_datadir}/gaze/omarchy/
 
 %files kde
 %license LICENSE
