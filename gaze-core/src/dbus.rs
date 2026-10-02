@@ -60,6 +60,7 @@ impl From<DbusConfig> for Config {
                 unlock_gnome_keyring: false,
                 unlock_kwallet: false,
             },
+            duress: crate::config::DuressConfig::default(),
         }
     }
 }
@@ -620,6 +621,8 @@ pub trait Gaze {
         new_face_name: &str,
     ) -> zbus::Result<bool>;
     async fn delete_faces(&self, username: &str) -> zbus::Result<bool>;
+    async fn duress_locked(&self, username: &str) -> zbus::Result<bool>;
+    async fn clear_duress(&self, username: &str) -> zbus::Result<bool>;
 
     #[zbus(property)]
     fn config(&self) -> zbus::Result<DbusConfig>;

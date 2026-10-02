@@ -55,6 +55,11 @@ max_seconds = 2.0
 encrypt_templates = false
 unlock_kwallet = false # optional TPM-backed KDE wallet unlock
 unlock_gnome_keyring = false
+
+[duress]
+enabled = false
+closed_threshold = 0.9
+hold_ms = 600
 ```
 
 ## Upgrades
@@ -388,6 +393,7 @@ sudo systemctl restart gazed
 Storage locations are managed by the service setup and are not intended to be changed in config:
 
 - User embeddings: `/var/lib/gaze/users`
+- Duress lockouts: `/var/lib/gaze/duress`
 - Downloaded models: `/var/cache/gaze`
 
 Models are auto-downloaded on first run if missing.
@@ -501,6 +507,38 @@ When enabled, Gaze runs a local MiniFASNet-V2 anti-spoofing model on the detecte
 Alongside the model, Gaze watches how far your eyes travel between frames, measured against the distance between them so it does not depend on how close you sit. A run that has accumulated several frame pairs and never seen movement above that floor is treated as a still object and refused even when the model is confident. Moving normally (breathing, blinking, small head shifts) clears it; once any pair shows movement, holding still afterwards does not undo it. On IR cameras this movement check is the whole liveness test, since the anti-spoof model is trained on colour frames.
 
 `max_seconds` caps how long (in seconds of usable face frames) Gaze examines the camera before giving up and falling back to your password. It bounds the whole attempt, not just the liveness stage: an unrecognised face spends the same budget. Gaze calculates the frame budget dynamically using your camera's actual frame rate (e.g. 2.0 seconds corresponds to 60 frames on a 30fps webcam, or 120 frames on a 60fps camera). Frames only count while a usable face is in view, and the RGB and IR phases each get the full budget. Raise it if authentication gives up before you are ready; `gaze auth --verbose` reports when a run ends this way.
+
+## Duress Signal
+
+```toml
+[duress]
+enabled = false
+closed_threshold = 0.9
+hold_ms = 600
+```
+
+Someone can hold your laptop up to your face, but they cannot make you type a password. With duress detection on, you can refuse a forced face unlock with your eyes: keep one eye (or both) closed while the camera sees you.
+
+How it works:
+
+- After your face matches, Gaze runs a small local open/closed eye classifier ([Intel Open Model Zoo `open-closed-eye-0001`](https://github.com/openvinotoolkit/open_model_zoo/tree/master/models/public/open-closed-eye-0001), about 46 KB, Apache-2.0) on each eye. It downloads into `/var/cache/gaze` the first time duress is enabled.
+- A matched frame where either eye is closed never unlocks. That alone means a blink cannot let a coerced unlock through.
+- If an eye stays closed for `hold_ms`, Gaze rejects the attempt and locks face authentication for that user. While locked, face unlock reports itself as unavailable and falls straight through to the password prompt without touching the camera.
+- The lock is stored in `/var/lib/gaze/duress`, so a reboot or daemon restart does not clear it.
+- It clears after a successful login that did not use your face, such as your password, on any service where `pam_gaze.so` is in the auth stack (including the `gdm-password`, KDE, and sudo stacks Gaze installs into). You can also clear it with `gaze duress --clear`.
+
+Settings:
+
+- `closed_threshold` is the classifier's closed-eye probability (0.5 to 0.99) needed to count an eye as shut. Lower it if a deliberate wink is missed; raise it if squinting or laughing trips it.
+- `hold_ms` is how long (0 to 5000 ms) the eye must stay shut. A normal blink takes 100 to 400 ms.
+
+The duress table lives only in `/etc/gaze/config.toml`. The GUI and `gaze config` leave it untouched, and the daemon reads it at the start of every face auth, so no restart is needed.
+
+Limits to be aware of:
+
+- Close your eye before the camera sees you. Any matched frame with both eyes open unlocks as usual.
+- Another non-face login method, such as a fingerprint, also clears the lock.
+- The classifier works on RGB and IR frames, but it is not perfect. Test it with `gaze auth` before relying on it: a held wink should end in a lockout, and `gaze duress --clear` resets it. Running `gazed` with `RUST_LOG=debug` logs the per-eye scores.
 
 ## Recommended tuning workflow
 

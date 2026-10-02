@@ -761,6 +761,12 @@ unsafe fn do_authenticate_simultaneous(
 }
 
 pub unsafe fn do_authenticate(pamh: PamHandle, flags: c_int, options: PamOptions) -> c_int {
+    let result = unsafe { authenticate_face(pamh, flags, options) };
+    unsafe { track_duress_clear(pamh, result) };
+    result
+}
+
+unsafe fn authenticate_face(pamh: PamHandle, flags: c_int, options: PamOptions) -> c_int {
     if caller_is_remote(unsafe { get_pam_rhost(pamh) }.as_deref()) {
         return PAM_IGNORE;
     }

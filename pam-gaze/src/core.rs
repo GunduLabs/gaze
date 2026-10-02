@@ -35,6 +35,12 @@ pub const PAM_IGNORE: c_int = 25;
 
 pub const PAM_DISALLOW_NULL_AUTHTOK: c_int = 0x0001;
 pub const PAM_SILENT: c_int = 0x8000;
+pub const PAM_ESTABLISH_CRED: c_int = 0x0002;
+pub const PAM_DELETE_CRED: c_int = 0x0004;
+pub const PAM_REINITIALIZE_CRED: c_int = 0x0008;
+pub const PAM_REFRESH_CRED: c_int = 0x0010;
+pub const PAM_DATA_REPLACE: c_int = 0x2000_0000;
+pub const PAM_DATA_SILENT: c_int = 0x4000_0000;
 
 pub fn caller_wants_silence(flags: c_int) -> bool {
     flags & PAM_SILENT != 0
@@ -126,11 +132,12 @@ macro_rules! pam_success_stubs {
     () => {
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn pam_sm_setcred(
-            _pamh: $crate::PamHandle,
-            _flags: ::std::os::raw::c_int,
+            pamh: $crate::PamHandle,
+            flags: ::std::os::raw::c_int,
             _argc: ::std::os::raw::c_int,
             _argv: *const *const ::std::os::raw::c_char,
         ) -> ::std::os::raw::c_int {
+            unsafe { $crate::clear_duress_after_credentials(pamh, flags) };
             $crate::PAM_SUCCESS
         }
 
@@ -243,6 +250,78 @@ pub unsafe fn read_first_pass_verdict(pamh: PamHandle) -> Option<FirstPassVerdic
         return None;
     }
     FirstPassVerdict::from_repr(unsafe { *(data as *const u8) })
+}
+
+pub const DURESS_CLEAR_DATA_KEY: &CStr = c"gaze_duress_clear";
+const DURESS_CLEAR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+pub fn setcred_follows_authentication(flags: c_int) -> bool {
+    flags & PAM_DELETE_CRED == 0
+        && flags & (PAM_ESTABLISH_CRED | PAM_REINITIALIZE_CRED | PAM_REFRESH_CRED) != 0
+}
+
+pub fn pam_end_reports_success(status: c_int) -> bool {
+    status & PAM_DATA_REPLACE == 0 && status & !PAM_DATA_SILENT == PAM_SUCCESS
+}
+
+pub fn clear_duress_lockout(username: &str) {
+    let Ok(rt) = tokio::runtime::Runtime::new() else {
+        return;
+    };
+    rt.block_on(async {
+        let _ = tokio::time::timeout(DURESS_CLEAR_TIMEOUT, async {
+            let proxy = gaze_core::dbus::connect_gaze().await?;
+            proxy.clear_duress(username).await
+        })
+        .await;
+    });
+}
+
+unsafe extern "C" fn clear_duress_on_pam_end(_pamh: PamHandle, data: *mut c_void, status: c_int) {
+    if data.is_null() {
+        return;
+    }
+    let username = unsafe { Box::from_raw(data as *mut String) };
+    if pam_end_reports_success(status) {
+        clear_duress_lockout(&username);
+    }
+}
+
+pub unsafe fn track_duress_clear(pamh: PamHandle, face_result: c_int) {
+    if face_result == PAM_SUCCESS {
+        unsafe { pam_set_data(pamh, DURESS_CLEAR_DATA_KEY.as_ptr(), ptr::null_mut(), None) };
+        return;
+    }
+    let Some(username) = (unsafe { get_username(pamh) }) else {
+        return;
+    };
+    let boxed = Box::into_raw(Box::new(username));
+    let rc = unsafe {
+        pam_set_data(
+            pamh,
+            DURESS_CLEAR_DATA_KEY.as_ptr(),
+            boxed as *mut c_void,
+            Some(clear_duress_on_pam_end),
+        )
+    };
+    if rc != PAM_SUCCESS {
+        drop(unsafe { Box::from_raw(boxed) });
+    }
+}
+
+pub unsafe fn clear_duress_after_credentials(pamh: PamHandle, flags: c_int) {
+    if !setcred_follows_authentication(flags) {
+        return;
+    }
+    let mut data: *const c_void = ptr::null();
+    if unsafe { pam_get_data(pamh, DURESS_CLEAR_DATA_KEY.as_ptr(), &mut data) } != PAM_SUCCESS
+        || data.is_null()
+    {
+        return;
+    }
+    let username = unsafe { &*(data as *const String) }.clone();
+    unsafe { pam_set_data(pamh, DURESS_CLEAR_DATA_KEY.as_ptr(), ptr::null_mut(), None) };
+    clear_duress_lockout(&username);
 }
 
 /// Wipe a libc-allocated conversation response before freeing it, so a typed
@@ -1489,6 +1568,29 @@ mod tests {
             auth_outcome(VerifyResult::VerifyMatch, Some(CaptureStatus::TooDark)),
             AuthOutcome::Match
         );
+    }
+
+    #[test]
+    fn only_credential_setup_after_authentication_clears_duress() {
+        assert!(setcred_follows_authentication(PAM_ESTABLISH_CRED));
+        assert!(setcred_follows_authentication(PAM_REINITIALIZE_CRED));
+        assert!(setcred_follows_authentication(
+            PAM_REFRESH_CRED | PAM_SILENT
+        ));
+        assert!(!setcred_follows_authentication(PAM_DELETE_CRED));
+        assert!(!setcred_follows_authentication(
+            PAM_DELETE_CRED | PAM_ESTABLISH_CRED
+        ));
+        assert!(!setcred_follows_authentication(0));
+    }
+
+    #[test]
+    fn only_a_successful_pam_end_clears_duress() {
+        assert!(pam_end_reports_success(PAM_SUCCESS));
+        assert!(pam_end_reports_success(PAM_SUCCESS | PAM_DATA_SILENT));
+        assert!(!pam_end_reports_success(PAM_AUTH_ERR));
+        assert!(!pam_end_reports_success(PAM_AUTH_ERR | PAM_DATA_SILENT));
+        assert!(!pam_end_reports_success(PAM_SUCCESS | PAM_DATA_REPLACE));
     }
 
     #[test]

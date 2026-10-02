@@ -107,3 +107,14 @@ unlock_gnome_keyring = false
 # Same TPM/liveness requirements. Run `gaze keyring --kwallet` and
 # `sudo gaze-kde-pam enable-login`; install your distro's KWallet PAM package.
 unlock_kwallet = false
+
+# Duress signal: hold one or both eyes closed while your face is in view and Gaze
+# refuses the match and turns face unlock off for that user until a password
+# login (or `gaze duress --clear`). Uses a small local eye-state model downloaded
+# into /var/cache/gaze. Edit this file and the next face auth picks it up.
+[duress]
+enabled = false
+# Closed-eye probability (0.5-0.99) that counts an eye as shut.
+closed_threshold = 0.9
+# How long the eye must stay shut, in milliseconds (0-5000). Blinks are shorter.
+hold_ms = 600

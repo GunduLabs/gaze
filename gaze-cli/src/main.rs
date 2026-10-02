@@ -79,6 +79,7 @@ fn command_requires_root(command: &Commands) -> Option<&'static str> {
         Commands::Keyring { .. } => Some("keyring"),
         Commands::Auth { .. }
         | Commands::ListFaces { .. }
+        | Commands::Duress { .. }
         | Commands::Doctor { .. }
         | Commands::Uninstall { .. } => None,
     }
@@ -88,6 +89,7 @@ fn command_target_user(command: &Commands) -> Option<&str> {
     match command {
         Commands::Auth { user, .. }
         | Commands::ListFaces { user }
+        | Commands::Duress { user, .. }
         | Commands::Doctor { user, .. } => user.as_deref(),
         _ => None,
     }
@@ -244,6 +246,13 @@ enum Commands {
     },
     /// Remove all data for a user
     ClearUser {
+        #[arg(short, long)]
+        user: Option<String>,
+    },
+    /// Show or clear the face authentication lockout set by a duress signal
+    Duress {
+        #[arg(long, help = "Re-enable face authentication after a duress lockout")]
+        clear: bool,
         #[arg(short, long)]
         user: Option<String>,
     },
@@ -1237,6 +1246,52 @@ async fn handle_rename_face(
     Ok(())
 }
 
+async fn handle_duress(proxy: &GazeProxy<'_>, user: &str, clear: bool) -> anyhow::Result<()> {
+    let term = Term::stdout();
+    if clear {
+        let cleared = proxy.clear_duress(user).await.map_err(|err| {
+            anyhow::anyhow!(
+                "Failed to clear the duress lockout: {}",
+                dbus_error_message(&err)
+            )
+        })?;
+        if cleared {
+            term.write_line(&format!(
+                "Face authentication re-enabled for {}.",
+                style(user).bold()
+            ))?;
+        } else {
+            term.write_line(&format!(
+                "Face authentication was not locked for {}.",
+                style(user).bold()
+            ))?;
+        }
+        return Ok(());
+    }
+
+    let locked = proxy.duress_locked(user).await.map_err(|err| {
+        anyhow::anyhow!(
+            "Failed to read the duress lockout: {}",
+            dbus_error_message(&err)
+        )
+    })?;
+    if locked {
+        term.write_line(&format!(
+            "Face authentication for {} is {} after a duress signal. Log in with your password, \
+             or run `gaze duress --clear`.",
+            style(user).bold(),
+            style("locked").red().bold()
+        ))?;
+    } else {
+        term.write_line(&format!(
+            "Face authentication for {} is {}.",
+            style(user).bold(),
+            style("not locked").green()
+        ))?;
+    }
+    Ok(())
+}
+
 async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<()> {
     let term = Term::stdout();
     let result = run_busy(
@@ -1884,6 +1939,9 @@ async fn run() -> anyhow::Result<()> {
         }
         Commands::ClearUser { user } => {
             handle_clear_user(&proxy, &user.unwrap_or_else(get_current_user)).await?;
+        }
+        Commands::Duress { clear, user } => {
+            handle_duress(&proxy, &user.unwrap_or_else(get_current_user), clear).await?;
         }
         Commands::Config { show } => {
             let (config, keyring_supported) = load_config_with_keyring_from_daemon(&proxy).await?;

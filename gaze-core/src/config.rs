@@ -48,6 +48,11 @@ pub const MAX_LIVENESS_MAX_SECONDS: f64 = 30.0;
 pub const DEFAULT_LIVENESS_MAX_SECONDS: f64 = 2.0;
 pub const MIN_LIVENESS_FRAMES: u32 = 6;
 pub const DEFAULT_CAMERA_FPS: f64 = 30.0;
+pub const DEFAULT_DURESS_CLOSED_THRESHOLD: f64 = 0.9;
+pub const MIN_DURESS_CLOSED_THRESHOLD: f64 = 0.5;
+pub const MAX_DURESS_CLOSED_THRESHOLD: f64 = 0.99;
+pub const DEFAULT_DURESS_HOLD_MS: u64 = 600;
+pub const MAX_DURESS_HOLD_MS: u64 = 5000;
 const DEFAULT_CONFIG_MODE: u32 = 0o644;
 
 fn default_level() -> String {
@@ -469,6 +474,8 @@ pub struct Config {
     pub liveness: LivenessConfig,
     #[serde(default)]
     pub storage: StorageConfig,
+    #[serde(default)]
+    pub duress: DuressConfig,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
@@ -583,6 +590,72 @@ impl StorageConfig {
             anyhow::bail!("keyring unlock requires storage.encrypt_templates and liveness.enabled");
         }
         Ok(())
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct DuressConfig {
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    #[serde(default = "default_duress_closed_threshold")]
+    pub closed_threshold: f64,
+    #[serde(default = "default_duress_hold_ms")]
+    pub hold_ms: u64,
+}
+
+fn default_duress_closed_threshold() -> f64 {
+    DEFAULT_DURESS_CLOSED_THRESHOLD
+}
+
+fn default_duress_hold_ms() -> u64 {
+    DEFAULT_DURESS_HOLD_MS
+}
+
+impl Default for DuressConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            closed_threshold: default_duress_closed_threshold(),
+            hold_ms: default_duress_hold_ms(),
+        }
+    }
+}
+
+impl DuressConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if !Self::closed_threshold_in_range(self.closed_threshold) {
+            anyhow::bail!(
+                "duress.closed_threshold must be between {} and {}, got {}",
+                MIN_DURESS_CLOSED_THRESHOLD,
+                MAX_DURESS_CLOSED_THRESHOLD,
+                self.closed_threshold
+            );
+        }
+        if self.hold_ms > MAX_DURESS_HOLD_MS {
+            anyhow::bail!(
+                "duress.hold_ms must be at most {}, got {}",
+                MAX_DURESS_HOLD_MS,
+                self.hold_ms
+            );
+        }
+        Ok(())
+    }
+
+    fn closed_threshold_in_range(threshold: f64) -> bool {
+        threshold.is_finite()
+            && (MIN_DURESS_CLOSED_THRESHOLD..=MAX_DURESS_CLOSED_THRESHOLD).contains(&threshold)
+    }
+
+    pub fn effective_closed_threshold(&self) -> f32 {
+        if Self::closed_threshold_in_range(self.closed_threshold) {
+            self.closed_threshold as f32
+        } else {
+            DEFAULT_DURESS_CLOSED_THRESHOLD as f32
+        }
+    }
+
+    pub fn effective_hold(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(self.hold_ms.min(MAX_DURESS_HOLD_MS))
     }
 }
 
@@ -1121,6 +1194,9 @@ impl Config {
             }
             if let Err(e) = config.cameras.validate() {
                 tracing::warn!("{e}; capturing RGB and IR one at a time");
+            }
+            if let Err(e) = config.duress.validate() {
+                tracing::warn!("{e}; using the default duress settings");
             }
             Ok(config)
         } else {
@@ -2022,6 +2098,11 @@ mod tests {
                 unlock_gnome_keyring: true,
                 unlock_kwallet: true,
             },
+            duress: DuressConfig {
+                enabled: true,
+                closed_threshold: 0.8,
+                hold_ms: 900,
+            },
         };
 
         config.save_to(path.to_str().unwrap()).unwrap();
@@ -2058,6 +2139,42 @@ mod tests {
         assert!(loaded.storage.encrypt_templates);
         assert!(loaded.storage.unlock_gnome_keyring);
         assert!(loaded.storage.unlock_kwallet);
+        assert!(loaded.duress.enabled);
+        assert_eq!(loaded.duress.closed_threshold, 0.8);
+        assert_eq!(loaded.duress.hold_ms, 900);
+    }
+
+    #[test]
+    fn duress_is_off_by_default_and_falls_back_on_invalid_values() {
+        let duress = Config::default().duress;
+        assert!(!duress.enabled);
+        assert!(duress.validate().is_ok());
+        assert_eq!(
+            duress.effective_closed_threshold(),
+            DEFAULT_DURESS_CLOSED_THRESHOLD as f32
+        );
+
+        for closed_threshold in [0.1, 1.5, f64::NAN] {
+            let bad = DuressConfig {
+                closed_threshold,
+                ..DuressConfig::default()
+            };
+            assert!(bad.validate().is_err());
+            assert_eq!(
+                bad.effective_closed_threshold(),
+                DEFAULT_DURESS_CLOSED_THRESHOLD as f32
+            );
+        }
+
+        let long_hold = DuressConfig {
+            hold_ms: MAX_DURESS_HOLD_MS + 1,
+            ..DuressConfig::default()
+        };
+        assert!(long_hold.validate().is_err());
+        assert_eq!(
+            long_hold.effective_hold(),
+            std::time::Duration::from_millis(MAX_DURESS_HOLD_MS)
+        );
     }
 
     #[test]

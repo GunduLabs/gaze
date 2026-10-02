@@ -4,6 +4,7 @@
 mod align;
 mod crypto;
 mod daemon;
+mod duress;
 mod liveness;
 pub mod models;
 mod preview;
@@ -138,6 +139,18 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
+    let eye_state = if config.duress.enabled {
+        match daemon::load_eye_state(&config.inference) {
+            Ok(classifier) => Some(classifier),
+            Err(e) => {
+                warn!("Duress detection is enabled but the eye-state model failed to load: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let cipher = if config.storage.encrypt_templates {
         let dek = tpm::load_or_create_dek(std::path::Path::new(tpm::STATE_DIR)).map_err(|e| {
             anyhow::anyhow!(
@@ -190,6 +203,8 @@ async fn main() -> anyhow::Result<()> {
         recognizer_rgb: Arc::new(Mutex::new(recognizer_rgb)),
         recognizer_ir: Arc::new(Mutex::new(recognizer_ir)),
         liveness: Arc::new(Mutex::new(liveness_detector)),
+        eye_state: Arc::new(Mutex::new(eye_state)),
+        duress_lockout: Arc::new(duress::DuressLockout::new(duress::DURESS_DIR)),
         db: Arc::new(Mutex::new(db)),
         rgb_threshold: Arc::new(Mutex::new(security.rgb_threshold())),
         ir_threshold: Arc::new(Mutex::new(security.ir_threshold())),

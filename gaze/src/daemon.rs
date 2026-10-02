@@ -16,6 +16,7 @@ use zbus::names::BusName;
 use zbus::{fdo, interface, message::Header, object_server::SignalEmitter};
 
 use crate::align::{align_face, mat_to_rgb};
+use crate::duress::{DuressLockout, DuressTracker, EyeStateClassifier};
 use crate::liveness::LivenessDetector;
 use crate::preview::PreviewStream;
 use crate::recognize::FaceRecognizer;
@@ -268,6 +269,8 @@ pub struct AuthDaemon {
     pub recognizer_rgb: Arc<Mutex<FaceRecognizer>>,
     pub recognizer_ir: Arc<Mutex<FaceRecognizer>>,
     pub liveness: Arc<Mutex<Option<LivenessDetector>>>,
+    pub eye_state: Arc<Mutex<Option<EyeStateClassifier>>>,
+    pub duress_lockout: Arc<DuressLockout>,
     pub db: Arc<Mutex<UserDatabase>>,
     pub rgb_threshold: Arc<Mutex<f32>>,
     pub ir_threshold: Arc<Mutex<f32>>,
@@ -2224,6 +2227,7 @@ enum VerifyMsg {
     Diagnostic(String),
     Status(Spectrum, CaptureStatus, Option<ndarray::Array1<f32>>, f64),
     Success(Spectrum, ndarray::Array1<f32>),
+    Duress(Spectrum),
     Error(String),
 }
 
@@ -2393,6 +2397,34 @@ fn crop_liveness_face(data: &FaceData) -> anyhow::Result<image::RgbImage> {
         data.bbox[3] - pad_y as f32,
     ];
     crate::liveness::crop_face(&content, bbox)
+}
+
+pub fn load_eye_state(
+    inference: &gaze_core::config::InferenceConfig,
+) -> anyhow::Result<EyeStateClassifier> {
+    let path = crate::models::ensure_eye_state_model(gaze_core::config::MODELS_DIR)?;
+    EyeStateClassifier::new_with_inference(path.to_str().unwrap(), inference)
+}
+
+fn eyes_closed_in_frame(
+    eye_state: &Mutex<Option<EyeStateClassifier>>,
+    data: &FaceData,
+    threshold: f32,
+) -> anyhow::Result<bool> {
+    let frame = data
+        .liveness_frame
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("frame was not retained for the eye-state check"))?;
+    let eyes =
+        eyes_from_kpss(&data.kpss).ok_or_else(|| anyhow::anyhow!("face landmarks are missing"))?;
+    let rgb = mat_to_rgb(frame)?;
+    let mut guard = eye_state.blocking_lock();
+    let classifier = guard.as_mut().ok_or_else(|| {
+        anyhow::anyhow!("duress detection is enabled but the eye-state model is unavailable")
+    })?;
+    let probabilities = classifier.closed_probabilities(&rgb, [eyes[0], eyes[1]])?;
+    tracing::debug!(?probabilities, threshold, "Duress eye state");
+    Ok(crate::duress::any_eye_closed(probabilities, threshold))
 }
 
 /// One row per enrolled face, holding (name, rgb_sim, rgb_pct, rgb_passed, ir_sim, ir_pct,
@@ -3583,6 +3615,34 @@ impl AuthDaemon {
         Ok(true)
     }
 
+    async fn duress_locked(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        username: String,
+    ) -> fdo::Result<bool> {
+        Self::ensure_user_query_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        Ok(self.duress_lockout.is_locked(&username))
+    }
+
+    async fn clear_duress(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        username: String,
+    ) -> fdo::Result<bool> {
+        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        let cleared = self
+            .duress_lockout
+            .clear(&username)
+            .map_err(|e| fdo::Error::Failed(format!("Failed to clear duress lockout: {e}")))?;
+        if cleared {
+            info!(
+                "Cleared the duress lockout for {}; face authentication is available again",
+                username
+            );
+        }
+        Ok(cleared)
+    }
+
     #[zbus(property)]
     async fn pam_internal(
         &self,
@@ -3812,7 +3872,8 @@ impl AuthDaemon {
 }
 
 impl AuthDaemon {
-    async fn apply_config(&self, new_config: Config) -> fdo::Result<()> {
+    async fn apply_config(&self, mut new_config: Config) -> fdo::Result<()> {
+        new_config.duress = self.current_config().await.duress;
         new_config
             .security
             .validate()
@@ -4058,6 +4119,18 @@ impl AuthDaemon {
         )?;
         let hybrid_policy = self.hybrid_policy.lock().await.clone();
         let serial_capture = *self.serial_capture.lock().await;
+        let duress_cfg = config.duress.clone();
+        if duress_cfg.enabled && self.eye_state.lock().await.is_none() {
+            match load_eye_state(&config.inference) {
+                Ok(classifier) => *self.eye_state.lock().await = Some(classifier),
+                Err(e) => {
+                    warn!("Duress detection is enabled but the eye-state model failed to load: {e}")
+                }
+            }
+        }
+        let eye_state_arc = self.eye_state.clone();
+        let duress_lockout = self.duress_lockout.clone();
+        let duress_locked = duress_lockout.is_locked(&username);
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
 
@@ -4069,6 +4142,15 @@ impl AuthDaemon {
                     return;
                 }
             };
+
+            if duress_locked {
+                info!(
+                    "Face authentication for {} is locked after a duress signal until a password login",
+                    username
+                );
+                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
+                return;
+            }
 
             let db = db_arc.lock().await;
             let faces_list = db.list_faces(&username).unwrap_or_default();
@@ -4160,6 +4242,10 @@ impl AuthDaemon {
                 let rgb_device_clone = rgb_device.clone();
                 let rgb_phase_done_clone = rgb_phase_done.clone();
                 let hybrid_policy_clone = hybrid_policy.clone();
+                let eye_state_arc = eye_state_arc.clone();
+                let duress_enabled = duress_cfg.enabled;
+                let duress_threshold = duress_cfg.effective_closed_threshold();
+                let duress_hold = duress_cfg.effective_hold();
 
                 rgb_thread = Some(std::thread::spawn(move || {
                     // Set on every exit path (incl. panic) once the RGB camera is released.
@@ -4197,6 +4283,7 @@ impl AuthDaemon {
                     let mut logged_rgb_luma_statuses = Vec::new();
                     let mut live_scores: Vec<f32> = Vec::new();
                     let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
+                    let mut duress = DuressTracker::new(duress_hold);
 
                     while let Some(frame) = cam.next_interruptible(&stop_clone) {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
@@ -4240,7 +4327,7 @@ impl AuthDaemon {
 
                         let (status, embed_opt) = {
                             let mut recognizer = recognizer_rgb_arc.blocking_lock();
-                            match process_frame_sync(&mut checker, &mut recognizer, &frame, liveness_enabled) {
+                            match process_frame_sync(&mut checker, &mut recognizer, &frame, liveness_enabled || duress_enabled) {
                                 Ok(res) => res,
                                 Err(_) => (CaptureStatus::NoFace, None),
                             }
@@ -4283,6 +4370,23 @@ impl AuthDaemon {
 
                             let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
                             if matched {
+                                if duress_enabled {
+                                    let closed = match eyes_closed_in_frame(&eye_state_arc, &data, duress_threshold) {
+                                        Ok(closed) => closed,
+                                        Err(e) => {
+                                            let _ = tx.blocking_send(VerifyMsg::Error(format!("Duress check failed: {e}")));
+                                            return;
+                                        }
+                                    };
+                                    if duress.observe(closed, Instant::now()) {
+                                        let _ = tx.blocking_send(VerifyMsg::Duress(Spectrum::Rgb));
+                                        return;
+                                    }
+                                    if closed {
+                                        continue;
+                                    }
+                                }
+
                                 let mut liveness_passed = true;
                                 if liveness_enabled {
                                     if let Some(eyes) = eyes_from_kpss(&data.kpss) {
@@ -4364,6 +4468,10 @@ impl AuthDaemon {
                 let emitter_enabled = emitter_enabled;
                 let serial_capture = serial_capture;
                 let rgb_phase_done_clone = rgb_phase_done.clone();
+                let eye_state_arc = eye_state_arc.clone();
+                let duress_enabled = duress_cfg.enabled;
+                let duress_threshold = duress_cfg.effective_closed_threshold();
+                let duress_hold = duress_cfg.effective_hold();
 
                 ir_thread = Some(std::thread::spawn(move || {
                     // Wait for RGB to release its camera before opening IR and firing the emitter,
@@ -4403,6 +4511,7 @@ impl AuthDaemon {
                     let mut logged_lit_luma = false;
                     let mut logged_dark_luma = false;
                     let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
+                    let mut duress = DuressTracker::new(duress_hold);
 
                     while let Some(frame) = cam.next_interruptible(&stop_clone) {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
@@ -4440,7 +4549,7 @@ impl AuthDaemon {
 
                         let (status, embed_opt) = {
                             let mut recognizer = recognizer_ir_arc.blocking_lock();
-                            match process_frame_sync(&mut checker, &mut recognizer, &frame, false) {
+                            match process_frame_sync(&mut checker, &mut recognizer, &frame, duress_enabled) {
                                 Ok(res) => res,
                                 Err(_) => (CaptureStatus::NoFace, None),
                             }
@@ -4466,6 +4575,23 @@ impl AuthDaemon {
 
                             let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
                             if matched {
+                                if duress_enabled {
+                                    let closed = match eyes_closed_in_frame(&eye_state_arc, &data, duress_threshold) {
+                                        Ok(closed) => closed,
+                                        Err(e) => {
+                                            let _ = tx.blocking_send(VerifyMsg::Error(format!("Duress check failed: {e}")));
+                                            return;
+                                        }
+                                    };
+                                    if duress.observe(closed, Instant::now()) {
+                                        let _ = tx.blocking_send(VerifyMsg::Duress(Spectrum::Ir));
+                                        return;
+                                    }
+                                    if closed {
+                                        continue;
+                                    }
+                                }
+
                                 let mut liveness_passed = true;
                                 if liveness_enabled {
                                     if let Some(eyes) = eyes_from_kpss(&data.kpss) {
@@ -4698,6 +4824,15 @@ impl AuthDaemon {
                                 if finish_if_auth_passed!() {
                                     break;
                                 }
+                            }
+                            VerifyMsg::Duress(spectrum) => {
+                                stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                info!(?spectrum, "Duress signal held; locking face authentication for {} until a password login", username);
+                                if let Err(e) = duress_lockout.lock(&username) {
+                                    error!("Failed to persist the duress lockout, holding it in memory: {e}");
+                                }
+                                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                break;
                             }
                             VerifyMsg::Error(e) => {
                                 error!("VerifyStart loop error: {e}");

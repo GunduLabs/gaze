@@ -164,6 +164,18 @@ gaze clear-user
 
 This is destructive.
 
+## Check or clear a duress lockout
+
+When [duress detection](./configuration.md#duress-signal) locks face
+authentication, a password login re-enables it. To check or clear it by hand:
+
+```bash
+gaze duress          # show whether face auth is locked
+gaze duress --clear  # re-enable face auth
+```
+
+Clearing another user's lockout needs root.
+
 ## Unlock the GNOME Keyring after a GDM or greetd face login
 
 A face login supplies no password, so the GNOME login keyring normally stays
