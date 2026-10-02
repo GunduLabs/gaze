@@ -1737,8 +1737,8 @@ mod tests {
 
     #[test]
     fn iterator_ends_on_pipeline_error() {
-        let mut camera =
-            Camera::open("videotestsrc ! identity error-after=2").expect("identity pipeline");
+        let mut camera = Camera::open("videotestsrc is-live=true ! identity error-after=5")
+            .expect("identity pipeline");
         let mut frames = 0;
         while camera.next().is_some() {
             frames += 1;
