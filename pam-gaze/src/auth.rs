@@ -342,12 +342,19 @@ fn is_kwallet_login(service: Option<&str>) -> bool {
     )
 }
 
+/// The services whose successful biometric result is allowed to release the GNOME Keyring
+/// credential. GDM has a token-only service of its own; greetd has none, so it is reached
+/// under the name its single session stack already runs as.
+fn is_gnome_keyring_login(service: Option<&str>) -> bool {
+    matches!(service, Some(FACE_PAM_SERVICE) | Some(GREETD_PAM_SERVICE))
+}
+
 fn keyring_backend(
     service: Option<&str>,
     config: &gaze_core::config::Config,
 ) -> Option<gaze_security::keyring::Backend> {
     use gaze_security::keyring::Backend;
-    if service == Some(FACE_PAM_SERVICE) && config.storage.unlock_gnome_keyring {
+    if is_gnome_keyring_login(service) && config.storage.unlock_gnome_keyring {
         Some(Backend::Gnome)
     } else if is_kwallet_login(service) && config.storage.unlock_kwallet {
         Some(Backend::KWallet)
@@ -826,7 +833,7 @@ mod tests {
     }
 
     #[test]
-    fn keyring_is_opt_in_and_gdm_only() {
+    fn keyring_is_opt_in_and_limited_to_login_services() {
         assert_eq!(
             finish_keyring(
                 PAM_SUCCESS,
@@ -842,12 +849,25 @@ mod tests {
             Some("gdm-password"),
             Some("kde-fingerprint"),
             Some("login"),
+            // The greeter's own stack, which runs as `greetd` and must never release a
+            // credential: only the user session reaching it does.
+            Some("greetd-greeter"),
         ] {
             assert_eq!(
                 finish_keyring(PAM_SUCCESS, service, &keyring_config(), || panic!(
-                    "not gdm-face"
+                    "not a face login"
                 )),
                 PAM_SUCCESS
+            );
+        }
+        for service in [FACE_PAM_SERVICE, GREETD_PAM_SERVICE] {
+            assert_eq!(
+                finish_keyring(PAM_SUCCESS, Some(service), &keyring_config(), || Ok(())),
+                PAM_SUCCESS
+            );
+            assert_eq!(
+                finish_keyring(PAM_SUCCESS, Some(service), &keyring_config(), || Err(())),
+                PAM_AUTHINFO_UNAVAIL
             );
         }
     }

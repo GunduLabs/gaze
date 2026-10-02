@@ -225,7 +225,7 @@ threshold = 0.8
 [storage]
 encrypt_templates = false   # seal face templates to the TPM
 unlock_kwallet = false # optional TPM-backed KDE wallet unlock
-unlock_gnome_keyring = false # unlock the GNOME keyring after a GDM face login
+unlock_gnome_keyring = false # unlock the GNOME keyring after a GDM or greetd face login
 ```
 
 OpenVINO selects its device at run time. An OpenVINO-enabled installation

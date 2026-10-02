@@ -432,7 +432,7 @@ Apply changes with:
 sudo systemctl restart gazed
 ```
 
-## Unlock GNOME Keyring after a GDM face login
+## Unlock GNOME Keyring after a GDM or greetd face login
 
 `storage.unlock_gnome_keyring` defaults to `false`. It requires TPM template
 encryption and liveness; if either is missing the option is ignored and the
