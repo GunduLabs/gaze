@@ -319,7 +319,8 @@ mod tests {
         let mut tracker = DuressTracker::new(Duration::from_millis(600));
         assert!(!tracker.observe(true, start));
         assert!(!tracker.observe(true, start + Duration::from_millis(2000)));
-        assert!(tracker.observe(true, start + Duration::from_millis(2400)));
+        assert!(!tracker.observe(true, start + Duration::from_millis(2300)));
+        assert!(tracker.observe(true, start + Duration::from_millis(2600)));
     }
 
     #[test]
