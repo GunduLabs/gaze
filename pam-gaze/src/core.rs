@@ -56,10 +56,6 @@ pub const CAMERA_AUTH_TIMEOUT_SECS: u64 = 12;
 pub const TTY_CONFIRM_DECISECONDS: libc::cc_t = 200;
 const _: () = assert!(TTY_CONFIRM_DECISECONDS > 0);
 pub const FACE_PAM_SERVICE: &str = "gdm-face";
-
-/// greetd runs a single session stack under its own name, so unlike GDM there is no token-only
-/// service to split off. It keeps `pam_unix`, which is what lets one stack serve both a face
-/// match and a typed password.
 pub const GREETD_PAM_SERVICE: &str = "greetd";
 
 /// Camera budget plus the daemon's pre-auth delay, which PAM also blocks through, so it must be

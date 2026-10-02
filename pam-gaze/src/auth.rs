@@ -342,9 +342,8 @@ fn is_kwallet_login(service: Option<&str>) -> bool {
     )
 }
 
-/// The services whose successful biometric result is allowed to release the GNOME Keyring
-/// credential. GDM has a token-only service of its own; greetd has none, so it is reached
-/// under the name its single session stack already runs as.
+/// greetd has no token-only service like `gdm-face`, so the credential is released into its
+/// session stack. `greetd-greeter` runs the greeter itself and never qualifies.
 fn is_gnome_keyring_login(service: Option<&str>) -> bool {
     matches!(service, Some(FACE_PAM_SERVICE) | Some(GREETD_PAM_SERVICE))
 }
@@ -849,13 +848,11 @@ mod tests {
             Some("gdm-password"),
             Some("kde-fingerprint"),
             Some("login"),
-            // The greeter's own stack, which runs as `greetd` and must never release a
-            // credential: only the user session reaching it does.
             Some("greetd-greeter"),
         ] {
             assert_eq!(
                 finish_keyring(PAM_SUCCESS, service, &keyring_config(), || panic!(
-                    "not a face login"
+                    "not a keyring login"
                 )),
                 PAM_SUCCESS
             );
