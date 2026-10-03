@@ -427,7 +427,7 @@ just kde-harness kde-fingerprint 2
 
 ## Testing KDE PAM compatibility
 
-With Node.js 22 or newer, run:
+With Node.js 22.15 or newer, run:
 
 ```bash
 node scripts/test-kde.mjs

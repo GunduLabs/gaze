@@ -13,6 +13,7 @@ import {cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile} from 'node:fs/prom
 import {tmpdir} from 'node:os';
 import {dirname, join, relative} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {gunzipSync, zstdDecompressSync} from 'node:zlib';
 import {test, after} from 'node:test';
 
 const repo = fileURLToPath(new URL('../', import.meta.url));
@@ -27,26 +28,28 @@ const ARCH = 'https://gitlab.archlinux.org/archlinux/packaging/packages';
 const FEDORA = 'https://src.fedoraproject.org/rpms';
 const DEBIAN = 'https://sources.debian.org';
 const UBUNTU = 'https://git.launchpad.net/ubuntu/+source';
-const SUSE = 'https://src.opensuse.org/api/v1/repos/pool';
+// openSUSE's own servers refuse GitHub's runners, so fall back to public mirrors.
+const SUSE_MIRRORS = ['https://download.opensuse.org/tumbleweed/repo/oss',
+    'https://ftp.fau.de/opensuse/tumbleweed/repo/oss', 'https://ftp.gwdg.de/pub/opensuse/tumbleweed/repo/oss'];
 const KDE = 'https://invent.kde.org/plasma';
 
 // Every host here throttles bursts from shared CI addresses, so cap and retry.
 const slots = Array(6).fill(Promise.resolve());
 let nextSlot = 0;
 
-async function download(url, optional = false) {
+async function download(url, {optional = false, binary = false} = {}) {
     const slot = nextSlot++ % slots.length;
-    const result = slots[slot].then(() => fetchWithRetry(url, optional));
+    const result = slots[slot].then(() => fetchWithRetry(url, optional, binary));
     slots[slot] = result.catch(() => {});
     return result;
 }
 
-async function fetchWithRetry(url, optional) {
+async function fetchWithRetry(url, optional, binary) {
     for (let attempt = 1; ; attempt++) {
         try {
             const response = await fetch(url, {signal: AbortSignal.timeout(60_000)});
             if (optional && response.status === 404) return null;
-            if (response.status === 200) return await response.text();
+            if (response.status === 200) return binary ? Buffer.from(await response.arrayBuffer()) : await response.text();
             if (response.status < 500 && response.status !== 429) assert.fail(`${url}: HTTP ${response.status}`);
             throw new Error(`HTTP ${response.status}`);
         } catch (error) {
@@ -122,12 +125,62 @@ const ubuntu = series => async () => {
     ];
 };
 
+function rpmFiles(buffer) {
+    const header = offset => {
+        assert.equal(buffer.readUInt32BE(offset), 0x8eade801, 'RPM header magic');
+        const count = buffer.readUInt32BE(offset + 8);
+        const store = offset + 16 + count * 16;
+        const tags = new Map();
+        for (let i = 0; i < count; i++)
+            tags.set(buffer.readUInt32BE(offset + 16 + i * 16), store + buffer.readUInt32BE(offset + 24 + i * 16));
+        return {end: store + buffer.readUInt32BE(offset + 12),
+            string: tag => tags.has(tag) ? buffer.toString('utf8', tags.get(tag), buffer.indexOf(0, tags.get(tag))) : null};
+    };
+    const signature = header(96);
+    const main = header(Math.ceil(signature.end / 8) * 8);
+    const compressor = main.string(1125) ?? 'gzip';
+    const decompress = {zstd: zstdDecompressSync, gzip: gunzipSync}[compressor];
+    assert.ok(decompress, `unsupported RPM payload compressor: ${compressor}`);
+    const cpio = decompress(buffer.subarray(main.end));
+    const files = new Map();
+    for (let offset = 0; ;) {
+        assert.equal(cpio.toString('ascii', offset, offset + 6), '070701', 'cpio newc magic');
+        const field = i => parseInt(cpio.toString('ascii', offset + 6 + i * 8, offset + 14 + i * 8), 16);
+        const size = field(6), nameSize = field(11);
+        const name = cpio.toString('utf8', offset + 110, offset + 109 + nameSize);
+        if (name === 'TRAILER!!!') return files;
+        const data = Math.ceil((offset + 110 + nameSize) / 4) * 4;
+        files.set(name.replace(/^\.?\/?/, '/'), cpio.subarray(data, data + size));
+        offset = Math.ceil((data + size) / 4) * 4;
+    }
+}
+
+async function suseRpm(pkg) {
+    const pattern = new RegExp(`(?<![\\w.+-])${pkg.replace(/[.+]/g, '\\$&')}-\\d[^"<>/\\s-]*-[^"<>/\\s-]+\\.x86_64\\.rpm`, 'g');
+    const errors = [];
+    for (const mirror of SUSE_MIRRORS) {
+        try {
+            const names = [...new Set((await download(`${mirror}/x86_64/?P=${pkg}-*`)).match(pattern) ?? [])]
+                .sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+            assert.ok(names.length, `no ${pkg} package listed`);
+            return rpmFiles(await download(`${mirror}/x86_64/${names.at(-1)}`, {binary: true}));
+        } catch (error) {
+            errors.push(`${mirror}: ${error.message}`);
+        }
+    }
+    throw new Error(`${pkg}: ${errors.join('; ')}`);
+}
+
 const tumbleweed = async () => {
-    const at = (pkg, file) => `${SUSE}/${pkg}/raw/${file}?ref=factory`;
+    const [kscreenlocker, sddm, pam] = await Promise.all(['kscreenlocker6', 'sddm-qt6', 'pam'].map(suseRpm));
+    const file = (files, path) => {
+        assert.ok(files.has(path), `missing ${path}`);
+        return {content: files.get(path).toString('utf8')};
+    };
     return [
-        ...SLOTS.map(name => [`vendor/${name}`, at('kscreenlocker6', name)]),
-        ['vendor/sddm', at('sddm', 'sddm.pam')],
-        ['vendor/common-auth', at('pam', 'common-auth.pamd')],
+        ...SLOTS.map(name => [`vendor/${name}`, file(kscreenlocker, `/usr/lib/pam.d/${name}`)]),
+        ['vendor/sddm', file(sddm, '/usr/lib/pam.d/sddm')],
+        ['vendor/common-auth', file(pam, '/usr/lib/pam.d/common-auth')],
     ];
 };
 
@@ -150,7 +203,7 @@ if (!process.argv[2]) {
     after(() => rm(upstream, {recursive: true, force: true}));
     const downloads = await Promise.allSettled(Object.entries(targets).map(async ([name, target]) => {
         await Promise.all((await target.files()).map(async ([file, url, optional]) => {
-            const body = await download(url, optional);
+            const body = url.content ?? await download(url, {optional});
             if (body === null) return;
             assert.doesNotMatch(body, /^\s*</, `${url}: got an HTML page instead of a source file`);
             const destination = join(upstream, name, file);
