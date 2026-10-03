@@ -53,6 +53,7 @@ function load(source, dependencies, exports, globals = {}) {
 
 const _ = text => text;
 const signalKey = Symbol('GObject.signals');
+const Gi = {gobject_prototype_symbol: Symbol('gobject_prototype'), hook_up_vfunc_symbol: Symbol('hook_up_vfunc')};
 class Emitter {
     connect(name, callback) {
         this.listeners ??= new Map();
@@ -130,6 +131,10 @@ class Widget extends Emitter {
     destroy() { this.parent?.remove_child(this); this.destroyed = true; }
     play() { this.playing = true; }
     stop() { this.playing = false; }
+    get [Gi.gobject_prototype_symbol]() {
+        const prototype = this;
+        return {[Gi.hook_up_vfunc_symbol]: (name, method) => { prototype[`vfunc_${name}`] = method; }};
+    }
 }
 
 async function environment(version, options = {}) {
@@ -254,7 +259,7 @@ async function environment(version, options = {}) {
     };
     const injectionSource = (await source('extensions/extension.js'))
         .slice((await source('extensions/extension.js')).indexOf('export class InjectionManager'));
-    const {InjectionManager: UpstreamInjectionManager} = load(injectionSource, {}, 'InjectionManager', globals);
+    const {InjectionManager: UpstreamInjectionManager} = load(injectionSource, {}, 'InjectionManager', {...globals, Gi});
     const overrides = [];
     class InjectionManager extends UpstreamInjectionManager {
         overrideMethod(proto, name, createOverride) {
