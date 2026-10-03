@@ -128,7 +128,7 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Test GNOME Shell 45 through 51 authentication
+      - name: Test supported GNOME Shell versions
         run: node scripts/test-gnome-shell.mjs
 
   openvino:
