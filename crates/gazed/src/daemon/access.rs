@@ -518,7 +518,6 @@ mod tests {
     use gaze_core::config::AuthSurface;
     use gaze_core::dbus::ActiveSession;
     use std::sync::Arc;
-    use tokio::sync::Mutex;
 
     fn session(class: &str) -> ActiveSession {
         ActiveSession {
