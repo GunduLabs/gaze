@@ -104,6 +104,28 @@ jobs:
             rpm_distro: ""
             rpm_version: ""
             package_release: "1~ubuntu26.04"
+          - id: ubuntu-stonking-amd64
+            name: deb (Ubuntu 26.10 stonking, amd64)
+            runner: ubuntu-latest
+            container: ubuntu:26.10
+            format: deb
+            distro: ubuntu
+            distro_version: "26.10"
+            deb_suite: stonking
+            rpm_distro: ""
+            rpm_version: ""
+            package_release: "1~ubuntu26.10"
+          - id: ubuntu-stonking-arm64
+            name: deb (Ubuntu 26.10 stonking, arm64)
+            runner: ubuntu-24.04-arm
+            container: ubuntu:26.10
+            format: deb
+            distro: ubuntu
+            distro_version: "26.10"
+            deb_suite: stonking
+            rpm_distro: ""
+            rpm_version: ""
+            package_release: "1~ubuntu26.10"
           - id: debian-trixie-amd64
             name: deb (Debian 13 trixie, amd64)
             runner: ubuntu-latest

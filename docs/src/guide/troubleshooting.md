@@ -154,8 +154,9 @@ dpkg-query -W -f='${Version}\n' gaze
 grep gundulabs /etc/apt/sources.list.d/gundulabs.list
 ```
 
-The version suffix (`1~ubuntu24.04`, `1~ubuntu26.04`, `1~debian13`, `1~debian14`) has to match
-your release. Point apt at the suite for your release and reinstall:
+The version suffix (`1~ubuntu24.04`, `1~ubuntu25.10`, `1~ubuntu26.04`,
+`1~ubuntu26.10`, `1~debian13`, `1~debian14`) has to match your release. Point
+apt at the suite for your release and reinstall:
 
 ```bash
 suite="$(. /etc/os-release && echo "${VERSION_CODENAME:-$UBUNTU_CODENAME}")"

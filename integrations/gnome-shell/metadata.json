@@ -3,7 +3,8 @@
     "description": "GNOME Shell extension for Gaze",
     "uuid": "gaze@gundulabs.com",
     "shell-version": [
-    	"50",
+        "51",
+        "50",
         "49",
         "48",
         "47",

@@ -51,7 +51,7 @@ const GAZE_DBUS_INTERFACE = `
 const GazeProxy = Gio.DBusProxy.makeProxyWrapper(GAZE_DBUS_INTERFACE);
 
 const FACE_SERVICE_NAME = "gdm-face";
-// GNOME 50 moved these out of gdm/util.js without leaving a re-export behind.
+// GNOME 51 moved these out of gdm/util.js without leaving a re-export behind.
 // The values are part of the GDM wire protocol, so hardcoding is safe.
 const MESSAGE_TYPE = Util.MessageType ?? {
   NONE: 0,
@@ -256,7 +256,7 @@ const getInternalErrorMessage = (msg) => {
 
 
 // RHEL 10's backport declares the AuthServices signals with positional
-// parameters; GNOME 50 upstream collapsed them into a single params object.
+// parameters; GNOME 51 upstream collapsed them into a single params object.
 const authServicesShapes = new WeakMap();
 
 const usesParamsObject = (services) => {
@@ -329,7 +329,7 @@ const isLegacyAuthServices = (services) => {
   return /Legacy/.test(services.constructor?.name ?? "");
 };
 
-// RHEL 10 keeps one named property per architecture; GNOME 50 upstream
+// RHEL 10 keeps one named property per architecture; GNOME 51 upstream
 // replaced them with a single _authServices array.
 const collectAuthServices = (verifier) => {
   const collected = [];
@@ -353,7 +353,7 @@ const collectAuthServices = (verifier) => {
   return collected;
 };
 
-// The emitter is the first argument everywhere except GNOME 50 upstream,
+// The emitter is the first argument everywhere except GNOME 51 upstream,
 // which passes a lone params object instead.
 const readAskQuestionArgs = (args) => {
   const [first, second, third] = args;
@@ -556,14 +556,17 @@ const ensureAuthPromptConfirmButton = (authPrompt, extension) => {
   }
 
   if (authPrompt._mainBox) {
-    if (authPrompt._defaultButtonWell) {
+    // GNOME 51 nests the default button well inside the entry area.
+    // insert_child_below requires a direct child of the receiving actor.
+    const sibling = authPrompt._entryArea ?? authPrompt._defaultButtonWell;
+    if (sibling) {
       authPrompt._mainBox.insert_child_below(
         button,
-        authPrompt._defaultButtonWell,
+        sibling,
       );
       authPrompt._mainBox.insert_child_below(
         spinnerBin,
-        authPrompt._defaultButtonWell,
+        sibling,
       );
     } else {
       authPrompt._mainBox.add_child(button);
@@ -654,17 +657,35 @@ const respondToAuthPromptConfirm = (authPrompt) => {
 
   authPrompt.verificationStatus =
     AuthPrompt.AuthPromptStatus.VERIFICATION_IN_PROGRESS;
-  authPrompt.updateSensitivity(false);
+  const callbackBased =
+    typeof authPrompt._completePendingCallback === "function";
+  authPrompt.updateSensitivity(callbackBased ? { sensitive: false } : false);
 
   const serviceName = authPrompt._queryingService;
   if (serviceName && authPrompt._userVerifier) {
-    authPrompt._userVerifier.answerQuery(serviceName, GAZE_CONFIRMED);
+    const answerHandler = authPrompt._faceConfirmAnswerHandler;
+    if (answerHandler) {
+      // GNOME 51 supplies an answer callback instead of answerQuery().
+      // Keep the password callback intact while face runs in the background.
+      authPrompt._userVerifier.handlePendingMessages().then(() => {
+        if (
+          authPrompt._faceConfirmAnswerHandler !== answerHandler ||
+          authPrompt._queryingService !== serviceName
+        )
+          return;
+        authPrompt._faceConfirmAnswerHandler = null;
+        answerHandler(GAZE_CONFIRMED);
+      }).catch((e) => logError(e));
+    } else {
+      authPrompt._userVerifier.answerQuery(serviceName, GAZE_CONFIRMED);
+    }
   }
 
   authPrompt.emit("next");
 };
 
 const exitAuthPromptConfirmMode = (authPrompt) => {
+  authPrompt._faceConfirmAnswerHandler = null;
   if (
     !authPrompt._confirmMode &&
     !authPrompt._confirmButton?.visible &&
@@ -1135,7 +1156,7 @@ export default class GazeFaceAuthExtension extends Extension {
       extension._verifierProto = proto;
 
       // Shells carrying the unified-auth rework (the RHEL 10 backport of
-      // gnome-shell MR !3212, and GNOME 50 upstream) moved the verification
+      // gnome-shell MR !3212, and GNOME 51 upstream) moved the verification
       // lifecycle off ShellUserVerifier and onto per-architecture AuthServices
       // objects. The presence of _beginVerification tells the layouts apart.
       const legacyArch = typeof proto._beginVerification === "function";
@@ -1203,7 +1224,7 @@ export default class GazeFaceAuthExtension extends Extension {
         services._faceStartProbe = probe;
 
         probeFaceEligibility({
-          proxy: dbusProxy,
+          proxy: extension._dbusProxy,
           userName,
           onEnrolled: () => faceCache.enrolled.set(userName, true),
           onCameraAvailable: () => {
@@ -1562,7 +1583,7 @@ export default class GazeFaceAuthExtension extends Extension {
               this._faceStartProbe = probe;
 
               probeFaceEligibility({
-                proxy: dbusProxy,
+                proxy: extension._dbusProxy,
                 userName,
                 onEnrolled: () => faceCache.enrolled.set(userName, true),
                 onCameraAvailable: () => {
@@ -1856,7 +1877,7 @@ export default class GazeFaceAuthExtension extends Extension {
       }
     };
 
-    // GNOME 50 dropped the ShellUserVerifier re-export from gdm/util.js, so
+    // GNOME 51 dropped the ShellUserVerifier re-export from gdm/util.js, so
     // fall back to the instance AuthPrompt builds instead of failing to enable.
     if (Util.ShellUserVerifier?.prototype) {
       installVerifierHooks(Util.ShellUserVerifier.prototype);
@@ -1928,6 +1949,10 @@ export default class GazeFaceAuthExtension extends Extension {
             (this._userVerifier?._faceConfirmPending &&
               serviceName === this._userVerifier?._faceConfirmService)
           ) {
+            this._faceConfirmAnswerHandler =
+              typeof args[0]?.answerHandler === "function"
+                ? args[0].answerHandler
+                : null;
             enterAuthPromptConfirmMode(this, serviceName, extension);
             return;
           }
@@ -2004,7 +2029,7 @@ export default class GazeFaceAuthExtension extends Extension {
       "updateSensitivity",
       (original) => {
         // Shells with the unified-auth rework pass {sensitive} instead of a
-        // bare boolean, but still accept the boolean for compatibility.
+        // bare boolean.
         return function (...args) {
           const [first] = args;
           const sensitive =

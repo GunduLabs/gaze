@@ -358,6 +358,26 @@ journalctl -f /usr/bin/gnome-shell
 
 For the unlock-dialog session mode (lock screen), changes only take effect after a fresh lock, not a shell reload.
 
+## Testing GNOME Shell compatibility
+
+With Node.js 22 or newer, run:
+
+```bash
+node scripts/test-gnome-shell.mjs
+```
+
+This downloads the GNOME Shell 50.0 and 51.0 authentication source and runs it
+with the Gaze extension. The tests cover face startup and eligibility,
+confirmation by keyboard and button, password fallback, cancellation, stale
+D-Bus replies, GNOME 51 retry modes, Polkit session handlers, and removal of
+extension hooks. CI runs the same command. To use downloaded sources without
+network access, pass a directory containing `50.0/js/` and `51.0/js/` from those
+releases.
+
+The harness simulates native widgets, GObject signals, and D-Bus. Test actual
+GDM login, lock screen unlock, and Polkit prompts in a GNOME desktop session
+before treating a new Shell release as fully verified.
+
 ## Iterating on the Cinnamon extension
 
 The extension source lives in `integrations/cinnamon/`. Cinnamon reads its settings

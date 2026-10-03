@@ -5,7 +5,7 @@
 
 Gaze lock screen and GDM integration are GNOME-specific and require the `gaze-gnome-extension` package. The one-line installer tries to enable lock screen face unlock for the current GNOME user. Manual package installs only install the extension files. On openSUSE Tumbleweed, install the extension with `sudo zypper install gaze-gnome-extension` before enabling it.
 
-This extension starts the `gdm-face` PAM service inside GNOME Shell authentication flows.
+This extension starts the `gdm-face` PAM service inside GNOME Shell authentication flows. It supports GNOME Shell 45 through 51.
 
 You do not need to enable this extension for the CLI, the GUI, or normal PAM prompts such as `sudo`. Leave it disabled on non-GNOME desktops.
 
