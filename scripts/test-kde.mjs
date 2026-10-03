@@ -30,11 +30,31 @@ const UBUNTU = 'https://git.launchpad.net/ubuntu/+source';
 const SUSE = 'https://api.opensuse.org/public/source/openSUSE:Factory';
 const KDE = 'https://invent.kde.org/plasma';
 
+// Every host here throttles bursts from shared CI addresses, so cap and retry.
+const slots = Array(6).fill(Promise.resolve());
+let nextSlot = 0;
+
 async function download(url, optional = false) {
-    const response = await fetch(url, {signal: AbortSignal.timeout(30_000)});
-    if (optional && response.status === 404) return null;
-    assert.equal(response.status, 200, url);
-    return response.text();
+    const slot = nextSlot++ % slots.length;
+    const result = slots[slot].then(() => fetchWithRetry(url, optional));
+    slots[slot] = result.catch(() => {});
+    return result;
+}
+
+async function fetchWithRetry(url, optional) {
+    for (let attempt = 1; ; attempt++) {
+        try {
+            const response = await fetch(url, {signal: AbortSignal.timeout(60_000)});
+            if (optional && response.status === 404) return null;
+            if (response.status === 200) return await response.text();
+            if (response.status < 500 && response.status !== 429) assert.fail(`${url}: HTTP ${response.status}`);
+            throw new Error(`HTTP ${response.status}`);
+        } catch (error) {
+            if (error instanceof assert.AssertionError) throw error;
+            if (attempt === 4) throw new Error(`${url}: ${error.message}`, {cause: error});
+            await new Promise(resolve => setTimeout(resolve, 2_000 * attempt));
+        }
+    }
 }
 
 function field(source, pattern, url) {
@@ -129,6 +149,7 @@ if (!process.argv[2]) {
         await Promise.all((await target.files()).map(async ([file, url, optional]) => {
             const body = await download(url, optional);
             if (body === null) return;
+            assert.doesNotMatch(body, /^\s*</, `${url}: got an HTML page instead of a source file`);
             const destination = join(upstream, name, file);
             await mkdir(dirname(destination), {recursive: true});
             await writeFile(destination, body);
