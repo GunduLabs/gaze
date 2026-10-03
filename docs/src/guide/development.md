@@ -363,7 +363,7 @@ For the unlock-dialog session mode (lock screen), changes only take effect after
 With Node.js 22 or newer, run:
 
 ```bash
-node scripts/test-gnome-shell.mjs
+node scripts/test-gnome.mjs
 ```
 
 This downloads the GNOME Shell 45.0 through 51.0 authentication source and runs

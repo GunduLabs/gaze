@@ -129,7 +129,7 @@ jobs:
           node-version: "24"
 
       - name: Test supported GNOME Shell versions
-        run: node scripts/test-gnome-shell.mjs
+        run: node scripts/test-gnome.mjs
 
   kde:
     name: KDE

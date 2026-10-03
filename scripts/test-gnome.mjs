@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Run with: node scripts/test-gnome-shell.mjs [upstream-source-directory]
+// Run with: node scripts/test-gnome.mjs [upstream-source-directory]
 // Downloads GNOME Shell 45.0 through 51.0 when no source directory is given.
 // Executes upstream authentication classes and Gaze's extension together.
 // Native widgets, GObject signals and D-Bus are simulated; this is not a
