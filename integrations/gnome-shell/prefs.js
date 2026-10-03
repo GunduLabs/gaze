@@ -8,20 +8,18 @@ import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
-const GAZE_BUS_NAME = 'com.gundulabs.Gaze';
+const GAZE_DBUS_NAME = 'com.gundulabs.Gaze';
 const GAZE_OBJECT_PATH = '/com/gundulabs/Gaze';
 
 const MAX_TRIES_KEY = 'max-face-tries';
 const FACE_AUTH_KEY = 'enable-face-authentication';
 const RETRY_MODE_KEY = 'face-retry-mode';
 
-const GAZE_IFACE = 'com.gundulabs.Gaze';
-
 function callGaze(method, params) {
     const conn = Gio.DBus.system;
     return new Promise((resolve, reject) => {
         conn.call(
-            GAZE_BUS_NAME, GAZE_OBJECT_PATH, GAZE_IFACE, method, params,
+            GAZE_DBUS_NAME, GAZE_OBJECT_PATH, GAZE_DBUS_NAME, method, params,
             null, Gio.DBusCallFlags.ALLOW_INTERACTIVE_AUTHORIZATION, -1, null,
             (_src, res) => {
                 try {

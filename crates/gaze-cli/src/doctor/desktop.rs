@@ -31,8 +31,9 @@ pub(super) fn owning_uid() -> u32 {
         .unwrap_or_else(|| unsafe { libc::getuid() })
 }
 
-/// Names only, joined like the environment variables above so the callers'
-/// `contains` checks are unchanged. The CLI does not link `pam-gaze`.
+/// Returns desktop names in the colon-delimited form used by the environment
+/// variables above, so callers can check for desktop names with `contains`.
+/// The CLI does not link `pam-gaze`.
 pub(super) fn desktop_from_processes(uid: u32) -> String {
     use std::os::unix::fs::MetadataExt;
 

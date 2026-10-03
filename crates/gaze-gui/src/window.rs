@@ -635,7 +635,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     page.add(&enrollment_group);
 
     let templates_row = libadwaita::SpinRow::with_range(1.0, 50.0, 1.0);
-    templates_row.set_title("Max Templates");
+    templates_row.set_title("Maximum Templates");
     templates_row.set_subtitle("Number of capture sets stored per face");
     enrollment_group.add(&templates_row);
 
@@ -675,12 +675,12 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     let liveness_max_seconds_row =
         libadwaita::SpinRow::with_range(MIN_LIVENESS_MAX_SECONDS, MAX_LIVENESS_MAX_SECONDS, 0.1);
     liveness_max_seconds_row.set_digits(1);
-    liveness_max_seconds_row.set_title("Liveness Max Seconds");
+    liveness_max_seconds_row.set_title("Maximum Liveness Duration");
     liveness_max_seconds_row.set_subtitle("Maximum seconds analyzed for liveness verification");
     liveness_group.add(&liveness_max_seconds_row);
 
     let auth_group = libadwaita::PreferencesGroup::new();
-    auth_group.set_title("Auth");
+    auth_group.set_title("Authentication");
     page.add(&auth_group);
 
     let abort_ssh_row = libadwaita::ActionRow::new();
