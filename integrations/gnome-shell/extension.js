@@ -1532,18 +1532,20 @@ export default class GazeFaceAuthExtension extends Extension {
       });
 
       if (legacyArch) {
-        this._injectionManager.overrideMethod(
-          proto,
-          "_updateEnabledServices",
-          (original) => {
-            return function () {
-              original.call(this);
-              this._faceEnabled = getFaceEnabled();
-              this._faceMaxTries = getMaxTries();
-              this._faceRetryMode = getRetryMode();
-            };
-          },
-        );
+        if (typeof proto._updateEnabledServices === "function") {
+          this._injectionManager.overrideMethod(
+            proto,
+            "_updateEnabledServices",
+            (original) => {
+              return function () {
+                original.call(this);
+                this._faceEnabled = getFaceEnabled();
+                this._faceMaxTries = getMaxTries();
+                this._faceRetryMode = getRetryMode();
+              };
+            },
+          );
+        }
 
         this._injectionManager.overrideMethod(
           proto,
@@ -1657,23 +1659,25 @@ export default class GazeFaceAuthExtension extends Extension {
           return null;
         };
 
-        this._injectionManager.overrideMethod(
-          proto,
-          "_onConversationStarted",
-          (original) => {
-            return function (client, serviceName) {
-              original.call(this, client, serviceName);
+        if (typeof proto._onConversationStarted === "function") {
+          this._injectionManager.overrideMethod(
+            proto,
+            "_onConversationStarted",
+            (original) => {
+              return function (client, serviceName) {
+                original.call(this, client, serviceName);
 
-              if (this.serviceIsBiometric(serviceName)) {
-                const hint = this._getHint();
-                if (hint) {
-                  this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
-                  this._queueMessage(serviceName, hint, MESSAGE_TYPE.HINT);
+                if (this.serviceIsBiometric(serviceName)) {
+                  const hint = this._getHint();
+                  if (hint) {
+                    this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
+                    this._queueMessage(serviceName, hint, MESSAGE_TYPE.HINT);
+                  }
                 }
-              }
-            };
-          },
-        );
+              };
+            },
+          );
+        }
 
         this._injectionManager.overrideMethod(proto, "_onInfo", (original) => {
           return function (client, serviceName, info) {
@@ -1962,9 +1966,13 @@ export default class GazeFaceAuthExtension extends Extension {
       },
     );
 
+    const keyPressMethod =
+      typeof authPromptProto.on_key_press_event === "function"
+        ? "on_key_press_event"
+        : "vfunc_key_press_event";
     this._injectionManager.overrideMethod(
       authPromptProto,
-      "on_key_press_event",
+      keyPressMethod,
       (original) => {
         return function (event) {
           const symbol = event.get_key_symbol();

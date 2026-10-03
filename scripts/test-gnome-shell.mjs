@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Run with: node scripts/test-gnome-shell.mjs [upstream-source-directory]
-// Downloads GNOME Shell 50.0 and 51.0 when no source directory is given.
+// Downloads GNOME Shell 45.0 through 51.0 when no source directory is given.
 // Executes upstream authentication classes and Gaze's extension together.
 // Native widgets, GObject signals and D-Bus are simulated; this is not a
 // replacement for testing login/unlock in an actual GNOME desktop session.
@@ -15,7 +15,7 @@ import vm from 'node:vm';
 import {test, after} from 'node:test';
 
 const repo = fileURLToPath(new URL('../', import.meta.url));
-const versions = ['50.0', '51.0'];
+const versions = ['45.0', '46.0', '47.0', '48.0', '49.0', '50.0', '51.0'];
 const upstream = process.argv[2] ?? await mkdtemp(join(tmpdir(), 'gaze-gnome-'));
 if (!process.argv[2]) {
     after(() => rm(upstream, {recursive: true, force: true}));
@@ -223,7 +223,7 @@ async function environment(version, options = {}) {
     const Batch = load(await source('gdm/batch.js'), common, 'Hold,Task', globals);
     common.Batch = Batch;
     let Util, UserVerifier, AuthServicesLegacy;
-    if (version === '50.0') {
+    if (version !== '51.0') {
         Util = load(await source('gdm/util.js'), common, 'ShellUserVerifier,MessageType,FINGERPRINT_SERVICE_NAME', globals);
         UserVerifier = Util;
     } else {
@@ -303,7 +303,7 @@ async function environment(version, options = {}) {
         assert.equal(promptFactory._createUserVerifier({}, {}), verifier);
     }
     const prompt = Object.create(AuthPrompt.AuthPrompt.prototype);
-    Object.assign(prompt, {_userVerifier: verifier, _inputWell: new Widget(),
+    Object.assign(prompt, {children: [], _userVerifier: verifier, _inputWell: new Widget(),
         _capsLockWarningLabel: new Widget(), _message: new Widget(),
         _timedLoginIndicator: new Widget(), _userWell: new Widget(),
         verificationStatus: AuthPrompt.AuthPromptStatus.VERIFYING, promptStep: 0,
@@ -315,6 +315,11 @@ async function environment(version, options = {}) {
     });
     return {version, extension, verifier, services, prompt, remote, proxy, errors,
         answers, starts, deferred, Batch, Clutter, PolkitAgent, AuthPrompt, overrides};
+}
+
+function pressKey(env, symbol) {
+    const handler = env.prompt.on_key_press_event ?? env.prompt.vfunc_key_press_event;
+    return handler.call(env.prompt, {get_key_symbol: () => symbol});
 }
 
 async function flush() {
@@ -362,7 +367,7 @@ for (const version of versions) {
                 assert.ok(env.prompt._confirmButton.get_parent(), 'confirmation button attached');
                 assert.equal(env.prompt._entry.visible, false);
                 if (key === 'click') env.prompt._confirmButton.emit('clicked');
-                else env.prompt.on_key_press_event({get_key_symbol: () => env.Clutter[`KEY_${key}`]});
+                else pressKey(env, env.Clutter[`KEY_${key}`]);
                 await flush();
                 assert.deepEqual(env.answers, [['gdm-face', 'GAZE_CONFIRMED']]);
                 assert.equal(env.prompt._entry.reactive, false);
@@ -420,7 +425,7 @@ for (const version of versions) {
             env.prompt.cancel = () => { cancelled = true; };
             if (env.services) env.services._onInfoQuery('gdm-face', 'GAZE_REQUIRE_CONFIRMATION');
             else env.verifier._onInfoQuery(null, 'gdm-face', 'GAZE_REQUIRE_CONFIRMATION');
-            env.prompt.on_key_press_event({get_key_symbol: () => env.Clutter.KEY_Escape});
+            pressKey(env, env.Clutter.KEY_Escape);
             await flush();
             assert.equal(cancelled, true);
             assert.equal(env.prompt._confirmMode, false);
@@ -513,7 +518,7 @@ test('51.0: cancelled confirmation does not send a delayed answer', async () => 
         assert.deepEqual(env.answers, []);
         env.prompt.cancel = () => {};
         env.prompt._confirmMode = true;
-        env.prompt.on_key_press_event({get_key_symbol: () => env.Clutter.KEY_Escape});
+        pressKey(env, env.Clutter.KEY_Escape);
         releaseMessages();
         await flush();
         assert.deepEqual(env.answers, []);

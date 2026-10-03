@@ -114,7 +114,7 @@ jobs:
         run: just test
 
   gnome-shell:
-    name: GNOME Shell compatibility
+    name: GNOME
     runs-on: ubuntu-latest
 
     steps:
@@ -128,7 +128,7 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Test GNOME Shell 50 and 51 authentication
+      - name: Test GNOME Shell 45 through 51 authentication
         run: node scripts/test-gnome-shell.mjs
 
   openvino:
