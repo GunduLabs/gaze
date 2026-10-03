@@ -37,17 +37,30 @@ See [Building without a Linux host](#building-without-a-linux-host-docker).
 
 Install the tooling:
 
-- Rust 1.85+, via [rustup](https://rustup.rs)
+- Current stable Rust, via [rustup](https://rustup.rs). The locked GTK and GStreamer dependencies require Rust 1.92 or newer.
 - [`just`](https://github.com/casey/just) 1.51+, the task runner everything below goes through
+- [`cargo-audit`](https://github.com/RustSec/rustsec/tree/main/cargo-audit), for `just audit`
 - [`nfpm`](https://nfpm.goreleaser.com), only for `just package`
 - [`flatpak-builder`](https://github.com/flatpak/flatpak-builder), only for `just build-flatpak`
 
-CI pins its own versions in `.github/workflows/ci.yml` if you need to match them exactly. Then
-the system libraries:
+CI uses stable Rust and pins `just` in `.github/workflows/ci.yml`. Prepare the
+Rust tools for the required checks:
+
+```bash
+rustup update stable
+rustup default stable
+rustup component add rustfmt clippy
+cargo install just --locked
+cargo install cargo-audit --locked
+```
+
+Then install the system libraries. Runtime packages alone do not provide the
+headers and pkg-config files needed by `just lint` and `just test`:
 
 ::: code-group
 
 ```bash [Debian/Ubuntu]
+sudo apt update
 sudo apt install build-essential pkg-config clang libclang-dev \
   libopencv-dev libv4l-dev libpam0g-dev libtss2-dev libssl-dev \
   libgtk-4-dev libadwaita-1-dev \

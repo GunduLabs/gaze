@@ -3,7 +3,7 @@
 
 # PAM
 
-This page is about normal PAM integration (`sudo`, polkit, shared auth stacks).
+Use this guide to set up face authentication for `sudo`, polkit, and shared PAM stacks.
 
 `gaze auth` is useful, but it is only a daemon/camera test. It does not run through PAM.
 

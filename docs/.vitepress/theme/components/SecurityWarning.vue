@@ -6,9 +6,9 @@
       <div class="security-warning" role="alert">
         <div class="security-warning-title">Security & Liveness</div>
         <p>
-          Gaze includes local liveness anti-spoofing and support for infrared (IR) cameras to secure
-          authentication against spoofing attacks. For high-security environments, it is recommended
-          to keep standard system authentication active as a fallback.
+          Gaze uses local liveness checks and supports infrared (IR) cameras to help protect
+          against spoofing. If you use Gaze in a high-security environment, we recommend
+          keeping your usual system authentication available as a fallback.
         </p>
       </div>
   </div>

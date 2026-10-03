@@ -9,15 +9,11 @@ and they all solve the same basic problem: log in with your face instead of a
 password. They differ in how far they push security, how they are architected,
 and how much of the desktop they cover.
 
-This page compares Gaze with the three most common alternatives,
+We put this comparison together to show where Gaze differs from
 [Howdy](https://github.com/boltgolt/howdy),
 [Visage](https://github.com/sovren-software/visage), and
-[Biopass](https://github.com/TickLabVN/biopass), as fairly as we can. It is
-written by the maintainers of Gaze, so treat it as informed and neutral to the best of our abilities; however, make sure to verify anything that matters to you against each project's own docs.
-
-The columns for the other three projects were last checked against their own
-READMEs on **2026-09-18**. These are all moving targets, so a row that matters
-to your decision is worth re-reading at the source.
+[Biopass](https://github.com/TickLabVN/biopass). If we've missed something or
+got a detail wrong, [let us know](https://github.com/GunduLabs/gaze/issues).
 
 ## At a glance
 
@@ -68,11 +64,10 @@ password fallback stays recommended everywhere, *Gaze included*.
 
 ## A note on the alternatives
 
-All of these projects **are** worth your respect! They are OSS, maintained by
-developers solving a real problem in the Linux desktop, and any of them can give you
-face authentication that works. Howdy defined the category and is the most widely
-packaged; Visage is a clean Rust daemon with strong IR handling and is candid in
-its own README about where its liveness check falls short; Biopass brings
-fingerprint and a polished GUI. This page highlights where Gaze differs, but the
-right choice is the one that fits your hardware, desktop, and threat model, and
-we'd rather you use the one that fits you best than blindly trusting Gaze.
+Any of the three will give you working face authentication. Howdy came first
+and is the most widely packaged. Visage is another Rust daemon with IR support,
+and its docs explain the limits of its liveness check.
+Biopass supports fingerprints as well as faces and has a GUI.
+
+We maintain Gaze, but we'd rather you use what fits your hardware, desktop,
+and threat model. Check the security limitations of whichever project you choose.

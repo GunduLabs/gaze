@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "Gaze"
   text: "Facial authentication for Linux"
-  tagline: Facial authentication for Linux with on-device face recognition, PAM integration, and tools for login, lock screen, sudo, and desktop management.
+  tagline: Log in, unlock your screen, and use sudo with your face. Recognition runs on your machine.
   image:
     src: /favicon.svg
     alt: Gaze icon
@@ -21,23 +21,23 @@ hero:
 
 features:
   - title: Quick setup
-    details: Install packages, start gazed, enroll a face, and test authentication from the CLI.
+    details: Install Gaze, start gazed, enroll your face, and try it from the terminal.
     link: /guide/getting-started
     linkText: Start setup
   - title: Desktop login
-    details: Face unlock at login and the lock screen, the GNOME extension, the KDE Plasma lock screen, Hyprland's hyprlock, or any PAM-based login manager such as SDDM.
+    details: Set up face unlock for GNOME, KDE Plasma, or Hyprland's hyprlock, or use Gaze with a PAM-based login manager such as SDDM.
     link: /guide/gnome
     linkText: Configure desktop auth
   - title: PAM integration
-    details: Add facial authentication to sudo, login managers, and other PAM-backed flows.
+    details: Use your face for sudo and other programs that authenticate through PAM.
     link: /guide/pam
     linkText: Read the PAM guide
   - title: CLI and GUI tools
-    details: Enroll, test, remove profiles, and manage authentication from the terminal or GTK app.
+    details: Add or remove face profiles, test recognition, and change settings from the terminal or GTK app.
     link: /guide/cli
     linkText: See the CLI
   - title: Local-first
-    details: Face templates stay on your machine. The root daemon owns the ML pipeline and DBus API.
+    details: Face templates stay on your machine. The daemon runs recognition locally and talks to the CLI, GUI, and PAM module over DBus.
     link: /guide/how-it-works
     linkText: How it works
   - title: Troubleshooting
@@ -48,4 +48,3 @@ features:
 
 <!-- SPDX-FileCopyrightText: 2026 Gundu Labs -->
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-

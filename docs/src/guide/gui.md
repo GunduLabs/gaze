@@ -4,12 +4,11 @@
 # GUI Guide
 
 ::: tip On KDE Plasma
-`gaze-kde` adds a **Face Unlock** entry to System Settings that opens this same app,
-so you can reach it from where Plasma users expect to find it. See the
+`gaze-kde` adds a **Face Unlock** entry to System Settings that opens this app. See the
 [KDE Plasma guide](/guide/kde#system-settings).
 :::
 
-`gaze-gui` is the easiest way to enroll faces and check auth health.
+Use `gaze-gui` to enroll your face, test recognition, and change settings.
 
 Launch it:
 
@@ -17,10 +16,10 @@ Launch it:
 gaze-gui
 ```
 
-- **Enroll a new face profile**: Initiates a guided camera capture. If both RGB and IR cameras are configured, it captures from both.
+- **Enroll a new face profile**: Follow the camera prompts to capture your face. If both RGB and IR cameras are configured, it captures from both.
 - **View enrolled profiles**: The main window lists enrolled faces with `RGB` and `IR` badges and the total template capture count. A badge is green when the profile has captures for that spectrum, amber when a camera is configured for it but the profile has none, and grey when no camera is configured for that spectrum at all. An RGB-only machine therefore shows a green `RGB` and a grey `IR`, not a failure.
 - **Refine profiles**: Tap the edit/refine icon on a profile to capture additional samples or add a missing spectrum (e.g. adding IR captures to an existing RGB-only face profile after configuring an IR camera).
-- **Test authentication**: Check Gaze's recognition with immediate pass/fail visual feedback.
+- **Test authentication**: Try a face scan and see whether Gaze recognizes you.
 - **Remove profiles**: Delete specific face profiles.
 - **Configure daemon settings**: Change security levels, cameras, liveness settings, and hybrid policies.
 
