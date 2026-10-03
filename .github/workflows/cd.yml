@@ -236,6 +236,28 @@ jobs:
             rpm_distro: fedora
             rpm_version: "44"
             package_release: "1.fc44"
+          - id: fedora-45-amd64
+            name: rpm (Fedora 45, amd64)
+            runner: ubuntu-latest
+            container: fedora:45
+            format: rpm
+            distro: fedora
+            distro_version: "45"
+            deb_suite: ""
+            rpm_distro: fedora
+            rpm_version: "45"
+            package_release: "1.fc45"
+          - id: fedora-45-arm64
+            name: rpm (Fedora 45, arm64)
+            runner: ubuntu-24.04-arm
+            container: fedora:45
+            format: rpm
+            distro: fedora
+            distro_version: "45"
+            deb_suite: ""
+            rpm_distro: fedora
+            rpm_version: "45"
+            package_release: "1.fc45"
           - id: opensuse-tumbleweed-amd64
             name: rpm (openSUSE Tumbleweed, amd64)
             runner: ubuntu-latest

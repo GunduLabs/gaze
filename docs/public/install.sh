@@ -801,14 +801,14 @@ supported_deb_suite() {
 
 supported_fedora_compatible_version() {
     case "$DISTRO_VERSION_ID" in
-    42 | 43 | 44) return 0 ;;
+    42 | 43 | 44 | 45) return 0 ;;
     esac
     return 1
 }
 
 if ! is_rpm && ! is_deb && ! is_arch; then
     fail "Unsupported distribution: $DISTRO_ID"
-    say "Supported: Ubuntu 24.04/25.10/26.04/26.10, Debian 13 and 14 (forky/testing), Fedora-compatible 42/43/44 systems (including rpm-ostree image-based distros like Silverblue, Bazzite, and Kinoite), openSUSE Tumbleweed, Arch Linux, and Arch-compatible AUR distros"
+    say "Supported: Ubuntu 24.04/25.10/26.04/26.10, Debian 13 and 14 (forky/testing), Fedora-compatible 42/43/44/45 systems (including rpm-ostree image-based distros like Silverblue, Bazzite, and Kinoite), openSUSE Tumbleweed, Arch Linux, and Arch-compatible AUR distros"
     exit 1
 fi
 
@@ -835,7 +835,7 @@ fi
 
 if is_fedora_compatible && ! supported_fedora_compatible_version; then
     fail "Unsupported ${NAME:-Fedora-compatible distribution} version: ${DISTRO_VERSION_ID:-unknown}"
-    say "Fedora-compatible packages are currently available for versions 42, 43, and 44."
+    say "Fedora-compatible packages are currently available for versions 42, 43, 44, and 45."
     exit 1
 fi
 
