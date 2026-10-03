@@ -74,10 +74,10 @@ HYPRLOCK_PAM_SRC="$REPO/packaging/pam/hyprlock-gaze"
 HYPRLOCK_PAM_DST=/etc/pam.d/hyprlock-gaze
 HYPRLOCK_SIMUL_PAM_SRC="$REPO/packaging/pam/hyprlock-gaze-simultaneous"
 HYPRLOCK_SIMUL_PAM_DST=/etc/pam.d/hyprlock-gaze-simultaneous
-KDE_PAM_HELPER_SRC="$REPO/packaging/kde/gaze-kde-pam"
+KDE_PAM_HELPER_SRC="$REPO/integrations/kde/gaze-kde-pam"
 KDE_PAM_HELPER_DST=/usr/bin/gaze-kde-pam
 KDE_PAM_SLOTS="/etc/pam.d/kde-fingerprint /etc/pam.d/kde-smartcard"
-OMARCHY_HELPER_SRC="$REPO/packaging/omarchy/gaze-omarchy"
+OMARCHY_HELPER_SRC="$REPO/integrations/omarchy/gaze-omarchy"
 OMARCHY_HELPER_DST=/usr/bin/gaze-omarchy
 OMARCHY_PAM_SRC="$REPO/packaging/pam/gaze-omarchy-face"
 OMARCHY_PAM_DST=/etc/pam.d/gaze-omarchy-face
@@ -455,7 +455,7 @@ link_omarchy() {
     backup_and_install "$OMARCHY_PAM_SRC" "$OMARCHY_PAM_DST" 0644
     install -d "$OMARCHY_PLUGIN_DIR"
     for file in $OMARCHY_PLUGIN_FILES; do
-        backup_and_install "$REPO/omarchy-plugin/$file" "$OMARCHY_PLUGIN_DIR/$file" 0644
+        backup_and_install "$REPO/integrations/omarchy/$file" "$OMARCHY_PLUGIN_DIR/$file" 0644
     done
 }
 
@@ -471,9 +471,9 @@ restore_omarchy() {
 link_extension_files() {
     dir=$1
     install -d "$dir"
-    backup_and_install "$REPO/gnome-shell-extension/metadata.json" "$dir/metadata.json" 0644
-    backup_and_install "$REPO/gnome-shell-extension/extension.js" "$dir/extension.js" 0644
-    backup_and_install "$REPO/gnome-shell-extension/prefs.js" "$dir/prefs.js" 0644
+    backup_and_install "$REPO/integrations/gnome-shell/metadata.json" "$dir/metadata.json" 0644
+    backup_and_install "$REPO/integrations/gnome-shell/extension.js" "$dir/extension.js" 0644
+    backup_and_install "$REPO/integrations/gnome-shell/prefs.js" "$dir/prefs.js" 0644
 }
 
 restore_extension_files() {
@@ -510,9 +510,9 @@ detect_session_desktop() {
 link_cinnamon_files() {
     dir="$1"
     install -d "$dir"
-    backup_and_install "$REPO/cinnamon-extension/metadata.json" "$dir/metadata.json" 0644
-    backup_and_install "$REPO/cinnamon-extension/extension.js" "$dir/extension.js" 0644
-    backup_and_install "$REPO/cinnamon-extension/settings-schema.json" "$dir/settings-schema.json" 0644
+    backup_and_install "$REPO/integrations/cinnamon/metadata.json" "$dir/metadata.json" 0644
+    backup_and_install "$REPO/integrations/cinnamon/extension.js" "$dir/extension.js" 0644
+    backup_and_install "$REPO/integrations/cinnamon/settings-schema.json" "$dir/settings-schema.json" 0644
 }
 
 restore_cinnamon_files() {

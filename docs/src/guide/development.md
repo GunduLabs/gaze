@@ -128,14 +128,18 @@ Git hooks are local to each clone. `just setup-hooks` points Git at the tracked 
 
 ## Workspace layout
 
-- `gaze`: the `gazed` daemon, ML pipeline, and user database.
-- `gaze-cli`: the `gaze` CLI binary. It lives in its own crate so the client binary does not statically link ONNX Runtime (see warning below).
-- `gaze-core`: shared config/DBus/IR library. Deliberately light: no OpenCV, GStreamer, or ONNX Runtime, so the PAM modules can depend on it.
-- `gaze-security`: TPM sealing and the GNOME Keyring credential store. Links tpm2-tss plus pure-Rust crypto (`aes-gcm`, `sha2`) and nothing heavier, so `pam-gaze` can depend on it.
-- `gaze-vision`: camera capture, face detection, and inference. Detection sits behind the `detection` cargo feature (on by default); the CLI and GUI opt out with `default-features = false` and get camera support alone.
-- `pam-gaze`: `cdylib` PAM module. Depends on `gaze-core` and `gaze-security` for TPM keyring unsealing, never `gaze-vision`; `just check-pam-link` enforces its library allowlist (see warning below).
-- `pam-gaze-grosshack`: deprecated `cdylib` compatibility shim that forces `PamMode::Simultaneous` and prints a deprecation notice. It `#[path]`-includes `pam-gaze`'s own modules rather than duplicating them. Shipped on openSUSE only, and slated for removal; new work belongs in `pam-gaze`.
-- `gaze-gui`: GTK4/libadwaita app. `gnome-shell-extension/` and `cinnamon-extension/` are packaged separately.
+Rust packages live under `crates/`; desktop integration source lives under
+`integrations/`. Package definitions and installed system configuration live under
+`packaging/`. Run build, test, and packaging commands from the repository root.
+
+- `crates/gazed`: the `gazed` daemon, ML pipeline, and user database.
+- `crates/gaze-cli`: the `gaze` CLI binary. It lives in its own crate so the client binary does not statically link ONNX Runtime (see warning below).
+- `crates/gaze-core`: shared config/DBus/IR library. Deliberately light: no OpenCV, GStreamer, or ONNX Runtime, so the PAM modules can depend on it.
+- `crates/gaze-security`: TPM sealing and the GNOME Keyring credential store. Links tpm2-tss plus pure-Rust crypto (`aes-gcm`, `sha2`) and nothing heavier, so `pam-gaze` can depend on it.
+- `crates/gaze-vision`: camera capture, face detection, and inference. Detection sits behind the `detection` cargo feature. The workspace dependency turns default features off, so the CLI and GUI get camera support alone and only `gazed` enables `detection`.
+- `crates/pam-gaze`: `cdylib` PAM module. Depends on `gaze-core` and `gaze-security` for TPM keyring unsealing, never `gaze-vision`; `just check-pam-link` enforces its library allowlist (see warning below).
+- `crates/pam-gaze-grosshack`: deprecated `cdylib` compatibility shim that forces `PamMode::Simultaneous` and prints a deprecation notice. It `#[path]`-includes `pam-gaze`'s own modules rather than duplicating them. Every package still installs it so legacy PAM lines keep working, and it is slated for removal; new work belongs in `pam-gaze`.
+- `crates/gaze-gui`: GTK4/libadwaita app. Desktop integrations in `integrations/` are packaged separately.
 
 ## Build and test rust components
 
@@ -331,11 +335,11 @@ sudo -v   # force a fresh PAM prompt
 
 ## Iterating on the GNOME extension
 
-The extension source lives in `gnome-shell-extension/`. To run it from the tree without packaging:
+The extension source lives in `integrations/gnome-shell/`. To run it from the tree without packaging:
 
 ```bash
 mkdir -p ~/.local/share/gnome-shell/extensions
-ln -sfn "$PWD/gnome-shell-extension" \
+ln -sfn "$PWD/integrations/gnome-shell" \
   ~/.local/share/gnome-shell/extensions/gaze@gundulabs.com
 
 # compile the gsettings schema once
@@ -356,12 +360,12 @@ For the unlock-dialog session mode (lock screen), changes only take effect after
 
 ## Iterating on the Cinnamon extension
 
-The extension source lives in `cinnamon-extension/`. Cinnamon reads its settings
+The extension source lives in `integrations/cinnamon/`. Cinnamon reads its settings
 schema from the extension directory, so no `glib-compile-schemas` step is needed:
 
 ```bash
 mkdir -p ~/.local/share/cinnamon/extensions
-ln -sfn "$PWD/cinnamon-extension" \
+ln -sfn "$PWD/integrations/cinnamon" \
   ~/.local/share/cinnamon/extensions/gaze@gundulabs.com
 ```
 

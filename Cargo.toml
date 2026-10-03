@@ -3,28 +3,20 @@
 
 [workspace]
 members = [
-    "gaze-security",
-    "gaze",
-    "gaze-cli",
-    "gaze-core",
-    "gaze-vision",
-    "pam-gaze",
-    "pam-gaze-grosshack",
-    "gaze-gui",
-]
-default-members = [
-    "gaze-security",
-    "gaze",
-    "gaze-cli",
-    "gaze-core",
-    "gaze-vision",
-    "pam-gaze",
-    "pam-gaze-grosshack",
-    "gaze-gui",
+    "crates/gazed",
+    "crates/gaze-cli",
+    "crates/gaze-core",
+    "crates/gaze-gui",
+    "crates/gaze-security",
+    "crates/gaze-vision",
+    "crates/pam-gaze",
+    "crates/pam-gaze-grosshack",
 ]
 resolver = "3"
 
 [workspace.package]
+version = "0.3.5"
+edition = "2024"
 categories = ["authentication"]
 homepage = "https://gaze.gundulabs.com"
 keywords = ["authentication", "biometrics", "face-recognition", "linux", "pam"]
@@ -32,3 +24,58 @@ license = "GPL-3.0-or-later"
 publish = false
 readme = "README.md"
 repository = "https://github.com/GunduLabs/gaze"
+
+[workspace.dependencies]
+gaze-core = { path = "crates/gaze-core" }
+gaze-security = { path = "crates/gaze-security" }
+gaze-vision = { path = "crates/gaze-vision", default-features = false }
+
+aes-gcm = "0.11.1"
+anyhow = "1.0.104"
+clap = "4.6.7"
+clap_complete = "4.6.11"
+console = "0.16.6"
+crossterm = "0.29"
+dialoguer = "0.12"
+enumflags2 = "0.7.12"
+futures = "0.3.34"
+getrandom = "0.4.3"
+glib = "0.22.10"
+gstreamer = "0.25.4"
+gstreamer-app = "0.25.2"
+gstreamer-video = "0.25.4"
+gtk4 = "0.11.5"
+image = { version = "0.25.10", default-features = false }
+libadwaita = "0.9.2"
+libc = "0.2.190"
+nalgebra = "0.35.0"
+ndarray = "0.17.2"
+opencv = { version = "0.101.0", default-features = false }
+ort = { version = "2.0.0-rc.13", default-features = false, features = [
+    "std",
+    "ndarray",
+    "tracing",
+    "download-binaries",
+    "copy-dylibs",
+    "tls-native",
+    "api-21",
+] }
+parking_lot = "0.12.5"
+ratatui = "0.30.2"
+serde = "1.0.229"
+serde_plain = "1.0.2"
+sha2 = "0.11"
+strum = "0.28"
+strum_macros = "0.28"
+tokio = "1.53.1"
+toml_edit = "0.25.15"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+tss-esapi = "7.7.0"
+ureq = "3.4.2"
+uuid = "1.27.0"
+zbus = "5.19.0"
+zbus_polkit = "5.1.0"
+zeroize = "1.9.0"
+zip = "8.6"
+zvariant = "5.15.0"

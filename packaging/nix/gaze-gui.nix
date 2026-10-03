@@ -28,21 +28,15 @@ let
 in
 rustPlatform.buildRustPackage {
   pname = "gaze-gui";
-  version = (builtins.fromTOML (builtins.readFile ../../gaze-gui/Cargo.toml)).package.version;
+  version = (builtins.fromTOML (builtins.readFile ../../Cargo.toml)).workspace.package.version;
 
   src = lib.fileset.toSource {
     root = ../..;
     fileset = lib.fileset.unions [
       ../../Cargo.toml
       ../../Cargo.lock
-      ../../gaze
-      ../../gaze-cli
-      ../../gaze-core
-      ../../gaze-security
-      ../../gaze-vision
-      ../../gaze-gui
-      ../../pam-gaze
-      ../../pam-gaze-grosshack
+      ../../README.md
+      ../../crates
       ../../packaging/gui
     ];
   };

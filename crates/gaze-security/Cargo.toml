@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "gaze-security"
+version.workspace = true
+edition.workspace = true
+description = "TPM and privileged credential storage for Gaze"
+categories.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+
+[dependencies]
+aes-gcm = { workspace = true, features = ["zeroize"] }
+anyhow.workspace = true
+getrandom.workspace = true
+libc.workspace = true
+sha2.workspace = true
+tss-esapi.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tempfile = "=3.27.0"

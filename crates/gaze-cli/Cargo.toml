@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "gaze-cli"
+version.workspace = true
+edition.workspace = true
+description = "Command-line facial authentication client for Gaze"
+categories.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+openvino = ["gaze-core/openvino-config"]
+
+[[bin]]
+name = "gaze"
+path = "src/main.rs"
+
+[dependencies]
+gaze-security.workspace = true
+anyhow.workspace = true
+clap = { workspace = true, features = ["derive"] }
+clap_complete = { workspace = true, features = ["unstable-dynamic"] }
+console.workspace = true
+crossterm.workspace = true
+dialoguer.workspace = true
+futures.workspace = true
+gaze-core.workspace = true
+gaze-vision.workspace = true
+libc.workspace = true
+ratatui.workspace = true
+tokio = { workspace = true, features = ["full", "rt-multi-thread"] }
+zbus.workspace = true

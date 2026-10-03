@@ -180,7 +180,7 @@ ORT_STRATEGY=system \
 ORT_LIB_LOCATION="$PWD/ort/lib" \
 ORT_PREFER_DYNAMIC_LINK=1 \
 RUSTFLAGS="-Cdebuginfo=0 -Clink-arg=-Wl,-rpath,%{ort_libdir}" \
-    cargo build --release --locked --offline -p gaze
+    cargo build --release --locked --offline -p gazed
 
 RUSTFLAGS="-Cdebuginfo=0" \
     cargo build --release --locked --offline -p gaze-cli -p gaze-gui -p pam-gaze -p pam-gaze-grosshack
@@ -216,9 +216,9 @@ install -Dpm 0644 packaging/gui/com.gundulabs.Gaze.desktop %{buildroot}%{_datadi
 install -Dpm 0644 packaging/gui/com.gundulabs.Gaze.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/com.gundulabs.Gaze.svg
 install -Dpm 0644 packaging/gui/com.gundulabs.Gaze.metainfo.xml %{buildroot}%{_datadir}/metainfo/com.gundulabs.Gaze.metainfo.xml
 
-install -Dpm 0644 gnome-shell-extension/metadata.json %{buildroot}%{_datadir}/gnome-shell/extensions/%{extension_uuid}/metadata.json
-install -Dpm 0644 gnome-shell-extension/extension.js %{buildroot}%{_datadir}/gnome-shell/extensions/%{extension_uuid}/extension.js
-install -Dpm 0644 gnome-shell-extension/prefs.js %{buildroot}%{_datadir}/gnome-shell/extensions/%{extension_uuid}/prefs.js
+install -Dpm 0644 integrations/gnome-shell/metadata.json %{buildroot}%{_datadir}/gnome-shell/extensions/%{extension_uuid}/metadata.json
+install -Dpm 0644 integrations/gnome-shell/extension.js %{buildroot}%{_datadir}/gnome-shell/extensions/%{extension_uuid}/extension.js
+install -Dpm 0644 integrations/gnome-shell/prefs.js %{buildroot}%{_datadir}/gnome-shell/extensions/%{extension_uuid}/prefs.js
 install -Dpm 0644 packaging/config/org.gnome.shell.extensions.gaze.gschema.xml %{buildroot}%{_datadir}/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml
 install -Dpm 0644 packaging/gdm/00-gaze-defaults %{buildroot}%{_sysconfdir}/dconf/db/gdm.d/00-gaze-defaults
 install -Dpm 0644 packaging/gdm/profile %{buildroot}%{_datadir}/gaze/dconf-profile-gdm
@@ -230,17 +230,17 @@ install -Dpm 0644 packaging/pam/gdm-face %{buildroot}%{_sysconfdir}/pam.d/gdm-fa
 install -Dpm 0644 gaze-gdm-camera.pp %{buildroot}%{_datadir}/gaze/gaze-gdm-camera.pp
 install -Dpm 0644 gaze-greeter-keyring.pp %{buildroot}%{_datadir}/gaze/gaze-greeter-keyring.pp
 
-install -Dpm 0644 cinnamon-extension/metadata.json %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/metadata.json
-install -Dpm 0644 cinnamon-extension/extension.js %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/extension.js
-install -Dpm 0644 cinnamon-extension/settings-schema.json %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/settings-schema.json
+install -Dpm 0644 integrations/cinnamon/metadata.json %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/metadata.json
+install -Dpm 0644 integrations/cinnamon/extension.js %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/extension.js
+install -Dpm 0644 integrations/cinnamon/settings-schema.json %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/settings-schema.json
 
-install -Dpm 0755 packaging/omarchy/gaze-omarchy %{buildroot}%{_bindir}/gaze-omarchy
+install -Dpm 0755 integrations/omarchy/gaze-omarchy %{buildroot}%{_bindir}/gaze-omarchy
 install -Dpm 0644 packaging/pam/gaze-omarchy-face %{buildroot}%{_sysconfdir}/pam.d/gaze-omarchy-face
 mkdir -p %{buildroot}%{_datadir}/gaze/omarchy
-install -pm 0644 omarchy-plugin/* %{buildroot}%{_datadir}/gaze/omarchy/
+install -pm 0644 integrations/omarchy/*.qml integrations/omarchy/*.json integrations/omarchy/THIRD_PARTY_NOTICES.md %{buildroot}%{_datadir}/gaze/omarchy/
 
-install -Dpm 0755 packaging/kde/gaze-kde-pam %{buildroot}%{_bindir}/gaze-kde-pam
-install -Dpm 0644 packaging/kde/gaze-face-unlock.desktop %{buildroot}%{_datadir}/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop
+install -Dpm 0755 integrations/kde/gaze-kde-pam %{buildroot}%{_bindir}/gaze-kde-pam
+install -Dpm 0644 integrations/kde/gaze-face-unlock.desktop %{buildroot}%{_datadir}/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop
 
 %if 0%{?suse_version}
 install -Dpm 0644 packaging/pam/hyprlock-gaze.suse %{buildroot}%{_sysconfdir}/pam.d/hyprlock-gaze

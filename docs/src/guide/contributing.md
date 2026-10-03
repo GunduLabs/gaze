@@ -38,6 +38,7 @@ Gaze is licensed under the [GNU General Public License, version 3 or later](http
 
 - Do not copy code into Gaze from projects under a license that is incompatible with GPLv3, and do not add dependencies that cannot be distributed alongside GPLv3 code. `just audit` does not check licenses, so check the license of any new dependency yourself.
 - New crate manifests inherit the license from the workspace with `license.workspace = true`; new packaging files must declare `GPL-3.0-or-later`.
+- Declare dependency versions once in the root `Cargo.toml` under `[workspace.dependencies]`, then use `name.workspace = true` in the crate and add only the features that crate needs.
 
 ## Local setup
 

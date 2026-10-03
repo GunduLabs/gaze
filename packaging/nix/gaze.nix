@@ -28,21 +28,15 @@ let
 in
 rustPlatform.buildRustPackage {
   pname = "gaze";
-  version = (builtins.fromTOML (builtins.readFile ../../gaze/Cargo.toml)).package.version;
+  version = (builtins.fromTOML (builtins.readFile ../../Cargo.toml)).workspace.package.version;
 
   src = lib.fileset.toSource {
     root = ../..;
     fileset = lib.fileset.unions [
       ../../Cargo.toml
       ../../Cargo.lock
-      ../../gaze
-      ../../gaze-cli
-      ../../gaze-core
-      ../../gaze-security
-      ../../gaze-vision
-      ../../gaze-gui
-      ../../pam-gaze
-      ../../pam-gaze-grosshack
+      ../../README.md
+      ../../crates
       ../../packaging/config
       ../../packaging/nix/nixos-module.nix
     ];
@@ -78,7 +72,7 @@ rustPlatform.buildRustPackage {
   # Two invocations keep gaze-vision's `detection` feature out of the clients.
   buildPhase = ''
     runHook preBuild
-    cargo build --release --offline -p gaze
+    cargo build --release --offline -p gazed
     cargo build --release --offline -p gaze-cli -p pam-gaze -p pam-gaze-grosshack
     runHook postBuild
   '';

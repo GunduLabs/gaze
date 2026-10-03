@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "pam-gaze-grosshack"
+version.workspace = true
+edition.workspace = true
+description = "Deprecated compatibility shim for Gaze simultaneous PAM module"
+categories.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+gaze-security.workspace = true
+gaze-core.workspace = true
+libc.workspace = true
+zbus.workspace = true
+tokio = { workspace = true, features = ["full"] }
+parking_lot.workspace = true
+anyhow.workspace = true
+futures.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tokio = { version = "=1.53.1", features = ["full", "test-util"] }

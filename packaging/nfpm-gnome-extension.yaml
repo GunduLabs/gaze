@@ -15,15 +15,15 @@ homepage: "https://gaze.gundulabs.com"
 license: "GPL-3.0-or-later"
 
 contents:
-  - src: "gnome-shell-extension/metadata.json"
+  - src: "integrations/gnome-shell/metadata.json"
     dst: "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/metadata.json"
     file_info:
       mode: 0644
-  - src: "gnome-shell-extension/extension.js"
+  - src: "integrations/gnome-shell/extension.js"
     dst: "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/extension.js"
     file_info:
       mode: 0644
-  - src: "gnome-shell-extension/prefs.js"
+  - src: "integrations/gnome-shell/prefs.js"
     dst: "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/prefs.js"
     file_info:
       mode: 0644

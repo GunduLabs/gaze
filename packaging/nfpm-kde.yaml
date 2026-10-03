@@ -16,12 +16,12 @@ license: "GPL-3.0-or-later"
 
 # Ships no /etc/pam.d/kde-fingerprint: plasma-workspace owns it, so RPM would reject the conflict.
 contents:
-  - src: "packaging/kde/gaze-kde-pam"
+  - src: "integrations/kde/gaze-kde-pam"
     dst: "/usr/bin/gaze-kde-pam"
     file_info:
       mode: 0755
   # System Settings scans this directory and launches the entry's Exec.
-  - src: "packaging/kde/gaze-face-unlock.desktop"
+  - src: "integrations/kde/gaze-face-unlock.desktop"
     dst: "/usr/share/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop"
     file_info:
       mode: 0644

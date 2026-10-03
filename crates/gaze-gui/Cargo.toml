@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "gaze-gui"
+version.workspace = true
+edition.workspace = true
+description = "GTK application for configuring and enrolling users with Gaze"
+categories.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+openvino = ["gaze-core/openvino-config"]
+
+[[bin]]
+name = "gaze-gui"
+path = "src/main.rs"
+
+[dependencies]
+gaze-core.workspace = true
+gaze-vision.workspace = true
+gtk4 = { workspace = true, features = ["gnome_46"] }
+libadwaita = { workspace = true, features = ["v1_4"] }
+zbus.workspace = true
+zbus_polkit.workspace = true
+enumflags2.workspace = true
+anyhow.workspace = true
+opencv = { workspace = true, features = ["imgproc"] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+futures.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }
+glib = { workspace = true, features = ["v2_66"] }

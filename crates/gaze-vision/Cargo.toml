@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "gaze-vision"
+version.workspace = true
+edition.workspace = true
+description = "Camera capture, face detection, and inference for Gaze"
+categories.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+
+[features]
+default = ["detection"]
+detection = ["dep:ort"]
+openvino = ["detection", "gaze-core/openvino-config", "ort/openvino"]
+
+[dependencies]
+gaze-core.workspace = true
+anyhow.workspace = true
+ndarray.workspace = true
+opencv = { workspace = true, features = ["imgproc"] }
+ort = { workspace = true, optional = true }
+tracing.workspace = true
+gstreamer.workspace = true
+gstreamer-app.workspace = true
+gstreamer-video.workspace = true

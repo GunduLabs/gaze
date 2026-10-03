@@ -15,7 +15,7 @@ export GAZE_KDE_STATE_DIR="$test_dir/state"
 export GAZE_KDE_SECURITY_DIRS="$test_dir/modules"
 mkdir -p "$test_dir"/{pam,vendor,modules}
 touch "$test_dir/modules/pam_gaze.so"
-helper="$repo/packaging/kde/gaze-kde-pam"
+helper="$repo/integrations/kde/gaze-kde-pam"
 for service in sddm plasmalogin plasmalogin-fingerprint; do
     printf 'auth required pam_unix.so\naccount required pam_permit.so\nsession required pam_permit.so\n' > "$test_dir/pam/$service"
     cp "$test_dir/pam/$service" "$test_dir/$service.original"

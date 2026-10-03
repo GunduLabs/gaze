@@ -1192,36 +1192,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gaze"
-version = "0.3.5"
-dependencies = [
- "aes-gcm",
- "anyhow",
- "futures",
- "gaze-core",
- "gaze-security",
- "gaze-vision",
- "getrandom 0.4.3",
- "image",
- "libc",
- "nalgebra",
- "ndarray",
- "opencv",
- "ort",
- "sha2 0.11.0",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "tss-esapi",
- "ureq",
- "uuid",
- "zbus",
- "zbus_polkit",
- "zeroize",
- "zip",
-]
-
-[[package]]
 name = "gaze-cli"
 version = "0.3.5"
 dependencies = [
@@ -1304,6 +1274,36 @@ dependencies = [
  "opencv",
  "ort",
  "tracing",
+]
+
+[[package]]
+name = "gazed"
+version = "0.3.5"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "futures",
+ "gaze-core",
+ "gaze-security",
+ "gaze-vision",
+ "getrandom 0.4.3",
+ "image",
+ "libc",
+ "nalgebra",
+ "ndarray",
+ "opencv",
+ "ort",
+ "sha2 0.11.0",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "tss-esapi",
+ "ureq",
+ "uuid",
+ "zbus",
+ "zbus_polkit",
+ "zeroize",
+ "zip",
 ]
 
 [[package]]

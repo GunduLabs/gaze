@@ -14,12 +14,12 @@ let
 in
 stdenvNoCC.mkDerivation {
   pname = "gaze-gnome-extension";
-  version = (builtins.fromTOML (builtins.readFile ../../gaze/Cargo.toml)).package.version;
+  version = (builtins.fromTOML (builtins.readFile ../../Cargo.toml)).workspace.package.version;
 
   src = lib.fileset.toSource {
     root = ../..;
     fileset = lib.fileset.unions [
-      ../../gnome-shell-extension
+      ../../integrations/gnome-shell
       ../../packaging/config/org.gnome.shell.extensions.gaze.gschema.xml
     ];
   };
@@ -30,9 +30,9 @@ stdenvNoCC.mkDerivation {
     runHook preInstall
 
     ext=$out/share/gnome-shell/extensions/${uuid}
-    install -Dm644 gnome-shell-extension/metadata.json -t "$ext"
-    install -Dm644 gnome-shell-extension/extension.js -t "$ext"
-    install -Dm644 gnome-shell-extension/prefs.js -t "$ext"
+    install -Dm644 integrations/gnome-shell/metadata.json -t "$ext"
+    install -Dm644 integrations/gnome-shell/extension.js -t "$ext"
+    install -Dm644 integrations/gnome-shell/prefs.js -t "$ext"
 
     # GNOME Shell loads the settings schema from the extension directory.
     install -Dm644 packaging/config/org.gnome.shell.extensions.gaze.gschema.xml \

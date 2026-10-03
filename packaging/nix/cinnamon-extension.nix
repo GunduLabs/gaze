@@ -12,20 +12,20 @@ let
 in
 stdenvNoCC.mkDerivation {
   pname = "gaze-cinnamon-extension";
-  version = (builtins.fromTOML (builtins.readFile ../../gaze/Cargo.toml)).package.version;
+  version = (builtins.fromTOML (builtins.readFile ../../Cargo.toml)).workspace.package.version;
 
   src = lib.fileset.toSource {
     root = ../..;
-    fileset = ../../cinnamon-extension;
+    fileset = ../../integrations/cinnamon;
   };
 
   installPhase = ''
     runHook preInstall
 
     ext=$out/share/cinnamon/extensions/${uuid}
-    install -Dm644 cinnamon-extension/metadata.json -t "$ext"
-    install -Dm644 cinnamon-extension/extension.js -t "$ext"
-    install -Dm644 cinnamon-extension/settings-schema.json -t "$ext"
+    install -Dm644 integrations/cinnamon/metadata.json -t "$ext"
+    install -Dm644 integrations/cinnamon/extension.js -t "$ext"
+    install -Dm644 integrations/cinnamon/settings-schema.json -t "$ext"
 
     runHook postInstall
   '';

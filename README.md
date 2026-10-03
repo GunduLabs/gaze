@@ -289,6 +289,18 @@ just package <deb | rpm | archlinux>
 
 See the [development guide](https://gaze.gundulabs.com/guide/development) for more.
 
+## Repository layout
+
+| Directory | Contents |
+| --- | --- |
+| `crates/` | Rust daemon, CLI, GUI, shared libraries, and PAM modules |
+| `integrations/` | GNOME Shell, Cinnamon, KDE, and Omarchy source |
+| `packaging/` | Package definitions, lifecycle hooks, and installed system configuration |
+| `scripts/` | Development helpers and integration test harnesses |
+| `docs/` | User and contributor documentation |
+
+The root `Cargo.toml`, `Justfile`, and `flake.nix` coordinate the workspace.
+
 ## License
 
 Gaze is free software licensed under the [GNU General Public License, version 3 or later](LICENSE) (`GPL-3.0-or-later`).

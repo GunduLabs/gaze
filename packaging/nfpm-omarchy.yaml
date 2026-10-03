@@ -15,27 +15,27 @@ homepage: "https://gaze.gundulabs.com"
 license: "GPL-3.0-or-later"
 
 contents:
-  - src: "packaging/omarchy/gaze-omarchy"
+  - src: "integrations/omarchy/gaze-omarchy"
     dst: "/usr/bin/gaze-omarchy"
     file_info:
       mode: 0755
-  - src: "omarchy-plugin/Service.qml"
+  - src: "integrations/omarchy/Service.qml"
     dst: "/usr/share/gaze/omarchy/Service.qml"
     file_info:
       mode: 0644
-  - src: "omarchy-plugin/LockView.qml"
+  - src: "integrations/omarchy/LockView.qml"
     dst: "/usr/share/gaze/omarchy/LockView.qml"
     file_info:
       mode: 0644
-  - src: "omarchy-plugin/manifest.json"
+  - src: "integrations/omarchy/manifest.json"
     dst: "/usr/share/gaze/omarchy/manifest.json"
     file_info:
       mode: 0644
-  - src: "omarchy-plugin/upstream-lock.json"
+  - src: "integrations/omarchy/upstream-lock.json"
     dst: "/usr/share/gaze/omarchy/upstream-lock.json"
     file_info:
       mode: 0644
-  - src: "omarchy-plugin/THIRD_PARTY_NOTICES.md"
+  - src: "integrations/omarchy/THIRD_PARTY_NOTICES.md"
     dst: "/usr/share/gaze/omarchy/THIRD_PARTY_NOTICES.md"
     file_info:
       mode: 0644
