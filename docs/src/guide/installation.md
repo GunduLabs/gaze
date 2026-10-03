@@ -5,7 +5,7 @@
 
 Use one of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible, enables the Cinnamon extension on Cinnamon desktops, installs the KDE packages on KDE Plasma, selects the Omarchy lock integration on Quickshell Omarchy, and skips desktop-specific packages on other desktops. Manual GNOME/Cinnamon package installs still need extension settings commands afterward.
 
-Supported installer targets on x86_64 and arm64: Ubuntu 24.04/25.10/26.04/26.10, Debian 13 and 14 (forky, currently testing), Fedora 42/43/44 and compatible distributions (including image-based OSTree distros such as Fedora Silverblue, Kinoite, and Bazzite), openSUSE Tumbleweed (x86_64), Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS.
+Supported installer targets on x86_64 and arm64: Ubuntu 24.04/25.10/26.04/26.10, Debian 13 and 14 (forky, currently testing), Fedora 42/43/44/45 and compatible distributions (including image-based OSTree distros such as Fedora Silverblue, Kinoite, and Bazzite), openSUSE Tumbleweed (x86_64), Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS.
 
 ## CPU requirement
 

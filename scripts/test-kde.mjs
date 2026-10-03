@@ -191,6 +191,7 @@ const targets = {
     'fedora-42': {files: fedora('f42')},
     'fedora-43': {files: fedora('f43')},
     'fedora-44': {files: fedora('f44')},
+    'fedora-45': {files: fedora('f45')},
     'opensuse-tumbleweed': {files: tumbleweed, modules: ['pam_pkcs11.so']},
     'ubuntu-noble': {files: ubuntu('noble')},
     'ubuntu-questing': {files: ubuntu('questing')},
@@ -308,6 +309,7 @@ function moduleResult({module, args}, scenario) {
     case 'pam_systemd_home.so': return 'user_unknown';
     case 'pam_permit.so': case 'pam_shells.so': case 'pam_env.so': case 'pam_succeed_if.so':
     case 'pam_faildelay.so': case 'pam_kwallet5.so': case 'pam_kwallet.so': case 'pam_gnome_keyring.so':
+    case 'pam_oo7.so':
         return 'success';
     default: throw new Error(`unmodelled PAM module: ${module}`);
     }
