@@ -19,7 +19,7 @@ openvino-config = []
 
 [dependencies]
 anyhow = "1.0.104"
-libc = "0.2.189"
+libc = "0.2.190"
 zbus = "5.19.0"
 zvariant = "5.15.0"
 serde = { version = "1.0.229", features = ["derive"] }
