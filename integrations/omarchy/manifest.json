@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "com.gundulabs.gaze.lock",
   "name": "Gaze",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "author": "Gundu Labs",
   "description": "Face authentication alongside Omarchy password and fingerprint unlock.",
   "kinds": [

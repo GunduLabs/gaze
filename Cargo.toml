@@ -15,7 +15,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.3.5"
+version = "0.3.6"
 edition = "2024"
 categories = ["authentication"]
 homepage = "https://gaze.gundulabs.com"
