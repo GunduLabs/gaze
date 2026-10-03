@@ -425,6 +425,29 @@ emulate re-arming after a wrong password:
 just kde-harness kde-fingerprint 2
 ```
 
+## Testing KDE PAM compatibility
+
+With Node.js 22 or newer, run:
+
+```bash
+node scripts/test-kde.mjs
+```
+
+This downloads the KDE lock screen and login greeter PAM stacks that each
+supported distribution ships (kscreenlocker, sddm, plasma-login-manager, and
+the base stacks they include) and runs `gaze-kde-pam` against them. Fedora runs
+twice, with the default authselect profile and with `with-fingerprint
+with-faillock`. The tests evaluate the edited stacks with Linux-PAM's dispatch
+rules and cover face unlock, account lockout and nologin gates, non-matches that
+must not count as failed logins, fingerprint readers keeping their own slot,
+password fallback at the login greeter, and byte-for-byte restoration on
+disable. CI runs the same command. To use downloaded sources without network
+access, pass a directory with one folder per target (such as `arch` or
+`fedora-44`) holding the files the script would otherwise download.
+
+PAM modules are simulated. Unlock an actual Plasma session, or use
+`just kde-harness`, before treating a distribution release as fully verified.
+
 ## Packaging
 
 ```bash
