@@ -27,7 +27,7 @@ const ARCH = 'https://gitlab.archlinux.org/archlinux/packaging/packages';
 const FEDORA = 'https://src.fedoraproject.org/rpms';
 const DEBIAN = 'https://sources.debian.org';
 const UBUNTU = 'https://git.launchpad.net/ubuntu/+source';
-const SUSE = 'https://api.opensuse.org/public/source/openSUSE:Factory';
+const SUSE = 'https://src.opensuse.org/api/v1/repos/pool';
 const KDE = 'https://invent.kde.org/plasma';
 
 // Every host here throttles bursts from shared CI addresses, so cap and retry.
@@ -122,11 +122,14 @@ const ubuntu = series => async () => {
     ];
 };
 
-const tumbleweed = async () => [
-    ...SLOTS.map(name => [`vendor/${name}`, `${SUSE}/kscreenlocker6/${name}`]),
-    ['vendor/sddm', `${SUSE}/sddm/sddm.pam`],
-    ['vendor/common-auth', `${SUSE}/pam/common-auth.pamd`],
-];
+const tumbleweed = async () => {
+    const at = (pkg, file) => `${SUSE}/${pkg}/raw/${file}?ref=factory`;
+    return [
+        ...SLOTS.map(name => [`vendor/${name}`, at('kscreenlocker6', name)]),
+        ['vendor/sddm', at('sddm', 'sddm.pam')],
+        ['vendor/common-auth', at('pam', 'common-auth.pamd')],
+    ];
+};
 
 const targets = {
     'arch': {files: arch},
