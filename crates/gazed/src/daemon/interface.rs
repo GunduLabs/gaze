@@ -10,9 +10,9 @@ enum EnrollMsg {
     Error(String),
 }
 
-/// Only the KDE greeters may drive KWallet unlock: anything else is a client
-/// bug or a confused-deputy attempt from another login path. Kept as a pure
-/// predicate so the allowlist is unit-testable without D-Bus.
+/// Restricts KWallet unlock to KDE greeter services. Any other caller likely
+/// indicates a client bug or a confused-deputy attempt from another login path.
+/// Keeping this as a pure predicate lets us test the allowlist without D-Bus.
 fn is_kwallet_pam_service(pam_service: &str) -> bool {
     matches!(
         pam_service,

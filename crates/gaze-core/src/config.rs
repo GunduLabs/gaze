@@ -333,8 +333,8 @@ impl SecurityLevel {
         }
     }
 
-    /// Every problem with the current values. `validate` reports only the first,
-    /// so a report that wants to list them all must use this instead.
+    /// Returns every problem with the current values. `validate` reports only the
+    /// first one, so diagnostics that need a complete list should use this method.
     pub fn validation_errors(&self) -> Vec<SecurityValidationError> {
         let mut errors = Vec::new();
         if !SECURITY_LEVEL_OPTIONS.contains(&self.level.as_str()) {
@@ -802,8 +802,8 @@ pub enum AuthSurface {
     ScreenLock,
     Elevation,
     Login,
-    /// No PAM prompt at all: `gaze auth`, the GUI test button, anything that
-    /// calls the daemon directly. There is no locker to step away from.
+    /// No PAM prompt is involved, as with `gaze auth` or the GUI test button.
+    /// These calls go straight to the daemon, so there is no locker to step away from.
     Direct,
 }
 
@@ -1173,8 +1173,8 @@ impl Config {
                     "{path} sets {key}, which Gaze does not read; it has no effect and is probably a typo"
                 );
             }
-            // Don't refuse to start on a bad level: warn and let the total accessors
-            // fall back. Rejection is enforced at the set_config (admin input) boundary.
+            // Keep startup available for an invalid level: warn and let the total
+            // accessors fall back. `set_config` rejects invalid admin input earlier.
             if let Err(e) = config.security.validate() {
                 tracing::warn!("{e}; using safe fallbacks for invalid security fields");
             }
@@ -1473,7 +1473,7 @@ mod tests {
         assert_eq!(liveness.effective_max_frames(30.0), 60);
         assert_eq!(liveness.effective_max_frames(60.0), 120);
         assert_eq!(liveness.effective_max_frames(15.0), 30);
-        // Minimum frame floor.
+        // Even a short duration still allows the minimum number of frames.
         let short_liveness = LivenessConfig {
             max_seconds: 0.2,
             ..LivenessConfig::default()

@@ -479,8 +479,8 @@ in
           readerHasFingerprintSlot = config.services.fprintd.enable;
           p11HasSmartcardSlot = config.security.pam.p11.enable;
 
-          # pam_fprintd blocks for its whole timeout, so sharing its slot starves
-          # whichever module runs second. Prefer a slot of our own.
+          # `pam_fprintd` occupies its slot for the full timeout. Sharing that slot
+          # would delay whichever module runs second, so use a separate slot when possible.
           slot =
             if readerHasFingerprintSlot && !p11HasSmartcardSlot then
               "kde-smartcard"
@@ -489,8 +489,8 @@ in
           shareWithReader = slot == "kde-fingerprint" && readerHasFingerprintSlot;
         in
         {
-          # A face-only stack, because a noninteractive slot must never reach a
-          # module that prompts. Never the simultaneous option here for that reason.
+          # Use a face-only, sequential stack: this noninteractive slot cannot
+          # answer prompts, so simultaneous mode is not appropriate here.
           # The gates run before Gaze: a `success=done` match ends the whole auth
           # stack, so anything behind it (faillock, nologin) would otherwise be
           # skipped by a face unlock. Mirrors gaze-kde-pam's managed block.
@@ -510,7 +510,7 @@ in
             session    required                       pam_permit.so
           '';
 
-          # Otherwise the interactive `kde` stack fights over the same camera claim.
+          # Otherwise, the interactive `kde` service could compete for the same camera claim.
           security.pam.services.kde.gaze.enable = lib.mkDefault false;
         }
       ))
@@ -519,9 +519,9 @@ in
         security.pam.services.plasmalogin.gaze.enable = lib.mkDefault true;
         security.pam.services.sddm.gaze.enable = lib.mkDefault true;
 
-        # Plasma Login Manager runs this one alongside the password field instead
-        # of after it, so face auth needs no submit. A greeter without
-        # plasma-login-manager!185 never opens the service and ignores the file.
+        # Plasma Login Manager runs this service alongside the password field,
+        # so face authentication can start before submission. Versions without
+        # plasma-login-manager!185 do not start this service or read its config.
         # The gates run before Gaze for the same `success=done` reason as the
         # lock-screen slot above.
         security.pam.services."plasmalogin-fingerprint".text =

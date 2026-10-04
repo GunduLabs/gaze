@@ -297,8 +297,8 @@ pub fn show_capture_dialog(
         #[strong]
         enrollment_completed,
         move |btn| {
-            // gazed captures from the backing V4L2 node, so even a PipeWire preview must
-            // let go of it first.
+            // `gazed` captures from the backing V4L2 node, so pause even a PipeWire preview
+            // before starting enrollment.
             feed.stop_and_wait();
             feed.hide_frame();
             camera_mode.set_text(&format!("{camera_kind} · starting capture"));
@@ -376,8 +376,8 @@ pub fn show_capture_dialog(
                                 if preview_live.get() {
                                     return;
                                 }
-                                // set_active only restores the overlay; reopening the camera
-                                // here would race gazed for the node.
+                                // `set_active` restores only the overlay. Reopening the camera here
+                                // could race `gazed` for the device node.
                                 feed.set_active(true);
                                 camera_mode.set_text(&format!(
                                     "{camera_kind} · live preview unavailable, look at the camera"
@@ -538,7 +538,7 @@ mod tests {
             emitter_enabled: true,
             ..CameraConfig::default()
         };
-        // Must not panic even when no physical nodes exist in CI.
+        // This should also work in CI, where no physical camera nodes may be available.
         let setup = CameraSetup::from_config(&ir_only);
         assert_eq!(
             setup.device,

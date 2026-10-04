@@ -3,7 +3,7 @@
 
 # Uninstallation
 
-This guide covers completely removing Gaze and all its components from your system.
+This guide explains how to remove Gaze and its components from your system.
 
 ## Quickest path: `gaze uninstall`
 
@@ -11,19 +11,19 @@ This guide covers completely removing Gaze and all its components from your syst
 gaze uninstall
 ```
 
-This runs the full cleanup sequence on supported Debian/Ubuntu, Fedora,
-openSUSE, and Arch package-manager installs: reset GNOME/GDM lock and login settings, remove
-system and per-user copies of the GNOME extension, revert PAM, stop the daemon,
-remove packages (including AUR `-debug` split packages) and the repo, delete
-`gazed` core dumps, and wipe `/etc/gaze`, `/var/cache/gaze`, and
-`/var/lib/gaze`. On openSUSE it also removes the `pam-config` entries, native
-packages, Tumbleweed repository, and repository signing key.
-It prints the plan and asks for confirmation first.
+On supported Debian/Ubuntu, Fedora, openSUSE, and Arch package-manager installs,
+this command performs the full cleanup. It resets GNOME/GDM lock and login
+settings, removes system and per-user copies of the GNOME extension, reverts PAM,
+stops the daemon, removes packages (including AUR `-debug` split packages) and
+the repository, deletes `gazed` core dumps, and clears `/etc/gaze`,
+`/var/cache/gaze`, and `/var/lib/gaze`. On openSUSE, it also removes the
+`pam-config` entries, Tumbleweed repository, and signing key. Before making any
+changes, it shows you the plan and asks for confirmation.
 
-::: warning `gaze uninstall` does not remove `gaze-cinnamon-extension`
-The package list it drives covers `gaze`, `gaze-gui`, `gaze-gnome-extension`,
-`gaze-hyprlock`, `gaze-kde`, and `gaze-omarchy`. If you installed the Cinnamon extension,
-remove it yourself with your package manager and follow
+::: warning `gaze uninstall` leaves `gaze-cinnamon-extension` installed
+The command removes `gaze`, `gaze-gui`, `gaze-gnome-extension`, `gaze-hyprlock`,
+`gaze-kde`, and `gaze-omarchy`. If you also installed the Cinnamon extension,
+remove it separately with your package manager, then follow
 [Reset Cinnamon lock screen settings](#reset-cinnamon-lock-screen-settings).
 :::
 
@@ -37,7 +37,8 @@ If you'd rather run the steps yourself, follow the manual procedure below.
 
 ## Step 1: Disable integrations
 
-Before removing packages, disable any active integrations to avoid leaving your system in a broken state.
+To leave your desktop integrations in a clean state, disable any that are active
+before removing the packages.
 
 ### Reset GNOME lock screen settings
 

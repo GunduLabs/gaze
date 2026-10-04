@@ -64,7 +64,7 @@ fn read_pam_service(path: &str) -> Option<String> {
 }
 const GDM_ENABLED_EXTENSIONS_KEY: &str = "/org/gnome/shell/enabled-extensions";
 const GDM_DISABLE_EXTENSIONS_KEY: &str = "/org/gnome/shell/disable-user-extensions";
-/// Debian and Ubuntu name the account `gdm3`, everyone else `gdm`.
+/// Returns the display-manager account name: `gdm3` on Debian and Ubuntu, `gdm` elsewhere.
 const GDM_HOME_DIRS: [&str; 2] = ["/var/lib/gdm", "/var/lib/gdm3"];
 const GDM_COMPILED_DB_PATH: &str = "/etc/dconf/db/gdm";
 const GDM_FACE_PAM_SERVICE: &str = "gdm-face";
@@ -82,8 +82,8 @@ const PRIVILEGED_FILES: [&str; 5] = [
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Level {
     Pass,
-    /// A working feature the user deliberately switched off: no checkmark, but it
-    /// still carries the steps that switch it on.
+    /// A working feature that the user has turned off. It has no checkmark, but
+    /// still includes the steps for enabling it.
     Off,
     Warning,
     Error,

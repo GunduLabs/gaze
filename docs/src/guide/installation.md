@@ -3,9 +3,13 @@
 
 # Installation
 
-Use one of these paths. The one-line installer enables GNOME lock screen auth for the current GNOME user when possible, enables the Cinnamon extension on Cinnamon desktops, installs the KDE packages on KDE Plasma, selects the Omarchy lock integration on Quickshell Omarchy, and skips desktop-specific packages on other desktops. Manual GNOME/Cinnamon package installs still need extension settings commands afterward.
+Choose the installation method that suits your system. When you use the one-line installer, it detects your desktop and configures the matching integration where possible: GNOME lock screen authentication, the Cinnamon extension, KDE packages, or the Omarchy lock integration. On other desktops, it skips desktop-specific packages. Manual GNOME and Cinnamon installs require an extra step to enable the extension.
 
-Supported installer targets on x86_64 and arm64: Ubuntu 24.04/25.10/26.04/26.10, Debian 13 and 14 (forky, currently testing), Fedora 42/43/44/45 and compatible distributions (including image-based OSTree distros such as Fedora Silverblue, Kinoite, and Bazzite), openSUSE Tumbleweed (x86_64), Arch Linux, and Arch-compatible AUR distributions such as Manjaro and CachyOS.
+On x86_64 and arm64, the installer supports Ubuntu 24.04/25.10/26.04/26.10,
+Debian 13 and 14 (forky, currently testing), Fedora 42/43/44/45 and compatible
+distributions (including image-based OSTree systems such as Silverblue, Kinoite,
+and Bazzite), Arch Linux, and Arch-compatible AUR distributions such as Manjaro
+and CachyOS. openSUSE Tumbleweed is supported on x86_64.
 
 ## CPU requirement
 
@@ -17,7 +21,11 @@ Check before installing:
 grep -qw avx2 /proc/cpuinfo && echo "AVX2 present" || echo "AVX2 missing"
 ```
 
-If AVX2 is missing, the one-line installer stops before touching your system, and the packages install the CLI and PAM modules but leave `gazed` stopped. `gaze doctor` reports the same thing. Face authentication is not available on these machines; there is no workaround short of a different CPU. See [troubleshooting](./troubleshooting) for details.
+Gaze's inference runtime needs AVX2 on x86_64. If your CPU does not support it,
+the one-line installer stops before making system changes; package installs leave
+`gazed` stopped, though the CLI and PAM modules are still installed. `gaze doctor`
+reports the limitation as well. Face authentication requires a CPU with AVX2;
+see [troubleshooting](./troubleshooting) for details.
 
 ## Path A: one-line installer (recommended)
 
@@ -25,14 +33,18 @@ If AVX2 is missing, the one-line installer stops before touching your system, an
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 ```
 
-This installs:
+The installer adds:
 
 - the Gaze daemon and CLI
 - `gaze-gui`
 - the GNOME Shell extension package only when a GNOME desktop session is detected
 - the Cinnamon extension package only when a Cinnamon desktop session is detected
 
-It also configures package updates where needed, enables the `gazed` daemon, and enables lock screen face unlock or PolKit confirmation for the current user when applicable. On KDE Plasma it installs `gaze-kde` instead, which wires up the lock screen. On Cinnamon it installs `gaze-cinnamon-extension`. On Quickshell Omarchy it selects `gaze-omarchy`; see the [Omarchy guide](/guide/omarchy) for setup and supported versions. On other desktops it skips the desktop extension packages. On OSTree systems (Silverblue, Bazzite, Kinoite), the installer automatically uses `rpm-ostree` layering. On openSUSE Tumbleweed, it uses `zypper` and the Tumbleweed-specific Gundu Labs RPM repository.
+The installer also configures package updates where needed and enables the `gazed` daemon. When supported, it enables lock screen face unlock or PolKit confirmation for your current user.
+
+Desktop integration depends on the session it detects. On KDE Plasma, it installs `gaze-kde` to wire up the lock screen; on Cinnamon, it installs `gaze-cinnamon-extension`. For Quickshell Omarchy, it selects `gaze-omarchy`; see the [Omarchy guide](/guide/omarchy) for setup instructions and supported versions. Other desktops do not receive desktop extension packages.
+
+On OSTree systems such as Silverblue, Bazzite, and Kinoite, the installer uses `rpm-ostree` to layer the packages. On openSUSE Tumbleweed, it uses `zypper` and Gaze's Tumbleweed-specific RPM repository.
 
 Desktop behavior:
 
@@ -258,7 +270,7 @@ GNOME/hyprlock integration, and home-manager usage.
 
 ## Restart after install
 
-After installation (any method), reboot once to ensure all system-level changes are fully applied.
+After installing Gaze by any method, reboot once to apply all system-level changes.
 
 ```bash
 sudo reboot
@@ -273,9 +285,9 @@ gaze doctor
 gaze-gui --help
 ```
 
-Run `gaze doctor` as your desktop user so it can inspect that user's PipeWire session and desktop integration.
+Run `gaze doctor` as your desktop user. This lets it inspect your PipeWire session and desktop integration.
 
-If daemon is inactive:
+If the daemon is inactive, start and enable it with:
 
 ```bash
 sudo systemctl enable --now gazed

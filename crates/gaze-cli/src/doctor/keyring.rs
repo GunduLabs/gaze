@@ -356,7 +356,8 @@ pub(super) fn report_keyring_record(report: &mut Report, username: &str, state: 
     }
 }
 
-/// Check the exact managed branch: no wallet hook is reachable on biometric failure.
+/// Returns true only for the exact managed branch, where biometric failure
+/// cannot reach a wallet hook.
 pub(super) fn kde_login_stack_passes_the_token(contents: &str) -> bool {
     let entries: Vec<_> = contents.lines().filter_map(pam_entry).collect();
     let auth: Vec<_> = entries.iter().filter(|entry| entry.0 == "auth").collect();

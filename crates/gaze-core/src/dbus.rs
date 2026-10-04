@@ -12,8 +12,8 @@ use zbus::zvariant::{OwnedValue, Type, Value};
 
 use strum_macros::{AsRefStr, Display, EnumString, VariantNames};
 
-/// Stable Config property layout. New settings must not change this
-/// wire type because an installed daemon and client may be upgraded separately.
+/// Defines the stable wire layout for Config properties. Keep this type unchanged
+/// when adding settings because daemon and client packages may be upgraded separately.
 #[derive(Clone, Debug, Value, OwnedValue, Type)]
 pub struct DbusConfig {
     inference: InferenceConfig,
@@ -243,8 +243,9 @@ pub fn dbus_is_unknown_method(err: &zbus::Error) -> bool {
     err.to_string().contains("UnknownMethod")
 }
 
-/// Backstop for a client awaiting one verify verdict. The daemon bounds its own run well inside
-/// this, so reaching it means the daemon stopped answering rather than that the face was rejected.
+/// Deadline for a client waiting for a verification result. The daemon's own
+/// deadline expires first, so reaching this one means it stopped answering rather
+/// than rejecting the face.
 pub const VERIFY_CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 pub async fn connect_gaze() -> zbus::Result<GazeProxy<'static>> {
@@ -491,8 +492,9 @@ pub async fn active_session_on(connection: &zbus::Connection) -> anyhow::Result<
         .ok_or_else(|| anyhow::anyhow!("seat0 has no active session"))
 }
 
-/// The uid of every session on seat0, foregrounded or not. logind clears `ActiveSession`
-/// whenever the active VT holds no session, so emptiness does not mean the seat is unoccupied.
+/// Returns the uid of every session on seat0, including background sessions.
+/// logind clears `ActiveSession` when the foreground VT has no session, so an
+/// empty active-session value does not mean the seat is unoccupied.
 pub async fn seat0_session_uids_on(connection: &zbus::Connection) -> anyhow::Result<Vec<u32>> {
     let proxy = zbus::Proxy::new(
         connection,
@@ -519,8 +521,9 @@ pub async fn seat0_session_uids_on(connection: &zbus::Connection) -> anyhow::Res
     Ok(uids)
 }
 
-/// Whether logind flags the session owning `pid` as remote. `Err` means logind is
-/// unreachable or the pid belongs to no session, which is not a local session.
+/// Checks whether logind marks the session that owns `pid` as remote. An `Err`
+/// means logind is unreachable or the process belongs to no session; neither case
+/// can be treated as a local session.
 pub async fn session_is_remote_on(connection: &zbus::Connection, pid: u32) -> anyhow::Result<bool> {
     let proxy = zbus::Proxy::new(
         connection,

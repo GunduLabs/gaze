@@ -241,8 +241,8 @@ fn cached_face_auth_profile(node: &str, vid: u16, pid: u16) -> Option<IrProfile>
     }
 }
 
-/// Extension unit ids are assigned per device and V4L2 offers no way to enumerate them, so the
-/// only way to find the face-auth unit on an unlisted camera is to GET_CUR every id in turn.
+/// Extension-unit IDs are assigned per device, and V4L2 cannot enumerate them. For an unlisted
+/// camera, finding the face-auth unit means trying `GET_CUR` for each ID in turn.
 fn probe_face_auth_profile(node: &str, vid: u16, pid: u16) -> anyhow::Result<Option<IrProfile>> {
     let file = std::fs::OpenOptions::new()
         .read(true)

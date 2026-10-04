@@ -75,9 +75,10 @@ there is no `pam_deny` gate. The keyring line only has to come after
 `system-auth`. A face match hands it the stored password, a typed password
 hands it what you typed, and with neither it does nothing.
 
-Do not copy the `pam_gaze.so` line from `gdm-face` or hyprlock into this file.
-`[success=1 ...]` would skip the keyring line itself, and `sufficient` or
-`[success=done ...]` end the auth section before it is reached.
+For greetd, use the PAM configuration shown here rather than copying the
+`pam_gaze.so` line from `gdm-face` or hyprlock. The `[success=1 ...]` control
+would skip the keyring line, while `sufficient` or `[success=done ...]` would
+end the auth section before it runs.
 
 `sudo gaze doctor` checks the order, not just the option.
 

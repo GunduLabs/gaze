@@ -287,7 +287,7 @@ impl CameraFeed {
     }
 
     pub fn start(&self) {
-        // Guidance-only feed (e.g. IR): no capture thread to pump.
+        // Guidance-only feeds (such as IR) have no capture thread to pump.
         let Some(rx) = self.rx.borrow_mut().take() else {
             return;
         };
@@ -406,17 +406,17 @@ mod tests {
 
     #[test]
     fn overlay_letterboxes_to_the_frame_aspect() {
-        // Wider widget than the frame: height limits the view.
+        // The widget is wider than the frame, so height limits the view.
         assert_eq!(
             overlay_view_size(800.0, 400.0, 4.0 / 3.0),
             (400.0 * (4.0 / 3.0), 400.0)
         );
-        // Taller widget: width limits the view.
+        // The widget is taller than the frame, so width limits the view.
         assert_eq!(
             overlay_view_size(400.0, 800.0, 4.0 / 3.0),
             (400.0, 400.0 / (4.0 / 3.0))
         );
-        // No aspect yet: use the whole widget.
+        // Until the aspect ratio is known, use the whole widget.
         assert_eq!(overlay_view_size(800.0, 600.0, 0.0), (800.0, 600.0));
     }
 

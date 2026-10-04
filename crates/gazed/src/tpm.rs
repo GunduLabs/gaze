@@ -20,8 +20,8 @@ pub const STATE_DIR: &str = "/var/lib/gaze/tpm";
 const PUB_FILE: &str = "dek.pub";
 const PRIV_FILE: &str = "dek.priv";
 
-/// The DEK never leaves a Zeroizing wrapper: callers borrow it for cipher
-/// setup and it is wiped on drop instead of lingering in freed memory.
+/// The DEK stays inside a `Zeroizing` wrapper. Callers borrow it to set up the
+/// cipher, and the wrapper wipes it on drop so it does not remain in freed memory.
 pub fn load_or_create_dek(state_dir: &Path) -> anyhow::Result<SealedKey> {
     if present_devices().is_empty() && !tcti_override_present() {
         return Err(anyhow!(

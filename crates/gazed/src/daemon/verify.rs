@@ -37,8 +37,9 @@ impl VerifyGiveUp {
     }
 }
 
-/// Whether a verify run has spent either deadline. Both are needed: `Clipped` and `Ready` refresh
-/// `since_face` and never `since_usable`, so alone they keep a run alive with nothing to decide it.
+/// Checks whether a verification run has reached either deadline. Both are needed because
+/// `Clipped` and `Ready` refresh `since_face` but not `since_usable`; alone, they can keep a run
+/// alive without producing a frame that can be used for matching.
 pub(super) fn verify_give_up(since_face: Duration, since_usable: Duration) -> Option<VerifyGiveUp> {
     if since_face >= VERIFY_NO_FACE_TIMEOUT {
         return Some(VerifyGiveUp::NoFace);

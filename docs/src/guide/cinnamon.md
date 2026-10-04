@@ -3,11 +3,17 @@
 
 # Cinnamon Extension
 
-Gaze lock screen and PolKit elevation integration are Cinnamon-specific and require the `gaze-cinnamon-extension` package. The one-line installer tries to enable the extension for the current Cinnamon user. Manual package installs only install the extension files. On openSUSE Tumbleweed, install the extension with `sudo zypper install gaze-cinnamon-extension` before enabling it.
+Gaze's lock screen and PolKit elevation integrations for Cinnamon are provided
+by the `gaze-cinnamon-extension` package. The one-line installer tries to enable
+the extension for your current Cinnamon user. If you install packages manually,
+you will need to enable it yourself. On openSUSE Tumbleweed, first install it
+with `sudo zypper install gaze-cinnamon-extension`.
 
 This Cinnamon Spices extension hooks into Cinnamon's internal PolKit authentication agent and native unlock dialogs.
 
-You do not need to enable this extension for the CLI, the GUI, or normal PAM prompts such as `sudo`. Leave it disabled on non-Cinnamon desktops.
+The extension is only needed for Cinnamon's lock screen and PolKit prompts. The
+CLI, GUI, and regular PAM prompts such as `sudo` work without it; if you use a
+different desktop, you can leave it disabled.
 
 > [!IMPORTANT]
 > If you enable `require_confirmation_lock_screen = true` or `require_confirmation_elevation = true` in `/etc/gaze/config.toml`, this Cinnamon Extension **must** be enabled for face-authorization confirmation to function inside Cinnamon's graphical PolKit prompts and on the lock screen.
@@ -18,13 +24,15 @@ You do not need to enable this extension for the CLI, the GUI, or normal PAM pro
 
 ## Should I enable it?
 
-Enable it if you use Cinnamon and want graphical PolKit elevation confirmation and face unlock from the lock screen.
+If you use Cinnamon and want face unlock on the lock screen or confirmation for
+graphical PolKit prompts, enable the extension.
 
-Do not enable it if you only want CLI/GUI enrollment, normal PAM authentication, or you are not using Cinnamon.
+Otherwise, you can leave it disabled: it is not needed for CLI or GUI enrollment,
+regular PAM authentication, or desktops other than Cinnamon.
 
 ## Enable the extension
 
-If the package is installed but the extension is not enabled yet, from your Cinnamon session:
+Once the package is installed, enable the extension from your Cinnamon session:
 
 ```bash
 gsettings set org.cinnamon enabled-extensions \

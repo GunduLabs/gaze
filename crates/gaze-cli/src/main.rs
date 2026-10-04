@@ -191,7 +191,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Authenticate a user via webcam
+    /// Authenticate a user with face recognition
     Auth {
         #[arg(short, long)]
         user: Option<String>,
@@ -209,33 +209,33 @@ enum Commands {
         )]
         silent: bool,
     },
-    /// Capture a new face with guided multi-angle template
+    /// Enroll a face profile with guided, multi-angle capture
     AddFace {
         #[arg(short, long)]
         user: Option<String>,
         #[arg(help = "The name of the face to enroll")]
         face: String,
     },
-    /// Add additional captures to improve recognition of an existing face
+    /// Add captures to improve recognition of an existing face profile
     RefineFace {
         #[arg(short, long)]
         user: Option<String>,
         #[arg(help = "The name of the face to refine", add = ArgValueCompleter::new(face_completer))]
         face: String,
     },
-    /// List all faces enrolled for a user
+    /// List the face profiles enrolled for a user
     ListFaces {
         #[arg(short, long)]
         user: Option<String>,
     },
-    /// Remove a named face for a user
+    /// Remove a face profile for a user
     RemoveFace {
         #[arg(short, long)]
         user: Option<String>,
         #[arg(help = "The name of the face to remove", add = ArgValueCompleter::new(face_completer))]
         face: String,
     },
-    /// Rename a face for a user
+    /// Rename a face profile
     RenameFace {
         #[arg(short, long)]
         user: Option<String>,
@@ -244,7 +244,7 @@ enum Commands {
         #[arg(help = "New face name")]
         to: String,
     },
-    /// Remove all data for a user
+    /// Remove all Gaze data for a user
     ClearUser {
         #[arg(short, long)]
         user: Option<String>,
@@ -256,23 +256,23 @@ enum Commands {
         #[arg(short, long)]
         user: Option<String>,
     },
-    /// Interactive configuration editor for daemon and GDM options
+    /// Configure daemon and GDM settings interactively
     Config {
         #[arg(long, help = "Print current values and exit")]
         show: bool,
     },
-    /// Enroll or replace a TPM-protected GNOME Keyring or KWallet password (root only)
+    /// Enroll or replace a TPM-protected GNOME Keyring or KWallet credential (root only)
     Keyring {
-        /// Use KDE KWallet instead of GNOME Keyring
+        /// Use KDE KWallet for the credential instead of GNOME Keyring
         #[arg(long)]
         kwallet: bool,
-        /// Remove the stored keyring credential instead of enrolling one
+        /// Remove the stored credential instead of enrolling one
         #[arg(long)]
         forget: bool,
         #[arg(short, long, help = "Act on this user instead of the current one")]
         user: Option<String>,
     },
-    /// Check the Gaze installation for configuration and runtime problems
+    /// Check the Gaze installation for configuration and runtime issues
     Doctor {
         #[arg(short, long, help = "Check enrollments for this user")]
         user: Option<String>,
@@ -283,7 +283,7 @@ enum Commands {
         )]
         benchmark: bool,
     },
-    /// Completely uninstall Gaze: packages, PAM integration, config, models, and user data
+    /// Remove Gaze packages, PAM integration, configuration, models, and user data
     Uninstall {
         #[arg(short = 'y', long, help = "Skip the confirmation prompt")]
         yes: bool,
@@ -911,7 +911,7 @@ async fn handle_auth(
                     };
                 }
             }
-            // Collected even without `--verbose`: a failure explains itself with the last one.
+        // Collect these even without `--verbose`, so failures can include the latest diagnostic.
             signal = diagnostic_stream.next() => {
                 let Some(signal) = signal else { break };
                 if let Ok(args) = signal.args() {
@@ -930,8 +930,8 @@ async fn handle_auth(
 
     drop(terminal);
 
-    // A diagnostic sent just before the verdict can still be in flight, and it is the one that
-    // says why: the streams are separate, so arrival order is not guaranteed.
+    // A diagnostic sent just before the verdict may still be in flight. Since the streams are
+    // separate, this one can explain the result even if it arrives after the verdict.
     while let Ok(Some(signal)) =
         tokio::time::timeout(Duration::from_millis(20), diagnostic_stream.next()).await
     {
@@ -1054,8 +1054,8 @@ async fn handle_auth(
             style("✗").red().bold(),
             start.elapsed().as_millis()
         ))?;
-        // "Authentication failed" on its own reads as a face that was not recognised, even when
-        // the camera never opened. Verbose mode has already printed the whole list.
+        // "Authentication failed" alone can sound like a face mismatch even if the camera never
+        // opened. Verbose mode has already printed the full diagnostic list.
         if !verbose && let Some(reason) = diagnostics.last() {
             term.write_line(&format!("  {}", style(reason).yellow()))?;
         }
@@ -1072,14 +1072,14 @@ async fn handle_auth(
 enum SpectrumBadge {
     /// The profile holds captures for this spectrum.
     Enrolled,
-    /// A camera is configured for it, but this profile never captured it.
+    /// A camera is configured for this spectrum, but the profile has no captures yet.
     Missing,
     /// No camera for this spectrum, so there is nothing to enroll.
     Unused,
 }
 
-/// A spectrum you never configured a camera for is not a gap in the profile, so
-/// it must not read like one.
+/// A spectrum without a configured camera is not missing from the profile.
+/// Describe it as unconfigured rather than incomplete.
 fn spectrum_badge_state(enrolled: bool, configured: bool) -> SpectrumBadge {
     match (enrolled, configured) {
         (true, _) => SpectrumBadge::Enrolled,
@@ -2543,11 +2543,11 @@ mod tests {
 
     #[test]
     fn every_capture_status_maps_to_a_tone() {
-        // Green only once the frame is actually usable.
+        // `Ready` stays green through a brief dark dip; `Usable` is ready for matching.
         assert!(matches!(capture_tone(CaptureStatus::Ready), Tone::Good));
         assert!(matches!(capture_tone(CaptureStatus::Usable), Tone::Good));
 
-        // Red when there is nothing to work with at all.
+        // Use red when the scan has nothing it can work with.
         assert!(matches!(capture_tone(CaptureStatus::Unused), Tone::Error));
         assert!(matches!(capture_tone(CaptureStatus::NoFace), Tone::Error));
 

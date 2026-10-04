@@ -203,15 +203,15 @@ pub(super) async fn check_daemon(
 
     let name_wait_started = Instant::now();
     let name_owned = gaze_name_has_owner(&proxy, ready_wait).await;
-    // gazed downloads models before it claims the name, so once it is on the bus the
-    // remaining budget is all the config call can need. Spend it once, not twice.
+    // `gazed` downloads models before claiming its name. Once it is on the bus,
+    // the remaining budget is enough for the config call; do not apply it twice.
     let ready_wait = ready_wait.saturating_sub(name_wait_started.elapsed());
 
     if name_owned {
         report.pass("DBus", "gazed owns com.gundulabs.Gaze on the system bus");
     } else {
-        // Every later call would fail with the same "not activatable" error, so report the
-        // cause once instead of repeating it as a camera and an enrollment fault.
+        // Later calls would fail with the same "not activatable" error. Report the cause
+        // once rather than repeating it as separate camera and enrollment faults.
         let (message, fix) = if !gaze_core::cpu::supports_inference() {
             (
                 "gazed cannot run on this CPU (no AVX2), so it never reaches the system bus"

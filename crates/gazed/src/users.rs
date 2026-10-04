@@ -1490,7 +1490,7 @@ mod tests {
         let template = base.join("alice/work/1");
         fs::create_dir_all(&template).unwrap();
         fs::write(template.join("good_rgb.bin"), 1.0f32.to_ne_bytes()).unwrap();
-        // Not a whole number of f32s.
+        // The byte length is not a whole number of `f32` values.
         fs::write(template.join("truncated_rgb.bin"), [0u8, 1, 2]).unwrap();
         fs::write(template.join("empty_rgb.bin"), b"").unwrap();
 
@@ -1510,7 +1510,7 @@ mod tests {
         let template = base.join(".hidden-user/ok-face/1");
         fs::create_dir_all(&template).unwrap();
         fs::write(template.join("a_rgb.bin"), 1.0f32.to_ne_bytes()).unwrap();
-        // A directory whose name would never pass validation, and a stray file at the top level.
+        // Include a directory with an invalid user name and a stray file at the top level.
         let unsafe_template = base.join(" spaced/face/1");
         fs::create_dir_all(&unsafe_template).unwrap();
         fs::write(unsafe_template.join("b_rgb.bin"), 1.0f32.to_ne_bytes()).unwrap();

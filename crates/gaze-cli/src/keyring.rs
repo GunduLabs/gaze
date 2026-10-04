@@ -4,8 +4,8 @@
 use gaze_core::config::Config;
 use gaze_security::keyring::{Backend, Zeroizing};
 
-/// The CLI must refuse before touching core dumps or prompting when the
-/// backend is switched off in config. Pure so it can be tested without PAM.
+/// Checks whether this backend is enabled before changing core-dump settings or
+/// prompting for a password. Kept pure so it can be tested without PAM.
 fn ensure_backend_enabled(config: &Config, backend: Backend) -> anyhow::Result<()> {
     let enabled = match backend {
         Backend::Gnome => config.storage.unlock_gnome_keyring,
@@ -22,7 +22,8 @@ fn ensure_backend_enabled(config: &Config, backend: Backend) -> anyhow::Result<(
 pub fn enroll(username: &str, config: &Config, backend: Backend) -> anyhow::Result<()> {
     ensure_backend_enabled(config, backend)?;
     config.storage.validate_keyring(&config.liveness)?;
-    // The interactive CLI owns this process; do not change dump policy in a PAM host.
+    // The CLI owns this process, so it can safely change the core-dump limit. A PAM host may
+    // have a different policy.
     let limit = libc::rlimit {
         rlim_cur: 0,
         rlim_max: 0,
@@ -31,7 +32,7 @@ pub fn enroll(username: &str, config: &Config, backend: Backend) -> anyhow::Resu
         unsafe { libc::setrlimit(libc::RLIMIT_CORE, &limit) } == 0,
         "cannot disable credential core dumps"
     );
-    // Fail before prompting for an unusable account; enrollment checks again for account changes.
+    // Check the account before prompting. Enrollment checks again in case it changes meanwhile.
     gaze_security::keyring::Account::lookup(username)?;
     println!("Enter the {} password for {username}.", backend.name());
     let password = Zeroizing::new(
@@ -42,8 +43,8 @@ pub fn enroll(username: &str, config: &Config, backend: Backend) -> anyhow::Resu
     );
     gaze_security::keyring::enroll_for(backend, username, password.as_bytes())?;
     println!("{} unlock enrolled for {username}.", backend.name());
-    // The greeter's PAM worker is confined as xdm_t, which the distribution policy keeps
-    // away from /etc/shadow and the TPM, so the record just written is unusable there.
+    // The greeter's PAM worker runs confined as xdm_t. Distribution policy blocks it from
+    // reading /etc/shadow and the TPM, so it cannot use the record we just wrote.
     if crate::selinux::is_enforcing() {
         let module = crate::selinux::GREETER_KEYRING_MODULE;
         match crate::selinux::load_module(module) {

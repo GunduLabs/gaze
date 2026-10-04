@@ -86,7 +86,7 @@ the way.
 Leave `cameras.rgb` as `primary` (the first color V4L2 node), pin it to
 `usb:VVVV:PPPP`, or pin it to a `pipewiresrc target-object=` value, which is
 resolved to the V4L2 node behind that same camera. See
-[Select Camera Source](/guide/configuration#select-camera-source).
+[Select a camera source](/guide/configuration#select-a-camera-source).
 
 Gaze uses the greeter's camera only while the greeter is the active session on
 seat0, which is also the condition under which the greeter holds the camera's
