@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use image::RgbImage;
+use image::{GenericImageView, ImageBuffer, Rgb, RgbImage};
 use nalgebra::Matrix3;
 
 /// Standard 112x112 ArcFace alignment template, from InsightFace's `arcface_dst` in face_align.py.
@@ -94,7 +94,12 @@ pub fn umeyama(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> Option<Matrix3<f32>>
     t.iter().all(|value| value.is_finite()).then_some(t)
 }
 
-pub fn warp_affine(img: &RgbImage, transform: &Matrix3<f32>, width: u32, height: u32) -> RgbImage {
+pub fn warp_affine(
+    img: &impl GenericImageView<Pixel = Rgb<u8>>,
+    transform: &Matrix3<f32>,
+    width: u32,
+    height: u32,
+) -> RgbImage {
     let mut out = RgbImage::new(width, height);
     // The transform maps camera coordinates to the aligned face; sample through its inverse
     // so every output pixel gets a source location instead of leaving gaps when scaling up.
@@ -111,7 +116,7 @@ pub fn warp_affine(img: &RgbImage, transform: &Matrix3<f32>, width: u32, height:
             if src_x >= 0 && src_y >= 0 && src_x < img.width() as i32 && src_y < img.height() as i32
             {
                 let pixel = img.get_pixel(src_x as u32, src_y as u32);
-                out.put_pixel(x, y, *pixel);
+                out.put_pixel(x, y, pixel);
             }
         }
     }
@@ -122,7 +127,7 @@ pub fn warp_affine(img: &RgbImage, transform: &Matrix3<f32>, width: u32, height:
 /// narrower `Mat` would otherwise be read past its allocation.
 pub fn mat_to_rgb(
     mat: &impl opencv::prelude::MatTraitConstManual,
-) -> anyhow::Result<image::RgbImage> {
+) -> anyhow::Result<ImageBuffer<Rgb<u8>, &[u8]>> {
     let sz = mat.size()?;
     anyhow::ensure!(
         mat.typ() == opencv::core::CV_8UC3,
@@ -142,7 +147,7 @@ pub fn mat_to_rgb(
         bytes.len()
     );
 
-    image::RgbImage::from_raw(sz.width as u32, sz.height as u32, bytes.to_vec())
+    ImageBuffer::from_raw(sz.width as u32, sz.height as u32, bytes)
         .ok_or_else(|| anyhow::anyhow!("Failed to create RgbImage from Mat raw bytes"))
 }
 
@@ -174,6 +179,7 @@ mod tests {
         let img = mat_to_rgb(&mat).unwrap();
         assert_eq!((img.width(), img.height()), (6, 4));
         assert!(img.pixels().all(|p| p.0 == [200, 200, 200]));
+        assert_eq!(img.as_raw().as_ptr(), mat.data_bytes().unwrap().as_ptr());
     }
 
     // A region of interest keeps the parent's stride, so a packed read would run off the end.

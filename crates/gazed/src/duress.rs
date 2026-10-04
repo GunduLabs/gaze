@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use image::RgbImage;
+use image::{GenericImageView, Rgb, RgbImage};
 use nalgebra::Matrix3;
 use ndarray::Array4;
 use ort::{session::Session, value::TensorRef};
@@ -94,7 +94,7 @@ impl EyeStateClassifier {
 
     pub fn closed_probabilities(
         &mut self,
-        img: &RgbImage,
+        img: &impl GenericImageView<Pixel = Rgb<u8>>,
         eyes: [(f32, f32); 2],
     ) -> anyhow::Result<[f32; 2]> {
         let ipd = (eyes[0].0 - eyes[1].0).hypot(eyes[0].1 - eyes[1].1);
