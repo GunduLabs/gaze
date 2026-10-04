@@ -599,20 +599,15 @@ The requested API version [27] is not available, only API versions [1, 26] are s
 thread 'main' panicked at ort-2.0.0-rc.13/src/lib.rs: Failed to initialize ORT API
 ```
 
-The ONNX Runtime `gazed` links against is older than the ONNX Runtime API the
-build asks for. It only affects builds that link a system ONNX Runtime
-(`ORT_STRATEGY=system`), such as the Nix package, the Flatpak, and RPM source
-builds; the released `.deb`, `.rpm`, and Arch packages bundle their own runtime.
+The loaded ONNX Runtime is older than the API Gaze requests. Current builds
+validate API 21 before initialization and try the bundled CPU runtime if a
+registered vendor runtime is incompatible. Conventional packages bundle their
+CPU runtime; Nix uses a Nix-managed library.
 
-Gaze requires ONNX Runtime 1.21 or newer. Current builds report the mismatch and
-exit with an error instead of aborting:
-
-```
-the ONNX Runtime library loaded at startup is version 1.20.0, which is older than the 1.21.x this build of Gaze requires
-```
-
-Update `gazed` to a current release, or build it against an ONNX Runtime that is
-at least 1.21.
+Gaze requires ONNX Runtime 1.21 or newer. Update Gaze and its runtime package,
+or point `ORT_DYLIB_PATH` at a compatible vendor runtime and provide its
+`LD_LIBRARY_PATH`. For Intel or AMD acceleration, register a compatible SDK as
+described in [Hardware Acceleration](/guide/acceleration) and restart `gazed`.
 
 ## 12. Collect useful logs before asking for help
 

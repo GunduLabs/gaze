@@ -27,13 +27,8 @@ pub const PARALLEL_CAPTURE_LABELS: [&str; 3] = [
 pub const START_DELAY_SCOPE_OPTIONS: [&str; 2] = ["all", "screen_lock"];
 pub const START_DELAY_SCOPE_LABELS: [&str; 2] =
     ["Every face auth (including sudo)", "Screen lockers only"];
-#[cfg(not(feature = "openvino-config"))]
-pub const INFERENCE_EXECUTION_PROVIDER_OPTIONS: [&str; 1] = ["cpu"];
-#[cfg(feature = "openvino-config")]
-pub const INFERENCE_EXECUTION_PROVIDER_OPTIONS: [&str; 2] = ["cpu", "openvino"];
-#[cfg(not(feature = "openvino-config"))]
-pub const INFERENCE_DEVICE_OPTIONS: [&str; 1] = ["cpu"];
-#[cfg(feature = "openvino-config")]
+// Clients validate syntax independently of the daemon's installed vendor runtime.
+pub const INFERENCE_EXECUTION_PROVIDER_OPTIONS: [&str; 4] = ["cpu", "auto", "openvino", "vitis"];
 pub const INFERENCE_DEVICE_OPTIONS: [&str; 3] = ["cpu", "gpu", "npu"];
 pub const DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO: f64 = 0.25;
 pub const MIN_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.10;
@@ -505,12 +500,6 @@ impl Default for InferenceConfig {
 
 impl InferenceConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
-        #[cfg(not(feature = "openvino-config"))]
-        if self.execution_provider == "openvino" {
-            anyhow::bail!(
-                "this Gaze build does not include OpenVINO support; rebuild with the \"openvino\" Cargo feature"
-            );
-        }
         if !INFERENCE_EXECUTION_PROVIDER_OPTIONS.contains(&self.execution_provider.as_str()) {
             anyhow::bail!(
                 "invalid inference.execution_provider {:?}: expected one of {:?}",
@@ -528,6 +517,12 @@ impl InferenceConfig {
         if self.execution_provider == "cpu" && self.device != "cpu" {
             anyhow::bail!(
                 "inference.device must be \"cpu\" when inference.execution_provider is \"cpu\""
+            );
+        }
+        if matches!(self.execution_provider.as_str(), "auto" | "vitis") && self.device != "npu" {
+            anyhow::bail!(
+                "inference.device must be \"npu\" when inference.execution_provider is {:?}",
+                self.execution_provider
             );
         }
         Ok(())
@@ -1776,15 +1771,14 @@ mod tests {
 
     #[test]
     fn inference_config_accepts_supported_provider_device_pairs() {
-        #[cfg(feature = "openvino-config")]
         let supported = [
             ("cpu", "cpu"),
             ("openvino", "cpu"),
             ("openvino", "gpu"),
             ("openvino", "npu"),
+            ("auto", "npu"),
+            ("vitis", "npu"),
         ];
-        #[cfg(not(feature = "openvino-config"))]
-        let supported = [("cpu", "cpu")];
 
         for (execution_provider, device) in supported {
             let inference = InferenceConfig {
@@ -1797,22 +1791,15 @@ mod tests {
 
     #[test]
     fn inference_config_rejects_invalid_pairs() {
-        #[cfg(feature = "openvino-config")]
         let invalid = [
             ("cpu", "gpu"),
             ("cpu", "npu"),
             ("openvino", "cuda"),
             ("webgpu", "gpu"),
-        ];
-        #[cfg(not(feature = "openvino-config"))]
-        let invalid = [
-            ("cpu", "gpu"),
-            ("cpu", "npu"),
-            ("openvino", "cuda"),
-            ("webgpu", "gpu"),
-            ("openvino", "cpu"),
-            ("openvino", "gpu"),
-            ("openvino", "npu"),
+            ("auto", "cpu"),
+            ("auto", "gpu"),
+            ("vitis", "cpu"),
+            ("vitis", "gpu"),
         ];
 
         for (execution_provider, device) in invalid {
@@ -1837,10 +1824,7 @@ mod tests {
             execution_provider: "openvino".to_string(),
             device: "npu".to_string(),
         };
-        assert_eq!(
-            openvino.is_representable(),
-            cfg!(feature = "openvino-config")
-        );
+        assert!(openvino.is_representable());
     }
 
     #[test]

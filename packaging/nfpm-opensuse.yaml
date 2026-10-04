@@ -16,6 +16,18 @@ homepage: "https://gaze.gundulabs.com"
 license: "GPL-3.0-or-later"
 
 contents:
+  - src: "target/release/onnxruntime-LICENSE"
+    dst: "/usr/share/licenses/gaze/onnxruntime/LICENSE"
+    file_info:
+      mode: 0644
+  - src: "target/release/onnxruntime-NOTICES"
+    dst: "/usr/share/licenses/gaze/onnxruntime/ThirdPartyNotices.txt"
+    file_info:
+      mode: 0644
+  - src: "target/release/libonnxruntime.so"
+    dst: "/usr/lib/gaze/libonnxruntime.so"
+    file_info:
+      mode: 0644
   - src: "target/release/gazed"
     dst: "/usr/bin/gazed"
     file_info:

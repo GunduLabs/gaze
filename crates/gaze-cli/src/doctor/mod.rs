@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+mod acceleration;
 mod camera;
 mod config;
 mod daemon;
@@ -194,6 +195,7 @@ pub async fn run(username: &str, benchmark: bool) -> anyhow::Result<bool> {
     check_platform(&mut report);
     check_systemd(&mut report);
     let config = check_config(&mut report);
+    acceleration::check_acceleration(&mut report, config.as_ref());
     check_pam(&mut report);
     check_sudo_policy(&mut report, username);
     check_privileged_files(&mut report);

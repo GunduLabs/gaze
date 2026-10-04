@@ -27,13 +27,6 @@ runs:
         runtime_version="$(sed -n 's/^runtime-version: "\([^"]*\)"/\1/p' packaging/flatpak/com.gundulabs.Gaze.yml)"
         test -n "$runtime_version"
         echo "FLATPAK_RUNTIME_VERSION=$runtime_version" >> "$GITHUB_ENV"
-        echo "FLATPAK_ORT_VERSION=$(just --evaluate ort_version)" >> "$GITHUB_ENV"
-
-    - name: Restore ONNX Runtime download
-      uses: actions/cache@v6
-      with:
-        path: .flatpak-cache/ort
-        key: flatpak-ort-${{ runner.os }}-${{ runner.arch }}-${{ env.FLATPAK_ORT_VERSION }}-v1
 
     - name: Restore flatpak-builder state
       uses: actions/cache@v6

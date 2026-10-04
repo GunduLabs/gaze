@@ -17,7 +17,6 @@ repository.workspace = true
 [features]
 default = ["detection"]
 detection = ["dep:ort"]
-openvino = ["detection", "gaze-core/openvino-config", "ort/openvino"]
 
 [dependencies]
 gaze-core.workspace = true
@@ -26,6 +25,8 @@ ndarray.workspace = true
 opencv = { workspace = true, features = ["imgproc"] }
 ort = { workspace = true, optional = true }
 tracing.workspace = true
+libc.workspace = true
+sha2.workspace = true
 gstreamer.workspace = true
 gstreamer-app.workspace = true
 gstreamer-video.workspace = true

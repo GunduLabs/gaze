@@ -393,7 +393,7 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
         .set_selected(cfg.inference.device_index());
     if cfg.inference.is_representable() {
         rows.inference_execution_provider
-            .set_subtitle("Use ONNX Runtime directly or through OpenVINO");
+            .set_subtitle("CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI");
     } else {
         rows.inference_execution_provider.set_subtitle(&format!(
             "Configured as {}/{}, which this build cannot show",
@@ -571,7 +571,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
     let inference_execution_provider_row = libadwaita::ComboRow::new();
     inference_execution_provider_row.set_title("Inference execution provider");
-    inference_execution_provider_row.set_subtitle("Use ONNX Runtime directly or through OpenVINO");
+    inference_execution_provider_row
+        .set_subtitle("CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI");
     let inference_execution_provider_model =
         gtk4::StringList::new(&INFERENCE_EXECUTION_PROVIDER_OPTIONS);
     inference_execution_provider_row.set_model(Some(&inference_execution_provider_model));
@@ -1012,6 +1013,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 cfg.inference.device = if cfg.inference.execution_provider == "openvino" {
                     InferenceConfig::device_from_index(inference_device_row.selected() as usize)
                         .to_string()
+                } else if matches!(cfg.inference.execution_provider.as_str(), "auto" | "vitis") {
+                    "npu".to_string()
                 } else {
                     "cpu".to_string()
                 };

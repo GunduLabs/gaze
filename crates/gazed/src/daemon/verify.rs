@@ -106,7 +106,10 @@ pub(super) fn and_policy_unsatisfiable(
     run_rgb: bool,
     run_ir: bool,
 ) -> bool {
-    policy == "and" && !rgb_device.is_empty() && !ir_device.is_empty() && !(run_rgb && run_ir)
+    if policy != "and" || rgb_device.is_empty() || ir_device.is_empty() {
+        return false;
+    }
+    !(run_rgb && run_ir)
 }
 
 pub(super) fn process_frame_sync(

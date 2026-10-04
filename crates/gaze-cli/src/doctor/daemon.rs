@@ -405,7 +405,7 @@ pub(super) async fn check_benchmark(report: &mut Report, proxy: &GazeProxy<'_>) 
                                 result.fallback_reason.as_str()
                             }
                         ),
-                        "Check the gazed journal for the OpenVINO setup error, or set [inference] back to cpu/cpu.",
+                        "Check the vendor runtime in /usr/lib/gaze/runtimes, restart gazed, and inspect its journal; cpu/cpu disables acceleration.",
                     );
                 }
             }

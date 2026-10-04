@@ -409,7 +409,15 @@ async fn run_config_wizard(
             config.inference.device =
                 gaze_core::config::InferenceConfig::device_from_index(selected_device).to_string();
         } else {
-            config.inference.device = "cpu".to_string();
+            config.inference.device = if matches!(
+                config.inference.execution_provider.as_str(),
+                "auto" | "vitis"
+            ) {
+                "npu"
+            } else {
+                "cpu"
+            }
+            .to_string();
         }
     } else {
         term.write_line(&format!(

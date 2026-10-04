@@ -64,15 +64,8 @@ modules:
         CARGO_TARGET_DIR: /run/build/gaze-gui/target
         LLVM_CONFIG_PATH: /usr/lib/sdk/llvm20/bin/llvm-config
         LIBCLANG_PATH: /usr/lib/sdk/llvm20/lib
-        ORT_STRATEGY: system
-        ORT_LIB_LOCATION: /app/lib
-        ORT_PREFER_DYNAMIC_LINK: "1"
     build-commands:
       - install -Dm644 .flatpak-cache/cargo/config.toml /run/build/gaze-gui/cargo/config.toml
-      - mkdir -p /run/build/gaze-gui/ort
-      - tar -xzf .flatpak-cache/ort/onnxruntime.tgz -C /run/build/gaze-gui/ort --strip-components=1
-      - mkdir -p /app/lib
-      - cp -a /run/build/gaze-gui/ort/lib/libonnxruntime.so* /app/lib/
       - cargo build --release --locked --offline -p gaze-gui
       - install -Dm755 target/release/gaze-gui /app/bin/gaze-gui
       - install -Dm644 packaging/gui/com.gundulabs.Gaze.desktop /app/share/applications/com.gundulabs.Gaze.desktop

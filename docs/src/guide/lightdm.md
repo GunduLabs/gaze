@@ -62,19 +62,17 @@ the session starts on its own.
 
 `lightdm-gtk-greeter` still requires the user to have been prompted before it
 will start a session, so face authentication succeeds but the greeter waits on
-the **Log In** button. That is an upstream limitation, tracked in
-[lightdm-gtk-greeter#140](https://github.com/Xubuntu/lightdm-gtk-greeter/issues/140);
-it is not something Gaze can work around from a PAM module.
+the **Log In** button. That is an upstream limitation, not something Gaze can
+work around from a PAM module.
 
 ::: warning The password field waits for the camera
 LightDM runs one authentication at a time, so while Gaze is looking for your
 face the greeter will not accept a typed password. It is accepted as soon as the
 face attempt finishes. This affects every biometric module on LightDM, not just
-Gaze ([LP#1310104](https://bugs.launchpad.net/bugs/1310104)), and it is why
+Gaze, and it is why
 `auth.start_delay_ms` should stay low on this surface.
 
-The greeter also does not cancel an authentication when the screen blanks
-([lightdm-gtk-greeter#58](https://github.com/Xubuntu/lightdm-gtk-greeter/issues/58)),
+The greeter also does not cancel an authentication when the screen blanks,
 so a scan started before the screen turned off runs to completion.
 :::
 
