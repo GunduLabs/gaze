@@ -18,24 +18,18 @@ const PREVIEW_GRACE: Duration = Duration::from_secs(10);
 pub struct CameraSetup {
     pub device: String,
     pub is_ir: bool,
-    pub can_share: bool,
 }
 
 impl CameraSetup {
     pub fn from_config(cameras: &CameraConfig) -> Self {
         let (device, is_ir) = gaze_vision::camera::preferred_capture_source(cameras);
-        Self {
-            device,
-            is_ir,
-            can_share: gaze_vision::camera::preview_can_be_shared(cameras),
-        }
+        Self { device, is_ir }
     }
 
     pub fn fallback() -> Self {
         Self {
             device: DEFAULT_RGB_CAMERA.to_string(),
             is_ir: false,
-            can_share: false,
         }
     }
 }
@@ -61,7 +55,6 @@ pub fn show_capture_dialog(
     on_done: impl Fn() + 'static,
 ) {
     let is_ir = camera.is_ir;
-    let can_share = camera.can_share;
 
     let feed = Rc::new(feed);
     let on_done = Rc::new(on_done);
@@ -304,15 +297,11 @@ pub fn show_capture_dialog(
         #[strong]
         enrollment_completed,
         move |btn| {
-            // The preview opens the RGB camera directly. PipeWire can back it and gazed's
-            // capture at once; anything else has to be released before gazed opens the device.
-            if can_share {
-                feed.set_active(true);
-            } else {
-                feed.stop_and_wait();
-                feed.hide_frame();
-                camera_mode.set_text(&format!("{camera_kind} · starting capture"));
-            }
+            // gazed captures from the backing V4L2 node, so even a PipeWire preview must
+            // let go of it first.
+            feed.stop_and_wait();
+            feed.hide_frame();
+            camera_mode.set_text(&format!("{camera_kind} · starting capture"));
 
             btn.set_visible(false);
             stop_btn.set_visible(true);
@@ -366,11 +355,7 @@ pub fn show_capture_dialog(
                         }
                     };
 
-                    let mut preview_stream = if can_share {
-                        None
-                    } else {
-                        proxy.receive_preview_frame().await.ok()
-                    };
+                    let mut preview_stream = proxy.receive_preview_frame().await.ok();
 
                     if proxy.enroll_start(&face_name).await.is_err() {
                         prompt_label.set_text("Daemon failed to start enrollment.");
@@ -378,28 +363,28 @@ pub fn show_capture_dialog(
                         return;
                     }
 
-                    if !can_share {
-                        glib::timeout_add_local_once(
-                            PREVIEW_GRACE,
-                            glib::clone!(
-                                #[strong]
-                                feed,
-                                #[strong]
-                                camera_mode,
-                                #[strong]
-                                preview_live,
-                                move || {
-                                    if preview_live.get() {
-                                        return;
-                                    }
-                                    feed.set_active(true);
-                                    camera_mode.set_text(&format!(
-                                        "{camera_kind} · live preview unavailable, look at the camera"
-                                    ));
+                    glib::timeout_add_local_once(
+                        PREVIEW_GRACE,
+                        glib::clone!(
+                            #[strong]
+                            feed,
+                            #[strong]
+                            camera_mode,
+                            #[strong]
+                            preview_live,
+                            move || {
+                                if preview_live.get() {
+                                    return;
                                 }
-                            ),
-                        );
-                    }
+                                // set_active only restores the overlay; reopening the camera
+                                // here would race gazed for the node.
+                                feed.set_active(true);
+                                camera_mode.set_text(&format!(
+                                    "{camera_kind} · live preview unavailable, look at the camera"
+                                ));
+                            }
+                        ),
+                    );
 
                     loop {
                         tokio::select! {

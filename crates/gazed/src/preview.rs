@@ -83,13 +83,6 @@ impl PreviewStream {
         }
     }
 
-    pub fn disabled() -> Self {
-        Self {
-            frames: None,
-            encoder: None,
-        }
-    }
-
     pub fn offer(&mut self, frame: &Mat) {
         let Some(frames) = self.frames.as_ref() else {
             return;

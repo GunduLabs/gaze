@@ -153,22 +153,6 @@ pub fn preferred_capture_source(cameras: &CameraConfig) -> (String, bool) {
     }
 }
 
-pub fn preview_can_be_shared(cameras: &CameraConfig) -> bool {
-    if !cameras.ir.trim().is_empty() {
-        return false;
-    }
-    let (source, _) = preferred_capture_source(cameras);
-    is_pipewire_source(&source)
-}
-
-fn is_pipewire_source(source: &str) -> bool {
-    matches!(
-        classify_source(source, true),
-        Ok(SourceElement::Element(element))
-            if element == "pipewiresrc" || element.starts_with("pipewiresrc ")
-    )
-}
-
 pub fn resolve_node(source: &str) -> Option<String> {
     resolve_node_for(source, false)
 }
@@ -402,6 +386,9 @@ const INTERRUPTIBLE_POLL_TIMEOUT_MS: u64 = 100;
 /// Long enough for a busy device to reject the stream, short enough not to sit through a live
 /// source that has simply not produced its first buffer. Later failures are the frame loop's.
 const PIPELINE_START_TIMEOUT_MS: u64 = 500;
+/// PipeWire can hold the backing node for a moment after the GUI stops its preview.
+const PRIVILEGED_BUSY_ATTEMPTS: u32 = 3;
+const PRIVILEGED_BUSY_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 const PIPELINE_STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 enum FramePoll {
@@ -455,6 +442,30 @@ fn current_pipewire_uid() -> Option<u32> {
 fn device_is_busy(detail: &str) -> bool {
     let detail = detail.to_ascii_lowercase();
     detail.contains("busy") || detail.contains("ebusy")
+}
+
+fn retry_while_busy<T>(
+    node: &str,
+    delay: std::time::Duration,
+    mut open: impl FnMut() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let mut attempt = 1;
+    loop {
+        match open() {
+            Err(err)
+                if attempt < PRIVILEGED_BUSY_ATTEMPTS && device_is_busy(&format!("{err:#}")) =>
+            {
+                warn!(
+                    attempt,
+                    ?delay,
+                    "Privileged capture found {node} busy; retrying"
+                );
+                std::thread::sleep(delay);
+                attempt += 1;
+            }
+            result => return result,
+        }
+    }
 }
 
 /// The state-change error says only that an element failed; the reason is on the bus.
@@ -724,12 +735,10 @@ impl Camera {
             )
         })?;
         let force_ir_yuy2 = node_requires_forced_ir_yuy2(&node, want_color);
-        Self::open_source_element(
-            &format!("v4l2src device={node}"),
-            camera_source,
-            force_ir_yuy2,
-            None,
-        )
+        let src_element = format!("v4l2src device={node}");
+        retry_while_busy(&node, PRIVILEGED_BUSY_RETRY_DELAY, || {
+            Self::open_source_element(&src_element, camera_source, force_ir_yuy2, None)
+        })
     }
 
     fn open_kind(camera_source: &str, want_color: bool) -> anyhow::Result<Self> {
@@ -1324,7 +1333,48 @@ mod tests {
             "Could not open device: Device or resource busy"
         ));
         assert!(device_is_busy("v4l2 returned EBUSY"));
+        assert!(device_is_busy(
+            "The camera is already in use by another program (primary): \
+             Device '/dev/video0' is busy"
+        ));
         assert!(!device_is_busy("No such file or directory"));
+    }
+
+    #[test]
+    fn a_briefly_busy_node_is_opened_on_retry() {
+        let mut calls = 0;
+        let result = retry_while_busy("/dev/video0", std::time::Duration::ZERO, || {
+            calls += 1;
+            if calls < PRIVILEGED_BUSY_ATTEMPTS {
+                anyhow::bail!("Device '/dev/video0' is busy")
+            }
+            Ok(calls)
+        });
+        assert_eq!(result.unwrap(), PRIVILEGED_BUSY_ATTEMPTS);
+    }
+
+    #[test]
+    fn a_node_that_stays_busy_fails_after_the_last_attempt() {
+        let mut calls = 0;
+        let result: anyhow::Result<()> =
+            retry_while_busy("/dev/video0", std::time::Duration::ZERO, || {
+                calls += 1;
+                anyhow::bail!("Device '/dev/video0' is busy")
+            });
+        assert!(device_is_busy(&format!("{:#}", result.unwrap_err())));
+        assert_eq!(calls, PRIVILEGED_BUSY_ATTEMPTS);
+    }
+
+    #[test]
+    fn other_open_errors_are_not_retried() {
+        let mut calls = 0;
+        let result: anyhow::Result<()> =
+            retry_while_busy("/dev/video0", std::time::Duration::ZERO, || {
+                calls += 1;
+                anyhow::bail!("No such file or directory")
+            });
+        assert!(result.is_err());
+        assert_eq!(calls, 1);
     }
 
     #[test]
@@ -1651,34 +1701,6 @@ mod tests {
         let mut cameras = cameras_with("primary", "/dev/video2");
         cameras.parallel_capture = "sometimes".to_string();
         assert!(resolve_configured_sources(&cameras).serial_capture);
-    }
-
-    #[test]
-    fn a_pipewire_camera_can_back_two_previews_at_once() {
-        assert!(preview_can_be_shared(&cameras_with("primary", "")));
-        assert!(preview_can_be_shared(&cameras_with(
-            "pipewiresrc target-object=v4l2_input.pci-0000:00:14.0-usb-0:5:1.0",
-            ""
-        )));
-    }
-
-    #[test]
-    fn a_v4l2_camera_cannot_be_streamed_twice() {
-        assert!(!preview_can_be_shared(&cameras_with("/dev/video0", "")));
-        assert!(!preview_can_be_shared(&cameras_with("usb:04f2:b6d9", "")));
-    }
-
-    #[test]
-    fn a_dual_spectrum_setup_needs_the_rgb_camera_released_between_steps() {
-        assert!(!preview_can_be_shared(&cameras_with(
-            "primary",
-            "/dev/video2"
-        )));
-    }
-
-    #[test]
-    fn an_ir_only_setup_is_not_shareable() {
-        assert!(!preview_can_be_shared(&cameras_with("", "/dev/video2")));
     }
 
     #[test]
