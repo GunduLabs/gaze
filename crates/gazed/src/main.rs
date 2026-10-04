@@ -218,6 +218,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
         lock_epochs: lock_epochs.clone(),
         benchmark_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         last_good_config: Arc::new(Mutex::new(config.clone())),
+        loaded_model_config: Mutex::new(config.clone()),
         rt_handle: tokio::runtime::Handle::current(),
     };
 

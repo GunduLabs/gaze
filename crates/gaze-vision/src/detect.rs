@@ -388,7 +388,14 @@ mod tests {
 
             assert_eq!(tensor.shape(), &[1, 3, 320, 320]);
             let data = tensor.as_slice().unwrap();
-            for (idx, pixel) in resized.data_bytes().unwrap().chunks_exact(3).enumerate() {
+            for (idx, pixel) in resized
+                .data_bytes()
+                .unwrap()
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .enumerate()
+            {
                 for channel in 0..3 {
                     assert_eq!(
                         data[channel * 320 * 320 + idx],
