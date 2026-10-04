@@ -153,15 +153,6 @@ pub fn preferred_capture_source(cameras: &CameraConfig) -> (String, bool) {
     }
 }
 
-/// Whether a local preview can run alongside gazed's privileged capture.
-pub fn preview_can_be_shared(_cameras: &CameraConfig) -> bool {
-    // gazed always captures through Camera::open_privileged_kind, which resolves every
-    // source to a backing V4L2 node. Even a PipeWire preview must release that node before
-    // capture; gazed supplies the preview frames instead. Keep this policy in sync with
-    // the privileged capture trust rule, not the unprivileged source classification.
-    false
-}
-
 pub fn resolve_node(source: &str) -> Option<String> {
     resolve_node_for(source, false)
 }
@@ -395,6 +386,11 @@ const INTERRUPTIBLE_POLL_TIMEOUT_MS: u64 = 100;
 /// Long enough for a busy device to reject the stream, short enough not to sit through a live
 /// source that has simply not produced its first buffer. Later failures are the frame loop's.
 const PIPELINE_START_TIMEOUT_MS: u64 = 500;
+/// Privileged capture retries a busy V4L2 node briefly before failing. The GUI releases its
+/// preview just before capture starts, but PipeWire may still hold the backing node for a
+/// moment after the local preview stops.
+const PRIVILEGED_BUSY_ATTEMPTS: u32 = 3;
+const PRIVILEGED_BUSY_RETRY_DELAY_MS: u64 = 250;
 const PIPELINE_STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 enum FramePoll {
@@ -710,7 +706,8 @@ impl Camera {
 
     fn open_privileged_kind(camera_source: &str, want_color: bool) -> anyhow::Result<Self> {
         gstreamer::init()?;
-        // Only V4L2 is trusted here; preview_can_be_shared relies on this exclusive access.
+        // Only V4L2 is trusted here. The node streams for one opener at a time: the GUI
+        // releases its local preview before capture, and gazed streams preview frames instead.
         let node = resolve_privileged_node(camera_source, want_color).ok_or_else(|| {
             anyhow::anyhow!(
                 "refusing privileged capture of {camera_source:?}: no backing /dev/video node \
@@ -718,12 +715,29 @@ impl Camera {
             )
         })?;
         let force_ir_yuy2 = node_requires_forced_ir_yuy2(&node, want_color);
-        Self::open_source_element(
-            &format!("v4l2src device={node}"),
-            camera_source,
-            force_ir_yuy2,
-            None,
-        )
+        let src_element = format!("v4l2src device={node}");
+
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            match Self::open_source_element(&src_element, camera_source, force_ir_yuy2, None) {
+                Ok(camera) => return Ok(camera),
+                Err(err)
+                    if attempt < PRIVILEGED_BUSY_ATTEMPTS
+                        && device_is_busy(&format!("{err:#}")) =>
+                {
+                    warn!(
+                        attempt,
+                        delay_ms = PRIVILEGED_BUSY_RETRY_DELAY_MS,
+                        "Privileged capture found {node} busy; retrying after the preview release"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        PRIVILEGED_BUSY_RETRY_DELAY_MS,
+                    ));
+                }
+                Err(err) => return Err(err),
+            }
+        }
     }
 
     fn open_kind(camera_source: &str, want_color: bool) -> anyhow::Result<Self> {
@@ -1645,59 +1659,6 @@ mod tests {
         let mut cameras = cameras_with("primary", "/dev/video2");
         cameras.parallel_capture = "sometimes".to_string();
         assert!(resolve_configured_sources(&cameras).serial_capture);
-    }
-
-    #[test]
-    fn a_pipewire_preview_must_release_the_camera_for_privileged_capture() {
-        // Privileged capture uses the backing V4L2 node, not a second PipeWire stream.
-        for source in [
-            "primary",
-            "pipewiresrc",
-            "pipewiresrc target-object=v4l2_input.pci-0000:00:14.0-usb-0:5:1.0",
-            "pipewiresrc path=42",
-            "pipewiresrc fd=7",
-        ] {
-            assert!(
-                !preview_can_be_shared(&cameras_with(source, "")),
-                "{source}"
-            );
-        }
-    }
-
-    #[test]
-    fn privileged_node_resolution_requires_an_exclusive_preview() {
-        // Explicit nodes resolve without hardware. Both privileged RGB and IR capture
-        // use these same nodes, which cannot be streamed by the local preview as well.
-        for want_color in [true, false] {
-            let node = resolve_privileged_node("  /dev/video0  ", want_color)
-                .expect("canonical V4L2 node");
-            assert_eq!(node, "/dev/video0");
-            let cameras = if want_color {
-                cameras_with(&node, "")
-            } else {
-                cameras_with("", &node)
-            };
-            assert!(!preview_can_be_shared(&cameras));
-        }
-    }
-
-    #[test]
-    fn a_v4l2_camera_cannot_be_streamed_twice() {
-        assert!(!preview_can_be_shared(&cameras_with("/dev/video0", "")));
-        assert!(!preview_can_be_shared(&cameras_with("usb:04f2:b6d9", "")));
-    }
-
-    #[test]
-    fn a_dual_spectrum_setup_needs_the_rgb_camera_released_between_steps() {
-        assert!(!preview_can_be_shared(&cameras_with(
-            "primary",
-            "/dev/video2"
-        )));
-    }
-
-    #[test]
-    fn an_ir_only_setup_is_not_shareable() {
-        assert!(!preview_can_be_shared(&cameras_with("", "/dev/video2")));
     }
 
     #[test]

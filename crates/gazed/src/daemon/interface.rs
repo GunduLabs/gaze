@@ -323,7 +323,6 @@ impl AuthDaemon {
 
             let (enroll_tx, mut enroll_rx) = tokio::sync::mpsc::channel::<EnrollMsg>(10);
             let (preview_tx, mut preview_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(1);
-            let stream_preview = !gaze_vision::camera::preview_can_be_shared(&config.cameras);
             let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let completed_steps_atomic = Arc::new(std::sync::atomic::AtomicU32::new(0));
             let rgb_captured_for_step = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -342,11 +341,7 @@ impl AuthDaemon {
 
                 rgb_thread = Some(std::thread::spawn(move || {
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, true);
-                    let mut preview = if stream_preview {
-                        PreviewStream::new(preview_tx_clone)
-                    } else {
-                        PreviewStream::disabled()
-                    };
+                    let mut preview = PreviewStream::new(preview_tx_clone);
                     let mut pose_baseline = None;
 
                     // Cameras like the Logitech Brio 4K cannot stream RGB and IR at once, so
@@ -534,11 +529,7 @@ impl AuthDaemon {
                 ir_thread = Some(std::thread::spawn(move || {
                     let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Ir, true);
                     let mut dark_gate = IrDarkFrameGate::new(config_clone.cameras.dark_luma_threshold);
-                    let mut preview = if stream_preview {
-                        PreviewStream::new(preview_tx_clone)
-                    } else {
-                        PreviewStream::disabled()
-                    };
+                    let mut preview = PreviewStream::new(preview_tx_clone);
 
                     // Dual-spectrum mode waits for RGB to capture and release the camera, then
                     // holds IR just long enough for one lit frame; RGB already checked the pose.
