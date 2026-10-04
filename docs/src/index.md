@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "Gaze"
   text: "Facial authentication for Linux"
-  tagline: Log in, unlock your screen, and use sudo with your face. Recognition runs on your machine.
+  tagline: Facial authentication for Linux with on-device face recognition, PAM integration, and tools for login, lock screen, sudo, and desktop management.
   image:
     src: /favicon.svg
     alt: Gaze icon
