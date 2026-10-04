@@ -33,7 +33,7 @@ const SUSE_MIRRORS = ['https://download.opensuse.org/tumbleweed/repo/oss',
     'https://ftp.fau.de/opensuse/tumbleweed/repo/oss', 'https://ftp.gwdg.de/pub/opensuse/tumbleweed/repo/oss'];
 const KDE = 'https://invent.kde.org/plasma';
 
-// Every host here throttles bursts from shared CI addresses, so cap and retry.
+// These hosts throttle shared CI addresses, so limit concurrent downloads and retry failures.
 const slots = Array(6).fill(Promise.resolve());
 let nextSlot = 0;
 

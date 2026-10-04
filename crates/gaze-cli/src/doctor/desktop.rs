@@ -62,16 +62,15 @@ pub(super) fn desktop_from_processes(uid: u32) -> String {
     found.join(":")
 }
 
-/// The prefs window has one page, Behavior, with two groups; naming the exact
-/// path beats "the extension preferences", which sends people hunting.
+/// Names the exact preferences page and group, making it easier for users to find.
 pub(super) fn gnome_prefs_path(group: &str, switch: &str) -> String {
     format!(
         "Open it with `gnome-extensions prefs {GNOME_EXTENSION_ID}` (or the Extensions app, then Gaze), then Behavior -> {group} -> \"{switch}\""
     )
 }
 
-/// GNOME Shell only scans extension directories at session start, so a session asked
-/// to enable a UUID it never scanned drops it at the next `enabled-extensions` rewrite.
+/// GNOME Shell scans extension directories when a session starts. If asked to enable
+/// an unseen UUID, it drops that UUID the next time it rewrites `enabled-extensions`.
 pub(super) fn gnome_extension_enable_steps() -> String {
     format!(
         "1. Reboot, or log out and back in, so GNOME Shell scans the extension.\n\
@@ -282,7 +281,7 @@ pub(super) fn check_desktop_integration(report: &mut Report) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum KdeLockStatus {
     Wired,
-    /// The simultaneous module, which deadlocks on this slot.
+    /// Simultaneous mode waits for a response that this slot cannot provide.
     Grosshack,
     NotWired,
     /// KScreenLocker has no biometric slot configured at all.
@@ -320,8 +319,8 @@ pub(super) fn slot_status(slot: Option<&str>) -> KdeLockStatus {
     KdeLockStatus::NotWired
 }
 
-/// Either slot the greeter starts up front will do, so report on whichever has
-/// the most to say: one being wired is a pass however the other looks.
+/// Reports the slot with the most useful status. Either slot is sufficient when it
+/// is wired to start Gaze before the user submits anything.
 pub(super) fn kde_lock_status(
     kde_fingerprint: Option<&str>,
     kde_smartcard: Option<&str>,
@@ -375,8 +374,9 @@ pub(super) fn check_kde_lock_screen(
     }
 }
 
-/// The greeter only scans before you type where it starts a service of its own.
-/// Everywhere else face auth waits for the submit, as a fingerprint reader does.
+/// A greeter can scan before you type only when it starts a separate biometric
+/// service. Otherwise, face authentication begins after submission, as it does
+/// for a fingerprint reader.
 pub(super) fn check_kde_login_greeter(report: &mut Report, plasmalogin_face: Option<&str>) {
     const NAME: &str = "KDE login greeter";
     match plasmalogin_face {

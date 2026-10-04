@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! NPU discovery shared by the daemon and diagnostics, without loading any ML libraries.
+//! Shared NPU discovery for the daemon and diagnostics, without loading ML libraries.
 
 use std::path::{Path, PathBuf};
 

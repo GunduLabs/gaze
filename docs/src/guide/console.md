@@ -96,7 +96,7 @@ to `login` itself is not in the way.
 Leave `cameras.rgb` as `primary` (the first color V4L2 node), pin it to
 `usb:VVVV:PPPP`, or pin it to a `pipewiresrc target-object=` value, which is
 resolved to the V4L2 node behind that same camera. See
-[Select Camera Source](/guide/configuration#select-camera-source).
+[Select a camera source](/guide/configuration#select-a-camera-source).
 
 ### When Gaze will not use the seat camera
 

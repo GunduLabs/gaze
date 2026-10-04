@@ -3,20 +3,23 @@
 
 # How Gaze Works
 
-This page explains the internals of Gaze's facial authentication pipeline. You don't need it to use Gaze, but it helps understand why it behaves the way it does.
+This page explains how Gaze's facial authentication pipeline works. You do not need it to use Gaze, but it can help make sense of its behavior.
 
 ## Security & Liveness
 
-Gaze provides facial authentication with local liveness anti-spoofing and support for infrared (IR) cameras.
+Gaze performs liveness checks locally and supports infrared (IR) cameras to help resist spoofing.
 
-When using an IR camera and RGB liveness checking, Gaze offers significant resistance against presentation attacks, such as printed photos, screen replays, or video-based spoofing. For high-security environments, it is recommended to keep standard system authentication (such as password entry) configured as a backup or fallback factor.
+Using an IR camera alongside RGB liveness checks helps Gaze resist presentation
+attacks such as printed photos, screen replays, and videos. In high-security
+environments, keep your usual system authentication, such as a password,
+enabled as a fallback.
 
 ## Privacy model
 
-- Face processing runs locally on your machine.
+- Gaze processes faces locally on your machine; it does not send face data to a cloud service.
 - No cloud account is required.
-- Face embeddings are stored on disk under your local Gaze data path, readable only by root.
-- They can optionally be encrypted at rest with a key sealed to the TPM, so a stolen disk is useless on another machine. See [template encryption](/guide/configuration#encrypt-face-templates-with-the-tpm).
+- Face embeddings are stored on disk in Gaze's local data directory, which is readable only by root.
+- You can optionally encrypt them at rest with a key sealed to the TPM. A stolen disk then cannot be used to recover the embeddings on another machine. See [template encryption](/guide/configuration#encrypt-face-templates-with-the-tpm).
 - If you enable [GNOME Keyring unlock](/guide/gnome#optional-tpm-backed-keyring-unlock), your account password is additionally stored in a TPM-protected record so a face login can unlock the keyring. That record is recoverable by root on this machine; read the security notes before turning it on.
 
 ## Authentication pipeline
@@ -25,16 +28,16 @@ When using an IR camera and RGB liveness checking, Gaze offers significant resis
 Camera frame -> Face detection (SCRFD) -> Face alignment -> Embedding (ArcFace: MobileFaceNet by default, ResNet50 at high/maximum security) -> Similarity match -> Liveness check (MiniFASNet-V2 / eye-motion on IR)
 ```
 
-High level:
+At a high level, authentication works as follows:
 
-1. Camera frame is captured from your configured GStreamer camera source.
-2. Detector finds a face and facial landmarks.
-3. Face is aligned into a standard input shape.
-4. Recognition model creates an embedding vector.
-5. Embedding is compared against your enrolled profiles. When both RGB and IR cameras are active, authentication results are combined based on the configured hybrid combining policy (e.g. requiring both to match, either to match, or dynamically falling back to IR in dark scenes).
-6. If liveness is enabled, a MiniFASNet-V2 anti-spoofing model checks the detected face crop (on the IR camera path, an eye-motion check across frames is used instead).
+1. Gaze captures a frame from your configured GStreamer camera source.
+2. The detector locates a face and its landmarks.
+3. Gaze aligns the face to a standard input shape.
+4. The recognition model converts the face into an embedding vector.
+5. Gaze compares the embedding with your enrolled profiles. If both RGB and IR cameras are active, it combines their results according to the configured hybrid policy. Depending on that policy, either or both cameras must match, or Gaze can fall back to IR when the scene is dark.
+6. If liveness checks are enabled, MiniFASNet-V2 checks the face crop for spoofing. On the IR camera path, Gaze instead checks for eye movement across frames.
 
-If best similarity passes threshold and the liveness score passes threshold, auth succeeds.
+Authentication succeeds when the best similarity and liveness scores both meet their configured thresholds.
 
 ## One authentication attempt
 
@@ -46,7 +49,7 @@ same daemon code runs on every surface, so a problem you can reproduce with
 
 1. The client claims the daemon over DBus. A claim binds the run to one user,
    and the client releases it when it finishes. A claim that is never released is
-   reclaimed after 5 minutes so the camera cannot be held hostage.
+    reclaimed after 5 minutes so an abandoned claim cannot keep the camera busy.
 2. Gaze checks three refusals in order: no suspend or resume since boot
    (`auth.abort_before_first_resume`), the caller sits inside an SSH session
    (`auth.abort_if_ssh`), and the laptop lid is closed (`auth.abort_if_lid_closed`). Any of
@@ -54,7 +57,7 @@ same daemon code runs on every surface, so a problem you can reproduce with
 3. Gaze works out which spectra can run. RGB runs when `cameras.rgb` is set *and* you have
    RGB templates enrolled; IR runs on the same rule. If neither can run, or if
    `security.hybrid_policy = "and"` demands both but you enrolled only one, the attempt ends
-   here rather than quietly authenticating on half the evidence.
+    here rather than proceeding with incomplete evidence.
 4. `auth.start_delay_ms` and `auth.resume_grace_ms` hold the capture back. Time the screen has
    already been locked counts against the delay, so a screen locked longer than
    `start_delay_ms` starts immediately. The lid is checked once more after the delay, since it
@@ -194,7 +197,7 @@ That makes authentication more robust for:
 
 ## Where data is stored
 
-Default locations:
+By default, Gaze stores its data in these locations:
 
 - User embeddings: `/var/lib/gaze/users`
 - TPM-sealed encryption key (only when template encryption is enabled): `/var/lib/gaze/tpm`
@@ -210,4 +213,4 @@ Default locations:
 - `pam_gaze.so`: PAM module. It holds no camera or inference code of its own; it asks `gazed` over DBus and reports the answer back to PAM. It links `gaze-security` so it can unseal a stored GNOME Keyring credential after a successful login
 - PAM integration, the GNOME and Cinnamon extensions, and KDE's biometric PAM slot for login/lock screen flow
 
-The CLI and GUI communicate with daemon over DBus (`com.gundulabs.Gaze`).
+The CLI and GUI communicate with the daemon over DBus (`com.gundulabs.Gaze`).

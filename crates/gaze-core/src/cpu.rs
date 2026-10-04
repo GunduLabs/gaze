@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-/// Exit status `gazed` uses when it stops because the CPU cannot run inference.
-/// `packaging/config/gazed.service` lists this in `RestartPreventExitStatus=`, so
-/// changing it here without changing the unit reintroduces the crash loop.
+/// Exit status used when `gazed` stops because the CPU cannot run inference.
+/// The systemd unit lists it in `RestartPreventExitStatus=`; update both places
+/// together to avoid reintroducing a restart loop.
 pub const EXIT_UNSUPPORTED_CPU: u8 = 78;
 
 pub const UNSUPPORTED_CPU_MESSAGE: &str = "AVX2 is unavailable; gazed cannot run on this CPU";
@@ -11,8 +11,9 @@ pub const UNSUPPORTED_CPU_MESSAGE: &str = "AVX2 is unavailable; gazed cannot run
 pub const UNSUPPORTED_CPU_FIX: &str =
     "Use a machine with AVX2 support. The CLI can run here, but the daemon cannot.";
 
-/// Whether the prebuilt ONNX Runtime that `gazed` links can execute here. Its startup
-/// code issues AVX2 unconditionally, so a miss is SIGILL rather than a recoverable error.
+/// Checks whether the prebuilt ONNX Runtime used by `gazed` can run on this CPU.
+/// Its startup code always issues AVX2 instructions, so unsupported CPUs receive
+/// SIGILL rather than a recoverable error.
 pub fn supports_inference() -> bool {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
@@ -29,8 +30,8 @@ pub fn supports_inference() -> bool {
 mod tests {
     use super::*;
 
-    /// The unit hardcodes the exit status, so a change here silently reintroduces the
-    /// SIGILL restart loop unless the packaging changes with it.
+    /// The unit also hardcodes this exit status. Keep the packaging in sync with
+    /// changes here to avoid silently bringing back the SIGILL restart loop.
     #[test]
     fn the_packaged_unit_prevents_restarts_on_the_unsupported_cpu_status() {
         let unit = include_str!("../../../packaging/config/gazed.service");

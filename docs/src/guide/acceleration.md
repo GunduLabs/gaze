@@ -3,22 +3,24 @@
 
 # Hardware acceleration
 
-The standard Gaze daemon supports Intel OpenVINO (NPU, GPU, or CPU) and AMD Ryzen AI/Vitis AI (NPU).
-You do not need to rebuild Gaze or install a different CLI/GUI. CPU remains the
-default; acceleration requires supported hardware, its drivers, and a matching vendor runtime.
+Gaze can use Intel OpenVINO (NPU, GPU, or CPU) and AMD Ryzen AI/Vitis AI (NPU)
+with its standard daemon; there is no need to rebuild Gaze or replace the CLI or
+GUI. By default, Gaze runs inference on the CPU, so you can use it without any
+acceleration setup. If you'd like to use supported accelerator hardware, install
+the matching drivers and vendor runtime first.
 
 ## Intel setup
 
-Install your distribution's Intel NPU firmware, kernel support (`intel_vpu`),
-and userspace Level Zero driver. On Fedora, these are:
+For Intel NPU acceleration, start by installing your distribution's NPU firmware,
+kernel support (`intel_vpu`), and userspace Level Zero driver. On Fedora, install:
 
 ```bash
 sudo dnf install intel-npu-driver oneapi-level-zero intel-npu-firmware
 ```
 
-For other distributions, follow [Intel's Linux NPU driver instructions](https://github.com/intel/linux-npu-driver).
-Then install an OpenVINO-enabled ONNX Runtime (1.21 or newer) in a root-owned
-location such as `/opt/onnxruntime-openvino`, and [register it](#register-a-runtime)
+On other distributions, [follow Intel's Linux NPU driver instructions](https://github.com/intel/linux-npu-driver).
+Next, install an OpenVINO-enabled ONNX Runtime (1.21 or newer) in a root-owned
+location such as `/opt/onnxruntime-openvino`, then [register it](#register-a-runtime)
 as the `openvino` runtime.
 
 ## AMD setup
@@ -28,9 +30,10 @@ documents Ryzen AI 1.8 for STX/KRK platforms (Strix, Strix Halo, Krackan Point)
 with Ubuntu 24.04 driver packages. Older Phoenix/Hawk Point NPUs and other Linux
 distributions are not included in that documented Linux support target.
 
-Install AMD's XRT/NPU driver packages and Ryzen AI SDK following that guide, in a
-root-owned system location such as `/opt/ryzen-ai`. Then [register it](#register-a-runtime)
-as the `vitis` runtime, including `/opt/xilinx/xrt/lib` in its library path.
+To set up AMD acceleration, follow that guide to install AMD's XRT/NPU driver
+packages and Ryzen AI SDK in a root-owned system location such as `/opt/ryzen-ai`.
+Then [register the runtime](#register-a-runtime) as `vitis`, including
+`/opt/xilinx/xrt/lib` in its library path.
 
 Ryzen AI can [compile FP32 models to BF16](https://ryzenai.docs.amd.com/en/latest/model_quantization.html).
 Gaze starts with its existing ONNX models and freezes symbolic input dimensions to
@@ -56,7 +59,7 @@ echo /opt/ryzen-ai/onnxruntime/lib:/opt/xilinx/xrt/lib \
     | sudo tee /usr/lib/gaze/runtimes/vitis/library-path
 ```
 
-Then enable acceleration in `/etc/gaze/config.toml`:
+Once the runtime is registered, enable acceleration in `/etc/gaze/config.toml`:
 
 ```toml
 [inference]
@@ -64,7 +67,7 @@ execution_provider = "auto"
 device = "npu"
 ```
 
-and restart the daemon and check each model:
+Finally, restart the daemon and check that each model is using the expected provider:
 
 ```bash
 sudo systemctl restart gazed
@@ -98,12 +101,12 @@ runtime identity/version, and kernel release. After upgrading a vendor's userspa
 driver or SDK, clear that vendor's cache with `sudo rm -rf /var/cache/gaze/inference/<provider>`.
 The initial compilation can take longer than subsequent daemon starts.
 
-Keep runtime libraries and their dependencies root-owned, outside `/home` and `/root`
+For security, keep runtime libraries and their dependencies root-owned, outside `/home` and `/root`
 (which `gazed.service` hides), and not writable by other users. Gaze validates the
 library's ONNX Runtime API before loading it, and re-executes the daemon with only the
 selected vendor's `library-path` before starting its threads.
 
-To return to the default, choose `cpu/cpu` in `gaze config` and restart `gazed`.
+To switch back to CPU inference, choose `cpu/cpu` in `gaze config` and restart `gazed`.
 
 For NixOS, use Nix-managed driver/runtime packages and the service environment to
 set `ORT_DYLIB_PATH` and `LD_LIBRARY_PATH`, with the same inference settings.
@@ -111,12 +114,12 @@ The `/usr/lib/gaze/runtimes` registration is intended for conventional distro pa
 
 ## Hardware validation
 
-For each vendor, test both model qualities, RGB/IR recognizers, MiniFASNet liveness,
-and the eye-state model if enabled. Confirm startup/warmup behavior, cold versus cached
-startup times, and per-model mean/p95 latency. Compare recognition and liveness scores
-against CPU on representative genuine and spoof samples; include embeddings enrolled
-before acceleration was enabled. Keep the existing thresholds unless validation
-supports a deliberate change.
+For each vendor, test both model qualities, the RGB and IR recognizers,
+MiniFASNet liveness, and the eye-state model if enabled. Check startup and
+warm-up behavior, cold and cached startup times, and each model's mean and p95
+latency. Compare recognition and liveness scores with CPU results on representative
+genuine and spoof samples, including profiles enrolled before acceleration was
+enabled. Keep the existing thresholds unless validation supports changing them.
 
 Exercise absent drivers, a missing SDK dependency, unsupported model operators,
 driver/SDK upgrades, and a switch back to CPU. Verify password fallback and recovery

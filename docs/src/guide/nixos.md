@@ -317,7 +317,8 @@ security.pam.services.login.gaze.enable = true; # console/display-manager login
 
 ### Uninstalling
 
-Don't use `gaze uninstall` on NixOS; it drives distro package managers.
+On NixOS, remove Gaze through your configuration rather than running
+`gaze uninstall`, which uses distribution package managers.
 Remove the module (or set `services.gaze.enable = false;`), rebuild, and
 delete the leftover state if you want a clean slate:
 

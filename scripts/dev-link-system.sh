@@ -88,9 +88,8 @@ artifact() {
     printf '%s/%s' "$TARGET" "$1"
 }
 
-# The GUI is optional: `GAZE_GUI=0 just build-rust` never produces it, and a
-# TUI-only install has nothing to link. Absent artifact means absent feature,
-# not a broken build.
+# The GUI is optional, and `GAZE_GUI=0 just build-rust` does not produce it.
+# A missing artifact is expected for a TUI-only build, not a broken build.
 have_gui() {
     [ -e "$(artifact gaze-gui)" ]
 }

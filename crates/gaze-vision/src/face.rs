@@ -42,7 +42,7 @@ fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|err| err.into_inner())
 }
 
-/// True when a square-padded detector bbox is within 5% of the original image edge.
+/// Returns true when a square-padded detector box comes within 5% of the image edge.
 fn bbox_is_clipped(bbox: (f32, f32, f32, f32), frame_w: f32, frame_h: f32) -> bool {
     const EDGE_MARGIN: f32 = 0.05;
     let max_dim = frame_w.max(frame_h);
@@ -89,8 +89,9 @@ fn geometry_status(
     }
 }
 
-/// Yaw and pitch here are unitless landmark ratios, not angles. Yaw is the nose offset in eye
-/// widths and pitch in eye-to-mouth heights, so every threshold comparing them is a ratio too.
+/// Yaw and pitch are unitless ratios derived from landmarks, not angles. Yaw measures the nose
+/// offset in eye-widths; pitch measures vertical position in eye-to-mouth heights. Their thresholds
+/// are ratios as well.
 pub fn estimate_head_pose(kps: &ndarray::Array3<f32>) -> Option<(f32, f32)> {
     let shape = kps.shape();
     if shape[0] < 1 || shape[1] < 5 || shape[2] < 2 {

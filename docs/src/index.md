@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "Gaze"
   text: "Facial authentication for Linux"
-  tagline: Facial authentication for Linux with on-device face recognition, PAM integration, and tools for login, lock screen, sudo, and desktop management.
+  tagline: Bring facial authentication to Linux with on-device recognition, PAM integration, and tools for login, lock screens, sudo, and desktop management.
   image:
     src: /favicon.svg
     alt: Gaze icon
@@ -21,7 +21,7 @@ hero:
 
 features:
   - title: Quick setup
-    details: Install Gaze, start gazed, enroll your face, and try it from the terminal.
+    details: Install Gaze, start the daemon, enroll your face, and try authentication from the terminal.
     link: /guide/getting-started
     linkText: Start setup
   - title: Desktop login
@@ -37,7 +37,7 @@ features:
     link: /guide/cli
     linkText: See the CLI
   - title: Local-first
-    details: Face templates stay on your machine. The daemon runs recognition locally and talks to the CLI, GUI, and PAM module over DBus.
+    details: Face templates stay on your machine. The daemon performs recognition locally and communicates with the CLI, GUI, and PAM module over DBus.
     link: /guide/how-it-works
     linkText: How it works
   - title: Troubleshooting

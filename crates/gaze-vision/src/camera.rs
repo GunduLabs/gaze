@@ -25,8 +25,9 @@ const REQUIRED_CAMERA_ELEMENTS: [&str; 7] = [
     "pipewiresrc",
 ];
 
-/// GStreamer elements Gaze's camera paths need but the registry cannot provide. Linker-based
-/// dependency scanners cannot see these, so packaging and `gaze doctor` ask at runtime instead.
+/// Lists the GStreamer elements required by Gaze's camera pipelines. Linker-based
+/// scanners cannot detect these plugin dependencies, so packaging and `gaze doctor`
+/// check for them at runtime.
 pub fn missing_camera_elements() -> anyhow::Result<Vec<&'static str>> {
     gstreamer::init()?;
     Ok(REQUIRED_CAMERA_ELEMENTS
@@ -46,8 +47,8 @@ fn requires_forced_ir_yuy2(vid: u16, pid: u16, want_color: bool) -> bool {
     !want_color && find_device(vid, pid).is_some_and(|device| device.requires_ir_yuy2)
 }
 
-/// The quirk belongs to the USB device, not to how the source was spelled, so it is looked up
-/// from the resolved node; `usb:VVVV:PPPP`, `/dev/videoN`, and PipeWire all reach one profile.
+/// Looks up this quirk by the resolved USB device, not by the source string. This lets
+/// `usb:VVVV:PPPP`, `/dev/videoN`, and PipeWire sources all use the same device profile.
 fn node_requires_forced_ir_yuy2(node: &str, want_color: bool) -> bool {
     !want_color
         && usb_ids_of(node).is_some_and(|(vid, pid)| requires_forced_ir_yuy2(vid, pid, want_color))
@@ -383,8 +384,8 @@ const PRIMARY_CAMERA_DISPLAY_NAME: &str = "Primary Camera";
 pub const IR_NONE_DISPLAY_NAME: &str = "None";
 const DEVICE_SETTLE_TIMEOUT_MS: u64 = 100;
 const INTERRUPTIBLE_POLL_TIMEOUT_MS: u64 = 100;
-/// Long enough for a busy device to reject the stream, short enough not to sit through a live
-/// source that has simply not produced its first buffer. Later failures are the frame loop's.
+/// Gives a busy device time to reject the stream without making us wait indefinitely for a
+/// live source that has not produced its first buffer. The frame loop handles later failures.
 const PIPELINE_START_TIMEOUT_MS: u64 = 500;
 /// PipeWire can hold the backing node for a moment after the GUI stops its preview.
 const PRIVILEGED_BUSY_ATTEMPTS: u32 = 3;
@@ -411,13 +412,13 @@ impl PipeWireSession {
     }
 }
 
-/// The uid whose PipeWire session capture attaches to, or `None` to resolve a socket from the
-/// environment. Only the uid is shared; each pipeline opens its own socket at open time.
+/// Identifies the uid whose PipeWire session capture should use, or `None` to resolve the socket
+/// from the environment. Threads share only the uid; each pipeline opens its own socket.
 static PIPEWIRE_UID: Mutex<Option<u32>> = Mutex::new(None);
 
 thread_local! {
-    /// The uid a capture thread was started for, which outranks the default. A thread still on
-    /// its way to opening a device must not follow a rebind by the claim that preempted it.
+/// Returns the uid assigned to a capture thread, which takes precedence over the default. A thread
+/// that has not opened its device yet must keep its original uid if a later claim rebinds the default.
     static PIPEWIRE_UID_FOR_THREAD: std::cell::Cell<Option<Option<u32>>> =
         const { std::cell::Cell::new(None) };
 }
@@ -480,8 +481,8 @@ fn bus_error_detail(pipeline: &gstreamer::Pipeline) -> Option<String> {
     None
 }
 
-/// What a failed PipeWire open may retry through. Only the bare element, what `primary` resolves
-/// to, means "any camera"; a named target may retry only its own node, never a substitute camera.
+/// Describes which V4L2 source a failed PipeWire open may retry. A bare element, as used by
+/// `primary`, can select any camera; a named target may retry only its own node, not another camera.
 #[derive(Debug, PartialEq, Eq)]
 enum V4l2Fallback {
     AnyDevice,
@@ -573,8 +574,8 @@ fn nodes_for_by_path(by_path: &str) -> Vec<String> {
         .collect()
 }
 
-/// The V4L2 node behind a pinned PipeWire target. A device that links several nodes also links
-/// ones that cannot be captured from, such as a metadata node, so the caps decide between them.
+/// Resolves a pinned PipeWire target to its V4L2 node. A device may link several nodes, including
+/// non-capture nodes such as metadata; negotiated caps distinguish the usable camera node.
 fn node_from_pipewire_target(target: &str, want_color: bool) -> Option<String> {
     let by_path = v4l2_by_path_for_target(target)?;
     let mut nodes = nodes_for_by_path(&by_path);
@@ -622,8 +623,8 @@ pub struct Camera {
     /// Keeps the socket open while the pipeline can use it. GStreamer caches its `pw_core` by
     /// fd number, so recycling the number early could hand a later capture this one's core.
     _pipewire: Option<PipeWireSession>,
-    /// Why the stream ended, when the pipeline said. A frame loop that just stops looks the same
-    /// as one that never saw a face, which is the wrong thing to tell the user.
+    /// Records why the stream ended and when the pipeline reported it. Without this detail, a
+    /// stopped frame loop could look like an attempt that simply never detected a face.
     stream_error: Option<String>,
     fps: Mutex<Option<f64>>,
     v4l2_retry: Option<V4l2Retry>,
@@ -1147,8 +1148,8 @@ pub fn enumerate_ir_cameras() -> anyhow::Result<Vec<(String, String)>> {
     Ok(label_camera_entries(all))
 }
 
-/// The IR picker, always led by an explicit "None" entry so a list index means
-/// the same thing in every front end.
+/// Builds the IR picker with an explicit "None" entry, keeping list indexes consistent
+/// across all front ends.
 pub fn ir_choices() -> Vec<(String, String)> {
     let mut options = vec![(IR_NONE_DISPLAY_NAME.to_string(), String::new())];
     options.extend(enumerate_ir_cameras().unwrap_or_default());

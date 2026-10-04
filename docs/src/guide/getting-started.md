@@ -3,7 +3,7 @@
 
 # Getting Started
 
-Get Gaze running in under 10 minutes: install, enroll your face, and verify authentication.
+Get Gaze up and running in under 10 minutes. Install it, enroll your face, and test authentication.
 
 ## Before you begin
 
@@ -13,7 +13,7 @@ Get Gaze running in under 10 minutes: install, enroll your face, and verify auth
 
 ## Step 1: Install Gaze
 
-Recommended one-line installer:
+The recommended option is the one-line installer:
 
 ```bash
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh
@@ -27,7 +27,7 @@ If you prefer manual package setup, use the [installation guide](/guide/installa
 systemctl status gazed
 ```
 
-If it is not running:
+If the service is not running, enable and start it:
 
 ```bash
 sudo systemctl enable --now gazed
@@ -53,7 +53,7 @@ Tips while enrolling:
 gaze auth
 ```
 
-For extra details:
+To see more detail about the authentication attempt, add `--verbose`:
 
 ```bash
 gaze auth --verbose
@@ -69,16 +69,16 @@ Use the GUI to enroll additional face profiles (for example, with glasses and wi
 
 ## Step 6: Verify GNOME lock screen auth (optional)
 
-Only do this on GNOME if you want face unlock from the lock screen. The one-line installer enables the extension for the current GNOME user when possible. If you installed packages manually or the installer could not enable it automatically, run:
+Follow these steps only if you use GNOME and want face unlock on the lock screen. The one-line installer enables the extension for your current GNOME user when possible. If you installed the packages manually, or automatic enablement failed, run:
 
 ```bash
 gnome-extensions enable gaze@gundulabs.com
 gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 ```
 
-Run those from a GNOME session that started **after** the package was installed. GNOME Shell only scans extension directories at session start and drops IDs it does not recognise, so enabling the extension from the session you installed in can look correct and then vanish at the next logout. Reboot, then re-run the two commands. `gaze doctor` reports this as `GNOME extension: installed, but not enabled for the current user` and prints the same steps. See [The extension disappears again after a logout](/guide/gnome#the-extension-disappears-again-after-a-logout).
+Run these commands from a GNOME session that started **after** the package was installed. GNOME Shell scans extension directories when a session starts and drops extension IDs it has not seen. If you enable the extension in the session where you installed it, the setting may appear to work but disappear after you log out. Reboot, then run the commands again. `gaze doctor` reports this as `GNOME extension: installed, but not enabled for the current user` and prints the same steps. See [The extension disappears again after a logout](/guide/gnome#the-extension-disappears-again-after-a-logout).
 
-Hands-free lock screen and GDM login face auth through this extension are GNOME-specific. Cinnamon has its own extension covering the lock screen and PolKit prompts, see [Cinnamon Extension](/guide/cinnamon). KDE Plasma gets a hands-free lock screen a different way, through the biometric PAM slot KScreenLocker starts up front, see [KDE Plasma](/guide/kde). Other surfaces integrate through PAM instead, see [Hyprland](/guide/hyprland), [LightDM](/guide/lightdm), [Console login (TTY)](/guide/console), and [PAM](/guide/pam).
+Hands-free lock screen and GDM login authentication through this extension are specific to GNOME. Cinnamon has a separate extension for its lock screen and PolKit prompts; see the [Cinnamon guide](/guide/cinnamon). KDE Plasma uses the biometric PAM slot that KScreenLocker starts in advance; see the [KDE Plasma guide](/guide/kde). Other login surfaces use PAM integrations. See the guides for [Hyprland](/guide/hyprland), [LightDM](/guide/lightdm), [console login (TTY)](/guide/console), and [PAM](/guide/pam).
 GDM login face auth is separate and disabled by default due to GNOME keyring behavior.
 See [GNOME Extension](/guide/gnome) for details and optional login enablement, including the optional TPM-backed keyring unlock that removes that caveat.
 

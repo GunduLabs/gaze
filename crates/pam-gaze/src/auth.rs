@@ -87,15 +87,15 @@ const RETRY_BACKOFF: Duration = Duration::from_millis(500);
 #[derive(Debug, PartialEq, Eq)]
 enum Verdict {
     Reached(AuthOutcome, Option<gaze_core::dbus::CaptureStatus>),
-    /// The budget ran out with nothing to report.
+    /// The attempt reached its time limit without producing a result.
     Exhausted,
-    /// The daemon could not be reached.
+    /// The daemon was unavailable to handle the request.
     Failed,
 }
 
 type Attempt<E> = Result<(AuthOutcome, Option<gaze_core::dbus::CaptureStatus>), E>;
 
-/// Darkness will still be dark in half a second; an empty frame may not be.
+/// A dark frame is likely to remain dark; an empty frame may be only a brief delay.
 fn worth_another_look(status: Option<gaze_core::dbus::CaptureStatus>) -> bool {
     !matches!(status, Some(gaze_core::dbus::CaptureStatus::TooDark))
 }
@@ -626,7 +626,7 @@ unsafe fn do_authenticate_simultaneous(
 
     let silent = caller_wants_silence(flags);
 
-    // Racing a prompt nobody answers is a deadlock, not a race.
+    // A prompt with no possible response would block indefinitely rather than race.
     if service_cannot_be_prompted(service.as_deref()) {
         return PAM_IGNORE;
     }

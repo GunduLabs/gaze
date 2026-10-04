@@ -337,7 +337,7 @@ pub fn enroll_for(backend: Backend, username: &str, password: &[u8]) -> anyhow::
     write_record(dir, &account, &blob)
 }
 
-/// Remove an enrolled credential without reading or unsealing it.
+/// Removes an enrolled credential without reading or unsealing it.
 pub fn forget(username: &str) -> anyhow::Result<()> {
     forget_for(Backend::Gnome, username)
 }

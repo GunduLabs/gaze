@@ -3,9 +3,10 @@
 
 # KDE Plasma
 
-On the KDE Plasma **lock screen**, the `gaze-kde` package makes face unlock start
-on its own, with no key press. The **login greeter** is a separate program with a
-different limitation, and is off by default; see [Login greeter](#login-greeter).
+On the KDE Plasma **lock screen**, the `gaze-kde` package starts face unlock
+automatically, without a key press. The **login greeter** is a separate program
+and works differently; face authentication there is off by default. See
+[Login greeter](#login-greeter) for details.
 
 The one-line installer installs `gaze-kde` when it detects a KDE Plasma session,
 so these steps are only needed after a manual install.
@@ -41,12 +42,13 @@ up under "KDE lock screen".
 
 ## System Settings
 
-`gaze-kde` adds a **Face Unlock** entry to System Settings. It opens `gaze-gui`,
-where you can manage enrolled faces and all of Gaze's settings.
+`gaze-kde` adds a **Face Unlock** entry to System Settings. Selecting it opens
+`gaze-gui`, where you can manage enrolled faces and adjust Gaze's settings.
 
-It's the GTK app, so it doesn't match Plasma's styling. We chose one app with
-every feature over a Plasma-native page that only covers some of them. You'll need `gaze-gui` installed for the entry
-to work; the one-line installer includes it.
+The settings entry opens the GTK app, so it does not match Plasma's styling.
+We chose to provide every feature in one app rather than maintain a native page
+with only partial coverage. Make sure `gaze-gui` is installed for the entry to
+work; the one-line installer includes it.
 
 ## How the lock screen works
 
@@ -181,9 +183,9 @@ lock screen, and on every version shipping today it starts PAM only when you
 submit the login form. So face auth there is not hands-free: press Enter with the
 password field empty and look at the camera.
 
-That is not a Gaze limitation, and it is worth being clear about it because the
-comparison usually made is with fingerprint. **A fingerprint reader behaves exactly
-the same way on this screen.** `pam_fprintd` goes into the same `plasmalogin` or
+This behavior comes from the greeter, not from Gaze. For comparison,
+**fingerprint readers behave the same way on this screen.** `pam_fprintd` goes
+into the same `plasmalogin` or
 `sddm` stack, that stack runs on submit, and every distribution's fingerprint
 instructions tell you to press Enter on an empty field before you swipe. Neither
 method scans before you type, because neither one gets to decide when the greeter

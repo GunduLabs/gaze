@@ -8,7 +8,7 @@
 [KDE Plasma guide](/guide/kde#system-settings).
 :::
 
-Use `gaze-gui` to enroll your face, test recognition, and change settings.
+Use `gaze-gui` to enroll your face, test recognition, and adjust Gaze settings.
 
 Launch it:
 
@@ -16,12 +16,12 @@ Launch it:
 gaze-gui
 ```
 
-- **Enroll a new face profile**: Follow the camera prompts to capture your face. If both RGB and IR cameras are configured, it captures from both.
-- **View enrolled profiles**: The main window lists enrolled faces with `RGB` and `IR` badges and the total template capture count. A badge is green when the profile has captures for that spectrum, amber when a camera is configured for it but the profile has none, and grey when no camera is configured for that spectrum at all. An RGB-only machine therefore shows a green `RGB` and a grey `IR`, not a failure.
-- **Refine profiles**: Tap the edit/refine icon on a profile to capture additional samples or add a missing spectrum (e.g. adding IR captures to an existing RGB-only face profile after configuring an IR camera).
-- **Test authentication**: Try a face scan and see whether Gaze recognizes you.
-- **Remove profiles**: Delete specific face profiles.
-- **Configure daemon settings**: Change security levels, cameras, liveness settings, and hybrid policies.
+- **Enroll a face:** Follow the camera prompts. If both RGB and IR cameras are configured, Gaze captures from both.
+- **View profiles:** The main window lists enrolled faces, their total template counts, and `RGB` and `IR` badges. A badge is green when the profile has captures for that spectrum, amber when a camera is configured but the profile has no captures, and grey when no camera is configured. An RGB-only machine therefore shows a green `RGB` badge and a grey `IR` badge; grey does not indicate a failure.
+- **Refine a profile:** Select its edit/refine icon to capture additional samples or add a missing spectrum. For example, you can add IR captures to an RGB-only profile after configuring an IR camera.
+- **Test authentication:** Run a face scan to check whether Gaze recognizes you.
+- **Remove profiles:** Delete individual face profiles.
+- **Change daemon settings:** Adjust the security level, cameras, liveness settings, and hybrid policy.
 
 ## Configuration dialog
 
@@ -98,7 +98,7 @@ Check daemon status:
 systemctl status gazed
 ```
 
-If stopped:
+If the service is stopped, enable and start it:
 
 ```bash
 sudo systemctl enable --now gazed

@@ -167,8 +167,9 @@ ${RPM_LIB_DEPENDS}
       postinstall: "packaging/postinst-arch.sh"
       preremove: "packaging/prerm-arch.sh"
     depends:
-      # The Justfile `_nfpm` recipe computes these from the libopencv_core soversion gazed
-      # linked; Arch bumps that every minor release, so an unbounded dep dies on `pacman -Syu`.
+      # The `_nfpm` recipe computes these bounds from the libopencv_core soversion linked by
+      # gazed. Arch changes that version each minor release, so an unbounded dependency can break
+      # during `pacman -Syu`.
       - "opencv>=${OPENCV_MIN}"
       - "opencv<${OPENCV_NEXT}"
       - pam

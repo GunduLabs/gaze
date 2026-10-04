@@ -77,15 +77,15 @@ if is_suse; then
 	configure_pam_suse
 fi
 
-# A display-manager greeter runs as xdm_t, which SELinux denies the camera by
-# default; the denial is silent and reads like a broken camera. Loaded here
-# because the base package owns the policy, whichever desktop is installed.
+# SELinux blocks the display-manager greeter (xdm_t) from accessing the camera by
+# default. The denial is silent and can look like a camera failure, so load the
+# policy here; the base package owns it regardless of which desktop is installed.
 if [ -f /usr/share/gaze/gaze-gdm-camera.pp ] && command -v semodule >/dev/null 2>&1; then
 	semodule -i /usr/share/gaze/gaze-gdm-camera.pp >/dev/null 2>&1 || true
 fi
 
-# The keyring policy widens xdm_t to /etc/shadow and the TPM, so `gaze keyring`
-# loads it on demand; an upgrade only refreshes a copy that is already loaded.
+# The keyring policy lets xdm_t access /etc/shadow and the TPM. `gaze keyring`
+# loads it when a credential is enrolled; upgrades refresh it only if already loaded.
 if [ -f /usr/share/gaze/gaze-greeter-keyring.pp ] && command -v semodule >/dev/null 2>&1 \
 	&& semodule -l 2>/dev/null | grep -Eq '^gaze-greeter-keyring([[:space:]]|$)'; then
 	semodule -i /usr/share/gaze/gaze-greeter-keyring.pp >/dev/null 2>&1 || true

@@ -68,8 +68,8 @@ const _: () = assert!(TTY_CONFIRM_DECISECONDS > 0);
 pub const FACE_PAM_SERVICE: &str = "gdm-face";
 pub const GREETD_PAM_SERVICE: &str = "greetd";
 
-/// Camera budget plus the daemon's pre-auth delay, which PAM also blocks through, so it must be
-/// added rather than absorbed. Assumes the resumed delay, which PAM cannot predict.
+/// Includes both the camera budget and the daemon's pre-auth delay, since PAM waits through each.
+/// Uses the resume delay as a conservative estimate because PAM cannot tell when resume is active.
 pub fn camera_auth_timeout(
     auth: &gaze_core::config::AuthConfig,
     service: Option<&str>,
@@ -535,8 +535,8 @@ pub fn has_interactive_tty() -> bool {
 }
 
 /// Fallback prompt when there is no controlling terminal to read Enter from.
-/// Empty must never count as consent here: hosts that answer unknown prompts
-/// with "" would otherwise auto-confirm without the user pressing anything.
+/// Treat an empty response as no consent. Some hosts answer unknown prompts with
+/// `""`; accepting that would confirm without the user pressing anything.
 pub const TYPED_CONFIRMATION_PROMPT: &str = "Face Verified. Type 'yes' to confirm.";
 
 pub fn typed_confirmation_accepted(response: Option<&str>) -> bool {
@@ -851,8 +851,8 @@ pub enum AuthOutcome {
     Unavailable,
 }
 
-/// The verdict's own view of the capture, derived the way the daemon derives `FaceStatus`.
-/// That signal can be stale, missing on runs that never looked, or reached second by `select!`.
+/// Uses the status embedded in the verification result, with the same priority as daemon `FaceStatus`.
+/// The separate status stream may be stale, absent, or lose the race against verification in `select!`.
 fn decisive_status(
     rgb_status: gaze_core::dbus::CaptureStatus,
     ir_status: gaze_core::dbus::CaptureStatus,
@@ -1127,7 +1127,8 @@ pub fn service_defers_to_face_slot(service: Option<&str>) -> bool {
         .any(|path| pam_stack_runs_gaze(pam_service_contents(path).as_deref()))
 }
 
-/// Nothing routes a response here, so a prompt wedges the slot for the lock.
+/// The greeter cannot route a response to this slot, so prompting would block it
+/// for the rest of the lock screen session.
 pub fn service_cannot_be_prompted(service: Option<&str>) -> bool {
     is_unpromptable_slot(service)
 }
@@ -1197,7 +1198,8 @@ mod tests {
         assert!(!tty_confirmation(1, b'x'));
     }
 
-    // A timeout must decline outright; treating it as an absent terminal re-prompted unbounded.
+    // On timeout, decline instead of treating the terminal as absent and prompting again
+    // without a deadline.
     #[test]
     fn an_unanswered_prompt_declines_rather_than_reprompting() {
         assert!(!tty_confirmation(0, b'\n'));
@@ -1479,7 +1481,7 @@ mod tests {
 
     #[test]
     fn typed_confirmation_never_takes_an_empty_response() {
-        // Hosts that answer unknown prompts with "" must not auto-confirm.
+        // Do not treat an empty reply from an unknown prompt as confirmation.
         assert!(!typed_confirmation_accepted(None));
         assert!(!typed_confirmation_accepted(Some("")));
         assert!(!typed_confirmation_accepted(Some("   ")));

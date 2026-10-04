@@ -93,13 +93,14 @@ Item {
     sessionLock.locked = true
   }
 
-  // ext-session-lock outlives its client, and a restart carries no lock over, so
-  // a session locked this early is an orphan behind Hyprland's failsafe. Outputs
-  // are often still absent here, so ask until the answer means something.
+  // `ext-session-lock` can outlive its client, but a restarted shell does not
+  // inherit the lock. If the session was locked in this window, Hyprland's
+  // failsafe may leave it locked. Outputs may not be ready yet, so retry until
+  // their state can be checked.
   function checkStrandedLock() {
     if (strandedLockResolved || strandedLockCheckProc.running) return
 
-    // A lock this shell took is nobody's orphan.
+    // A lock already requested or held by this shell is not stranded.
     if (locked || lockRequested) {
       strandedLockResolved = true
       return
@@ -575,12 +576,12 @@ Item {
     id: strandedLockCheckProc
     command: ["bash", "-c", "omarchy-hyprland-session-locked"]
     onExited: function(exitCode) {
-      // No output to read the lock off yet.
+      // Exit status 2 means the lock state is not available yet; retry later.
       if (exitCode === 2) return
 
       root.strandedLockResolved = true
 
-      // A lock taken while this was in flight is this shell's own.
+      // If this shell requested a lock while the check ran, that lock is not stranded.
       root.strandedLock = exitCode === 0 && !root.locked && !root.lockRequested
       root.recoverStrandedLock()
     }
@@ -602,16 +603,16 @@ Item {
     repeat: false
     property double armedAt: 0
     onTriggered: {
-      // A countdown frozen by suspend fires right after resume, which would
-      // blank the freshly woken unlock screen under the user. Wall-clock time
-      // exposes the gap: take a fresh run-up instead of blanking.
+      // A countdown paused during suspend can fire as soon as the system resumes,
+      // blanking the unlock screen before the user can see it. Detect the elapsed
+      // wall-clock time and start a fresh countdown instead.
       if (Date.now() - armedAt > interval + 2000) {
         root.armBlankTimer()
         return
       }
-      // Only a password check in flight should hold the display up. The
-      // fingerprint PAM stays armed for the whole lock, so gating on
-      // `authenticating` here would keep the panel lit until unlock.
+      // Keep the display awake only while a password check is pending. Fingerprint
+      // PAM stays active throughout the lock, so checking `authenticating` here
+      // would keep the panel lit until the screen unlocks.
       if (root.lockRequested && !root.authenticatingPassword && !root.faceAuthenticating) root.runBlank()
     }
   }
@@ -634,7 +635,7 @@ Item {
     id: strandedLockRetryTimer
     interval: 500
     repeat: true
-    // Covers the compositor settling; screens coming back re-arm it.
+    // Allow time for the compositor to settle; re-arm this timer when screens return.
     readonly property int budget: 20
     property int remaining: 20
     running: !root.strandedLockResolved && remaining > 0
@@ -654,7 +655,7 @@ Item {
     function onScreensChanged() {
       root.requestSessionLock()
 
-      // A monitor still coming up has no workspace, so cannot answer yet.
+      // A monitor that is still starting has no workspace, so its lock state is not available yet.
       strandedLockRetryTimer.rearm()
       root.checkStrandedLock()
     }
@@ -675,8 +676,9 @@ Item {
     onFileChanged: reload()
   }
 
-  // No lock before PAM is known good. An answer from before then may be stale --
-  // the failsafe can be cleared from a TTY -- so re-ask rather than act on it.
+  // Wait until PAM is configured before checking for a stranded lock. The earlier
+  // result may be stale because the failsafe can be cleared from a TTY, so check
+  // again rather than relying on it.
   onPasswordPamConfiguredChanged: {
     if (!passwordPamConfigured) return
 

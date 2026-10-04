@@ -347,8 +347,9 @@ fn flush_config_apply(queue: &ApplyQueue) {
     drain_config_apply_queue(queue);
 }
 
-/// Holds the rows the config dialog populates. GTK widgets are reference counted, so this owns
-/// handles rather than borrows and the async reload can share it without relisting all 25 rows.
+/// Holds the rows populated by the config dialog. GTK widgets are reference counted, so this
+/// stores handles instead of borrows and can be shared with the async reload without listing
+/// all 25 rows again.
 struct ConfigRows {
     inference_execution_provider: libadwaita::ComboRow,
     inference_device: libadwaita::ComboRow,
@@ -521,8 +522,8 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
     );
 }
 
-/// Green once the profile holds captures for the spectrum, amber when a camera is configured
-/// but never captured, and unlit when no camera exists for that spectrum at all.
+/// Returns green when the profile has captures for this spectrum, amber when a camera is
+/// configured but the profile has no captures, and unlit when no camera is configured.
 fn spectrum_badge_class(enrolled: bool, configured: bool) -> &'static str {
     match (enrolled, configured) {
         (true, _) => "badge-success",
@@ -1827,7 +1828,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                     } else if dbus_is_not_activatable(&err)
                                         && !gaze_core::cpu::supports_inference()
                                     {
-                                        // Retrying cannot help: gazed exits on this CPU.
+                                        // This CPU cannot run `gazed`, so retrying the request will not
+                                        // help.
                                         status_page.set_title("Unsupported CPU");
                                         status_page.set_description(Some(
                                             gaze_core::cpu::UNSUPPORTED_CPU_MESSAGE,

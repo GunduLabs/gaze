@@ -5,7 +5,8 @@
 
 Use this guide to set up face authentication for `sudo`, polkit, and shared PAM stacks.
 
-`gaze auth` is useful, but it is only a daemon/camera test. It does not run through PAM.
+`gaze auth` is a useful first check for the daemon and camera, but it does not
+test the PAM stack itself.
 
 If you specifically want GNOME lock screen or GDM login behavior, use the [GNOME Extension guide](/guide/gnome).
 
@@ -17,11 +18,13 @@ If you specifically want GNOME lock screen or GDM login behavior, use the [GNOME
 old configurations. It is deprecated, prints a notice on every authentication,
 and will be removed; it does nothing that `pam_gaze.so simultaneous` does not.
 
-Sequential (the default) means face auth runs first, then password fallback.
-Simultaneous (enabled via the `simultaneous` option, e.g. `pam_gaze.so simultaneous`) means face auth and password prompt run in parallel.
-Retry (enabled via the `retry` option, e.g. `pam_gaze.so retry`) is a second Gaze
-entry placed *below* the password module, so face auth gets one more attempt
-after a rejected password. See [Retry after a rejected password](#retry-after-a-rejected-password).
+In sequential mode (the default), Gaze tries face authentication first and then
+falls back to the password prompt. With the `simultaneous` option (for example,
+`pam_gaze.so simultaneous`), face authentication and the password prompt run at
+the same time. The `retry` option (for example, `pam_gaze.so retry`) adds a
+second Gaze entry *below* the password module, giving face authentication one
+more chance after a rejected password. See
+[Retry after a rejected password](#retry-after-a-rejected-password).
 
 ### Network logins are skipped
 
