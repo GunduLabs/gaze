@@ -173,14 +173,14 @@ pub(super) fn crop_liveness_face(data: &FaceData) -> anyhow::Result<image::RgbIm
     let frame_h = frame_h.min(rgb.height()).max(1);
     let pad_x = (rgb.width() - frame_w) / 2;
     let pad_y = (rgb.height() - frame_h) / 2;
-    let content = image::imageops::crop_imm(&rgb, pad_x, pad_y, frame_w, frame_h).to_image();
+    let content = image::imageops::crop_imm(&rgb, pad_x, pad_y, frame_w, frame_h);
     let bbox = [
         data.bbox[0] - pad_x as f32,
         data.bbox[1] - pad_y as f32,
         data.bbox[2] - pad_x as f32,
         data.bbox[3] - pad_y as f32,
     ];
-    crate::liveness::crop_face(&content, bbox)
+    crate::liveness::crop_face(&*content, bbox)
 }
 
 pub fn load_eye_state(
