@@ -54,8 +54,7 @@ fn warn_on_ir_misconfig(cameras: &gaze_core::config::CameraConfig) {
     }
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -71,28 +70,20 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(i32::from(gaze_core::cpu::EXIT_UNSUPPORTED_CPU));
     }
 
-    gaze_vision::inference::ensure_supported_runtime()?;
-    if let Ok(version) = gaze_vision::inference::runtime_version() {
-        info!(version, "Loaded ONNX Runtime");
-    }
+    Config::migrate_file(CONFIG_PATH);
+    let config = Config::load()?;
+    gaze_vision::inference::prepare_environment(&config.inference)?;
+    run(config)
+}
 
-    let _initialized = ort::init()
-        .with_name("gazed")
-        .with_logger(std::sync::Arc::new(
-            move |level, category, _id, _location, message| {
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(target: "ort", "[{}] ({:?}) {}", category, level, message);
-                }
-            },
-        ))
-        .commit();
+#[tokio::main]
+async fn run(config: Config) -> anyhow::Result<()> {
+    gaze_vision::inference::initialize_runtime(&config.inference)?;
 
     info!("Initializing Gaze Daemon...");
 
     let t_load = std::time::Instant::now();
 
-    Config::migrate_file(CONFIG_PATH);
-    let config = Config::load()?;
     let security = &config.security;
 
     info!(
@@ -227,6 +218,7 @@ async fn main() -> anyhow::Result<()> {
         lock_epochs: lock_epochs.clone(),
         benchmark_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         last_good_config: Arc::new(Mutex::new(config.clone())),
+        loaded_model_config: Mutex::new(config.clone()),
         rt_handle: tokio::runtime::Handle::current(),
     };
 

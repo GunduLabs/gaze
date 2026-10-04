@@ -108,53 +108,51 @@ impl FaceDetector {
         Ok(padded)
     }
 
-    pub fn detect(&mut self, img: &Mat) -> Result<DetectResult, DetectError> {
-        let mat_square = Self::pad_to_square(img)?;
-        let mut mat_rgb = Mat::default();
-        opencv::imgproc::cvt_color_def(&mat_square, &mut mat_rgb, opencv::imgproc::COLOR_BGR2RGB)?;
-
+    fn pre_process(
+        mat_square: &Mat,
+        input_size: (usize, usize),
+    ) -> Result<ndarray::Array4<f32>, DetectError> {
+        let (w, h) = input_size;
         let mut mat_resized = Mat::default();
-        let target_size =
-            opencv::core::Size::new(self.input_size.0 as i32, self.input_size.1 as i32);
         opencv::imgproc::resize(
-            &mat_rgb,
+            mat_square,
             &mut mat_resized,
-            target_size,
+            opencv::core::Size::new(w as i32, h as i32),
             0.0,
             0.0,
             opencv::imgproc::INTER_LINEAR,
         )?;
 
-        let h = self.input_size.1;
-        let w = self.input_size.0;
         let plane_len = h * w;
         let mut input_array = ndarray::Array4::<f32>::zeros((1, 3, h, w));
-        {
-            let data = input_array.as_slice_mut().expect("contiguous ndarray");
-            let mat_data = mat_resized.data_bytes()?;
-
-            if mat_data.len() != plane_len * 3 {
-                return Err(DetectError::InferenceFailed(format!(
-                    "resized image data length {} does not match plane length {}",
-                    mat_data.len(),
-                    plane_len * 3
-                )));
-            }
-
-            for y in 0..h {
-                for x in 0..w {
-                    let pixel_idx = (y * w + x) * 3;
-                    let r = mat_data[pixel_idx];
-                    let g = mat_data[pixel_idx + 1];
-                    let b = mat_data[pixel_idx + 2];
-
-                    let dest_idx = y * w + x;
-                    data[dest_idx] = (r as f32 - 127.5) / 128.0;
-                    data[plane_len + dest_idx] = (g as f32 - 127.5) / 128.0;
-                    data[2 * plane_len + dest_idx] = (b as f32 - 127.5) / 128.0;
-                }
-            }
+        let data = input_array.as_slice_mut().expect("contiguous ndarray");
+        let mat_data = mat_resized.data_bytes()?;
+        let channels = mat_resized.channels() as usize;
+        if !matches!(channels, 3 | 4) {
+            return Err(DetectError::InferenceFailed(format!(
+                "expected a 3 or 4 channel frame, got {channels}"
+            )));
         }
+        if mat_data.len() != plane_len * channels {
+            return Err(DetectError::InferenceFailed(format!(
+                "resized image data length {} does not match plane length {}",
+                mat_data.len(),
+                plane_len * channels
+            )));
+        }
+
+        for (idx, pixel) in mat_data.chunks_exact(channels).enumerate() {
+            data[idx] = (pixel[2] as f32 - 127.5) / 128.0;
+            data[plane_len + idx] = (pixel[1] as f32 - 127.5) / 128.0;
+            data[2 * plane_len + idx] = (pixel[0] as f32 - 127.5) / 128.0;
+        }
+        Ok(input_array)
+    }
+
+    pub fn detect(&mut self, img: &Mat) -> Result<DetectResult, DetectError> {
+        let mat_square = Self::pad_to_square(img)?;
+        let input_array = Self::pre_process(&mat_square, self.input_size)?;
+        let (w, h) = self.input_size;
 
         let inputs = ort::inputs![TensorRef::from_array_view(&input_array)?];
         let outputs = self.session.run(inputs)?;
@@ -263,6 +261,9 @@ impl FaceDetector {
             return Err(DetectError::NoFacesDetected);
         }
 
+        let mut mat_rgb = Mat::default();
+        opencv::imgproc::cvt_color_def(&mat_square, &mut mat_rgb, opencv::imgproc::COLOR_BGR2RGB)?;
+
         // Keep boxes and landmarks in the padded image's coordinates: callers crop and align
         // against the returned mat_rgb, so subtracting the padding here would misplace them.
         let scale_x = (mat_square.cols() as f32) / (w as f32);
@@ -353,6 +354,56 @@ mod tests {
 
     fn filled(cols: i32, rows: i32, value: f64) -> Mat {
         Mat::new_rows_cols_with_default(rows, cols, CV_8UC3, Scalar::all(value)).unwrap()
+    }
+
+    #[test]
+    fn pre_process_matches_converting_to_rgb_before_resizing() {
+        for (width, height, typ) in [
+            (640, 480, CV_8UC3),
+            (63, 95, CV_8UC3),
+            (320, 320, CV_8UC3),
+            (640, 480, opencv::core::CV_8UC4),
+        ] {
+            let mut frame =
+                Mat::new_rows_cols_with_default(height, width, typ, Scalar::all(0.0)).unwrap();
+            for (idx, byte) in frame.data_bytes_mut().unwrap().iter_mut().enumerate() {
+                *byte = (idx * 37 + idx / 11) as u8;
+            }
+            let square = FaceDetector::pad_to_square(&frame).unwrap();
+            let tensor = FaceDetector::pre_process(&square, (320, 320)).unwrap();
+
+            let mut rgb = Mat::default();
+            opencv::imgproc::cvt_color_def(&square, &mut rgb, opencv::imgproc::COLOR_BGR2RGB)
+                .unwrap();
+            let mut resized = Mat::default();
+            opencv::imgproc::resize(
+                &rgb,
+                &mut resized,
+                opencv::core::Size::new(320, 320),
+                0.0,
+                0.0,
+                opencv::imgproc::INTER_LINEAR,
+            )
+            .unwrap();
+
+            assert_eq!(tensor.shape(), &[1, 3, 320, 320]);
+            let data = tensor.as_slice().unwrap();
+            for (idx, pixel) in resized
+                .data_bytes()
+                .unwrap()
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .enumerate()
+            {
+                for channel in 0..3 {
+                    assert_eq!(
+                        data[channel * 320 * 320 + idx],
+                        (pixel[channel] as f32 - 127.5) / 128.0
+                    );
+                }
+            }
+        }
     }
 
     #[test]

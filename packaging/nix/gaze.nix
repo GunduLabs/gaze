@@ -62,13 +62,6 @@ rustPlatform.buildRustPackage {
     tpm2-tss
   ];
 
-  env = {
-    # Link the nixpkgs ONNX Runtime instead of letting ort download one.
-    ORT_STRATEGY = "system";
-    ORT_LIB_LOCATION = "${lib.getLib onnxruntime}/lib";
-    ORT_PREFER_DYNAMIC_LINK = "1";
-  };
-
   # Two invocations keep gaze-vision's `detection` feature out of the clients.
   buildPhase = ''
     runHook preBuild
@@ -96,7 +89,8 @@ rustPlatform.buildRustPackage {
   # registers the same plugin types again and the scanner rejects the duplicates.
   postFixup = ''
     wrapProgram $out/bin/gazed \
-      --set GST_PLUGIN_SYSTEM_PATH_1_0 "${gstPluginPath}"
+      --set GST_PLUGIN_SYSTEM_PATH_1_0 "${gstPluginPath}" \
+      --set GAZE_CPU_ORT_PATH "${lib.getLib onnxruntime}/lib/libonnxruntime.so"
     wrapProgram $out/bin/gaze \
       --set GST_PLUGIN_SYSTEM_PATH_1_0 "${gstPluginPath}"
   '';

@@ -28,7 +28,6 @@ opencv_env := shell("pkg-config --exists opencv4 2>/dev/null || pkg-config --exi
 gui := lowercase(env("GAZE_GUI", "1"))
 gui_off := if gui =~ '^(0|false|no|off)$' { "1" } else { "" }
 gui_pkg := if gui_off == "1" { "" } else { "-p gaze-gui" }
-gui_feature := if gui_off == "1" { "" } else { ",gaze-gui/openvino" }
 gui_exclude := if gui_off == "1" { "--exclude gaze-gui" } else { "" }
 gui_notice := if gui_off == "1" { "echo 'note: GAZE_GUI is off, gaze-gui is excluded here; CI still checks it'" } else { "true" }
 
@@ -44,21 +43,18 @@ default:
 
 # ── build ─────────────────────────────────────────────────────────────────────
 
-# Two invocations so gaze-vision's `detection` feature does not unify into the client binaries;
-# ONNX Runtime's constructors require AVX2 and crash on older CPUs.
+# Two invocations keep gaze-vision's detector/inference code out of the client binaries.
+# Only the daemon loads ONNX Runtime, after checking CPU support.
 # Build all Rust workspace binaries (release)
 [group("build")]
-build-rust:
+build-rust: prepare-ort
     {{ opencv_env }} cargo build -p gazed --release
     {{ opencv_env }} cargo build -p gaze-cli {{ gui_pkg }} -p pam-gaze -p pam-gaze-grosshack --release
     scripts/check-pam-link.sh target/release/libpam_gaze.so target/release/libpam_gaze_grosshack.so
 
-# Build all Rust workspace binaries with OpenVINO configuration and runtime support.
-[group("build")]
-build-rust-openvino:
-    {{ opencv_env }} cargo build -p gazed --release --features gazed/openvino
-    {{ opencv_env }} cargo build -p gaze-cli {{ gui_pkg }} -p pam-gaze -p pam-gaze-grosshack --release --features gaze-cli/openvino{{ gui_feature }}
-    scripts/check-pam-link.sh target/release/libpam_gaze.so target/release/libpam_gaze_grosshack.so
+[private]
+prepare-ort:
+    bash scripts/prepare-ort.sh {{ quote(ort_version) }} {{ quote(arch) }}
 
 # Compile the SELinux policy module
 [group("build")]
@@ -82,21 +78,6 @@ prepare-flatpak-vendor:
     mkdir -p .flatpak-cache/cargo
     cargo vendor --locked --versioned-dirs > .flatpak-cache/cargo/config.toml
 
-[private]
-prepare-flatpak-ort:
-    mkdir -p .flatpak-cache/ort
-    arch="$(flatpak --default-arch)"; \
-    case "$arch" in \
-        x86_64) ort_arch="x64" ;; \
-        aarch64) ort_arch="aarch64" ;; \
-        *) echo "Unsupported Flatpak arch for ORT bootstrap: $arch" >&2; exit 1 ;; \
-    esac; \
-    ort_file="onnxruntime-linux-${ort_arch}-{{ ort_version }}.tgz"; \
-    ort_url="https://github.com/microsoft/onnxruntime/releases/download/v{{ ort_version }}/${ort_file}"; \
-    if [ ! -s .flatpak-cache/ort/onnxruntime.tgz ]; then \
-        curl -fsSL "$ort_url" -o .flatpak-cache/ort/onnxruntime.tgz; \
-    fi
-
 # flatpak-builder's ostree dirs need xattrs and same-filesystem co-location, so they default to
 # the repo tree; the `docker` wrapper moves them into a volume the sshfs mount can't host.
 flatpak_state_dir := env("FLATPAK_STATE_DIR", ".flatpak-builder")
@@ -105,7 +86,7 @@ flatpak_repo_dir := env("FLATPAK_REPO_DIR", "dist/flatpak-repo")
 
 # Build flatpak repo and bundle
 [group("build")]
-build-flatpak: prepare-flatpak-vendor prepare-flatpak-ort
+build-flatpak: prepare-flatpak-vendor
     mkdir -p dist/packages {{ quote(flatpak_repo_dir) }}
     flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
@@ -160,7 +141,7 @@ _nfpm config format:
         [ -n "$src" ] || continue
         [ -f "$src" ] || { echo "_nfpm: {{ config }} ships $src, which has not been built" >&2; exit 1; }
         binaries+=("$src")
-    done < <(grep -oE 'target/release/[A-Za-z0-9_.+-]+' {{ quote(config) }} | sort -u)
+    done < <(grep -oE 'target/release/(gaze-gui|gazed|gaze|lib[A-Za-z0-9_.+-]+)' {{ quote(config) }} | sort -u)
 
     needed() { objdump -p "${binaries[@]}" | awk '/NEEDED/ { print $2 }' | sort -u; }
 
@@ -519,7 +500,10 @@ _verify-package format:
         want_opencv_bounds
         ;;
     esac
-    ok "$base ships its daemon, PAM modules, polkit action, unit and config"
+    want_files /usr/lib/gaze/libonnxruntime.so \
+        /usr/share/licenses/gaze/onnxruntime/LICENSE /usr/share/licenses/gaze/onnxruntime/ThirdPartyNotices.txt
+    want_size /usr/lib/gaze/libonnxruntime.so 1000000
+    ok "$base ships its daemon, CPU runtime, PAM modules, polkit action, unit and config"
 
     load gaze-gui
     want_files /usr/bin/gaze-gui /usr/share/applications/com.gundulabs.Gaze.desktop \
@@ -610,7 +594,7 @@ package format: build-rust build-selinux && (package-prebuilt format)
 # Package already-built artifacts for a given packager
 [arg("format", pattern="deb|rpm|archlinux")]
 [group("package")]
-package-prebuilt format: _dist-packages
+package-prebuilt format: _dist-packages prepare-ort
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -663,11 +647,8 @@ _srpm-sources:
     tar --zstd -cf "$sources/vendor.tar.zst" vendor
 
     for ort_arch in x64 aarch64; do
-        ort_file="onnxruntime-linux-${ort_arch}-{{ ort_version }}.tgz"
-        [ -s "$sources/$ort_file" ] && continue
-        curl -fsSL \
-            "https://github.com/microsoft/onnxruntime/releases/download/v{{ ort_version }}/${ort_file}" \
-            -o "$sources/$ort_file"
+        scripts/fetch-ort.sh {{ quote(ort_version) }} "$ort_arch" \
+            "$sources/onnxruntime-linux-${ort_arch}-{{ ort_version }}.tgz"
     done
 
 # Build a source RPM (Copr input). Set RPM_SIGN_KEY to a gpg key id to sign it.
@@ -737,18 +718,16 @@ setup-hooks:
 
 # Run the full test suite
 [group("checks")]
-test:
+test: prepare-ort
     @{{ gui_notice }}
     {{ opencv_env }} cargo test --workspace {{ gui_exclude }} --release
-    {{ opencv_env }} cargo test -p gaze-core --release --features gaze-core/openvino-config config::
     bash scripts/test-keyring-pam.sh
     bash scripts/test-kwallet-pam.sh
 
-# Run the OpenVINO-gated tests with an OpenVINO-enabled system ONNX Runtime.
+# Run the inference tests against the runtime in ORT_DYLIB_PATH, such as Intel's OpenVINO build.
 [group("checks")]
-test-openvino:
-    {{ opencv_env }} cargo test -p gaze-vision --release --features gaze-vision/openvino -- inference::
-    {{ opencv_env }} cargo test -p gaze-core --release --features gaze-core/openvino-config config::
+test-openvino: prepare-ort
+    GAZE_TEST_OPENVINO=1 {{ opencv_env }} cargo test -p gaze-vision --release -- inference::
 
 # Check dependencies for known security advisories
 [group("checks")]
@@ -765,11 +744,6 @@ check-pam-link:
 lint:
     @{{ gui_notice }}
     {{ opencv_env }} cargo clippy --workspace {{ gui_exclude }} --all-targets -- -D warnings
-
-# Lint the OpenVINO-gated code with an OpenVINO-enabled system ONNX Runtime.
-[group("checks")]
-lint-openvino:
-    {{ opencv_env }} cargo clippy -p gaze-vision --all-targets --features gaze-vision/openvino -- -D warnings
 
 # Check formatting (does not write)
 [group("checks")]

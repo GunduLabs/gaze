@@ -215,7 +215,9 @@ pub struct BenchmarkResult {
 impl BenchmarkResult {
     pub fn ran_as_configured(&self) -> bool {
         self.fallback_reason.is_empty()
-            && self.execution_provider == self.requested_execution_provider
+            && (self.execution_provider == self.requested_execution_provider
+                || (self.requested_execution_provider == "auto"
+                    && matches!(self.execution_provider.as_str(), "openvino" | "vitis")))
             && self.device == self.requested_device
     }
 }
@@ -814,6 +816,21 @@ mod tests {
     fn a_device_fallback_is_not_reported_as_configured() {
         assert!(!benchmark_result("npu", "no npu driver").ran_as_configured());
         assert!(!benchmark_result("npu", "").ran_as_configured());
+    }
+
+    #[test]
+    fn auto_benchmark_accepts_either_npu_vendor_but_not_cpu_fallback() {
+        for provider in ["openvino", "vitis"] {
+            let mut result = benchmark_result("npu", "");
+            result.execution_provider = provider.into();
+            result.device = "npu".into();
+            result.requested_execution_provider = "auto".into();
+            result.requested_device = "npu".into();
+            assert!(result.ran_as_configured());
+            result.execution_provider = "cpu".into();
+            result.device = "cpu".into();
+            assert!(!result.ran_as_configured());
+        }
     }
 
     #[test]

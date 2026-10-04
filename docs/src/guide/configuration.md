@@ -83,42 +83,34 @@ execution_provider = "cpu"
 device = "cpu"
 ```
 
-OpenVINO does not select a fixed device at build time. The same
-OpenVINO-enabled Gaze binary can use an Intel CPU, Intel GPU, or Intel NPU.
-Select the device in `/etc/gaze/config.toml`.
-
-> **Hardware limitation:** `device = "npu"` means an Intel NPU. Gaze's OpenVINO
-> execution provider does not support AMD Ryzen AI/XDNA NPUs or AMD GPUs, so
-> setting this option on a Ryzen laptop will not use its NPU. Use the CPU
-> provider on AMD hardware.
-
-For supported Intel hardware, select the device like this:
+Standard builds also support Intel OpenVINO and AMD Ryzen AI. Install the vendor
+runtime and drivers using the [hardware acceleration guide](/guide/acceleration), then select automatic NPU acceleration:
 
 ```toml
 [inference]
-execution_provider = "openvino"
-device = "npu" # or "gpu" for an Intel GPU, "cpu" for an Intel CPU
+execution_provider = "auto"
+device = "npu"
 ```
 
-The shipped packages are CPU-only. Using OpenVINO requires both an ONNX Runtime
-built with its OpenVINO execution provider and a Gaze daemon compiled with the
-`openvino` Cargo feature; changing the config alone cannot enable it. See the
-[OpenVINO build instructions](/guide/development#build-and-test-rust-components).
-The Intel accelerator's Linux driver/runtime must also be installed for OpenVINO
-to discover and use it. Switching between supported devices does not require
-recompiling Gaze once you have an OpenVINO-enabled build.
+| Provider | Devices | Behavior |
+| --- | --- | --- |
+| `cpu` | `cpu` | Bundled ONNX Runtime CPU inference (default) |
+| `auto` | `npu` | Select Intel (`intel_vpu`) or AMD (`amdxdna`) from the bound NPU driver |
+| `openvino` | `cpu`, `gpu`, `npu` | Use the installed Intel OpenVINO runtime |
+| `vitis` | `npu` | Use the installed AMD Ryzen AI/Vitis AI runtime |
 
-On a CPU-only build, `gaze config` and the GUI refuse to set
-`execution_provider = "openvino"`. A config file that already contains it does
-not stop the daemon: it logs a warning and runs on the CPU, the same way every
-other unusable value in `/etc/gaze/config.toml` is handled.
+Restart `gazed` after installing a runtime or changing provider vendors. ONNX Runtime
+is loaded once per daemon process. Changing an OpenVINO device within that runtime
+can still reload models without restarting.
 
-The values stay lowercase in the config. Gaze converts the device name only
-when it calls OpenVINO. ONNX Runtime keeps its CPU execution provider after
-OpenVINO. It runs unsupported model operations on the CPU. If Gaze cannot
-create an OpenVINO session, it logs the error and creates a CPU session.
-`gaze doctor --benchmark` reports the execution provider and device each model
-actually uses, and warns when that is not the configured one.
+Missing libraries, unavailable drivers, model compilation failures, or failed startup
+warmups produce a logged reason and a CPU session for the affected model. CPU graph
+partitions may remain inside a successful accelerator session too; the provider label
+alone does not prove that every operation ran on the NPU. `gaze doctor --benchmark`
+reports each model's selected provider, timings, and any session fallback reason.
+
+OpenVINO's NPU support targets Intel. AMD uses `vitis`, with the hardware and OS
+restrictions documented by AMD. Neither provider makes an ordinary CPU or GPU an NPU.
 
 ## Change security level
 

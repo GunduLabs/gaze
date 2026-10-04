@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use image::RgbImage;
 use image::imageops::{FilterType, crop_imm, resize};
+use image::{GenericImageView, Rgb, RgbImage};
 use ndarray::Array4;
 use ort::{session::Session, value::TensorRef};
 
@@ -87,7 +87,10 @@ impl LivenessDetector {
     }
 }
 
-pub fn crop_face(img: &RgbImage, bbox: [f32; 4]) -> anyhow::Result<RgbImage> {
+pub fn crop_face(
+    img: &impl GenericImageView<Pixel = Rgb<u8>>,
+    bbox: [f32; 4],
+) -> anyhow::Result<RgbImage> {
     let [x1, y1, x2, y2] = bbox;
     let width = x2 - x1;
     let height = y2 - y1;
@@ -138,7 +141,10 @@ pub fn crop_face(img: &RgbImage, bbox: [f32; 4]) -> anyhow::Result<RgbImage> {
         anyhow::bail!("invalid face crop bounds");
     }
 
-    Ok(crop_imm(img, left, top, right - left + 1, bottom - top + 1).to_image())
+    let crop = crop_imm(img, left, top, right - left + 1, bottom - top + 1);
+    Ok(RgbImage::from_fn(crop.width(), crop.height(), |x, y| {
+        crop.get_pixel(x, y)
+    }))
 }
 
 pub const MIN_EYE_MOTION_RATIO: f32 = 0.02;
@@ -263,6 +269,19 @@ mod tests {
         let clamped = crop_face(&img, [0.0, 0.0, 20.0, 20.0]).unwrap();
         assert_eq!(clamped.width(), 55);
         assert_eq!(clamped.height(), 55);
+    }
+
+    #[test]
+    fn crop_face_from_a_borrowed_region_matches_an_owned_crop() {
+        let img = RgbImage::from_fn(120, 110, |x, y| Rgb([x as u8, y as u8, (x + y) as u8]));
+        let content = crop_imm(&img, 10, 15, 100, 80);
+        let owned = content.to_image();
+        for bbox in [[40.0, 30.0, 60.0, 50.0], [0.0, 0.0, 20.0, 20.0]] {
+            assert_eq!(
+                crop_face(&*content, bbox).unwrap(),
+                crop_face(&owned, bbox).unwrap()
+            );
+        }
     }
 
     #[test]

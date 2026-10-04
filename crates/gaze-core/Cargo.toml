@@ -14,9 +14,6 @@ publish.workspace = true
 readme.workspace = true
 repository.workspace = true
 
-[features]
-openvino-config = []
-
 [dependencies]
 anyhow.workspace = true
 libc.workspace = true

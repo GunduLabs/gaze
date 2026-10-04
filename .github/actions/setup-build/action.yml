@@ -22,7 +22,7 @@ inputs:
     default: ""
   ort-cache-dir:
     description: >-
-      Directory ort-sys extracts ONNX Runtime into. It links it by absolute path,
+      Directory scripts/prepare-ort.sh keeps the verified ONNX Runtime archive in,
       so it must live somewhere rust-cache persists (the default ~/.cache is not).
     default: /home/runner/.ort-cache
 

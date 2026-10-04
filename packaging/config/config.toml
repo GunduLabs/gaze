@@ -13,13 +13,11 @@
 # releases if not already present in the models directory.
 
 [inference]
-# "cpu" uses the normal ONNX Runtime CPU execution provider.
-# "openvino" requires a Gaze build compiled with the openvino Cargo feature
-# and keeps the ONNX models while sending supported work through OpenVINO.
+# Standard builds accept cpu, auto, openvino (Intel), and vitis (AMD Ryzen AI).
+# auto selects the NPU driver/vendor at startup. Register a vendor runtime under
+# /usr/lib/gaze/runtimes, then restart gazed. Failed accelerator setup falls back to CPU.
 execution_provider = "cpu"
-# "cpu" is the only value the released packages accept. "gpu" and "npu" require
-# a Gaze build compiled with the openvino-config Cargo feature, and need
-# execution_provider = "openvino".
+# cpu requires cpu; auto and vitis require npu; openvino accepts cpu, gpu, or npu.
 device = "cpu"
 
 [security]

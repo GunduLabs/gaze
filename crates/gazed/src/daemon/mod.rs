@@ -303,6 +303,9 @@ pub struct AuthDaemon {
     pub lock_epochs: LockEpochs,
     pub benchmark_running: Arc<AtomicBool>,
     pub last_good_config: Arc<Mutex<Config>>,
+    /// Settings used by the loaded sessions, independent of reads from disk. Holding
+    /// this lock also serializes config writes and model replacements.
+    pub loaded_model_config: Mutex<Config>,
     pub rt_handle: tokio::runtime::Handle,
 }
 

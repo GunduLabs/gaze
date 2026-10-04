@@ -176,11 +176,7 @@ pub(super) fn config_findings(config: &Config) -> Vec<Check> {
         );
     }
     if let Err(err) = config.inference.validate() {
-        let fix = if cfg!(feature = "openvino") {
-            "Use cpu/cpu, openvino/cpu, openvino/gpu, or openvino/npu in the [inference] table."
-        } else {
-            "Use cpu/cpu, or install a Gaze build compiled with the openvino Cargo feature."
-        };
+        let fix = "Use cpu/cpu, auto/npu, openvino/cpu, openvino/gpu, openvino/npu, or vitis/npu in [inference].";
         error(err.to_string(), fix);
     }
 

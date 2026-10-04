@@ -107,6 +107,7 @@ require_artifacts() {
     for file in \
         "$(artifact gazed)" \
         "$(artifact gaze)" \
+        "$(artifact libonnxruntime.so)" \
         "$(artifact libpam_gaze.so)" \
         "$(artifact libpam_gaze_grosshack.so)"
     do
@@ -208,6 +209,7 @@ restore_or_remove() {
 }
 
 link_binaries() {
+    backup_and_install "$(artifact libonnxruntime.so)" "$LOCAL_BIN_DIR/libonnxruntime.so" 0644
     backup_and_install "$(artifact gazed)" "$LOCAL_BIN_DIR/gazed" 0755
     backup_and_install "$(artifact gaze)" "$LOCAL_BIN_DIR/gaze" 0755
     backup_and_link "$LOCAL_BIN_DIR/gazed" /usr/bin/gazed
@@ -221,6 +223,7 @@ link_binaries() {
 }
 
 restore_binaries() {
+    restore_or_remove "$LOCAL_BIN_DIR/libonnxruntime.so"
     restore_or_remove /usr/bin/gazed
     restore_or_remove /usr/bin/gaze
     restore_or_remove /usr/bin/gaze-gui
