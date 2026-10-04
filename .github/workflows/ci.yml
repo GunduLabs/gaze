@@ -22,8 +22,8 @@ env:
   CARGO_TERM_COLOR: always
   JUST_VERSION: 1.58.0
   NFPM_VERSION: v2.47.0
-  # The OpenVINO job loads Intel's onnxruntime-openvino wheel, which trails the upstream
-  # ONNX Runtime releases that `ort_version` tracks. Only the CI check uses it; no package ships it.
+  # The test job's OpenVINO step loads Intel's onnxruntime-openvino wheel, which trails the upstream
+  # ONNX Runtime releases that `ort_version` tracks. Only that check uses it; no package ships it.
   ORT_OPENVINO_VERSION: 1.24.1
 
 jobs:
@@ -113,6 +113,37 @@ jobs:
           CARGO_BUILD_JOBS: 2
         run: just test
 
+      - name: Provide Intel's OpenVINO ONNX Runtime
+        env:
+          ORT_OPENVINO_DIR: /home/runner/ort-openvino/lib
+        run: |
+          set -euo pipefail
+          version="$ORT_OPENVINO_VERSION"
+          wheel="$RUNNER_TEMP/ov-wheel"
+          mkdir -p "$ORT_OPENVINO_DIR" "$wheel"
+          python3 -m pip download --no-deps --only-binary :all: \
+            --python-version 3.12 --platform manylinux_2_28_x86_64 \
+            "onnxruntime-openvino==$version" -d "$wheel"
+          unzip -qo "$wheel"/*.whl 'onnxruntime/capi/lib*.so*' -d "$wheel/extracted"
+          mv "$wheel"/extracted/onnxruntime/capi/lib*.so* "$ORT_OPENVINO_DIR/"
+          real="libonnxruntime.so.$version"
+          soname="$(objdump -p "$ORT_OPENVINO_DIR/$real" | awk '/SONAME/ { print $2 }')"
+          test -n "$soname"
+          ln -sf "$real" "$ORT_OPENVINO_DIR/libonnxruntime.so"
+          ln -sf "$real" "$ORT_OPENVINO_DIR/$soname"
+          objdump -T "$ORT_OPENVINO_DIR/$real" \
+            | grep -q OrtSessionOptionsAppendExecutionProvider_OpenVINO
+          test -e "$ORT_OPENVINO_DIR/$soname"
+
+      - name: Run inference tests with OpenVINO
+        env:
+          CARGO_BUILD_JOBS: 2
+          ORT_DYLIB_PATH: /home/runner/ort-openvino/lib/libonnxruntime.so
+          LD_LIBRARY_PATH: /home/runner/ort-openvino/lib
+          GAZE_TEST_OPENVINO: "1"
+          XDG_CACHE_HOME: /home/runner/.cache/gaze-test
+        run: just test-openvino
+
   gnome-shell:
     name: GNOME
     runs-on: ubuntu-latest
@@ -148,54 +179,6 @@ jobs:
 
       - name: Test supported KDE distributions
         run: node scripts/test-kde.mjs
-
-  openvino:
-    name: OpenVINO
-    runs-on: ubuntu-latest
-    env:
-      ORT_LIB_LOCATION: /home/runner/ort-openvino/lib
-      ORT_DYLIB_PATH: /home/runner/ort-openvino/lib/libonnxruntime.so
-      GAZE_TEST_OPENVINO: "1"
-      XDG_CACHE_HOME: /home/runner/.cache/gaze-test
-      LD_LIBRARY_PATH: /home/runner/ort-openvino/lib
-      CARGO_BUILD_JOBS: 2
-      RUSTFLAGS: -Cdebuginfo=0
-
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 1
-
-      - name: Set up build environment
-        uses: ./.github/actions/setup-build
-        with:
-          just-version: ${{ env.JUST_VERSION }}
-          components: clippy
-          cache-key: ci-openvino-v1
-
-      - name: Provide an OpenVINO-enabled ONNX Runtime
-        run: |
-          set -euo pipefail
-          version="$ORT_OPENVINO_VERSION"
-          wheel="$RUNNER_TEMP/ov-wheel"
-          mkdir -p "$ORT_LIB_LOCATION" "$wheel"
-          python3 -m pip download --no-deps --only-binary :all: \
-            --python-version 3.12 --platform manylinux_2_28_x86_64 \
-            "onnxruntime-openvino==$version" -d "$wheel"
-          unzip -qo "$wheel"/*.whl 'onnxruntime/capi/lib*.so*' -d "$wheel/extracted"
-          mv "$wheel"/extracted/onnxruntime/capi/lib*.so* "$ORT_LIB_LOCATION/"
-          real="libonnxruntime.so.$version"
-          soname="$(objdump -p "$ORT_LIB_LOCATION/$real" | awk '/SONAME/ { print $2 }')"
-          test -n "$soname"
-          ln -sf "$real" "$ORT_LIB_LOCATION/libonnxruntime.so"
-          ln -sf "$real" "$ORT_LIB_LOCATION/$soname"
-          objdump -T "$ORT_LIB_LOCATION/$real" \
-            | grep -q OrtSessionOptionsAppendExecutionProvider_OpenVINO
-          test -e "$ORT_LIB_LOCATION/$soname"
-
-      - name: Run inference tests with OpenVINO
-        run: just test-openvino
 
   package:
     name: Package (${{ matrix.format }}${{ matrix.distro && format(', {0}', matrix.distro) || '' }})
