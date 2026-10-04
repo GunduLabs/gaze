@@ -160,3 +160,61 @@ pub fn unseal(public: &[u8], private: &[u8]) -> anyhow::Result<SealedKey> {
         Private::try_from(private.to_vec())?,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn device_constants_point_at_the_local_tpms() {
+        assert_eq!(TPM_RM_DEVICE, "/dev/tpmrm0");
+        assert_eq!(TPM_RAW_DEVICE, "/dev/tpm0");
+        assert_eq!(TPM_DEVICES, [TPM_RM_DEVICE, TPM_RAW_DEVICE]);
+        assert_eq!(KEY_LEN, 32);
+    }
+
+    #[test]
+    fn sealed_template_needs_no_tpm_and_is_a_keyed_hash() {
+        let public = sealed_object_public().expect("template builds without hardware");
+        assert!(
+            matches!(public, Public::KeyedHash { .. }),
+            "sealing needs a keyed-hash object, not a key"
+        );
+        assert_eq!(
+            public.name_hashing_algorithm(),
+            HashingAlgorithm::Sha256
+        );
+    }
+
+    #[test]
+    fn sealed_template_is_bound_to_this_tpm_but_supplied_externally() {
+        let public = sealed_object_public().unwrap();
+        let attrs = public.object_attributes();
+        assert!(attrs.fixed_tpm(), "sealed blob must not migrate to another TPM");
+        assert!(attrs.fixed_parent(), "sealed blob must stay under the same parent");
+        assert!(
+            !attrs.sensitive_data_origin(),
+            "we supply the key, so it must not originate in the TPM"
+        );
+        assert!(attrs.user_with_auth(), "unseal is gated on auth");
+        assert!(
+            !attrs.decrypt() && !attrs.sign_encrypt() && !attrs.restricted(),
+            "a sealed object is data, not a key"
+        );
+    }
+
+    #[test]
+    fn sealed_template_round_trips_through_its_on_disk_form() {
+        let public = sealed_object_public().unwrap();
+        let bytes = public.marshall().expect("template must marshall for disk");
+        assert!(!bytes.is_empty());
+        let parsed = Public::unmarshall(&bytes).expect("stored blob must parse");
+        assert_eq!(parsed.marshall().unwrap(), bytes);
+    }
+
+    #[test]
+    fn unmarshall_rejects_garbage_instead_of_panicking() {
+        assert!(Public::unmarshall(&[]).is_err());
+        assert!(Public::unmarshall(&[0u8; 8]).is_err());
+    }
+}

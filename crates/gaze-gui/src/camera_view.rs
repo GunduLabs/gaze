@@ -22,16 +22,71 @@ struct FrameData {
     mat: opencv::core::Mat,
 }
 
+fn aspect_ratio(width: i32, height: i32) -> Option<f64> {
+    if height > 0 {
+        Some(width as f64 / height as f64)
+    } else {
+        None
+    }
+}
+
 fn update_aspect(
     frame_aspect: &Cell<f64>,
     aspect_frame: &gtk4::AspectFrame,
     width: i32,
     height: i32,
 ) {
-    if height > 0 {
-        let aspect = width as f64 / height as f64;
+    if let Some(aspect) = aspect_ratio(width, height) {
         frame_aspect.set(aspect);
         aspect_frame.set_ratio(aspect as f32);
+    }
+}
+
+/// GTK's R8g8b8 texture format expects RGB, so swap each BGR pixel in place.
+fn bgr_to_rgb(bytes: &mut [u8]) {
+    for chunk in bytes.as_chunks_mut::<3>().0 {
+        chunk.swap(0, 2);
+    }
+}
+
+/// Letterboxed view size for the overlay ellipse, matching the draw closure.
+fn overlay_view_size(width: f64, height: f64, aspect: f64) -> (f64, f64) {
+    if aspect > 0.0 {
+        if width / height > aspect {
+            (height * aspect, height)
+        } else {
+            (width, width / aspect)
+        }
+    } else {
+        (width, height)
+    }
+}
+
+fn status_style(status: CaptureStatus, active: bool) -> (f64, f64, f64, f64) {
+    if !active {
+        return (0.6, 0.6, 0.6, 0.4);
+    }
+    match status {
+        CaptureStatus::NoFace | CaptureStatus::Unused => (0.6, 0.6, 0.6, 0.5),
+        CaptureStatus::TooDark
+        | CaptureStatus::NotCentered
+        | CaptureStatus::Clipped
+        | CaptureStatus::TooFar
+        | CaptureStatus::TooClose => (1.0, 0.8, 0.2, 0.7),
+        CaptureStatus::Ready | CaptureStatus::Usable => (0.2, 0.9, 0.4, 0.85),
+    }
+}
+
+fn status_label(status: CaptureStatus) -> &'static str {
+    match status {
+        CaptureStatus::Unused => "Camera Not Activated", // This should never be shown
+        CaptureStatus::NoFace => "No Face",
+        CaptureStatus::TooDark => "Need More Light",
+        CaptureStatus::NotCentered => "Not Centered",
+        CaptureStatus::Clipped => "Face Clipped",
+        CaptureStatus::TooFar => "Come Closer",
+        CaptureStatus::TooClose => "Back Up",
+        CaptureStatus::Ready | CaptureStatus::Usable => "Ready",
     }
 }
 
@@ -71,12 +126,9 @@ impl CameraFeed {
                 let Ok(bytes) = frame_to_bytes(&frame) else {
                     continue;
                 };
-                // GTK's R8g8b8 texture format expects RGB, so swap each pixel.
 
                 let mut rgb = bytes;
-                for chunk in rgb.as_chunks_mut::<3>().0 {
-                    chunk.swap(0, 2);
-                }
+                bgr_to_rgb(&mut rgb);
 
                 let Ok(size) = frame.size() else {
                     continue;
@@ -124,16 +176,7 @@ impl CameraFeed {
 
             let w = width as f64;
             let h = height as f64;
-            let aspect = draw_aspect.get();
-            let (view_w, view_h) = if aspect > 0.0 {
-                if w / h > aspect {
-                    (h * aspect, h)
-                } else {
-                    (w, w / aspect)
-                }
-            } else {
-                (w, h)
-            };
+            let (view_w, view_h) = overlay_view_size(w, h, draw_aspect.get());
 
             let cx = w / 2.0;
             let cy = h / 2.0;
@@ -141,19 +184,7 @@ impl CameraFeed {
             let rx = min_dim * 0.28;
             let ry = min_dim * 0.38;
 
-            let (red, green, blue, alpha) = if active {
-                match status {
-                    CaptureStatus::NoFace | CaptureStatus::Unused => (0.6, 0.6, 0.6, 0.5),
-                    CaptureStatus::TooDark
-                    | CaptureStatus::NotCentered
-                    | CaptureStatus::Clipped
-                    | CaptureStatus::TooFar
-                    | CaptureStatus::TooClose => (1.0, 0.8, 0.2, 0.7),
-                    CaptureStatus::Ready | CaptureStatus::Usable => (0.2, 0.9, 0.4, 0.85),
-                }
-            } else {
-                (0.6, 0.6, 0.6, 0.4)
-            };
+            let (red, green, blue, alpha) = status_style(status, active);
 
             let _ = cr.save();
             cr.translate(cx, cy);
@@ -190,16 +221,7 @@ impl CameraFeed {
             }
 
             if active {
-                let label = match status {
-                    CaptureStatus::Unused => "Camera Not Activated", // This should never be shown
-                    CaptureStatus::NoFace => "No Face",
-                    CaptureStatus::TooDark => "Need More Light",
-                    CaptureStatus::NotCentered => "Not Centered",
-                    CaptureStatus::Clipped => "Face Clipped",
-                    CaptureStatus::TooFar => "Come Closer",
-                    CaptureStatus::TooClose => "Back Up",
-                    CaptureStatus::Ready | CaptureStatus::Usable => "Ready",
-                };
+                let label = status_label(status);
                 cr.set_font_size(min_dim * 0.035);
                 if let Ok(extents) = cr.text_extents(label) {
                     cr.move_to(cx - extents.width() / 2.0, bottom + min_dim * 0.06);
@@ -350,4 +372,89 @@ pub fn build_camera_widget(feed: &CameraFeed) -> gtk4::AspectFrame {
     aspect_frame.set_hexpand(true);
     aspect_frame.set_vexpand(true);
     aspect_frame
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aspect_ratio_follows_width_over_height() {
+        assert_eq!(aspect_ratio(640, 480), Some(640.0 / 480.0));
+        assert_eq!(aspect_ratio(1920, 1080), Some(1920.0 / 1080.0));
+    }
+
+    #[test]
+    fn aspect_ratio_rejects_non_positive_heights() {
+        assert_eq!(aspect_ratio(640, 0), None);
+        assert_eq!(aspect_ratio(640, -1), None);
+    }
+
+    #[test]
+    fn bgr_pixels_become_rgb_and_lengths_are_preserved() {
+        let mut bytes = vec![10u8, 20, 30, 40, 50, 60];
+        bgr_to_rgb(&mut bytes);
+        assert_eq!(bytes, vec![30u8, 20, 10, 60, 50, 40]);
+    }
+
+    #[test]
+    fn bgr_swap_ignores_a_trailing_partial_pixel() {
+        let mut bytes = vec![1u8, 2, 3, 4, 99];
+        bgr_to_rgb(&mut bytes);
+        assert_eq!(bytes, vec![3u8, 2, 1, 4, 99]);
+    }
+
+    #[test]
+    fn overlay_letterboxes_to_the_frame_aspect() {
+        // Wider widget than the frame: height limits the view.
+        assert_eq!(overlay_view_size(800.0, 400.0, 4.0 / 3.0), (400.0 * 4.0 / 3.0, 400.0));
+        // Taller widget: width limits the view.
+        assert_eq!(overlay_view_size(400.0, 800.0, 4.0 / 3.0), (400.0, 400.0 / (4.0 / 3.0)));
+        // No aspect yet: use the whole widget.
+        assert_eq!(overlay_view_size(800.0, 600.0, 0.0), (800.0, 600.0));
+    }
+
+    #[test]
+    fn inactive_status_is_always_grey() {
+        for status in [
+            CaptureStatus::NoFace,
+            CaptureStatus::Ready,
+            CaptureStatus::TooDark,
+            CaptureStatus::Unused,
+        ] {
+            assert_eq!(status_style(status, false), (0.6, 0.6, 0.6, 0.4));
+        }
+    }
+
+    #[test]
+    fn status_colors_distinguish_guidance_from_ready() {
+        assert_eq!(
+            status_style(CaptureStatus::NoFace, true),
+            (0.6, 0.6, 0.6, 0.5)
+        );
+        assert_eq!(
+            status_style(CaptureStatus::TooDark, true),
+            (1.0, 0.8, 0.2, 0.7)
+        );
+        assert_eq!(
+            status_style(CaptureStatus::Ready, true),
+            (0.2, 0.9, 0.4, 0.85)
+        );
+        assert_eq!(
+            status_style(CaptureStatus::Usable, true),
+            status_style(CaptureStatus::Ready, true)
+        );
+    }
+
+    #[test]
+    fn every_status_has_a_user_facing_label() {
+        assert_eq!(status_label(CaptureStatus::NoFace), "No Face");
+        assert_eq!(status_label(CaptureStatus::TooDark), "Need More Light");
+        assert_eq!(status_label(CaptureStatus::NotCentered), "Not Centered");
+        assert_eq!(status_label(CaptureStatus::Clipped), "Face Clipped");
+        assert_eq!(status_label(CaptureStatus::TooFar), "Come Closer");
+        assert_eq!(status_label(CaptureStatus::TooClose), "Back Up");
+        assert_eq!(status_label(CaptureStatus::Ready), "Ready");
+        assert_eq!(status_label(CaptureStatus::Usable), "Ready");
+    }
 }

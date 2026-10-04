@@ -87,4 +87,37 @@ mod tests {
             "only the first column names the module"
         );
     }
+
+    #[test]
+    fn policy_path_lives_under_the_gaze_share_dir() {
+        assert_eq!(
+            policy_path(GDM_CAMERA_MODULE),
+            format!("{POLICY_DIR}/{GDM_CAMERA_MODULE}.pp")
+        );
+        assert_eq!(
+            policy_path(GREETER_KEYRING_MODULE),
+            format!("{POLICY_DIR}/{GREETER_KEYRING_MODULE}.pp")
+        );
+    }
+
+    #[test]
+    fn module_listing_ignores_blank_lines_and_extra_columns() {
+        let listing = "\n  \ngaze-greeter-keyring 1.0 extra-col\n";
+        assert!(lists_module(listing, GREETER_KEYRING_MODULE));
+        assert!(!lists_module("", GDM_CAMERA_MODULE));
+        assert!(!lists_module("\n   \n", GDM_CAMERA_MODULE));
+    }
+
+    #[test]
+    fn module_matching_is_exact_per_line() {
+        // `semodule -l` prints "<name> <version>"; a substring elsewhere must not count.
+        assert!(!lists_module(
+            "my-gaze-gdm-camera 1.0\n",
+            GDM_CAMERA_MODULE
+        ));
+        assert!(lists_module(
+            "gaze-gdm-camera 1.0\ngaze-greeter-keyring 1.0\n",
+            GREETER_KEYRING_MODULE
+        ));
+    }
 }

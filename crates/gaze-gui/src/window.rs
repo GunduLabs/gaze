@@ -163,6 +163,10 @@ async fn begin_face_capture(
     );
 }
 
+fn custom_rows_visible(selected: u32) -> bool {
+    selected == SecurityLevel::CUSTOM_LEVEL_INDEX
+}
+
 fn set_custom_config_rows_visible(
     level_row: &libadwaita::ComboRow,
     detector_row: &libadwaita::ComboRow,
@@ -171,7 +175,7 @@ fn set_custom_config_rows_visible(
     ir_threshold_row: &libadwaita::SpinRow,
     hybrid_row: &libadwaita::ComboRow,
 ) {
-    let is_custom = level_row.selected() == SecurityLevel::CUSTOM_LEVEL_INDEX;
+    let is_custom = custom_rows_visible(level_row.selected());
     detector_row.set_visible(is_custom);
     recognizer_row.set_visible(is_custom);
     rgb_threshold_row.set_visible(is_custom);
@@ -179,11 +183,19 @@ fn set_custom_config_rows_visible(
     hybrid_row.set_visible(is_custom);
 }
 
+fn start_delay_scope_visible(start_delay_value: f64) -> bool {
+    start_delay_value > 0.0
+}
+
 fn set_start_delay_scope_row_visible(
     start_delay_row: &libadwaita::SpinRow,
     scope_row: &libadwaita::ComboRow,
 ) {
-    scope_row.set_visible(start_delay_row.value() > 0.0);
+    scope_row.set_visible(start_delay_scope_visible(start_delay_row.value()));
+}
+
+fn liveness_rows_visible(enabled: bool) -> bool {
+    enabled
 }
 
 fn set_liveness_config_rows_visible(
@@ -191,9 +203,25 @@ fn set_liveness_config_rows_visible(
     threshold_row: &libadwaita::SpinRow,
     max_seconds_row: &libadwaita::SpinRow,
 ) {
-    let active = enabled_switch.is_active();
+    let active = liveness_rows_visible(enabled_switch.is_active());
     threshold_row.set_visible(active);
     max_seconds_row.set_visible(active);
+}
+
+fn keyring_sensitivity(
+    keyring_active: bool,
+    kwallet_active: bool,
+    liveness_active: bool,
+    encrypt_active: bool,
+) -> (bool, bool, bool, bool) {
+    let keyring_enabled = keyring_active || kwallet_active;
+    let prerequisites = liveness_active && encrypt_active;
+    (
+        keyring_active || prerequisites,
+        kwallet_active || prerequisites,
+        !keyring_enabled,
+        !keyring_enabled,
+    )
 }
 
 fn set_keyring_config_sensitivity(
@@ -202,12 +230,21 @@ fn set_keyring_config_sensitivity(
     liveness_switch: &gtk4::Switch,
     encrypt_templates_switch: &gtk4::Switch,
 ) {
-    let keyring_enabled = keyring_switch.is_active() || kwallet_switch.is_active();
-    let prerequisites = liveness_switch.is_active() && encrypt_templates_switch.is_active();
-    keyring_switch.set_sensitive(keyring_switch.is_active() || prerequisites);
-    kwallet_switch.set_sensitive(kwallet_switch.is_active() || prerequisites);
-    liveness_switch.set_sensitive(!keyring_enabled);
-    encrypt_templates_switch.set_sensitive(!keyring_enabled);
+    let (keyring_sensitive, kwallet_sensitive, liveness_sensitive, encrypt_sensitive) =
+        keyring_sensitivity(
+            keyring_switch.is_active(),
+            kwallet_switch.is_active(),
+            liveness_switch.is_active(),
+            encrypt_templates_switch.is_active(),
+        );
+    keyring_switch.set_sensitive(keyring_sensitive);
+    kwallet_switch.set_sensitive(kwallet_sensitive);
+    liveness_switch.set_sensitive(liveness_sensitive);
+    encrypt_templates_switch.set_sensitive(encrypt_sensitive);
+}
+
+fn inference_device_visible(provider: &str) -> bool {
+    provider == "openvino"
 }
 
 fn set_inference_device_row_visible(
@@ -216,7 +253,7 @@ fn set_inference_device_row_visible(
 ) {
     let provider =
         InferenceConfig::execution_provider_from_index(execution_provider_row.selected() as usize);
-    device_row.set_visible(provider == "openvino");
+    device_row.set_visible(inference_device_visible(provider));
 }
 
 type SharedProxy = Rc<RefCell<Option<Rc<GazeProxy<'static>>>>>;
@@ -372,17 +409,24 @@ struct CameraChoices<'a> {
     ir_options: &'a [(String, String)],
 }
 
+fn camera_subtitle(options: &[(String, String)], configured: &str) -> Option<String> {
+    if is_listed_source(options, configured) {
+        None
+    } else {
+        Some(format!(
+            "Configured as {configured}, which this list cannot show"
+        ))
+    }
+}
+
 fn set_camera_row_subtitle(
     row: &libadwaita::ComboRow,
     options: &[(String, String)],
     configured: &str,
 ) {
-    if is_listed_source(options, configured) {
-        row.set_subtitle("");
-    } else {
-        row.set_subtitle(&format!(
-            "Configured as {configured}, which this list cannot show"
-        ));
+    match camera_subtitle(options, configured) {
+        Some(subtitle) => row.set_subtitle(&subtitle),
+        None => row.set_subtitle(""),
     }
 }
 
@@ -2278,6 +2322,98 @@ mod tests {
         assert!(
             pump_until(|| log.borrow().applied.len() == 2, Duration::from_secs(5)),
             "the queue should keep accepting writes after a failure"
+        );
+    }
+
+    #[test]
+    fn spectrum_badges_distinguish_enrolled_configured_and_absent() {
+        assert_eq!(spectrum_badge_class(true, true), "badge-success");
+        assert_eq!(spectrum_badge_class(true, false), "badge-success");
+        assert_eq!(spectrum_badge_class(false, true), "badge-warning");
+        assert_eq!(spectrum_badge_class(false, false), "badge-muted");
+    }
+
+    #[test]
+    fn custom_security_level_reveals_the_detail_rows() {
+        assert!(custom_rows_visible(SecurityLevel::CUSTOM_LEVEL_INDEX));
+        assert!(!custom_rows_visible(0));
+        assert!(!custom_rows_visible(SecurityLevel::CUSTOM_LEVEL_INDEX + 100));
+    }
+
+    #[test]
+    fn start_delay_scope_only_matters_for_positive_delays() {
+        assert!(!start_delay_scope_visible(0.0));
+        assert!(!start_delay_scope_visible(-5.0));
+        assert!(start_delay_scope_visible(0.5));
+        assert!(start_delay_scope_visible(2500.0));
+    }
+
+    #[test]
+    fn liveness_rows_follow_the_enabled_switch() {
+        assert!(liveness_rows_visible(true));
+        assert!(!liveness_rows_visible(false));
+    }
+
+    #[test]
+    fn keyring_switches_need_both_liveness_and_encryption() {
+        // Nothing on: everything sensitive except the locks on liveness/encryption.
+        assert_eq!(
+            keyring_sensitivity(false, false, false, false),
+            (false, false, true, true)
+        );
+        // Only one prerequisite: still locked.
+        assert_eq!(
+            keyring_sensitivity(false, false, true, false),
+            (false, false, true, true)
+        );
+        assert_eq!(
+            keyring_sensitivity(false, false, false, true),
+            (false, false, true, true)
+        );
+        // Both prerequisites: the backends unlock, and they pin liveness/encryption on.
+        assert_eq!(
+            keyring_sensitivity(false, false, true, true),
+            (true, true, true, true)
+        );
+        // An active backend stays sensitive and locks its prerequisites on.
+        assert_eq!(
+            keyring_sensitivity(true, false, false, false),
+            (true, false, false, false)
+        );
+        assert_eq!(
+            keyring_sensitivity(false, true, false, false),
+            (false, true, false, false)
+        );
+    }
+
+    #[test]
+    fn inference_device_row_is_an_openvino_extra() {
+        assert!(inference_device_visible("openvino"));
+        for provider in ["cpu", "auto", "vitis", "", "OpenVINO"] {
+            assert!(
+                !inference_device_visible(provider),
+                "{provider:?} must not show the device row"
+            );
+        }
+    }
+
+    #[test]
+    fn camera_subtitle_is_empty_for_listed_sources() {
+        let options = vec![
+            ("Primary camera".to_string(), "primary".to_string()),
+            ("USB camera".to_string(), "/dev/video0".to_string()),
+        ];
+        assert_eq!(camera_subtitle(&options, "primary"), None);
+        assert_eq!(camera_subtitle(&options, "/dev/video0"), None);
+        let unlisted = camera_subtitle(&options, "/dev/video9")
+            .expect("unlisted source must explain itself");
+        assert!(
+            unlisted.contains("/dev/video9"),
+            "subtitle must name the configured value: {unlisted}"
+        );
+        assert!(
+            camera_subtitle(&[], "anything").is_some(),
+            "an empty picker cannot show anything"
         );
     }
 }
