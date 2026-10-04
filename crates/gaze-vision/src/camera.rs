@@ -153,20 +153,13 @@ pub fn preferred_capture_source(cameras: &CameraConfig) -> (String, bool) {
     }
 }
 
-pub fn preview_can_be_shared(cameras: &CameraConfig) -> bool {
-    if !cameras.ir.trim().is_empty() {
-        return false;
-    }
-    let (source, _) = preferred_capture_source(cameras);
-    is_pipewire_source(&source)
-}
-
-fn is_pipewire_source(source: &str) -> bool {
-    matches!(
-        classify_source(source, true),
-        Ok(SourceElement::Element(element))
-            if element == "pipewiresrc" || element.starts_with("pipewiresrc ")
-    )
+/// Whether a local preview can run alongside gazed's privileged capture.
+pub fn preview_can_be_shared(_cameras: &CameraConfig) -> bool {
+    // gazed always captures through Camera::open_privileged_kind, which resolves every
+    // source to a backing V4L2 node. Even a PipeWire preview must release that node before
+    // capture; gazed supplies the preview frames instead. Keep this policy in sync with
+    // the privileged capture trust rule, not the unprivileged source classification.
+    false
 }
 
 pub fn resolve_node(source: &str) -> Option<String> {
@@ -717,6 +710,7 @@ impl Camera {
 
     fn open_privileged_kind(camera_source: &str, want_color: bool) -> anyhow::Result<Self> {
         gstreamer::init()?;
+        // Only V4L2 is trusted here; preview_can_be_shared relies on this exclusive access.
         let node = resolve_privileged_node(camera_source, want_color).ok_or_else(|| {
             anyhow::anyhow!(
                 "refusing privileged capture of {camera_source:?}: no backing /dev/video node \
@@ -1654,12 +1648,37 @@ mod tests {
     }
 
     #[test]
-    fn a_pipewire_camera_can_back_two_previews_at_once() {
-        assert!(preview_can_be_shared(&cameras_with("primary", "")));
-        assert!(preview_can_be_shared(&cameras_with(
+    fn a_pipewire_preview_must_release_the_camera_for_privileged_capture() {
+        // Privileged capture uses the backing V4L2 node, not a second PipeWire stream.
+        for source in [
+            "primary",
+            "pipewiresrc",
             "pipewiresrc target-object=v4l2_input.pci-0000:00:14.0-usb-0:5:1.0",
-            ""
-        )));
+            "pipewiresrc path=42",
+            "pipewiresrc fd=7",
+        ] {
+            assert!(
+                !preview_can_be_shared(&cameras_with(source, "")),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn privileged_node_resolution_requires_an_exclusive_preview() {
+        // Explicit nodes resolve without hardware. Both privileged RGB and IR capture
+        // use these same nodes, which cannot be streamed by the local preview as well.
+        for want_color in [true, false] {
+            let node = resolve_privileged_node("  /dev/video0  ", want_color)
+                .expect("canonical V4L2 node");
+            assert_eq!(node, "/dev/video0");
+            let cameras = if want_color {
+                cameras_with(&node, "")
+            } else {
+                cameras_with("", &node)
+            };
+            assert!(!preview_can_be_shared(&cameras));
+        }
     }
 
     #[test]
