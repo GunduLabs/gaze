@@ -37,12 +37,11 @@ the file through the daemon, so it needs a polkit authorization.
 
 **Hardware**
 
-- Inference execution provider, either ONNX Runtime directly or through OpenVINO
-- OpenVINO inference device
+- Inference execution provider: CPU, automatic NPU selection, Intel OpenVINO, or AMD Vitis AI
+- OpenVINO inference device; automatic and AMD modes select NPU
 
-Both offer only `cpu` on the released packages. The other values need a build
-compiled with the `openvino-config` Cargo feature. See
-[Configuration](/guide/configuration) for what those builds accept.
+The standard build exposes all providers. Install the vendor runtime and drivers
+using [Hardware Acceleration](/guide/acceleration), then restart the daemon after changing its provider.
 
 **Cameras**
 

@@ -65,9 +65,7 @@
             just
           ];
           env = {
-            ORT_STRATEGY = "system";
-            ORT_LIB_LOCATION = "${pkgs.lib.getLib pkgs.onnxruntime}/lib";
-            ORT_PREFER_DYNAMIC_LINK = "1";
+            GAZE_CPU_ORT_PATH = "${pkgs.lib.getLib pkgs.onnxruntime}/lib/libonnxruntime.so";
           };
         };
       });

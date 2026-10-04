@@ -337,7 +337,7 @@ unsafe fn free_conv_response(resp: *mut c_char) {
     unsafe {
         let len = libc::strlen(resp);
         if len > 0 {
-            std::slice::from_raw_parts_mut(resp as *mut u8, len).zeroize();
+            std::slice::from_raw_parts_mut(resp, len).zeroize();
         }
         libc::free(resp as *mut c_void);
     }

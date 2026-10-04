@@ -55,9 +55,9 @@ ort = { version = "2.0.0-rc.13", default-features = false, features = [
     "std",
     "ndarray",
     "tracing",
-    "download-binaries",
-    "copy-dylibs",
-    "tls-native",
+    "load-dynamic",
+    "openvino",
+    "vitis",
     "api-21",
 ] }
 parking_lot = "0.12.5"

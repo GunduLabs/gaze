@@ -7,7 +7,7 @@
 %global ort_libdir %{_libdir}/%{name}
 %global extension_uuid gaze@gundulabs.com
 
-# gazed links a bundled ONNX Runtime, so keep the private library out of rpm's automatic
+# gazed loads a bundled ONNX Runtime, so keep the private library out of rpm's automatic
 # provides and requires; otherwise it either satisfies or demands a system libonnxruntime.
 %global __provides_exclude_from ^%{ort_libdir}/.*\\.so.*$
 %global __requires_exclude ^libonnxruntime\\.so.*$
@@ -174,12 +174,9 @@ if ! pkg-config --exists opencv4 && ! pkg-config --exists opencv && pkg-config -
     export OPENCV_PKGCONFIG_NAME=opencv5
 fi
 
-# Split like `just build-rust`: gazed's `detection` feature must not unify ONNX
-# Runtime into the clients, whose constructors crash on non-AVX2 CPUs.
-ORT_STRATEGY=system \
-ORT_LIB_LOCATION="$PWD/ort/lib" \
-ORT_PREFER_DYNAMIC_LINK=1 \
-RUSTFLAGS="-Cdebuginfo=0 -Clink-arg=-Wl,-rpath,%{ort_libdir}" \
+# Split like `just build-rust`: gazed's `detection` feature must not unify the
+# inference code into the clients or PAM modules.
+RUSTFLAGS="-Cdebuginfo=0" \
     cargo build --release --locked --offline -p gazed
 
 RUSTFLAGS="-Cdebuginfo=0" \
@@ -210,6 +207,8 @@ cp -p packaging/authselect/custom/gaze/* %{buildroot}%{_datadir}/authselect/vend
 
 install -dm 0755 %{buildroot}%{ort_libdir}
 cp -aP ort/lib/libonnxruntime.so* %{buildroot}%{ort_libdir}/
+install -Dpm0644 ort/LICENSE %{buildroot}%{_datadir}/licenses/gaze/onnxruntime/LICENSE
+install -Dpm0644 ort/ThirdPartyNotices.txt %{buildroot}%{_datadir}/licenses/gaze/onnxruntime/ThirdPartyNotices.txt
 
 install -Dpm 0755 target/release/gaze-gui %{buildroot}%{_bindir}/gaze-gui
 install -Dpm 0644 packaging/gui/com.gundulabs.Gaze.desktop %{buildroot}%{_datadir}/applications/com.gundulabs.Gaze.desktop
@@ -317,6 +316,7 @@ ${SCRIPTLET_HYPRLOCK_POSTUN}
 %{_datadir}/gaze/gaze-greeter-keyring.pp
 %dir %{ort_libdir}
 %{ort_libdir}/libonnxruntime.so*
+%license %{_datadir}/licenses/gaze/onnxruntime/
 
 %files gui
 %license LICENSE

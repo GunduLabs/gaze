@@ -355,5 +355,5 @@ nix develop
 ```
 
 The shell provides the Rust toolchain and all native build inputs (OpenCV,
-GStreamer, GTK4, ONNX Runtime, tpm2-tss) with the `ORT_STRATEGY=system`
-environment already set, so `cargo build` works out of the box.
+GStreamer, GTK4, ONNX Runtime, tpm2-tss) with `GAZE_CPU_ORT_PATH` pointing
+`gazed` at the Nix ONNX Runtime, so `cargo build` works out of the box.

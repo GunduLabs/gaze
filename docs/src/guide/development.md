@@ -117,7 +117,7 @@ Only `gaze-gui` needs gtk4 and libadwaita (`libgtk-4-dev`/`gtk4-devel`/`gtk4`,
 `libadwaita-1-dev`/`libadwaita-devel`/`libadwaita`, and on Debian/Ubuntu the
 cairo, glib, gdk-pixbuf, pango, and graphene headers listed with them). For a
 TUI-only checkout, set `GAZE_GUI=0` (also `false`, `no`, or `off`) and skip
-those packages: `build-rust`, `build-rust-openvino`, `test`, and `lint` then
+those packages: `build-rust`, `test`, and `lint` then
 leave `gaze-gui` out, and `dev-link-system` skips the binary it never built.
 The daemon, the `gaze` TUI, the CLI, and the PAM modules are unaffected. Like
 `OPENCV_PKGCONFIG_NAME`, this only covers those `just` recipes: a bare `cargo
@@ -166,27 +166,22 @@ just check-pam-link    # check the PAM modules' shared-library footprint
 just fmt               # apply formatting (fmt-check only checks)
 ```
 
-The default build supports CPU inference only. To build the daemon and
-configuration tools with OpenVINO support, provide an OpenVINO-enabled system
-ONNX Runtime and run:
+The standard daemon includes both Intel OpenVINO and AMD Vitis AI adapters and
+loads ONNX Runtime dynamically at startup. `just build-rust` stages the pinned CPU
+runtime and its notices beside `gazed`; package builds install it under `/usr/lib/gaze`.
 
-```bash
-ORT_STRATEGY=system \
-ORT_LIB_LOCATION=/path/to/onnxruntime/lib \
-ORT_PREFER_DYNAMIC_LINK=1 \
-just build-rust-openvino
-```
-
-The `openvino` Cargo feature is explicit. The build fails when that feature is
-enabled without a matching ONNX Runtime library.
+Register vendor runtimes as described in [Hardware Acceleration](/guide/acceleration). To test a custom
+SDK without installing it, set `ORT_DYLIB_PATH` to its complete ONNX Runtime library
+and start the daemon with that SDK's `LD_LIBRARY_PATH`. Keep system-service libraries
+outside `/home` and `/root`, which `gazed.service` hides.
 
 ::: warning Keep the `api-21` feature on the `ort` dependency
-`gaze` and `gaze-vision` depend on `ort` with `default-features = false` and
+`gazed` and `gaze-vision` depend on `ort` with `default-features = false` and
 `api-21`, which pins the ONNX Runtime C API version the binaries ask for. `ort`
 defaults to the newest API its release targets, and a runtime older than that
 makes ONNX Runtime hand back a null API pointer, which `ort` turns into a panic
-during process teardown and a core dump. Anything that links a system runtime
-(Nix, Flatpak, RPM source builds, `ORT_STRATEGY=system` in CI) can be as old as
+during process teardown and a core dump. A runtime supplied from outside
+the pinned download (Nix, `ORT_DYLIB_PATH`, or a vendor SDK) can be as old as
 ONNX Runtime 1.21, so an `ort` upgrade must keep the `api-21` feature rather than
 inherit the new default. `gazed` also checks the loaded runtime before touching
 `ort`, and `gaze-vision`'s `inference::` tests fail against a runtime that is too
@@ -203,29 +198,14 @@ so staying on `api-21` keeps session creation on the path that installs the CPU
 provider directly.
 :::
 
-The OpenVINO-enabled binary supports Intel CPU, GPU, and NPU devices. The
-`device` value in `/etc/gaze/config.toml` selects the device at run time; GPU
-and NPU do not require separate builds. An installation with OpenVINO support
-should set `execution_provider = "openvino"` and `device = "npu"` in its
-installed configuration. If OpenVINO setup fails at run time, Gaze still falls
-back to the ONNX Runtime CPU provider.
-
-::: warning OpenVINO is a source build only
-The released `.deb`, `.rpm`, Arch, and Flatpak packages are all produced by
-`just build-rust`, so none of them include OpenVINO. Getting it means building
-from source with `just build-rust-openvino` against your own OpenVINO-enabled
-ONNX Runtime.
-:::
-
-CI does not cover the OpenVINO features either: `just lint`, `just test`, and
-`just build-rust` all build CPU-only. Run `just test-openvino`,
-`just lint-openvino`, and `just build-rust-openvino` by hand before changing
-anything behind the `openvino` or `openvino-config` features. `just test` does
-compile `gaze-core` with `openvino-config` alone, which is what the CLI and GUI
-ship with, but that path needs no OpenVINO runtime.
+`just lint` compiles both vendor adapters and `just test` exercises configuration,
+hardware discovery, runtime/API validation, and CPU fallback without NPU hardware.
+The OpenVINO CI job (`just test-openvino`) reruns the inference tests against Intel's runtime. Actual NPU execution,
+model operator coverage, driver compatibility, and recognition/liveness precision need
+[hardware validation](/guide/acceleration#hardware-validation) on both vendors.
 
 ::: warning Build with `just build-rust`, not `cargo build --workspace`
-`just build-rust` builds the daemon and the clients in separate cargo invocations so feature unification cannot link ONNX Runtime into the CLI, GUI, or PAM modules. ONNX Runtime's startup code requires AVX2, and a single workspace build would silently reintroduce crashes on older CPUs.
+`just build-rust` builds the daemon and the clients in separate cargo invocations so feature unification cannot link ONNX Runtime into the CLI, GUI, or PAM modules. This keeps inference code out of the clients and PAM modules; the daemon checks CPU support before loading ONNX Runtime.
 :::
 
 ::: warning Never give the PAM modules a `gaze-vision` dependency
@@ -233,8 +213,8 @@ ship with, but that path needs no OpenVINO runtime.
 `common-auth`, including network services such as `sshd` and `dovecot`. Linking
 the vision stack there pulls in OpenCV, which pulls in OpenBLAS, whose ELF
 constructor reserves per-thread buffers sized for every core. Services that cap
-address space then abort on load: this broke IMAP authentication in
-[#607](https://github.com/GunduLabs/gaze/issues/607). A crate boundary, not a
+address space then abort on load, which has broken IMAP authentication before.
+A crate boundary, not a
 cargo feature, is what keeps this out, because features unify across packages
 built in one `cargo build` invocation. `just check-pam-link` verifies the built
 modules link only basic system libraries and, for the main PAM module, the TPM
@@ -481,13 +461,11 @@ of truth. Build with:
 just build-flatpak
 ```
 
-This runs two `[private]` prep recipes first (`prepare-flatpak-vendor`, `prepare-flatpak-ort`),
-so the first run needs network access even though the sandboxed build itself is `--offline`:
+This runs a `[private]` prep recipe first (`prepare-flatpak-vendor`), so the first run needs
+network access even though the sandboxed build itself is `--offline`:
+`cargo vendor --locked --versioned-dirs` populates `.flatpak-cache/cargo` from crates.io.
 
-- `cargo vendor --locked --versioned-dirs` populates `.flatpak-cache/cargo` from crates.io.
-- It downloads the pinned ONNX Runtime release tarball into `.flatpak-cache/ort`.
-
-Both are cached under `.flatpak-cache/` (removed by `just clean`), so only the first build
+It is cached under `.flatpak-cache/` (removed by `just clean`), so only the first build
 per checkout pays the network/OpenCV-from-source cost; expect that first build to take a
 while, since OpenCV compiles from source inside the sandbox.
 

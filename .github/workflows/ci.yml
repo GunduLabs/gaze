@@ -22,7 +22,7 @@ env:
   CARGO_TERM_COLOR: always
   JUST_VERSION: 1.58.0
   NFPM_VERSION: v2.47.0
-  # The OpenVINO job links against Intel's onnxruntime-openvino wheel, which trails the upstream
+  # The OpenVINO job loads Intel's onnxruntime-openvino wheel, which trails the upstream
   # ONNX Runtime releases that `ort_version` tracks. Only the CI check uses it; no package ships it.
   ORT_OPENVINO_VERSION: 1.24.1
 
@@ -153,9 +153,10 @@ jobs:
     name: OpenVINO
     runs-on: ubuntu-latest
     env:
-      ORT_STRATEGY: system
       ORT_LIB_LOCATION: /home/runner/ort-openvino/lib
-      ORT_PREFER_DYNAMIC_LINK: "1"
+      ORT_DYLIB_PATH: /home/runner/ort-openvino/lib/libonnxruntime.so
+      GAZE_TEST_OPENVINO: "1"
+      XDG_CACHE_HOME: /home/runner/.cache/gaze-test
       LD_LIBRARY_PATH: /home/runner/ort-openvino/lib
       CARGO_BUILD_JOBS: 2
       RUSTFLAGS: -Cdebuginfo=0
@@ -193,14 +194,8 @@ jobs:
             | grep -q OrtSessionOptionsAppendExecutionProvider_OpenVINO
           test -e "$ORT_LIB_LOCATION/$soname"
 
-      - name: Run clippy with OpenVINO
-        run: just lint-openvino
-
-      - name: Run tests with OpenVINO
+      - name: Run inference tests with OpenVINO
         run: just test-openvino
-
-      - name: Build with OpenVINO
-        run: just build-rust-openvino
 
   package:
     name: Package (${{ matrix.format }}${{ matrix.distro && format(', {0}', matrix.distro) || '' }})

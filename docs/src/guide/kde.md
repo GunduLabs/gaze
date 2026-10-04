@@ -120,8 +120,7 @@ face authentication") is sent as an *error* message, which briefly replaces the
 slot's hint label. Gaze still sends one informational message when it starts
 looking, even though nothing displays it: that is what tells the greeter this
 unlock had a prompt, and without it a face match lands on an extra "Unlock" button
-instead of going straight to the desktop
-([bug 497904](https://bugs.kde.org/show_bug.cgi?id=497904)).
+instead of going straight to the desktop.
 
 ### Only one Gaze per unlock
 
@@ -156,9 +155,9 @@ daemon is down.
 On Plasma before 6.7 (and before the 6.5.x and 6.6.x backports), a *successful*
 biometric unlock made `pam_unix` in the password service report a failure, so
 unlocking repeatedly in quick succession could trip `pam_faillock` and lock the
-account. That is
+account. That was fixed in
 [kscreenlocker 29d01bf7](https://invent.kde.org/plasma/kscreenlocker/-/commit/29d01bf74958b96b41d1726b5ff6b133a7a0e402),
-fixing [bug 484363](https://bugs.kde.org/show_bug.cgi?id=484363), and it applies to
+and it applies to
 fingerprint readers exactly as much as to Gaze. `faillock --user "$USER"` shows
 what has been recorded, and `faillock --reset` clears it.
 :::
@@ -244,10 +243,8 @@ Two things stay true even then:
   `password-auth`, the module stands down there once the up-front service runs it,
   so one submit does not start two scans fighting for the camera.
 
-Nothing here applies to SDDM.
-[sddm#1220](https://github.com/sddm/sddm/pull/1220) proposed the same feature in
-December 2019 and is still open, and upstream's answer has been that Plasma Login
-Manager is where it gets solved.
+Nothing here applies to SDDM. Upstream's answer has been that Plasma Login
+Manager is where this gets solved.
 
 ### Optional TPM-backed KWallet unlock
 
