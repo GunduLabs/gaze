@@ -289,12 +289,7 @@ mod tests {
     fn empty_ir_never_warns_from_the_diagnostic() {
         for emitter in [false, true] {
             assert_eq!(
-                ir_misconfig_diagnostic(
-                    "",
-                    emitter,
-                    &mut no_resolve,
-                    &mut |_| true,
-                ),
+                ir_misconfig_diagnostic("", emitter, &mut no_resolve, &mut |_| true,),
                 None,
                 "empty ir is the caller's empty-emitter branch, not this one"
             );
@@ -332,7 +327,12 @@ mod tests {
     #[test]
     fn unresolvable_source_warns_only_when_the_emitter_needs_it() {
         assert_eq!(
-            ir_misconfig_diagnostic("pipewiresrc target-object=x", true, &mut no_resolve, &mut |_| true),
+            ir_misconfig_diagnostic(
+                "pipewiresrc target-object=x",
+                true,
+                &mut no_resolve,
+                &mut |_| true
+            ),
             Some(("pipewiresrc target-object=x".to_string(), None))
         );
         assert_eq!(

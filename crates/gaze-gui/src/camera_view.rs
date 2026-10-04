@@ -407,9 +407,15 @@ mod tests {
     #[test]
     fn overlay_letterboxes_to_the_frame_aspect() {
         // Wider widget than the frame: height limits the view.
-        assert_eq!(overlay_view_size(800.0, 400.0, 4.0 / 3.0), (400.0 * 4.0 / 3.0, 400.0));
+        assert_eq!(
+            overlay_view_size(800.0, 400.0, 4.0 / 3.0),
+            (400.0 * (4.0 / 3.0), 400.0)
+        );
         // Taller widget: width limits the view.
-        assert_eq!(overlay_view_size(400.0, 800.0, 4.0 / 3.0), (400.0, 400.0 / (4.0 / 3.0)));
+        assert_eq!(
+            overlay_view_size(400.0, 800.0, 4.0 / 3.0),
+            (400.0, 400.0 / (4.0 / 3.0))
+        );
         // No aspect yet: use the whole widget.
         assert_eq!(overlay_view_size(800.0, 600.0, 0.0), (800.0, 600.0));
     }
