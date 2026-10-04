@@ -4,15 +4,23 @@
 use gaze_core::config::Config;
 use gaze_security::keyring::{Backend, Zeroizing};
 
-pub fn enroll(username: &str, config: &Config, backend: Backend) -> anyhow::Result<()> {
+/// The CLI must refuse before touching core dumps or prompting when the
+/// backend is switched off in config. Pure so it can be tested without PAM.
+fn ensure_backend_enabled(config: &Config, backend: Backend) -> anyhow::Result<()> {
+    let enabled = match backend {
+        Backend::Gnome => config.storage.unlock_gnome_keyring,
+        Backend::KWallet => config.storage.unlock_kwallet,
+    };
     anyhow::ensure!(
-        match backend {
-            Backend::Gnome => config.storage.unlock_gnome_keyring,
-            Backend::KWallet => config.storage.unlock_kwallet,
-        },
+        enabled,
         "enable {} unlock with gaze config first",
         backend.name()
     );
+    Ok(())
+}
+
+pub fn enroll(username: &str, config: &Config, backend: Backend) -> anyhow::Result<()> {
+    ensure_backend_enabled(config, backend)?;
     config.storage.validate_keyring(&config.liveness)?;
     // The interactive CLI owns this process; do not change dump policy in a PAM host.
     let limit = libc::rlimit {
@@ -49,4 +57,48 @@ pub fn enroll(username: &str, config: &Config, backend: Backend) -> anyhow::Resu
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with(unlock_gnome: bool, unlock_kwallet: bool) -> Config {
+        let mut config = Config::default();
+        config.storage.unlock_gnome_keyring = unlock_gnome;
+        config.storage.unlock_kwallet = unlock_kwallet;
+        config
+    }
+
+    #[test]
+    fn disabled_backend_is_rejected_before_any_side_effect() {
+        let config = config_with(false, false);
+        for backend in [Backend::Gnome, Backend::KWallet] {
+            let err = ensure_backend_enabled(&config, backend).expect_err("must refuse");
+            assert!(
+                err.to_string().contains(backend.name()),
+                "error should name the backend: {err}"
+            );
+            assert!(
+                err.to_string().contains("gaze config"),
+                "error should say how to enable it: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn each_backend_is_gated_independently() {
+        assert!(
+            ensure_backend_enabled(&config_with(true, false), Backend::Gnome).is_ok()
+        );
+        assert!(
+            ensure_backend_enabled(&config_with(true, false), Backend::KWallet).is_err()
+        );
+        assert!(
+            ensure_backend_enabled(&config_with(false, true), Backend::KWallet).is_ok()
+        );
+        assert!(
+            ensure_backend_enabled(&config_with(false, true), Backend::Gnome).is_err()
+        );
+    }
 }

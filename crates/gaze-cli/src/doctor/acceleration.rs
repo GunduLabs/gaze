@@ -3,7 +3,7 @@
 
 use super::*;
 use gaze_core::acceleration::{NpuDevice, discover_npus, vendor_runtime};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn register_fix(library: &Path) -> String {
     format!(
@@ -95,5 +95,78 @@ pub(super) fn check_acceleration(report: &mut Report, config: Option<&Config>) {
                 ),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gaze_core::config::Config;
+
+    fn config_with_provider(provider: &str) -> Config {
+        let mut config = Config::default();
+        config.inference.execution_provider = provider.to_string();
+        config
+    }
+
+    fn device(provider: &'static str) -> NpuDevice {
+        NpuDevice {
+            node: PathBuf::from("/dev/accel/accel0"),
+            driver: "intel_vpu".to_string(),
+            provider,
+        }
+    }
+
+    #[test]
+    fn cpu_never_selects_a_provider_even_with_npus_present() {
+        let config = config_with_provider("cpu");
+        let devices = vec![device("openvino")];
+        assert_eq!(active_provider(Some(&config), &devices), None);
+    }
+
+    #[test]
+    fn auto_selects_the_first_discovered_npu() {
+        let config = config_with_provider("auto");
+        let devices = vec![device("openvino"), device("vitis")];
+        assert_eq!(active_provider(Some(&config), &devices), Some("openvino"));
+    }
+
+    #[test]
+    fn auto_with_no_npu_selects_nothing() {
+        let config = config_with_provider("auto");
+        assert_eq!(active_provider(Some(&config), &[]), None);
+    }
+
+    #[test]
+    fn explicit_provider_is_used_verbatim() {
+        let config = config_with_provider("openvino");
+        assert_eq!(
+            active_provider(Some(&config), &[]),
+            Some("openvino")
+        );
+        let config = config_with_provider("vitis");
+        let devices = vec![device("openvino")];
+        assert_eq!(active_provider(Some(&config), &devices), Some("vitis"));
+    }
+
+    #[test]
+    fn missing_config_selects_nothing() {
+        let devices = vec![device("openvino")];
+        assert_eq!(active_provider(None, &devices), None);
+    }
+
+    #[test]
+    fn register_fix_names_the_library_and_its_config_file() {
+        let library = Path::new("/usr/lib/gaze/runtimes/openvino/libonnxruntime.so");
+        let fix = register_fix(library);
+        assert!(
+            fix.contains("/usr/lib/gaze/runtimes/openvino/libonnxruntime.so"),
+            "{fix}"
+        );
+        assert!(
+            fix.contains("/usr/lib/gaze/runtimes/openvino/library-path"),
+            "{fix}"
+        );
+        assert!(fix.contains("restart gazed"), "{fix}");
     }
 }

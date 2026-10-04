@@ -22,33 +22,57 @@ use tracing_subscriber::EnvFilter;
 use zbus::connection::Builder;
 
 fn warn_on_ir_misconfig(cameras: &gaze_core::config::CameraConfig) {
-    let ir = cameras.ir.trim();
-    if ir.is_empty() {
-        if cameras.emitter_enabled {
+    if let Some((node, resolved)) = ir_misconfig_diagnostic(
+        cameras.ir.trim(),
+        cameras.emitter_enabled,
+        &mut |ir| gaze_vision::camera::resolve_node(ir),
+        &mut |node| std::path::Path::new(&node).exists(),
+    ) {
+        if let Some(resolved) = resolved {
             warn!(
-                "cameras.emitter_enabled is set but cameras.ir is empty; the IR emitter will not be used"
+                node = node,
+                resolved = resolved,
+                "resolved cameras.ir device node does not exist; IR capture will fail until it appears"
+            );
+        } else {
+            warn!(
+                node = node,
+                "could not resolve a physical V4L2 device node for cameras.ir; the IR emitter will not be driven"
             );
         }
-        return;
+    } else if !cameras.ir.trim().is_empty() {
+        // Resolved and present, or unresolvable with the emitter off: nothing to warn about.
+    } else if cameras.emitter_enabled {
+        warn!(
+            "cameras.emitter_enabled is set but cameras.ir is empty; the IR emitter will not be used"
+        );
     }
-    match gaze_vision::camera::resolve_node(ir) {
+}
+
+fn ir_misconfig_diagnostic(
+    ir: &str,
+    emitter_enabled: bool,
+    resolve: &mut dyn FnMut(&str) -> Option<String>,
+    exists: &mut dyn FnMut(&str) -> bool,
+) -> Option<(String, Option<String>)> {
+    if ir.is_empty() {
+        return None;
+    }
+    match resolve(ir) {
         // A missing node breaks IR capture whether or not the emitter is driven.
         Some(node) => {
-            if !std::path::Path::new(&node).exists() {
-                warn!(
-                    node = ir,
-                    resolved = node,
-                    "resolved cameras.ir device node does not exist; IR capture will fail until it appears"
-                );
+            if !exists(&node) {
+                Some((ir.to_string(), Some(node)))
+            } else {
+                None
             }
         }
         // Only the emitter needs a physical V4L2 node, so stay quiet when it is off.
         None => {
-            if cameras.emitter_enabled {
-                warn!(
-                    node = ir,
-                    "could not resolve a physical V4L2 device node for cameras.ir; the IR emitter will not be driven"
-                );
+            if emitter_enabled {
+                Some((ir.to_string(), None))
+            } else {
+                None
             }
         }
     }
@@ -251,4 +275,74 @@ async fn run(config: Config) -> anyhow::Result<()> {
     std::future::pending::<()>().await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ir_misconfig_diagnostic;
+
+    fn no_resolve(_: &str) -> Option<String> {
+        None
+    }
+
+    #[test]
+    fn empty_ir_never_warns_from_the_diagnostic() {
+        for emitter in [false, true] {
+            assert_eq!(
+                ir_misconfig_diagnostic(
+                    "",
+                    emitter,
+                    &mut no_resolve,
+                    &mut |_| true,
+                ),
+                None,
+                "empty ir is the caller's empty-emitter branch, not this one"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_node_warns_with_or_without_the_emitter() {
+        for emitter in [false, true] {
+            assert_eq!(
+                ir_misconfig_diagnostic(
+                    "/dev/video2",
+                    emitter,
+                    &mut |ir| Some(format!("/dev/{ir}")).map(|_| "/dev/video2".to_string()),
+                    &mut |_| false,
+                ),
+                Some(("/dev/video2".to_string(), Some("/dev/video2".to_string())))
+            );
+        }
+    }
+
+    #[test]
+    fn present_node_is_quiet() {
+        assert_eq!(
+            ir_misconfig_diagnostic(
+                "/dev/video2",
+                true,
+                &mut |_| Some("/dev/video2".to_string()),
+                &mut |_| true,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn unresolvable_source_warns_only_when_the_emitter_needs_it() {
+        assert_eq!(
+            ir_misconfig_diagnostic("pipewiresrc target-object=x", true, &mut no_resolve, &mut |_| true),
+            Some(("pipewiresrc target-object=x".to_string(), None))
+        );
+        assert_eq!(
+            ir_misconfig_diagnostic(
+                "pipewiresrc target-object=x",
+                false,
+                &mut no_resolve,
+                &mut |_| true
+            ),
+            None
+        );
+    }
 }

@@ -109,6 +109,16 @@ pub(super) fn locked_hint_from_changed(body: &zbus::message::Body) -> Option<boo
         Vec<String>,
     ) = body.deserialize().ok()?;
 
+    locked_hint_from_parts(&interface, &changed)
+}
+
+/// Pure core of [`locked_hint_from_changed`]: the only signals that matter are
+/// `org.freedesktop.login1.Session` ones carrying a boolean `LockedHint`.
+/// Split out so it can be unit-tested without synthesising D-Bus bodies.
+fn locked_hint_from_parts(
+    interface: &str,
+    changed: &std::collections::HashMap<String, zbus::zvariant::Value>,
+) -> Option<bool> {
     if interface != "org.freedesktop.login1.Session" {
         return None;
     }
@@ -150,5 +160,84 @@ pub async fn watch_session_locks(conn: zbus::Connection, lock_epochs: LockEpochs
         } else {
             epochs.remove(&path);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn changed_with(value: Option<zbus::zvariant::Value>) -> std::collections::HashMap<String, zbus::zvariant::Value> {
+        let mut map = std::collections::HashMap::new();
+        if let Some(value) = value {
+            map.insert("LockedHint".to_string(), value);
+        }
+        map
+    }
+
+    #[test]
+    fn session_locked_hint_true_and_false_both_parse() {
+        for locked in [true, false] {
+            assert_eq!(
+                locked_hint_from_parts(
+                    "org.freedesktop.login1.Session",
+                    &changed_with(Some(zbus::zvariant::Value::Bool(locked))),
+                ),
+                Some(locked)
+            );
+        }
+    }
+
+    #[test]
+    fn unrelated_interfaces_are_ignored() {
+        for interface in [
+            "",
+            "org.freedesktop.DBus.Properties",
+            "org.freedesktop.login1.Manager",
+            "org.freedesktop.login1.session",
+        ] {
+            assert_eq!(
+                locked_hint_from_parts(
+                    interface,
+                    &changed_with(Some(zbus::zvariant::Value::Bool(true))),
+                ),
+                None,
+                "interface {interface:?} must not yield a lock state"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_or_non_boolean_locked_hint_is_ignored() {
+        let session = "org.freedesktop.login1.Session";
+        assert_eq!(locked_hint_from_parts(session, &changed_with(None)), None);
+        assert_eq!(
+            locked_hint_from_parts(
+                session,
+                &changed_with(Some(zbus::zvariant::Value::Str("true".into()))),
+            ),
+            None,
+            "a string LockedHint must not be trusted"
+        );
+        assert_eq!(
+            locked_hint_from_parts(
+                session,
+                &changed_with(Some(zbus::zvariant::Value::U32(1))),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn other_properties_do_not_trigger_lock_tracking() {
+        let mut map = std::collections::HashMap::new();
+        map.insert(
+            "Active".to_string(),
+            zbus::zvariant::Value::Bool(true),
+        );
+        assert_eq!(
+            locked_hint_from_parts("org.freedesktop.login1.Session", &map),
+            None
+        );
     }
 }

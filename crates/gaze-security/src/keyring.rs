@@ -572,4 +572,23 @@ mod tests {
             .is_none()
         );
     }
+
+    #[test]
+    fn backends_have_distinct_names_dirs_and_bindings() {
+        assert_eq!(Backend::Gnome.name(), "GNOME Keyring");
+        assert_eq!(Backend::KWallet.name(), "KWallet");
+        assert_eq!(Backend::Gnome.store_dir(), STORE_DIR);
+        assert_eq!(Backend::KWallet.store_dir(), KWALLET_STORE_DIR);
+        assert_ne!(Backend::Gnome.store_dir(), Backend::KWallet.store_dir());
+        assert_ne!(
+            Backend::Gnome.bind(account()).binding,
+            Backend::KWallet.bind(account()).binding,
+            "wallet records must not decrypt as gnome records"
+        );
+        assert_eq!(
+            Backend::Gnome.bind(account()).binding,
+            account().binding,
+            "gnome keeps the compatible binding"
+        );
+    }
 }

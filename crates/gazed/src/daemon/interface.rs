@@ -10,6 +10,16 @@ enum EnrollMsg {
     Error(String),
 }
 
+/// Only the KDE greeters may drive KWallet unlock: anything else is a client
+/// bug or a confused-deputy attempt from another login path. Kept as a pure
+/// predicate so the allowlist is unit-testable without D-Bus.
+fn is_kwallet_pam_service(pam_service: &str) -> bool {
+    matches!(
+        pam_service,
+        "sddm" | "plasmalogin" | "plasmalogin-fingerprint"
+    )
+}
+
 #[interface(name = "com.gundulabs.Gaze")]
 impl AuthDaemon {
     async fn register_extension(
@@ -225,10 +235,7 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         pam_service: String,
     ) -> fdo::Result<()> {
-        if !matches!(
-            pam_service.as_str(),
-            "sddm" | "plasmalogin" | "plasmalogin-fingerprint"
-        ) {
+        if !is_kwallet_pam_service(pam_service.as_str()) {
             return Err(fdo::Error::InvalidArgs(
                 "KWallet requires a KDE login service".into(),
             ));
@@ -1227,4 +1234,40 @@ impl AuthDaemon {
         msg: EnrollPrompt,
         time_remaining: f64,
     ) -> zbus::Result<()>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_kwallet_pam_service;
+
+    #[test]
+    fn only_kde_login_services_may_drive_kwallet() {
+        for service in ["sddm", "plasmalogin", "plasmalogin-fingerprint"] {
+            assert!(
+                is_kwallet_pam_service(service),
+                "{service} is a KDE login path"
+            );
+        }
+    }
+
+    #[test]
+    fn non_kde_services_are_rejected() {
+        for service in [
+            "",
+            "gdm-face",
+            "login",
+            "sudo",
+            "polkit-1",
+            "SDDM",
+            "sddm ",
+            " sddm",
+            "plasmalogin-fingerprint-extra",
+            "kde",
+        ] {
+            assert!(
+                !is_kwallet_pam_service(service),
+                "{service:?} must not unlock KWallet"
+            );
+        }
+    }
 }

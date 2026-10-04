@@ -735,6 +735,27 @@ mod tests {
         }
     }
 
+    #[test]
+    fn status_priority_orders_usable_above_ready_above_framing() {
+        assert!(CaptureStatus::Usable.priority() > CaptureStatus::Ready.priority());
+        assert!(CaptureStatus::Ready.priority() > CaptureStatus::Clipped.priority());
+        assert!(CaptureStatus::Clipped.priority() > CaptureStatus::TooDark.priority());
+        assert!(CaptureStatus::TooDark.priority() > CaptureStatus::NoFace.priority());
+        assert!(CaptureStatus::NoFace.priority() > CaptureStatus::Unused.priority());
+        assert_eq!(
+            CaptureStatus::NotCentered.priority(),
+            CaptureStatus::TooFar.priority()
+        );
+        assert_eq!(
+            CaptureStatus::TooFar.priority(),
+            CaptureStatus::TooClose.priority()
+        );
+        assert_eq!(
+            CaptureStatus::TooClose.priority(),
+            CaptureStatus::Clipped.priority()
+        );
+    }
+
     #[derive(Clone, Debug, Serialize, Deserialize, Value, OwnedValue, Type)]
     struct OldBenchmarkResult {
         component: String,
