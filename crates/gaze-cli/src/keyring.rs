@@ -88,17 +88,9 @@ mod tests {
 
     #[test]
     fn each_backend_is_gated_independently() {
-        assert!(
-            ensure_backend_enabled(&config_with(true, false), Backend::Gnome).is_ok()
-        );
-        assert!(
-            ensure_backend_enabled(&config_with(true, false), Backend::KWallet).is_err()
-        );
-        assert!(
-            ensure_backend_enabled(&config_with(false, true), Backend::KWallet).is_ok()
-        );
-        assert!(
-            ensure_backend_enabled(&config_with(false, true), Backend::Gnome).is_err()
-        );
+        assert!(ensure_backend_enabled(&config_with(true, false), Backend::Gnome).is_ok());
+        assert!(ensure_backend_enabled(&config_with(true, false), Backend::KWallet).is_err());
+        assert!(ensure_backend_enabled(&config_with(false, true), Backend::KWallet).is_ok());
+        assert!(ensure_backend_enabled(&config_with(false, true), Backend::Gnome).is_err());
     }
 }

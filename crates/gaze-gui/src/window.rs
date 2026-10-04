@@ -2337,7 +2337,9 @@ mod tests {
     fn custom_security_level_reveals_the_detail_rows() {
         assert!(custom_rows_visible(SecurityLevel::CUSTOM_LEVEL_INDEX));
         assert!(!custom_rows_visible(0));
-        assert!(!custom_rows_visible(SecurityLevel::CUSTOM_LEVEL_INDEX + 100));
+        assert!(!custom_rows_visible(
+            SecurityLevel::CUSTOM_LEVEL_INDEX + 100
+        ));
     }
 
     #[test]
@@ -2405,8 +2407,8 @@ mod tests {
         ];
         assert_eq!(camera_subtitle(&options, "primary"), None);
         assert_eq!(camera_subtitle(&options, "/dev/video0"), None);
-        let unlisted = camera_subtitle(&options, "/dev/video9")
-            .expect("unlisted source must explain itself");
+        let unlisted =
+            camera_subtitle(&options, "/dev/video9").expect("unlisted source must explain itself");
         assert!(
             unlisted.contains("/dev/video9"),
             "subtitle must name the configured value: {unlisted}"

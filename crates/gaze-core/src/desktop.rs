@@ -29,7 +29,11 @@ mod tests {
             assert!(path.starts_with('/'), "{path} must be absolute");
         }
         let unique: HashSet<_> = paths.into_iter().collect();
-        assert_eq!(unique.len(), paths.len(), "each integration point needs its own path");
+        assert_eq!(
+            unique.len(),
+            paths.len(),
+            "each integration point needs its own path"
+        );
     }
 
     #[test]

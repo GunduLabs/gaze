@@ -167,7 +167,9 @@ pub async fn watch_session_locks(conn: zbus::Connection, lock_epochs: LockEpochs
 mod tests {
     use super::*;
 
-    fn changed_with(value: Option<zbus::zvariant::Value>) -> std::collections::HashMap<String, zbus::zvariant::Value> {
+    fn changed_with(
+        value: Option<zbus::zvariant::Value>,
+    ) -> std::collections::HashMap<String, zbus::zvariant::Value> {
         let mut map = std::collections::HashMap::new();
         if let Some(value) = value {
             map.insert("LockedHint".to_string(), value);
@@ -220,10 +222,7 @@ mod tests {
             "a string LockedHint must not be trusted"
         );
         assert_eq!(
-            locked_hint_from_parts(
-                session,
-                &changed_with(Some(zbus::zvariant::Value::U32(1))),
-            ),
+            locked_hint_from_parts(session, &changed_with(Some(zbus::zvariant::Value::U32(1))),),
             None
         );
     }
@@ -231,10 +230,7 @@ mod tests {
     #[test]
     fn other_properties_do_not_trigger_lock_tracking() {
         let mut map = std::collections::HashMap::new();
-        map.insert(
-            "Active".to_string(),
-            zbus::zvariant::Value::Bool(true),
-        );
+        map.insert("Active".to_string(), zbus::zvariant::Value::Bool(true));
         assert_eq!(
             locked_hint_from_parts("org.freedesktop.login1.Session", &map),
             None

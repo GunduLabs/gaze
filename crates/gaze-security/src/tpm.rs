@@ -180,18 +180,21 @@ mod tests {
             matches!(public, Public::KeyedHash { .. }),
             "sealing needs a keyed-hash object, not a key"
         );
-        assert_eq!(
-            public.name_hashing_algorithm(),
-            HashingAlgorithm::Sha256
-        );
+        assert_eq!(public.name_hashing_algorithm(), HashingAlgorithm::Sha256);
     }
 
     #[test]
     fn sealed_template_is_bound_to_this_tpm_but_supplied_externally() {
         let public = sealed_object_public().unwrap();
         let attrs = public.object_attributes();
-        assert!(attrs.fixed_tpm(), "sealed blob must not migrate to another TPM");
-        assert!(attrs.fixed_parent(), "sealed blob must stay under the same parent");
+        assert!(
+            attrs.fixed_tpm(),
+            "sealed blob must not migrate to another TPM"
+        );
+        assert!(
+            attrs.fixed_parent(),
+            "sealed blob must stay under the same parent"
+        );
         assert!(
             !attrs.sensitive_data_origin(),
             "we supply the key, so it must not originate in the TPM"

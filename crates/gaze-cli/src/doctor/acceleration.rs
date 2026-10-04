@@ -3,7 +3,7 @@
 
 use super::*;
 use gaze_core::acceleration::{NpuDevice, discover_npus, vendor_runtime};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 fn register_fix(library: &Path) -> String {
     format!(
@@ -102,6 +102,7 @@ pub(super) fn check_acceleration(report: &mut Report, config: Option<&Config>) {
 mod tests {
     use super::*;
     use gaze_core::config::Config;
+    use std::path::PathBuf;
 
     fn config_with_provider(provider: &str) -> Config {
         let mut config = Config::default();
@@ -140,10 +141,7 @@ mod tests {
     #[test]
     fn explicit_provider_is_used_verbatim() {
         let config = config_with_provider("openvino");
-        assert_eq!(
-            active_provider(Some(&config), &[]),
-            Some("openvino")
-        );
+        assert_eq!(active_provider(Some(&config), &[]), Some("openvino"));
         let config = config_with_provider("vitis");
         let devices = vec![device("openvino")];
         assert_eq!(active_provider(Some(&config), &devices), Some("vitis"));

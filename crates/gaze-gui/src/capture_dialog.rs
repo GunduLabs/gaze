@@ -45,43 +45,6 @@ pub fn prepare_camera_feed(camera: &CameraSetup) -> anyhow::Result<CameraFeed> {
     Ok(feed)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use gaze_core::config::CameraConfig;
-
-    #[test]
-    fn fallback_is_the_default_rgb_camera() {
-        let setup = CameraSetup::fallback();
-        assert_eq!(setup.device, DEFAULT_RGB_CAMERA);
-        assert!(!setup.is_ir);
-    }
-
-    #[test]
-    fn from_config_prefers_rgb_but_honours_ir_only_configs() {
-        let rgb = CameraConfig {
-            rgb: "/dev/video0".to_string(),
-            ..CameraConfig::default()
-        };
-        let (device, is_ir) = gaze_vision::camera::preferred_capture_source(&rgb);
-        assert_eq!(CameraSetup::from_config(&rgb).device, device);
-        assert_eq!(CameraSetup::from_config(&rgb).is_ir, is_ir);
-
-        let ir_only = CameraConfig {
-            rgb: String::new(),
-            ir: "/dev/video2".to_string(),
-            emitter_enabled: true,
-            ..CameraConfig::default()
-        };
-        // Must not panic even when no physical nodes exist in CI.
-        let setup = CameraSetup::from_config(&ir_only);
-        assert_eq!(
-            setup.device,
-            gaze_vision::camera::preferred_capture_source(&ir_only).0
-        );
-    }
-}
-
 pub fn show_capture_dialog(
     parent: &impl IsA<gtk4::Widget>,
     username: &str,
@@ -545,4 +508,41 @@ pub fn show_capture_dialog(
     ));
 
     dialog.present();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gaze_core::config::CameraConfig;
+
+    #[test]
+    fn fallback_is_the_default_rgb_camera() {
+        let setup = CameraSetup::fallback();
+        assert_eq!(setup.device, DEFAULT_RGB_CAMERA);
+        assert!(!setup.is_ir);
+    }
+
+    #[test]
+    fn from_config_prefers_rgb_but_honours_ir_only_configs() {
+        let rgb = CameraConfig {
+            rgb: "/dev/video0".to_string(),
+            ..CameraConfig::default()
+        };
+        let (device, is_ir) = gaze_vision::camera::preferred_capture_source(&rgb);
+        assert_eq!(CameraSetup::from_config(&rgb).device, device);
+        assert_eq!(CameraSetup::from_config(&rgb).is_ir, is_ir);
+
+        let ir_only = CameraConfig {
+            rgb: String::new(),
+            ir: "/dev/video2".to_string(),
+            emitter_enabled: true,
+            ..CameraConfig::default()
+        };
+        // Must not panic even when no physical nodes exist in CI.
+        let setup = CameraSetup::from_config(&ir_only);
+        assert_eq!(
+            setup.device,
+            gaze_vision::camera::preferred_capture_source(&ir_only).0
+        );
+    }
 }

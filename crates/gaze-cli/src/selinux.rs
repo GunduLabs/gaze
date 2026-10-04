@@ -111,10 +111,7 @@ mod tests {
     #[test]
     fn module_matching_is_exact_per_line() {
         // `semodule -l` prints "<name> <version>"; a substring elsewhere must not count.
-        assert!(!lists_module(
-            "my-gaze-gdm-camera 1.0\n",
-            GDM_CAMERA_MODULE
-        ));
+        assert!(!lists_module("my-gaze-gdm-camera 1.0\n", GDM_CAMERA_MODULE));
         assert!(lists_module(
             "gaze-gdm-camera 1.0\ngaze-greeter-keyring 1.0\n",
             GREETER_KEYRING_MODULE
