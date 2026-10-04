@@ -386,11 +386,9 @@ const INTERRUPTIBLE_POLL_TIMEOUT_MS: u64 = 100;
 /// Long enough for a busy device to reject the stream, short enough not to sit through a live
 /// source that has simply not produced its first buffer. Later failures are the frame loop's.
 const PIPELINE_START_TIMEOUT_MS: u64 = 500;
-/// Privileged capture retries a busy V4L2 node briefly before failing. The GUI releases its
-/// preview just before capture starts, but PipeWire may still hold the backing node for a
-/// moment after the local preview stops.
+/// PipeWire can hold the backing node for a moment after the GUI stops its preview.
 const PRIVILEGED_BUSY_ATTEMPTS: u32 = 3;
-const PRIVILEGED_BUSY_RETRY_DELAY_MS: u64 = 250;
+const PRIVILEGED_BUSY_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 const PIPELINE_STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 enum FramePoll {
@@ -444,6 +442,30 @@ fn current_pipewire_uid() -> Option<u32> {
 fn device_is_busy(detail: &str) -> bool {
     let detail = detail.to_ascii_lowercase();
     detail.contains("busy") || detail.contains("ebusy")
+}
+
+fn retry_while_busy<T>(
+    node: &str,
+    delay: std::time::Duration,
+    mut open: impl FnMut() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let mut attempt = 1;
+    loop {
+        match open() {
+            Err(err)
+                if attempt < PRIVILEGED_BUSY_ATTEMPTS && device_is_busy(&format!("{err:#}")) =>
+            {
+                warn!(
+                    attempt,
+                    ?delay,
+                    "Privileged capture found {node} busy; retrying"
+                );
+                std::thread::sleep(delay);
+                attempt += 1;
+            }
+            result => return result,
+        }
+    }
 }
 
 /// The state-change error says only that an element failed; the reason is on the bus.
@@ -706,8 +728,6 @@ impl Camera {
 
     fn open_privileged_kind(camera_source: &str, want_color: bool) -> anyhow::Result<Self> {
         gstreamer::init()?;
-        // Only V4L2 is trusted here. The node streams for one opener at a time: the GUI
-        // releases its local preview before capture, and gazed streams preview frames instead.
         let node = resolve_privileged_node(camera_source, want_color).ok_or_else(|| {
             anyhow::anyhow!(
                 "refusing privileged capture of {camera_source:?}: no backing /dev/video node \
@@ -716,28 +736,9 @@ impl Camera {
         })?;
         let force_ir_yuy2 = node_requires_forced_ir_yuy2(&node, want_color);
         let src_element = format!("v4l2src device={node}");
-
-        let mut attempt = 0;
-        loop {
-            attempt += 1;
-            match Self::open_source_element(&src_element, camera_source, force_ir_yuy2, None) {
-                Ok(camera) => return Ok(camera),
-                Err(err)
-                    if attempt < PRIVILEGED_BUSY_ATTEMPTS
-                        && device_is_busy(&format!("{err:#}")) =>
-                {
-                    warn!(
-                        attempt,
-                        delay_ms = PRIVILEGED_BUSY_RETRY_DELAY_MS,
-                        "Privileged capture found {node} busy; retrying after the preview release"
-                    );
-                    std::thread::sleep(std::time::Duration::from_millis(
-                        PRIVILEGED_BUSY_RETRY_DELAY_MS,
-                    ));
-                }
-                Err(err) => return Err(err),
-            }
-        }
+        retry_while_busy(&node, PRIVILEGED_BUSY_RETRY_DELAY, || {
+            Self::open_source_element(&src_element, camera_source, force_ir_yuy2, None)
+        })
     }
 
     fn open_kind(camera_source: &str, want_color: bool) -> anyhow::Result<Self> {
@@ -1332,7 +1333,48 @@ mod tests {
             "Could not open device: Device or resource busy"
         ));
         assert!(device_is_busy("v4l2 returned EBUSY"));
+        assert!(device_is_busy(
+            "The camera is already in use by another program (primary): \
+             Device '/dev/video0' is busy"
+        ));
         assert!(!device_is_busy("No such file or directory"));
+    }
+
+    #[test]
+    fn a_briefly_busy_node_is_opened_on_retry() {
+        let mut calls = 0;
+        let result = retry_while_busy("/dev/video0", std::time::Duration::ZERO, || {
+            calls += 1;
+            if calls < PRIVILEGED_BUSY_ATTEMPTS {
+                anyhow::bail!("Device '/dev/video0' is busy")
+            }
+            Ok(calls)
+        });
+        assert_eq!(result.unwrap(), PRIVILEGED_BUSY_ATTEMPTS);
+    }
+
+    #[test]
+    fn a_node_that_stays_busy_fails_after_the_last_attempt() {
+        let mut calls = 0;
+        let result: anyhow::Result<()> =
+            retry_while_busy("/dev/video0", std::time::Duration::ZERO, || {
+                calls += 1;
+                anyhow::bail!("Device '/dev/video0' is busy")
+            });
+        assert!(device_is_busy(&format!("{:#}", result.unwrap_err())));
+        assert_eq!(calls, PRIVILEGED_BUSY_ATTEMPTS);
+    }
+
+    #[test]
+    fn other_open_errors_are_not_retried() {
+        let mut calls = 0;
+        let result: anyhow::Result<()> =
+            retry_while_busy("/dev/video0", std::time::Duration::ZERO, || {
+                calls += 1;
+                anyhow::bail!("No such file or directory")
+            });
+        assert!(result.is_err());
+        assert_eq!(calls, 1);
     }
 
     #[test]

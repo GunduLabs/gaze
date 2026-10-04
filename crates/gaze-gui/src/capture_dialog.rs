@@ -297,8 +297,8 @@ pub fn show_capture_dialog(
         #[strong]
         enrollment_completed,
         move |btn| {
-            // Release the local preview before gazed opens the backing V4L2 node,
-            // including when the preview itself uses PipeWire.
+            // gazed captures from the backing V4L2 node, so even a PipeWire preview must
+            // let go of it first.
             feed.stop_and_wait();
             feed.hide_frame();
             camera_mode.set_text(&format!("{camera_kind} · starting capture"));
@@ -376,9 +376,8 @@ pub fn show_capture_dialog(
                                 if preview_live.get() {
                                     return;
                                 }
-                                // Only restore the guidance overlay: set_active does not
-                                // restart capture. Never reopen the local camera on a
-                                // timeout, since gazed may still hold the V4L2 node.
+                                // set_active only restores the overlay; reopening the camera
+                                // here would race gazed for the node.
                                 feed.set_active(true);
                                 camera_mode.set_text(&format!(
                                     "{camera_kind} · live preview unavailable, look at the camera"
