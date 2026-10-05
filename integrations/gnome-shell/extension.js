@@ -2086,6 +2086,30 @@ export default class GazeFaceAuthExtension extends Extension {
 
     this._injectionManager.overrideMethod(
       authPromptProto,
+      "finish",
+      (original) => {
+        return function (...args) {
+          const verifier = this._userVerifier;
+          const queue = verifier?._messageQueue;
+          if (
+            Array.isArray(queue) &&
+            queue.length &&
+            queue.every((m) => !m.text || m.type <= MESSAGE_TYPE.HINT) &&
+            typeof verifier._clearMessageQueue === "function"
+          ) {
+            try {
+              verifier._clearMessageQueue();
+            } catch (e) {
+              logError(e, "[gaze] Failed to drop pending hints");
+            }
+          }
+          return original.apply(this, args);
+        };
+      },
+    );
+
+    this._injectionManager.overrideMethod(
+      authPromptProto,
       "_onDestroy",
       (original) => {
         return function (...args) {
