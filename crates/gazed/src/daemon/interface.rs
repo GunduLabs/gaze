@@ -369,7 +369,7 @@ impl AuthDaemon {
                                 continue;
                             }
 
-                            let mut cam = match Camera::open_privileged(&rgb_device_clone) {
+                            let mut cam = match Camera::open_privileged(&rgb_device_clone, (-1, -1)) {
                                 Ok(c) => c,
                                 Err(e) => {
                                     dead_streams += 1;
@@ -443,7 +443,7 @@ impl AuthDaemon {
                         }
                     }
 
-                    let mut cam = match Camera::open_privileged(&rgb_device_clone) {
+                    let mut cam = match Camera::open_privileged(&rgb_device_clone, (-1,-1)) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(EnrollMsg::Error(format!("RGB Camera open error: {e}")));
@@ -565,7 +565,8 @@ impl AuthDaemon {
                                 &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                                 emitter_enabled
                             );
-                            let mut cam = match Camera::open_ir_privileged(&ir_device_clone) {
+                            let ir_res = (config_clone.cameras.ir_frame_width, config_clone.cameras.ir_frame_height);
+                            let mut cam = match Camera::open_ir_privileged(&ir_device_clone, ir_res) {
                                 Ok(c) => c,
                                 Err(e) => {
                                     dead_streams += 1;
@@ -636,7 +637,8 @@ impl AuthDaemon {
                         emitter_enabled
                     );
 
-                    let mut cam = match Camera::open_ir_privileged(&ir_device_clone) {
+                    let ir_res = (config_clone.cameras.ir_frame_width, config_clone.cameras.ir_frame_height);
+                    let mut cam = match Camera::open_ir_privileged(&ir_device_clone, ir_res) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(EnrollMsg::Error(format!("IR Camera open error: {e}")));

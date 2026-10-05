@@ -711,23 +711,27 @@ fn video_info_fps(video_info: &gstreamer_video::VideoInfo) -> Option<f64> {
 }
 
 impl Camera {
-    pub fn open(camera_source: &str) -> anyhow::Result<Self> {
-        Self::open_kind(camera_source, true)
+    pub fn open(camera_source: &str, resolution: (i32, i32)) -> anyhow::Result<Self> {
+        Self::open_kind(camera_source, true, resolution)
     }
 
-    pub fn open_ir(camera_source: &str) -> anyhow::Result<Self> {
-        Self::open_kind(camera_source, false)
+    pub fn open_ir(camera_source: &str, resolution: (i32, i32)) -> anyhow::Result<Self> {
+        Self::open_kind(camera_source, false, resolution)
     }
 
-    pub fn open_privileged(camera_source: &str) -> anyhow::Result<Self> {
-        Self::open_privileged_kind(camera_source, true)
+    pub fn open_privileged(camera_source: &str, resolution: (i32, i32)) -> anyhow::Result<Self> {
+        Self::open_privileged_kind(camera_source, true, resolution)
     }
 
-    pub fn open_ir_privileged(camera_source: &str) -> anyhow::Result<Self> {
-        Self::open_privileged_kind(camera_source, false)
+    pub fn open_ir_privileged(camera_source: &str, resolution: (i32, i32)) -> anyhow::Result<Self> {
+        Self::open_privileged_kind(camera_source, false, resolution)
     }
 
-    fn open_privileged_kind(camera_source: &str, want_color: bool) -> anyhow::Result<Self> {
+    fn open_privileged_kind(
+        camera_source: &str,
+        want_color: bool,
+        resolution: (i32, i32),
+    ) -> anyhow::Result<Self> {
         gstreamer::init()?;
         let node = resolve_privileged_node(camera_source, want_color).ok_or_else(|| {
             anyhow::anyhow!(
@@ -737,12 +741,39 @@ impl Camera {
         })?;
         let force_ir_yuy2 = node_requires_forced_ir_yuy2(&node, want_color);
         let src_element = format!("v4l2src device={node}");
-        retry_while_busy(&node, PRIVILEGED_BUSY_RETRY_DELAY, || {
-            Self::open_source_element(&src_element, camera_source, force_ir_yuy2, None)
-        })
+        let attempt = retry_while_busy(&node, PRIVILEGED_BUSY_RETRY_DELAY, || {
+            Self::open_source_element(&src_element, camera_source, force_ir_yuy2, None, resolution)
+        });
+        match attempt {
+            Ok(cam) => Ok(cam),
+            Err(err)
+                if resolution.0 > 0 && resolution.1 > 0 && !device_is_busy(&format!("{err:#}")) =>
+            {
+                tracing::warn!(
+                    "Custom resolution {}x{} failed for {camera_source}: {err}. Falling back to auto-negotiation.",
+                    resolution.0,
+                    resolution.1
+                );
+
+                retry_while_busy(&node, PRIVILEGED_BUSY_RETRY_DELAY, || {
+                    Self::open_source_element(
+                        &src_element,
+                        camera_source,
+                        force_ir_yuy2,
+                        None,
+                        (-1, -1),
+                    )
+                })
+            }
+            Err(err) => Err(err),
+        }
     }
 
-    fn open_kind(camera_source: &str, want_color: bool) -> anyhow::Result<Self> {
+    fn open_kind(
+        camera_source: &str,
+        want_color: bool,
+        resolution: (i32, i32),
+    ) -> anyhow::Result<Self> {
         gstreamer::init()?;
         let (src_element, force_ir_yuy2) = match classify_source(camera_source, want_color)? {
             SourceElement::Element(element) => {
@@ -774,25 +805,43 @@ impl Camera {
         // A claim binds capture to one user's PipeWire session; without one, `pipewiresrc`
         // resolves the socket from the environment as it does inside a user's own session.
         let is_pipewire = src_element == "pipewiresrc" || src_element.starts_with("pipewiresrc ");
-        let session = match (is_pipewire, current_pipewire_uid()) {
-            (true, Some(uid)) => match PipeWireSession::connect_for_uid(uid) {
-                Ok(session) => Some(session),
-                Err(err) => {
-                    // Greeters without a user manager have no socket. Carry on unbound so the
-                    // V4L2 fallback below still gets its turn.
-                    warn!("No PipeWire socket for uid {uid} ({err}); capture will use V4L2");
-                    None
-                }
-            },
-            _ => None,
-        };
-        let bound = match &session {
-            Some(session) => bind_pipewire_fd(&src_element, session.raw_fd()),
-            None => src_element.clone(),
+
+        let try_open = |res: (i32, i32)| -> anyhow::Result<Camera> {
+            let session = match (is_pipewire, current_pipewire_uid()) {
+                (true, Some(uid)) => match PipeWireSession::connect_for_uid(uid) {
+                    Ok(session) => Some(session),
+                    Err(err) => {
+                        // Greeters without a user manager have no socket. Carry on unbound so the
+                        // V4L2 fallback below still gets its turn.
+                        warn!("No PipeWire socket for uid {uid} ({err}); capture will use V4L2");
+                        None
+                    }
+                },
+                _ => None,
+            };
+            let bound = match &session {
+                Some(session) => bind_pipewire_fd(&src_element, session.raw_fd()),
+                None => src_element.clone(),
+            };
+            Self::open_source_element(&bound, camera_source, force_ir_yuy2, session, res)
         };
 
+        let mut result = try_open(resolution);
+        if let Err(err) = &result
+            && resolution.0 > 0
+            && resolution.1 > 0
+            && !device_is_busy(&format!("{err:#}"))
+        {
+            tracing::warn!(
+                "Custom resolution {}x{} failed for {camera_source}: {err}. Falling back to auto-negotiation.",
+                resolution.0,
+                resolution.1
+            );
+            result = try_open((-1, -1));
+        }
+
         let fallback = v4l2_fallback_for(&src_element);
-        match Self::open_source_element(&bound, camera_source, force_ir_yuy2, session) {
+        match result {
             Ok(mut camera) => {
                 if fallback != V4l2Fallback::None {
                     camera.v4l2_retry = Some(V4l2Retry {
@@ -822,6 +871,7 @@ impl Camera {
                     camera_source,
                     force_ir_yuy2,
                     None,
+                    resolution,
                 )
             }
             Err(err) => Err(err),
@@ -870,8 +920,9 @@ impl Camera {
         camera_source: &str,
         force_ir_yuy2: bool,
         pipewire: Option<PipeWireSession>,
+        resolution: (i32, i32),
     ) -> anyhow::Result<Self> {
-        let pipeline_str = camera_pipeline(src_element, force_ir_yuy2);
+        let pipeline_str = camera_pipeline(src_element, force_ir_yuy2, resolution);
         info!("Attempting to open GStreamer camera: {}", pipeline_str);
 
         let pipeline = gstreamer::parse::launch(&pipeline_str)
@@ -1043,6 +1094,7 @@ impl Camera {
             &retry.camera_source,
             force_ir_yuy2,
             None,
+            (-1, -1),
         ) {
             Ok(camera) => {
                 info!("Retrying the dark PipeWire stream on V4L2 camera node {node}");
@@ -1097,17 +1149,29 @@ impl Camera {
     }
 }
 
-fn camera_pipeline(src_element: &str, force_ir_yuy2: bool) -> String {
+fn camera_pipeline(src_element: &str, force_ir_yuy2: bool, resolution: (i32, i32)) -> String {
+    let (width, height) = resolution;
     if force_ir_yuy2 {
         // Dell/Realtek single-node RGB/IR modules silently stay in RGB mode unless the
         // stream is negotiated as uncompressed YUY2 at this exact resolution.
+        let (w, h) = if width > 0 && height > 0 {
+            (width, height)
+        } else {
+            (REALTEK_IR_YUY2_WIDTH as i32, REALTEK_IR_YUY2_HEIGHT as i32)
+        };
         format!(
-            "{src_element} ! video/x-raw,format=YUY2,width={REALTEK_IR_YUY2_WIDTH},height={REALTEK_IR_YUY2_HEIGHT},pixel-aspect-ratio=1/1 ! videoconvert ! videoscale ! appsink name=gaze_sink"
+            "{src_element} ! video/x-raw,format=YUY2,width={w},height={h},pixel-aspect-ratio=1/1 ! videoconvert ! videoscale ! appsink name=gaze_sink"
         )
     } else {
-        format!(
-            "{src_element} ! video/x-raw,pixel-aspect-ratio=1/1; image/jpeg ! decodebin ! videoconvert ! videoscale ! appsink name=gaze_sink"
-        )
+        if width > 0 && height > 0 {
+            format!(
+                "{src_element} ! video/x-raw,width={width},height={height},pixel-aspect-ratio=1/1; image/jpeg ! decodebin ! videoconvert ! videoscale ! appsink name=gaze_sink"
+            )
+        } else {
+            format!(
+                "{src_element} ! video/x-raw,pixel-aspect-ratio=1/1; image/jpeg ! decodebin ! videoconvert ! videoscale ! appsink name=gaze_sink"
+            )
+        }
     }
 }
 
@@ -1458,8 +1522,8 @@ mod tests {
     fn a_failing_stream_keeps_the_reason_it_ended() {
         // A failing element pushes EOS as well as posting the error, so the reason survives
         // only if the bus is read first.
-        let mut camera =
-            Camera::open("videotestsrc ! identity error-after=3").expect("identity pipeline");
+        let mut camera = Camera::open("videotestsrc ! identity error-after=3", (-1, -1))
+            .expect("identity pipeline");
         let stop = AtomicBool::new(false);
         while camera.next_interruptible(&stop).is_some() {}
 
@@ -1478,7 +1542,8 @@ mod tests {
 
     #[test]
     fn a_clean_end_of_stream_leaves_no_reason() {
-        let mut camera = Camera::open("videotestsrc num-buffers=2").expect("videotestsrc pipeline");
+        let mut camera =
+            Camera::open("videotestsrc num-buffers=2", (-1, -1)).expect("videotestsrc pipeline");
         let stop = AtomicBool::new(false);
         while camera.next_interruptible(&stop).is_some() {}
 
@@ -1567,11 +1632,11 @@ mod tests {
 
     #[test]
     fn realtek_ir_pipeline_forces_required_uncompressed_mode() {
-        let pipeline = camera_pipeline("v4l2src device=/dev/video0", true);
+        let pipeline = camera_pipeline("v4l2src device=/dev/video0", true, (-1, -1));
         assert!(pipeline.contains("video/x-raw,format=YUY2,width=640,height=480"));
         assert!(!pipeline.contains("image/jpeg"));
 
-        let rgb_pipeline = camera_pipeline("v4l2src device=/dev/video0", false);
+        let rgb_pipeline = camera_pipeline("v4l2src device=/dev/video0", false, (-1, -1));
         assert!(rgb_pipeline.contains("image/jpeg"));
     }
 
@@ -1592,6 +1657,8 @@ mod tests {
         let cameras = CameraConfig {
             rgb: "primary".to_string(),
             ir: String::new(),
+            ir_frame_width: -1,
+            ir_frame_height: -1,
             emitter_enabled: false,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
@@ -1610,6 +1677,8 @@ mod tests {
         CameraConfig {
             rgb: rgb.to_string(),
             ir: ir.to_string(),
+            ir_frame_width: -1,
+            ir_frame_height: -1,
             emitter_enabled: false,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
@@ -1709,6 +1778,8 @@ mod tests {
         let cameras = CameraConfig {
             rgb: "primary".to_string(),
             ir: "/dev/video2".to_string(),
+            ir_frame_width: -1,
+            ir_frame_height: -1,
             emitter_enabled: true,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
@@ -1724,6 +1795,8 @@ mod tests {
         let cameras = CameraConfig {
             rgb: String::new(),
             ir: "/dev/video2".to_string(),
+            ir_frame_width: -1,
+            ir_frame_height: -1,
             emitter_enabled: true,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
@@ -1738,6 +1811,7 @@ mod tests {
     fn open_scales_widescreen_to_square_pixels() {
         let mut camera = Camera::open(
             "videotestsrc num-buffers=3 ! capsfilter caps=video/x-raw,width=1280,height=720",
+            (-1, -1),
         )
         .expect("videotestsrc pipeline");
         let frame = camera.next().expect("videotestsrc frame");
@@ -1752,7 +1826,8 @@ mod tests {
 
     #[test]
     fn iterator_ends_after_eos() {
-        let mut camera = Camera::open("videotestsrc num-buffers=2").expect("videotestsrc pipeline");
+        let mut camera =
+            Camera::open("videotestsrc num-buffers=2", (-1, -1)).expect("videotestsrc pipeline");
         assert!(camera.next().is_some());
         assert!(camera.next().is_some());
         assert!(camera.next().is_none(), "iterator must end at EOS");
@@ -1760,8 +1835,11 @@ mod tests {
 
     #[test]
     fn iterator_ends_on_pipeline_error() {
-        let mut camera = Camera::open("videotestsrc is-live=true ! identity error-after=5")
-            .expect("identity pipeline");
+        let mut camera = Camera::open(
+            "videotestsrc is-live=true ! identity error-after=5",
+            (-1, -1),
+        )
+        .expect("identity pipeline");
         let mut frames = 0;
         while camera.next().is_some() {
             frames += 1;
@@ -1777,7 +1855,7 @@ mod tests {
         let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
 
         let worker = std::thread::spawn(move || {
-            let mut camera = Camera::open("appsrc is-live=true format=time")
+            let mut camera = Camera::open("appsrc is-live=true format=time", (-1, -1))
                 .expect("live pipeline without frames");
             ready_tx.send(()).expect("signal camera readiness");
             let stopped = camera.next_interruptible(&worker_stop).is_none();
@@ -1844,9 +1922,9 @@ mod tests {
 
     #[test]
     fn open_surfaces_malformed_sources() {
-        assert!(Camera::open("/dev/video").is_err());
-        assert!(Camera::open_ir("/dev/video2 ! fakesink").is_err());
-        assert!(Camera::open("usb:046d").is_err());
+        assert!(Camera::open("/dev/video", (-1, -1)).is_err());
+        assert!(Camera::open_ir("/dev/video2 ! fakesink", (-1, -1)).is_err());
+        assert!(Camera::open("usb:046d", (-1, -1)).is_err());
     }
 
     #[test]
@@ -1938,6 +2016,8 @@ mod tests {
         let cameras = CameraConfig {
             rgb: "primary".to_string(),
             ir: "pipewiresrc target-object=device-name".to_string(),
+            ir_frame_width: -1,
+            ir_frame_height: -1,
             emitter_enabled: true,
             dark_luma_threshold: 30,
             parallel_capture: "auto".to_string(),
@@ -2001,15 +2081,15 @@ mod tests {
 
     #[test]
     fn privileged_open_refuses_custom_pipelines_without_touching_hardware() {
-        let err = Camera::open_privileged("videotestsrc num-buffers=2")
+        let err = Camera::open_privileged("videotestsrc num-buffers=2", (-1, -1))
             .err()
             .expect("privileged open of a custom pipeline must fail");
         assert!(
             err.to_string().contains("refusing privileged capture"),
             "unexpected error: {err:#}"
         );
-        assert!(Camera::open_privileged("").is_err());
-        assert!(Camera::open_ir_privileged("v4l2src device=/dev/video0").is_err());
+        assert!(Camera::open_privileged("", (-1, -1)).is_err());
+        assert!(Camera::open_ir_privileged("v4l2src device=/dev/video0", (-1, -1)).is_err());
     }
 
     fn sample_options() -> Vec<(String, String)> {
@@ -2031,5 +2111,16 @@ mod tests {
         let options = sample_options();
         assert!(!is_listed_source(&options, "/dev/video99"));
         assert_eq!(source_index(&options, "/dev/video99"), 0);
+    }
+
+    #[test]
+    fn test_resolution_fallback() {
+        let mock_camera =
+            "videotestsrc num-buffers=3 ! capsfilter caps=video/x-raw,width=640,height=480";
+        let camera = Camera::open_ir(mock_camera, (999, 999));
+        assert!(
+            camera.is_ok(),
+            "Camera should have fallen back and opened successfully"
+        );
     }
 }

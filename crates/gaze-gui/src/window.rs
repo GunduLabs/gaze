@@ -360,6 +360,8 @@ struct ConfigRows {
     ir_threshold: libadwaita::SpinRow,
     camera: libadwaita::ComboRow,
     ir: libadwaita::ComboRow,
+    ir_frame_width: libadwaita::SpinRow,
+    ir_frame_height: libadwaita::SpinRow,
     emitter: gtk4::Switch,
     parallel_capture: libadwaita::ComboRow,
     dark_luma_threshold: libadwaita::SpinRow,
@@ -390,6 +392,8 @@ fn commit_focused_spin_row(window: &libadwaita::Window, rows: &ConfigRows) {
     for row in [
         &rows.rgb_threshold,
         &rows.ir_threshold,
+        &rows.ir_frame_width,
+        &rows.ir_frame_height,
         &rows.dark_luma_threshold,
         &rows.templates,
         &rows.min_face_size_ratio,
@@ -471,6 +475,10 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
     let ir_idx = source_index(choices.ir_options, &cfg.cameras.ir);
     rows.ir.set_selected(ir_idx as u32);
     set_camera_row_subtitle(&rows.ir, choices.ir_options, &cfg.cameras.ir);
+    rows.ir_frame_width
+        .set_value(cfg.cameras.ir_frame_width as f64);
+    rows.ir_frame_height
+        .set_value(cfg.cameras.ir_frame_height as f64);
     rows.emitter.set_active(cfg.cameras.emitter_enabled);
     rows.parallel_capture
         .set_selected(cfg.cameras.parallel_capture_index());
@@ -652,6 +660,18 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     let ir_model = gtk4::StringList::new(&ir_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
     ir_row.set_model(Some(&ir_model));
     hardware_group.add(&ir_row);
+
+    let ir_frame_width_row = libadwaita::SpinRow::with_range(-1.0, 9999.0, 1.0);
+    ir_frame_width_row.set_digits(0);
+    ir_frame_width_row.set_title("IR Camera Width Override");
+    ir_frame_width_row.set_subtitle("Set to -1 for auto-negotiation (default)");
+    hardware_group.add(&ir_frame_width_row);
+
+    let ir_frame_height_row = libadwaita::SpinRow::with_range(-1.0, 9999.0, 1.0);
+    ir_frame_height_row.set_digits(0);
+    ir_frame_height_row.set_title("IR Camera Height Override");
+    ir_frame_height_row.set_subtitle("Set to -1 for auto-negotiation (default)");
+    hardware_group.add(&ir_frame_height_row);
 
     let emitter_row = libadwaita::ActionRow::new();
     emitter_row.set_title("Force IR Emitter");
@@ -991,6 +1011,10 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         ir_row,
         #[weak]
+        ir_frame_width_row,
+        #[weak]
+        ir_frame_height_row,
+        #[weak]
         emitter_switch,
         #[weak]
         parallel_capture_row,
@@ -1094,6 +1118,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                     cfg.cameras.ir = target.clone();
                 }
             }
+            cfg.cameras.ir_frame_width = ir_frame_width_row.value() as i32;
+            cfg.cameras.ir_frame_height = ir_frame_height_row.value() as i32;
             cfg.cameras.emitter_enabled = emitter_switch.is_active();
             cfg.cameras.parallel_capture =
                 CameraConfig::parallel_capture_from_index(parallel_capture_row.selected() as usize);
@@ -1211,6 +1237,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     for row in [
         &rgb_threshold_row,
         &ir_threshold_row,
+        &ir_frame_width_row,
+        &ir_frame_height_row,
         &templates_row,
         &min_face_size_ratio_row,
         &dark_luma_threshold_row,
@@ -1254,6 +1282,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         ir_threshold: ir_threshold_row.clone(),
         camera: camera_row.clone(),
         ir: ir_row.clone(),
+        ir_frame_width: ir_frame_width_row.clone(),
+        ir_frame_height: ir_frame_height_row.clone(),
         emitter: emitter_switch.clone(),
         parallel_capture: parallel_capture_row.clone(),
         dark_luma_threshold: dark_luma_threshold_row.clone(),

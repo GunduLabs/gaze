@@ -241,6 +241,19 @@ When you configure an IR camera alongside RGB, Gaze captures templates from both
 during enrollment, then combines their results during verification according to
 the configured `hybrid_policy`.
 
+### IR resolution overrides
+
+Some modern laptop IR webcams advertise high resolutions (like `640x480`) to the operating system, but only actually stream valid frames when forced to a specific native resolution (like `340x340`). If auto-negotiation fails and the camera outputs a solid green screen or corrupted frames, you can force the dimensions explicitly:
+
+```toml
+[cameras]
+ir = "/dev/video2"
+ir_frame_width = 340
+ir_frame_height = 340
+```
+
+By default, these are `-1` (meaning auto-negotiation is used).
+
 ### Parallel RGB + IR capture
 
 By default, verification captures the two cameras one at a time (RGB, then IR). Capturing sequentially rather than concurrently lets single-function webcams that cannot stream their RGB and IR sensors at once (for example the Logitech BRIO 4K, `046d:085e`) still use hybrid authentication, at the cost of latency: with `hybrid_policy = "and"` both spectra always run, so the two capture phases add up.

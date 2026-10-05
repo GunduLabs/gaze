@@ -748,6 +748,10 @@ pub struct CameraConfig {
     pub rgb: String,
     #[serde(default)]
     pub ir: String,
+    #[serde(default = "default_ir_frame_size")]
+    pub ir_frame_width: i32,
+    #[serde(default = "default_ir_frame_size")]
+    pub ir_frame_height: i32,
     #[serde(default)]
     pub emitter_enabled: bool,
     #[serde(default = "default_dark_luma_threshold")]
@@ -758,6 +762,10 @@ pub struct CameraConfig {
 
 fn default_rgb_device() -> String {
     DEFAULT_RGB_CAMERA.to_string()
+}
+
+fn default_ir_frame_size() -> i32 {
+    -1
 }
 
 fn default_dark_luma_threshold() -> u8 {
@@ -1052,6 +1060,8 @@ impl Default for CameraConfig {
             emitter_enabled: false,
             dark_luma_threshold: default_dark_luma_threshold(),
             parallel_capture: default_parallel_capture(),
+            ir_frame_width: default_ir_frame_size(),
+            ir_frame_height: default_ir_frame_size(),
         }
     }
 }
@@ -1886,7 +1896,7 @@ mod tests {
         assert_eq!(AuthConfig::SIGNATURE.to_string(), "(bbbbbtts)");
         assert_eq!(
             crate::dbus::DbusConfig::SIGNATURE.to_string(),
-            "((ss)(sssdds)(ssbys)(bbbbbtts)(ud)(bdd)(b))"
+            "((ss)(sssdds)(ssiibys)(bbbbbtts)(ud)(bdd)(b))"
         );
     }
 
@@ -2057,6 +2067,8 @@ mod tests {
                 emitter_enabled: true,
                 dark_luma_threshold: 55,
                 parallel_capture: "auto".to_string(),
+                ir_frame_height: default_ir_frame_size(),
+                ir_frame_width: default_ir_frame_size(),
             },
             auth: AuthConfig {
                 abort_if_ssh: true,
@@ -2718,5 +2730,35 @@ level = "low""#,
         assert_eq!(seed.rgb_threshold, 0.31);
         assert_eq!(seed.ir_threshold, 0.62);
         assert_eq!(seed.hybrid_policy, "and");
+    }
+
+    #[test]
+    fn ir_frame_size_defaults_to_unconstrained() {
+        let config: Config = toml_edit::de::from_str(
+            r#"
+            [cameras]
+            rgb = "primary"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.cameras.ir_frame_width, -1);
+        assert_eq!(config.cameras.ir_frame_height, -1);
+    }
+
+    #[test]
+    fn explicit_ir_frame_size_is_parsed() {
+        let config: Config = toml_edit::de::from_str(
+            r#"
+            [cameras]
+            rgb = "primary"
+            ir_frame_width = 340
+            ir_frame_height = 340
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.cameras.ir_frame_width, 340);
+        assert_eq!(config.cameras.ir_frame_height, 340);
     }
 }

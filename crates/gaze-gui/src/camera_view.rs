@@ -112,7 +112,7 @@ impl CameraFeed {
         let stop_clone = stop_flag.clone();
 
         let thread_handle = thread::spawn(move || {
-            let mut cam = match Camera::open(&device) {
+            let mut cam = match Camera::open(&device, (-1, -1)) {
                 Ok(c) => c,
                 Err(err) => {
                     error!(%err, "Camera open failed");

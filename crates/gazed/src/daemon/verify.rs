@@ -481,7 +481,7 @@ impl AuthDaemon {
                         .then(|| Instant::now() + VERIFY_SERIAL_RGB_BUDGET);
                     let mut yielded_to_ir = false;
 
-                    let mut cam = match Camera::open_privileged(&rgb_device_clone) {
+                    let mut cam = match Camera::open_privileged(&rgb_device_clone, (-1, -1)) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(VerifyMsg::Error(format!("RGB Camera open error: {e}")));
@@ -713,7 +713,8 @@ impl AuthDaemon {
                         let _ = tx.blocking_send(VerifyMsg::Diagnostic(message.to_owned()));
                     }
 
-                    let mut cam = match Camera::open_ir_privileged(&ir_device_clone) {
+                    let ir_res = (config_clone.cameras.ir_frame_width, config_clone.cameras.ir_frame_height);
+                    let mut cam = match Camera::open_ir_privileged(&ir_device_clone, ir_res) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(VerifyMsg::Error(format!("IR Camera open error: {e}")));
