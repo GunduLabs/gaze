@@ -2205,19 +2205,24 @@ mod tests {
     #[test]
     fn ir_frame_size_is_negotiated_when_the_source_supports_it() {
         let mut camera =
-            Camera::open_ir("videotestsrc num-buffers=3", Some((320, 240))).expect("ir pipeline");
+            Camera::open_ir("videotestsrc num-buffers=3", Some((480, 480))).expect("ir pipeline");
         let frame = camera.next().expect("videotestsrc frame");
-        assert_eq!((frame.cols(), frame.rows()), (320, 240));
+        assert_eq!((frame.cols(), frame.rows()), (480, 480));
     }
 
     #[test]
     fn unsupported_ir_frame_size_falls_back_to_auto_negotiation() {
         let mut camera = Camera::open_ir(
-            "videotestsrc num-buffers=3 ! capsfilter caps=video/x-raw,width=640,height=480",
-            Some((999, 999)),
+            "videotestsrc num-buffers=3 ! capsfilter caps=video/x-raw,width=1280,height=720",
+            Some((480, 480)),
         )
         .expect("fallback pipeline");
         let frame = camera.next().expect("videotestsrc frame");
-        assert_eq!((frame.cols(), frame.rows()), (640, 480));
+        assert_eq!(frame.rows(), 480);
+        let cols = frame.cols();
+        assert!(
+            (853..=854).contains(&cols),
+            "expected the source's 16:9 aspect, got {cols}"
+        );
     }
 }
