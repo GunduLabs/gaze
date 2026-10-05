@@ -440,6 +440,35 @@ for (const version of versions) {
         } finally { env.extension.disable(); }
     });
 
+    test(`${version}: a pending face hint does not delay unlock`, async () => {
+        const env = await environment(version);
+        try {
+            await begin(env);
+            if (env.services) env.services._onInfo('gdm-face', 'GAZE_MSG_LOOK_CAMERA');
+            else env.verifier._onInfo(null, 'gdm-face', 'GAZE_MSG_LOOK_CAMERA');
+            assert.equal(env.verifier.hasPendingMessages, true);
+            env.verifier.clear = () => {};
+            let unlocked = false;
+            env.prompt.finish(() => { unlocked = true; });
+            assert.equal(unlocked, true);
+            assert.equal(env.errors.length, 0, env.errors.map(String).join('\n'));
+        } finally { env.extension.disable(); }
+    });
+
+    test(`${version}: a pending error still holds unlock`, async () => {
+        const env = await environment(version);
+        try {
+            await begin(env);
+            if (env.services) env.services._onProblem('gdm-face', 'GAZE_MSG_FACE_NOT_RECOGNIZED');
+            else env.verifier._onProblem(null, 'gdm-face', 'GAZE_MSG_FACE_NOT_RECOGNIZED');
+            assert.equal(env.verifier.hasPendingMessages, true);
+            env.verifier.clear = () => {};
+            let unlocked = false;
+            env.prompt.finish(() => { unlocked = true; });
+            assert.equal(unlocked, false);
+        } finally { env.extension.disable(); }
+    });
+
     test(`${version}: a password prompt replaces face confirmation`, async () => {
         const env = await environment(version);
         try {
