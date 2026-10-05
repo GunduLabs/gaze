@@ -182,7 +182,8 @@ gaze duress          # show whether face auth is locked
 gaze duress --clear  # re-enable face auth
 ```
 
-Clearing another user's lockout needs root.
+Clearing a lockout manually requires fresh administrator authentication, even
+for your own account. Root PAM callers clear it after a successful non-face login.
 
 ## Unlock the GNOME Keyring after a GDM or greetd face login
 

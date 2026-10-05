@@ -564,7 +564,7 @@ How it works:
 - A matched frame where either eye is closed never unlocks. That alone means a blink cannot let a coerced unlock through.
 - If an eye stays closed for `hold_ms`, Gaze rejects the attempt and locks face authentication for that user. While locked, face unlock reports itself as unavailable and falls straight through to the password prompt without touching the camera.
 - The lock is stored in `/var/lib/gaze/duress`, so a reboot or daemon restart does not clear it.
-- It clears after a successful login that did not use your face, such as your password, on any service where `pam_gaze.so` is in the auth stack (including the `gdm-password`, KDE, and sudo stacks Gaze installs into). You can also clear it with `gaze duress --clear`.
+- It clears after a successful login that did not use your face, such as your password, on any service where `pam_gaze.so` is in the auth stack (including the `gdm-password`, KDE, and sudo stacks Gaze installs into). You can also clear it with `gaze duress --clear`, which requires fresh administrator authentication.
 
 Settings:
 

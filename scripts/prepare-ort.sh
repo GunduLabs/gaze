@@ -17,7 +17,7 @@ archive="$cache/onnxruntime.tgz"
 stamp="$cache/.extracted"
 "$(dirname "$0")/fetch-ort.sh" "$version" "$ort_arch" "$archive"
 if [ ! -f "$stamp" ] || [ "$archive" -nt "$stamp" ]; then
-    rm -rf "$cache/lib"
+    rm -rf "${cache:?}/lib"
     tar --no-same-owner -xzf "$archive" -C "$cache" --strip-components=1
     touch "$stamp"
 fi

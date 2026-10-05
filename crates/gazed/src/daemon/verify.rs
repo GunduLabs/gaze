@@ -287,10 +287,6 @@ impl AuthDaemon {
 
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
-        self.cancel_active_tasks().await;
-
-        let (tx, mut rx) = oneshot::channel();
-        *self.active_cancel.lock().await = Some(tx);
 
         let detector_arc = self.detector.clone();
         let recognizer_rgb_arc = self.recognizer_rgb.clone();
@@ -351,6 +347,9 @@ impl AuthDaemon {
         let duress_locked = duress_lockout.is_locked(&username);
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
+        let (caller_uid, target_uid) = Self::ensure_claim_camera_access(&header, &claim).await?;
+        let mut rx =
+            replace_claim_task(&self.claim_state, &self.active_cancel, claim.epoch).await?;
 
         self.rt_handle.spawn(async move {
             let ctxt = match SignalEmitter::new(&conn, path) {
@@ -424,6 +423,14 @@ impl AuthDaemon {
                     let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
                     return;
                 }
+            }
+
+            // A configured delay may span a seat switch or claim revocation.
+            if !Self::seat_camera_available(caller_uid, target_uid).await
+                || rx.try_recv() != Err(oneshot::error::TryRecvError::Empty)
+            {
+                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
+                return;
             }
 
             resume_pending.store(false, Ordering::SeqCst);
@@ -908,6 +915,7 @@ impl AuthDaemon {
 
             loop {
                 tokio::select! {
+                    biased;
                     _ = &mut rx => {
                         info!("VerifyStart: cancelled");
                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1067,6 +1075,9 @@ impl AuthDaemon {
                 }
             }
 
+            // A producer may be blocked in blocking_send when cancellation wins.
+            // Closing the receiver releases it so joining cannot deadlock.
+            drop(result_rx);
             if let Some(t) = rgb_thread {
                 let _ = t.join();
             }

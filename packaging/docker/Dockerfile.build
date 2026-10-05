@@ -65,10 +65,13 @@ RUN set -eux; \
         amd64) triple=x86_64-unknown-linux-musl ;; \
         *) echo "Unsupported arch: $arch" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${triple}.tar.gz" \
-        -o /tmp/just.tar.gz; \
-    tar -xzf /tmp/just.tar.gz -C /usr/local/bin just; \
-    rm /tmp/just.tar.gz; \
+    url="https://github.com/casey/just/releases/download/${JUST_VERSION}"; \
+    archive="just-${JUST_VERSION}-${triple}.tar.gz"; \
+    curl -fsSL "$url/$archive" -o "/tmp/$archive"; \
+    curl -fsSL "$url/SHA256SUMS" -o /tmp/just.sha256sums; \
+    (cd /tmp && grep "  ${archive}\$" just.sha256sums | sha256sum -c -); \
+    tar -xzf "/tmp/$archive" -C /usr/local/bin just; \
+    rm "/tmp/$archive" /tmp/just.sha256sums; \
     just --version
 
 # nfpm (pinned to the version CD uses)
@@ -79,10 +82,13 @@ RUN set -eux; \
         amd64) nfpm_arch=x86_64 ;; \
         *) echo "Unsupported arch: $arch" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${nfpm_arch}.tar.gz" \
-        -o /tmp/nfpm.tar.gz; \
-    tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm; \
-    rm /tmp/nfpm.tar.gz; \
+    url="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}"; \
+    archive="nfpm_${NFPM_VERSION}_Linux_${nfpm_arch}.tar.gz"; \
+    curl -fsSL "$url/$archive" -o "/tmp/$archive"; \
+    curl -fsSL "$url/checksums.txt" -o /tmp/nfpm.sha256sums; \
+    (cd /tmp && grep "  ${archive}\$" nfpm.sha256sums | sha256sum -c -); \
+    tar -xzf "/tmp/$archive" -C /usr/local/bin nfpm; \
+    rm "/tmp/$archive" /tmp/nfpm.sha256sums; \
     nfpm --version
 
 # Leave LIBCLANG_PATH unset. clang-sys treats it as a single directory, so a path list becomes

@@ -162,12 +162,12 @@ pub(super) async fn gaze_name_has_owner(proxy: &GazeProxy<'_>, ready_wait: Durat
     }
 }
 
-pub(super) async fn check_daemon(
-    report: &mut Report,
-    username: &str,
-    config: Option<&Config>,
-    benchmark: bool,
-) {
+pub(super) struct Daemon {
+    pub(super) proxy: GazeProxy<'static>,
+    pub(super) config: Option<Config>,
+}
+
+pub(super) async fn connect_daemon(report: &mut Report) -> Option<Daemon> {
     let service_state = match command_output("systemctl", &["is-active", "gazed"]) {
         Ok((_, state)) => state,
         Err(_) => String::new(),
@@ -187,8 +187,7 @@ pub(super) async fn check_daemon(
                 format!("could not reach the system bus: {err}"),
                 "Run `systemctl status dbus` and confirm the system bus socket exists.",
             );
-            check_cameras(report, config);
-            return;
+            return None;
         }
         Err(_) => {
             report.error(
@@ -196,8 +195,7 @@ pub(super) async fn check_daemon(
                 "timed out connecting to the system bus",
                 "Run `systemctl status dbus` and confirm the system bus socket exists.",
             );
-            check_cameras(report, config);
-            return;
+            return None;
         }
     };
 
@@ -240,48 +238,62 @@ pub(super) async fn check_daemon(
             )
         };
         report.error("DBus", message, fix);
-        check_cameras(report, config);
-        return;
+        return None;
     }
 
-    let mut daemon_config = None;
-    match tokio::time::timeout(
+    let config = match tokio::time::timeout(
         ready_wait + DAEMON_TIMEOUT,
         read_daemon_config(&proxy, ready_wait),
     )
     .await
     {
-        Ok(Ok(loaded_config)) => {
+        Ok(Ok(config)) => {
             report.pass("Daemon", "gazed responded to a configuration request");
-            if config.is_none() {
-                for check in config_findings(&loaded_config) {
-                    report.checks.push(check);
-                }
-                check_tpm(report, Some(&loaded_config));
-            }
-            daemon_config = Some(loaded_config);
+            Some(config)
         }
         // The name was owned a moment ago, so losing it here means gazed exited mid-check.
-        Ok(Err(err)) if dbus_is_not_activatable(&err) => report.error(
-            "Daemon",
-            "gazed left the system bus while doctor was querying it",
-            "Run `journalctl -u gazed -n 100 --no-pager` to see why it exited.",
-        ),
-        Ok(Err(err)) => report.error(
-            "Daemon",
-            format!(
-                "gazed did not return its configuration: {}",
-                dbus_error_message(&err)
-            ),
-            "Restart gazed and inspect its journal.",
-        ),
-        Err(_) => report.error(
-            "Daemon",
-            "gazed timed out while reading its configuration",
-            "Restart gazed and inspect its journal.",
-        ),
-    }
-    let config = config.or(daemon_config.as_ref());
+        Ok(Err(err)) if dbus_is_not_activatable(&err) => {
+            report.error(
+                "Daemon",
+                "gazed left the system bus while doctor was querying it",
+                "Run `journalctl -u gazed -n 100 --no-pager` to see why it exited.",
+            );
+            None
+        }
+        Ok(Err(err)) => {
+            report.error(
+                "Daemon",
+                format!(
+                    "gazed did not return its configuration: {}",
+                    dbus_error_message(&err)
+                ),
+                "Restart gazed and inspect its journal.",
+            );
+            None
+        }
+        Err(_) => {
+            report.error(
+                "Daemon",
+                "gazed timed out while reading its configuration",
+                "Restart gazed and inspect its journal.",
+            );
+            None
+        }
+    };
+    Some(Daemon { proxy, config })
+}
+
+pub(super) async fn check_daemon(
+    report: &mut Report,
+    username: &str,
+    proxy: Option<&GazeProxy<'static>>,
+    config: Option<&Config>,
+    benchmark: bool,
+) {
+    let Some(proxy) = proxy else {
+        check_cameras(report, config);
+        return;
+    };
 
     match tokio::time::timeout(DAEMON_TIMEOUT, proxy.is_camera_available()).await {
         Ok(Ok(true)) => report.pass(
@@ -363,7 +375,7 @@ pub(super) async fn check_daemon(
     }
 
     if benchmark {
-        check_benchmark(report, &proxy).await;
+        check_benchmark(report, proxy).await;
     }
 }
 
