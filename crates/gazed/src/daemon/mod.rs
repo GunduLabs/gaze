@@ -49,6 +49,7 @@ pub use watch::*;
 const POLKIT_ACTION_MANAGE_FACES: &str = "com.gundulabs.gaze.manage-faces";
 const POLKIT_ACTION_MANAGE_CONFIG: &str = "com.gundulabs.gaze.manage-config";
 const POLKIT_ACTION_MANAGE_GDM_PROFILE: &str = "com.gundulabs.gaze.manage-gdm-profile";
+const POLKIT_ACTION_CLEAR_DURESS: &str = "com.gundulabs.gaze.clear-duress";
 const GDM_DCONF_OVERRIDE_CONTENT: &str =
     "[org/gnome/shell/extensions/gaze]\nenable-face-authentication=true\n";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
@@ -121,6 +122,41 @@ async fn dbus_proxy() -> fdo::Result<&'static fdo::DBusProxy<'static>> {
 
 fn claim_has_epoch(state: &Option<ClaimState>, epoch: u64) -> bool {
     matches!(state, Some(claim) if claim.epoch == epoch)
+}
+
+// Hold the claim lock while replacing its cancellation channel. Authorization and
+// camera/config lookups may await long enough for this claim to be revoked.
+async fn replace_claim_task(
+    claim_state: &ClaimStateHandle,
+    active_cancel: &ActiveCancelHandle,
+    epoch: u64,
+) -> fdo::Result<oneshot::Receiver<()>> {
+    let state = claim_state.lock().await;
+    if !claim_has_epoch(&state, epoch) {
+        return Err(fdo::Error::AccessDenied("Daemon claim was revoked".into()));
+    }
+    let mut cancel = active_cancel.lock().await;
+    if let Some(previous) = cancel.take() {
+        let _ = previous.send(());
+    }
+    let (tx, rx) = oneshot::channel();
+    *cancel = Some(tx);
+    Ok(rx)
+}
+
+async fn cancel_claim_task(
+    claim_state: &ClaimStateHandle,
+    active_cancel: &ActiveCancelHandle,
+    epoch: u64,
+) -> fdo::Result<()> {
+    let state = claim_state.lock().await;
+    if !claim_has_epoch(&state, epoch) {
+        return Err(fdo::Error::AccessDenied("Daemon claim was revoked".into()));
+    }
+    if let Some(tx) = active_cancel.lock().await.take() {
+        let _ = tx.send(());
+    }
+    Ok(())
 }
 
 /// Whether a NameOwnerChanged signal says `watched` lost its owner. A `new_owner`
@@ -509,6 +545,39 @@ mod tests {
             fresh.unique_name(),
             "a distinct connection is what the cache exists to avoid"
         );
+    }
+
+    #[tokio::test]
+    async fn revoked_claim_cannot_launch_a_capture() {
+        let state = claim_at(7);
+        let cancel = Arc::new(Mutex::new(None));
+        assert!(release_claim_epoch(&state, &cancel, 7).await);
+        assert!(replace_claim_task(&state, &cancel, 7).await.is_err());
+        assert!(cancel.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn stale_start_and_stop_preserve_the_new_owners_capture() {
+        let state = claim_at(8);
+        let cancel = Arc::new(Mutex::new(None));
+        let mut current = replace_claim_task(&state, &cancel, 8).await.unwrap();
+        assert!(replace_claim_task(&state, &cancel, 7).await.is_err());
+        assert!(cancel_claim_task(&state, &cancel, 7).await.is_err());
+        assert_eq!(current.try_recv(), Err(oneshot::error::TryRecvError::Empty));
+        assert!(cancel.lock().await.is_some());
+        cancel_claim_task(&state, &cancel, 8).await.unwrap();
+        assert_eq!(current.await, Ok(()));
+    }
+
+    #[tokio::test]
+    async fn replacing_a_capture_cancels_the_previous_one_and_remains_revocable() {
+        let state = claim_at(9);
+        let cancel = Arc::new(Mutex::new(None));
+        let previous = replace_claim_task(&state, &cancel, 9).await.unwrap();
+        let current = replace_claim_task(&state, &cancel, 9).await.unwrap();
+        assert_eq!(previous.await, Ok(()));
+        assert!(release_claim_epoch(&state, &cancel, 9).await);
+        assert_eq!(current.await, Ok(()));
     }
 
     // The vanish watcher, the owner re-check, and the claim timeout all release here.

@@ -40,6 +40,9 @@ jobs:
         with:
           just-version: ${{ env.JUST_VERSION }}
 
+      - name: Audit docs dependencies
+        run: bun audit
+
       - name: Build docs
         run: just build-docs
 
