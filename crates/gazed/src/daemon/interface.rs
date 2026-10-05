@@ -255,9 +255,8 @@ impl AuthDaemon {
     }
 
     async fn verify_stop(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
-        self.check_claim(&header).await?;
-        self.cancel_active_tasks().await;
-        Ok(())
+        let claim = self.check_claim(&header).await?;
+        cancel_claim_task(&self.claim_state, &self.active_cancel, claim.epoch).await
     }
 
     async fn enroll_start(
@@ -270,12 +269,8 @@ impl AuthDaemon {
         let username = claim.username.clone();
         Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let signal_destination = Self::signal_destination(&claim.sender)?;
-        self.cancel_active_tasks().await;
 
         UserDatabase::validate_face_name(&face_name).map_err(Self::map_user_db_error)?;
-
-        let (tx, mut rx) = oneshot::channel();
-        *self.active_cancel.lock().await = Some(tx);
 
         let detector_arc = self.detector.clone();
         let recognizer_rgb_arc = self.recognizer_rgb.clone();
@@ -290,6 +285,10 @@ impl AuthDaemon {
         let emitter_enabled = config.cameras.emitter_enabled;
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
+        let claim_state = self.claim_state.clone();
+        Self::ensure_claim_camera_access(&header, &claim).await?;
+        let mut rx =
+            replace_claim_task(&self.claim_state, &self.active_cancel, claim.epoch).await?;
 
         self.rt_handle.spawn(async move {
             let ctxt = match SignalEmitter::new(&conn, path) {
@@ -749,6 +748,7 @@ impl AuthDaemon {
                 }
 
                 tokio::select! {
+                    biased;
                     _ = &mut rx => {
                         info!("EnrollStart: cancelled");
                         let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::Cancelled, -1.0).await;
@@ -847,19 +847,33 @@ impl AuthDaemon {
             }
 
             stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-            if !aborted {
+            // Unblock any producer waiting on a full channel before joining it.
+            drop(enroll_rx);
+            drop(preview_rx);
+            let state = claim_state.lock().await;
+            if !aborted && claim_has_epoch(&state, claim.epoch) {
                 let mut db = db_arc.lock().await;
-                match db.add_template(&username, &face_name, &template_id, captured_embeddings) {
-                    Ok(_) => {
+                // Stop/replacement may arrive during the pause after the last capture.
+                let saved = if rx.try_recv() == Err(oneshot::error::TryRecvError::Empty) {
+                    Some(db.add_template(&username, &face_name, &template_id, captured_embeddings))
+                } else {
+                    None
+                };
+                match saved {
+                    Some(Ok(_)) => {
                         info!("Template saved successfully!");
                         let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::Completed, 0.0).await;
                     }
-                    Err(e) => {
+                    Some(Err(e)) => {
                         error!("DB error saving template: {}", e);
                         let _ = Self::enroll_status(&ctxt, &face_name, max_steps, max_steps, true, EnrollPrompt::DbFailed, -1.0).await;
                     }
+                    None => {
+                        let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::Cancelled, -1.0).await;
+                    }
                 }
             }
+            drop(state);
 
             if let Some(t) = rgb_thread {
                 let _ = t.join();
@@ -873,9 +887,8 @@ impl AuthDaemon {
     }
 
     async fn enroll_stop(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
-        self.check_claim(&header).await?;
-        self.cancel_active_tasks().await;
-        Ok(())
+        let claim = self.check_claim(&header).await?;
+        cancel_claim_task(&self.claim_state, &self.active_cancel, claim.epoch).await
     }
 
     async fn list_faces(
@@ -988,7 +1001,9 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         username: String,
     ) -> fdo::Result<bool> {
-        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        // Owning the account does not prove a password login. Root PAM callers
+        // clear after successful authentication; manual clears need a fresh challenge.
+        Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_CLEAR_DURESS).await?;
         let cleared = self
             .duress_lockout
             .clear(&username)

@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Audit
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  JUST_VERSION: 1.58.0
+
+jobs:
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Set up build environment
+        uses: ./.github/actions/setup-build
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+          build-deps: "false"
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
+      - name: Run cargo audit
+        run: just audit
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Audit docs dependencies
+        run: bun audit

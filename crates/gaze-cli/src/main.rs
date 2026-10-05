@@ -96,7 +96,13 @@ fn command_target_user(command: &Commands) -> Option<&str> {
 }
 
 fn command_may_be_challenged(command: &Commands) -> bool {
-    !is_root() && matches!(command_target_user(command), Some(user) if user != get_current_user())
+    command_may_be_challenged_as(command, is_root(), &get_current_user())
+}
+
+fn command_may_be_challenged_as(command: &Commands, root: bool, current_user: &str) -> bool {
+    !root
+        && (matches!(command, Commands::Duress { clear: true, .. })
+            || matches!(command_target_user(command), Some(user) if user != current_user))
 }
 
 const ESCALATION_MARKER: &str = "GAZE_ESCALATED";
@@ -2274,6 +2280,22 @@ mod tests {
 
         let cli = Cli::try_parse_from(["gaze", "add-face", "default"]).unwrap();
         assert_eq!(command_target_user(&cli.command), None);
+    }
+
+    #[test]
+    fn clearing_a_duress_lockout_always_needs_a_tty_polkit_agent() {
+        let clear = Cli::try_parse_from(["gaze", "duress", "--clear"]).unwrap();
+        assert!(command_may_be_challenged_as(&clear.command, false, "alice"));
+        assert!(!command_may_be_challenged_as(&clear.command, true, "alice"));
+
+        let own = Cli::try_parse_from(["gaze", "duress", "--clear", "--user", "alice"]).unwrap();
+        assert!(command_may_be_challenged_as(&own.command, false, "alice"));
+
+        let show = Cli::try_parse_from(["gaze", "duress"]).unwrap();
+        assert!(!command_may_be_challenged_as(&show.command, false, "alice"));
+
+        let other = Cli::try_parse_from(["gaze", "duress", "--user", "bob"]).unwrap();
+        assert!(command_may_be_challenged_as(&other.command, false, "alice"));
     }
 
     #[test]

@@ -446,9 +446,12 @@ jobs:
           esac
           curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
             | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
-          curl -fsSL "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${just_target}.tar.gz" \
-            -o /tmp/just.tar.gz
-          tar -xzf /tmp/just.tar.gz -C /usr/local/bin just
+          just_url="https://github.com/casey/just/releases/download/${JUST_VERSION}"
+          just_archive="just-${JUST_VERSION}-${just_target}.tar.gz"
+          curl -fsSL "$just_url/$just_archive" -o "/tmp/$just_archive"
+          curl -fsSL "$just_url/SHA256SUMS" -o /tmp/just.sha256sums
+          (cd /tmp && grep "  ${just_archive}\$" just.sha256sums | sha256sum -c -)
+          tar -xzf "/tmp/$just_archive" -C /usr/local/bin just
           echo "PATH=$HOME/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" >>"$GITHUB_ENV"
           "$HOME/.cargo/bin/rustc" --version
           just --version
@@ -468,9 +471,12 @@ jobs:
             *) echo "Unsupported nfpm install architecture: $(uname -m)" >&2; exit 1 ;;
           esac
           nfpm_version="${NFPM_VERSION#v}"
-          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/${NFPM_VERSION}/nfpm_${nfpm_version}_Linux_${nfpm_arch}.tar.gz" \
-            -o /tmp/nfpm.tar.gz
-          tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm
+          nfpm_url="https://github.com/goreleaser/nfpm/releases/download/${NFPM_VERSION}"
+          nfpm_archive="nfpm_${nfpm_version}_Linux_${nfpm_arch}.tar.gz"
+          curl -fsSL "$nfpm_url/$nfpm_archive" -o "/tmp/$nfpm_archive"
+          curl -fsSL "$nfpm_url/checksums.txt" -o /tmp/nfpm.sha256sums
+          (cd /tmp && grep "  ${nfpm_archive}\$" nfpm.sha256sums | sha256sum -c -)
+          tar -xzf "/tmp/$nfpm_archive" -C /usr/local/bin nfpm
           nfpm --version
 
       - name: Configure Arch LLVM/Clang environment

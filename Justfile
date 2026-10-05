@@ -801,7 +801,7 @@ dev-link-status:
 # Build docs
 [group("docs")]
 build-docs:
-    bun install
+    bun install --frozen-lockfile
     bun run docs:build
 
 # ── docker (build the Linux targets on a non-Linux host) ────────────────────────
