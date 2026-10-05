@@ -293,6 +293,20 @@ impl AuthDaemon {
         Self::ensure_authorized(header, action_id).await
     }
 
+    pub(super) async fn ensure_claim_camera_access(
+        header: &Header<'_>,
+        claim: &ClaimState,
+    ) -> fdo::Result<(u32, u32)> {
+        let caller_uid = Self::caller_uid(header).await?;
+        let target_uid = Self::username_uid(&claim.username)?;
+        if !Self::seat_camera_available(caller_uid, target_uid).await {
+            return Err(fdo::Error::AccessDenied(
+                "refusing capture: the seat camera belongs to another user's session".into(),
+            ));
+        }
+        Ok((caller_uid, target_uid))
+    }
+
     // The GDM greeter asks which login users have faces and cannot answer an
     // interactive polkit challenge. `active` is (uid, is_greeter) for the seat.
     pub(super) fn config_read_allowed(caller_uid: u32, active_uid: Option<u32>) -> bool {

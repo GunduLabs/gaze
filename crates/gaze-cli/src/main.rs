@@ -96,7 +96,9 @@ fn command_target_user(command: &Commands) -> Option<&str> {
 }
 
 fn command_may_be_challenged(command: &Commands) -> bool {
-    !is_root() && matches!(command_target_user(command), Some(user) if user != get_current_user())
+    !is_root()
+        && (matches!(command, Commands::Duress { clear: true, .. })
+            || matches!(command_target_user(command), Some(user) if user != get_current_user()))
 }
 
 const ESCALATION_MARKER: &str = "GAZE_ESCALATED";

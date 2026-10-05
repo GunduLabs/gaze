@@ -710,6 +710,65 @@ fn video_info_fps(video_info: &gstreamer_video::VideoInfo) -> Option<f64> {
     (num > 0 && denom > 0).then(|| num as f64 / denom as f64)
 }
 
+fn mirrored_bgr_frame(
+    buffer: &gstreamer::BufferRef,
+    info: &gstreamer_video::VideoInfo,
+) -> anyhow::Result<Mat> {
+    anyhow::ensure!(
+        info.format() == gstreamer_video::VideoFormat::Bgr,
+        "Expected BGR format, got {:?}",
+        info.format()
+    );
+    let width = i32::try_from(info.width())?;
+    let height = i32::try_from(info.height())?;
+    anyhow::ensure!(width > 0 && height > 0, "Empty video frame");
+    // VideoMeta can specify padding and an offset different from the negotiated caps.
+    let (stride, offset) = if let Some(meta) = buffer.meta::<gstreamer_video::VideoMeta>() {
+        anyhow::ensure!(
+            meta.format() == info.format()
+                && meta.width() == info.width()
+                && meta.height() == info.height()
+                && meta.n_planes() == 1,
+            "Video metadata does not match BGR caps"
+        );
+        (meta.stride()[0], meta.offset()[0])
+    } else {
+        (info.stride()[0], info.offset()[0])
+    };
+    let stride = usize::try_from(stride)?;
+    let row_bytes = (width as usize)
+        .checked_mul(3)
+        .ok_or_else(|| anyhow::anyhow!("Video row size overflow"))?;
+    anyhow::ensure!(
+        stride >= row_bytes,
+        "Video stride is smaller than a BGR row"
+    );
+    let end = stride
+        .checked_mul(height as usize)
+        .and_then(|size| offset.checked_add(size))
+        .ok_or_else(|| anyhow::anyhow!("Video frame size overflow"))?;
+    let map = buffer
+        .map_readable()
+        .map_err(|_| anyhow::anyhow!("Buffer is not readable"))?;
+    let pixels = map
+        .get(offset..end)
+        .ok_or_else(|| anyhow::anyhow!("Video buffer is smaller than its declared frame"))?;
+    // Bounds, dimensions and stride are checked before OpenCV borrows this memory.
+    // The map stays alive until flip has copied the frame into an owned Mat.
+    let frame = unsafe {
+        Mat::new_rows_cols_with_data_unsafe(
+            height,
+            width,
+            opencv::core::CV_8UC3,
+            pixels.as_ptr() as *mut std::ffi::c_void,
+            stride,
+        )?
+    };
+    let mut mirrored = Mat::default();
+    opencv::core::flip(&frame, &mut mirrored, 1)?;
+    Ok(mirrored)
+}
+
 impl Camera {
     pub fn open(camera_source: &str) -> anyhow::Result<Self> {
         Self::open_kind(camera_source, true)
@@ -926,33 +985,7 @@ impl Camera {
             *guard = Some(fps_val);
         }
 
-        anyhow::ensure!(
-            video_info.format() == gstreamer_video::VideoFormat::Bgr,
-            "Expected BGR format, got {:?}",
-            video_info.format()
-        );
-
-        let width = video_info.width() as usize;
-        let height = video_info.height() as usize;
-        let stride = video_info.stride()[0] as usize;
-
-        let map = buffer
-            .map_readable()
-            .map_err(|_| anyhow::anyhow!("Buffer is not readable"))?;
-
-        let frame = unsafe {
-            opencv::core::Mat::new_rows_cols_with_data_unsafe(
-                height as i32,
-                width as i32,
-                opencv::core::CV_8UC3,
-                map.as_ptr() as *mut std::ffi::c_void,
-                stride,
-            )?
-        };
-
-        let mut mirrored = Mat::default();
-        opencv::core::flip(&frame, &mut mirrored, 1)?;
-        Ok(mirrored)
+        mirrored_bgr_frame(buffer, &video_info)
     }
 
     fn poll_frame(&mut self, timeout: gstreamer::ClockTime) -> FramePoll {
@@ -1313,6 +1346,69 @@ fn is_mono_format(format: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn truncated_camera_buffer_is_rejected_before_opencv_borrows_it() {
+        gstreamer::init().unwrap();
+        let info = gstreamer_video::VideoInfo::builder(gstreamer_video::VideoFormat::Bgr, 2, 2)
+            .build()
+            .unwrap();
+        let buffer = gstreamer::Buffer::from_mut_slice(vec![0u8; 1]);
+        let err = mirrored_bgr_frame(&buffer, &info).unwrap_err();
+        assert!(err.to_string().contains("smaller"), "{err}");
+    }
+
+    #[test]
+    fn camera_metadata_cannot_supply_a_negative_short_or_overflowing_layout() {
+        gstreamer::init().unwrap();
+        let info = gstreamer_video::VideoInfo::builder(gstreamer_video::VideoFormat::Bgr, 2, 2)
+            .build()
+            .unwrap();
+        for (offset, stride) in [(0, -8), (0, 3), (usize::MAX, 8), (16, 8)] {
+            let mut buffer = gstreamer::Buffer::from_mut_slice(vec![0u8; 16]);
+            gstreamer_video::VideoMeta::add_full(
+                buffer.get_mut().unwrap(),
+                gstreamer_video::VideoFrameFlags::empty(),
+                gstreamer_video::VideoFormat::Bgr,
+                2,
+                2,
+                &[offset],
+                &[stride],
+            )
+            .unwrap();
+            assert!(
+                mirrored_bgr_frame(&buffer, &info).is_err(),
+                "{offset}/{stride}"
+            );
+        }
+    }
+
+    #[test]
+    fn camera_frames_honor_metadata_offset_and_stride_and_copy_the_pixels() {
+        gstreamer::init().unwrap();
+        let info = gstreamer_video::VideoInfo::builder(gstreamer_video::VideoFormat::Bgr, 2, 2)
+            .build()
+            .unwrap();
+        let mut buffer = gstreamer::Buffer::from_mut_slice(vec![
+            99, 99, 99, 99, 99, 99, 99, 99, 1, 2, 3, 4, 5, 6, 0, 0, 7, 8, 9, 10, 11, 12, 0, 0,
+        ]);
+        gstreamer_video::VideoMeta::add_full(
+            buffer.get_mut().unwrap(),
+            gstreamer_video::VideoFrameFlags::empty(),
+            gstreamer_video::VideoFormat::Bgr,
+            2,
+            2,
+            &[8],
+            &[8],
+        )
+        .unwrap();
+        let frame = mirrored_bgr_frame(&buffer, &info).unwrap();
+        drop(buffer);
+        assert_eq!(
+            frame_to_bytes(&frame).unwrap(),
+            [4, 5, 6, 1, 2, 3, 10, 11, 12, 7, 8, 9]
+        );
+    }
 
     #[test]
     fn pipewire_elements_take_the_bound_descriptor() {
