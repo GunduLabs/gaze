@@ -615,6 +615,7 @@ struct V4l2Retry {
     fallback: V4l2Fallback,
     camera_source: String,
     want_color: bool,
+    frame_size: Option<(u32, u32)>,
 }
 
 pub struct Camera {
@@ -771,22 +772,46 @@ fn mirrored_bgr_frame(
 
 impl Camera {
     pub fn open(camera_source: &str) -> anyhow::Result<Self> {
-        Self::open_kind(camera_source, true)
+        Self::open_kind(camera_source, true, None)
     }
 
-    pub fn open_ir(camera_source: &str) -> anyhow::Result<Self> {
-        Self::open_kind(camera_source, false)
+    pub fn open_ir(camera_source: &str, frame_size: Option<(u32, u32)>) -> anyhow::Result<Self> {
+        Self::open_kind(camera_source, false, frame_size)
     }
 
     pub fn open_privileged(camera_source: &str) -> anyhow::Result<Self> {
-        Self::open_privileged_kind(camera_source, true)
+        Self::open_privileged_kind(camera_source, true, None)
     }
 
-    pub fn open_ir_privileged(camera_source: &str) -> anyhow::Result<Self> {
-        Self::open_privileged_kind(camera_source, false)
+    pub fn open_ir_privileged(
+        camera_source: &str,
+        frame_size: Option<(u32, u32)>,
+    ) -> anyhow::Result<Self> {
+        Self::open_privileged_kind(camera_source, false, frame_size)
     }
 
-    fn open_privileged_kind(camera_source: &str, want_color: bool) -> anyhow::Result<Self> {
+    fn open_with_frame_size_fallback(
+        camera_source: &str,
+        frame_size: Option<(u32, u32)>,
+        mut open: impl FnMut(Option<(u32, u32)>) -> anyhow::Result<Self>,
+    ) -> anyhow::Result<Self> {
+        match (open(frame_size), frame_size) {
+            (Err(err), Some((width, height))) if !device_is_busy(&format!("{err:#}")) => {
+                warn!(
+                    "IR frame size {width}x{height} failed for {camera_source} ({err:#}); \
+                     falling back to auto-negotiation"
+                );
+                open(None)
+            }
+            (result, _) => result,
+        }
+    }
+
+    fn open_privileged_kind(
+        camera_source: &str,
+        want_color: bool,
+        frame_size: Option<(u32, u32)>,
+    ) -> anyhow::Result<Self> {
         gstreamer::init()?;
         let node = resolve_privileged_node(camera_source, want_color).ok_or_else(|| {
             anyhow::anyhow!(
@@ -796,12 +821,18 @@ impl Camera {
         })?;
         let force_ir_yuy2 = node_requires_forced_ir_yuy2(&node, want_color);
         let src_element = format!("v4l2src device={node}");
-        retry_while_busy(&node, PRIVILEGED_BUSY_RETRY_DELAY, || {
-            Self::open_source_element(&src_element, camera_source, force_ir_yuy2, None)
+        Self::open_with_frame_size_fallback(camera_source, frame_size, |size| {
+            retry_while_busy(&node, PRIVILEGED_BUSY_RETRY_DELAY, || {
+                Self::open_source_element(&src_element, camera_source, force_ir_yuy2, None, size)
+            })
         })
     }
 
-    fn open_kind(camera_source: &str, want_color: bool) -> anyhow::Result<Self> {
+    fn open_kind(
+        camera_source: &str,
+        want_color: bool,
+        frame_size: Option<(u32, u32)>,
+    ) -> anyhow::Result<Self> {
         gstreamer::init()?;
         let (src_element, force_ir_yuy2) = match classify_source(camera_source, want_color)? {
             SourceElement::Element(element) => {
@@ -833,31 +864,36 @@ impl Camera {
         // A claim binds capture to one user's PipeWire session; without one, `pipewiresrc`
         // resolves the socket from the environment as it does inside a user's own session.
         let is_pipewire = src_element == "pipewiresrc" || src_element.starts_with("pipewiresrc ");
-        let session = match (is_pipewire, current_pipewire_uid()) {
-            (true, Some(uid)) => match PipeWireSession::connect_for_uid(uid) {
-                Ok(session) => Some(session),
-                Err(err) => {
-                    // Greeters without a user manager have no socket. Carry on unbound so the
-                    // V4L2 fallback below still gets its turn.
-                    warn!("No PipeWire socket for uid {uid} ({err}); capture will use V4L2");
-                    None
-                }
-            },
-            _ => None,
-        };
-        let bound = match &session {
-            Some(session) => bind_pipewire_fd(&src_element, session.raw_fd()),
-            None => src_element.clone(),
+
+        let open = |size: Option<(u32, u32)>| -> anyhow::Result<Camera> {
+            let session = match (is_pipewire, current_pipewire_uid()) {
+                (true, Some(uid)) => match PipeWireSession::connect_for_uid(uid) {
+                    Ok(session) => Some(session),
+                    Err(err) => {
+                        // Greeters without a user manager have no socket. Carry on unbound so the
+                        // V4L2 fallback below still gets its turn.
+                        warn!("No PipeWire socket for uid {uid} ({err}); capture will use V4L2");
+                        None
+                    }
+                },
+                _ => None,
+            };
+            let bound = match &session {
+                Some(session) => bind_pipewire_fd(&src_element, session.raw_fd()),
+                None => src_element.clone(),
+            };
+            Self::open_source_element(&bound, camera_source, force_ir_yuy2, session, size)
         };
 
         let fallback = v4l2_fallback_for(&src_element);
-        match Self::open_source_element(&bound, camera_source, force_ir_yuy2, session) {
+        match Self::open_with_frame_size_fallback(camera_source, frame_size, open) {
             Ok(mut camera) => {
                 if fallback != V4l2Fallback::None {
                     camera.v4l2_retry = Some(V4l2Retry {
                         fallback,
                         camera_source: camera_source.to_string(),
                         want_color,
+                        frame_size,
                     });
                 }
                 Ok(camera)
@@ -876,12 +912,16 @@ impl Camera {
                 })?;
                 info!("Falling back to V4L2 camera node {node}");
                 let force_ir_yuy2 = node_requires_forced_ir_yuy2(&node, want_color);
-                Self::open_source_element(
-                    &format!("v4l2src device={node}"),
-                    camera_source,
-                    force_ir_yuy2,
-                    None,
-                )
+                let src_element = format!("v4l2src device={node}");
+                Self::open_with_frame_size_fallback(camera_source, frame_size, |size| {
+                    Self::open_source_element(
+                        &src_element,
+                        camera_source,
+                        force_ir_yuy2,
+                        None,
+                        size,
+                    )
+                })
             }
             Err(err) => Err(err),
         }
@@ -929,8 +969,9 @@ impl Camera {
         camera_source: &str,
         force_ir_yuy2: bool,
         pipewire: Option<PipeWireSession>,
+        frame_size: Option<(u32, u32)>,
     ) -> anyhow::Result<Self> {
-        let pipeline_str = camera_pipeline(src_element, force_ir_yuy2);
+        let pipeline_str = camera_pipeline(src_element, force_ir_yuy2, frame_size);
         info!("Attempting to open GStreamer camera: {}", pipeline_str);
 
         let pipeline = gstreamer::parse::launch(&pipeline_str)
@@ -1071,12 +1112,16 @@ impl Camera {
         self._pipewire = None;
 
         let force_ir_yuy2 = node_requires_forced_ir_yuy2(&node, retry.want_color);
-        match Self::open_source_element(
-            &format!("v4l2src device={node}"),
-            &retry.camera_source,
-            force_ir_yuy2,
-            None,
-        ) {
+        let src_element = format!("v4l2src device={node}");
+        match Self::open_with_frame_size_fallback(&retry.camera_source, retry.frame_size, |size| {
+            Self::open_source_element(
+                &src_element,
+                &retry.camera_source,
+                force_ir_yuy2,
+                None,
+                size,
+            )
+        }) {
             Ok(camera) => {
                 info!("Retrying the dark PipeWire stream on V4L2 camera node {node}");
                 *self = camera;
@@ -1130,16 +1175,24 @@ impl Camera {
     }
 }
 
-fn camera_pipeline(src_element: &str, force_ir_yuy2: bool) -> String {
+fn camera_pipeline(
+    src_element: &str,
+    force_ir_yuy2: bool,
+    frame_size: Option<(u32, u32)>,
+) -> String {
     if force_ir_yuy2 {
         // Dell/Realtek single-node RGB/IR modules silently stay in RGB mode unless the
         // stream is negotiated as uncompressed YUY2 at this exact resolution.
+        let (width, height) = frame_size.unwrap_or((REALTEK_IR_YUY2_WIDTH, REALTEK_IR_YUY2_HEIGHT));
         format!(
-            "{src_element} ! video/x-raw,format=YUY2,width={REALTEK_IR_YUY2_WIDTH},height={REALTEK_IR_YUY2_HEIGHT},pixel-aspect-ratio=1/1 ! videoconvert ! videoscale ! appsink name=gaze_sink"
+            "{src_element} ! video/x-raw,format=YUY2,width={width},height={height},pixel-aspect-ratio=1/1 ! videoconvert ! videoscale ! appsink name=gaze_sink"
         )
     } else {
+        let size = frame_size
+            .map(|(width, height)| format!(",width={width},height={height}"))
+            .unwrap_or_default();
         format!(
-            "{src_element} ! video/x-raw,pixel-aspect-ratio=1/1; image/jpeg ! decodebin ! videoconvert ! videoscale ! appsink name=gaze_sink"
+            "{src_element} ! video/x-raw{size},pixel-aspect-ratio=1/1; image/jpeg{size} ! decodebin ! videoconvert ! videoscale ! appsink name=gaze_sink"
         )
     }
 }
@@ -1663,11 +1716,11 @@ mod tests {
 
     #[test]
     fn realtek_ir_pipeline_forces_required_uncompressed_mode() {
-        let pipeline = camera_pipeline("v4l2src device=/dev/video0", true);
+        let pipeline = camera_pipeline("v4l2src device=/dev/video0", true, None);
         assert!(pipeline.contains("video/x-raw,format=YUY2,width=640,height=480"));
         assert!(!pipeline.contains("image/jpeg"));
 
-        let rgb_pipeline = camera_pipeline("v4l2src device=/dev/video0", false);
+        let rgb_pipeline = camera_pipeline("v4l2src device=/dev/video0", false, None);
         assert!(rgb_pipeline.contains("image/jpeg"));
     }
 
@@ -1688,6 +1741,8 @@ mod tests {
         let cameras = CameraConfig {
             rgb: "primary".to_string(),
             ir: String::new(),
+            ir_frame_width: None,
+            ir_frame_height: None,
             emitter_enabled: false,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
@@ -1706,6 +1761,8 @@ mod tests {
         CameraConfig {
             rgb: rgb.to_string(),
             ir: ir.to_string(),
+            ir_frame_width: None,
+            ir_frame_height: None,
             emitter_enabled: false,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
@@ -1805,6 +1862,8 @@ mod tests {
         let cameras = CameraConfig {
             rgb: "primary".to_string(),
             ir: "/dev/video2".to_string(),
+            ir_frame_width: None,
+            ir_frame_height: None,
             emitter_enabled: true,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
@@ -1820,6 +1879,8 @@ mod tests {
         let cameras = CameraConfig {
             rgb: String::new(),
             ir: "/dev/video2".to_string(),
+            ir_frame_width: None,
+            ir_frame_height: None,
             emitter_enabled: true,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
@@ -1941,7 +2002,7 @@ mod tests {
     #[test]
     fn open_surfaces_malformed_sources() {
         assert!(Camera::open("/dev/video").is_err());
-        assert!(Camera::open_ir("/dev/video2 ! fakesink").is_err());
+        assert!(Camera::open_ir("/dev/video2 ! fakesink", None).is_err());
         assert!(Camera::open("usb:046d").is_err());
     }
 
@@ -2034,6 +2095,8 @@ mod tests {
         let cameras = CameraConfig {
             rgb: "primary".to_string(),
             ir: "pipewiresrc target-object=device-name".to_string(),
+            ir_frame_width: None,
+            ir_frame_height: None,
             emitter_enabled: true,
             dark_luma_threshold: 30,
             parallel_capture: "auto".to_string(),
@@ -2105,7 +2168,7 @@ mod tests {
             "unexpected error: {err:#}"
         );
         assert!(Camera::open_privileged("").is_err());
-        assert!(Camera::open_ir_privileged("v4l2src device=/dev/video0").is_err());
+        assert!(Camera::open_ir_privileged("v4l2src device=/dev/video0", None).is_err());
     }
 
     fn sample_options() -> Vec<(String, String)> {
@@ -2127,5 +2190,39 @@ mod tests {
         let options = sample_options();
         assert!(!is_listed_source(&options, "/dev/video99"));
         assert_eq!(source_index(&options, "/dev/video99"), 0);
+    }
+
+    #[test]
+    fn ir_frame_size_constrains_raw_and_jpeg_caps() {
+        let pipeline = camera_pipeline("v4l2src device=/dev/video2", false, Some((340, 340)));
+        assert!(pipeline.contains("video/x-raw,width=340,height=340,pixel-aspect-ratio=1/1;"));
+        assert!(pipeline.contains("image/jpeg,width=340,height=340 ! decodebin"));
+
+        let forced = camera_pipeline("v4l2src device=/dev/video2", true, Some((340, 340)));
+        assert!(forced.contains("video/x-raw,format=YUY2,width=340,height=340,"));
+    }
+
+    #[test]
+    fn ir_frame_size_is_negotiated_when_the_source_supports_it() {
+        let mut camera =
+            Camera::open_ir("videotestsrc num-buffers=3", Some((480, 480))).expect("ir pipeline");
+        let frame = camera.next().expect("videotestsrc frame");
+        assert_eq!((frame.cols(), frame.rows()), (480, 480));
+    }
+
+    #[test]
+    fn unsupported_ir_frame_size_falls_back_to_auto_negotiation() {
+        let mut camera = Camera::open_ir(
+            "videotestsrc num-buffers=3 ! capsfilter caps=video/x-raw,width=1280,height=720",
+            Some((480, 480)),
+        )
+        .expect("fallback pipeline");
+        let frame = camera.next().expect("videotestsrc frame");
+        assert_eq!(frame.rows(), 480);
+        let cols = frame.cols();
+        assert!(
+            (853..=854).contains(&cols),
+            "expected the source's 16:9 aspect, got {cols}"
+        );
     }
 }
