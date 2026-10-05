@@ -54,7 +54,10 @@ pub(super) fn check_acceleration(report: &mut Report, config: Option<&Config>) {
         }
     }
 
-    if let Some(provider) = active_provider(config, &devices) {
+    let Some(config) = config else {
+        return;
+    };
+    if let Some(provider) = active_provider(Some(config), &devices) {
         let library = vendor_runtime(provider);
         if library.is_file() {
             report.pass(

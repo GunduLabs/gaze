@@ -194,24 +194,41 @@ pub async fn run(username: &str, benchmark: bool) -> anyhow::Result<bool> {
 
     check_platform(&mut report);
     check_systemd(&mut report);
-    let config = check_config(&mut report);
-    acceleration::check_acceleration(&mut report, config.as_ref());
+    let file_config = check_config(&mut report);
+    let daemon = connect_daemon(&mut report).await;
+    let daemon_config = daemon.as_ref().and_then(|daemon| daemon.config.as_ref());
+    if file_config.is_none()
+        && let Some(daemon_config) = daemon_config
+    {
+        for check in config_findings(daemon_config) {
+            report.checks.push(check);
+        }
+    }
+    let config = file_config.as_ref().or(daemon_config);
+    acceleration::check_acceleration(&mut report, config);
     check_pam(&mut report);
     check_sudo_policy(&mut report, username);
     check_privileged_files(&mut report);
     check_desktop_integration(&mut report);
     check_kde_confirmation_bypass(
         &mut report,
-        config.as_ref(),
+        config,
         read_pam_service(KDE_FACE_PAM_FILE).as_deref(),
         read_pam_service(KDE_SMARTCARD_PAM_FILE).as_deref(),
         read_pam_service(PLASMALOGIN_FACE_PAM_FILE).as_deref(),
     );
-    check_tpm(&mut report, config.as_ref());
-    check_keyring(&mut report, username, config.as_ref());
-    check_kwallet(&mut report, username, config.as_ref());
-    check_greeter_keyring_selinux(&mut report, config.as_ref());
-    check_daemon(&mut report, username, config.as_ref(), benchmark).await;
+    check_tpm(&mut report, config);
+    check_keyring(&mut report, username, config);
+    check_kwallet(&mut report, username, config);
+    check_greeter_keyring_selinux(&mut report, config);
+    check_daemon(
+        &mut report,
+        username,
+        daemon.as_ref().map(|daemon| &daemon.proxy),
+        config,
+        benchmark,
+    )
+    .await;
 
     report.print()?;
     Ok(report.is_healthy())
