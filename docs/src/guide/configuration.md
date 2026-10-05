@@ -29,6 +29,8 @@ level = "medium"
 rgb = "primary"
 # ir = "/dev/video2"        # optional infrared camera (direct /dev/video* node or usb:VVVV:PPPP)
 # emitter_enabled = false   # drive the IR emitter (requires ir)
+# ir_frame_width = 340      # force the IR resolution; set with ir_frame_height (requires ir)
+# ir_frame_height = 340
 # parallel_capture = "never" # "never", "auto", or "always" (requires ir)
 dark_luma_threshold = 20
 
@@ -241,9 +243,12 @@ When you configure an IR camera alongside RGB, Gaze captures templates from both
 during enrollment, then combines their results during verification according to
 the configured `hybrid_policy`.
 
-### IR resolution overrides
+### IR frame size override
 
-Some modern laptop IR webcams advertise high resolutions (like `640x480`) to the operating system, but only actually stream valid frames when forced to a specific native resolution (like `340x340`). If auto-negotiation fails and the camera outputs a solid green screen or corrupted frames, you can force the dimensions explicitly:
+Some laptop IR cameras advertise several resolutions but only stream valid frames
+at their native one. Gaze picks the largest mode it can negotiate, so on those
+cameras the IR feed comes out solid green or corrupted. Force the native size
+instead:
 
 ```toml
 [cameras]
@@ -252,7 +257,15 @@ ir_frame_width = 340
 ir_frame_height = 340
 ```
 
-By default, these are `-1` (meaning auto-negotiation is used).
+- Set both keys or neither. Each must be between 1 and 4096. Leave them out to
+  let Gaze negotiate the size, which is the default.
+- If the camera cannot open at the forced size, Gaze logs a warning and falls back
+  to negotiating the size, so a wrong value never leaves face auth without a camera.
+- The override applies only to the IR camera. On Dell and Realtek modules that
+  Gaze forces into 640x480 YUY2 mode, it replaces that 640x480.
+- In the GUI, turn on **IR Frame Size Override** under Hardware.
+- The daemon must be at least as new as the GUI or CLI that sets the override.
+  An older daemon rejects it and leaves the rest of the configuration unchanged.
 
 ### Parallel RGB + IR capture
 

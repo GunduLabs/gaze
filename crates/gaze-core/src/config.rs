@@ -48,6 +48,7 @@ pub const MIN_DURESS_CLOSED_THRESHOLD: f64 = 0.5;
 pub const MAX_DURESS_CLOSED_THRESHOLD: f64 = 0.99;
 pub const DEFAULT_DURESS_HOLD_MS: u64 = 600;
 pub const MAX_DURESS_HOLD_MS: u64 = 5000;
+pub const MAX_IR_FRAME_DIMENSION: u32 = 4096;
 const DEFAULT_CONFIG_MODE: u32 = 0o644;
 
 fn default_level() -> String {
@@ -742,16 +743,16 @@ impl LivenessConfig {
     }
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct CameraConfig {
     #[serde(default = "default_rgb_device")]
     pub rgb: String,
     #[serde(default)]
     pub ir: String,
-    #[serde(default = "default_ir_frame_size")]
-    pub ir_frame_width: i32,
-    #[serde(default = "default_ir_frame_size")]
-    pub ir_frame_height: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ir_frame_width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ir_frame_height: Option<u32>,
     #[serde(default)]
     pub emitter_enabled: bool,
     #[serde(default = "default_dark_luma_threshold")]
@@ -764,8 +765,8 @@ fn default_rgb_device() -> String {
     DEFAULT_RGB_CAMERA.to_string()
 }
 
-fn default_ir_frame_size() -> i32 {
-    -1
+fn ir_frame_dimension_valid(dimension: u32) -> bool {
+    (1..=MAX_IR_FRAME_DIMENSION).contains(&dimension)
 }
 
 fn default_dark_luma_threshold() -> u8 {
@@ -785,7 +786,33 @@ impl CameraConfig {
                 PARALLEL_CAPTURE_OPTIONS
             );
         }
+        match (self.ir_frame_width, self.ir_frame_height) {
+            (None, None) => {}
+            (Some(_), None) | (None, Some(_)) => anyhow::bail!(
+                "cameras.ir_frame_width and cameras.ir_frame_height must be set together"
+            ),
+            (Some(width), Some(height)) => {
+                if !ir_frame_dimension_valid(width) || !ir_frame_dimension_valid(height) {
+                    anyhow::bail!(
+                        "cameras.ir_frame_width and cameras.ir_frame_height must be between 1 and \
+                         {MAX_IR_FRAME_DIMENSION}, got {width}x{height}"
+                    );
+                }
+            }
+        }
         Ok(())
+    }
+
+    pub fn ir_frame_size(&self) -> Option<(u32, u32)> {
+        let width = self.ir_frame_width?;
+        let height = self.ir_frame_height?;
+        (ir_frame_dimension_valid(width) && ir_frame_dimension_valid(height))
+            .then_some((width, height))
+    }
+
+    pub fn set_ir_frame_size(&mut self, size: Option<(u32, u32)>) {
+        self.ir_frame_width = size.map(|(width, _)| width);
+        self.ir_frame_height = size.map(|(_, height)| height);
     }
 
     pub fn parallel_capture(&self) -> &str {
@@ -1060,11 +1087,16 @@ impl Default for CameraConfig {
             emitter_enabled: false,
             dark_luma_threshold: default_dark_luma_threshold(),
             parallel_capture: default_parallel_capture(),
-            ir_frame_width: default_ir_frame_size(),
-            ir_frame_height: default_ir_frame_size(),
+            ir_frame_width: None,
+            ir_frame_height: None,
         }
     }
 }
+
+const OPTIONAL_CONFIG_KEYS: [(&str, &str); 2] = [
+    ("cameras", "ir_frame_width"),
+    ("cameras", "ir_frame_height"),
+];
 
 const LEGACY_CONFIG_KEYS: [&str; 3] = [
     "security.threshold",
@@ -1113,7 +1145,8 @@ pub fn unknown_config_keys(contents: &str) -> Vec<String> {
                 _ => false,
             };
             let path = format!("{table_name}.{key}");
-            if !is_known && !LEGACY_CONFIG_KEYS.contains(&path.as_str()) {
+            let is_optional = OPTIONAL_CONFIG_KEYS.contains(&(table_name, key));
+            if !is_known && !is_optional && !LEGACY_CONFIG_KEYS.contains(&path.as_str()) {
                 unknown.push(path);
             }
         }
@@ -1198,7 +1231,7 @@ impl Config {
                 tracing::warn!("{e}; using the default liveness settings");
             }
             if let Err(e) = config.cameras.validate() {
-                tracing::warn!("{e}; capturing RGB and IR one at a time");
+                tracing::warn!("{e}; using the default for the invalid camera setting");
             }
             if let Err(e) = config.duress.validate() {
                 tracing::warn!("{e}; using the default duress settings");
@@ -1271,7 +1304,21 @@ impl Config {
     fn rewrite_preserving_comments(&self, existing: Option<&str>) -> Option<String> {
         let mut doc = existing?.parse::<toml_edit::DocumentMut>().ok()?;
         let desired_doc = toml_edit::ser::to_document(self).ok()?;
-        merge_into_toml_table(doc.as_table_mut(), desired_doc.as_table()).then(|| doc.to_string())
+        if !merge_into_toml_table(doc.as_table_mut(), desired_doc.as_table()) {
+            return None;
+        }
+        for (table, key) in OPTIONAL_CONFIG_KEYS {
+            let unset = desired_doc
+                .get(table)
+                .and_then(|item| item.as_table_like())
+                .is_none_or(|desired| !desired.contains_key(key));
+            if unset
+                && let Some(target) = doc.get_mut(table).and_then(|item| item.as_table_like_mut())
+            {
+                target.remove(key);
+            }
+        }
+        Some(doc.to_string())
     }
 }
 
@@ -1896,7 +1943,7 @@ mod tests {
         assert_eq!(AuthConfig::SIGNATURE.to_string(), "(bbbbbtts)");
         assert_eq!(
             crate::dbus::DbusConfig::SIGNATURE.to_string(),
-            "((ss)(sssdds)(ssiibys)(bbbbbtts)(ud)(bdd)(b))"
+            "((ss)(sssdds)(ssbys)(bbbbbtts)(ud)(bdd)(b))"
         );
     }
 
@@ -2067,8 +2114,8 @@ mod tests {
                 emitter_enabled: true,
                 dark_luma_threshold: 55,
                 parallel_capture: "auto".to_string(),
-                ir_frame_height: default_ir_frame_size(),
-                ir_frame_width: default_ir_frame_size(),
+                ir_frame_width: Some(340),
+                ir_frame_height: Some(340),
             },
             auth: AuthConfig {
                 abort_if_ssh: true,
@@ -2119,6 +2166,7 @@ mod tests {
         assert!(loaded.cameras.emitter_enabled);
         assert_eq!(loaded.cameras.dark_luma_threshold, 55);
         assert_eq!(loaded.cameras.parallel_capture(), "auto");
+        assert_eq!(loaded.cameras.ir_frame_size(), Some((340, 340)));
         assert!(loaded.auth.abort_if_ssh);
         assert!(!loaded.auth.abort_if_lid_closed);
         assert!(loaded.auth.abort_before_first_resume);
@@ -2733,7 +2781,7 @@ level = "low""#,
     }
 
     #[test]
-    fn ir_frame_size_defaults_to_unconstrained() {
+    fn ir_frame_size_defaults_to_auto_negotiation() {
         let config: Config = toml_edit::de::from_str(
             r#"
             [cameras]
@@ -2742,23 +2790,68 @@ level = "low""#,
         )
         .unwrap();
 
-        assert_eq!(config.cameras.ir_frame_width, -1);
-        assert_eq!(config.cameras.ir_frame_height, -1);
+        assert_eq!(config.cameras.ir_frame_size(), None);
+        config.cameras.validate().unwrap();
     }
 
     #[test]
-    fn explicit_ir_frame_size_is_parsed() {
-        let config: Config = toml_edit::de::from_str(
-            r#"
+    fn explicit_ir_frame_size_is_parsed_as_a_known_key() {
+        let contents = r#"
             [cameras]
             rgb = "primary"
             ir_frame_width = 340
             ir_frame_height = 340
-            "#,
+            "#;
+        let config: Config = toml_edit::de::from_str(contents).unwrap();
+
+        config.cameras.validate().unwrap();
+        assert_eq!(config.cameras.ir_frame_size(), Some((340, 340)));
+        assert!(unknown_config_keys(contents).is_empty());
+    }
+
+    #[test]
+    fn validate_rejects_a_partial_or_out_of_range_ir_frame_size() {
+        for (width, height) in [
+            (Some(340), None),
+            (None, Some(340)),
+            (Some(0), Some(340)),
+            (Some(340), Some(MAX_IR_FRAME_DIMENSION + 1)),
+        ] {
+            let cameras = CameraConfig {
+                ir_frame_width: width,
+                ir_frame_height: height,
+                ..CameraConfig::default()
+            };
+            assert!(cameras.validate().is_err(), "{width:?}x{height:?}");
+            assert_eq!(cameras.ir_frame_size(), None, "{width:?}x{height:?}");
+        }
+    }
+
+    #[test]
+    fn save_to_omits_an_unset_ir_frame_size_and_removes_a_cleared_one() {
+        let temp = TempDir::new("ir-frame-size");
+        let path = temp.path().join("config.toml");
+        let path = path.to_str().unwrap();
+
+        Config::default().save_to(path).unwrap();
+        assert!(!fs::read_to_string(path).unwrap().contains("ir_frame"));
+
+        fs::write(
+            path,
+            "[cameras]\n# keep me\nir = \"/dev/video2\"\nir_frame_width = 340\nir_frame_height = 340\n",
         )
         .unwrap();
+        let mut config = Config::load_from(path).unwrap();
+        assert_eq!(config.cameras.ir_frame_size(), Some((340, 340)));
 
-        assert_eq!(config.cameras.ir_frame_width, 340);
-        assert_eq!(config.cameras.ir_frame_height, 340);
+        config.cameras.set_ir_frame_size(None);
+        config.save_to(path).unwrap();
+        let saved = fs::read_to_string(path).unwrap();
+        assert!(saved.contains("# keep me"), "{saved}");
+        assert!(!saved.contains("ir_frame"), "{saved}");
+        assert_eq!(
+            Config::load_from(path).unwrap().cameras.ir_frame_size(),
+            None
+        );
     }
 }

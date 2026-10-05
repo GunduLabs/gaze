@@ -5,9 +5,9 @@ use crate::capture_dialog;
 use gaze_core::config::{
     AuthConfig, CameraConfig, Config, DEFAULT_RGB_CAMERA, HYBRID_POLICY_LABELS,
     INFERENCE_DEVICE_OPTIONS, INFERENCE_EXECUTION_PROVIDER_OPTIONS, InferenceConfig,
-    MAX_ENROLLMENT_FACE_SIZE_RATIO, MAX_LIVENESS_MAX_SECONDS, MIN_ENROLLMENT_FACE_SIZE_RATIO,
-    MIN_LIVENESS_MAX_SECONDS, MODEL_QUALITY_LABELS, PARALLEL_CAPTURE_LABELS, SECURITY_LEVEL_LABELS,
-    START_DELAY_SCOPE_LABELS, SecurityLevel,
+    MAX_ENROLLMENT_FACE_SIZE_RATIO, MAX_IR_FRAME_DIMENSION, MAX_LIVENESS_MAX_SECONDS,
+    MIN_ENROLLMENT_FACE_SIZE_RATIO, MIN_LIVENESS_MAX_SECONDS, MODEL_QUALITY_LABELS,
+    PARALLEL_CAPTURE_LABELS, SECURITY_LEVEL_LABELS, START_DELAY_SCOPE_LABELS, SecurityLevel,
 };
 use gaze_core::dbus::{
     GazeProxy, apply_config_to_daemon, apply_config_with_keyring_to_daemon, connect_gaze,
@@ -360,6 +360,7 @@ struct ConfigRows {
     ir_threshold: libadwaita::SpinRow,
     camera: libadwaita::ComboRow,
     ir: libadwaita::ComboRow,
+    ir_frame_size: libadwaita::ExpanderRow,
     ir_frame_width: libadwaita::SpinRow,
     ir_frame_height: libadwaita::SpinRow,
     emitter: gtk4::Switch,
@@ -475,10 +476,15 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
     let ir_idx = source_index(choices.ir_options, &cfg.cameras.ir);
     rows.ir.set_selected(ir_idx as u32);
     set_camera_row_subtitle(&rows.ir, choices.ir_options, &cfg.cameras.ir);
-    rows.ir_frame_width
-        .set_value(cfg.cameras.ir_frame_width as f64);
-    rows.ir_frame_height
-        .set_value(cfg.cameras.ir_frame_height as f64);
+    let ir_frame_size = cfg.cameras.ir_frame_size();
+    if let Some((width, height)) = ir_frame_size {
+        rows.ir_frame_width.set_value(width as f64);
+        rows.ir_frame_height.set_value(height as f64);
+    }
+    rows.ir_frame_size
+        .set_enable_expansion(ir_frame_size.is_some());
+    rows.ir_frame_size
+        .set_visible(!cfg.cameras.ir.is_empty() || ir_frame_size.is_some());
     rows.emitter.set_active(cfg.cameras.emitter_enabled);
     rows.parallel_capture
         .set_selected(cfg.cameras.parallel_capture_index());
@@ -661,17 +667,27 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     ir_row.set_model(Some(&ir_model));
     hardware_group.add(&ir_row);
 
-    let ir_frame_width_row = libadwaita::SpinRow::with_range(-1.0, 9999.0, 1.0);
-    ir_frame_width_row.set_digits(0);
-    ir_frame_width_row.set_title("IR Camera Width Override");
-    ir_frame_width_row.set_subtitle("Set to -1 for auto-negotiation (default)");
-    hardware_group.add(&ir_frame_width_row);
+    let ir_frame_size_row = libadwaita::ExpanderRow::new();
+    ir_frame_size_row.set_title("IR Frame Size Override");
+    ir_frame_size_row
+        .set_subtitle("Force one resolution if the IR feed is green or corrupted on auto");
+    ir_frame_size_row.set_show_enable_switch(true);
+    ir_frame_size_row.set_enable_expansion(false);
+    hardware_group.add(&ir_frame_size_row);
 
-    let ir_frame_height_row = libadwaita::SpinRow::with_range(-1.0, 9999.0, 1.0);
+    let ir_frame_width_row =
+        libadwaita::SpinRow::with_range(1.0, MAX_IR_FRAME_DIMENSION as f64, 1.0);
+    ir_frame_width_row.set_digits(0);
+    ir_frame_width_row.set_title("Width");
+    ir_frame_width_row.set_value(640.0);
+    ir_frame_size_row.add_row(&ir_frame_width_row);
+
+    let ir_frame_height_row =
+        libadwaita::SpinRow::with_range(1.0, MAX_IR_FRAME_DIMENSION as f64, 1.0);
     ir_frame_height_row.set_digits(0);
-    ir_frame_height_row.set_title("IR Camera Height Override");
-    ir_frame_height_row.set_subtitle("Set to -1 for auto-negotiation (default)");
-    hardware_group.add(&ir_frame_height_row);
+    ir_frame_height_row.set_title("Height");
+    ir_frame_height_row.set_value(480.0);
+    ir_frame_size_row.add_row(&ir_frame_height_row);
 
     let emitter_row = libadwaita::ActionRow::new();
     emitter_row.set_title("Force IR Emitter");
@@ -1011,6 +1027,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         #[weak]
         ir_row,
         #[weak]
+        ir_frame_size_row,
+        #[weak]
         ir_frame_width_row,
         #[weak]
         ir_frame_height_row,
@@ -1118,8 +1136,13 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                     cfg.cameras.ir = target.clone();
                 }
             }
-            cfg.cameras.ir_frame_width = ir_frame_width_row.value() as i32;
-            cfg.cameras.ir_frame_height = ir_frame_height_row.value() as i32;
+            cfg.cameras
+                .set_ir_frame_size(ir_frame_size_row.enables_expansion().then(|| {
+                    (
+                        ir_frame_width_row.value() as u32,
+                        ir_frame_height_row.value() as u32,
+                    )
+                }));
             cfg.cameras.emitter_enabled = emitter_switch.is_active();
             cfg.cameras.parallel_capture =
                 CameraConfig::parallel_capture_from_index(parallel_capture_row.selected() as usize);
@@ -1194,6 +1217,8 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         }
     ));
     ir_row.connect_selected_notify(glib::clone!(
+        #[weak]
+        ir_frame_size_row,
         #[strong]
         apply_changes,
         #[strong]
@@ -1205,8 +1230,15 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 ir_touched.set(true);
                 row.set_subtitle("");
             }
+            ir_frame_size_row
+                .set_visible(row.selected() != 0 || ir_frame_size_row.enables_expansion());
             apply_changes()
         }
+    ));
+    ir_frame_size_row.connect_enable_expansion_notify(glib::clone!(
+        #[strong]
+        apply_changes,
+        move |_| apply_changes()
     ));
     start_delay_row.connect_value_notify(glib::clone!(
         #[weak]
@@ -1282,6 +1314,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         ir_threshold: ir_threshold_row.clone(),
         camera: camera_row.clone(),
         ir: ir_row.clone(),
+        ir_frame_size: ir_frame_size_row.clone(),
         ir_frame_width: ir_frame_width_row.clone(),
         ir_frame_height: ir_frame_height_row.clone(),
         emitter: emitter_switch.clone(),

@@ -38,6 +38,10 @@ rgb = "primary"
 # ir = "/dev/video2"
 # Drive the camera's IR emitter (turn the IR LED on during auth). Requires `ir`.
 # emitter_enabled = false
+# Force the IR camera to one resolution when auto-negotiation picks a mode it cannot
+# stream (a green or corrupted feed). Set both or neither, each 1-4096. Requires `ir`.
+# ir_frame_width = 340
+# ir_frame_height = 340
 # Reject frames whose mean brightness (0-255) is below this value as too dark.
 dark_luma_threshold = 20
 # Capture RGB and IR at the same time during hybrid auth. "never" (default) captures

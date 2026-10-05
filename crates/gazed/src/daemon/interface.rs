@@ -254,6 +254,34 @@ impl AuthDaemon {
         Ok(self.current_config().await.storage.unlock_gnome_keyring)
     }
 
+    async fn ir_frame_size(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<(u32, u32)> {
+        Self::ensure_config_read_access(&header).await?;
+        Ok(self
+            .current_config()
+            .await
+            .cameras
+            .ir_frame_size()
+            .unwrap_or((0, 0)))
+    }
+
+    async fn set_ir_frame_size(
+        &self,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        width: u32,
+        height: u32,
+    ) -> fdo::Result<()> {
+        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
+        let mut config = self.current_config().await;
+        let requested = ((width, height) != (0, 0)).then_some((width, height));
+        if config.cameras.ir_frame_size() == requested {
+            return Ok(());
+        }
+        config.cameras.set_ir_frame_size(requested);
+        self.apply_config(config).await?;
+        self.config_invalidate(&ctxt).await.map_err(Into::into)
+    }
+
     async fn verify_stop(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
         self.check_claim(&header).await?;
         self.cancel_active_tasks().await;
@@ -369,7 +397,7 @@ impl AuthDaemon {
                                 continue;
                             }
 
-                            let mut cam = match Camera::open_privileged(&rgb_device_clone, (-1, -1)) {
+                            let mut cam = match Camera::open_privileged(&rgb_device_clone) {
                                 Ok(c) => c,
                                 Err(e) => {
                                     dead_streams += 1;
@@ -443,7 +471,7 @@ impl AuthDaemon {
                         }
                     }
 
-                    let mut cam = match Camera::open_privileged(&rgb_device_clone, (-1,-1)) {
+                    let mut cam = match Camera::open_privileged(&rgb_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(EnrollMsg::Error(format!("RGB Camera open error: {e}")));
@@ -565,8 +593,7 @@ impl AuthDaemon {
                                 &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                                 emitter_enabled
                             );
-                            let ir_res = (config_clone.cameras.ir_frame_width, config_clone.cameras.ir_frame_height);
-                            let mut cam = match Camera::open_ir_privileged(&ir_device_clone, ir_res) {
+                            let mut cam = match Camera::open_ir_privileged(&ir_device_clone, config_clone.cameras.ir_frame_size()) {
                                 Ok(c) => c,
                                 Err(e) => {
                                     dead_streams += 1;
@@ -637,8 +664,7 @@ impl AuthDaemon {
                         emitter_enabled
                     );
 
-                    let ir_res = (config_clone.cameras.ir_frame_width, config_clone.cameras.ir_frame_height);
-                    let mut cam = match Camera::open_ir_privileged(&ir_device_clone, ir_res) {
+                    let mut cam = match Camera::open_ir_privileged(&ir_device_clone, config_clone.cameras.ir_frame_size()) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(EnrollMsg::Error(format!("IR Camera open error: {e}")));
@@ -1102,9 +1128,12 @@ impl AuthDaemon {
 
         let mut new_config: Config = new_config.into();
         // Legacy clients do not send these flags; preserve the existing opt-ins.
-        let storage = self.current_config().await.storage;
-        new_config.storage.unlock_gnome_keyring = storage.unlock_gnome_keyring;
-        new_config.storage.unlock_kwallet = storage.unlock_kwallet;
+        let current = self.current_config().await;
+        new_config.storage.unlock_gnome_keyring = current.storage.unlock_gnome_keyring;
+        new_config.storage.unlock_kwallet = current.storage.unlock_kwallet;
+        new_config
+            .cameras
+            .set_ir_frame_size(current.cameras.ir_frame_size());
         // A legacy client cannot see or clear the flag, so treat it as turning the feature off
         // rather than rejecting every later write with an error it cannot act on.
         if new_config.clamp_keyring() {
@@ -1125,7 +1154,11 @@ impl AuthDaemon {
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
         let mut config = gaze_core::dbus::config_update_from_property(config, unlock_gnome_keyring)
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
-        config.storage.unlock_kwallet = self.current_config().await.storage.unlock_kwallet;
+        let current = self.current_config().await;
+        config.storage.unlock_kwallet = current.storage.unlock_kwallet;
+        config
+            .cameras
+            .set_ir_frame_size(current.cameras.ir_frame_size());
         // This older client cannot clear a KWallet opt-in when removing prerequisites.
         if config.storage.validate_keyring(&config.liveness).is_err() {
             config.storage.unlock_kwallet = false;
@@ -1146,6 +1179,9 @@ impl AuthDaemon {
         let mut config = gaze_core::dbus::config_update_from_property(config, unlock_gnome_keyring)
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
         config.storage.unlock_kwallet = unlock_kwallet;
+        config
+            .cameras
+            .set_ir_frame_size(self.current_config().await.cameras.ir_frame_size());
         config
             .storage
             .validate_keyring(&config.liveness)

@@ -18,11 +18,46 @@ use strum_macros::{AsRefStr, Display, EnumString, VariantNames};
 pub struct DbusConfig {
     inference: InferenceConfig,
     security: SecurityLevel,
-    cameras: CameraConfig,
+    cameras: DbusCameraConfig,
     auth: AuthConfig,
     enrollment: EnrollmentConfig,
     liveness: LivenessConfig,
     storage: DbusStorageConfig,
+}
+
+#[derive(Clone, Debug, Value, OwnedValue, Type)]
+struct DbusCameraConfig {
+    rgb: String,
+    ir: String,
+    emitter_enabled: bool,
+    dark_luma_threshold: u8,
+    parallel_capture: String,
+}
+
+impl From<CameraConfig> for DbusCameraConfig {
+    fn from(cameras: CameraConfig) -> Self {
+        Self {
+            rgb: cameras.rgb,
+            ir: cameras.ir,
+            emitter_enabled: cameras.emitter_enabled,
+            dark_luma_threshold: cameras.dark_luma_threshold,
+            parallel_capture: cameras.parallel_capture,
+        }
+    }
+}
+
+impl From<DbusCameraConfig> for CameraConfig {
+    fn from(cameras: DbusCameraConfig) -> Self {
+        Self {
+            rgb: cameras.rgb,
+            ir: cameras.ir,
+            ir_frame_width: None,
+            ir_frame_height: None,
+            emitter_enabled: cameras.emitter_enabled,
+            dark_luma_threshold: cameras.dark_luma_threshold,
+            parallel_capture: cameras.parallel_capture,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Value, OwnedValue, Type)]
@@ -35,7 +70,7 @@ impl From<Config> for DbusConfig {
         Self {
             inference: config.inference,
             security: config.security,
-            cameras: config.cameras,
+            cameras: config.cameras.into(),
             auth: config.auth,
             enrollment: config.enrollment,
             liveness: config.liveness,
@@ -51,7 +86,7 @@ impl From<DbusConfig> for Config {
         Self {
             inference: config.inference,
             security: config.security,
-            cameras: config.cameras,
+            cameras: config.cameras.into(),
             auth: config.auth,
             enrollment: config.enrollment,
             liveness: config.liveness,
@@ -368,6 +403,15 @@ pub async fn load_config_with_keyring_from_daemon(
             ));
         }
     };
+    match proxy.ir_frame_size().await {
+        Ok((width, height)) => config
+            .cameras
+            .set_ir_frame_size((width > 0 && height > 0).then_some((width, height))),
+        Err(error) if dbus_is_unknown_method(&error) => {}
+        Err(error) => {
+            return Err(anyhow::anyhow!("Failed to read the IR frame size: {error}"));
+        }
+    }
     Ok((
         config,
         KeyringSupport {
@@ -377,7 +421,26 @@ pub async fn load_config_with_keyring_from_daemon(
     ))
 }
 
+async fn apply_ir_frame_size_to_daemon(
+    proxy: &GazeProxy<'_>,
+    config: &Config,
+) -> anyhow::Result<()> {
+    config.cameras.validate()?;
+    let size = config.cameras.ir_frame_size();
+    let (width, height) = size.unwrap_or((0, 0));
+    match proxy.set_ir_frame_size(width, height).await {
+        Ok(()) => Ok(()),
+        Err(error) if dbus_is_unknown_method(&error) && size.is_none() => Ok(()),
+        Err(error) if dbus_is_unknown_method(&error) => Err(anyhow::anyhow!(
+            "The running daemon does not support an IR frame size override. \
+             Update gazed or set the IR frame size to automatic."
+        )),
+        Err(error) => Err(anyhow::anyhow!("Failed to set the IR frame size: {error}")),
+    }
+}
+
 pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> anyhow::Result<()> {
+    apply_ir_frame_size_to_daemon(proxy, config).await?;
     proxy
         .set_config(config.clone().into())
         .await
@@ -388,6 +451,7 @@ pub async fn apply_config_with_keyring_to_daemon(
     proxy: &GazeProxy<'_>,
     config: &Config,
 ) -> anyhow::Result<()> {
+    apply_ir_frame_size_to_daemon(proxy, config).await?;
     let unlock_gnome_keyring = config.storage.unlock_gnome_keyring;
     let unlock_kwallet = config.storage.unlock_kwallet;
     let config = OwnedValue::try_from(DbusConfig::from(config.clone()))?;
@@ -601,6 +665,10 @@ pub trait Gaze {
 
     async fn keyring_enabled(&self) -> zbus::Result<bool>;
     async fn kwallet_enabled(&self) -> zbus::Result<bool>;
+    async fn ir_frame_size(&self) -> zbus::Result<(u32, u32)>;
+
+    #[zbus(allow_interactive_auth)]
+    async fn set_ir_frame_size(&self, width: u32, height: u32) -> zbus::Result<()>;
     async fn verify_start_for_kwallet(&self, pam_service: &str) -> zbus::Result<()>;
 
     #[zbus(allow_interactive_auth)]
@@ -881,7 +949,7 @@ mod tests {
     #[derive(Clone, Debug, Value, OwnedValue, Type)]
     struct OldConfig {
         security: crate::config::SecurityLevel,
-        cameras: crate::config::CameraConfig,
+        cameras: DbusCameraConfig,
         auth: crate::config::AuthConfig,
         enrollment: crate::config::EnrollmentConfig,
         liveness: crate::config::LivenessConfig,
@@ -891,7 +959,7 @@ mod tests {
     fn old_daemon_property() -> OwnedValue {
         let old = OldConfig {
             security: Default::default(),
-            cameras: Default::default(),
+            cameras: CameraConfig::default().into(),
             auth: Default::default(),
             enrollment: Default::default(),
             liveness: Default::default(),
@@ -942,6 +1010,17 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_ir_frame_size_stays_off_the_legacy_config_wire() {
+        let mut config = Config::default();
+        config.cameras.set_ir_frame_size(Some((340, 340)));
+        let raw = OwnedValue::try_from(DbusConfig::from(config)).unwrap();
+        let decoded = config_from_property(raw)
+            .expect("no error")
+            .expect("current layout is readable");
+        assert_eq!(decoded.cameras.ir_frame_size(), None);
     }
 
     #[test]
