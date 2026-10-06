@@ -269,7 +269,10 @@ pub fn pam_end_reports_success(status: c_int) -> bool {
 }
 
 pub fn clear_duress_lockout(username: &str) {
-    let Ok(rt) = tokio::runtime::Runtime::new() else {
+    let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
         return;
     };
     rt.block_on(async {
@@ -279,6 +282,7 @@ pub fn clear_duress_lockout(username: &str) {
         })
         .await;
     });
+    rt.shutdown_timeout(DURESS_CLEAR_TIMEOUT);
 }
 
 unsafe extern "C" fn clear_duress_on_pam_end(_pamh: PamHandle, data: *mut c_void, status: c_int) {
@@ -1046,6 +1050,37 @@ pub fn caller_is_remote(rhost: Option<&str>) -> bool {
     }
 }
 
+const NETWORK_PAM_SERVICES: [&str; 20] = [
+    "sshd",
+    "dovecot",
+    "imap",
+    "imaps",
+    "pop3",
+    "pop3s",
+    "smtp",
+    "sieve",
+    "managesieve",
+    "vsftpd",
+    "proftpd",
+    "pure-ftpd",
+    "ftp",
+    "samba",
+    "cups",
+    "openvpn",
+    "radiusd",
+    "ppp",
+    "xrdp-sesman",
+    "cockpit",
+];
+
+pub fn service_is_network_facing(service: Option<&str>) -> bool {
+    service.is_some_and(|s| NETWORK_PAM_SERVICES.contains(&pam_service_name(s)))
+}
+
+pub fn face_auth_out_of_scope(service: Option<&str>, rhost: Option<&str>) -> bool {
+    caller_is_remote(rhost) || service_is_network_facing(service)
+}
+
 pub fn service_defers_to_face_service(service: Option<&str>) -> bool {
     match service {
         Some(name) => name.starts_with("gdm-") && name != FACE_PAM_SERVICE,
@@ -1172,6 +1207,31 @@ mod tests {
         ] {
             assert!(!caller_is_remote(rhost), "{rhost:?}");
         }
+    }
+
+    #[test]
+    fn network_services_are_skipped_even_over_loopback() {
+        for service in ["dovecot", "imap", "sshd", "vsftpd", "/etc/pam.d/dovecot"] {
+            assert!(service_is_network_facing(Some(service)), "{service}");
+            assert!(face_auth_out_of_scope(Some(service), Some("127.0.0.1")));
+            assert!(face_auth_out_of_scope(Some(service), None));
+        }
+    }
+
+    #[test]
+    fn desktop_services_stay_in_scope_locally() {
+        for service in [
+            Some("sudo"),
+            Some("polkit-1"),
+            Some("gdm-face"),
+            Some("login"),
+            Some("kde"),
+            None,
+        ] {
+            assert!(!service_is_network_facing(service), "{service:?}");
+            assert!(!face_auth_out_of_scope(service, Some("localhost")));
+        }
+        assert!(face_auth_out_of_scope(Some("sudo"), Some("192.168.1.120")));
     }
 
     // The escape moves up a line and clears it, so it must only run when a line was printed.

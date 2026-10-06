@@ -492,8 +492,13 @@ for the complete setup and diagnostic split.
 
 ### Another service stops authenticating after enabling Gaze (dovecot, sshd, cron)
 
-Symptoms are in that service's own log rather than Gaze's. For dovecot, IMAP
-logins fail and `mail.log` shows the auth worker dying:
+Symptoms are in that service's own log rather than Gaze's. Enabling a Gaze
+profile with `pam-auth-update` puts the module in `common-auth`, which nearly
+every service includes, so a problem in the module can reach services that have
+nothing to do with face authentication. For dovecot, IMAP logins fail and
+`mail.log` shows one of two patterns.
+
+The auth worker dies as the module loads:
 
 ```
 dovecot: auth-worker: Error: OpenBLAS error: Memory allocation still failed after 10 retries, giving up.
@@ -502,29 +507,36 @@ dovecot: auth: Error: auth-worker: Aborted PASSV request for user: Worker proces
 dovecot: imap-login: Login aborted: Connection closed (auth service reported temporary failure)
 ```
 
-Packages up to and including 0.3.1 linked OpenCV into `pam_gaze.so`. On Debian
-and Ubuntu, OpenCV pulls in OpenBLAS, whose startup code reserves per-thread
-memory sized for every CPU core. Services that cap their address space, as
-dovecot's auth worker does at 256 MB by default, cannot satisfy that
-reservation and abort as the module loads, before any Gaze code runs. Enabling
-a Gaze profile with `pam-auth-update` puts the module in `common-auth`, which
-those services include, so the crash reaches them even though they have nothing
-to do with face authentication.
-
-Later packages build the PAM module without OpenCV, so update:
-
-```bash
-curl -fsSL https://gaze.gundulabs.com/install.sh | sh
-```
-
-Confirm the module no longer links it:
+Older packages linked OpenCV into `pam_gaze.so`. On Debian and Ubuntu, OpenCV
+pulls in OpenBLAS, whose startup code reserves per-thread memory sized for every
+CPU core. Services that cap their address space, as dovecot's auth worker does
+at 256 MB by default, cannot satisfy that reservation and abort before any Gaze
+code runs. Confirm the module no longer links it:
 
 ```bash
 objdump -p /usr/lib/security/pam_gaze.so | grep NEEDED
 ```
 
-Nothing beyond libc, libgcc, libm, and the dynamic loader should appear. To
-restore mail service before updating, disable Gaze in the shared stack with
+Nothing beyond libc, libgcc, libm, and the dynamic loader should appear.
+
+Or the auth worker stalls until dovecot gives up on it:
+
+```
+dovecot: auth: Error: auth-worker: Aborted PASSV request for user: Lookup timed out
+```
+
+Older packages cleared the duress lockout after every successful password login,
+including network ones, by starting a thread pool and a D-Bus call inside the
+service's own process. Current packages skip network services and remote callers
+entirely, before doing any work.
+
+Both are fixed in current packages, so update:
+
+```bash
+curl -fsSL https://gaze.gundulabs.com/install.sh | sh
+```
+
+To restore mail service before updating, disable Gaze in the shared stack with
 `sudo pam-auth-update --disable gaze gaze-simultaneous`.
 
 ## 6. First run is slow

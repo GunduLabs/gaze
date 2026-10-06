@@ -35,6 +35,14 @@ immediately and the stack falls through to the next module, normally the
 password check. Services that authenticate remote clients set this item:
 `sshd`, `dovecot`, `vsftpd`, and Samba among them.
 
+Gaze also steps aside for known network daemons by PAM service name, even when
+the client connects over loopback, such as a mail client on the same machine
+talking to `127.0.0.1`. A face in front of the camera must never vouch for
+whoever opened that connection. The skipped services are `sshd`, `dovecot`,
+`imap`, `imaps`, `pop3`, `pop3s`, `smtp`, `sieve`, `managesieve`, `vsftpd`,
+`proftpd`, `pure-ftpd`, `ftp`, `samba`, `cups`, `openvpn`, `radiusd`, `ppp`,
+`xrdp-sesman`, and `cockpit`.
+
 This matters on Debian and Ubuntu, where enabling a Gaze profile through
 `pam-auth-update` puts Gaze in `common-auth`, and `common-auth` is included by
 nearly every service on the system, not just the desktop ones. Those services

@@ -754,15 +754,18 @@ unsafe fn do_authenticate_simultaneous(
 }
 
 pub unsafe fn do_authenticate(pamh: PamHandle, flags: c_int, options: PamOptions) -> c_int {
+    if face_auth_out_of_scope(
+        unsafe { get_pam_service(pamh) }.as_deref(),
+        unsafe { get_pam_rhost(pamh) }.as_deref(),
+    ) {
+        return PAM_IGNORE;
+    }
     let result = unsafe { authenticate_face(pamh, flags, options) };
     unsafe { track_duress_clear(pamh, result) };
     result
 }
 
 unsafe fn authenticate_face(pamh: PamHandle, flags: c_int, options: PamOptions) -> c_int {
-    if caller_is_remote(unsafe { get_pam_rhost(pamh) }.as_deref()) {
-        return PAM_IGNORE;
-    }
     // The managed login entry owns the scan. Shared distro stacks may contain another
     // Gaze entry (including simultaneous/retry); reaching it on fallback must not scan again.
     if is_kwallet_login(unsafe { get_pam_service(pamh) }.as_deref()) {
