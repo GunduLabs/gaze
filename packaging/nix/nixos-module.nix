@@ -591,6 +591,7 @@ in
           auth       required                     pam_env.so
           auth       [success=1 default=ignore]    ${cfg.package}/lib/security/pam_gaze.so
           auth       requisite                    pam_deny.so
+          auth       required                     pam_permit.so
           auth       optional                     ${pkgs.gnome-keyring}/lib/security/pam_gnome_keyring.so use_authtok
 
           account    required                     pam_nologin.so

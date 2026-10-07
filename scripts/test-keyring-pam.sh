@@ -29,24 +29,29 @@ for template in "$repo"/packaging/pam/gdm-face{,.arch,.deb,.suse}; do
     case "$auth_keyring" in *use_authtok*) ;; *) exit 1 ;; esac
     for result in 0 7 9 25; do
         for token in token absent; do
-            marker="$test_dir/called"
-            rm -f -- "$marker"
-            # Replace only module implementations and unrelated distro includes. Preserve
-            # the shipped order and controls, including pam_deny's real implementation.
-            sed -n '/^auth/p' "$template" |
-                sed -e 's/pam_env.so/pam_permit.so/' \
-                    -e '/[[:space:]]include[[:space:]]/d' \
-                    -e "s|pam_gaze.so|$test_dir/mock.so gaze $result $token|" \
-                    -e "s|pam_gnome_keyring.so.*|$test_dir/mock.so keyring $marker $token|" \
-                > "$test_dir/gdm-face"
-            expected=failure
-            if [ "$result" -eq 0 ]; then expected=success; fi
-            "$test_dir/driver" "$test_dir" "$expected"
-            if [ "$expected" = success ]; then
-                test "$(< "$marker")" = valid
-            else
-                test ! -e "$marker"
-            fi
+            for keyring in present removed; do
+                marker="$test_dir/called"
+                rm -f -- "$marker"
+                drop_keyring=
+                if [ "$keyring" = removed ]; then drop_keyring='/pam_gnome_keyring\.so/d'; fi
+                # Replace only module implementations and unrelated distro includes. Preserve
+                # the shipped order and controls, including pam_deny's real implementation.
+                sed -n '/^auth/p' "$template" |
+                    sed -e "${drop_keyring:-/^\$/d}" \
+                        -e "s|pam_env.so|$test_dir/mock.so gaze 25 absent|" \
+                        -e '/[[:space:]]include[[:space:]]/d' \
+                        -e "s|pam_gaze.so|$test_dir/mock.so gaze $result $token|" \
+                        -e "s|pam_gnome_keyring.so.*|$test_dir/mock.so keyring $marker $token|" \
+                    > "$test_dir/gdm-face"
+                expected=failure
+                if [ "$result" -eq 0 ]; then expected=success; fi
+                "$test_dir/driver" "$test_dir" "$expected"
+                if [ "$expected" = success ] && [ "$keyring" = present ]; then
+                    test "$(< "$marker")" = valid
+                else
+                    test ! -e "$marker"
+                fi
+            done
         done
     done
 done
