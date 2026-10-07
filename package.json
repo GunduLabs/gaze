@@ -1,6 +1,6 @@
 {
   "devDependencies": {
-    "@viteplus/versions": "2.1.1",
+    "@viteplus/versions": "2.2.0",
     "esbuild": "0.28.2",
     "typescript": "7.0.2",
     "vitepress": "2.0.0-alpha.20"
