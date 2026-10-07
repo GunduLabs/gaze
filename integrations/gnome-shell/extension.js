@@ -1901,6 +1901,16 @@ export default class GazeFaceAuthExtension extends Extension {
           };
         },
       );
+
+      const existingVerifier =
+        Main.screenShield?._dialog?._authPrompt?._userVerifier;
+      if (existingVerifier) {
+        try {
+          installVerifierHooks(Object.getPrototypeOf(existingVerifier));
+        } catch (e) {
+          logError(e, "[gaze] Failed to hook the user verifier");
+        }
+      }
     }
 
 

@@ -93,7 +93,11 @@ pub(super) fn pam_entry(line: &str) -> Option<(&str, &str, &str, &str)> {
 /// Recognize the packaged hand-off, including the session hook that starts the keyring.
 pub(super) fn gdm_face_stack_passes_the_token(contents: &str) -> bool {
     let entries: Vec<_> = contents.lines().filter_map(pam_entry).collect();
-    let auth: Vec<_> = entries.iter().filter(|entry| entry.0 == "auth").collect();
+    let auth: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.0 == "auth")
+        .filter(|entry| !(entry.1 == "required" && entry.2 == "pam_permit.so"))
+        .collect();
     let handoff = auth.windows(3).any(|lines| {
         let (_, control, module, options) = *lines[0];
         module == "pam_gaze.so"
@@ -576,9 +580,13 @@ mod tests {
     fn incomplete_or_misordered_keyring_stacks_are_not_reported_healthy() {
         let valid = "auth [success=1 default=ignore] /usr/lib/security/pam_gaze.so\n\
             auth requisite pam_deny.so\n\
+            auth required pam_permit.so\n\
             auth optional pam_gnome_keyring.so use_authtok\n\
             session optional pam_gnome_keyring.so auto_start\n";
         assert!(gdm_face_stack_passes_the_token(valid));
+        assert!(gdm_face_stack_passes_the_token(
+            &valid.replace("auth required pam_permit.so\n", "")
+        ));
         for broken in [
             valid.replace(
                 "auth [success=1 default=ignore] /usr/lib/security/pam_gaze.so\n",
