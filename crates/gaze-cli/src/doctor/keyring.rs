@@ -394,9 +394,17 @@ pub(super) fn kde_login_stack_passes_the_token(contents: &str) -> bool {
         })
 }
 
+const KDE_LOGIN_PAM_SERVICES: [&str; 3] = ["sddm", "plasmalogin", "plasmalogin-fingerprint"];
+
 pub(super) fn check_kwallet(report: &mut Report, username: &str, config: Option<&Config>) {
     let Some(config) = config else { return };
     if !config.storage.unlock_kwallet {
+        if KDE_LOGIN_PAM_SERVICES
+            .iter()
+            .all(|service| !Path::new(&format!("/etc/pam.d/{service}")).exists())
+        {
+            return;
+        }
         report.off("KWallet", "KWallet unlock after a KDE face login is off",
             "Enable KWallet unlock in `gaze config`, then run `gaze keyring --kwallet` and `sudo gaze-kde-pam enable-login`.");
         return;
@@ -417,7 +425,7 @@ pub(super) fn check_kwallet(report: &mut Report, username: &str, config: Option<
         );
     }
     let mut found = false;
-    for service in ["sddm", "plasmalogin", "plasmalogin-fingerprint"] {
+    for service in KDE_LOGIN_PAM_SERVICES {
         let Some(contents) = read_pam_service(&format!("/etc/pam.d/{service}")) else {
             continue;
         };

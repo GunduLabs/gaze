@@ -131,7 +131,20 @@ pub(super) async fn read_daemon_config(
     let deadline = Instant::now() + ready_wait;
     loop {
         match proxy.config().await {
-            Ok(config) => return Ok(config.into()),
+            Ok(config) => {
+                let mut config: Config = config.into();
+                match proxy.keyring_enabled().await {
+                    Ok(enabled) => config.storage.unlock_gnome_keyring = enabled,
+                    Err(err) if dbus_is_unknown_method(&err) => {}
+                    Err(err) => return Err(err),
+                }
+                match proxy.kwallet_enabled().await {
+                    Ok(enabled) => config.storage.unlock_kwallet = enabled,
+                    Err(err) if dbus_is_unknown_method(&err) => {}
+                    Err(err) => return Err(err),
+                }
+                return Ok(config);
+            }
             Err(err) if dbus_is_not_activatable(&err) && Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }
