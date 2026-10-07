@@ -9,7 +9,7 @@ use gaze_core::config::{
 };
 use gaze_core::dbus::{
     GazeProxy, dbus_error_message, dbus_is_file_not_found, dbus_is_not_activatable,
-    try_benchmark_from_daemon,
+    dbus_is_unknown_method, try_benchmark_from_daemon,
 };
 use gaze_core::desktop::{
     GDM_DCONF_FACE_AUTH_KEY, GDM_DCONF_PROFILE, GDM_DCONF_PROFILE_PATH, GDM_FACE_OVERRIDE_PATH,
