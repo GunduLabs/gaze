@@ -32,6 +32,8 @@ level = "medium"
 # hybrid_policy = "fallback_on_dark"  # optional; default, or, fallback_on_dark, and
 
 [cameras]
+# Set rgb = "" to authenticate with the IR camera alone. Leaving the key out
+# keeps "primary". Requires `ir` and IR templates (re-enroll after switching).
 rgb = "primary"
 # Infrared (Windows Hello) camera. Set this to a direct /dev/video* node or the
 # camera's GStreamer source string (e.g. "pipewiresrc target-object=<pipewire-target>").

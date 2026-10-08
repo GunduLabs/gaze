@@ -644,8 +644,15 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     inference_device_row.set_model(Some(&inference_device_model));
     hardware_group.add(&inference_device_row);
 
-    let cameras = gaze_vision::camera::enumerate_cameras()
-        .unwrap_or_else(|_| vec![("Primary Camera".to_string(), DEFAULT_RGB_CAMERA.to_string())]);
+    let cameras = gaze_vision::camera::rgb_choices().unwrap_or_else(|_| {
+        vec![
+            ("Primary Camera".to_string(), DEFAULT_RGB_CAMERA.to_string()),
+            (
+                gaze_vision::camera::RGB_NONE_DISPLAY_NAME.to_string(),
+                String::new(),
+            ),
+        ]
+    });
     let cam_names = cameras.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
 
     let camera_row = libadwaita::ComboRow::new();

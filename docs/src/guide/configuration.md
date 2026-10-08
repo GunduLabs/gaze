@@ -162,10 +162,11 @@ To get the policy the table lists for a level, omit `hybrid_policy` entirely.
 The key is only read when `level = "custom"`, and a custom level with the key
 absent also resolves to `fallback_on_dark`.
 
-Both `fallback_on_dark` and `default` require RGB and IR to match when RGB was
-never attempted at all, for example when the RGB camera could not be opened.
-Only a frame that was captured and measured as too dark relaxes the requirement
-to IR alone.
+Both `fallback_on_dark` and `default` relax the requirement to IR alone when RGB
+was captured and measured as too dark, or when the RGB camera cannot be used,
+for example because a video call already holds it. In that case Gaze logs the
+camera error and keeps going with IR instead of falling back to your password.
+`and` still fails, since it always needs both spectra.
 
 ## Select a camera source
 
@@ -242,6 +243,22 @@ ir = "usb:046d:085e"
 When you configure an IR camera alongside RGB, Gaze captures templates from both
 during enrollment, then combines their results during verification according to
 the configured `hybrid_policy`.
+
+### IR only
+
+To authenticate with the IR camera alone and never open the RGB camera, set
+`rgb` to an empty string. Commenting the key out is not enough, because a
+missing `rgb` means `"primary"`.
+
+```toml
+[cameras]
+rgb = ""
+ir = "/dev/video2"
+```
+
+In the GUI, pick **None (IR only)** as the RGB camera source. `gaze config`
+offers the same choice. Your profile needs IR templates, so enroll (or add
+captures) after switching. `hybrid_policy` has no effect with one camera.
 
 ### IR frame size override
 

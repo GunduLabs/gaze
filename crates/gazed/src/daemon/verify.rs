@@ -9,6 +9,7 @@ pub(super) enum VerifyMsg {
     Status(Spectrum, CaptureStatus, Option<ndarray::Array1<f32>>, f64),
     Success(Spectrum, ndarray::Array1<f32>),
     Duress(Spectrum),
+    Unavailable(Spectrum, String),
     Error(String),
 }
 
@@ -86,6 +87,11 @@ pub(super) fn hybrid_auth_passed(
         (false, true) => ir_success,
         (false, false) => false,
     }
+}
+
+// Losing RGB is no weaker than covering its lens, which already hands fallback_on_dark to IR.
+pub(super) fn ir_continues_without_rgb(policy: &str, run_ir: bool) -> bool {
+    run_ir && policy != "and"
 }
 
 pub(super) fn auth_streams(
@@ -383,7 +389,7 @@ impl AuthDaemon {
             }
             drop(db);
 
-            let (run_rgb, run_ir) = auth_streams(
+            let (mut run_rgb, run_ir) = auth_streams(
                 &rgb_device,
                 &ir_device,
                 has_rgb_templates,
@@ -491,7 +497,7 @@ impl AuthDaemon {
                     let mut cam = match Camera::open_privileged(&rgb_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
-                            let _ = tx.blocking_send(VerifyMsg::Error(format!("RGB Camera open error: {e}")));
+                            let _ = tx.blocking_send(VerifyMsg::Unavailable(Spectrum::Rgb, format!("RGB Camera open error: {e}")));
                             return;
                         }
                     };
@@ -672,7 +678,7 @@ impl AuthDaemon {
                         let reason = cam.take_stream_error().unwrap_or_else(|| {
                             "RGB camera stream stopped unexpectedly".to_string()
                         });
-                        let _ = tx.blocking_send(VerifyMsg::Error(reason));
+                        let _ = tx.blocking_send(VerifyMsg::Unavailable(Spectrum::Rgb, reason));
                     }
                 }));
             }
@@ -1060,7 +1066,18 @@ impl AuthDaemon {
                                 let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
                                 break;
                             }
-                            VerifyMsg::Error(e) => {
+                            VerifyMsg::Unavailable(Spectrum::Rgb, reason)
+                                if run_rgb && ir_continues_without_rgb(&hybrid_policy, run_ir) =>
+                            {
+                                warn!("VerifyStart: {reason}; continuing with IR only");
+                                let _ = Self::verify_diagnostic(&ctxt, &format!("{reason}; continuing with the IR camera")).await;
+                                run_rgb = false;
+                                rgb_status = CaptureStatus::Unused;
+                                if finish_if_auth_passed!() {
+                                    break;
+                                }
+                            }
+                            VerifyMsg::Error(e) | VerifyMsg::Unavailable(_, e) => {
                                 error!("VerifyStart loop error: {e}");
                                 stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                                 // The verdict alone reads as a face that was not found.
@@ -1327,6 +1344,24 @@ mod tests {
             false,
             true
         ));
+    }
+
+    #[test]
+    fn an_unavailable_rgb_camera_hands_auth_to_ir_unless_both_are_required() {
+        for policy in ["or", "fallback_on_dark", "default"] {
+            assert!(ir_continues_without_rgb(policy, true), "{policy}");
+            assert!(hybrid_auth_passed(
+                policy,
+                false,
+                true,
+                false,
+                CaptureStatus::Unused,
+                false,
+                true
+            ));
+        }
+        assert!(!ir_continues_without_rgb("and", true));
+        assert!(!ir_continues_without_rgb("fallback_on_dark", false));
     }
 
     #[test]

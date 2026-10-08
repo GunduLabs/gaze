@@ -434,7 +434,7 @@ async fn run_config_wizard(
         ))?;
     }
 
-    let mut cameras = gaze_vision::camera::enumerate_cameras().unwrap_or_default();
+    let mut cameras = gaze_vision::camera::rgb_choices().unwrap_or_default();
     if cameras.is_empty() {
         anyhow::bail!("No PipeWire cameras detected! Please ensure your video inputs are active.");
     }
@@ -469,6 +469,14 @@ async fn run_config_wizard(
 
     config.cameras.ir = ir_options[selected_ir_idx].1.clone();
 
+    if config.cameras.rgb.is_empty() && config.cameras.ir.is_empty() {
+        term.write_line(&format!(
+            "{} No IR camera selected, so keeping the primary RGB camera",
+            style("!").yellow().bold()
+        ))?;
+        config.cameras.rgb = gaze_core::config::DEFAULT_RGB_CAMERA.to_string();
+    }
+
     if config.cameras.ir.is_empty() {
         config.cameras.emitter_enabled = false;
         config.cameras.parallel_capture = "never".to_string();
@@ -478,13 +486,19 @@ async fn run_config_wizard(
             .default(config.cameras.emitter_enabled)
             .interact()?;
 
-        let capture_idx = Select::with_theme(&theme)
-            .with_prompt("Capture RGB and IR at the same time (faster, but some webcams cannot)")
-            .items(gaze_core::config::PARALLEL_CAPTURE_LABELS.as_slice())
-            .default(config.cameras.parallel_capture_index() as usize)
-            .interact()?;
-        config.cameras.parallel_capture =
-            gaze_core::config::CameraConfig::parallel_capture_from_index(capture_idx);
+        if config.cameras.rgb.is_empty() {
+            config.cameras.parallel_capture = "never".to_string();
+        } else {
+            let capture_idx = Select::with_theme(&theme)
+                .with_prompt(
+                    "Capture RGB and IR at the same time (faster, but some webcams cannot)",
+                )
+                .items(gaze_core::config::PARALLEL_CAPTURE_LABELS.as_slice())
+                .default(config.cameras.parallel_capture_index() as usize)
+                .interact()?;
+            config.cameras.parallel_capture =
+                gaze_core::config::CameraConfig::parallel_capture_from_index(capture_idx);
+        }
     }
 
     config.auth.abort_if_ssh = Confirm::with_theme(&theme)
