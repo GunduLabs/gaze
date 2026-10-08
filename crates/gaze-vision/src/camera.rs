@@ -382,6 +382,7 @@ fn device_video_node(device: &gstreamer::Device) -> Option<String> {
 
 const PRIMARY_CAMERA_DISPLAY_NAME: &str = "Primary Camera";
 pub const IR_NONE_DISPLAY_NAME: &str = "None";
+pub const RGB_NONE_DISPLAY_NAME: &str = "None (IR only)";
 const DEVICE_SETTLE_TIMEOUT_MS: u64 = 100;
 const INTERRUPTIBLE_POLL_TIMEOUT_MS: u64 = 100;
 /// Gives a busy device time to reject the stream without making us wait indefinitely for a
@@ -1232,6 +1233,14 @@ pub fn enumerate_ir_cameras() -> anyhow::Result<Vec<(String, String)>> {
         return Ok(Vec::new());
     }
     Ok(label_camera_entries(all))
+}
+
+/// Lists the RGB cameras with a trailing "None (IR only)" entry, kept last so an unlisted
+/// configured source still falls back to the primary camera at index 0.
+pub fn rgb_choices() -> anyhow::Result<Vec<(String, String)>> {
+    let mut options = enumerate_cameras()?;
+    options.push((RGB_NONE_DISPLAY_NAME.to_string(), String::new()));
+    Ok(options)
 }
 
 /// Builds the IR picker with an explicit "None" entry, keeping list indexes consistent
