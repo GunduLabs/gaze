@@ -336,12 +336,10 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 
-    // Fallback hides a broken provider, so the OpenVINO CI job asserts the session really used it.
+    // Fallback hides a broken provider, so this asserts the session really used OpenVINO.
     #[test]
+    #[ignore = "needs Intel's OpenVINO ONNX Runtime; run `just test-openvino`"]
     fn openvino_runtime_creates_an_openvino_session() {
-        if std::env::var_os("GAZE_TEST_OPENVINO").is_none() {
-            return;
-        }
         let path = std::env::temp_dir().join(format!(
             "gaze-identity-openvino-{}.onnx",
             std::process::id()

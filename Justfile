@@ -18,6 +18,9 @@ nfpm := require("nfpm")
 rpmbuild := require("rpmbuild")
 # ONNX Runtime release bundled into the offline builds (flatpak and srpm).
 ort_version := env("ORT_VERSION", "1.31.0")
+# Intel's onnxruntime-openvino build, which trails `ort_version`. Only `test-openvino` uses it.
+ort_openvino_version := env("ORT_OPENVINO_VERSION", "1.24.1")
+ort_openvino_dir := justfile_directory() / "target/ort-openvino"
 
 # The opencv crate probes only the `opencv4`/`opencv` pkg-config names, so distros shipping
 # OpenCV 5 (e.g. Arch) need this override. Empty when opencv4/opencv resolve or opencv5 doesn't.
@@ -55,6 +58,10 @@ build-rust: prepare-ort
 [private]
 prepare-ort:
     bash scripts/prepare-ort.sh {{ quote(ort_version) }} {{ quote(arch) }}
+
+[private]
+prepare-ort-openvino:
+    bash scripts/prepare-ort-openvino.sh {{ quote(ort_openvino_version) }} {{ quote(ort_openvino_dir / "lib") }}
 
 # Compile the SELinux policy module
 [group("build")]
@@ -724,10 +731,13 @@ test: prepare-ort
     bash scripts/test-keyring-pam.sh
     bash scripts/test-kwallet-pam.sh
 
-# Run the inference tests against the runtime in ORT_DYLIB_PATH, such as Intel's OpenVINO build.
+# Run the inference tests, plus the ignored OpenVINO session test, against Intel's OpenVINO runtime
 [group("checks")]
-test-openvino: prepare-ort
-    GAZE_TEST_OPENVINO=1 {{ opencv_env }} cargo test -p gaze-vision --release -- inference::
+test-openvino: prepare-ort-openvino
+    ORT_DYLIB_PATH={{ quote(ort_openvino_dir / "lib/libonnxruntime.so") }} \
+    LD_LIBRARY_PATH={{ quote(ort_openvino_dir / "lib") }} \
+    XDG_CACHE_HOME={{ quote(ort_openvino_dir / "cache") }} \
+    {{ opencv_env }} cargo test -p gaze-vision --release -- --include-ignored inference::
 
 # Check dependencies for known security advisories
 [group("checks")]

@@ -200,7 +200,9 @@ provider directly.
 
 `just lint` compiles both vendor adapters and `just test` exercises configuration,
 hardware discovery, runtime/API validation, and CPU fallback without NPU hardware.
-CI's test job then reruns the inference tests against Intel's OpenVINO runtime (`just test-openvino`). Actual NPU execution,
+`just test-openvino` reruns the inference tests, including the ignored OpenVINO session test,
+against Intel's onnxruntime-openvino runtime, which it downloads and verifies against a pinned
+SHA256 (x86_64 only; CI runs it in the test job). Actual NPU execution,
 model operator coverage, driver compatibility, and recognition/liveness precision need
 [hardware validation](/guide/acceleration#hardware-validation) on both vendors.
 
