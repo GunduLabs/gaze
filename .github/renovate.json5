@@ -122,9 +122,9 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "managerFilePatterns": ["/^Justfile$/"],
       "matchStrings": [
-        "(?:^|\\n)[ \\t]*ORT_OPENVINO_VERSION[ \\t]*:[ \\t]*(?<currentValue>\\d+\\.\\d+\\.\\d+)",
+        "(?:^|\\n)ort_openvino_version[ \\t]*:=[ \\t]*env\\(\"ORT_OPENVINO_VERSION\",[ \\t]*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\"\\)",
       ],
       "depNameTemplate": "onnxruntime-openvino",
       "datasourceTemplate": "pypi",
