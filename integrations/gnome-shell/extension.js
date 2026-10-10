@@ -813,6 +813,7 @@ export default class GazeFaceAuthExtension extends Extension {
         "/com/gundulabs/Gaze",
         (proxy, error) => {
           if (error) {
+            logError(error, "[gaze] Failed to connect to gazed");
             return;
           }
           try {

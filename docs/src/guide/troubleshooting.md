@@ -224,6 +224,34 @@ You can also point `rgb` at a camera directly with a `/dev/video*` node or a `us
 
 For authentication, the daemon always captures the kernel `/dev/video*` node directly and never needs a PipeWire session, not even on the GDM login screen. `rgb = "primary"` means the first color node; set `rgb` to a specific `/dev/video*` node or `usb:VVVV:PPPP` id if that picks the wrong camera. A `pipewiresrc target-object=` value is resolved to the V4L2 node behind that same camera.
 
+### Intel IPU6/IPU7 MIPI cameras (`does not support ... colorimetry`)
+
+Many recent Intel laptops (Meteor Lake, Lunar Lake, and others) use a MIPI camera behind an Intel IPU. Its `/dev/video*` nodes are raw capture nodes that only stream after libcamera configures the camera, so opening one directly fails with an error like `Device '/dev/video0' does not support 2:0:0:0 colorimetry`.
+
+With `rgb = "primary"`, Gaze falls back to libcamera when the color node it picked can only be driven through libcamera, or when no color node is visible. The daemon runs libcamera itself and never uses the user's PipeWire session. Install the libcamera GStreamer plugin and restart the daemon:
+
+::: code-group
+
+```bash [Debian/Ubuntu]
+sudo apt install gstreamer1.0-libcamera
+```
+
+```bash [Fedora/RHEL]
+sudo dnf install libcamera-gstreamer
+```
+
+```bash [openSUSE Tumbleweed]
+sudo zypper install gstreamer-plugins-libcamera
+```
+
+```bash [Arch Linux / Manjaro]
+sudo pacman -S libcamera gst-plugin-libcamera
+```
+
+:::
+
+If the daemon log shows `Failed to fork: Function not implemented` from libcamera, your libcamera build ships IPA modules whose signatures do not verify. libcamera then tries to run them in a separate sandboxed process, which the daemon's hardening blocks. On Fedora 44 this is fixed in `libcamera-0.7.1-2.fc44` and later.
+
 Restart the daemon to apply the camera change:
 
 ```bash
