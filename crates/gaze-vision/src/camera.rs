@@ -532,6 +532,96 @@ pub fn resolve_privileged_node(source: &str, want_color: bool) -> Option<String>
     }
 }
 
+fn libcamera_fallback_applies(
+    camera_source: &str,
+    want_color: bool,
+    failed_node: Option<&str>,
+) -> bool {
+    want_color
+        && camera_source.trim() == DEFAULT_RGB_CAMERA
+        && failed_node.is_none_or(node_requires_media_controller)
+}
+
+const VIDIOC_QUERYCAP: libc::c_ulong = 0x8068_5600;
+const V4L2_CAP_IO_MC: u32 = 0x2000_0000;
+const V4L2_CAP_DEVICE_CAPS: u32 = 0x8000_0000;
+
+#[repr(C)]
+struct V4l2Capability {
+    _driver: [u8; 16],
+    _card: [u8; 32],
+    _bus_info: [u8; 32],
+    _version: u32,
+    capabilities: u32,
+    device_caps: u32,
+    _reserved: [u32; 3],
+}
+
+fn effective_device_caps(capabilities: u32, device_caps: u32) -> u32 {
+    if capabilities & V4L2_CAP_DEVICE_CAPS != 0 {
+        device_caps
+    } else {
+        capabilities
+    }
+}
+
+fn node_requires_media_controller(node: &str) -> bool {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let Ok(file) = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(node)
+    else {
+        return false;
+    };
+    let mut cap = V4l2Capability {
+        _driver: [0; 16],
+        _card: [0; 32],
+        _bus_info: [0; 32],
+        _version: 0,
+        capabilities: 0,
+        device_caps: 0,
+        _reserved: [0; 3],
+    };
+    let ret = unsafe {
+        libc::ioctl(
+            file.as_raw_fd(),
+            VIDIOC_QUERYCAP,
+            &mut cap as *mut V4l2Capability,
+        )
+    };
+    ret == 0 && effective_device_caps(cap.capabilities, cap.device_caps) & V4L2_CAP_IO_MC != 0
+}
+
+fn libcamera_color_source() -> Option<String> {
+    gstreamer::ElementFactory::find("libcamerasrc")?;
+    let monitor = gstreamer::DeviceMonitor::new();
+    monitor.add_filter(Some("Video/Source"), None);
+    monitor.start().ok()?;
+    wait_for_device_updates(&monitor);
+    let devices = monitor.devices();
+    monitor.stop();
+
+    devices
+        .iter()
+        .filter(|device| has_color_caps(device))
+        .find_map(|device| {
+            let element = device.create_element(None).ok()?;
+            let factory = element.factory()?;
+            if factory.name().as_str() != "libcamerasrc" {
+                return None;
+            }
+            let name = element.property::<Option<String>>("camera-name")?;
+            Some(libcamera_source_element(&name))
+        })
+}
+
+fn libcamera_source_element(camera_name: &str) -> String {
+    let escaped = camera_name.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("libcamerasrc camera-name=\"{escaped}\"")
+}
+
 const V4L2_BY_PATH_DIR: &str = "/dev/v4l/by-path";
 
 /// PipeWire names a V4L2 camera `v4l2_input.<udev ID_PATH>` with `:` rewritten as `_`, and udev
@@ -814,12 +904,13 @@ impl Camera {
         frame_size: Option<(u32, u32)>,
     ) -> anyhow::Result<Self> {
         gstreamer::init()?;
-        let node = resolve_privileged_node(camera_source, want_color).ok_or_else(|| {
-            anyhow::anyhow!(
+        let Some(node) = resolve_privileged_node(camera_source, want_color) else {
+            let err = anyhow::anyhow!(
                 "refusing privileged capture of {camera_source:?}: no backing /dev/video node \
                  (PipeWire sessions and custom pipelines are not trusted for authentication)"
-            )
-        })?;
+            );
+            return Self::open_libcamera_fallback(camera_source, want_color, None, err);
+        };
         let force_ir_yuy2 = node_requires_forced_ir_yuy2(&node, want_color);
         let src_element = format!("v4l2src device={node}");
         Self::open_with_frame_size_fallback(camera_source, frame_size, |size| {
@@ -827,6 +918,29 @@ impl Camera {
                 Self::open_source_element(&src_element, camera_source, force_ir_yuy2, None, size)
             })
         })
+        .or_else(|err| Self::open_libcamera_fallback(camera_source, want_color, Some(&node), err))
+    }
+
+    fn open_libcamera_fallback(
+        camera_source: &str,
+        want_color: bool,
+        failed_node: Option<&str>,
+        err: anyhow::Error,
+    ) -> anyhow::Result<Self> {
+        if !libcamera_fallback_applies(camera_source, want_color, failed_node) {
+            return Err(err);
+        }
+        let Some(src_element) = libcamera_color_source() else {
+            return Err(err);
+        };
+        warn!(
+            "Privileged V4L2 capture of {camera_source:?} failed ({err:#}); trying {src_element}"
+        );
+        Self::open_source_element(&src_element, camera_source, false, None, None).map_err(
+            |libcamera_err| {
+                anyhow::anyhow!("{err:#}; libcamera fallback also failed: {libcamera_err:#}")
+            },
+        )
     }
 
     fn open_kind(
@@ -2178,6 +2292,66 @@ mod tests {
         );
         assert!(Camera::open_privileged("").is_err());
         assert!(Camera::open_ir_privileged("v4l2src device=/dev/video0", None).is_err());
+    }
+
+    #[test]
+    fn libcamera_fallback_only_covers_primary_color_capture() {
+        assert!(libcamera_fallback_applies("primary", true, None));
+        assert!(libcamera_fallback_applies("  primary ", true, None));
+        assert!(!libcamera_fallback_applies("primary", false, None));
+        for source in [
+            "/dev/video0",
+            "usb:046d:085e",
+            "pipewiresrc",
+            "pipewiresrc target-object=device-name",
+            "videotestsrc",
+            "libcamerasrc",
+        ] {
+            assert!(
+                !libcamera_fallback_applies(source, true, None),
+                "{source:?} must keep its own failure"
+            );
+        }
+    }
+
+    #[test]
+    fn libcamera_fallback_skips_nodes_that_are_not_media_controller_only() {
+        assert!(!libcamera_fallback_applies(
+            "primary",
+            true,
+            Some("/dev/video-gaze-test-missing")
+        ));
+    }
+
+    #[test]
+    fn the_querycap_code_matches_the_kernels_ior_encoding() {
+        let expected = (2 << 30)
+            | ((std::mem::size_of::<V4l2Capability>() as libc::c_ulong) << 16)
+            | ((b'V' as libc::c_ulong) << 8);
+        assert_eq!(std::mem::size_of::<V4l2Capability>(), 104);
+        assert_eq!(VIDIOC_QUERYCAP, expected);
+    }
+
+    #[test]
+    fn device_caps_are_used_only_when_the_driver_reports_them() {
+        let mc_only = V4L2_CAP_IO_MC | 0x1;
+        assert_eq!(
+            effective_device_caps(V4L2_CAP_DEVICE_CAPS | 0x1, mc_only),
+            mc_only
+        );
+        assert_eq!(effective_device_caps(0x1, mc_only), 0x1);
+    }
+
+    #[test]
+    fn libcamera_camera_names_survive_pipeline_parsing() {
+        assert_eq!(
+            libcamera_source_element("\\_SB_.LNK1"),
+            "libcamerasrc camera-name=\"\\\\_SB_.LNK1\""
+        );
+        assert_eq!(
+            libcamera_source_element("a \"b\""),
+            "libcamerasrc camera-name=\"a \\\"b\\\"\""
+        );
     }
 
     fn sample_options() -> Vec<(String, String)> {
