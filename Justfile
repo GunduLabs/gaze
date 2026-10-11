@@ -447,13 +447,19 @@ _verify-package format:
     esac
 
     load gaze
-    want_files /usr/bin/gazed /usr/bin/gaze /etc/gaze/config.toml \
+    want_files /usr/bin/gazed /usr/bin/gaze \
         /etc/dbus-1/system.d/com.gundulabs.Gaze.conf \
         /usr/share/polkit-1/actions/com.gundulabs.gaze.policy \
         /usr/lib/systemd/system/gazed.service
     want_size /usr/bin/gazed 100000
     want_size /usr/bin/gaze 100000
-    want_config /etc/gaze/config.toml /etc/dbus-1/system.d/com.gundulabs.Gaze.conf
+    want_config /etc/dbus-1/system.d/com.gundulabs.Gaze.conf
+    if [ "{{ format }}" = deb ]; then
+        want_files /usr/share/gaze/config.toml
+    else
+        want_files /etc/gaze/config.toml
+        want_config /etc/gaze/config.toml
+    fi
     want_scripts "$post" "$preun"
     want_depends "${gst[@]}"
     case "{{ format }}" in

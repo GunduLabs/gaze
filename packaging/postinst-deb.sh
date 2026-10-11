@@ -31,6 +31,12 @@ check_deprecated_pam_grosshack() {
 	fi
 }
 
+seed_config() {
+	[ -e /etc/gaze/config.toml ] || [ -L /etc/gaze/config.toml ] && return 0
+	install -D -m 0644 /usr/share/gaze/config.toml /etc/gaze/config.toml
+}
+
+seed_config
 check_deprecated_pam_grosshack
 warn_missing_avx2
 

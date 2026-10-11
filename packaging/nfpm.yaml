@@ -36,8 +36,20 @@ contents:
     file_info:
       mode: 0755
   - src: "packaging/config/config.toml"
+    dst: "/usr/share/gaze/config.toml"
+    packager: deb
+    file_info:
+      mode: 0644
+  - src: "packaging/config/config.toml"
     dst: "/etc/gaze/config.toml"
     type: "config|noreplace"
+    packager: rpm
+    file_info:
+      mode: 0644
+  - src: "packaging/config/config.toml"
+    dst: "/etc/gaze/config.toml"
+    type: "config|noreplace"
+    packager: archlinux
     file_info:
       mode: 0644
   - src: "packaging/config/com.gundulabs.Gaze.conf"
