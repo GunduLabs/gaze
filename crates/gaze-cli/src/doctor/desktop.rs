@@ -407,6 +407,7 @@ pub(super) fn check_kde_confirmation_bypass(
     kde_fingerprint: Option<&str>,
     kde_smartcard: Option<&str>,
     plasmalogin_face: Option<&str>,
+    login_greeters: &[&str],
 ) {
     const NAME: &str = "KDE confirmation";
     let Some(config) = config else {
@@ -426,6 +427,7 @@ pub(super) fn check_kde_confirmation_bypass(
     {
         bypassed.push(PLASMALOGIN_FACE_PAM_FILE.trim_start_matches("/etc/pam.d/"));
     }
+    bypassed.extend_from_slice(login_greeters);
     if bypassed.is_empty() {
         return;
     }
@@ -435,7 +437,7 @@ pub(super) fn check_kde_confirmation_bypass(
             "require_confirmation_lock_screen is on, but {} cannot be prompted, so a face match unlocks without confirmation there",
             bypassed.join(", ")
         ),
-        "This is by design: the greeter never delivers a response to a noninteractive slot, so asking would hang it for the rest of the lock. Leave the toggle for surfaces that can prompt (sudo with a TTY, polkit, GNOME), or turn it off if the KDE bypass surprises you. See the KDE guide.",
+        "This is by design: the greeter never delivers a response to a noninteractive slot, and the login form never shows a second prompt, so asking would hang the slot or fail every login. Leave the toggle for surfaces that can prompt (sudo with a TTY, polkit, GNOME), or turn it off if the KDE bypass surprises you. See the KDE guide.",
     );
 }
 
@@ -598,11 +600,19 @@ mod tests {
         let check = |confirmation: bool,
                      fingerprint: Option<&str>,
                      smartcard: Option<&str>,
-                     face: Option<&str>| {
+                     face: Option<&str>,
+                     greeters: &[&str]| {
             let mut config = Config::default();
             config.auth.require_confirmation_lock_screen = confirmation;
             let mut report = Report::default();
-            check_kde_confirmation_bypass(&mut report, Some(&config), fingerprint, smartcard, face);
+            check_kde_confirmation_bypass(
+                &mut report,
+                Some(&config),
+                fingerprint,
+                smartcard,
+                face,
+                greeters,
+            );
             report
                 .checks
                 .iter()
@@ -611,12 +621,13 @@ mod tests {
         };
 
         // Off means nothing to say, even when a slot is wired.
-        assert!(check(false, Some("auth sufficient pam_gaze.so"), None, None).is_none());
+        assert!(check(false, Some("auth sufficient pam_gaze.so"), None, None, &[]).is_none());
+        assert!(check(false, None, None, None, &["plasmalogin"]).is_none());
         // On with nothing wired means nothing is bypassed.
-        assert!(check(true, None, None, None).is_none());
-        assert!(check(true, Some("auth required pam_fprintd.so"), None, None).is_none());
+        assert!(check(true, None, None, None, &[]).is_none());
+        assert!(check(true, Some("auth required pam_fprintd.so"), None, None, &[]).is_none());
 
-        let (level, message) = check(true, Some("auth sufficient pam_gaze.so"), None, None)
+        let (level, message) = check(true, Some("auth sufficient pam_gaze.so"), None, None, &[])
             .expect("a wired slot with confirmation on must warn");
         assert_eq!(level, Level::Warning);
         assert!(message.contains("kde-fingerprint"), "{message}");
@@ -630,10 +641,15 @@ mod tests {
             None,
             Some("auth sufficient pam_gaze.so"),
             Some("auth sufficient pam_gaze.so"),
+            &[],
         )
         .expect("both smartcard and greeter slots must warn");
         assert!(message.contains("kde-smartcard"), "{message}");
         assert!(message.contains("plasmalogin-fingerprint"), "{message}");
+
+        let (_, message) = check(true, None, None, None, &["sddm", "plasmalogin"])
+            .expect("a login greeter reaching Gaze must warn");
+        assert!(message.contains("sddm, plasmalogin"), "{message}");
     }
 
     #[test]

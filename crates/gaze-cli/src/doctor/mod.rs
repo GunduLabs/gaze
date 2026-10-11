@@ -53,6 +53,7 @@ const GNOME_DOCS_URL: &str = "https://gaze.gundulabs.com/guide/gnome";
 /// openSUSE ship these slots only there, so reading `/etc` alone sees nothing.
 const VENDOR_PAM_DIR: &str = "/usr/lib/pam.d";
 const POLKIT_PAM_FILE: &str = "/etc/pam.d/polkit-1";
+const KDE_LOGIN_GREETER_SERVICES: [&str; 2] = ["sddm", "plasmalogin"];
 const ELEVATION_PAM_SERVICE: &str = "sudo";
 const PAM_SUDO_OPTOUT_PATH: &str = "/etc/gaze/pam-sudo.optout";
 
@@ -216,6 +217,10 @@ pub async fn run(username: &str, benchmark: bool) -> anyhow::Result<bool> {
         read_pam_service(KDE_FACE_PAM_FILE).as_deref(),
         read_pam_service(KDE_SMARTCARD_PAM_FILE).as_deref(),
         read_pam_service(PLASMALOGIN_FACE_PAM_FILE).as_deref(),
+        &KDE_LOGIN_GREETER_SERVICES
+            .into_iter()
+            .filter(|service| pam_service_reaches_gaze(service, 2))
+            .collect::<Vec<_>>(),
     );
     check_tpm(&mut report, config);
     check_keyring(&mut report, username, config);
