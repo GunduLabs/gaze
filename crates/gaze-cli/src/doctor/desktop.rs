@@ -162,13 +162,13 @@ pub(super) fn check_desktop_integration(report: &mut Report) {
                         "enabled system-wide via {GDM_FACE_OVERRIDE_PATH}; toggle it under Behavior -> GDM login screen in `gnome-extensions prefs {GNOME_EXTENSION_ID}`"
                     ),
                 ),
-                GdmGreeterReadiness::ProfileMissingSystemDb => report.error(
+                GdmGreeterReadiness::ProfileMissingSystemDb(profile) => report.error(
                     "GDM login face auth",
                     format!(
-                        "{GDM_FACE_OVERRIDE_PATH} exists, but {GDM_DCONF_PROFILE_PATH} does not list `system-db:{GDM_DCONF_PROFILE}`, so GDM never reads it"
+                        "{GDM_FACE_OVERRIDE_PATH} exists, but the greeter's dconf profile {profile} does not list `system-db:{GDM_DCONF_PROFILE}`, so GDM never reads it"
                     ),
                     format!(
-                        "Add a `system-db:{GDM_DCONF_PROFILE}` line to {GDM_DCONF_PROFILE_PATH}, run `sudo dconf update`, then reboot."
+                        "Reinstall the Gaze GNOME extension package, or add a `system-db:{GDM_DCONF_PROFILE}` line after `user-db:user` in {profile} (copying it from {VENDOR_DCONF_PROFILE_DIR} first if it does not exist), run `sudo dconf update`, then reboot."
                     ),
                 ),
                 GdmGreeterReadiness::CompiledDbMissing => report.error(

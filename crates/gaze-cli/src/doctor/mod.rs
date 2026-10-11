@@ -68,6 +68,9 @@ const GDM_DISABLE_EXTENSIONS_KEY: &str = "/org/gnome/shell/disable-user-extensio
 /// Returns the display-manager account name: `gdm3` on Debian and Ubuntu, `gdm` elsewhere.
 const GDM_HOME_DIRS: [&str; 2] = ["/var/lib/gdm", "/var/lib/gdm3"];
 const GDM_COMPILED_DB_PATH: &str = "/etc/dconf/db/gdm";
+const GDM_GREETER_DCONF_PROFILES: [&str; 2] = [GDM_DCONF_PROFILE, "Debian-gdm"];
+const DCONF_PROFILE_DIR: &str = "/etc/dconf/profile";
+const VENDOR_DCONF_PROFILE_DIR: &str = "/usr/share/dconf/profile";
 const GDM_FACE_PAM_SERVICE: &str = "gdm-face";
 const GREETD_PAM_FILE: &str = "/etc/pam.d/greetd";
 /// Files that decide what runs as root or who may talk to the daemon. A writable entry here
