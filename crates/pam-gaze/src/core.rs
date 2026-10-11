@@ -570,6 +570,9 @@ pub fn confirmation_required(
     auth: Option<&gaze_core::config::AuthConfig>,
     service: Option<&str>,
 ) -> bool {
+    if is_kde_login_greeter(service) {
+        return false;
+    }
     let surface = gaze_core::config::classify_pam_service(service);
     auth.is_none_or(|auth| auth.requires_confirmation(surface))
 }
@@ -1104,6 +1107,7 @@ pub const OMARCHY_FACE_PAM_FILE: &str = "/etc/pam.d/gaze-omarchy-face";
 /// the shared stack it installs into.
 const KDE_INTERACTIVE_SERVICE: &str = "kde";
 const PLASMALOGIN_INTERACTIVE_SERVICE: &str = "plasmalogin";
+const SDDM_INTERACTIVE_SERVICE: &str = "sddm";
 const OMARCHY_PASSWORD_SERVICE: &str = "omarchy-lock-password";
 const OMARCHY_FINGERPRINT_SERVICE: &str = "omarchy-lock-fingerprint";
 
@@ -1117,6 +1121,13 @@ fn is_kde_noninteractive_service(service: Option<&str>) -> bool {
 /// A slot the greeter starts by itself, with nothing to route a response back.
 fn is_unpromptable_slot(service: Option<&str>) -> bool {
     is_kde_noninteractive_service(service) || service == Some(PLASMALOGIN_FACE_PAM_SERVICE)
+}
+
+fn is_kde_login_greeter(service: Option<&str>) -> bool {
+    matches!(
+        service,
+        Some(SDDM_INTERACTIVE_SERVICE | PLASMALOGIN_INTERACTIVE_SERVICE)
+    )
 }
 
 pub fn pam_stack_runs_gaze(contents: Option<&str>) -> bool {
@@ -1496,6 +1507,21 @@ mod tests {
         };
         assert!(confirmation_required(Some(&on), Some("swaylock")));
         assert!(confirmation_required(Some(&on), Some("gdm-password")));
+    }
+
+    #[test]
+    fn kde_login_greeters_never_require_confirmation() {
+        let on = gaze_core::config::AuthConfig {
+            require_confirmation_lock_screen: true,
+            require_confirmation_elevation: true,
+            ..Default::default()
+        };
+        for service in ["sddm", "plasmalogin"] {
+            assert!(!confirmation_required(Some(&on), Some(service)));
+            assert!(!confirmation_required(None, Some(service)));
+        }
+        assert!(confirmation_required(Some(&on), Some("kde")));
+        assert!(confirmation_required(Some(&on), Some("lightdm")));
     }
 
     #[test]

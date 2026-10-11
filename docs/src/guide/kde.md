@@ -172,6 +172,9 @@ delivers a response to a noninteractive slot, so asking would hang that slot for
 the rest of the lock rather than ask anybody anything. Denying the match instead
 would just mean no face unlock at all on KDE.
 
+The login greeter (Plasma Login Manager or SDDM) skips confirmation too. Its login
+form never shows a second prompt, so asking would fail every face login.
+
 If you want a real confirmation step on KDE, use simultaneous mode (`pam_gaze.so simultaneous`) on a
 surface that can show a dialog, such as polkit prompts. It refuses to run in the
 lock screen's biometric slot for the reason above.
