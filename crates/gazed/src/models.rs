@@ -180,7 +180,7 @@ fn extract_onnx_from_zip(zip_path: &Path, dest_dir: &Path) -> anyhow::Result<Vec
 
     for idx in 0..archive.len() {
         let mut entry = archive.by_index(idx)?;
-        let name = entry.name().to_string();
+        let name = entry.name()?.into_owned();
         if name.ends_with(".onnx") {
             let basename = Path::new(&name)
                 .file_name()
