@@ -173,7 +173,7 @@ pub(super) fn extensions_include(value: &str, uuid: &str) -> bool {
 
 pub(super) enum GdmGreeterReadiness {
     Ready,
-    ProfileMissingSystemDb,
+    ProfileMissingSystemDb(String),
     CompiledDbMissing,
     ExtensionNotEnabled,
     /// `Some` names the greeter db holding the key, `None` means a `system-db` layer set it.
@@ -181,17 +181,36 @@ pub(super) enum GdmGreeterReadiness {
     Unverifiable(String),
 }
 
+fn read_profile(path: &str) -> Option<std::io::Result<String>> {
+    match fs::read_to_string(path) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        result => Some(result),
+    }
+}
+
 pub(super) fn gdm_greeter_readiness() -> GdmGreeterReadiness {
-    match fs::read_to_string(GDM_DCONF_PROFILE_PATH) {
-        Ok(contents) if !profile_reads_system_db(&contents, GDM_DCONF_PROFILE) => {
-            return GdmGreeterReadiness::ProfileMissingSystemDb;
+    let mut found = false;
+    for name in GDM_GREETER_DCONF_PROFILES {
+        let path = format!("{DCONF_PROFILE_DIR}/{name}");
+        let vendor = format!("{VENDOR_DCONF_PROFILE_DIR}/{name}");
+        let contents = match read_profile(&path).or_else(|| read_profile(&vendor)) {
+            None => continue,
+            Some(Ok(contents)) => contents,
+            Some(Err(err)) => {
+                return GdmGreeterReadiness::Unverifiable(format!(
+                    "could not read the {name} dconf profile: {err}"
+                ));
+            }
+        };
+        if !profile_reads_system_db(&contents, GDM_DCONF_PROFILE) {
+            return GdmGreeterReadiness::ProfileMissingSystemDb(path);
         }
-        Ok(_) => {}
-        Err(err) => {
-            return GdmGreeterReadiness::Unverifiable(format!(
-                "could not read {GDM_DCONF_PROFILE_PATH}: {err}"
-            ));
-        }
+        found = true;
+    }
+    if !found {
+        return GdmGreeterReadiness::Unverifiable(format!(
+            "no GDM dconf profile under {DCONF_PROFILE_DIR} or {VENDOR_DCONF_PROFILE_DIR}"
+        ));
     }
 
     if !Path::new(GDM_COMPILED_DB_PATH).exists() {
