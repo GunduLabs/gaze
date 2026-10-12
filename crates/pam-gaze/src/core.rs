@@ -805,7 +805,7 @@ pub async fn setup_auth_env() -> Result<(Config, GazeProxy<'static>), c_int> {
 pub async fn has_enrolled_faces_on(proxy: &GazeProxy<'_>, username: &str) -> anyhow::Result<bool> {
     match proxy.list_faces(username).await {
         // Treat unenrolled users as having no faces.
-        Ok(faces) => Ok(!faces.is_empty()),
+        Ok(faces) => Ok(faces.iter().any(|(_, templates, _, _)| *templates > 0)),
         Err(ref err) if gaze_core::dbus::dbus_is_file_not_found(err) => Ok(false),
         Err(err) => Err(err.into()),
     }

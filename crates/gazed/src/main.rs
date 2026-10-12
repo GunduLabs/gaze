@@ -203,6 +203,16 @@ async fn run(config: Config) -> anyhow::Result<()> {
         }
     }
 
+    let adopted = db.adopt_untagged_templates(security.recognizer())?;
+    if adopted > 0 {
+        info!(
+            adopted,
+            recognizer = security.recognizer(),
+            "Recorded the recognizer for existing templates"
+        );
+    }
+    db.use_recognizer(security.recognizer())?;
+
     warn_on_ir_misconfig(&config.cameras);
 
     let sources = gaze_vision::camera::resolve_configured_sources(&config.cameras);

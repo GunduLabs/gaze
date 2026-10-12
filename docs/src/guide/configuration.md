@@ -133,6 +133,11 @@ Practical guidance:
 - `high`: use when false positives are unacceptable
 - `low`: use on weaker hardware when speed is critical
 
+Templates only match the recognizer that enrolled them. After switching between
+a MobileFaceNet level and a ResNet50 level, re-enroll your faces. Until you do,
+those faces show 0 templates and face login falls back to your password.
+Switching back to the original recognizer makes the old templates usable again.
+
 ### Custom level
 
 ```toml
