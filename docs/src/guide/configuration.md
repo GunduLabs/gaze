@@ -382,10 +382,10 @@ With the standard sequential `pam_gaze` mode (e.g. `sudo`, `gdm-face`):
 
 A "text-based (TTY) environment" means Gaze can open the process's controlling terminal (`/dev/tty`), which is how `sudo` itself finds the terminal to prompt on. Redirected standard input does not change that, so `echo 1 | sudo tee /tmp/1` still confirms from the keyboard. When there is no controlling terminal at all (a management console such as Cockpit that drives PAM over a framed stdio protocol, or a service started without one), nobody can press a key, so Gaze neither prints a terminal banner nor waits for one; the face match is refused and the stack falls through to the password.
 
-Callers that set the PAM `PAM_SILENT` flag, `sudo` among them, receive no messages through their own conversation. Gaze still writes the camera prompt and the verdict to the controlling terminal when there is one, so a terminal user keeps the "Please look at the camera" / "Face Verified." feedback; graphical callers with no terminal stay silent.
+Callers that set the PAM `PAM_SILENT` flag, `sudo` among them, receive no messages through their own conversation. For the terminal services (`sudo`, `su`, `doas`, `login`) Gaze still writes the camera prompt and the verdict to the controlling terminal, so a terminal user keeps the "Please look at the camera" / "Face Verified." feedback. Other callers, including a lock screen that happens to have inherited a terminal, never get terminal output or a terminal confirmation; they confirm through their own dialog instead.
 
 With simultaneous mode (`pam_gaze.so simultaneous`):
-- The password prompt still comes up immediately so you are never blocked.
+- In terminal services (`sudo`, `su`, `doas`, `login`) and polkit dialogs, the password prompt comes up immediately so you are never blocked. Lock screens and greeters answer prompts in a way Gaze cannot withdraw, so there the scan runs first and the password is asked for afterwards, exactly as in sequential mode.
 - If face verification succeeds before you finish entering your password:
   - In a text-based (TTY) environment, it cancels the password prompt and asks for text confirmation ("Press Enter to confirm, Esc to cancel").
   - In a graphical Polkit environment:
@@ -440,7 +440,7 @@ Four things to keep in mind:
 - The scope is only honored by a daemon new enough to know about it. Package upgrades restart `gazed` if it was already running, but if you built or installed Gaze some other way and the old daemon is still live, the delay keeps applying to every prompt. Run `sudo systemctl restart gazed` if `screen_lock` appears to be ignored.
 - On resume from suspend, Gaze waits for whichever of `start_delay_ms` and `resume_grace_ms` is longer. The two do not stack.
 - `resume_grace_ms` ignores `start_delay_scope`. It exists so the display can repaint after suspend, which has nothing to do with which prompt is asking, so it still applies to the first authentication after a resume whatever that prompt is.
-- With a sequential PAM stack (`hyprlock-gaze`, the default), `pam_gaze.so` runs before the password module, so the delay also postpones the point at which a typed password is accepted. You can type during the delay, but your first Enter may be consumed while PAM is still inside Gaze, requiring a second press. This is the same behavior as the existing wait while a face scan is in progress. The simultaneous stack (`hyprlock-gaze-simultaneous`) prompts for the password in parallel and avoids it.
+- With a sequential PAM stack (`hyprlock-gaze`, the default), `pam_gaze.so` runs before the password module, so the delay also postpones the point at which a typed password is accepted. You can type during the delay, but your first Enter may be consumed while PAM is still inside Gaze, requiring a second press. This is the same behavior as the existing wait while a face scan is in progress. The simultaneous stack (`hyprlock-gaze-simultaneous`) does not avoid it: on a lock screen simultaneous mode also scans before it asks for the password.
 
 After updating the configuration, restart the daemon to apply the changes:
 
@@ -586,7 +586,7 @@ How it works:
 - A matched frame where either eye is closed never unlocks. That alone means a blink cannot let a coerced unlock through.
 - If an eye stays closed for `hold_ms`, Gaze rejects the attempt and locks face authentication for that user. While locked, face unlock reports itself as unavailable and falls straight through to the password prompt without touching the camera.
 - The lock is stored in `/var/lib/gaze/duress`, so a reboot or daemon restart does not clear it.
-- It clears after a successful login that did not use your face, such as your password, on any service where `pam_gaze.so` is in the auth stack (including the `gdm-password`, KDE, and sudo stacks Gaze installs into). Network logins such as SSH or IMAP do not clear it. You can also clear it with `gaze duress --clear`, which requires fresh administrator authentication.
+- It clears after a successful login that did not use your face, such as your password, on a service that runs as root with `pam_gaze.so` in its auth stack: the login greeters (`gdm-password`, SDDM, LightDM, greetd), `login`, `sudo`, `su` and polkit. Lock screens that run as you (hyprlock, swaylock, the KDE lock screen) cannot clear it, because the daemon cannot tell that a password was used there; unlock with your password and then run `sudo -v`, or log in again. Network logins such as SSH or IMAP do not clear it. You can also clear it with `gaze duress --clear`, which requires fresh administrator authentication.
 
 Settings:
 

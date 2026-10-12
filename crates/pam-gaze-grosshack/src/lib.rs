@@ -33,10 +33,12 @@ pub unsafe extern "C" fn pam_sm_authenticate(
     argc: c_int,
     argv: *const *const c_char,
 ) -> c_int {
-    emit_deprecation_notice();
-    let mut options = unsafe { parse_raw_pam_options(argc, argv) };
-    options.mode = PamMode::Simultaneous;
-    unsafe { do_authenticate(pamh, flags, options) }
+    guard_pam_entry(|| {
+        emit_deprecation_notice();
+        let mut options = unsafe { parse_raw_pam_options(argc, argv) };
+        options.mode = PamMode::Simultaneous;
+        unsafe { do_authenticate(pamh, flags, options) }
+    })
 }
 
 pam_success_stubs!();

@@ -48,6 +48,39 @@ This matters on Debian and Ubuntu, where enabling a Gaze profile through
 nearly every service on the system, not just the desktop ones. Those services
 keep authenticating by password exactly as before.
 
+### Root services must be known to be local
+
+A name list cannot cover every network daemon. JupyterHub, Webmin, RStudio
+Server and VNC servers authenticate as root, often without setting `PAM_RHOST`,
+so a list of exclusions would let someone on the network submit your username
+while you sit at your desk and have the camera approve them. A PAM host running
+as root therefore only gets face authentication for services Gaze knows run for
+someone at this machine:
+
+- elevation: `sudo`, `sudo-i`, `su`, `su-l`, `doas`, `run0`, `systemd-run0`,
+  `polkit-1`, `pkexec`
+- login greeters: `gdm-password`, `gdm-launch-environment`, `gdm-face`, `sddm`,
+  `plasmalogin`, `plasmalogin-fingerprint`, `lightdm`, `greetd`,
+  `cosmic-greeter`, `ly`, `lemurs`, `lxdm`
+- the KDE lock screen slots and the Omarchy face service
+- `login`, but only on a virtual console (`PAM_TTY` of `ttyN`), because
+  `login` is also the default service of web logins such as JupyterHub
+
+Any other root service falls through to the password. Lock screens that run as
+you (hyprlock, swaylock, the KDE and Cinnamon lockers) are not affected, since
+they can only ask about their own user.
+
+If a root greeter or locker you use is missing, add the `local` option to the
+`pam_gaze.so` line in that service's own file under `/etc/pam.d`, never in a
+shared file such as `common-auth` or `system-auth`:
+
+```text
+auth    [success=done default=ignore]    pam_gaze.so local
+```
+
+Unknown options are ignored with a warning in the system log, so run
+`journalctl -g pam_gaze` if an option seems to have no effect.
+
 ## Debian / Ubuntu
 
 Packages install PAM profiles for `pam-auth-update`.
@@ -261,7 +294,7 @@ After that, `sudo` authenticates you with your own password or face. Outside
 ### Simultaneous mode on openSUSE
 
 There is no `pam-config` definition for simultaneous mode. The package ships
-only `--gaze` (sequential) and `--gaze_retry`, so add the `simultaneous` option
+only `--gaze` (sequential), so add the `simultaneous` option
 by hand: run `sudo pam-config --add --gaze && sudo pam-config --update`, then
 edit the generated `/etc/pam.d/common-auth-pc` so the Gaze line reads
 
@@ -281,21 +314,14 @@ notice on every authentication and will be removed in a future release. If
 instead. `gaze doctor` reports a stack that still loads it.
 :::
 
-To add a retry after a rejected password, enable the retry definition alongside
-whichever of the above you use:
+### Retry mode on openSUSE
 
-```bash
-sudo pam-config --add --gaze_retry
-sudo pam-config --update
-```
-
-::: warning
-The openSUSE retry definition is newer than the others and has had less testing
-on Tumbleweed than the Debian and Fedora profiles. Check the generated
-`/etc/pam.d/common-auth` afterwards and confirm the `pam_gaze.so retry` line
-landed *below* `pam_unix.so`. If it did not, remove it with
-`sudo pam-config --delete --gaze_retry` and add the line by hand instead.
-:::
+Retry mode is not available on openSUSE. `pam-config` writes `pam_unix.so` as
+`required` unless an LDAP, Kerberos, SSSD or Winbind module is also enabled, and
+once a `required` module has failed, a later face match cannot turn the result
+into a success. Earlier packages shipped a `--gaze_retry` definition anyway; it
+showed "Face Verified." and `sudo` still refused. Upgrading removes that line
+from `/etc/pam.d/common-auth-pc`.
 
 Check that the managed file contains Gaze and that the common-auth link still
 points at the generated file:
@@ -435,6 +461,10 @@ auth    sufficient    pam_gaze.so retry
 The first line still gives you face-or-password. The third line is what catches
 a typo: the password is rejected, and Gaze looks once more instead of failing
 the attempt outright.
+
+The password module must not be `required`. Once a `required` module has
+failed, PAM fails the whole stack whatever a later `sufficient` line returns,
+so the retry could match your face and the login would still be refused.
 
 Retry composes with either mode, so `pam_gaze.so` on its own works as the first
 line too.
