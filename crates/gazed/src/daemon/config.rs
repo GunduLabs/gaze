@@ -163,10 +163,17 @@ impl AuthDaemon {
             *self.detector.lock().unwrap_or_else(|e| e.into_inner()) = detector;
         }
         if let Some((rgb, ir)) = new_recognizers {
-            let mut recognizer_rgb = self.recognizer_rgb.lock().await;
-            let mut recognizer_ir = self.recognizer_ir.lock().await;
-            *recognizer_rgb = rgb;
-            *recognizer_ir = ir;
+            {
+                let mut recognizer_rgb = self.recognizer_rgb.lock().await;
+                let mut recognizer_ir = self.recognizer_ir.lock().await;
+                *recognizer_rgb = rgb;
+                *recognizer_ir = ir;
+            }
+            self.db
+                .lock()
+                .await
+                .use_recognizer(security.recognizer())
+                .map_err(|e| fdo::Error::Failed(format!("Failed to reload templates: {e}")))?;
         }
         if reload.liveness {
             *self.liveness.lock().await = new_liveness_detector;

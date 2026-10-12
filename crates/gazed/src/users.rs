@@ -15,6 +15,8 @@ use crate::crypto::{self, EmbeddingCipher};
 type FaceMap = HashMap<String, HashMap<String, (Array1<f32>, Spectrum)>>;
 pub type FaceScore = (String, f32, f32, bool, u32);
 
+const RECOGNIZER_TAG: &str = "recognizer";
+
 #[derive(Debug)]
 pub enum UserDbError {
     UserNotFound(String),
@@ -49,6 +51,7 @@ pub struct UserDatabase {
     max_templates: usize,
     users: HashMap<String, FaceMap>,
     cipher: Option<EmbeddingCipher>,
+    recognizer: Option<String>,
 }
 
 impl UserDatabase {
@@ -122,6 +125,7 @@ impl UserDatabase {
             max_templates,
             users: HashMap::new(),
             cipher,
+            recognizer: None,
         };
         db.load_all()?;
         Ok(db)
@@ -133,6 +137,52 @@ impl UserDatabase {
 
     pub fn set_cipher(&mut self, cipher: Option<EmbeddingCipher>) {
         self.cipher = cipher;
+    }
+
+    pub fn use_recognizer(&mut self, recognizer: &str) -> anyhow::Result<()> {
+        self.recognizer = Some(recognizer.to_string());
+        self.load_all()
+    }
+
+    fn recognizer_tag(dir: &Path) -> Option<String> {
+        let tag = fs::read_to_string(dir.join(RECOGNIZER_TAG)).ok()?;
+        let tag = tag.trim();
+        (!tag.is_empty()).then(|| tag.to_string())
+    }
+
+    fn write_recognizer_tag(dir: &Path, recognizer: &str) -> std::io::Result<()> {
+        let mut file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(dir.join(RECOGNIZER_TAG))
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        file.write_all(recognizer.as_bytes())?;
+        file.flush()
+    }
+
+    // Untagged templates predate tagging, so they can only be attributed to the recognizer
+    // the daemon is starting with.
+    pub fn adopt_untagged_templates(&self, recognizer: &str) -> anyhow::Result<usize> {
+        let mut dirs: Vec<PathBuf> = self
+            .collect_bin_files()?
+            .into_iter()
+            .filter_map(|path| path.parent().map(Path::to_path_buf))
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        let mut adopted = 0;
+        for dir in dirs {
+            if Self::recognizer_tag(&dir).is_none() {
+                Self::write_recognizer_tag(&dir, recognizer)?;
+                adopted += 1;
+            }
+        }
+        Ok(adopted)
     }
 
     fn init_dirs(&self) -> std::io::Result<()> {
@@ -245,9 +295,15 @@ impl UserDatabase {
                     continue;
                 }
                 let mut embeddings = HashMap::new();
+                let mut stale = 0usize;
 
                 let mut walk_stack = vec![face_path.clone()];
                 while let Some(current_path) = walk_stack.pop() {
+                    let from_other_recognizer =
+                        match (&self.recognizer, Self::recognizer_tag(&current_path)) {
+                            (Some(current), Some(tag)) => *current != tag,
+                            _ => false,
+                        };
                     for entry in fs::read_dir(current_path)? {
                         let entry = entry?;
                         let path = entry.path();
@@ -257,6 +313,10 @@ impl UserDatabase {
                         } else if file_type.is_file()
                             && path.extension().and_then(|e| e.to_str()) == Some("bin")
                         {
+                            if from_other_recognizer {
+                                stale += 1;
+                                continue;
+                            }
                             let embed = match self.read_embedding(&path) {
                                 Ok(embed) => embed,
                                 Err(err) => {
@@ -283,6 +343,16 @@ impl UserDatabase {
                             embeddings.insert(uuid, (embed, spectrum));
                         }
                     }
+                }
+                if stale > 0 {
+                    tracing::warn!(
+                        username = %username,
+                        face = %face_name,
+                        stale,
+                        recognizer = self.recognizer.as_deref().unwrap_or_default(),
+                        "ignoring templates enrolled under a different security level's \
+                         recognizer; re-enroll this face to use it at the current level"
+                    );
                 }
                 faces.insert(face_name, embeddings);
             }
@@ -426,6 +496,9 @@ impl UserDatabase {
         }
 
         Self::ensure_private_dir(&template_dir)?;
+        if let Some(recognizer) = &self.recognizer {
+            Self::write_recognizer_tag(&template_dir, recognizer)?;
+        }
 
         for (embed, spectrum) in embeddings {
             let uuid = uuid::Uuid::new_v4().to_string();
@@ -683,7 +756,7 @@ impl UserDatabase {
         Ok(self
             .users
             .get(username)
-            .is_some_and(|faces| !faces.is_empty()))
+            .is_some_and(|faces| faces.values().any(|embeds| !embeds.is_empty())))
     }
 
     pub fn get_user_embeddings(&self, username: &str) -> Option<Vec<&Array1<f32>>> {
@@ -1737,5 +1810,86 @@ mod tests {
             })
             .count();
         assert_eq!(leftovers, 0, "staging files must be cleaned up on failure");
+    }
+
+    #[test]
+    fn templates_from_another_recognizer_are_not_matched() {
+        let temp = TempDir::new("recognizer-switch");
+        let base = temp.path().to_str().unwrap();
+        let mut db = UserDatabase::new(base, 4).unwrap();
+        db.use_recognizer("w600k_mbf.onnx").unwrap();
+        db.add_template(
+            "alice",
+            "work",
+            "1",
+            rgb_embeds(vec![embedding(&[1.0, 0.0])]),
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(temp.path().join("alice/work/1").join(RECOGNIZER_TAG)).unwrap(),
+            "w600k_mbf.onnx"
+        );
+
+        db.use_recognizer("w600k_r50.onnx").unwrap();
+        assert_eq!(
+            sorted_faces(&db, "alice"),
+            vec![("work".to_string(), 0, false, false)]
+        );
+        assert!(!db.has_enrolled_faces("alice").unwrap());
+        assert!(
+            db.match_faces("alice", &embedding(&[1.0, 0.0]), 0.5, Spectrum::Rgb)
+                .unwrap()
+                .iter()
+                .all(|score| !score.3)
+        );
+
+        db.add_template(
+            "alice",
+            "work",
+            "2",
+            rgb_embeds(vec![embedding(&[0.0, 1.0])]),
+        )
+        .unwrap();
+        assert_eq!(
+            sorted_faces(&db, "alice"),
+            vec![("work".to_string(), 1, true, false)]
+        );
+
+        db.use_recognizer("w600k_mbf.onnx").unwrap();
+        assert_eq!(
+            sorted_faces(&db, "alice"),
+            vec![("work".to_string(), 1, true, false)]
+        );
+    }
+
+    #[test]
+    fn untagged_templates_are_adopted_by_the_starting_recognizer() {
+        let temp = TempDir::new("recognizer-adopt");
+        let base = temp.path().to_str().unwrap();
+        let mut legacy = UserDatabase::new(base, 4).unwrap();
+        legacy
+            .add_template(
+                "alice",
+                "work",
+                "1",
+                rgb_embeds(vec![embedding(&[1.0, 0.0])]),
+            )
+            .unwrap();
+        assert!(
+            !temp
+                .path()
+                .join("alice/work/1")
+                .join(RECOGNIZER_TAG)
+                .exists()
+        );
+
+        let mut db = UserDatabase::new(base, 4).unwrap();
+        assert_eq!(db.adopt_untagged_templates("w600k_mbf.onnx").unwrap(), 1);
+        assert_eq!(db.adopt_untagged_templates("w600k_r50.onnx").unwrap(), 0);
+        db.use_recognizer("w600k_mbf.onnx").unwrap();
+        assert!(db.has_enrolled_faces("alice").unwrap());
+
+        db.use_recognizer("w600k_r50.onnx").unwrap();
+        assert!(!db.has_enrolled_faces("alice").unwrap());
     }
 }
