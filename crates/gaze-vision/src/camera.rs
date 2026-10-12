@@ -617,6 +617,16 @@ fn libcamera_color_source() -> Option<String> {
         })
 }
 
+/// libcamera logs the cause to stderr, not the bus. When its software ISP cannot start its IPA,
+/// it offers only raw Bayer, which the pipeline cannot take.
+fn libcamera_negotiation_hint(detail: &str) -> Option<&'static str> {
+    detail.contains("not-negotiated").then_some(
+        ". libcamera offered no processed format, usually because its software ISP failed to \
+         start; if `journalctl -u gazed` shows `Failed to fork`, update libcamera \
+         (see https://gaze.gundulabs.com/guide/troubleshooting)",
+    )
+}
+
 fn libcamera_source_element(camera_name: &str) -> String {
     let escaped = camera_name.replace('\\', "\\\\").replace('"', "\\\"");
     format!("libcamerasrc camera-name=\"{escaped}\"")
@@ -938,7 +948,9 @@ impl Camera {
         );
         Self::open_source_element(&src_element, camera_source, false, None, None).map_err(
             |libcamera_err| {
-                anyhow::anyhow!("{err:#}; libcamera fallback also failed: {libcamera_err:#}")
+                let libcamera_err = format!("{libcamera_err:#}");
+                let hint = libcamera_negotiation_hint(&libcamera_err).unwrap_or_default();
+                anyhow::anyhow!("{err:#}; libcamera fallback also failed: {libcamera_err}{hint}")
             },
         )
     }
@@ -2312,6 +2324,18 @@ mod tests {
                 "{source:?} must keep its own failure"
             );
         }
+    }
+
+    #[test]
+    fn libcamera_negotiation_failures_point_at_the_software_isp() {
+        let hint = libcamera_negotiation_hint(
+            "Internal data stream error.: streaming stopped, reason not-negotiated (-4)",
+        )
+        .expect("not-negotiated gets a hint");
+        assert!(hint.contains("Failed to fork"));
+        assert!(
+            libcamera_negotiation_hint("Failed to configure camera: Invalid argument").is_none()
+        );
     }
 
     #[test]

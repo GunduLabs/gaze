@@ -23,6 +23,7 @@ with-ecryptfs::
 
 with-fingerprint::
     Enable authentication with fingerprint reader through *pam_fprintd*.
+    Face authentication runs first; the fingerprint prompt follows if it fails.
 
 with-pam-gnome-keyring::
     Enable pam-gnome-keyring support.
