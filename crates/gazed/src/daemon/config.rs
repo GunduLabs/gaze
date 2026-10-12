@@ -27,27 +27,6 @@ impl ModelReloads {
     }
 }
 
-/// The effective value in the GDM profile, which a NixOS config sets without our override file.
-pub(super) fn gdm_face_auth_from_dconf() -> Option<bool> {
-    if !std::path::Path::new(GDM_DCONF_PROFILE_PATH).exists() {
-        return None;
-    }
-    let output = std::process::Command::new("dconf")
-        .arg("read")
-        .arg(GDM_DCONF_FACE_AUTH_KEY)
-        .env("DCONF_PROFILE", GDM_DCONF_PROFILE)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    match String::from_utf8_lossy(&output.stdout).trim() {
-        "true" => Some(true),
-        "false" => Some(false),
-        _ => None,
-    }
-}
-
 pub(super) fn gdm_override_error(
     action: &str,
     path: &std::path::Path,
@@ -67,10 +46,64 @@ pub(super) fn gdm_override_error(
     fdo::Error::Failed(format!("Failed to {action} {}: {err}", path.display()))
 }
 
+pub(super) fn write_gdm_face_auth(enabled: bool) -> fdo::Result<bool> {
+    let path = std::path::Path::new(GDM_FACE_OVERRIDE_PATH);
+    // Already in the requested state elsewhere, so don't write a read-only /etc.
+    if !path.exists() && gdm_face_auth_from_dconf() == Some(enabled) {
+        info!(enabled, "GDM face authentication already set outside Gaze");
+        return Ok(enabled);
+    }
+
+    if enabled {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| gdm_override_error("create", parent, e))?;
+        }
+        std::fs::write(path, GDM_DCONF_OVERRIDE_CONTENT)
+            .map_err(|e| gdm_override_error("write", path, e))?;
+    } else if path.exists() {
+        std::fs::remove_file(path).map_err(|e| gdm_override_error("remove", path, e))?;
+    }
+
+    let status = std::process::Command::new("dconf")
+        .arg("update")
+        .status()
+        .map_err(|e| fdo::Error::Failed(format!("Failed to run dconf update: {e}")))?;
+    if !status.success() {
+        return Err(fdo::Error::Failed(format!(
+            "dconf update exited with status {}",
+            status.code().unwrap_or(-1)
+        )));
+    }
+
+    // GDM's own user db outranks the system db the override lives in.
+    if let Some(effective) = gdm_face_auth_from_dconf()
+        && effective != enabled
+    {
+        let source = gdm_greeter_dconf_source(GDM_DCONF_FACE_AUTH_KEY)
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "another dconf system-db".to_string());
+        return Err(fdo::Error::Failed(format!(
+            "Updated the Gaze override, but GDM still resolves face login as {effective} \
+             because {source} sets it; clear the key there"
+        )));
+    }
+
+    info!(enabled, "Updated GDM face authentication override");
+    Ok(enabled)
+}
+
 impl AuthDaemon {
-    pub(super) async fn apply_config(&self, mut new_config: Config) -> fdo::Result<()> {
+    /// `update` builds the new config from the current one under the write lock, so concurrent
+    /// writers cannot each start from the same snapshot and silently undo one another.
+    pub(super) async fn apply_config(
+        &self,
+        update: impl FnOnce(Config) -> fdo::Result<Config> + Send,
+    ) -> fdo::Result<()> {
         let mut loaded_model_config = self.loaded_model_config.lock().await;
-        new_config.duress = self.current_config().await.duress;
+        let current = self.current_config().await;
+        let duress = current.duress.clone();
+        let mut new_config = update(current)?;
+        new_config.duress = duress;
         new_config
             .security
             .validate()

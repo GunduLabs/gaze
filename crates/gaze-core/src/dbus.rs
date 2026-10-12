@@ -656,7 +656,6 @@ pub trait Gaze {
     async fn release(&self) -> zbus::Result<()>;
 
     async fn register_extension(&self, active: bool) -> zbus::Result<()>;
-    async fn is_extension_active(&self, uid: u32) -> zbus::Result<bool>;
 
     async fn verify_start(&self, face_name: &str) -> zbus::Result<()>;
     async fn verify_start_for(&self, face_name: &str, pam_service: &str) -> zbus::Result<()>;

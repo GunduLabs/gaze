@@ -30,10 +30,6 @@ impl AuthDaemon {
         }
     }
 
-    pub(super) fn may_query_extension(caller_uid: u32, target_uid: u32) -> bool {
-        caller_uid == 0 || caller_uid == target_uid
-    }
-
     pub(super) async fn emit_effective_face_status(
         ctxt: &SignalEmitter<'_>,
         last_emitted_status: &mut Option<CaptureStatus>,
@@ -66,14 +62,21 @@ impl AuthDaemon {
         };
         let mut buf = vec![0u8; buf_size];
 
-        let ret = unsafe {
-            libc::getpwnam_r(
-                c_username.as_ptr(),
-                &mut pwd,
-                buf.as_mut_ptr() as *mut libc::c_char,
-                buf.len(),
-                &mut result,
-            )
+        // Directory-backed (LDAP/AD) entries can exceed the advertised size.
+        let ret = loop {
+            let ret = unsafe {
+                libc::getpwnam_r(
+                    c_username.as_ptr(),
+                    &mut pwd,
+                    buf.as_mut_ptr() as *mut libc::c_char,
+                    buf.len(),
+                    &mut result,
+                )
+            };
+            if ret != libc::ERANGE || buf.len() >= 1024 * 1024 {
+                break ret;
+            }
+            buf.resize(buf.len() * 2, 0);
         };
 
         if ret != 0 {
@@ -342,6 +345,13 @@ impl AuthDaemon {
         let caller_uid = Self::caller_uid(header).await?;
         let active_uid = active_session_uid_and_class().await.map(|(uid, _)| uid);
         Ok(Self::pam_internal_owner(caller_uid, active_uid))
+    }
+
+    pub(super) fn pam_internal_sender(header: &Header<'_>) -> fdo::Result<String> {
+        header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| fdo::Error::AccessDenied("Missing DBus sender".into()))
     }
 
     pub(super) async fn pam_internal_write_owner(header: &Header<'_>) -> fdo::Result<u32> {
@@ -910,13 +920,6 @@ mod tests {
             Some((1000, false)),
             false
         ));
-    }
-
-    #[test]
-    fn extension_state_is_visible_only_to_root_or_the_target_user() {
-        assert!(AuthDaemon::may_query_extension(0, 1000));
-        assert!(AuthDaemon::may_query_extension(1000, 1000));
-        assert!(!AuthDaemon::may_query_extension(1001, 1000));
     }
 
     #[test]

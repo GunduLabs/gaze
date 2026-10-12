@@ -24,7 +24,8 @@ use crate::users::{UserDatabase, UserDbError};
 use gaze_core::config::{CONFIG_PATH, Config};
 use gaze_core::dbus::{CaptureStatus, DbusConfig, EnrollPrompt, VerifyResult};
 use gaze_core::desktop::{
-    GDM_DCONF_FACE_AUTH_KEY, GDM_DCONF_PROFILE, GDM_DCONF_PROFILE_PATH, GDM_FACE_OVERRIDE_PATH,
+    GDM_DCONF_FACE_AUTH_KEY, GDM_FACE_OVERRIDE_PATH, gdm_face_auth_from_dconf,
+    gdm_greeter_dconf_source,
 };
 use gaze_core::ir::led::IrLed;
 use gaze_vision::camera::{Camera, CameraKind, resolve_configured_sources};
@@ -65,11 +66,21 @@ const VERIFY_SERIAL_RGB_BUDGET: Duration = Duration::from_secs(4);
 const VERIFY_WATCHDOG_POLL: Duration = Duration::from_millis(250);
 const SSH_PROC_CHAIN_MAX_DEPTH: usize = 16;
 
+/// Aborts the claim's timeout task once the last copy of the claim is gone.
+pub struct ClaimTimeout(tokio::task::AbortHandle);
+
+impl Drop for ClaimTimeout {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 #[derive(Clone)]
 pub struct ClaimState {
     pub username: String,
     pub sender: String,
     pub epoch: u64,
+    pub _timeout: Option<Arc<ClaimTimeout>>,
 }
 
 /// The single claim the daemon will honour, if any.
@@ -77,6 +88,23 @@ pub type ClaimStateHandle = Arc<Mutex<Option<ClaimState>>>;
 
 /// Cancellation channel for whatever task the current claim owns.
 pub type ActiveCancelHandle = Arc<Mutex<Option<oneshot::Sender<()>>>>;
+
+/// Internal PAM services per owner uid, kept per registering D-Bus sender so a session that
+/// ends without cleaning up loses its entries when its connection goes away.
+pub type PamInternalSets =
+    Arc<Mutex<HashMap<u32, HashMap<String, std::collections::HashSet<String>>>>>;
+
+fn forget_pam_internal_sender(
+    sets: &mut HashMap<u32, HashMap<String, std::collections::HashSet<String>>>,
+    sender: &str,
+) -> bool {
+    let mut removed = false;
+    sets.retain(|_, senders| {
+        removed |= senders.remove(sender).is_some();
+        !senders.is_empty()
+    });
+    removed
+}
 
 static CLAIM_EPOCH: AtomicU64 = AtomicU64::new(0);
 
@@ -176,11 +204,14 @@ async fn release_claim_epoch(
     if !claim_has_epoch(&state, epoch) {
         return false;
     }
-    *state = None;
+    // Dropped only after the last await: the timeout task calls this, and dropping the claim
+    // aborts that task at its next await.
+    let released = state.take();
     let mut cancel = active_cancel.lock().await;
     if let Some(tx) = cancel.take() {
         let _ = tx.send(());
     }
+    drop(released);
     true
 }
 
@@ -332,8 +363,7 @@ pub struct AuthDaemon {
     pub abort_before_first_resume: Arc<Mutex<bool>>,
     pub claim_state: ClaimStateHandle,
     pub active_cancel: ActiveCancelHandle,
-    pub active_extensions: Arc<Mutex<std::collections::HashMap<u32, bool>>>,
-    pub pam_internal: Arc<Mutex<std::collections::HashMap<u32, std::collections::HashSet<String>>>>,
+    pub pam_internal: PamInternalSets,
     pub resume_pending: Arc<AtomicBool>,
     pub resume_seen: Arc<AtomicBool>,
     pub lock_epochs: LockEpochs,
@@ -410,11 +440,42 @@ mod tests {
     use tokio::sync::{Mutex, oneshot};
 
     #[test]
+    fn a_vanished_sender_loses_only_its_internal_services() {
+        let mut sets: HashMap<u32, HashMap<String, std::collections::HashSet<String>>> =
+            HashMap::new();
+        let owner = sets.entry(1000).or_default();
+        owner.insert(":1.10".to_string(), ["polkit-1".to_string()].into());
+        owner.insert(":1.11".to_string(), ["gdm-face".to_string()].into());
+
+        assert!(forget_pam_internal_sender(&mut sets, ":1.10"));
+        assert_eq!(sets[&1000].len(), 1);
+        assert!(forget_pam_internal_sender(&mut sets, ":1.11"));
+        assert!(sets.is_empty());
+        assert!(!forget_pam_internal_sender(&mut sets, ":1.11"));
+    }
+
+    #[tokio::test]
+    async fn releasing_a_claim_aborts_its_timeout() {
+        let timeout = tokio::spawn(std::future::pending::<()>());
+        let claim_state = Arc::new(Mutex::new(Some(ClaimState {
+            username: "alice".to_string(),
+            sender: ":1.42".to_string(),
+            epoch: 7,
+            _timeout: Some(Arc::new(ClaimTimeout(timeout.abort_handle()))),
+        })));
+        let active_cancel = Arc::new(Mutex::new(None));
+
+        assert!(release_claim_epoch(&claim_state, &active_cancel, 7).await);
+        assert!(timeout.await.unwrap_err().is_cancelled());
+    }
+
+    #[test]
     fn stale_claim_epoch_does_not_match_reclaimed_state() {
         let state = Some(ClaimState {
             username: "alice".to_string(),
             sender: ":1.42".to_string(),
             epoch: 2,
+            _timeout: None,
         });
 
         assert!(!claim_has_epoch(&state, 1));
@@ -426,6 +487,7 @@ mod tests {
             username: "alice".to_string(),
             sender: ":1.42".to_string(),
             epoch,
+            _timeout: None,
         })))
     }
 
@@ -653,6 +715,7 @@ mod tests {
             username: "alice".to_string(),
             sender: ":1.42".to_string(),
             epoch: 12,
+            _timeout: None,
         });
 
         assert!(!release_claim_epoch(&claim_state, &active_cancel, 11).await);
