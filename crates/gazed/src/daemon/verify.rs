@@ -400,7 +400,8 @@ impl AuthDaemon {
 
             if !run_rgb && !run_ir {
                 error!("No matching templates or cameras configured for auth");
-                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                // Idle rather than no-face: nothing a retry could change.
+                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
                 return;
             }
 
@@ -415,7 +416,7 @@ impl AuthDaemon {
                     username,
                     if has_rgb_templates { "IR" } else { "RGB" }
                 );
-                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
                 return;
             }
 
@@ -428,7 +429,7 @@ impl AuthDaemon {
                 }
                 if abort_if_lid_closed && Self::is_lid_closed().await {
                     warn!("Laptop lid is closed, aborting face auth");
-                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
+                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
                     return;
                 }
             }

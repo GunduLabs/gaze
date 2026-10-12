@@ -12,6 +12,12 @@ libm.so.6"
 
 status=0
 
+# Without objdump the NEEDED list would come back empty and every module would pass.
+if ! command -v objdump >/dev/null 2>&1; then
+    echo "check-pam-link: objdump is required" >&2
+    exit 1
+fi
+
 for module in "$@"; do
     if [ ! -f "$module" ]; then
         echo "check-pam-link: $module has not been built" >&2
@@ -23,7 +29,12 @@ for module in "$@"; do
         continue
     fi
 
-    needed=$(objdump -p "$module" | awk '/NEEDED/ { print $2 }' | sort -u)
+    # A separate step, since a failing objdump inside the pipeline would go unnoticed.
+    headers=$(objdump -p "$module") || {
+        echo "check-pam-link: objdump could not read $module" >&2
+        exit 1
+    }
+    needed=$(printf '%s\n' "$headers" | awk '/NEEDED/ { print $2 }' | sort -u)
 
     for lib in $needed; do
         # Both modules share pam-gaze/src/auth.rs and its local credential

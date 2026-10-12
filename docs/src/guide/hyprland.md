@@ -52,7 +52,7 @@ Restart hyprlock or lock the session again. Face unlock runs first; if it fails 
 
 ## Simultaneous mode
 
-For password-and-face authentication in parallel (type your password while the camera matches your face; whichever succeeds first unlocks), use:
+The `hyprlock-gaze-simultaneous` service is shipped as well:
 
 ```ini
 auth {
@@ -62,7 +62,7 @@ auth {
 }
 ```
 
-This uses `pam_gaze.so simultaneous`, running Gaze alongside the password prompt instead of blocking it.
+It uses `pam_gaze.so simultaneous`, but on hyprlock it behaves like `hyprlock-gaze`: the scan runs first and the password is asked for afterwards. Gaze can only withdraw a password prompt it started on a terminal (`sudo`, `su`, `login`) or in a polkit dialog. hyprlock answers prompts from its own thread, so a prompt started alongside the scan could never be taken back, and Gaze does not start one.
 
 ## How it works
 

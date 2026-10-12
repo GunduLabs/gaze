@@ -589,6 +589,7 @@ in
         # Face-only PAM service, equivalent of packaging/pam/gdm-face.arch.
         security.pam.services."gdm-face".text = ''
           auth       required                     pam_env.so
+          auth       requisite                    ${pamPackage}/lib/security/pam_faillock.so preauth
           auth       [success=1 default=ignore]    ${cfg.package}/lib/security/pam_gaze.so
           auth       requisite                    pam_deny.so
           auth       required                     pam_permit.so
