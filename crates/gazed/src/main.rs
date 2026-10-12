@@ -242,6 +242,8 @@ async fn run(config: Config) -> anyhow::Result<()> {
     let lock_epochs: daemon::LockEpochs = Arc::new(Mutex::new(std::collections::HashMap::new()));
     let claim_state: daemon::ClaimStateHandle = Arc::new(Mutex::new(None));
     let active_cancel: daemon::ActiveCancelHandle = Arc::new(Mutex::new(None));
+    let pam_internal: daemon::PamInternalSets =
+        Arc::new(Mutex::new(std::collections::HashMap::new()));
 
     let daemon = AuthDaemon {
         detector: Arc::new(std::sync::Mutex::new(detector)),
@@ -265,8 +267,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
         abort_before_first_resume: Arc::new(Mutex::new(config.auth.abort_before_first_resume)),
         claim_state: claim_state.clone(),
         active_cancel: active_cancel.clone(),
-        active_extensions: Arc::new(Mutex::new(std::collections::HashMap::new())),
-        pam_internal: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        pam_internal: pam_internal.clone(),
         resume_pending: resume_pending.clone(),
         resume_seen: resume_seen.clone(),
         lock_epochs: lock_epochs.clone(),
@@ -297,6 +298,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
         claim_owners,
         claim_state,
         active_cancel,
+        pam_internal,
     ));
 
     conn.request_name("com.gundulabs.Gaze").await?;

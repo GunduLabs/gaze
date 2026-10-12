@@ -341,11 +341,13 @@ impl AuthDaemon {
         let serial_capture = *self.serial_capture.lock().await;
         let duress_cfg = config.duress.clone();
         if duress_cfg.enabled && self.eye_state.lock().await.is_none() {
-            match load_eye_state(&config.inference) {
-                Ok(classifier) => *self.eye_state.lock().await = Some(classifier),
-                Err(e) => {
+            let inference = config.inference.clone();
+            match tokio::task::spawn_blocking(move || load_eye_state(&inference)).await {
+                Ok(Ok(classifier)) => *self.eye_state.lock().await = Some(classifier),
+                Ok(Err(e)) => {
                     warn!("Duress detection is enabled but the eye-state model failed to load: {e}")
                 }
+                Err(e) => warn!("Loading the eye-state model panicked: {e}"),
             }
         }
         let eye_state_arc = self.eye_state.clone();
@@ -1095,12 +1097,15 @@ impl AuthDaemon {
             // A producer may be blocked in blocking_send when cancellation wins.
             // Closing the receiver releases it so joining cannot deadlock.
             drop(result_rx);
-            if let Some(t) = rgb_thread {
-                let _ = t.join();
-            }
-            if let Some(t) = ir_thread {
-                let _ = t.join();
-            }
+            let _ = tokio::task::spawn_blocking(move || {
+                if let Some(t) = rgb_thread {
+                    let _ = t.join();
+                }
+                if let Some(t) = ir_thread {
+                    let _ = t.join();
+                }
+            })
+            .await;
         });
 
         Ok(())

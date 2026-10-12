@@ -48,12 +48,14 @@ pub async fn subscribe_claim_owners(
         .await
 }
 
-/// Release the active claim as soon as its owning D-Bus name loses its owner. One subscription
-/// for the daemon's lifetime, so no task or signal receiver is left behind per claim.
+/// Release the active claim, and forget the internal PAM services a client registered, as soon
+/// as its D-Bus name loses its owner. One subscription for the daemon's lifetime, so no task or
+/// signal receiver is left behind per claim.
 pub async fn watch_claim_owner(
     mut stream: fdo::NameOwnerChangedStream,
     claim_state: ClaimStateHandle,
     active_cancel: ActiveCancelHandle,
+    pam_internal: PamInternalSets,
 ) {
     while let Some(signal) = stream.next().await {
         let Ok(args) = signal.args() else {
@@ -61,6 +63,11 @@ pub async fn watch_claim_owner(
         };
 
         let name = args.name().as_str();
+        if args.new_owner().is_none()
+            && forget_pam_internal_sender(&mut *pam_internal.lock().await, name)
+        {
+            info!(sender = %name, "Sender vanished, dropping its internal PAM services");
+        }
         let epoch = {
             let state = claim_state.lock().await;
             match &*state {

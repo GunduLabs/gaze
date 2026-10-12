@@ -34,10 +34,6 @@ const GAZE_DBUS_INTERFACE = `
     <method name="RegisterExtension">
       <arg name="active" type="b" direction="in"/>
     </method>
-    <method name="IsExtensionActive">
-      <arg name="uid" type="u" direction="in"/>
-      <arg name="active" type="b" direction="out"/>
-    </method>
     <method name="HasEnrolledFaces">
       <arg name="username" type="s" direction="in"/>
       <arg name="result" type="b" direction="out"/>
