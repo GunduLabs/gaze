@@ -250,7 +250,12 @@ sudo pacman -S libcamera gst-plugin-libcamera
 
 :::
 
-If the daemon log shows `Failed to fork: Function not implemented` from libcamera, your libcamera build ships IPA modules whose signatures do not verify. libcamera then tries to run them in a separate sandboxed process, which the daemon's hardening blocks. On Fedora 44 this is fixed in `libcamera-0.7.1-2.fc44` and later.
+If `gaze auth` reports `libcamera fallback also failed` with `reason not-negotiated`, and the daemon log shows `Failed to fork: Function not implemented` from libcamera, your libcamera build ships IPA modules whose signatures do not verify. libcamera then tries to run them in a separate sandboxed process, which the daemon's hardening blocks, and without its software ISP the camera offers only raw frames. On Fedora 44 this is fixed in `libcamera-0.7.1-2.fc44` and later. Until that reaches the stable repository, install it from updates-testing:
+
+```bash
+journalctl -u gazed -b | grep -i 'failed to fork'
+sudo dnf upgrade --enablerepo=updates-testing --refresh 'libcamera*'
+```
 
 Restart the daemon to apply the camera change:
 
