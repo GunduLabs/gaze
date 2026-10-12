@@ -481,7 +481,7 @@ fn replace_previous_line(
     write!(writer, "{}{message}", line_prefix(prompt))
 }
 
-const TTY_CONVERSATION_SERVICES: [&str; 6] = ["sudo", "sudo-i", "su", "su-l", "doas", "login"];
+pub(crate) const TTY_CONVERSATION_SERVICES: [&str; 6] = ["sudo", "sudo-i", "su", "su-l", "doas", "login"];
 
 /// Only these hosts read the terminal. A locker or greeter that merely inherited one would leave
 /// anything written there unseen, and a key read from it would never come.
