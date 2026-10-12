@@ -159,21 +159,67 @@ impl AuthDaemon {
             None
         };
 
+        // Every step that can fail runs before any live setting changes, so a rejected
+        // request leaves the daemon, the config file and the GUI agreeing on the old values.
+        let want_encrypt = new_config.storage.encrypt_templates;
+        let pending_cipher = {
+            let db = self.db.lock().await;
+            if want_encrypt != db.is_encrypted() {
+                let dek =
+                    crate::tpm::load_or_create_dek(std::path::Path::new(crate::tpm::STATE_DIR))
+                        .map_err(|e| {
+                            fdo::Error::Failed(format!("cannot change template encryption: {e}"))
+                        })?;
+                Some(crate::crypto::EmbeddingCipher::new(&dek))
+            } else {
+                None
+            }
+        };
+
+        let save_config = || {
+            new_config
+                .save_to(CONFIG_PATH)
+                .map_err(|e| fdo::Error::Failed(format!("Failed to save config: {e}")))
+        };
+
+        match pending_cipher {
+            Some(cipher) if want_encrypt => {
+                let mut db = self.db.lock().await;
+                db.set_cipher(Some(cipher));
+                let n = match db.migrate_plaintext_to_encrypted() {
+                    Ok(n) => n,
+                    Err(e) => {
+                        db.set_cipher(None);
+                        return Err(fdo::Error::Failed(format!(
+                            "failed to encrypt existing templates: {e}"
+                        )));
+                    }
+                };
+                drop(db);
+                save_config()?;
+                info!(migrated = n, "Enabled template encryption");
+            }
+            Some(cipher) => {
+                let mut db = self.db.lock().await;
+                let n = db.decrypt_all_with(&cipher).map_err(|e| {
+                    fdo::Error::Failed(format!("failed to decrypt existing templates: {e}"))
+                })?;
+                db.set_cipher(None);
+                drop(db);
+                save_config()?;
+                info!(decrypted = n, "Disabled template encryption");
+            }
+            None => save_config()?,
+        }
+
         if let Some(detector) = new_detector {
             *self.detector.lock().unwrap_or_else(|e| e.into_inner()) = detector;
         }
         if let Some((rgb, ir)) = new_recognizers {
-            {
-                let mut recognizer_rgb = self.recognizer_rgb.lock().await;
-                let mut recognizer_ir = self.recognizer_ir.lock().await;
-                *recognizer_rgb = rgb;
-                *recognizer_ir = ir;
-            }
-            self.db
-                .lock()
-                .await
-                .use_recognizer(security.recognizer())
-                .map_err(|e| fdo::Error::Failed(format!("Failed to reload templates: {e}")))?;
+            let mut recognizer_rgb = self.recognizer_rgb.lock().await;
+            let mut recognizer_ir = self.recognizer_ir.lock().await;
+            *recognizer_rgb = rgb;
+            *recognizer_ir = ir;
         }
         if reload.liveness {
             *self.liveness.lock().await = new_liveness_detector;
@@ -182,8 +228,6 @@ impl AuthDaemon {
             // The optional eye-state session is loaded lazily by verification.
             *self.eye_state.lock().await = None;
         }
-        // Remember what is actually loaded even if a later storage/config write
-        // fails, so the next request compares against the live sessions.
         *loaded_model_config = new_config.clone();
 
         *self.rgb_threshold.lock().await = new_config.security.rgb_threshold();
@@ -213,50 +257,10 @@ impl AuthDaemon {
         {
             let mut db = self.db.lock().await;
             db.set_max_templates(new_config.enrollment.max_templates as usize);
-        }
-
-        let want_encrypt = new_config.storage.encrypt_templates;
-        let pending_cipher = {
-            let db = self.db.lock().await;
-            if want_encrypt != db.is_encrypted() {
-                let dek =
-                    crate::tpm::load_or_create_dek(std::path::Path::new(crate::tpm::STATE_DIR))
-                        .map_err(|e| {
-                            fdo::Error::Failed(format!("cannot change template encryption: {e}"))
-                        })?;
-                Some(crate::crypto::EmbeddingCipher::new(&dek))
-            } else {
-                None
+            if reload.recognizer {
+                db.use_recognizer(new_config.security.recognizer())
+                    .map_err(|e| fdo::Error::Failed(format!("Failed to reload templates: {e}")))?;
             }
-        };
-
-        let save_config = || {
-            new_config
-                .save_to(CONFIG_PATH)
-                .map_err(|e| fdo::Error::Failed(format!("Failed to save config: {e}")))
-        };
-
-        match pending_cipher {
-            Some(cipher) if want_encrypt => {
-                save_config()?;
-                let mut db = self.db.lock().await;
-                db.set_cipher(Some(cipher));
-                let n = db.migrate_plaintext_to_encrypted().map_err(|e| {
-                    fdo::Error::Failed(format!("failed to encrypt existing templates: {e}"))
-                })?;
-                info!(migrated = n, "Enabled template encryption");
-            }
-            Some(cipher) => {
-                let mut db = self.db.lock().await;
-                let n = db.decrypt_all_with(&cipher).map_err(|e| {
-                    fdo::Error::Failed(format!("failed to decrypt existing templates: {e}"))
-                })?;
-                db.set_cipher(None);
-                drop(db);
-                save_config()?;
-                info!(decrypted = n, "Disabled template encryption");
-            }
-            None => save_config()?,
         }
 
         info!("Config reloaded successfully");
