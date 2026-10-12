@@ -203,6 +203,26 @@ async fn run(config: Config) -> anyhow::Result<()> {
         }
     }
 
+    if !encrypt_templates && db.has_encrypted_templates()? {
+        // Without the TPM the templates stay unreadable, but refusing to start would also
+        // block the troubleshooting fix of turning encryption off when the TPM is gone.
+        match tpm::load_or_create_dek(std::path::Path::new(tpm::STATE_DIR))
+            .and_then(|dek| db.decrypt_all_with(&crypto::EmbeddingCipher::new(&dek)))
+        {
+            Ok(n) => {
+                info!(
+                    decrypted = n,
+                    "Decrypted templates after encryption was disabled"
+                );
+                db.load_all()?;
+            }
+            Err(e) => warn!(
+                "template encryption is disabled but encrypted templates remain and could not \
+                 be decrypted, so those faces will not match until they are re-enrolled: {e}"
+            ),
+        }
+    }
+
     let adopted = db.adopt_untagged_templates(security.recognizer())?;
     if adopted > 0 {
         info!(
