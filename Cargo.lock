@@ -1205,7 +1205,7 @@ dependencies = [
  "anyhow",
  "getrandom 0.4.3",
  "libc",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tempfile",
  "tss-esapi",
  "zeroize",
@@ -1224,7 +1224,7 @@ dependencies = [
  "ndarray",
  "opencv",
  "ort",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tracing",
 ]
 
@@ -1245,7 +1245,7 @@ dependencies = [
  "ndarray",
  "opencv",
  "ort",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2055,7 +2055,7 @@ version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde178a3caf126c440fa15628147772d8ee590a39477d711353fbe2e58a73a5b"
 dependencies = [
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -3190,9 +3190,9 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
+checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
