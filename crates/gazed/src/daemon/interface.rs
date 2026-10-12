@@ -109,7 +109,7 @@ impl AuthDaemon {
             username,
             sender: sender.clone(),
             epoch,
-            timeout: Some(Arc::new(ClaimTimeout(timeout.abort_handle()))),
+            _timeout: Some(Arc::new(ClaimTimeout(timeout.abort_handle()))),
         });
         drop(state);
 

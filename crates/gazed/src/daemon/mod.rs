@@ -80,7 +80,7 @@ pub struct ClaimState {
     pub username: String,
     pub sender: String,
     pub epoch: u64,
-    pub timeout: Option<Arc<ClaimTimeout>>,
+    pub _timeout: Option<Arc<ClaimTimeout>>,
 }
 
 /// The single claim the daemon will honour, if any.
@@ -461,7 +461,7 @@ mod tests {
             username: "alice".to_string(),
             sender: ":1.42".to_string(),
             epoch: 7,
-            timeout: Some(Arc::new(ClaimTimeout(timeout.abort_handle()))),
+            _timeout: Some(Arc::new(ClaimTimeout(timeout.abort_handle()))),
         })));
         let active_cancel = Arc::new(Mutex::new(None));
 
@@ -475,7 +475,7 @@ mod tests {
             username: "alice".to_string(),
             sender: ":1.42".to_string(),
             epoch: 2,
-            timeout: None,
+            _timeout: None,
         });
 
         assert!(!claim_has_epoch(&state, 1));
@@ -487,7 +487,7 @@ mod tests {
             username: "alice".to_string(),
             sender: ":1.42".to_string(),
             epoch,
-            timeout: None,
+            _timeout: None,
         })))
     }
 
@@ -715,7 +715,7 @@ mod tests {
             username: "alice".to_string(),
             sender: ":1.42".to_string(),
             epoch: 12,
-            timeout: None,
+            _timeout: None,
         });
 
         assert!(!release_claim_epoch(&claim_state, &active_cancel, 11).await);
