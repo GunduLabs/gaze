@@ -1,15 +1,119 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
 pub const GDM_DCONF_PROFILE: &str = "gdm";
 pub const GDM_DCONF_PROFILE_PATH: &str = "/etc/dconf/profile/gdm";
 pub const GDM_DCONF_FACE_AUTH_KEY: &str =
     "/org/gnome/shell/extensions/gaze/enable-face-authentication";
 pub const GDM_FACE_OVERRIDE_PATH: &str = "/etc/dconf/db/gdm.d/99-gaze";
+pub const GDM_HOME_DIRS: [&str; 2] = ["/var/lib/gdm", "/var/lib/gdm3"];
 
 pub const KDE_FACE_PAM_FILE: &str = "/etc/pam.d/kde-fingerprint";
 pub const KDE_SMARTCARD_PAM_FILE: &str = "/etc/pam.d/kde-smartcard";
 pub const PLASMALOGIN_FACE_PAM_FILE: &str = "/etc/pam.d/plasmalogin-fingerprint";
+
+/// `None` only when `dconf` itself could not answer. An unset key reads back as an empty
+/// string, which callers layering one db over another must tell apart from a real value.
+pub fn dconf_read_with_profile(
+    tag: &str,
+    profile_body: &str,
+    config_home: Option<&Path>,
+    key: &str,
+) -> Option<String> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let profile = std::env::temp_dir().join(format!(
+        "gaze-{tag}-{}-{}.profile",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::write(&profile, profile_body).ok()?;
+    let mut command = Command::new("dconf");
+    command.arg("read").arg(key).env("DCONF_PROFILE", &profile);
+    if let Some(home) = config_home {
+        command.env("XDG_CONFIG_HOME", home);
+    }
+    let output = command.output();
+    let _ = fs::remove_file(&profile);
+    let output = output.ok().filter(|output| output.status.success())?;
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+pub fn gdm_system_dconf_read(key: &str) -> Option<String> {
+    dconf_read_with_profile(
+        GDM_DCONF_PROFILE,
+        &format!("system-db:{GDM_DCONF_PROFILE}\n"),
+        None,
+        key,
+    )
+}
+
+pub fn gdm_user_db_read(dir: &Path, key: &str) -> Option<String> {
+    dconf_read_with_profile("gdm-user", "user-db:user\n", Some(dir), key)
+        .filter(|value| !value.is_empty())
+}
+
+/// The greeter runs as `gdm` with its own `XDG_CONFIG_HOME`, and the path differs by
+/// distribution and by seat, so every candidate holding a db has to be considered.
+pub fn gdm_greeter_config_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    for home in GDM_HOME_DIRS {
+        let home = Path::new(home);
+        if !home.is_dir() {
+            continue;
+        }
+        dirs.push(home.join(".config"));
+        if let Ok(entries) = fs::read_dir(home) {
+            for entry in entries.flatten() {
+                dirs.push(entry.path().join("config"));
+            }
+        }
+    }
+    dirs.retain(|dir| dir.join("dconf/user").is_file());
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
+/// `user-db:user` leads the greeter profile, so whatever GDM has written for itself outranks
+/// every `system-db` keyfile. Reading only `system-db:gdm` reports what Gaze installed rather
+/// than what the greeter resolves, which is how a disabled extension system passed as ready.
+pub fn gdm_greeter_dconf_read(key: &str) -> Option<String> {
+    for dir in gdm_greeter_config_dirs() {
+        if let Some(value) = gdm_user_db_read(&dir, key) {
+            return Some(value);
+        }
+    }
+    gdm_system_dconf_read(key)
+}
+
+/// Which greeter db holds `key`, for a fix that has to name the file it must be cleared from.
+pub fn gdm_greeter_dconf_source(key: &str) -> Option<PathBuf> {
+    gdm_greeter_config_dirs()
+        .into_iter()
+        .find(|dir| gdm_user_db_read(dir, key).is_some())
+        .map(|dir| dir.join("dconf/user"))
+}
+
+pub fn dconf_bool(value: &str) -> Option<bool> {
+    match value {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+/// The value GDM itself sees, which a NixOS configuration sets without `GDM_FACE_OVERRIDE_PATH`.
+pub fn gdm_face_auth_from_dconf() -> Option<bool> {
+    if !Path::new(GDM_DCONF_PROFILE_PATH).exists() {
+        return None;
+    }
+    dconf_bool(&gdm_greeter_dconf_read(GDM_DCONF_FACE_AUTH_KEY)?)
+}
 
 #[cfg(test)]
 mod tests {

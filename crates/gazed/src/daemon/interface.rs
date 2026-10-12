@@ -30,26 +30,8 @@ impl AuthDaemon {
         let caller_uid = Self::caller_uid(&header)
             .await
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
-        let mut extensions = self.active_extensions.lock().await;
-        extensions.insert(caller_uid, active);
         info!(caller_uid, active, "Registered extension status");
         Ok(())
-    }
-
-    async fn is_extension_active(
-        &self,
-        #[zbus(header)] header: Header<'_>,
-        uid: u32,
-    ) -> fdo::Result<bool> {
-        let caller_uid = Self::caller_uid(&header).await?;
-        if !Self::may_query_extension(caller_uid, uid) {
-            return Err(fdo::Error::AccessDenied(
-                "not permitted to query another user's extension state".into(),
-            ));
-        }
-        let extensions = self.active_extensions.lock().await;
-        let is_active = extensions.get(&uid).copied().unwrap_or(false);
-        Ok(is_active)
     }
 
     async fn claim(
@@ -78,7 +60,13 @@ impl AuthDaemon {
         let mut state = self.claim_state.lock().await;
         if let Some(existing) = &*state {
             if existing.sender == sender {
-                return Ok(());
+                if existing.username == username {
+                    return Ok(());
+                }
+                return Err(fdo::Error::Failed(format!(
+                    "Device already claimed for '{}'; release it before claiming for another user",
+                    existing.username
+                )));
             }
             if caller_uid == 0 {
                 self.cancel_active_tasks().await;
@@ -102,18 +90,11 @@ impl AuthDaemon {
             "Claimed daemon"
         );
         let epoch = CLAIM_EPOCH.fetch_add(1, Ordering::Relaxed);
-        *state = Some(ClaimState {
-            username,
-            sender: sender.clone(),
-            epoch,
-        });
-        drop(state);
 
         let claim_state = self.claim_state.clone();
         let active_cancel = self.active_cancel.clone();
-
         let timeout_sender = sender.clone();
-        self.rt_handle.spawn(async move {
+        let timeout = self.rt_handle.spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(CLAIM_TIMEOUT_SECS)).await;
             if release_claim_epoch(&claim_state, &active_cancel, epoch).await {
                 warn!(
@@ -123,6 +104,14 @@ impl AuthDaemon {
                 );
             }
         });
+
+        *state = Some(ClaimState {
+            username,
+            sender: sender.clone(),
+            epoch,
+            _timeout: Some(Arc::new(ClaimTimeout(timeout.abort_handle()))),
+        });
+        drop(state);
 
         let claim_state = self.claim_state.clone();
         let active_cancel = self.active_cancel.clone();
@@ -272,13 +261,15 @@ impl AuthDaemon {
         height: u32,
     ) -> fdo::Result<()> {
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
-        let mut config = self.current_config().await;
         let requested = ((width, height) != (0, 0)).then_some((width, height));
-        if config.cameras.ir_frame_size() == requested {
+        if self.current_config().await.cameras.ir_frame_size() == requested {
             return Ok(());
         }
-        config.cameras.set_ir_frame_size(requested);
-        self.apply_config(config).await?;
+        self.apply_config(move |mut config| {
+            config.cameras.set_ir_frame_size(requested);
+            Ok(config)
+        })
+        .await?;
         self.config_invalidate(&ctxt).await.map_err(Into::into)
     }
 
@@ -449,6 +440,8 @@ impl AuthDaemon {
                                         if prompt == EnrollPrompt::LookStraight {
                                             pose_baseline = Some((data.yaw, data.pitch));
                                         }
+                                        // The flag hands the device to the IR thread, so it must be closed first.
+                                        drop(cam);
                                         rgb_captured_for_step_clone.store(true, std::sync::atomic::Ordering::Relaxed);
                                         let _ = tx.blocking_send(EnrollMsg::Captured(current_step, Spectrum::Rgb, data.embedding));
                                         dead_streams = 0;
@@ -900,15 +893,21 @@ impl AuthDaemon {
                         let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::Cancelled, -1.0).await;
                     }
                 }
+            } else if !aborted {
+                // The claim was revoked while enrollment ran, so the client still needs a final status.
+                let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::Cancelled, -1.0).await;
             }
             drop(state);
 
-            if let Some(t) = rgb_thread {
-                let _ = t.join();
-            }
-            if let Some(t) = ir_thread {
-                let _ = t.join();
-            }
+            let _ = tokio::task::spawn_blocking(move || {
+                if let Some(t) = rgb_thread {
+                    let _ = t.join();
+                }
+                if let Some(t) = ir_thread {
+                    let _ = t.join();
+                }
+            })
+            .await;
         });
 
         Ok(())
@@ -1045,7 +1044,9 @@ impl AuthDaemon {
         Ok(cleared)
     }
 
-    #[zbus(property)]
+    // The value depends on who asks, so there is no single value to broadcast. zbus would
+    // also build the change signal through this getter without a header, failing every Set.
+    #[zbus(property(emits_changed_signal = "false"))]
     async fn pam_internal(
         &self,
         #[zbus(header)] header: Option<Header<'_>>,
@@ -1056,9 +1057,10 @@ impl AuthDaemon {
         let sets = self.pam_internal.lock().await;
         let mut list: Vec<String> = sets
             .get(&owner)
-            .map(|set| set.iter().cloned().collect())
+            .map(|senders| senders.values().flatten().cloned().collect())
             .unwrap_or_default();
         list.sort();
+        list.dedup();
         Ok(list)
     }
 
@@ -1071,8 +1073,9 @@ impl AuthDaemon {
         let header =
             header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
         let owner = Self::pam_internal_write_owner(&header).await?;
+        let sender = Self::pam_internal_sender(&header)?;
         let mut sets = self.pam_internal.lock().await;
-        let set = sets.entry(owner).or_default();
+        let set = sets.entry(owner).or_default().entry(sender).or_default();
         set.clear();
         for s in services {
             let normalized = Self::normalize_pam_service(&s);
@@ -1090,10 +1093,15 @@ impl AuthDaemon {
         service: String,
     ) -> fdo::Result<()> {
         let owner = Self::pam_internal_write_owner(&header).await?;
+        let sender = Self::pam_internal_sender(&header)?;
         let normalized = Self::normalize_pam_service(&service);
         if !normalized.is_empty() {
             let mut sets = self.pam_internal.lock().await;
-            sets.entry(owner).or_default().insert(normalized.clone());
+            sets.entry(owner)
+                .or_default()
+                .entry(sender)
+                .or_default()
+                .insert(normalized.clone());
             info!(uid = owner, service = %normalized, "Added to PAM internal services");
         }
         Ok(())
@@ -1108,8 +1116,11 @@ impl AuthDaemon {
         let normalized = Self::normalize_pam_service(&service);
         if !normalized.is_empty() {
             let mut sets = self.pam_internal.lock().await;
-            if let Some(set) = sets.get_mut(&owner) {
-                set.remove(&normalized);
+            if let Some(senders) = sets.get_mut(&owner) {
+                for set in senders.values_mut() {
+                    set.remove(&normalized);
+                }
+                senders.retain(|_, set| !set.is_empty());
             }
             info!(uid = owner, service = %normalized, "Removed from PAM internal services");
         }
@@ -1142,21 +1153,24 @@ impl AuthDaemon {
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
 
         let mut new_config: Config = new_config.into();
-        // Legacy clients do not send these flags; preserve the existing opt-ins.
-        let current = self.current_config().await;
-        new_config.storage.unlock_gnome_keyring = current.storage.unlock_gnome_keyring;
-        new_config.storage.unlock_kwallet = current.storage.unlock_kwallet;
-        new_config
-            .cameras
-            .set_ir_frame_size(current.cameras.ir_frame_size());
-        // A legacy client cannot see or clear the flag, so treat it as turning the feature off
-        // rather than rejecting every later write with an error it cannot act on.
-        if new_config.clamp_keyring() {
-            warn!(
-                "a legacy config update removed a keyring prerequisite; disabling keyring unlock"
-            );
-        }
-        self.apply_config(new_config).await
+        self.apply_config(move |current| {
+            // Legacy clients do not send these flags; preserve the existing opt-ins.
+            new_config.storage.unlock_gnome_keyring = current.storage.unlock_gnome_keyring;
+            new_config.storage.unlock_kwallet = current.storage.unlock_kwallet;
+            new_config
+                .cameras
+                .set_ir_frame_size(current.cameras.ir_frame_size());
+            // A legacy client cannot see or clear the flag, so treat it as turning the feature
+            // off rather than rejecting every later write with an error it cannot act on.
+            if new_config.clamp_keyring() {
+                warn!(
+                    "a legacy config update removed a keyring prerequisite; disabling keyring \
+                     unlock"
+                );
+            }
+            Ok(new_config)
+        })
+        .await
     }
 
     async fn set_config_with_keyring(
@@ -1169,16 +1183,18 @@ impl AuthDaemon {
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
         let mut config = gaze_core::dbus::config_update_from_property(config, unlock_gnome_keyring)
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
-        let current = self.current_config().await;
-        config.storage.unlock_kwallet = current.storage.unlock_kwallet;
-        config
-            .cameras
-            .set_ir_frame_size(current.cameras.ir_frame_size());
-        // This older client cannot clear a KWallet opt-in when removing prerequisites.
-        if config.storage.validate_keyring(&config.liveness).is_err() {
-            config.storage.unlock_kwallet = false;
-        }
-        self.apply_config(config).await?;
+        self.apply_config(move |current| {
+            config.storage.unlock_kwallet = current.storage.unlock_kwallet;
+            config
+                .cameras
+                .set_ir_frame_size(current.cameras.ir_frame_size());
+            // This older client cannot clear a KWallet opt-in when removing prerequisites.
+            if config.storage.validate_keyring(&config.liveness).is_err() {
+                config.storage.unlock_kwallet = false;
+            }
+            Ok(config)
+        })
+        .await?;
         self.config_invalidate(&ctxt).await.map_err(Into::into)
     }
 
@@ -1195,22 +1211,27 @@ impl AuthDaemon {
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
         config.storage.unlock_kwallet = unlock_kwallet;
         config
-            .cameras
-            .set_ir_frame_size(self.current_config().await.cameras.ir_frame_size());
-        config
             .storage
             .validate_keyring(&config.liveness)
             .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
-        self.apply_config(config).await?;
+        self.apply_config(move |current| {
+            config
+                .cameras
+                .set_ir_frame_size(current.cameras.ir_frame_size());
+            Ok(config)
+        })
+        .await?;
         self.config_invalidate(&ctxt).await.map_err(Into::into)
     }
 
     async fn get_gdm_face_auth(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<bool> {
         Self::ensure_config_read_access(&header).await?;
-        if let Some(enabled) = gdm_face_auth_from_dconf() {
-            return Ok(enabled);
-        }
-        Ok(std::path::Path::new(GDM_FACE_OVERRIDE_PATH).exists())
+        tokio::task::spawn_blocking(|| {
+            gdm_face_auth_from_dconf()
+                .unwrap_or_else(|| std::path::Path::new(GDM_FACE_OVERRIDE_PATH).exists())
+        })
+        .await
+        .map_err(|e| fdo::Error::Failed(format!("Failed to read GDM face login: {e}")))
     }
 
     async fn set_gdm_face_auth(
@@ -1219,38 +1240,9 @@ impl AuthDaemon {
         enabled: bool,
     ) -> fdo::Result<bool> {
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_GDM_PROFILE).await?;
-
-        let path = std::path::Path::new(GDM_FACE_OVERRIDE_PATH);
-        // Already in the requested state elsewhere, so don't write a read-only /etc.
-        if !path.exists() && gdm_face_auth_from_dconf() == Some(enabled) {
-            info!(enabled, "GDM face authentication already set outside Gaze");
-            return Ok(enabled);
-        }
-
-        if enabled {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| gdm_override_error("create", parent, e))?;
-            }
-            std::fs::write(path, GDM_DCONF_OVERRIDE_CONTENT)
-                .map_err(|e| gdm_override_error("write", path, e))?;
-        } else if path.exists() {
-            std::fs::remove_file(path).map_err(|e| gdm_override_error("remove", path, e))?;
-        }
-
-        let status = std::process::Command::new("dconf")
-            .arg("update")
-            .status()
-            .map_err(|e| fdo::Error::Failed(format!("Failed to run dconf update: {e}")))?;
-        if !status.success() {
-            return Err(fdo::Error::Failed(format!(
-                "dconf update exited with status {}",
-                status.code().unwrap_or(-1)
-            )));
-        }
-
-        info!(enabled, "Updated GDM face authentication override");
-        Ok(enabled)
+        tokio::task::spawn_blocking(move || write_gdm_face_auth(enabled))
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("Failed to update GDM face login: {e}")))?
     }
 
     #[zbus(signal)]

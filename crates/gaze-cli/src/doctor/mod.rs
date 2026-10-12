@@ -12,8 +12,9 @@ use gaze_core::dbus::{
     dbus_is_unknown_method, try_benchmark_from_daemon,
 };
 use gaze_core::desktop::{
-    GDM_DCONF_FACE_AUTH_KEY, GDM_DCONF_PROFILE, GDM_DCONF_PROFILE_PATH, GDM_FACE_OVERRIDE_PATH,
-    KDE_FACE_PAM_FILE, KDE_SMARTCARD_PAM_FILE, PLASMALOGIN_FACE_PAM_FILE,
+    GDM_DCONF_PROFILE, GDM_FACE_OVERRIDE_PATH, KDE_FACE_PAM_FILE, KDE_SMARTCARD_PAM_FILE,
+    PLASMALOGIN_FACE_PAM_FILE, dconf_bool, gdm_face_auth_from_dconf, gdm_greeter_dconf_read,
+    gdm_greeter_dconf_source,
 };
 use gaze_security::tpm::TPM_DEVICES;
 use std::collections::BTreeSet;
@@ -66,7 +67,6 @@ fn read_pam_service(path: &str) -> Option<String> {
 const GDM_ENABLED_EXTENSIONS_KEY: &str = "/org/gnome/shell/enabled-extensions";
 const GDM_DISABLE_EXTENSIONS_KEY: &str = "/org/gnome/shell/disable-user-extensions";
 /// Returns the display-manager account name: `gdm3` on Debian and Ubuntu, `gdm` elsewhere.
-const GDM_HOME_DIRS: [&str; 2] = ["/var/lib/gdm", "/var/lib/gdm3"];
 const GDM_COMPILED_DB_PATH: &str = "/etc/dconf/db/gdm";
 const GDM_GREETER_DCONF_PROFILES: [&str; 2] = [GDM_DCONF_PROFILE, "Debian-gdm"];
 const DCONF_PROFILE_DIR: &str = "/etc/dconf/profile";
