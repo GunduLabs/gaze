@@ -23,6 +23,8 @@ class GazeKcm : public KQuickConfigModule
     Q_PROPERTY(uint progress READ progress NOTIFY enrollChanged)
     Q_PROPERTY(uint steps READ steps NOTIFY enrollChanged)
     Q_PROPERTY(QString preview READ preview NOTIFY previewChanged)
+    // "idle", "running", "success", "failed" or "timeout"
+    Q_PROPERTY(QString testState READ testState NOTIFY testChanged)
 
 public:
     GazeKcm(QObject *parent, const KPluginMetaData &data);
@@ -36,6 +38,7 @@ public:
     uint progress() const { return m_progress; }
     uint steps() const { return m_steps; }
     QString preview() const { return m_preview; }
+    QString testState() const { return m_testState; }
 
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void renameFace(const QString &oldName, const QString &newName);
@@ -44,22 +47,26 @@ public:
     Q_INVOKABLE QString suggestedName() const;
     Q_INVOKABLE void startEnroll(const QString &name);
     Q_INVOKABLE void stopEnroll();
+    Q_INVOKABLE void testFace();
 
 Q_SIGNALS:
     void errorChanged();
     void enrollChanged();
     void previewChanged();
+    void testChanged();
 
 private Q_SLOTS:
     void onEnrollStatus(const QDBusMessage &message);
     void onFaceStatus(const QDBusMessage &message);
     void onPreviewFrame(const QDBusMessage &message);
+    void onVerifyStatus(const QDBusMessage &message);
 
 private:
     using Reply = std::function<void(const QDBusMessage &)>;
     void call(const QString &method, const QVariantList &args, Reply done = {});
     void callFaceMethod(const QString &method, const QVariantList &args);
     void finishEnroll(const QString &state, const QString &prompt);
+    void finishTest(const QString &state);
     void release();
     void setError(const QString &error);
 
@@ -72,4 +79,7 @@ private:
     uint m_progress = 0;
     uint m_steps = 0;
     QString m_preview;
+    QString m_testState = QStringLiteral("idle");
+    QTimer m_testTimeout;
+    QTimer m_testReset;
 };

@@ -18,6 +18,8 @@ namespace
 {
 constexpr QLatin1String Service("com.gundulabs.Gaze");
 constexpr QLatin1String Path("/com/gundulabs/Gaze");
+constexpr int TestTimeoutMs = 20000;
+constexpr int TestResultMs = 4000;
 
 QString enrollPrompt(const QString &id)
 {
@@ -58,6 +60,22 @@ GazeKcm::GazeKcm(QObject *parent, const KPluginMetaData &data)
     bus.connect(Service, Path, Service, QStringLiteral("EnrollStatus"), this, SLOT(onEnrollStatus(QDBusMessage)));
     bus.connect(Service, Path, Service, QStringLiteral("FaceStatus"), this, SLOT(onFaceStatus(QDBusMessage)));
     bus.connect(Service, Path, Service, QStringLiteral("PreviewFrame"), this, SLOT(onPreviewFrame(QDBusMessage)));
+    bus.connect(Service, Path, Service, QStringLiteral("VerifyStatus"), this, SLOT(onVerifyStatus(QDBusMessage)));
+
+    m_testTimeout.setSingleShot(true);
+    m_testTimeout.setInterval(TestTimeoutMs);
+    connect(&m_testTimeout, &QTimer::timeout, this, [this] {
+        call(QStringLiteral("VerifyStop"), {});
+        finishTest(QStringLiteral("timeout"));
+    });
+
+    // The verdict is a notice, not state, so it clears itself.
+    m_testReset.setSingleShot(true);
+    m_testReset.setInterval(TestResultMs);
+    connect(&m_testReset, &QTimer::timeout, this, [this] {
+        m_testState = QStringLiteral("idle");
+        Q_EMIT testChanged();
+    });
 
     refresh();
 }
@@ -164,7 +182,7 @@ void GazeKcm::finishEnroll(const QString &state, const QString &prompt)
 
 void GazeKcm::startEnroll(const QString &name)
 {
-    if (m_enrollState == QLatin1String("running")) {
+    if (m_enrollState == QLatin1String("running") || m_testState == QLatin1String("running")) {
         return;
     }
     m_enrollState = QStringLiteral("running");
@@ -242,6 +260,49 @@ void GazeKcm::onPreviewFrame(const QDBusMessage &message)
     }
     m_preview = QStringLiteral("data:image/jpeg;base64,") + QString::fromLatin1(message.arguments().at(0).toByteArray().toBase64());
     Q_EMIT previewChanged();
+}
+
+void GazeKcm::finishTest(const QString &state)
+{
+    m_testTimeout.stop();
+    m_testState = state;
+    m_testReset.start();
+    Q_EMIT testChanged();
+    release();
+}
+
+void GazeKcm::testFace()
+{
+    if (m_enrollState == QLatin1String("running") || m_testState == QLatin1String("running")) {
+        return;
+    }
+    m_testReset.stop();
+    m_testState = QStringLiteral("running");
+    Q_EMIT testChanged();
+    call(QStringLiteral("Claim"), {m_user}, [this](const QDBusMessage &claim) {
+        if (claim.type() == QDBusMessage::ErrorMessage) {
+            setError(claim.errorMessage());
+            finishTest(QStringLiteral("failed"));
+            return;
+        }
+        call(QStringLiteral("VerifyStart"), {QStringLiteral("any")}, [this](const QDBusMessage &start) {
+            if (start.type() == QDBusMessage::ErrorMessage) {
+                setError(start.errorMessage());
+                finishTest(QStringLiteral("failed"));
+                return;
+            }
+            m_testTimeout.start();
+        });
+    });
+}
+
+void GazeKcm::onVerifyStatus(const QDBusMessage &message)
+{
+    if (m_testState != QLatin1String("running") || message.arguments().isEmpty()) {
+        return;
+    }
+    const bool matched = message.arguments().at(0).toString() == QLatin1String("verify-match");
+    finishTest(matched ? QStringLiteral("success") : QStringLiteral("failed"));
 }
 
 #include "gazekcm.moc"

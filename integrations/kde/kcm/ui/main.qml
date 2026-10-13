@@ -11,6 +11,7 @@ KCM.ScrollViewKCM {
     id: root
 
     readonly property bool enrolling: kcm.enrollState === "running"
+    readonly property bool testing: kcm.testState === "running"
 
     title: i18n("Enrolled Faces")
     implicitWidth: Kirigami.Units.gridUnit * 36
@@ -18,9 +19,15 @@ KCM.ScrollViewKCM {
 
     actions: [
         Kirigami.Action {
+            text: i18n("Test")
+            icon.name: "media-playback-start"
+            enabled: list.count > 0 && !root.enrolling && !root.testing
+            onTriggered: kcm.testFace()
+        },
+        Kirigami.Action {
             text: i18n("Add Face…")
             icon.name: "list-add"
-            enabled: !root.enrolling
+            enabled: !root.enrolling && !root.testing
             onTriggered: enrollDialog.openFor("")
         }
     ]
@@ -40,6 +47,21 @@ KCM.ScrollViewKCM {
             visible: kcm.error.length > 0
             type: Kirigami.MessageType.Error
             text: kcm.error
+        }
+        Kirigami.InlineMessage {
+            Layout.fillWidth: true
+            visible: kcm.testState !== "idle"
+            type: switch (kcm.testState) {
+                case "success": return Kirigami.MessageType.Positive;
+                case "running": return Kirigami.MessageType.Information;
+                default: return Kirigami.MessageType.Warning;
+            }
+            text: switch (kcm.testState) {
+                case "running": return i18n("Look at the camera…");
+                case "success": return i18n("Face recognized");
+                case "timeout": return i18n("No result, the camera did not respond in time");
+                default: return i18n("Face not recognized");
+            }
         }
     }
 
@@ -114,7 +136,7 @@ KCM.ScrollViewKCM {
                     icon.name: "view-refresh"
                     text: i18n("Improve this face")
                     display: QQC2.AbstractButton.IconOnly
-                    enabled: !root.enrolling
+                    enabled: !root.enrolling && !root.testing
                     onClicked: enrollDialog.openFor(row.name)
                     QQC2.ToolTip.text: text
                     QQC2.ToolTip.visible: hovered
