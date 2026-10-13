@@ -200,6 +200,14 @@ jobs:
             policycoreutils \
             gtk4-devel \
             libadwaita-devel \
+            cmake \
+            extra-cmake-modules \
+            qt6-qtbase-devel \
+            qt6-qtdeclarative-devel \
+            kf6-kcoreaddons-devel \
+            kf6-ki18n-devel \
+            kf6-kcmutils-devel \
+            kf6-kirigami-devel \
             gstreamer1-devel \
             gstreamer1-plugins-base-devel \
             gstreamer1-plugins-base \
@@ -244,6 +252,14 @@ jobs:
             policycoreutils \
             gtk4-devel \
             libadwaita-devel \
+            cmake \
+            kf6-extra-cmake-modules \
+            qt6-base-devel \
+            qt6-declarative-devel \
+            kf6-kcoreaddons-devel \
+            kf6-ki18n-devel \
+            kf6-kcmutils-devel \
+            kf6-kirigami-devel \
             gstreamer-devel \
             gstreamer-plugins-base-devel \
             gstreamer-plugins-base \
@@ -333,6 +349,10 @@ jobs:
         run: |
           just build-selinux
           test -f dist/selinux/gaze-gdm-camera.pp
+
+      - name: Build the Plasma settings page
+        if: ${{ matrix.format == 'rpm' }}
+        run: just build-kcm rpm
 
       - name: Build and verify ${{ matrix.format }} packages
         if: ${{ matrix.format != 'srpm' }}

@@ -338,6 +338,14 @@ jobs:
             policycoreutils \
             gtk4-devel \
             libadwaita-devel \
+            cmake \
+            extra-cmake-modules \
+            qt6-qtbase-devel \
+            qt6-qtdeclarative-devel \
+            kf6-kcoreaddons-devel \
+            kf6-ki18n-devel \
+            kf6-kcmutils-devel \
+            kf6-kirigami-devel \
             gstreamer1-devel \
             gstreamer1-plugins-base-devel \
             gstreamer1-plugins-base \
@@ -384,6 +392,14 @@ jobs:
             policycoreutils \
             gtk4-devel \
             libadwaita-devel \
+            cmake \
+            kf6-extra-cmake-modules \
+            qt6-base-devel \
+            qt6-declarative-devel \
+            kf6-kcoreaddons-devel \
+            kf6-ki18n-devel \
+            kf6-kcmutils-devel \
+            kf6-kirigami-devel \
             gstreamer-devel \
             gstreamer-plugins-base-devel \
             gstreamer-plugins-base \
@@ -497,6 +513,7 @@ jobs:
         run: |
           VERSION="${DEPLOY_REF_NAME#v}" just build-rust
           VERSION="${DEPLOY_REF_NAME#v}" just build-selinux
+          VERSION="${DEPLOY_REF_NAME#v}" just build-kcm "${{ matrix.format }}"
 
       - name: Prepare nfpm signing key
         env:
