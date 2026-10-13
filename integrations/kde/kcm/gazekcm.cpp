@@ -8,6 +8,8 @@
 #include <QDBusArgument>
 #include <QDBusConnection>
 #include <QDBusPendingCallWatcher>
+#include <QDir>
+#include <QFile>
 
 #include <pwd.h>
 #include <unistd.h>
@@ -304,6 +306,24 @@ void GazeKcm::onVerifyStatus(const QDBusMessage &message)
     }
     const bool matched = message.arguments().at(0).toString() == QLatin1String("verify-match");
     finishTest(matched ? QStringLiteral("success") : QStringLiteral("failed"));
+}
+
+QVariantList GazeKcm::cameraSources() const
+{
+    QVariantList sources;
+    const QDir sysfs(QStringLiteral("/sys/class/video4linux"));
+    for (const QString &node : sysfs.entryList({QStringLiteral("video*")}, QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::LocaleAware)) {
+        // Each camera exposes metadata nodes next to its capture node. Only capture nodes have index 0.
+        QFile index(sysfs.filePath(node + QStringLiteral("/index")));
+        if (index.open(QIODevice::ReadOnly) && index.readAll().trimmed() != "0") {
+            continue;
+        }
+        QFile name(sysfs.filePath(node + QStringLiteral("/name")));
+        const QString label = name.open(QIODevice::ReadOnly) ? QString::fromLocal8Bit(name.readAll().trimmed()) : QString();
+        const QString device = QStringLiteral("/dev/") + node;
+        sources.append(QVariantMap{{QStringLiteral("text"), label.isEmpty() ? device : QStringLiteral("%1 (%2)").arg(label, device)}, {QStringLiteral("value"), device}});
+    }
+    return sources;
 }
 
 #include "gazekcm.moc"

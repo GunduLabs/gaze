@@ -19,6 +19,11 @@ KCM.ScrollViewKCM {
 
     actions: [
         Kirigami.Action {
+            text: i18n("Settings")
+            icon.name: "configure"
+            onTriggered: kcm.push("SettingsPage.qml")
+        },
+        Kirigami.Action {
             text: i18n("Test")
             icon.name: "media-playback-start"
             enabled: list.count > 0 && !root.enrolling && !root.testing

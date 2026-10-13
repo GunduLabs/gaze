@@ -47,6 +47,8 @@ public:
     Q_INVOKABLE void renameFace(const QString &oldName, const QString &newName);
     Q_INVOKABLE void deleteFace(const QString &name);
     Q_INVOKABLE bool hasFace(const QString &name) const;
+    // V4L2 capture nodes as { text, value } pairs for the camera pickers.
+    Q_INVOKABLE QVariantList cameraSources() const;
     Q_INVOKABLE QString suggestedName() const;
     Q_INVOKABLE void startEnroll(const QString &name);
     Q_INVOKABLE void stopEnroll();
