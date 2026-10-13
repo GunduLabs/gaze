@@ -27,6 +27,14 @@ KCM.SimpleKCM {
 
     title: i18n("Configuration")
 
+    actions: [
+        Kirigami.Action {
+            text: i18n("Restart Service")
+            icon.name: "system-reboot"
+            onTriggered: kcm.settings.restartService()
+        }
+    ]
+
     ColumnLayout {
         spacing: Kirigami.Units.largeSpacing
 
@@ -45,11 +53,32 @@ KCM.SimpleKCM {
         }
         Kirigami.InlineMessage {
             Layout.fillWidth: true
+            visible: ["suggested", "restarting", "done"].includes(kcm.settings.restartState)
+            type: kcm.settings.restartState === "done" ? Kirigami.MessageType.Positive : Kirigami.MessageType.Information
+            text: kcm.settings.restartState === "suggested" ? i18n("Settings saved. Restart the Gaze service to apply them.")
+                : kcm.settings.restartState === "restarting" ? i18n("Restarting the Gaze service…")
+                : i18n("Gaze service restarted")
+            actions: [
+                Kirigami.Action {
+                    visible: kcm.settings.restartState === "suggested"
+                    text: i18n("Restart Service")
+                    icon.name: "system-reboot"
+                    onTriggered: kcm.settings.restartService()
+                }
+            ]
+        }
+        Kirigami.InlineMessage {
+            Layout.fillWidth: true
+            visible: kcm.settings.restartState === "failed"
+            type: Kirigami.MessageType.Error
+            text: i18n("Restarting the Gaze service failed")
+        }
+        Kirigami.InlineMessage {
+            Layout.fillWidth: true
             visible: kcm.settings.error.length > 0
             type: Kirigami.MessageType.Error
             text: kcm.settings.error
         }
-
 
         SectionHeader { text: i18n("Security") }
         SettingRow {

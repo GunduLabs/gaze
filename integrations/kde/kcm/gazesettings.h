@@ -4,6 +4,7 @@
 #pragma once
 
 #include <QDBusMessage>
+#include <QDBusObjectPath>
 #include <QObject>
 #include <QTimer>
 #include <QVariantMap>
@@ -24,6 +25,8 @@ class GazeSettings : public QObject
     Q_PROPERTY(bool unlocked READ unlocked NOTIFY unlockedChanged)
     Q_PROPERTY(bool editable READ editable NOTIFY editableChanged)
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
+    // idle, suggested (saved, restart advised), restarting, done or failed.
+    Q_PROPERTY(QString restartState READ restartState NOTIFY restartStateChanged)
 
 public:
     explicit GazeSettings(QObject *parent = nullptr);
@@ -33,13 +36,20 @@ public:
     bool unlocked() const { return m_unlocked; }
     bool editable() const { return m_loaded && m_unlocked; }
     QString error() const { return m_error; }
+    QString restartState() const { return m_restartState; }
 
     Q_INVOKABLE void load();
     Q_INVOKABLE void unlock();
+    // Restarts gazed through systemd, which asks for the administrator password.
+    Q_INVOKABLE void restartService();
     // Keys look like "security.level" or "storage.unlock_kwallet". Writes are batched.
     Q_INVOKABLE void set(const QString &key, const QVariant &value);
 
+private Q_SLOTS:
+    void onJobRemoved(uint id, const QDBusObjectPath &job, const QString &unit, const QString &result);
+
 Q_SIGNALS:
+    void restartStateChanged();
     void valuesChanged();
     void unlockedChanged();
     void editableChanged();
@@ -51,10 +61,17 @@ private:
     void setError(const QString &error);
     void apply();
     void seedCustomSecurity();
+    void waitForService(int attempts);
+    void sendRestart();
+    void setRestartState(const QString &state);
 
     QVariantMap m_values;
     bool m_loaded = false;
     bool m_unlocked = false;
+    QString m_restartState = QStringLiteral("idle");
+    bool m_restarting = false;
+    bool m_restartWanted = false;
+    bool m_applying = false;
     QString m_error;
     QTimer m_applyTimer;
 };

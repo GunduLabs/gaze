@@ -4,7 +4,9 @@
 #include "gazesettings.h"
 
 #include <QDBusArgument>
+#include <KLocalizedString>
 #include <QDBusConnection>
+#include <QDBusConnectionInterface>
 #include <QDBusPendingCallWatcher>
 #include <QDBusVariant>
 
@@ -114,6 +116,12 @@ GazeSettings::GazeSettings(QObject *parent)
     m_applyTimer.setSingleShot(true);
     m_applyTimer.setInterval(ApplyDelayMs);
     connect(&m_applyTimer, &QTimer::timeout, this, &GazeSettings::apply);
+    QDBusConnection::systemBus().connect(QStringLiteral("org.freedesktop.systemd1"),
+                                         QStringLiteral("/org/freedesktop/systemd1"),
+                                         QStringLiteral("org.freedesktop.systemd1.Manager"),
+                                         QStringLiteral("JobRemoved"),
+                                         this,
+                                         SLOT(onJobRemoved(uint, QDBusObjectPath, QString, QString)));
 }
 
 void GazeSettings::setError(const QString &error)
@@ -229,6 +237,79 @@ void GazeSettings::unlock()
     });
 }
 
+// An edit still being saved must reach the file first, or the restart kills the daemon mid-save and the edit is lost.
+void GazeSettings::restartService()
+{
+    m_restartWanted = true;
+    if (m_applyTimer.isActive()) {
+        m_applyTimer.stop();
+        apply();
+    } else if (!m_applying) {
+        sendRestart();
+    }
+}
+
+void GazeSettings::setRestartState(const QString &state)
+{
+    if (m_restartState != state) {
+        m_restartState = state;
+        Q_EMIT restartStateChanged();
+    }
+}
+
+void GazeSettings::sendRestart()
+{
+    m_restartWanted = false;
+    setRestartState(QStringLiteral("restarting"));
+    auto message = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.systemd1"),
+                                                  QStringLiteral("/org/freedesktop/systemd1"),
+                                                  QStringLiteral("org.freedesktop.systemd1.Manager"),
+                                                  QStringLiteral("RestartUnit"));
+    message.setArguments({QStringLiteral("gazed.service"), QStringLiteral("replace")});
+    message.setInteractiveAuthorizationAllowed(true);
+    m_restarting = true;
+    auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(message, 120000), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this](QDBusPendingCallWatcher *self) {
+        self->deleteLater();
+        const QDBusMessage reply = self->reply();
+        if (reply.type() == QDBusMessage::ErrorMessage) {
+            m_restarting = false;
+            setRestartState(QStringLiteral("failed"));
+            setError(reply.errorMessage());
+            return;
+        }
+        setError(QString());
+    });
+}
+
+// systemd answers RestartUnit at once, while the old daemon is still running, so wait for the job to end.
+void GazeSettings::onJobRemoved(uint, const QDBusObjectPath &, const QString &unit, const QString &)
+{
+    if (m_restarting && unit == QLatin1String("gazed.service")) {
+        m_restarting = false;
+        waitForService(30);
+    }
+}
+
+// The daemon is not bus activated, so it is unreachable until the restart has registered its name again.
+void GazeSettings::waitForService(int attempts)
+{
+    if (QDBusConnection::systemBus().interface()->isServiceRegistered(QStringLiteral("com.gundulabs.Gaze"))) {
+        load();
+        setRestartState(QStringLiteral("done"));
+        QTimer::singleShot(5000, this, [this] {
+            if (m_restartState == QLatin1String("done")) {
+                setRestartState(QStringLiteral("idle"));
+            }
+        });
+    } else if (attempts > 0) {
+        QTimer::singleShot(500, this, [this, attempts] { waitForService(attempts - 1); });
+    } else {
+        setRestartState(QStringLiteral("failed"));
+        setError(i18n("Gaze did not come back after the restart"));
+    }
+}
+
 void GazeSettings::set(const QString &key, const QVariant &value)
 {
     if (m_values.value(key) == value) {
@@ -288,21 +369,33 @@ void GazeSettings::apply()
     const bool gnome = m_values.value(QStringLiteral("storage.unlock_gnome_keyring")).toBool();
     const bool kwallet = m_values.value(QStringLiteral("storage.unlock_kwallet")).toBool();
 
-    auto failed = [this](const QDBusMessage &reply) {
+    m_applying = true;
+    auto finished = [this] {
+        m_applying = false;
+        if (m_restartWanted) {
+            sendRestart();
+        }
+    };
+    auto failed = [this, finished](const QDBusMessage &reply) {
         if (reply.type() == QDBusMessage::ErrorMessage) {
             setError(reply.errorMessage());
             load();
+            finished();
             return true;
         }
         return false;
     };
-    call(QStringLiteral("SetIrFrameSize"), {width, height}, [this, failed, config, gnome, kwallet](const QDBusMessage &reply) {
+    call(QStringLiteral("SetIrFrameSize"), {width, height}, [this, failed, finished, config, gnome, kwallet](const QDBusMessage &reply) {
         if (failed(reply)) {
             return;
         }
-        call(QStringLiteral("SetConfigWithWallets"), {QVariant::fromValue(QDBusVariant(QVariant::fromValue(config))), gnome, kwallet}, [this, failed](const QDBusMessage &r) {
+        call(QStringLiteral("SetConfigWithWallets"), {QVariant::fromValue(QDBusVariant(QVariant::fromValue(config))), gnome, kwallet}, [this, failed, finished](const QDBusMessage &r) {
             if (!failed(r)) {
                 setError(QString());
+                if (!m_restartWanted) {
+                    setRestartState(QStringLiteral("suggested"));
+                }
+                finished();
             }
         });
     });
