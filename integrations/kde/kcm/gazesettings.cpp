@@ -1,0 +1,230 @@
+// SPDX-FileCopyrightText: 2026 Gundu Labs
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include "gazesettings.h"
+
+#include <QDBusArgument>
+#include <QDBusConnection>
+#include <QDBusPendingCallWatcher>
+#include <QDBusVariant>
+
+namespace
+{
+constexpr QLatin1String Service("com.gundulabs.Gaze");
+constexpr QLatin1String Path("/com/gundulabs/Gaze");
+constexpr int ApplyDelayMs = 400;
+
+struct Field {
+    const char *name;
+    // D-Bus type: s string, b bool, y byte, u uint32, t uint64, d double
+    char type;
+};
+
+struct Group {
+    const char *name;
+    QList<Field> fields;
+};
+
+// Mirrors DbusConfig in crates/gaze-core/src/dbus.rs, in wire order.
+const QList<Group> &layout()
+{
+    static const QList<Group> groups = {
+        {"inference", {{"execution_provider", 's'}, {"device", 's'}}},
+        {"security", {{"level", 's'}, {"detector", 's'}, {"recognizer", 's'}, {"rgb_threshold", 'd'}, {"ir_threshold", 'd'}, {"hybrid_policy", 's'}}},
+        {"cameras", {{"rgb", 's'}, {"ir", 's'}, {"emitter_enabled", 'b'}, {"dark_luma_threshold", 'y'}, {"parallel_capture", 's'}}},
+        {"auth",
+         {{"abort_if_ssh", 'b'},
+          {"abort_if_lid_closed", 'b'},
+          {"abort_before_first_resume", 'b'},
+          {"require_confirmation_lock_screen", 'b'},
+          {"require_confirmation_elevation", 'b'},
+          {"resume_grace_ms", 't'},
+          {"start_delay_ms", 't'},
+          {"start_delay_scope", 's'}}},
+        {"enrollment", {{"max_templates", 'u'}, {"min_face_size_ratio", 'd'}}},
+        {"liveness", {{"enabled", 'b'}, {"threshold", 'd'}, {"max_seconds", 'd'}}},
+        {"storage", {{"encrypt_templates", 'b'}}},
+    };
+    return groups;
+}
+
+QVariant readField(const QDBusArgument &in, char type)
+{
+    switch (type) {
+    case 's': {
+        QString v;
+        in >> v;
+        return v;
+    }
+    case 'b': {
+        bool v;
+        in >> v;
+        return v;
+    }
+    case 'y': {
+        uchar v;
+        in >> v;
+        return uint(v);
+    }
+    case 'u': {
+        uint v;
+        in >> v;
+        return v;
+    }
+    case 't': {
+        qulonglong v;
+        in >> v;
+        return v;
+    }
+    default: {
+        double v;
+        in >> v;
+        return v;
+    }
+    }
+}
+
+void writeField(QDBusArgument &out, char type, const QVariant &value)
+{
+    switch (type) {
+    case 's':
+        out << value.toString();
+        break;
+    case 'b':
+        out << value.toBool();
+        break;
+    case 'y':
+        out << uchar(value.toUInt());
+        break;
+    case 'u':
+        out << value.toUInt();
+        break;
+    case 't':
+        out << value.toULongLong();
+        break;
+    default:
+        out << value.toDouble();
+    }
+}
+}
+
+GazeSettings::GazeSettings(QObject *parent)
+    : QObject(parent)
+{
+    m_applyTimer.setSingleShot(true);
+    m_applyTimer.setInterval(ApplyDelayMs);
+    connect(&m_applyTimer, &QTimer::timeout, this, &GazeSettings::apply);
+}
+
+void GazeSettings::setError(const QString &error)
+{
+    if (m_error != error) {
+        m_error = error;
+        Q_EMIT errorChanged();
+    }
+}
+
+void GazeSettings::call(const QString &method, const QVariantList &args, Reply done)
+{
+    auto message = QDBusMessage::createMethodCall(Service, Path, Service, method);
+    message.setArguments(args);
+    message.setInteractiveAuthorizationAllowed(true);
+    auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(message), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [done = std::move(done)](QDBusPendingCallWatcher *self) {
+        self->deleteLater();
+        done(self->reply());
+    });
+}
+
+void GazeSettings::load()
+{
+    auto message = QDBusMessage::createMethodCall(Service, Path, QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"));
+    message.setArguments({Service, QStringLiteral("Config")});
+    auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(message), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this](QDBusPendingCallWatcher *self) {
+        self->deleteLater();
+        const QDBusMessage reply = self->reply();
+        if (reply.type() == QDBusMessage::ErrorMessage) {
+            setError(reply.errorMessage());
+            return;
+        }
+        const QDBusArgument top = reply.arguments().value(0).value<QDBusVariant>().variant().value<QDBusArgument>();
+        QVariantMap values;
+        top.beginStructure();
+        for (const Group &group : layout()) {
+            top.beginStructure();
+            for (const Field &field : group.fields) {
+                values.insert(QLatin1String(group.name) + QLatin1Char('.') + QLatin1String(field.name), readField(top, field.type));
+            }
+            top.endStructure();
+        }
+        top.endStructure();
+        m_values = values;
+        m_loaded = true;
+        setError(QString());
+        Q_EMIT valuesChanged();
+
+        // These live outside the Config struct.
+        call(QStringLiteral("KwalletEnabled"), {}, [this](const QDBusMessage &r) {
+            m_values.insert(QStringLiteral("storage.unlock_kwallet"), r.arguments().value(0).toBool());
+            Q_EMIT valuesChanged();
+        });
+        call(QStringLiteral("KeyringEnabled"), {}, [this](const QDBusMessage &r) {
+            m_values.insert(QStringLiteral("storage.unlock_gnome_keyring"), r.arguments().value(0).toBool());
+            Q_EMIT valuesChanged();
+        });
+        call(QStringLiteral("IrFrameSize"), {}, [this](const QDBusMessage &r) {
+            m_values.insert(QStringLiteral("cameras.ir_frame_width"), r.arguments().value(0).toUInt());
+            m_values.insert(QStringLiteral("cameras.ir_frame_height"), r.arguments().value(1).toUInt());
+            Q_EMIT valuesChanged();
+        });
+    });
+}
+
+void GazeSettings::set(const QString &key, const QVariant &value)
+{
+    if (m_values.value(key) == value) {
+        return;
+    }
+    m_values.insert(key, value);
+    Q_EMIT valuesChanged();
+    m_applyTimer.start();
+}
+
+void GazeSettings::apply()
+{
+    QDBusArgument config;
+    config.beginStructure();
+    for (const Group &group : layout()) {
+        config.beginStructure();
+        for (const Field &field : group.fields) {
+            writeField(config, field.type, m_values.value(QLatin1String(group.name) + QLatin1Char('.') + QLatin1String(field.name)));
+        }
+        config.endStructure();
+    }
+    config.endStructure();
+
+    const uint width = m_values.value(QStringLiteral("cameras.ir_frame_width")).toUInt();
+    const uint height = m_values.value(QStringLiteral("cameras.ir_frame_height")).toUInt();
+    const bool gnome = m_values.value(QStringLiteral("storage.unlock_gnome_keyring")).toBool();
+    const bool kwallet = m_values.value(QStringLiteral("storage.unlock_kwallet")).toBool();
+
+    auto failed = [this](const QDBusMessage &reply) {
+        if (reply.type() == QDBusMessage::ErrorMessage) {
+            setError(reply.errorMessage());
+            load();
+            return true;
+        }
+        return false;
+    };
+    call(QStringLiteral("SetIrFrameSize"), {width, height}, [=, this](const QDBusMessage &reply) {
+        if (failed(reply)) {
+            return;
+        }
+        call(QStringLiteral("SetConfigWithWallets"), {QVariant::fromValue(QDBusVariant(QVariant::fromValue(config))), gnome, kwallet}, [=, this](const QDBusMessage &r) {
+            if (!failed(r)) {
+                setError(QString());
+            }
+        });
+    });
+}

@@ -14,5 +14,5 @@ include(KDECompilerSettings NO_POLICY_SCOPE)
 find_package(Qt6 REQUIRED COMPONENTS Core DBus Quick)
 find_package(KF6 REQUIRED COMPONENTS CoreAddons I18n KCMUtils Kirigami)
 
-kcmutils_add_qml_kcm(kcm_gaze SOURCES gazekcm.cpp facemodel.cpp)
+kcmutils_add_qml_kcm(kcm_gaze SOURCES gazekcm.cpp facemodel.cpp gazesettings.cpp)
 target_link_libraries(kcm_gaze PRIVATE Qt6::Core Qt6::DBus Qt6::Quick KF6::CoreAddons KF6::I18n KF6::KCMUtilsQuick)

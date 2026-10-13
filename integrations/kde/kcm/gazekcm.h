@@ -9,11 +9,13 @@
 #include <functional>
 
 #include "facemodel.h"
+#include "gazesettings.h"
 
 class GazeKcm : public KQuickConfigModule
 {
     Q_OBJECT
     Q_PROPERTY(FaceModel *faces READ faces CONSTANT)
+    Q_PROPERTY(GazeSettings *settings READ settings CONSTANT)
     Q_PROPERTY(QString user READ user CONSTANT)
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
     // "idle", "running", "done" or "failed"
@@ -30,6 +32,7 @@ public:
     GazeKcm(QObject *parent, const KPluginMetaData &data);
 
     FaceModel *faces() { return &m_faces; }
+    GazeSettings *settings() { return &m_settings; }
     QString user() const { return m_user; }
     QString error() const { return m_error; }
     QString enrollState() const { return m_enrollState; }
@@ -73,6 +76,7 @@ private:
     QString m_user;
     QString m_error;
     FaceModel m_faces;
+    GazeSettings m_settings;
     QString m_enrollState = QStringLiteral("idle");
     QString m_prompt;
     QString m_faceHint;

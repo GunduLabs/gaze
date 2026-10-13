@@ -78,6 +78,7 @@ GazeKcm::GazeKcm(QObject *parent, const KPluginMetaData &data)
     });
 
     refresh();
+    m_settings.load();
 }
 
 void GazeKcm::setError(const QString &error)
