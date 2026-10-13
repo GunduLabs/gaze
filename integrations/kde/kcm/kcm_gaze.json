@@ -1,0 +1,9 @@
+{
+    "KPlugin": {
+        "Description": "Face unlock",
+        "Icon": "com.gundulabs.Gaze",
+        "Name": "Gaze"
+    },
+    "X-KDE-Keywords": "face,unlock,gaze,camera,login,biometric",
+    "X-KDE-System-Settings-Parent-Category": "users"
+}
