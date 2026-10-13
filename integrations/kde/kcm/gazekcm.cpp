@@ -25,28 +25,28 @@ constexpr int TestResultMs = 4000;
 
 QString enrollPrompt(const QString &id)
 {
-    if (id == QLatin1String("look-straight")) return i18n("Look straight at the camera");
+    if (id == QLatin1String("look-straight")) return i18n("Face the camera");
     if (id == QLatin1String("look-up")) return i18n("Tilt your face slightly up");
     if (id == QLatin1String("look-down")) return i18n("Tilt your face slightly down");
     if (id == QLatin1String("look-left")) return i18n("Turn your face slightly left");
     if (id == QLatin1String("look-right")) return i18n("Turn your face slightly right");
     if (id == QLatin1String("captured")) return i18n("Captured");
-    if (id == QLatin1String("completed")) return i18n("Face added");
+    if (id == QLatin1String("completed")) return i18n("✓ Enrollment Complete!");
     if (id == QLatin1String("cancelled")) return i18n("Enrollment cancelled");
-    if (id == QLatin1String("db-failed")) return i18n("Could not save the face");
+    if (id == QLatin1String("db-failed")) return i18n("Database error during enrollment");
     if (id == QLatin1String("camera-failed")) return i18n("Camera error during enrollment");
     return id;
 }
 
 QString hintText(const QString &id)
 {
-    if (id == QLatin1String("no-face")) return i18n("Look at the camera");
-    if (id == QLatin1String("too-dark")) return i18n("More light is needed");
-    if (id == QLatin1String("clipped")) return i18n("Move back, your face is cut off");
-    if (id == QLatin1String("not-centered")) return i18n("Center your face");
-    if (id == QLatin1String("too-far")) return i18n("Come closer");
-    if (id == QLatin1String("too-close")) return i18n("Move back a little");
-    if (id == QLatin1String("ready") || id == QLatin1String("usable")) return i18n("Hold still");
+    if (id == QLatin1String("no-face")) return i18n("Please look at the camera...");
+    if (id == QLatin1String("too-dark")) return i18n("Need more light...");
+    if (id == QLatin1String("clipped")) return i18n("Face is clipped. Please move back...");
+    if (id == QLatin1String("not-centered")) return i18n("Please center your face...");
+    if (id == QLatin1String("too-far")) return i18n("Please come closer...");
+    if (id == QLatin1String("too-close")) return i18n("Please back up...");
+    if (id == QLatin1String("ready") || id == QLatin1String("usable")) return i18n("Hold still...");
     return {};
 }
 }
@@ -168,6 +168,28 @@ QString GazeKcm::suggestedName() const
     }
 }
 
+bool GazeKcm::busy() const
+{
+    return m_enrollState == QLatin1String("running") || m_testState == QLatin1String("running");
+}
+
+void GazeKcm::claimAnd(const QString &method, const QVariantList &args, std::function<void(const QString &)> failed, std::function<void()> started)
+{
+    call(QStringLiteral("Claim"), {m_user}, [this, method, args, failed, started](const QDBusMessage &claim) {
+        if (claim.type() == QDBusMessage::ErrorMessage) {
+            failed(claim.errorMessage());
+            return;
+        }
+        call(method, args, [failed, started](const QDBusMessage &start) {
+            if (start.type() == QDBusMessage::ErrorMessage) {
+                failed(start.errorMessage());
+            } else if (started) {
+                started();
+            }
+        });
+    });
+}
+
 void GazeKcm::release()
 {
     call(QStringLiteral("Release"), {});
@@ -185,11 +207,11 @@ void GazeKcm::finishEnroll(const QString &state, const QString &prompt)
 
 void GazeKcm::startEnroll(const QString &name)
 {
-    if (m_enrollState == QLatin1String("running") || m_testState == QLatin1String("running")) {
+    if (busy()) {
         return;
     }
     m_enrollState = QStringLiteral("running");
-    m_prompt = i18n("Starting the camera…");
+    m_prompt = i18n("Starting enrollment...");
     m_faceHint.clear();
     m_progress = 0;
     m_steps = 0;
@@ -197,17 +219,7 @@ void GazeKcm::startEnroll(const QString &name)
     Q_EMIT enrollChanged();
     Q_EMIT previewChanged();
 
-    call(QStringLiteral("Claim"), {m_user}, [this, name](const QDBusMessage &claim) {
-        if (claim.type() == QDBusMessage::ErrorMessage) {
-            finishEnroll(QStringLiteral("failed"), claim.errorMessage());
-            return;
-        }
-        call(QStringLiteral("EnrollStart"), {name}, [this](const QDBusMessage &start) {
-            if (start.type() == QDBusMessage::ErrorMessage) {
-                finishEnroll(QStringLiteral("failed"), start.errorMessage());
-            }
-        });
-    });
+    claimAnd(QStringLiteral("EnrollStart"), {name}, [this](const QString &error) { finishEnroll(QStringLiteral("failed"), error); });
 }
 
 void GazeKcm::stopEnroll()
@@ -240,7 +252,7 @@ void GazeKcm::onEnrollStatus(const QDBusMessage &message)
         finishEnroll(QStringLiteral("failed"), enrollPrompt(id));
     } else if (done) {
         const bool saved = id == QLatin1String("completed");
-        finishEnroll(saved ? QStringLiteral("done") : QStringLiteral("failed"), saved ? enrollPrompt(id) : i18n("Enrollment finished without saving"));
+        finishEnroll(saved ? QStringLiteral("done") : QStringLiteral("failed"), saved ? enrollPrompt(id) : i18n("Enrollment finished without saving."));
     } else {
         m_prompt = enrollPrompt(id);
         Q_EMIT enrollChanged();
@@ -276,27 +288,19 @@ void GazeKcm::finishTest(const QString &state)
 
 void GazeKcm::testFace()
 {
-    if (m_enrollState == QLatin1String("running") || m_testState == QLatin1String("running")) {
+    if (busy()) {
         return;
     }
     m_testReset.stop();
     m_testState = QStringLiteral("running");
     Q_EMIT testChanged();
-    call(QStringLiteral("Claim"), {m_user}, [this](const QDBusMessage &claim) {
-        if (claim.type() == QDBusMessage::ErrorMessage) {
-            setError(claim.errorMessage());
+    claimAnd(
+        QStringLiteral("VerifyStart"), {QStringLiteral("any")},
+        [this](const QString &error) {
+            setError(error);
             finishTest(QStringLiteral("failed"));
-            return;
-        }
-        call(QStringLiteral("VerifyStart"), {QStringLiteral("any")}, [this](const QDBusMessage &start) {
-            if (start.type() == QDBusMessage::ErrorMessage) {
-                setError(start.errorMessage());
-                finishTest(QStringLiteral("failed"));
-                return;
-            }
-            m_testTimeout.start();
-        });
-    });
+        },
+        [this] { m_testTimeout.start(); });
 }
 
 void GazeKcm::onVerifyStatus(const QDBusMessage &message)

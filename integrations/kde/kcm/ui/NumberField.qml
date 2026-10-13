@@ -19,7 +19,7 @@ QQC2.SpinBox {
     to: Math.round(realTo * factor)
     stepSize: Math.max(1, Math.round(realStep * factor))
     editable: true
-    enabled: kcm.settings.loaded
+    enabled: kcm.settings.editable
     value: Math.round(Number(kcm.settings.values[key] ?? realFrom) * factor)
     textFromValue: (v) => Number(v / factor).toFixed(decimals)
     valueFromText: (t) => Math.round(Number.fromLocaleString(Qt.locale(), t) * factor)

@@ -73,6 +73,9 @@ private:
     void finishEnroll(const QString &state, const QString &prompt);
     void finishTest(const QString &state);
     void release();
+    bool busy() const;
+    // Claims the device for the user, runs one method, and reports the first error.
+    void claimAnd(const QString &method, const QVariantList &args, std::function<void(const QString &)> failed, std::function<void()> started = {});
     void setError(const QString &error);
 
     QString m_user;

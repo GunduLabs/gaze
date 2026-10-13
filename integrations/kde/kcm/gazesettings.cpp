@@ -161,6 +161,7 @@ void GazeSettings::load()
         top.endStructure();
         m_values = values;
         m_loaded = true;
+        Q_EMIT editableChanged();
         setError(QString());
         Q_EMIT valuesChanged();
 
@@ -181,14 +182,92 @@ void GazeSettings::load()
     });
 }
 
+void GazeSettings::unlock()
+{
+    // Ask polkit directly so the password prompt comes before any edit, like a lock button.
+    QDBusArgument subject;
+    subject.beginStructure();
+    subject << QStringLiteral("system-bus-name");
+    subject << QVariantMap{{QStringLiteral("name"), QDBusConnection::systemBus().baseService()}};
+    subject.endStructure();
+
+    QDBusArgument details;
+    details.beginMap(QMetaType::fromType<QString>(), QMetaType::fromType<QString>());
+    details.endMap();
+
+    constexpr uint AllowUserInteraction = 1;
+    auto message = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.PolicyKit1"),
+                                                  QStringLiteral("/org/freedesktop/PolicyKit1/Authority"),
+                                                  QStringLiteral("org.freedesktop.PolicyKit1.Authority"),
+                                                  QStringLiteral("CheckAuthorization"));
+    message.setArguments({QVariant::fromValue(subject),
+                          QStringLiteral("com.gundulabs.gaze.manage-config"),
+                          QVariant::fromValue(details),
+                          AllowUserInteraction,
+                          QString()});
+    auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(message, 120000), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this](QDBusPendingCallWatcher *self) {
+        self->deleteLater();
+        const QDBusMessage reply = self->reply();
+        if (reply.type() == QDBusMessage::ErrorMessage) {
+            setError(reply.errorMessage());
+            return;
+        }
+        const QDBusArgument result = reply.arguments().value(0).value<QDBusArgument>();
+        bool authorized = false;
+        result.beginStructure();
+        result >> authorized;
+        result.endStructure();
+        if (authorized != m_unlocked) {
+            m_unlocked = authorized;
+            Q_EMIT unlockedChanged();
+            Q_EMIT editableChanged();
+        }
+        if (authorized) {
+            setError(QString());
+        }
+    });
+}
+
 void GazeSettings::set(const QString &key, const QVariant &value)
 {
     if (m_values.value(key) == value) {
         return;
     }
+    if (key == QLatin1String("security.level") && value.toString() == QLatin1String("custom")) {
+        seedCustomSecurity();
+    }
     m_values.insert(key, value);
     Q_EMIT valuesChanged();
     m_applyTimer.start();
+}
+
+// A preset stores no custom values, and the daemon rejects "custom" without them. Start from what
+// the preset resolves to, as the GNOME page does.
+void GazeSettings::seedCustomSecurity()
+{
+    const QString level = m_values.value(QStringLiteral("security.level")).toString();
+    if (level == QLatin1String("custom")) {
+        return;
+    }
+    const bool strong = level == QLatin1String("high") || level == QLatin1String("maximum");
+    const QString quality = strong ? QStringLiteral("accurate") : QStringLiteral("standard");
+    double threshold = 0.4;
+    QString policy = QStringLiteral("fallback_on_dark");
+    if (level == QLatin1String("low")) {
+        threshold = 0.3;
+        policy = QStringLiteral("or");
+    } else if (level == QLatin1String("high")) {
+        threshold = 0.5;
+    } else if (level == QLatin1String("maximum")) {
+        threshold = 0.6;
+        policy = QStringLiteral("and");
+    }
+    m_values.insert(QStringLiteral("security.detector"), quality);
+    m_values.insert(QStringLiteral("security.recognizer"), quality);
+    m_values.insert(QStringLiteral("security.rgb_threshold"), threshold);
+    m_values.insert(QStringLiteral("security.ir_threshold"), threshold);
+    m_values.insert(QStringLiteral("security.hybrid_policy"), policy);
 }
 
 void GazeSettings::apply()
@@ -217,11 +296,11 @@ void GazeSettings::apply()
         }
         return false;
     };
-    call(QStringLiteral("SetIrFrameSize"), {width, height}, [=, this](const QDBusMessage &reply) {
+    call(QStringLiteral("SetIrFrameSize"), {width, height}, [this, failed, config, gnome, kwallet](const QDBusMessage &reply) {
         if (failed(reply)) {
             return;
         }
-        call(QStringLiteral("SetConfigWithWallets"), {QVariant::fromValue(QDBusVariant(QVariant::fromValue(config))), gnome, kwallet}, [=, this](const QDBusMessage &r) {
+        call(QStringLiteral("SetConfigWithWallets"), {QVariant::fromValue(QDBusVariant(QVariant::fromValue(config))), gnome, kwallet}, [this, failed](const QDBusMessage &r) {
             if (!failed(r)) {
                 setError(QString());
             }

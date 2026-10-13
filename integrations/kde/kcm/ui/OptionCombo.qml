@@ -24,7 +24,7 @@ QQC2.ComboBox {
     model: shown
     textRole: "text"
     valueRole: "value"
-    enabled: kcm.settings.loaded
+    enabled: kcm.settings.editable
     currentIndex: Math.max(0, shown.findIndex(o => o.value === current))
     onActivated: kcm.settings.set(key, shown[currentIndex].value)
 }

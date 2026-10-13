@@ -5,5 +5,5 @@
         "Name": "Gaze"
     },
     "X-KDE-Keywords": "face,unlock,gaze,camera,login,biometric",
-    "X-KDE-System-Settings-Parent-Category": "users"
+    "X-KDE-System-Settings-Parent-Category": "system-administration"
 }

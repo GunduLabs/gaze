@@ -19,18 +19,21 @@ KCM.ScrollViewKCM {
 
     actions: [
         Kirigami.Action {
-            text: i18n("Settings")
+            text: i18n("Configure")
+            tooltip: i18n("Configure Gaze")
             icon.name: "configure"
             onTriggered: kcm.push("SettingsPage.qml")
         },
         Kirigami.Action {
             text: i18n("Test")
+            tooltip: i18n("Test Authentication")
             icon.name: "media-playback-start"
             enabled: list.count > 0 && !root.enrolling && !root.testing
             onTriggered: kcm.testFace()
         },
         Kirigami.Action {
             text: i18n("Add Face…")
+            tooltip: i18n("Add new face")
             icon.name: "list-add"
             enabled: !root.enrolling && !root.testing
             onTriggered: enrollDialog.openFor("")
@@ -43,7 +46,7 @@ KCM.ScrollViewKCM {
         QQC2.Label {
             Layout.fillWidth: true
             horizontalAlignment: Text.AlignHCenter
-            text: i18n("Registered face profiles for %1", kcm.user)
+            text: i18n("Your registered face profiles · User: %1", kcm.user)
             color: Kirigami.Theme.disabledTextColor
             wrapMode: Text.WordWrap
         }
@@ -63,9 +66,9 @@ KCM.ScrollViewKCM {
             }
             text: switch (kcm.testState) {
                 case "running": return i18n("Look at the camera…");
-                case "success": return i18n("Face recognized");
-                case "timeout": return i18n("No result, the camera did not respond in time");
-                default: return i18n("Face not recognized");
+                case "success": return i18n("✓ Authentication successful");
+                case "timeout": return i18n("✗ Verification timed out");
+                default: return i18n("✗ Authentication failed");
             }
         }
     }
@@ -80,8 +83,8 @@ KCM.ScrollViewKCM {
             width: parent.width - Kirigami.Units.gridUnit * 4
             visible: list.count === 0 && kcm.error.length === 0
             icon.name: "user-identity"
-            text: i18n("No faces added")
-            explanation: i18n("Add your face to unlock the screen and authenticate by looking at the camera.")
+            text: i18n("No Faces Enrolled")
+            explanation: i18n("Press Add Face to add your first face")
             helpfulAction: Kirigami.Action {
                 text: i18n("Add Face…")
                 icon.name: "list-add"
@@ -176,7 +179,7 @@ KCM.ScrollViewKCM {
             open();
         }
 
-        title: refining ? i18n("Improve Face") : i18n("Add Face")
+        title: refining ? i18n("Updating Face Template") : i18n("New Face Template")
         preferredWidth: Kirigami.Units.gridUnit * 22
         closePolicy: started && kcm.enrollState === "running" ? QQC2.Popup.NoAutoClose : QQC2.Popup.CloseOnEscape
         standardButtons: Kirigami.Dialog.NoButton
@@ -189,7 +192,7 @@ KCM.ScrollViewKCM {
                 id: nameField
                 Layout.fillWidth: true
                 visible: !enrollDialog.refining && !enrollDialog.started
-                placeholderText: i18n("Face name")
+                placeholderText: i18n("Face Name")
                 onAccepted: if (enrollDialog.chosenName.length > 0 && !kcm.hasFace(enrollDialog.chosenName)) kcm.startEnroll(enrollDialog.chosenName)
             }
             QQC2.Label {
@@ -273,7 +276,7 @@ KCM.ScrollViewKCM {
                 QQC2.Button {
                     visible: !enrollDialog.started
                     icon.name: "media-record"
-                    text: i18n("Start")
+                    text: enrollDialog.refining ? i18n("Start Update") : i18n("Start Capture")
                     highlighted: true
                     enabled: enrollDialog.refining
                         || (enrollDialog.chosenName.length > 0 && !kcm.hasFace(enrollDialog.chosenName))

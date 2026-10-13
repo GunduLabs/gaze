@@ -12,315 +12,356 @@ KCM.SimpleKCM {
 
     readonly property var values: kcm.settings.values
     readonly property bool custom: values["security.level"] === "custom"
+    // Mirrors the GNOME page: dependent rows are hidden, and wallet unlock needs a prerequisite.
+    readonly property bool livenessOn: values["liveness.enabled"] === true
+    readonly property bool encryptOn: values["storage.encrypt_templates"] === true
+    readonly property bool keyringOn: values["storage.unlock_gnome_keyring"] === true
+    readonly property bool kwalletOn: values["storage.unlock_kwallet"] === true
+    readonly property bool walletOn: keyringOn || kwalletOn
+    readonly property bool walletReady: livenessOn && encryptOn
 
-    title: i18n("Settings")
+    readonly property var levels: [
+        { text: i18n("Standard"), value: "standard" },
+        { text: i18n("Accurate"), value: "accurate" }
+    ]
 
-    Kirigami.FormLayout {
+    title: i18n("Configuration")
+
+    ColumnLayout {
+        spacing: Kirigami.Units.largeSpacing
+
         Kirigami.InlineMessage {
-            Kirigami.FormData.isSection: true
+            Layout.fillWidth: true
+            visible: kcm.settings.loaded && !kcm.settings.unlocked
+            type: Kirigami.MessageType.Information
+            text: i18n("Settings are locked")
+            actions: [
+                Kirigami.Action {
+                    text: i18n("Unlock…")
+                    icon.name: "unlock"
+                    onTriggered: kcm.settings.unlock()
+                }
+            ]
+        }
+        Kirigami.InlineMessage {
             Layout.fillWidth: true
             visible: kcm.settings.error.length > 0
             type: Kirigami.MessageType.Error
             text: kcm.settings.error
         }
 
-        Kirigami.Separator {
-            Kirigami.FormData.isSection: true
-            Kirigami.FormData.label: i18n("Security")
-        }
-        OptionCombo {
-            Kirigami.FormData.label: i18n("Security level:")
-            key: "security.level"
-            options: [
-                { text: i18n("Low"), value: "low" },
-                { text: i18n("Medium"), value: "medium" },
-                { text: i18n("High"), value: "high" },
-                { text: i18n("Maximum"), value: "maximum" },
-                { text: i18n("Custom"), value: "custom" }
-            ]
-        }
-        OptionCombo {
-            Kirigami.FormData.label: i18n("Detector:")
-            key: "security.detector"
-            enabled: page.custom
-            options: [
-                { text: i18n("Standard"), value: "standard" },
-                { text: i18n("Accurate"), value: "accurate" }
-            ]
-        }
-        OptionCombo {
-            Kirigami.FormData.label: i18n("Recognizer:")
-            key: "security.recognizer"
-            enabled: page.custom
-            options: [
-                { text: i18n("Standard"), value: "standard" },
-                { text: i18n("Accurate"), value: "accurate" }
-            ]
-        }
-        NumberField {
-            Kirigami.FormData.label: i18n("Color match threshold:")
-            key: "security.rgb_threshold"
-            enabled: page.custom
-            realFrom: 0.10
-            realTo: 0.99
-            realStep: 0.01
-            decimals: 2
-        }
-        NumberField {
-            Kirigami.FormData.label: i18n("Infrared match threshold:")
-            key: "security.ir_threshold"
-            enabled: page.custom
-            realFrom: 0.10
-            realTo: 0.99
-            realStep: 0.01
-            decimals: 2
-        }
-        OptionCombo {
-            Kirigami.FormData.label: i18n("Color and infrared:")
-            key: "security.hybrid_policy"
-            options: [
-                { text: i18n("Default"), value: "default" },
-                { text: i18n("Either one matches"), value: "or" },
-                { text: i18n("Infrared when dark"), value: "fallback_on_dark" },
-                { text: i18n("Both must match"), value: "and" }
-            ]
-        }
 
-        Kirigami.Separator {
-            Kirigami.FormData.isSection: true
-            Kirigami.FormData.label: i18n("Hardware")
-        }
-        OptionCombo {
-            Kirigami.FormData.label: i18n("Inference:")
-            key: "inference.execution_provider"
-            options: [
-                { text: i18n("CPU"), value: "cpu" },
-                { text: i18n("Automatic NPU"), value: "auto" },
-                { text: i18n("Intel OpenVINO"), value: "openvino" },
-                { text: i18n("AMD Ryzen AI"), value: "vitis" }
-            ]
-        }
-        OptionCombo {
-            Kirigami.FormData.label: i18n("OpenVINO device:")
-            key: "inference.device"
-            enabled: values["inference.execution_provider"] === "openvino"
-            options: [
-                { text: i18n("CPU"), value: "cpu" },
-                { text: i18n("GPU"), value: "gpu" },
-                { text: i18n("NPU"), value: "npu" }
-            ]
-        }
-        OptionCombo {
-            Kirigami.FormData.label: i18n("Color camera:")
-            key: "cameras.rgb"
-            options: [
-                { text: i18n("Not used"), value: "" },
-                { text: i18n("Primary camera"), value: "primary" }
-            ].concat(kcm.cameraSources())
-        }
-        OptionCombo {
-            Kirigami.FormData.label: i18n("Infrared camera:")
-            key: "cameras.ir"
-            options: [{ text: i18n("Not used"), value: "" }].concat(kcm.cameraSources())
-        }
-        QQC2.CheckBox {
-            id: frameOverride
-            Kirigami.FormData.label: i18n("Infrared frame size:")
-            text: i18n("Force a size")
-            enabled: kcm.settings.loaded
-            checked: Number(values["cameras.ir_frame_width"]) > 0
-            onToggled: {
-                kcm.settings.set("cameras.ir_frame_width", checked ? 640 : 0);
-                kcm.settings.set("cameras.ir_frame_height", checked ? 480 : 0);
+        SectionHeader { text: i18n("Security") }
+        SettingRow {
+            title: i18n("Security Level")
+            hint: i18n("Adjust the balance between speed and security")
+            OptionCombo {
+                key: "security.level"
+                options: [
+                    { text: i18n("Low"), value: "low" },
+                    { text: i18n("Medium"), value: "medium" },
+                    { text: i18n("High"), value: "high" },
+                    { text: i18n("Maximum"), value: "maximum" },
+                    { text: i18n("Custom"), value: "custom" }
+                ]
             }
         }
-        RowLayout {
-            visible: frameOverride.checked
-            spacing: Kirigami.Units.smallSpacing
+        SettingRow {
+            title: i18n("Detector Level")
+            visible: page.custom
+            OptionCombo {
+                key: "security.detector"
+                options: page.levels
+            }
+        }
+        SettingRow {
+            title: i18n("Recognizer Level")
+            visible: page.custom
+            OptionCombo {
+                key: "security.recognizer"
+                options: page.levels
+            }
+        }
+        SettingRow {
+            title: i18n("RGB Recognizer Threshold")
+            visible: page.custom
+            hint: i18n("Minimum RGB similarity for a match")
             NumberField {
+                key: "security.rgb_threshold"
+                realFrom: 0.1
+                realTo: 0.99
+                realStep: 0.01
+                decimals: 3
+            }
+        }
+        SettingRow {
+            title: i18n("IR Recognizer Threshold")
+            visible: page.custom
+            hint: i18n("Minimum IR similarity for a match")
+            NumberField {
+                key: "security.ir_threshold"
+                realFrom: 0.1
+                realTo: 0.99
+                realStep: 0.01
+                decimals: 3
+            }
+        }
+        SettingRow {
+            title: i18n("Hybrid combining policy")
+            visible: page.custom
+            hint: i18n("Combining policy when both RGB and IR cameras are active")
+            OptionCombo {
+                key: "security.hybrid_policy"
+                options: [
+                    { text: i18n("Default"), value: "default" },
+                    { text: i18n("Or"), value: "or" },
+                    { text: i18n("Fallback on Dark"), value: "fallback_on_dark" },
+                    { text: i18n("And"), value: "and" }
+                ]
+            }
+        }
+
+        SectionHeader { text: i18n("Hardware") }
+        SettingRow {
+            title: i18n("Inference execution provider")
+            hint: i18n("CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI")
+            OptionCombo {
+                key: "inference.execution_provider"
+                options: [
+                    { text: i18n("cpu"), value: "cpu" },
+                    { text: i18n("auto"), value: "auto" },
+                    { text: i18n("openvino"), value: "openvino" },
+                    { text: i18n("vitis"), value: "vitis" }
+                ]
+            }
+        }
+        SettingRow {
+            title: i18n("OpenVINO inference device")
+            visible: values["inference.execution_provider"] === "openvino"
+            hint: i18n("The Intel device used for all ONNX models")
+            OptionCombo {
+                key: "inference.device"
+                options: [
+                    { text: i18n("cpu"), value: "cpu" },
+                    { text: i18n("gpu"), value: "gpu" },
+                    { text: i18n("npu"), value: "npu" }
+                ]
+            }
+        }
+        SettingRow {
+            title: i18n("RGB Camera Source")
+            OptionCombo {
+                key: "cameras.rgb"
+                options: [
+                    { text: i18n("None"), value: "" },
+                    { text: i18n("Primary Camera"), value: "primary" }
+                ].concat(kcm.cameraSources())
+            }
+        }
+        SettingRow {
+            title: i18n("IR Camera Source")
+            OptionCombo {
+                key: "cameras.ir"
+                options: [{ text: i18n("None"), value: "" }].concat(kcm.cameraSources())
+            }
+        }
+        SettingRow {
+            title: i18n("IR Frame Size Override")
+            hint: i18n("Force one resolution if the IR feed is green or corrupted on auto")
+            QQC2.Label {
+                visible: frameOverride.checked
+                text: i18n("Width")
+            }
+            NumberField {
+                visible: frameOverride.checked
                 key: "cameras.ir_frame_width"
                 realFrom: 1
                 realTo: 4096
             }
-            QQC2.Label { text: "×" }
+            QQC2.Label {
+                visible: frameOverride.checked
+                text: i18n("Height")
+            }
             NumberField {
+                visible: frameOverride.checked
                 key: "cameras.ir_frame_height"
                 realFrom: 1
                 realTo: 4096
             }
+            QQC2.Switch {
+                id: frameOverride
+                enabled: kcm.settings.editable
+                checked: Number(values["cameras.ir_frame_width"]) > 0
+                onToggled: {
+                    kcm.settings.set("cameras.ir_frame_width", checked ? 640 : 0);
+                    kcm.settings.set("cameras.ir_frame_height", checked ? 480 : 0);
+                }
+            }
         }
-        QQC2.Label {
-            visible: frameOverride.checked
-            text: i18n("Use this if the infrared image is green or corrupted.")
-            color: Kirigami.Theme.disabledTextColor
+        SwitchRow {
+            title: i18n("Force IR Emitter")
+            key: "cameras.emitter_enabled"
+            hint: i18n("Override emitter control (only use if camera stays unlit automatically)")
         }
-        QQC2.CheckBox {
-            Kirigami.FormData.label: i18n("Infrared emitter:")
-            text: i18n("Always turn it on")
-            enabled: kcm.settings.loaded
-            checked: values["cameras.emitter_enabled"] === true
-            onToggled: kcm.settings.set("cameras.emitter_enabled", checked)
+        SettingRow {
+            title: i18n("Parallel RGB + IR Capture")
+            hint: i18n("Faster hybrid auth, but some webcams cannot stream both sensors at once")
+            OptionCombo {
+                key: "cameras.parallel_capture"
+                options: [
+                    { text: i18n("Never (capture RGB, then IR)"), value: "never" },
+                    { text: i18n("Auto (parallel when the camera allows it)"), value: "auto" },
+                    { text: i18n("Always (capture RGB and IR at once)"), value: "always" }
+                ]
+            }
         }
-        OptionCombo {
-            Kirigami.FormData.label: i18n("Capture both cameras:")
-            key: "cameras.parallel_capture"
-            options: [
-                { text: i18n("One after the other"), value: "never" },
-                { text: i18n("At once when supported"), value: "auto" },
-                { text: i18n("Always at once"), value: "always" }
-            ]
-        }
-        NumberField {
-            Kirigami.FormData.label: i18n("Darkness cutoff:")
-            key: "cameras.dark_luma_threshold"
-            realFrom: 0
-            realTo: 255
-        }
-
-        Kirigami.Separator {
-            Kirigami.FormData.isSection: true
-            Kirigami.FormData.label: i18n("Enrollment")
-        }
-        NumberField {
-            Kirigami.FormData.label: i18n("Captures per face:")
-            key: "enrollment.max_templates"
-            realFrom: 1
-            realTo: 50
-        }
-        NumberField {
-            Kirigami.FormData.label: i18n("Smallest face size:")
-            key: "enrollment.min_face_size_ratio"
-            realFrom: 0.10
-            realTo: 0.75
-            realStep: 0.05
-            decimals: 2
-        }
-        QQC2.Label {
-            text: i18n("A lower value accepts a face that is further away.")
-            color: Kirigami.Theme.disabledTextColor
+        SettingRow {
+            title: i18n("Darkness Cutoff")
+            hint: i18n("Reject frames below this mean brightness (0-255)")
+            NumberField {
+                key: "cameras.dark_luma_threshold"
+                realFrom: 0
+                realTo: 255
+                realStep: 1
+                decimals: 0
+            }
         }
 
-        Kirigami.Separator {
-            Kirigami.FormData.isSection: true
-            Kirigami.FormData.label: i18n("Anti-spoofing")
+        SectionHeader { text: i18n("Enrollment") }
+        SettingRow {
+            title: i18n("Maximum Templates")
+            hint: i18n("Number of capture sets stored per face")
+            NumberField {
+                key: "enrollment.max_templates"
+                realFrom: 1
+                realTo: 50
+                realStep: 1
+                decimals: 0
+            }
         }
-        QQC2.CheckBox {
-            id: liveness
-            Kirigami.FormData.label: i18n("Liveness:")
-            text: i18n("Reject photos and screens")
-            enabled: kcm.settings.loaded
-            checked: values["liveness.enabled"] === true
-            onToggled: kcm.settings.set("liveness.enabled", checked)
-        }
-        NumberField {
-            Kirigami.FormData.label: i18n("Confidence needed:")
-            key: "liveness.threshold"
-            enabled: liveness.checked
-            realFrom: 0.10
-            realTo: 1.0
-            realStep: 0.05
-            decimals: 2
-        }
-        NumberField {
-            Kirigami.FormData.label: i18n("Longest check (seconds):")
-            key: "liveness.max_seconds"
-            enabled: liveness.checked
-            realFrom: 0.2
-            realTo: 30
-            realStep: 0.1
-            decimals: 1
+        SettingRow {
+            title: i18n("Minimum Face Size Ratio")
+            hint: i18n("Smallest accepted face during enrollment; lower allows more distance")
+            NumberField {
+                key: "enrollment.min_face_size_ratio"
+                realFrom: 0.1
+                realTo: 0.75
+                realStep: 0.05
+                decimals: 2
+            }
         }
 
-        Kirigami.Separator {
-            Kirigami.FormData.isSection: true
-            Kirigami.FormData.label: i18n("Authentication")
+        SectionHeader { text: i18n("Liveness Anti-Spoofing") }
+        SwitchRow {
+            title: i18n("Enable Liveness Spoof Prevention")
+            key: "liveness.enabled"
+            allowed: !page.walletOn
+            hint: i18n("Analyze face depth/reflectance to prevent photo spoofing")
         }
-        QQC2.CheckBox {
-            Kirigami.FormData.label: i18n("Remote sessions:")
-            text: i18n("Do not use face unlock over SSH")
-            enabled: kcm.settings.loaded
-            checked: values["auth.abort_if_ssh"] === true
-            onToggled: kcm.settings.set("auth.abort_if_ssh", checked)
+        SettingRow {
+            title: i18n("Liveness Threshold")
+            visible: page.livenessOn
+            hint: i18n("Minimum spoof prevention confidence")
+            NumberField {
+                key: "liveness.threshold"
+                realFrom: 0.1
+                realTo: 1.0
+                realStep: 0.05
+                decimals: 2
+            }
         }
-        QQC2.CheckBox {
-            Kirigami.FormData.label: i18n("Laptop lid:")
-            text: i18n("Do not use face unlock when it is closed")
-            enabled: kcm.settings.loaded
-            checked: values["auth.abort_if_lid_closed"] === true
-            onToggled: kcm.settings.set("auth.abort_if_lid_closed", checked)
-        }
-        QQC2.CheckBox {
-            Kirigami.FormData.label: i18n("After boot:")
-            text: i18n("Wait for one suspend and resume first")
-            enabled: kcm.settings.loaded
-            checked: values["auth.abort_before_first_resume"] === true
-            onToggled: kcm.settings.set("auth.abort_before_first_resume", checked)
-        }
-        QQC2.CheckBox {
-            Kirigami.FormData.label: i18n("Confirmation:")
-            text: i18n("Ask before unlocking the screen")
-            enabled: kcm.settings.loaded
-            checked: values["auth.require_confirmation_lock_screen"] === true
-            onToggled: kcm.settings.set("auth.require_confirmation_lock_screen", checked)
-        }
-        QQC2.CheckBox {
-            
-            text: i18n("Ask before authorizing administrator actions")
-            enabled: kcm.settings.loaded
-            checked: values["auth.require_confirmation_elevation"] === true
-            onToggled: kcm.settings.set("auth.require_confirmation_elevation", checked)
-        }
-        NumberField {
-            Kirigami.FormData.label: i18n("Wait after waking (ms):")
-            key: "auth.resume_grace_ms"
-            realFrom: 0
-            realTo: 10000
-            realStep: 100
-        }
-        NumberField {
-            Kirigami.FormData.label: i18n("Start delay (ms):")
-            key: "auth.start_delay_ms"
-            realFrom: 0
-            realTo: 10000
-            realStep: 500
-        }
-        OptionCombo {
-            Kirigami.FormData.label: i18n("Delay applies to:")
-            key: "auth.start_delay_scope"
-            options: [
-                { text: i18n("Every face check, including sudo"), value: "all" },
-                { text: i18n("Screen lockers only"), value: "screen_lock" }
-            ]
+        SettingRow {
+            title: i18n("Maximum Liveness Duration")
+            visible: page.livenessOn
+            hint: i18n("Maximum seconds analyzed for liveness verification")
+            NumberField {
+                key: "liveness.max_seconds"
+                realFrom: 0.2
+                realTo: 30
+                realStep: 0.1
+                decimals: 1
+            }
         }
 
-        Kirigami.Separator {
-            Kirigami.FormData.isSection: true
-            Kirigami.FormData.label: i18n("Storage")
+        SectionHeader { text: i18n("Authentication") }
+        SwitchRow {
+            title: i18n("Abort if SSH")
+            key: "auth.abort_if_ssh"
+            hint: i18n("Prevent authentication over SSH connections")
         }
-        QQC2.CheckBox {
-            Kirigami.FormData.label: i18n("Face data:")
-            text: i18n("Encrypt with a key sealed in the TPM")
-            enabled: kcm.settings.loaded
-            checked: values["storage.encrypt_templates"] === true
-            onToggled: kcm.settings.set("storage.encrypt_templates", checked)
+        SwitchRow {
+            title: i18n("Abort if Lid Closed")
+            key: "auth.abort_if_lid_closed"
+            hint: i18n("Prevent authentication when the laptop lid is closed")
         }
-        QQC2.CheckBox {
-            Kirigami.FormData.label: i18n("Wallets:")
-            text: i18n("Unlock KDE Wallet after a face login")
-            enabled: kcm.settings.loaded
-            checked: values["storage.unlock_kwallet"] === true
-            onToggled: kcm.settings.set("storage.unlock_kwallet", checked)
+        SwitchRow {
+            title: i18n("Require a Suspend First")
+            key: "auth.abort_before_first_resume"
+            hint: i18n("Prevent authentication until the system has suspended and resumed once")
         }
-        QQC2.Label {
-            text: i18n("Needs a saved password. Set it up with “gaze keyring --kwallet”.")
-            color: Kirigami.Theme.disabledTextColor
+        SwitchRow {
+            title: i18n("Require Confirmation on Lock Screen")
+            key: "auth.require_confirmation_lock_screen"
+            hint: i18n("Require pressing Enter or clicking OK to authorize after face matches on the lock screen or login screen")
         }
-        QQC2.CheckBox {
-            
-            text: i18n("Unlock GNOME Keyring after a face login")
-            enabled: kcm.settings.loaded
-            checked: values["storage.unlock_gnome_keyring"] === true
-            onToggled: kcm.settings.set("storage.unlock_gnome_keyring", checked)
+        SwitchRow {
+            title: i18n("Require Confirmation for Elevated Auth")
+            key: "auth.require_confirmation_elevation"
+            hint: i18n("Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts")
+        }
+        SettingRow {
+            title: i18n("Resume Grace Period (ms)")
+            hint: i18n("Delay face authentication on wake from suspend")
+            NumberField {
+                key: "auth.resume_grace_ms"
+                realFrom: 0
+                realTo: 10000
+                realStep: 100
+                decimals: 0
+            }
+        }
+        SettingRow {
+            title: i18n("Start Delay (ms)")
+            hint: i18n("Delay before face authentication starts")
+            NumberField {
+                key: "auth.start_delay_ms"
+                realFrom: 0
+                realTo: 10000
+                realStep: 500
+                decimals: 0
+            }
+        }
+        SettingRow {
+            title: i18n("Start Delay Applies To")
+            visible: Number(values["auth.start_delay_ms"]) > 0
+            hint: i18n("Which prompts wait for the start delay")
+            OptionCombo {
+                key: "auth.start_delay_scope"
+                options: [
+                    { text: i18n("Every face auth (including sudo)"), value: "all" },
+                    { text: i18n("Screen lockers only"), value: "screen_lock" }
+                ]
+            }
+        }
+
+        SectionHeader { text: i18n("Storage") }
+        SwitchRow {
+            title: i18n("Encrypt Face Templates")
+            key: "storage.encrypt_templates"
+            allowed: !page.walletOn
+            hint: i18n("Encrypt face templates at rest with a TPM-sealed key")
+        }
+        SwitchRow {
+            title: i18n("Unlock GNOME Keyring")
+            key: "storage.unlock_gnome_keyring"
+            allowed: (page.keyringOn || page.walletReady)
+            hint: i18n("Use an enrolled password after liveness-protected GDM or greetd face login")
+        }
+        SwitchRow {
+            title: i18n("Unlock KDE KWallet")
+            key: "storage.unlock_kwallet"
+            allowed: (page.kwalletOn || page.walletReady)
+            hint: i18n("Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet")
         }
     }
 }
