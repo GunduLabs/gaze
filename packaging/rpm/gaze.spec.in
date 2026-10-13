@@ -373,6 +373,7 @@ ${SCRIPTLET_HYPRLOCK_POSTUN}
 %{_bindir}/gaze-kde-pam
 %{_libdir}/qt6/plugins/plasma/kcms/systemsettings/kcm_gaze.so
 %{_datadir}/applications/kcm_gaze.desktop
+%{_datadir}/applications/com.gundulabs.Gaze.Settings.desktop
 
 %changelog
 * ${CHANGELOG_DATE} Gundu Labs <maintainers@gundulabs.com> - ${VERSION}-${PACKAGE_RELEASE}

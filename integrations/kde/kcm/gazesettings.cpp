@@ -3,8 +3,8 @@
 
 #include "gazesettings.h"
 
-#include <QDBusArgument>
 #include <KLocalizedString>
+#include <QDBusArgument>
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
 #include <QDBusPendingCallWatcher>

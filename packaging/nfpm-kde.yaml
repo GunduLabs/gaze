@@ -59,6 +59,10 @@ overrides:
         dst: "/usr/share/applications/kcm_gaze.desktop"
         file_info:
           mode: 0644
+      - src: "dist/kcm/usr/share/applications/com.gundulabs.Gaze.Settings.desktop"
+        dst: "/usr/share/applications/com.gundulabs.Gaze.Settings.desktop"
+        file_info:
+          mode: 0644
     depends:
       - kf6-kirigami
 ${RPM_LIB_DEPENDS}

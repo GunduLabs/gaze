@@ -580,7 +580,8 @@ _verify-package format:
 
     load gaze-kde
     if [ "{{ format }}" = rpm ]; then
-        want_files /usr/bin/gaze-kde-pam /usr/share/applications/kcm_gaze.desktop
+        want_files /usr/bin/gaze-kde-pam /usr/share/applications/kcm_gaze.desktop \
+            /usr/share/applications/com.gundulabs.Gaze.Settings.desktop
         grep -Eq '^/usr/lib[^/]*/qt6/plugins/plasma/kcms/systemsettings/kcm_gaze\.so$' <<< "$paths" \
             || fail "$base does not ship the System Settings plugin"
     else

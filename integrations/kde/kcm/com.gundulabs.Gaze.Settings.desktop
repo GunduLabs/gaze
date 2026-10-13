@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[Desktop Entry]
+Type=Application
+Name=Gaze Settings
+Comment=Enroll faces and configure Gaze face unlock
+Exec=kcmshell6 kcm_gaze
+Icon=com.gundulabs.Gaze
+Terminal=false
+Categories=Qt;KDE;Settings;Security;
+Keywords=face;unlock;gaze;camera;login;biometric;
+OnlyShowIn=KDE;
