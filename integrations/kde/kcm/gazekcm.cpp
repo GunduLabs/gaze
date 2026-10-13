@@ -3,6 +3,7 @@
 
 #include "gazekcm.h"
 
+#include <KLocalizedString>
 #include <KPluginFactory>
 #include <QDBusArgument>
 #include <QDBusConnection>
@@ -17,6 +18,33 @@ namespace
 {
 constexpr QLatin1String Service("com.gundulabs.Gaze");
 constexpr QLatin1String Path("/com/gundulabs/Gaze");
+
+QString enrollPrompt(const QString &id)
+{
+    if (id == QLatin1String("look-straight")) return i18n("Look straight at the camera");
+    if (id == QLatin1String("look-up")) return i18n("Tilt your face slightly up");
+    if (id == QLatin1String("look-down")) return i18n("Tilt your face slightly down");
+    if (id == QLatin1String("look-left")) return i18n("Turn your face slightly left");
+    if (id == QLatin1String("look-right")) return i18n("Turn your face slightly right");
+    if (id == QLatin1String("captured")) return i18n("Captured");
+    if (id == QLatin1String("completed")) return i18n("Face added");
+    if (id == QLatin1String("cancelled")) return i18n("Enrollment cancelled");
+    if (id == QLatin1String("db-failed")) return i18n("Could not save the face");
+    if (id == QLatin1String("camera-failed")) return i18n("Camera error during enrollment");
+    return id;
+}
+
+QString hintText(const QString &id)
+{
+    if (id == QLatin1String("no-face")) return i18n("Look at the camera");
+    if (id == QLatin1String("too-dark")) return i18n("More light is needed");
+    if (id == QLatin1String("clipped")) return i18n("Move back, your face is cut off");
+    if (id == QLatin1String("not-centered")) return i18n("Center your face");
+    if (id == QLatin1String("too-far")) return i18n("Come closer");
+    if (id == QLatin1String("too-close")) return i18n("Move back a little");
+    if (id == QLatin1String("ready") || id == QLatin1String("usable")) return i18n("Hold still");
+    return {};
+}
 }
 
 GazeKcm::GazeKcm(QObject *parent, const KPluginMetaData &data)
@@ -25,6 +53,12 @@ GazeKcm::GazeKcm(QObject *parent, const KPluginMetaData &data)
     const passwd *entry = getpwuid(getuid());
     m_user = entry ? QString::fromLocal8Bit(entry->pw_name) : QString();
     setButtons(NoAdditionalButton);
+
+    auto bus = QDBusConnection::systemBus();
+    bus.connect(Service, Path, Service, QStringLiteral("EnrollStatus"), this, SLOT(onEnrollStatus(QDBusMessage)));
+    bus.connect(Service, Path, Service, QStringLiteral("FaceStatus"), this, SLOT(onFaceStatus(QDBusMessage)));
+    bus.connect(Service, Path, Service, QStringLiteral("PreviewFrame"), this, SLOT(onPreviewFrame(QDBusMessage)));
+
     refresh();
 }
 
@@ -97,6 +131,117 @@ void GazeKcm::deleteFace(const QString &name)
 bool GazeKcm::hasFace(const QString &name) const
 {
     return m_faces.contains(name);
+}
+
+QString GazeKcm::suggestedName() const
+{
+    const QString base = QStringLiteral("default");
+    if (!m_faces.contains(base)) {
+        return base;
+    }
+    for (int n = 2;; ++n) {
+        const QString name = QStringLiteral("face-%1").arg(n);
+        if (!m_faces.contains(name)) {
+            return name;
+        }
+    }
+}
+
+void GazeKcm::release()
+{
+    call(QStringLiteral("Release"), {});
+}
+
+void GazeKcm::finishEnroll(const QString &state, const QString &prompt)
+{
+    m_enrollState = state;
+    m_prompt = prompt;
+    m_faceHint.clear();
+    Q_EMIT enrollChanged();
+    release();
+    refresh();
+}
+
+void GazeKcm::startEnroll(const QString &name)
+{
+    if (m_enrollState == QLatin1String("running")) {
+        return;
+    }
+    m_enrollState = QStringLiteral("running");
+    m_prompt = i18n("Starting the camera…");
+    m_faceHint.clear();
+    m_progress = 0;
+    m_steps = 0;
+    m_preview.clear();
+    Q_EMIT enrollChanged();
+    Q_EMIT previewChanged();
+
+    call(QStringLiteral("Claim"), {m_user}, [this, name](const QDBusMessage &claim) {
+        if (claim.type() == QDBusMessage::ErrorMessage) {
+            finishEnroll(QStringLiteral("failed"), claim.errorMessage());
+            return;
+        }
+        call(QStringLiteral("EnrollStart"), {name}, [this](const QDBusMessage &start) {
+            if (start.type() == QDBusMessage::ErrorMessage) {
+                finishEnroll(QStringLiteral("failed"), start.errorMessage());
+            }
+        });
+    });
+}
+
+void GazeKcm::stopEnroll()
+{
+    if (m_enrollState == QLatin1String("running")) {
+        call(QStringLiteral("EnrollStop"), {});
+        finishEnroll(QStringLiteral("idle"), QString());
+    } else {
+        m_enrollState = QStringLiteral("idle");
+        Q_EMIT enrollChanged();
+    }
+    m_preview.clear();
+    Q_EMIT previewChanged();
+}
+
+void GazeKcm::onEnrollStatus(const QDBusMessage &message)
+{
+    if (m_enrollState != QLatin1String("running")) {
+        return;
+    }
+    const QVariantList args = message.arguments();
+    if (args.size() < 6) {
+        return;
+    }
+    m_progress = args.at(1).toUInt();
+    m_steps = args.at(2).toUInt();
+    const bool done = args.at(3).toBool();
+    const QString id = args.at(4).toString();
+    if (id == QLatin1String("db-failed") || id == QLatin1String("camera-failed") || id == QLatin1String("cancelled")) {
+        finishEnroll(QStringLiteral("failed"), enrollPrompt(id));
+    } else if (done) {
+        const bool saved = id == QLatin1String("completed");
+        finishEnroll(saved ? QStringLiteral("done") : QStringLiteral("failed"), saved ? enrollPrompt(id) : i18n("Enrollment finished without saving"));
+    } else {
+        m_prompt = enrollPrompt(id);
+        Q_EMIT enrollChanged();
+    }
+}
+
+void GazeKcm::onFaceStatus(const QDBusMessage &message)
+{
+    if (m_enrollState != QLatin1String("running") || message.arguments().isEmpty()) {
+        return;
+    }
+    m_faceHint = hintText(message.arguments().at(0).toString());
+    Q_EMIT enrollChanged();
+}
+
+void GazeKcm::onPreviewFrame(const QDBusMessage &message)
+{
+    if (m_enrollState != QLatin1String("running") || message.arguments().isEmpty()) {
+        return;
+    }
+    m_preview = QStringLiteral("data:image/jpeg;base64,") + QString::fromLatin1(message.arguments().at(0).toByteArray().toBase64());
+    Q_EMIT previewChanged();
 }
 
 #include "gazekcm.moc"
