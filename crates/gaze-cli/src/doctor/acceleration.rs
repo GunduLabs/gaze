@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::*;
-use gaze_core::acceleration::{NpuDevice, discover_npus, vendor_runtime};
+use gaze_core::acceleration::{NpuDevice, discover_npus, provider_runtime};
 use std::path::Path;
 
 fn register_fix(library: &Path) -> String {
@@ -58,7 +58,7 @@ pub(super) fn check_acceleration(report: &mut Report, config: Option<&Config>) {
         return;
     };
     if let Some(provider) = active_provider(Some(config), &devices) {
-        let library = vendor_runtime(provider);
+        let library = provider_runtime(provider);
         if library.is_file() {
             report.pass(
                 "Accelerator runtime",
@@ -81,7 +81,7 @@ pub(super) fn check_acceleration(report: &mut Report, config: Option<&Config>) {
     providers.sort_unstable();
     providers.dedup();
     for provider in providers {
-        let library = vendor_runtime(provider);
+        let library = provider_runtime(provider);
         if library.is_file() {
             report.off(
                 "NPU acceleration",
