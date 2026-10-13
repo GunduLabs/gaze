@@ -72,7 +72,7 @@ pub fn prepare_environment(config: &InferenceConfig) -> anyhow::Result<()> {
         Some(env) if env == provider => {
             // The CPU fallback must not resolve its dependencies from the vendor's
             // directories, so drop them while this process is still single-threaded.
-            let Err(error) = library_version(&acceleration::vendor_runtime(provider)) else {
+            let Err(error) = library_version(&acceleration::provider_runtime(provider)) else {
                 return Ok(());
             };
             tracing::warn!(provider, error = %format!("{error:#}"), "Vendor runtime unusable; restarting without its library path");
@@ -191,7 +191,10 @@ pub fn initialize_runtime(config: &InferenceConfig) -> anyhow::Result<&'static R
     if let Some(path) = std::env::var_os("ORT_DYLIB_PATH") {
         candidates.push((provider.to_string(), PathBuf::from(path)));
     } else if provider != "cpu" {
-        candidates.push((provider.to_string(), acceleration::vendor_runtime(provider)));
+        candidates.push((
+            provider.to_string(),
+            acceleration::provider_runtime(provider),
+        ));
     }
     candidates.extend(
         cpu_candidates()

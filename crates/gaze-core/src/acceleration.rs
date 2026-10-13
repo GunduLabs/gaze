@@ -7,6 +7,14 @@ use std::path::{Path, PathBuf};
 
 pub const RUNTIME_DIR: &str = "/usr/lib/gaze/runtimes";
 
+/// Distro-packaged ONNX Runtime builds that can serve a vendor provider without registration.
+pub const SYSTEM_RUNTIMES: &[&str] = &[
+    "/usr/lib64/libonnxruntime.so.1",
+    "/usr/lib/libonnxruntime.so.1",
+    "/usr/lib/x86_64-linux-gnu/libonnxruntime.so.1",
+    "/usr/lib/aarch64-linux-gnu/libonnxruntime.so.1",
+];
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NpuDevice {
     pub node: PathBuf,
@@ -57,10 +65,15 @@ fn discover_npus_at(sysfs: &Path, nodes: &Path) -> Vec<NpuDevice> {
     devices
 }
 
-pub fn vendor_runtime(provider: &str) -> PathBuf {
-    Path::new(RUNTIME_DIR)
+/// The registered vendor runtime, else a system one, else the path to register.
+pub fn provider_runtime(provider: &str) -> PathBuf {
+    let vendor = Path::new(RUNTIME_DIR)
         .join(provider)
-        .join("libonnxruntime.so")
+        .join("libonnxruntime.so");
+    std::iter::once(vendor.clone())
+        .chain(SYSTEM_RUNTIMES.iter().map(PathBuf::from))
+        .find(|path| path.is_file())
+        .unwrap_or(vendor)
 }
 
 #[cfg(test)]
