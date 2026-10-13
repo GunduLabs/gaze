@@ -14,6 +14,7 @@ pub struct RuntimeLibrary {
     pub version: String,
     pub provider: String,
     pub fallback_reason: Option<String>,
+    pub environment: ort::environment::Environment,
 }
 
 static RUNTIME: OnceLock<RuntimeLibrary> = OnceLock::new();
@@ -203,22 +204,18 @@ pub fn initialize_runtime(config: &InferenceConfig) -> anyhow::Result<&'static R
         let path = path.canonicalize().unwrap_or(path);
         let attempt = (|| {
             let version = library_version(&path)?;
-            let initialized = ort::init_from(&path)?
+            let environment = ort::init_from(&path)?
                 .with_name("gazed")
                 .with_logger(std::sync::Arc::new(
                     |level, category, _id, _location, message| {
                         tracing::debug!(target: "ort", "[{category}] ({level:?}) {message}");
                     },
                 ))
-                .commit();
-            anyhow::ensure!(
-                initialized,
-                "ONNX Runtime was initialized before Gaze selected a runtime"
-            );
-            Ok::<_, anyhow::Error>(version)
+                .build()?;
+            Ok::<_, anyhow::Error>((version, environment))
         })();
         match attempt {
-            Ok(version) => {
+            Ok((version, environment)) => {
                 let fallback_reason = if active_provider == "cpu" && provider != "cpu" {
                     Some(format!(
                         "{provider} runtime unavailable: {}. Register it under {} and restart gazed",
@@ -236,6 +233,7 @@ pub fn initialize_runtime(config: &InferenceConfig) -> anyhow::Result<&'static R
                     version,
                     provider: active_provider,
                     fallback_reason,
+                    environment,
                 };
                 RUNTIME
                     .set(runtime)

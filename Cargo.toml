@@ -51,7 +51,7 @@ libc = "0.2.190"
 nalgebra = "0.35.0"
 ndarray = "0.17.2"
 opencv = { version = "0.101.1", default-features = false }
-ort = { version = "2.0.0-rc.13", default-features = false, features = [
+ort = { version = "2.0.0-rc.14", default-features = false, features = [
     "std",
     "ndarray",
     "tracing",

@@ -46,8 +46,8 @@ impl InferenceRuntime {
     }
 }
 
-fn session_builder() -> anyhow::Result<SessionBuilder> {
-    Session::builder()
+fn session_builder(library: &RuntimeLibrary) -> anyhow::Result<SessionBuilder> {
+    Session::builder(&library.environment)
         .map_err(|error| {
             anyhow::anyhow!("failed to create an ONNX Runtime session builder: {error}")
         })?
@@ -57,8 +57,8 @@ fn session_builder() -> anyhow::Result<SessionBuilder> {
         })
 }
 
-fn build_cpu_session(model_path: &str) -> anyhow::Result<Session> {
-    session_builder()?
+fn build_cpu_session(library: &RuntimeLibrary, model_path: &str) -> anyhow::Result<Session> {
+    session_builder(library)?
         .commit_from_file(model_path)
         .with_context(|| format!("failed to load ONNX model {model_path} on cpu"))
 }
@@ -106,8 +106,8 @@ fn build_accelerated_session(
     device: &str,
 ) -> anyhow::Result<Session> {
     let available = match provider {
-        "openvino" => ep::OpenVINO::default().is_available()?,
-        "vitis" => ep::Vitis::default().is_available()?,
+        "openvino" => ep::OpenVINO::is_available()?,
+        "vitis" => ep::Vitis::is_available()?,
         _ => false,
     };
     anyhow::ensure!(
@@ -131,13 +131,13 @@ fn build_accelerated_session(
         }
         _ => anyhow::bail!("unsupported acceleration provider {provider}"),
     };
-    let mut builder = session_builder()?;
+    let mut builder = session_builder(library)?;
     if device == "npu"
         && let Some(size) = model_input_size(model_path)
     {
         // The SCRFD models have symbolic dimensions. Freeze the actual NCHW input
         // Gaze supplies so both vendors can compile a static graph for their NPU.
-        let metadata = build_cpu_session(model_path)?;
+        let metadata = build_cpu_session(library, model_path)?;
         if let Some(input) = metadata.inputs().first()
             && let ort::value::ValueType::Tensor {
                 shape,
@@ -209,12 +209,12 @@ pub fn create_session(
             reason,
             "Unusable inference configuration; falling back to the ONNX Runtime CPU execution provider"
         );
-        let session = build_cpu_session(model_path)?;
+        let session = build_cpu_session(library, model_path)?;
         return Ok((session, InferenceRuntime::cpu(config, Some(reason))));
     }
     if config.execution_provider == "cpu" {
         return Ok((
-            build_cpu_session(model_path)?,
+            build_cpu_session(library, model_path)?,
             InferenceRuntime::cpu(config, None),
         ));
     }
@@ -251,7 +251,7 @@ pub fn create_session(
         }
     };
     tracing::warn!(provider, model = model_path, %reason, "Accelerator setup failed; using CPU");
-    let session = build_cpu_session(model_path).with_context(|| {
+    let session = build_cpu_session(library, model_path).with_context(|| {
         format!("accelerator setup failed ({reason}) and CPU fallback also failed")
     })?;
     Ok((session, InferenceRuntime::cpu(config, Some(reason))))
