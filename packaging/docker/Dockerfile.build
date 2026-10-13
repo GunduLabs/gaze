@@ -9,7 +9,7 @@ FROM ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a
 # so the RUN steps below fall back to `dpkg --print-architecture`.
 ARG TARGETARCH
 ARG JUST_VERSION=1.58.0
-ARG NFPM_VERSION=2.47.0
+ARG NFPM_VERSION=2.48.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 
