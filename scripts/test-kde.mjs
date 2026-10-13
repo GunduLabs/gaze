@@ -363,7 +363,7 @@ function dispatch(handlers, scenario, installed) {
     return status === 'success' && impression !== 'positive' ? 'perm_denied' : status;
 }
 
-async function environment(target, features, {reader = false} = {}) {
+async function environment(target, features, {reader = false, module = reader} = {}) {
     const root = await mkdtemp(join(tmpdir(), 'gaze-kde-env-'));
     const etc = join(root, 'etc'), vendor = join(root, 'vendor');
     const state = join(root, 'state'), security = join(root, 'security');
@@ -382,7 +382,9 @@ async function environment(target, features, {reader = false} = {}) {
         for (const name of ['common-account', 'common-session', 'common-password'])
             await writeFile(join(etc, name), '');
     }
-    const modules = new Set(['pam_gaze.so', ...(targets[target].modules ?? []), ...(reader ? ['pam_fprintd.so'] : [])]);
+    const modules = new Set(['pam_gaze.so', ...(targets[target].modules ?? []), ...(module ? ['pam_fprintd.so'] : [])]);
+    const busctl = join(root, 'busctl');
+    await writeFile(busctl, `#!/bin/sh\necho '${reader ? 'ao 1 "/net/reactivated/Fprint/Device/0"' : 'ao 0'}'\n`, {mode: 0o755});
     for (const module of modules) await writeFile(join(security, module), '');
     const env = {...process.env,
         GAZE_KDE_PAM_FILE: join(etc, 'kde-fingerprint'),
@@ -392,6 +394,7 @@ async function environment(target, features, {reader = false} = {}) {
         GAZE_KDE_VENDOR_PAM_DIR: vendor,
         GAZE_KDE_STATE_DIR: state,
         GAZE_KDE_SECURITY_DIRS: security,
+        GAZE_KDE_BUSCTL: busctl,
     };
     const locate = name => [join(etc, name), join(vendor, name)].find(existsSync);
     const read = async name => locate(name) ? readFile(locate(name), 'utf8') : null;
@@ -545,6 +548,11 @@ for (const target of Object.keys(targets)) {
             }
             assert.equal((await env.authenticate(expected, {face: 'success'})).status, 'success');
         }, {reader: true});
+
+        scoped('a fingerprint module without a reader keeps the face slot', async env => {
+            env.run('enable');
+            assert.deepEqual(await env.wired(), ['kde-fingerprint']);
+        }, {module: true});
 
         scoped('login greeters accept a face or the password', async env => {
             const services = LOGIN.filter(env.exists);

@@ -194,10 +194,18 @@ stack_reaches_gaze() {
 	stack_matches "$1" "$GAZE_MODULES"
 }
 
+# fprintd answers with "ao 0" when no supported reader is plugged in.
+fprintd_has_device() {
+	devices=$(${GAZE_KDE_BUSCTL:-busctl} --system --timeout=5 call net.reactivated.Fprint \
+		/net/reactivated/Fprint/Manager net.reactivated.Fprint.Manager GetDevices 2>/dev/null) || return 1
+	[ "$devices" != 'ao 0' ]
+}
+
 # A reader the greeter can actually use, not merely a slot that mentions one: every
 # distro's kde-fingerprint names pam_fprintd whether or not fprintd is installed.
 runs_fprintd() {
 	pam_module_present pam_fprintd.so || return 1
+	fprintd_has_device || return 1
 	stack_matches "$1" 'pam_fprintd[.]so([[:space:]]|$)'
 }
 

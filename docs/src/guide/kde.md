@@ -97,9 +97,10 @@ wrong for a camera, though Gaze replaces it with a real message the moment there
 something to say. `gaze doctor` reports which slot is in use, and `gaze-kde-pam`
 never wires both.
 
-The reader has to actually be installed for this to kick in, not merely mentioned:
+The reader has to actually be there for this to kick in, not merely mentioned:
 every distribution's `kde-fingerprint` names `pam_fprintd` whether or not `fprintd`
-is present, so the check is for the module on disk.
+is present, so the check is for the module on disk and for a device that `fprintd`
+reports. A reader that libfprint does not support leaves Gaze in `kde-fingerprint`.
 
 On openSUSE and Gentoo the smartcard slot ships `pam_pkcs11 wait_for_card`, which
 blocks with no timeout. Gaze runs above it, so face unlock is unaffected, but after
