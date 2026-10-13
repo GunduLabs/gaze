@@ -55,6 +55,19 @@ build-rust: prepare-ort
     {{ opencv_env }} cargo build -p gaze-cli {{ gui_pkg }} -p pam-gaze -p pam-gaze-grosshack --release
     scripts/check-pam-link.sh target/release/libpam_gaze.so target/release/libpam_gaze_grosshack.so
 
+# Stage the Plasma System Settings page in dist/kcm. Only RPM hosts build it: deb and Arch packages
+# are built on hosts without the KDE Frameworks 6 development files.
+[arg("format", pattern="deb|rpm|archlinux")]
+[group("build")]
+build-kcm format="rpm":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ "{{ format }}" = rpm ] || exit 0
+    rm -rf dist/kcm
+    cmake -S integrations/kde/kcm -B target/kcm -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release
+    cmake --build target/kcm
+    DESTDIR="$PWD/dist/kcm" cmake --install target/kcm
+
 [private]
 prepare-ort:
     bash scripts/prepare-ort.sh {{ quote(ort_version) }} {{ quote(arch) }}
@@ -149,6 +162,10 @@ _nfpm config format:
         [ -f "$src" ] || { echo "_nfpm: {{ config }} ships $src, which has not been built" >&2; exit 1; }
         binaries+=("$src")
     done < <(grep -oE 'target/release/(gaze-gui|gazed|gaze|lib[A-Za-z0-9_.+-]+)' {{ quote(config) }} | sort -u)
+    # The staged System Settings page is a plugin built by build-kcm, not a cargo artifact.
+    if [ "{{ format }}" = rpm ] && grep -q 'dist/kcm' {{ quote(config) }}; then
+        while read -r src; do binaries+=("$src"); done < <(find dist/kcm -name '*.so' | sort)
+    fi
 
     needed() { objdump -p "${binaries[@]}" | awk '/NEEDED/ { print $2 }' | sort -u; }
 
@@ -242,7 +259,7 @@ _nfpm config format:
     export RPM_GSTREAMER_GOOD="gstreamer1-plugins-good"
     export RPM_GSTREAMER_PIPEWIRE="pipewire-gstreamer"
     if [ "{{ format }}" = rpm ] && is_suse; then
-        export RPM_GSTREAMER_BASE="gstreamer-plugins-base"
+            export RPM_GSTREAMER_BASE="gstreamer-plugins-base"
         export RPM_GSTREAMER_GOOD="gstreamer-plugins-good"
         export RPM_GSTREAMER_PIPEWIRE="gstreamer-plugin-pipewire"
     fi
@@ -562,8 +579,14 @@ _verify-package format:
     ok "$base ships both hyprlock PAM stacks"
 
     load gaze-kde
-    want_files /usr/bin/gaze-kde-pam \
-        /usr/share/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop
+    if [ "{{ format }}" = rpm ]; then
+        want_files /usr/bin/gaze-kde-pam /usr/share/applications/kcm_gaze.desktop
+        grep -Eq '^/usr/lib[^/]*/qt6/plugins/plasma/kcms/systemsettings/kcm_gaze\.so$' <<< "$paths" \
+            || fail "$base does not ship the System Settings plugin"
+    else
+        want_files /usr/bin/gaze-kde-pam \
+            /usr/share/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop
+    fi
     want_size /usr/bin/gaze-kde-pam 1000
     want_scripts "$post" "$postun"
     if [ "{{ format }}" = archlinux ]; then
@@ -602,7 +625,7 @@ _verify-package format:
 [arg("format", pattern="deb|rpm|archlinux")]
 [group("package")]
 [parallel]
-package format: build-rust build-selinux && (package-prebuilt format)
+package format: build-rust build-selinux (build-kcm format) && (package-prebuilt format)
 
 # Package already-built artifacts for a given packager
 [arg("format", pattern="deb|rpm|archlinux")]

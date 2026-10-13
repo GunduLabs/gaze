@@ -44,11 +44,28 @@ scripts:
   postremove: "packaging/postrm-kde.sh"
 
 overrides:
-  deb:
+  # RPM hosts build the System Settings page, so the staged tree replaces the external module that launches gaze-gui.
+  rpm:
+    contents:
+      - src: "integrations/kde/gaze-kde-pam"
+        dst: "/usr/bin/gaze-kde-pam"
+        file_info:
+          mode: 0755
+      - src: "dist/kcm/usr/lib64/qt6/plugins/plasma/kcms/systemsettings/kcm_gaze.so"
+        dst: "/usr/lib64/qt6/plugins/plasma/kcms/systemsettings/kcm_gaze.so"
+        file_info:
+          mode: 0755
+      - src: "dist/kcm/usr/share/applications/kcm_gaze.desktop"
+        dst: "/usr/share/applications/kcm_gaze.desktop"
+        file_info:
+          mode: 0644
+    depends:
+      - kf6-kirigami
+${RPM_LIB_DEPENDS}
     recommends:
       - gaze
       - gaze-gui
-  rpm:
+  deb:
     recommends:
       - gaze
       - gaze-gui

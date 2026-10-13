@@ -67,6 +67,14 @@ BuildRequires:  gstreamer-plugins-base
 BuildRequires:  gstreamer-plugins-good
 BuildRequires:  gstreamer-plugin-pipewire
 BuildRequires:  libopenssl-devel
+BuildRequires:  cmake
+BuildRequires:  kf6-extra-cmake-modules
+BuildRequires:  qt6-base-devel
+BuildRequires:  qt6-declarative-devel
+BuildRequires:  kf6-kcoreaddons-devel
+BuildRequires:  kf6-ki18n-devel
+BuildRequires:  kf6-kcmutils-devel
+BuildRequires:  kf6-kirigami-devel
 Requires:       pam-config
 Requires:       gstreamer-plugins-base
 Requires:       gstreamer-plugins-good
@@ -80,6 +88,14 @@ BuildRequires:  gstreamer1-plugins-base
 BuildRequires:  gstreamer1-plugins-good
 BuildRequires:  pipewire-gstreamer
 BuildRequires:  openssl-devel
+BuildRequires:  cmake
+BuildRequires:  extra-cmake-modules
+BuildRequires:  qt6-qtbase-devel
+BuildRequires:  qt6-qtdeclarative-devel
+BuildRequires:  kf6-kcoreaddons-devel
+BuildRequires:  kf6-ki18n-devel
+BuildRequires:  kf6-kcmutils-devel
+BuildRequires:  kf6-kirigami-devel
 Recommends:     authselect
 Requires:       gstreamer1-plugins-base
 Requires:       gstreamer1-plugins-good
@@ -152,11 +168,12 @@ Enable with gaze-omarchy enable from an unlocked Omarchy desktop.
 Summary:        KDE Plasma lock screen and System Settings integration for Gaze
 Recommends:     %{name}%{?_isa} = %{version}-%{release}
 Recommends:     %{name}-gui%{?_isa} = %{version}-%{release}
+Requires:       kf6-kirigami
 
 %description kde
 Runs Gaze in the biometric PAM slot KScreenLocker starts before you touch
 anything, so the KDE Plasma lock screen unlocks on a face match with no key
-press, and adds a Face Unlock entry to System Settings. Ships no PAM service
+press, and adds a Gaze page to System Settings. Ships no PAM service
 file of its own: plasma-workspace owns those, so they are edited in place.
 
 %prep
@@ -186,6 +203,9 @@ checkmodule -M -m -o gaze-gdm-camera.mod packaging/selinux/gaze-gdm-camera.te
 semodule_package -o gaze-gdm-camera.pp -m gaze-gdm-camera.mod
 checkmodule -M -m -o gaze-greeter-keyring.mod packaging/selinux/gaze-greeter-keyring.te
 semodule_package -o gaze-greeter-keyring.pp -m gaze-greeter-keyring.mod
+
+cmake -S integrations/kde/kcm -B kcm-build -DCMAKE_INSTALL_PREFIX=%{_prefix} -DCMAKE_BUILD_TYPE=Release
+cmake --build kcm-build %{?_smp_mflags}
 
 %install
 install -Dpm 0755 target/release/gazed %{buildroot}%{_bindir}/gazed
@@ -239,7 +259,7 @@ mkdir -p %{buildroot}%{_datadir}/gaze/omarchy
 install -pm 0644 integrations/omarchy/*.qml integrations/omarchy/*.json integrations/omarchy/THIRD_PARTY_NOTICES.md %{buildroot}%{_datadir}/gaze/omarchy/
 
 install -Dpm 0755 integrations/kde/gaze-kde-pam %{buildroot}%{_bindir}/gaze-kde-pam
-install -Dpm 0644 integrations/kde/gaze-face-unlock.desktop %{buildroot}%{_datadir}/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop
+DESTDIR=%{buildroot} cmake --install kcm-build
 
 %if 0%{?suse_version}
 install -Dpm 0644 packaging/pam/hyprlock-gaze.suse %{buildroot}%{_sysconfdir}/pam.d/hyprlock-gaze
@@ -351,7 +371,8 @@ ${SCRIPTLET_HYPRLOCK_POSTUN}
 %files kde
 %license LICENSE
 %{_bindir}/gaze-kde-pam
-%{_datadir}/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop
+%{_libdir}/qt6/plugins/plasma/kcms/systemsettings/kcm_gaze.so
+%{_datadir}/applications/kcm_gaze.desktop
 
 %changelog
 * ${CHANGELOG_DATE} Gundu Labs <maintainers@gundulabs.com> - ${VERSION}-${PACKAGE_RELEASE}
