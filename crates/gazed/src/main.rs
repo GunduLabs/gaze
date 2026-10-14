@@ -239,6 +239,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
 
     let resume_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let resume_seen = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (sleeping_tx, sleeping) = tokio::sync::watch::channel(false);
     let lock_epochs: daemon::LockEpochs = Arc::new(Mutex::new(std::collections::HashMap::new()));
     let claim_state: daemon::ClaimStateHandle = Arc::new(Mutex::new(None));
     let active_cancel: daemon::ActiveCancelHandle = Arc::new(Mutex::new(None));
@@ -270,6 +271,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
         pam_internal: pam_internal.clone(),
         resume_pending: resume_pending.clone(),
         resume_seen: resume_seen.clone(),
+        sleeping,
         lock_epochs: lock_epochs.clone(),
         benchmark_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         last_good_config: Arc::new(Mutex::new(config.clone())),
@@ -288,6 +290,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
         conn.clone(),
         resume_pending,
         resume_seen,
+        sleeping_tx,
     ));
     tokio::spawn(daemon::watch_session_locks(conn.clone(), lock_epochs));
 

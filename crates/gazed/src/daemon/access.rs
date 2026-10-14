@@ -252,13 +252,80 @@ impl AuthDaemon {
             }
         }
 
-        let abort_if_lid_closed = *self.abort_if_lid_closed.lock().await;
-        if abort_if_lid_closed && Self::is_lid_closed().await {
-            warn!("Laptop lid is closed, aborting face auth");
-            return Err(fdo::Error::Failed("lid closed".into()));
-        }
-
         Ok(())
+    }
+
+    pub(super) async fn lid_closed_wait(&self) -> fdo::Result<bool> {
+        let abort_if_lid_closed = *self.abort_if_lid_closed.lock().await;
+        if !abort_if_lid_closed || !Self::is_lid_closed().await {
+            return Ok(false);
+        }
+        let sleeping = *self.sleeping.borrow();
+        if sleeping || Self::lid_close_sleeps().await {
+            return Ok(true);
+        }
+        warn!("Laptop lid is closed, aborting face auth");
+        Err(fdo::Error::Failed("lid closed".into()))
+    }
+
+    pub(super) fn lid_close_action<'a>(
+        docked: bool,
+        on_external_power: bool,
+        handle: &'a str,
+        handle_external_power: &'a str,
+        handle_docked: &'a str,
+    ) -> &'a str {
+        if docked {
+            handle_docked
+        } else if on_external_power && !handle_external_power.is_empty() {
+            handle_external_power
+        } else {
+            handle
+        }
+    }
+
+    pub(super) fn action_sleeps(action: &str) -> bool {
+        matches!(
+            action,
+            "suspend" | "hibernate" | "hybrid-sleep" | "suspend-then-hibernate" | "sleep"
+        )
+    }
+
+    pub(super) async fn lid_close_sleeps() -> bool {
+        let Ok(conn) = system_bus().await else {
+            return false;
+        };
+        let Ok(proxy) = zbus::Proxy::new(
+            &conn,
+            "org.freedesktop.login1",
+            "/org/freedesktop/login1",
+            "org.freedesktop.login1.Manager",
+        )
+        .await
+        else {
+            return false;
+        };
+        let docked: bool = proxy.get_property("Docked").await.unwrap_or(false);
+        let on_external_power: bool = proxy.get_property("OnExternalPower").await.unwrap_or(false);
+        let handle: String = proxy
+            .get_property("HandleLidSwitch")
+            .await
+            .unwrap_or_default();
+        let handle_external_power: String = proxy
+            .get_property("HandleLidSwitchExternalPower")
+            .await
+            .unwrap_or_default();
+        let handle_docked: String = proxy
+            .get_property("HandleLidSwitchDocked")
+            .await
+            .unwrap_or_default();
+        Self::action_sleeps(Self::lid_close_action(
+            docked,
+            on_external_power,
+            &handle,
+            &handle_external_power,
+            &handle_docked,
+        ))
     }
 
     pub(super) async fn ensure_user_access(
@@ -639,6 +706,42 @@ mod tests {
         assert!(AuthDaemon::lid_state_is_closed("state:      closed\n"));
         assert!(AuthDaemon::lid_state_is_closed("State: CLOSED\n"));
         assert!(!AuthDaemon::lid_state_is_closed("state:      open\n"));
+    }
+
+    #[test]
+    fn lid_close_action_follows_logind_precedence() {
+        assert_eq!(
+            AuthDaemon::lid_close_action(true, true, "suspend", "lock", "ignore"),
+            "ignore"
+        );
+        assert_eq!(
+            AuthDaemon::lid_close_action(false, true, "suspend", "lock", "ignore"),
+            "lock"
+        );
+        assert_eq!(
+            AuthDaemon::lid_close_action(false, true, "suspend", "", "ignore"),
+            "suspend"
+        );
+        assert_eq!(
+            AuthDaemon::lid_close_action(false, false, "suspend", "lock", "ignore"),
+            "suspend"
+        );
+    }
+
+    #[test]
+    fn only_sleeping_lid_actions_wait_for_suspend() {
+        for action in [
+            "suspend",
+            "hibernate",
+            "hybrid-sleep",
+            "suspend-then-hibernate",
+            "sleep",
+        ] {
+            assert!(AuthDaemon::action_sleeps(action), "{action}");
+        }
+        for action in ["ignore", "lock", "poweroff", "reboot", "halt", "kexec", ""] {
+            assert!(!AuthDaemon::action_sleeps(action), "{action}");
+        }
     }
 
     #[test]
