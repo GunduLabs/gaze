@@ -26,7 +26,6 @@ async fn preparing_for_sleep(conn: &zbus::Connection) -> zbus::Result<bool> {
     .await?
     .get_property("PreparingForSleep")
     .await
-    .map_err(Into::into)
 }
 
 pub async fn watch_resume(
