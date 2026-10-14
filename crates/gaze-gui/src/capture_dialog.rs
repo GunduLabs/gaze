@@ -62,11 +62,11 @@ pub fn show_capture_dialog(
     let is_refine = face_name.is_some();
 
     let dialog = libadwaita::Window::new();
-    dialog.set_title(Some(if is_refine {
-        "Updating Face Template"
-    } else {
-        "New Face Template"
-    }));
+    let title = match face_name {
+        Some(name) => format!("Improve “{name}”"),
+        None => "Add Face".to_string(),
+    };
+    dialog.set_title(Some(&title));
     dialog.set_default_size(500, if is_refine { 450 } else { 530 });
     dialog.set_modal(true);
     dialog.set_transient_for(
@@ -109,7 +109,7 @@ pub fn show_capture_dialog(
 
     if !is_refine {
         let entry = libadwaita::EntryRow::new();
-        entry.set_title("Face Name");
+        entry.set_title("Face name");
         entry.set_text("default");
         let group = libadwaita::PreferencesGroup::new();
         group.add(&entry);
@@ -148,11 +148,7 @@ pub fn show_capture_dialog(
     progress.set_visible(false);
     body.append(&progress);
 
-    let start_btn = gtk4::Button::with_label(if is_refine {
-        "Start Update"
-    } else {
-        "Start Capture"
-    });
+    let start_btn = gtk4::Button::with_label("Start Capture");
     start_btn.add_css_class("suggested-action");
     start_btn.add_css_class("pill");
     start_btn.set_halign(gtk4::Align::Center);
@@ -189,11 +185,7 @@ pub fn show_capture_dialog(
         stop_btn,
         move |parent: gtk4::Window| {
             let confirm = libadwaita::MessageDialog::builder()
-                .heading(if is_refine {
-                    "Cancel Template Update?"
-                } else {
-                    "Cancel Template Capture?"
-                })
+                .heading("Cancel Enrollment?")
                 .body("This will discard any partial captures.")
                 .transient_for(&parent)
                 .build();
@@ -308,7 +300,7 @@ pub fn show_capture_dialog(
             prompt_label.set_visible(true);
             progress_label.set_visible(true);
             progress.set_visible(true);
-            prompt_label.set_text("Starting enrollment...");
+            prompt_label.set_text("Starting enrollment…");
 
             let preview_live = Rc::new(Cell::new(false));
             let face_name = resolved_face.borrow().clone();
@@ -418,7 +410,7 @@ pub fn show_capture_dialog(
 
                                     if is_done && raw_msg == EnrollPrompt::Completed {
                                         enrollment_completed.set(true);
-                                        prompt_label.set_text("✓ Enrollment Complete!");
+                                        prompt_label.set_text("Enrollment complete");
                                         stop_btn.set_visible(false);
                                         on_done();
                                         glib::timeout_add_local_once(

@@ -340,7 +340,7 @@ pub(super) async fn check_daemon(
         Ok(Ok(faces)) => {
             report.pass(
                 "Enrollment",
-                format!("{} face profile(s) enrolled for {username}", faces.len()),
+                format!("{} face(s) enrolled for {username}", faces.len()),
             );
             if let Some(config) = config {
                 let missing_rgb = !config.cameras.rgb.trim().is_empty()

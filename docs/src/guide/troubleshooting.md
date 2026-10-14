@@ -18,7 +18,7 @@ Each line is marked with what it found:
 | Mark | Meaning |
 |---|---|
 | `✓` | Working. |
-| `○` | A working feature you have switched off, such as GDM login face auth or template encryption. Not a problem. The dim line underneath is the recipe that switches it on. |
+| `○` | A working feature you have switched off, such as GDM login face authentication or template encryption. Not a problem. The dim line underneath is the recipe that switches it on. |
 | `!` | Warning: Gaze still works, but something is degraded or not wired up. |
 | `✗` | Error: this part will not work until you fix it. `gaze doctor` exits `1`. |
 
@@ -104,7 +104,7 @@ or build and install Gaze from source against the new OpenCV.
 
 ### Gaze disappears after an AUR helper upgrade (Arch Linux)
 
-If face auth stops working across every surface at once (sudo, polkit, the lock
+If face authentication stops working across every surface at once (sudo, polkit, the lock
 screen, greetd) and `systemctl status gazed` reports that the unit does not
 exist, check whether an AUR helper replaced Gaze with an unrelated package:
 
@@ -340,7 +340,7 @@ ir = "/dev/video2"
 emitter_enabled = true
 ```
 
-## 4. Lock screen does not trigger face auth
+## 4. Lock screen does not trigger face authentication
 
 ### GNOME
 
@@ -361,10 +361,10 @@ journalctl -u gazed -b
 
 Older Gaze builds could try to use the selected user's PipeWire runtime before that user session existed. Update Gaze if you see this behavior.
 
-#### GDM shows no face auth at all, and its journal says nothing
+#### GDM shows no face authentication at all, and its journal says nothing
 
 Different from the SELinux case below: there the prompt appears and the camera
-stays dark, here nothing about face auth appears at the login screen and the
+stays dark, here nothing about face authentication appears at the login screen and the
 greeter logs nothing, while the lock screen, `sudo` and `gaze auth` all work.
 
 The greeter has GNOME Shell's extension kill switch on, which stops every
@@ -387,11 +387,11 @@ sudo reboot
 
 GDM writes the file again with its own defaults. The path is under `/var/lib/gdm3`
 on Debian and Ubuntu, and a multi-seat machine has one directory per seat.
-`gaze doctor` reports this as **GDM login face auth** and names the exact file.
+`gaze doctor` reports this as **GDM login face authentication** and names the exact file.
 
 #### GDM never scans on Fedora or SELinux-enabled systems
 
-If face auth works in your desktop session (`sudo`, the lock screen, `gaze auth`)
+If face authentication works in your desktop session (`sudo`, the lock screen, `gaze auth`)
 but the GDM login screen never opens the camera, SELinux may be denying the
 greeter the camera device. Gaze ships a policy module for this and the
 extension package loads it on install, but that step cannot fail the package
@@ -468,15 +468,15 @@ sudo gaze-kde-pam enable
 gaze-kde-pam status
 ```
 
-The lock screen only starts face auth on its own when `/etc/pam.d/kde-fingerprint`
+The lock screen only starts face authentication on its own when `/etc/pam.d/kde-fingerprint`
 runs `pam_gaze.so`. Without it, KScreenLocker has no biometric slot to start and
-face auth waits until you submit the password field.
+face authentication waits until you submit the password field.
 
 If `gaze doctor` warns that the slot runs `pam_gaze.so` in simultaneous mode, replace it with
 the plain module without `simultaneous`: the simultaneous mode waits for a password prompt the greeter can
 never answer, which wedges the slot for the rest of the lock.
 
-At the **login greeter** (Plasma Login Manager or SDDM), face auth is opt-in and,
+At the **login greeter** (Plasma Login Manager or SDDM), face authentication is opt-in and,
 unless the greeter ships an up-front biometric service, starts only when the login
 form is submitted: press Enter with the password field empty, exactly as you would
 for a fingerprint reader there. See the [KDE Plasma guide](/guide/kde).

@@ -34,6 +34,10 @@ gui_pkg := if gui_off == "1" { "" } else { "-p gaze-gui" }
 gui_exclude := if gui_off == "1" { "--exclude gaze-gui" } else { "" }
 gui_notice := if gui_off == "1" { "echo 'note: GAZE_GUI is off, gaze-gui is excluded here; CI still checks it'" } else { "true" }
 
+# `GAZE_KCM=legacy` stages the System Settings entry that opens gaze-gui instead of the Plasma 6 page,
+# for hosts without KDE Frameworks 6 such as Ubuntu 24.04, which still ships Plasma 5.
+kcm := lowercase(env("GAZE_KCM", "plasma6"))
+
 # Derived vars
 multiarch := if arch == "aarch64" { "aarch64-linux-gnu" } else { "x86_64-linux-gnu" }
 deb_arch := if arch == "x86_64" { "amd64" } else if arch == "aarch64" { "arm64" } else { arch }
@@ -54,6 +58,30 @@ build-rust: prepare-ort
     {{ opencv_env }} cargo build -p gazed --release
     {{ opencv_env }} cargo build -p gaze-cli {{ gui_pkg }} -p pam-gaze -p pam-gaze-grosshack --release
     scripts/check-pam-link.sh target/release/libpam_gaze.so target/release/libpam_gaze_grosshack.so
+
+# Stage the gaze-kde System Settings files in dist/kcm
+[arg("format", pattern="deb|rpm|archlinux")]
+[group("build")]
+build-kcm format="rpm":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -rf dist/kcm
+    case {{ quote(kcm) }} in
+    plasma6)
+        cmake -S integrations/kde/kcm -B target/kcm -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release
+        cmake --build target/kcm
+        DESTDIR="$PWD/dist/kcm" cmake --install target/kcm
+        ;;
+    legacy)
+        [ "{{ format }}" != rpm ] || { echo "build-kcm: every RPM target runs Plasma 6, so GAZE_KCM=legacy is for deb and Arch only" >&2; exit 1; }
+        install -Dm0644 integrations/kde/gaze-face-unlock.desktop \
+            dist/kcm/usr/share/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop
+        ;;
+    *)
+        echo "build-kcm: GAZE_KCM must be plasma6 or legacy, got {{ kcm }}" >&2
+        exit 1
+        ;;
+    esac
 
 [private]
 prepare-ort:
@@ -149,6 +177,33 @@ _nfpm config format:
         [ -f "$src" ] || { echo "_nfpm: {{ config }} ships $src, which has not been built" >&2; exit 1; }
         binaries+=("$src")
     done < <(grep -oE 'target/release/(gaze-gui|gazed|gaze|lib[A-Za-z0-9_.+-]+)' {{ quote(config) }} | sort -u)
+    # build-kcm stages either the Plasma 6 page or the legacy entry, with paths that vary by distro.
+    export KCM_CONTENTS="  # unused for {{ config }}"
+    export KCM_DEPENDS="      # unused for {{ config }}"
+    export KCM_RECOMMENDS="      # unused for {{ config }}"
+    if grep -q 'KCM_CONTENTS' {{ quote(config) }}; then
+        [ -d dist/kcm ] || { echo "_nfpm: {{ config }} ships dist/kcm, which is not staged; run just build-kcm {{ format }}" >&2; exit 1; }
+        KCM_CONTENTS=""
+        native=""
+        while read -r src; do
+            mode=0644
+            [ -x "$src" ] && mode=0755
+            printf -v entry '  - src: "%s"\n    dst: "%s"\n    file_info:\n      mode: %s\n' "$src" "${src#dist/kcm}" "$mode"
+            KCM_CONTENTS+=$entry
+            case "$src" in *.so) binaries+=("$src"); native=1 ;; esac
+        done < <(find dist/kcm -type f | sort)
+        [ -n "$KCM_CONTENTS" ] || { echo "_nfpm: dist/kcm is empty; run just build-kcm {{ format }}" >&2; exit 1; }
+        [ -n "$native" ] || [ "{{ format }}" != rpm ] || { echo "_nfpm: RPM packages must ship the Plasma 6 page" >&2; exit 1; }
+        if [ -n "$native" ]; then
+            case "{{ format }}" in
+            deb) KCM_DEPENDS=$(printf '      - %s\n' qml6-module-org-kde-kirigami qml6-module-org-kde-kcmutils) ;;
+            rpm) KCM_DEPENDS=$(printf '      - %s\n' kf6-kirigami) ;;
+            archlinux) KCM_DEPENDS=$(printf '      - %s\n' kcmutils kirigami) ;;
+            esac
+        else
+            KCM_RECOMMENDS="      - gaze-gui"
+        fi
+    fi
 
     needed() { objdump -p "${binaries[@]}" | awk '/NEEDED/ { print $2 }' | sort -u; }
 
@@ -252,7 +307,7 @@ _nfpm config format:
     esac
 
     tmp_config=$(mktemp)
-    envsubst '$MULTIARCH $OPENCV_MIN $OPENCV_NEXT $DEB_LIB_DEPENDS $RPM_LIB_DEPENDS $RPM_GSTREAMER_BASE $RPM_GSTREAMER_GOOD $RPM_GSTREAMER_PIPEWIRE' < {{ quote(config) }} > "$tmp_config"
+    envsubst '$MULTIARCH $OPENCV_MIN $OPENCV_NEXT $DEB_LIB_DEPENDS $RPM_LIB_DEPENDS $RPM_GSTREAMER_BASE $RPM_GSTREAMER_GOOD $RPM_GSTREAMER_PIPEWIRE $KCM_CONTENTS $KCM_DEPENDS $KCM_RECOMMENDS' < {{ quote(config) }} > "$tmp_config"
     {{ quote(nfpm) }} pkg -f "$tmp_config" --packager {{ format }} --target dist/packages
     rm -f "$tmp_config"
 
@@ -562,8 +617,24 @@ _verify-package format:
     ok "$base ships both hyprlock PAM stacks"
 
     load gaze-kde
-    want_files /usr/bin/gaze-kde-pam \
-        /usr/share/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop
+    want_files /usr/bin/gaze-kde-pam
+    legacy_entry=/usr/share/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop
+    if grep -Eq '^/usr/lib(64)?/([^/]+/)?qt6/plugins/plasma/kcms/systemsettings/kcm_gaze\.so$' <<< "$paths"; then
+        want_files /usr/share/applications/kcm_gaze.desktop \
+            /usr/share/applications/com.gundulabs.Gaze.Settings.desktop \
+            /usr/share/icons/hicolor/scalable/apps/com.gundulabs.Gaze.Settings.svg
+        case "{{ format }}" in
+        deb) want_depends qml6-module-org-kde-kirigami qml6-module-org-kde-kcmutils ;;
+        rpm) want_depends kf6-kirigami ;;
+        archlinux) want_depends kcmutils kirigami ;;
+        esac
+        ! grep -Fxq "$legacy_entry" <<< "$paths" \
+            || fail "$base ships both the Plasma 6 page and the legacy entry; System Settings would list Gaze twice"
+    elif [ "{{ format }}" = rpm ]; then
+        fail "$base does not ship the System Settings plugin"
+    else
+        want_files "$legacy_entry"
+    fi
     want_size /usr/bin/gaze-kde-pam 1000
     want_scripts "$post" "$postun"
     if [ "{{ format }}" = archlinux ]; then
@@ -602,7 +673,7 @@ _verify-package format:
 [arg("format", pattern="deb|rpm|archlinux")]
 [group("package")]
 [parallel]
-package format: build-rust build-selinux && (package-prebuilt format)
+package format: build-rust build-selinux (build-kcm format) && (package-prebuilt format)
 
 # Package already-built artifacts for a given packager
 [arg("format", pattern="deb|rpm|archlinux")]

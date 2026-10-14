@@ -380,7 +380,7 @@ fn device_video_node(device: &gstreamer::Device) -> Option<String> {
     path.starts_with("/dev/video").then_some(path)
 }
 
-const PRIMARY_CAMERA_DISPLAY_NAME: &str = "Primary Camera";
+const PRIMARY_CAMERA_DISPLAY_NAME: &str = "Primary camera";
 pub const IR_NONE_DISPLAY_NAME: &str = "None";
 pub const RGB_NONE_DISPLAY_NAME: &str = "None (IR only)";
 const DEVICE_SETTLE_TIMEOUT_MS: u64 = 100;

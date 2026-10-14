@@ -67,7 +67,7 @@ same daemon code runs on every surface, so a problem you can reproduce with
 ### Suspend during an attempt
 
 A locker started on lid close, such as hyprlock from hypridle's `before_sleep_cmd`, asks
-for face auth a moment before the machine sleeps. Without special handling that attempt
+for face authentication a moment before the machine sleeps. Without special handling that attempt
 fails against a closed lid or a black frame, and the locker shows a password prompt after
 resume with Gaze no longer scanning.
 

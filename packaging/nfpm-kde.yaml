@@ -20,12 +20,7 @@ contents:
     dst: "/usr/bin/gaze-kde-pam"
     file_info:
       mode: 0755
-  # System Settings scans this directory and launches the entry's Exec.
-  - src: "integrations/kde/gaze-face-unlock.desktop"
-    dst: "/usr/share/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop"
-    file_info:
-      mode: 0644
-
+${KCM_CONTENTS}
 deb:
   signature:
     method: debsign
@@ -45,14 +40,21 @@ scripts:
 
 overrides:
   deb:
+    depends:
+${KCM_DEPENDS}
+${DEB_LIB_DEPENDS}
     recommends:
       - gaze
-      - gaze-gui
+${KCM_RECOMMENDS}
   rpm:
+    depends:
+${KCM_DEPENDS}
+${RPM_LIB_DEPENDS}
     recommends:
       - gaze
-      - gaze-gui
   archlinux:
+    depends:
+${KCM_DEPENDS}
     recommends:
       - gaze
-      - gaze-gui
+${KCM_RECOMMENDS}

@@ -71,7 +71,7 @@ in the extension preferences:
 | Face retry mode | `face-retry-mode` | `disabled`, `fixed`, `infinite` | `fixed` |
 | Maximum face tries | `max-face-tries` | 2 to 20 | 3 |
 
-- `disabled`: one attempt. After it fails, face auth stops for that cycle and you
+- `disabled`: one attempt. After it fails, face authentication stops for that cycle and you
   finish with your password.
 - `fixed`: retries until `max-face-tries` failures, then stops for that cycle.
 - `infinite`: keeps retrying for as long as the prompt is open. The password entry
@@ -80,7 +80,7 @@ in the extension preferences:
 `max-face-tries` only applies in `fixed` mode, and the extension clamps it to a
 minimum of 2 even if a lower value is configured.
 
-## Create a face profile
+## Enroll a face
 
 Enrollment does not live in the extension preferences. Use the Gaze settings app or the CLI:
 

@@ -33,7 +33,7 @@ features:
     link: /guide/pam
     linkText: Read the PAM guide
   - title: CLI and GUI tools
-    details: Add or remove face profiles, test recognition, and change settings from the terminal or GTK app.
+    details: Add or remove faces, test recognition, and change settings from the terminal or GTK app.
     link: /guide/cli
     linkText: See the CLI
   - title: Local-first

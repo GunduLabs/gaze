@@ -50,10 +50,10 @@ Desktop behavior:
 
 - CLI, GUI, and normal PAM prompts work without desktop extensions.
 - If the installer detects Cinnamon, it installs `gaze-cinnamon-extension` and enables it for the session.
-- If the installer detects KDE Plasma, it installs `gaze-kde` alongside the base packages, so the lock screen starts face auth on its own and a Face Unlock entry appears in System Settings.
+- If the installer detects KDE Plasma, it installs `gaze-kde` alongside the base packages, so the lock screen starts face authentication on its own and a Gaze page appears in System Settings.
 - On Quickshell Omarchy, it installs the Gaze lock plugin and enables it from the unlocked desktop user session.
 - If you later want GNOME or Cinnamon lock screen support, install the appropriate extension package manually from your desktop session.
-- GDM loads the extension from package defaults when the extension package is installed, but GDM login face auth stays disabled unless you explicitly enable it.
+- GDM loads the extension from package defaults when the extension package is installed, but GDM login face authentication stays disabled unless you explicitly enable it.
 
 For non-interactive installs:
 
@@ -226,13 +226,13 @@ gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 
 Reboot once after installing or updating the extension if the lock screen does not pick it up immediately. Run the two commands above from a session that started **after** the package was installed: GNOME Shell drops extension IDs it has not scanned yet, so enabling one from the session you installed in can look right and then be gone after the next logout. See [The extension disappears again after a logout](/guide/gnome#the-extension-disappears-again-after-a-logout).
 
-GDM login face auth stays disabled unless you explicitly enable it; see the [GNOME Extension guide](/guide/gnome) before doing that.
+GDM login face authentication stays disabled unless you explicitly enable it; see the [GNOME Extension guide](/guide/gnome) before doing that.
 
 ### KDE Plasma and other PAM-based desktops
 
-The one-line installer detects KDE Plasma and intentionally skips `gaze-gnome-extension`, because that package depends on GNOME Shell. It installs `gaze-kde` instead, which makes the KDE **lock screen** start face auth on its own with no key press and adds a Face Unlock entry to System Settings. Keep password fallback enabled while testing.
+The one-line installer detects KDE Plasma and intentionally skips `gaze-gnome-extension`, because that package depends on GNOME Shell. It installs `gaze-kde` instead, which makes the KDE **lock screen** start face authentication on its own with no key press and adds a Gaze page to System Settings. Keep password fallback enabled while testing.
 
-The KDE **login greeter** (Plasma Login Manager, or SDDM) is a separate program with no up-front biometric slot upstream, so face auth there starts when you submit the login form, exactly as a fingerprint reader does on the same screen. See the [KDE Plasma guide](/guide/kde#login-greeter).
+The KDE **login greeter** (Plasma Login Manager, or SDDM) is a separate program with no up-front biometric slot upstream, so face authentication there starts when you submit the login form, exactly as a fingerprint reader does on the same screen. See the [KDE Plasma guide](/guide/kde#login-greeter).
 
 For other PAM-based desktops, use the base `gaze` package's PAM modules and see the [PAM guide](/guide/pam).
 

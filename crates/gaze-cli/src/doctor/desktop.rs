@@ -115,12 +115,12 @@ pub(super) fn check_desktop_integration(report: &mut Report) {
         match extension_setting("enable-face-authentication") {
             Ok((true, value)) if value == "true" => {
                 report.pass(
-                    "GNOME lock-screen face auth",
+                    "GNOME lock-screen face authentication",
                     "enabled for the current user",
                 );
             }
             Ok((true, _)) => report.off(
-                "GNOME lock-screen face auth",
+                "GNOME lock-screen face authentication",
                 "off for the current user, so the lock screen only takes your password",
                 format!(
                     "Turn it on: {}.\n\
@@ -130,12 +130,12 @@ pub(super) fn check_desktop_integration(report: &mut Report) {
                 ),
             ),
             Ok((false, message)) => report.warning(
-                "GNOME lock-screen face auth",
+                "GNOME lock-screen face authentication",
                 format!("could not read the extension setting: {message}"),
                 "Reinstall the Gaze GNOME extension package.",
             ),
             Err(err) => report.warning(
-                "GNOME lock-screen face auth",
+                "GNOME lock-screen face authentication",
                 format!("could not read the extension setting: {err}"),
                 "Reinstall the Gaze GNOME extension package.",
             ),
@@ -145,25 +145,25 @@ pub(super) fn check_desktop_integration(report: &mut Report) {
         let dconf_face_auth = gdm_face_auth_from_dconf();
         match (dconf_face_auth, override_exists) {
             (Some(false), true) => report.warning(
-                "GDM login face auth",
+                "GDM login face authentication",
                 format!(
                     "{GDM_FACE_OVERRIDE_PATH} enables it, but the compiled GDM dconf database still reports it disabled"
                 ),
                 "Run `sudo dconf update`, then restart GDM (or reboot).",
             ),
             (Some(true), false) => report.pass(
-                "GDM login face auth",
+                "GDM login face authentication",
                 "enabled in the GDM dconf profile by your system configuration, not by Gaze (on NixOS, `services.gaze.gnome.gdmFaceLogin`)",
             ),
             (_, true) => match gdm_greeter_readiness() {
                 GdmGreeterReadiness::Ready => report.pass(
-                    "GDM login face auth",
+                    "GDM login face authentication",
                     format!(
                         "enabled system-wide via {GDM_FACE_OVERRIDE_PATH}; toggle it under Behavior -> GDM login screen in `gnome-extensions prefs {GNOME_EXTENSION_ID}`"
                     ),
                 ),
                 GdmGreeterReadiness::ProfileMissingSystemDb(profile) => report.error(
-                    "GDM login face auth",
+                    "GDM login face authentication",
                     format!(
                         "{GDM_FACE_OVERRIDE_PATH} exists, but the greeter's dconf profile {profile} does not list `system-db:{GDM_DCONF_PROFILE}`, so GDM never reads it"
                     ),
@@ -172,21 +172,21 @@ pub(super) fn check_desktop_integration(report: &mut Report) {
                     ),
                 ),
                 GdmGreeterReadiness::CompiledDbMissing => report.error(
-                    "GDM login face auth",
+                    "GDM login face authentication",
                     format!(
                         "{GDM_FACE_OVERRIDE_PATH} exists, but the compiled database {GDM_COMPILED_DB_PATH} does not"
                     ),
                     "Run `sudo dconf update`, then reboot.",
                 ),
                 GdmGreeterReadiness::ExtensionNotEnabled => report.error(
-                    "GDM login face auth",
+                    "GDM login face authentication",
                     format!(
                         "the GDM database does not enable {GNOME_EXTENSION_ID} for the greeter, so the login screen never starts the {GDM_FACE_PAM_SERVICE} PAM service"
                     ),
                     "Reinstall the Gaze GNOME extension package, run `sudo dconf update`, then reboot.",
                 ),
                 GdmGreeterReadiness::ExtensionsDisabled(source) => report.error(
-                    "GDM login face auth",
+                    "GDM login face authentication",
                     format!(
                         "the greeter resolves `org.gnome.shell disable-user-extensions` to true, which switches off every GNOME Shell extension at the login screen, {GNOME_EXTENSION_ID} included"
                     ),
@@ -204,7 +204,7 @@ pub(super) fn check_desktop_integration(report: &mut Report) {
                     },
                 ),
                 GdmGreeterReadiness::Unverifiable(why) => report.warning(
-                    "GDM login face auth",
+                    "GDM login face authentication",
                     format!(
                         "{GDM_FACE_OVERRIDE_PATH} enables it, but the greeter configuration could not be verified: {why}"
                     ),
@@ -212,13 +212,13 @@ pub(super) fn check_desktop_integration(report: &mut Report) {
                 ),
             },
             (_, false) => report.off(
-                "GDM login face auth",
+                "GDM login face authentication",
                 "off, so the login screen only takes your password (the lock screen is a separate switch)",
                 format!(
                     "Turn it on: {}, then reboot. It asks for admin authorization and writes {GDM_FACE_OVERRIDE_PATH} for you.\n\
                      By hand: put `enable-face-authentication=true` under `[org/gnome/shell/extensions/gaze]` in {GDM_FACE_OVERRIDE_PATH}, run `sudo dconf update`, then reboot.\n\
                      Details: {GNOME_DOCS_URL}#optional-enable-face-at-gdm-login",
-                    gnome_prefs_path("GDM login screen", "Enable face auth at GDM login")
+                    gnome_prefs_path("GDM login screen", "Enable face authentication at GDM login")
                 ),
             ),
         }
@@ -363,7 +363,7 @@ pub(super) fn check_kde_lock_screen(
         ),
         KdeLockStatus::NotWired => report.warning(
             NAME,
-            format!("{file} does not run Gaze, so face auth only starts after you submit the password field"),
+            format!("{file} does not run Gaze, so face authentication only starts after you submit the password field"),
             "Install the gaze-kde package, or run `sudo gaze-kde-pam enable`.",
         ),
         KdeLockStatus::NoService => report.warning(
@@ -382,15 +382,15 @@ pub(super) fn check_kde_login_greeter(report: &mut Report, plasmalogin_face: Opt
     match plasmalogin_face {
         None => report.pass(
             NAME,
-            "no up-front biometric service upstream, so face auth runs when you submit the login form (press Enter on an empty password field)",
+            "no up-front biometric service upstream, so face authentication runs when you submit the login form (press Enter on an empty password field)",
         ),
         Some(contents) if slot_status(Some(contents)) == KdeLockStatus::Wired => report.pass(
             NAME,
-            "plasmalogin-fingerprint runs Gaze, so face auth starts as soon as the greeter shows your user",
+            "plasmalogin-fingerprint runs Gaze, so face authentication starts as soon as the greeter shows your user",
         ),
         Some(_) => report.warning(
             NAME,
-            format!("{PLASMALOGIN_FACE_PAM_FILE} exists but does not run Gaze, so face auth at the greeter waits for you to submit the form"),
+            format!("{PLASMALOGIN_FACE_PAM_FILE} exists but does not run Gaze, so face authentication at the greeter waits for you to submit the form"),
             "Run `sudo gaze-kde-pam enable-login` to scan before you type.",
         ),
     }

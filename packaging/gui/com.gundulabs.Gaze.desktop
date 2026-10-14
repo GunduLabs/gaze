@@ -3,7 +3,7 @@
 
 [Desktop Entry]
 Name=Gaze
-Comment=GTK4/Adwaita GUI for Gaze
+Comment=Enroll faces and configure facial authentication
 Exec=gaze-gui
 Icon=com.gundulabs.Gaze
 Terminal=false

@@ -197,7 +197,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Authenticate a user with face recognition
+    /// Test face authentication for a user
     Auth {
         #[arg(short, long)]
         user: Option<String>,
@@ -215,33 +215,33 @@ enum Commands {
         )]
         silent: bool,
     },
-    /// Enroll a face profile with guided, multi-angle capture
+    /// Enroll a face with guided, multi-angle capture
     AddFace {
         #[arg(short, long)]
         user: Option<String>,
         #[arg(help = "The name of the face to enroll")]
         face: String,
     },
-    /// Add captures to improve recognition of an existing face profile
+    /// Add captures to improve recognition of an enrolled face
     RefineFace {
         #[arg(short, long)]
         user: Option<String>,
         #[arg(help = "The name of the face to refine", add = ArgValueCompleter::new(face_completer))]
         face: String,
     },
-    /// List the face profiles enrolled for a user
+    /// List the faces enrolled for a user
     ListFaces {
         #[arg(short, long)]
         user: Option<String>,
     },
-    /// Remove a face profile for a user
+    /// Remove an enrolled face
     RemoveFace {
         #[arg(short, long)]
         user: Option<String>,
         #[arg(help = "The name of the face to remove", add = ArgValueCompleter::new(face_completer))]
         face: String,
     },
-    /// Rename a face profile
+    /// Rename an enrolled face
     RenameFace {
         #[arg(short, long)]
         user: Option<String>,
@@ -502,17 +502,17 @@ async fn run_config_wizard(
     }
 
     config.auth.abort_if_ssh = Confirm::with_theme(&theme)
-        .with_prompt("Abort face auth for SSH sessions")
+        .with_prompt("Abort face authentication for SSH sessions")
         .default(config.auth.abort_if_ssh)
         .interact()?;
 
     config.auth.abort_if_lid_closed = Confirm::with_theme(&theme)
-        .with_prompt("Abort face auth when laptop lid is closed")
+        .with_prompt("Abort face authentication when laptop lid is closed")
         .default(config.auth.abort_if_lid_closed)
         .interact()?;
 
     config.auth.abort_before_first_resume = Confirm::with_theme(&theme)
-        .with_prompt("Abort face auth until the system has suspended and resumed once")
+        .with_prompt("Abort face authentication until the system has suspended and resumed once")
         .default(config.auth.abort_before_first_resume)
         .interact()?;
 
