@@ -324,9 +324,9 @@ KCM.ScrollViewKCM {
     Kirigami.PromptDialog {
         id: renameDialog
         property string faceName
+        readonly property string newName: nameEdit.text.trim()
         title: i18n("Rename Face")
         standardButtons: Kirigami.Dialog.Cancel | Kirigami.Dialog.Ok
-        readonly property string newName: nameEdit.text.trim()
         onAccepted: if (newName.length > 0 && newName !== faceName && !kcm.hasFace(newName)) kcm.renameFace(faceName, newName)
         onOpened: {
             nameEdit.text = faceName;

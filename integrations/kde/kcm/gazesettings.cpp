@@ -8,6 +8,7 @@
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
 #include <QDBusVariant>
+#include <memory>
 
 namespace
 {
@@ -183,6 +184,7 @@ void GazeSettings::load()
             top.endStructure();
         }
         top.endStructure();
+
         // These live outside the Config struct.
         auto staged = std::make_shared<QVariantMap>(values);
         auto pending = std::make_shared<int>(3);
@@ -190,12 +192,13 @@ void GazeSettings::load()
             if (*pending <= 0) {
                 return;
             }
-            if (r.type() == QDBusMessage::ErrorMessage && r.errorName() != QLatin1String("org.freedesktop.DBus.Error.UnknownMethod")) {
+            const bool failed = r.type() == QDBusMessage::ErrorMessage;
+            if (failed && r.errorName() != QLatin1String("org.freedesktop.DBus.Error.UnknownMethod")) {
                 *pending = 0;
                 setError(r.errorMessage());
                 return;
             }
-            if (r.type() != QDBusMessage::ErrorMessage) {
+            if (!failed) {
                 insert(*staged, r.arguments());
             }
             if (--*pending == 0 && !editPending()) {
@@ -243,7 +246,8 @@ void GazeSettings::checkAuthorization(bool interactive)
     details.beginMap(QMetaType::fromType<QString>(), QMetaType::fromType<QString>());
     details.endMap();
 
-    const uint flags = interactive ? 1 : 0;
+    constexpr uint AllowUserInteraction = 1;
+    const uint flags = interactive ? AllowUserInteraction : 0;
     const QVariantList args{QVariant::fromValue(subject), QStringLiteral("com.gundulabs.gaze.manage-config"), QVariant::fromValue(details), flags, QString()};
     GazeBus::call(this, QStringLiteral("org.freedesktop.PolicyKit1"), QStringLiteral("/org/freedesktop/PolicyKit1/Authority"), QStringLiteral("org.freedesktop.PolicyKit1.Authority"), QStringLiteral("CheckAuthorization"), args, [this](const QDBusMessage &reply) {
         if (reply.type() == QDBusMessage::ErrorMessage) {
@@ -397,13 +401,13 @@ void GazeSettings::clearCustomSecurity()
 
 void GazeSettings::coupleInferenceDevice(const QString &provider)
 {
-    const QString device = m_values.value(QStringLiteral("inference.device")).toString();
+    const QString key = QStringLiteral("inference.device");
     if (provider == QLatin1String("cpu")) {
-        m_values.insert(QStringLiteral("inference.device"), QStringLiteral("cpu"));
+        m_values.insert(key, QStringLiteral("cpu"));
     } else if (provider == QLatin1String("auto") || provider == QLatin1String("vitis")) {
-        m_values.insert(QStringLiteral("inference.device"), QStringLiteral("npu"));
-    } else if (device.isEmpty()) {
-        m_values.insert(QStringLiteral("inference.device"), QStringLiteral("cpu"));
+        m_values.insert(key, QStringLiteral("npu"));
+    } else if (m_values.value(key).toString().isEmpty()) {
+        m_values.insert(key, QStringLiteral("cpu"));
     }
 }
 

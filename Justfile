@@ -188,16 +188,17 @@ _nfpm config format:
         while read -r src; do
             mode=0644
             [ -x "$src" ] && mode=0755
-            KCM_CONTENTS+="  - src: \"$src\""$'\n'"    dst: \"${src#dist/kcm}\""$'\n'"    file_info:"$'\n'"      mode: $mode"$'\n'
+            printf -v entry '  - src: "%s"\n    dst: "%s"\n    file_info:\n      mode: %s\n' "$src" "${src#dist/kcm}" "$mode"
+            KCM_CONTENTS+=$entry
             case "$src" in *.so) binaries+=("$src"); native=1 ;; esac
         done < <(find dist/kcm -type f | sort)
         [ -n "$KCM_CONTENTS" ] || { echo "_nfpm: dist/kcm is empty; run just build-kcm {{ format }}" >&2; exit 1; }
         [ -n "$native" ] || [ "{{ format }}" != rpm ] || { echo "_nfpm: RPM packages must ship the Plasma 6 page" >&2; exit 1; }
         if [ -n "$native" ]; then
             case "{{ format }}" in
-            deb) KCM_DEPENDS="      - qml6-module-org-kde-kirigami"$'\n'"      - qml6-module-org-kde-kcmutils" ;;
-            rpm) KCM_DEPENDS="      - kf6-kirigami" ;;
-            archlinux) KCM_DEPENDS="      - kcmutils"$'\n'"      - kirigami" ;;
+            deb) KCM_DEPENDS=$(printf '      - %s\n' qml6-module-org-kde-kirigami qml6-module-org-kde-kcmutils) ;;
+            rpm) KCM_DEPENDS=$(printf '      - %s\n' kf6-kirigami) ;;
+            archlinux) KCM_DEPENDS=$(printf '      - %s\n' kcmutils kirigami) ;;
             esac
         else
             KCM_RECOMMENDS="      - gaze-gui"
@@ -618,7 +619,7 @@ _verify-package format:
     load gaze-kde
     want_files /usr/bin/gaze-kde-pam
     legacy_entry=/usr/share/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop
-    if grep -Eq '^/usr/lib/([^/]+/)?qt6/plugins/plasma/kcms/systemsettings/kcm_gaze\.so$|^/usr/lib64/qt6/plugins/plasma/kcms/systemsettings/kcm_gaze\.so$' <<< "$paths"; then
+    if grep -Eq '^/usr/lib(64)?/([^/]+/)?qt6/plugins/plasma/kcms/systemsettings/kcm_gaze\.so$' <<< "$paths"; then
         want_files /usr/share/applications/kcm_gaze.desktop \
             /usr/share/applications/com.gundulabs.Gaze.Settings.desktop \
             /usr/share/icons/hicolor/scalable/apps/com.gundulabs.Gaze.Settings.svg

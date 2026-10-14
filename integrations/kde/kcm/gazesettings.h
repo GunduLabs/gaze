@@ -12,7 +12,6 @@
 #include <QTimer>
 #include <QVariantMap>
 #include <functional>
-#include <memory>
 
 /**
  * The daemon configuration as a flat key/value map for QML.
