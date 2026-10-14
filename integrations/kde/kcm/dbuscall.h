@@ -25,4 +25,7 @@ void call(QObject *owner, const QString &service, const QString &path, const QSt
 
 // The same call on the Gaze daemon.
 void callGaze(QObject *owner, const QString &method, const QVariantList &args, Reply done = {});
+
+// Sends a call to the Gaze daemon without waiting for a reply, for use while the caller is going away.
+void sendGaze(const QString &method);
 }

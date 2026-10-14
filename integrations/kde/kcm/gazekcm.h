@@ -31,6 +31,7 @@ class GazeKcm : public KQuickConfigModule
 
 public:
     GazeKcm(QObject *parent, const KPluginMetaData &data);
+    ~GazeKcm() override;
 
     FaceModel *faces() { return &m_faces; }
     GazeSettings *settings() { return &m_settings; }

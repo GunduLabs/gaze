@@ -321,6 +321,19 @@ jobs:
             gettext-base \
             pkg-config
 
+      - name: Install Plasma 6 build dependencies
+        if: ${{ matrix.format == 'deb' && matrix.deb_suite != 'noble' }}
+        run: |
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            cmake \
+            extra-cmake-modules \
+            qt6-base-dev \
+            qt6-declarative-dev \
+            libkf6coreaddons-dev \
+            libkf6i18n-dev \
+            libkf6kcmutils-dev \
+            libkirigami-dev
+
       - name: Install Fedora dependencies
         if: ${{ matrix.distro == 'fedora' }}
         run: |
@@ -356,7 +369,8 @@ jobs:
             rpm-sign \
             pkg-config \
             gettext \
-            gcc
+            gcc \
+            gcc-c++
 
       - name: Install openSUSE Tumbleweed dependencies
         if: ${{ matrix.distro == 'opensuse' }}
@@ -440,7 +454,15 @@ jobs:
             gnupg \
             pkgconf \
             gettext \
-            gcc
+            gcc \
+            cmake \
+            extra-cmake-modules \
+            qt6-base \
+            qt6-declarative \
+            kcoreaddons \
+            ki18n \
+            kcmutils \
+            kirigami
 
       - name: Install Rust toolchain
         if: ${{ matrix.distro != 'opensuse' }}
@@ -510,6 +532,7 @@ jobs:
         env:
           CARGO_BUILD_JOBS: 2
           RUSTFLAGS: -Cdebuginfo=0
+          GAZE_KCM: ${{ matrix.deb_suite == 'noble' && 'legacy' || 'plasma6' }}
         run: |
           VERSION="${DEPLOY_REF_NAME#v}" just build-rust
           VERSION="${DEPLOY_REF_NAME#v}" just build-selinux

@@ -42,14 +42,20 @@ up under "KDE lock screen".
 
 ## System Settings
 
-The RPM `gaze-kde` package adds a **Gaze** page under System Administration, built
+On Plasma 6, `gaze-kde` adds a **Gaze** page under System Administration, built
 with Kirigami. It lists enrolled faces, adds, renames and deletes them with a live
 preview, tests authentication, and shows every Gaze setting. Settings stay locked
-until you press **Unlock** and authorize with your administrator password.
+until you press **Unlock** and authorize with your administrator password. The
+**Gaze Settings** launcher in the application menu opens the same page in its own
+window.
 
-The deb and Arch packages still add a **Face Unlock** entry that opens `gaze-gui`.
-Make sure `gaze-gui` is installed for that entry to work; the one-line installer
-includes it.
+The page manages the faces of the user running it. Only one app can use the
+camera at a time, so adding or testing a face fails while `gaze-gui` or another
+client is enrolling, and a login or `sudo` prompt cancels it.
+
+Ubuntu 24.04 ships Plasma 5, which cannot load the page, so there `gaze-kde` adds
+a **Face Unlock** entry that opens `gaze-gui` instead. Make sure `gaze-gui` is
+installed for that entry to work; the one-line installer includes it.
 
 ## How the lock screen works
 

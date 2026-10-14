@@ -119,6 +119,37 @@ GazeSettings::GazeSettings(QObject *parent)
                                          QStringLiteral("JobRemoved"),
                                          this,
                                          SLOT(onJobRemoved(uint, QDBusObjectPath, QString, QString)));
+    QDBusConnection::systemBus().connect(GazeBus::Service,
+                                         GazeBus::Path,
+                                         QStringLiteral("org.freedesktop.DBus.Properties"),
+                                         QStringLiteral("PropertiesChanged"),
+                                         this,
+                                         SLOT(onPropertiesChanged(QString, QVariantMap, QStringList)));
+    QDBusConnection::systemBus().connect(QStringLiteral("org.freedesktop.PolicyKit1"),
+                                         QStringLiteral("/org/freedesktop/PolicyKit1/Authority"),
+                                         QStringLiteral("org.freedesktop.PolicyKit1.Authority"),
+                                         QStringLiteral("Changed"),
+                                         this,
+                                         SLOT(onAuthorityChanged()));
+}
+
+void GazeSettings::onPropertiesChanged(const QString &interface, const QVariantMap &changed, const QStringList &invalidated)
+{
+    if (interface == GazeBus::Service && (changed.contains(QStringLiteral("Config")) || invalidated.contains(QStringLiteral("Config")))) {
+        load();
+    }
+}
+
+void GazeSettings::onAuthorityChanged()
+{
+    if (m_unlocked) {
+        checkAuthorization(false);
+    }
+}
+
+bool GazeSettings::editPending() const
+{
+    return m_applyTimer.isActive() || m_applying;
 }
 
 void GazeSettings::setError(const QString &error)
@@ -152,30 +183,54 @@ void GazeSettings::load()
             top.endStructure();
         }
         top.endStructure();
-        m_values = values;
-        m_loaded = true;
-        Q_EMIT editableChanged();
-        setError(QString());
-        Q_EMIT valuesChanged();
-
         // These live outside the Config struct.
-        call(QStringLiteral("KwalletEnabled"), {}, [this](const QDBusMessage &r) {
-            m_values.insert(QStringLiteral("storage.unlock_kwallet"), r.arguments().value(0).toBool());
-            Q_EMIT valuesChanged();
+        auto staged = std::make_shared<QVariantMap>(values);
+        auto pending = std::make_shared<int>(3);
+        auto received = [this, staged, pending](const QDBusMessage &r, auto insert) {
+            if (*pending <= 0) {
+                return;
+            }
+            if (r.type() == QDBusMessage::ErrorMessage && r.errorName() != QLatin1String("org.freedesktop.DBus.Error.UnknownMethod")) {
+                *pending = 0;
+                setError(r.errorMessage());
+                return;
+            }
+            if (r.type() != QDBusMessage::ErrorMessage) {
+                insert(*staged, r.arguments());
+            }
+            if (--*pending == 0 && !editPending()) {
+                m_values = *staged;
+                m_loaded = true;
+                Q_EMIT editableChanged();
+                setError(QString());
+                Q_EMIT valuesChanged();
+            }
+        };
+        call(QStringLiteral("KwalletEnabled"), {}, [received](const QDBusMessage &r) {
+            received(r, [](QVariantMap &v, const QVariantList &a) {
+                v.insert(QStringLiteral("storage.unlock_kwallet"), a.value(0).toBool());
+            });
         });
-        call(QStringLiteral("KeyringEnabled"), {}, [this](const QDBusMessage &r) {
-            m_values.insert(QStringLiteral("storage.unlock_gnome_keyring"), r.arguments().value(0).toBool());
-            Q_EMIT valuesChanged();
+        call(QStringLiteral("KeyringEnabled"), {}, [received](const QDBusMessage &r) {
+            received(r, [](QVariantMap &v, const QVariantList &a) {
+                v.insert(QStringLiteral("storage.unlock_gnome_keyring"), a.value(0).toBool());
+            });
         });
-        call(QStringLiteral("IrFrameSize"), {}, [this](const QDBusMessage &r) {
-            m_values.insert(QStringLiteral("cameras.ir_frame_width"), r.arguments().value(0).toUInt());
-            m_values.insert(QStringLiteral("cameras.ir_frame_height"), r.arguments().value(1).toUInt());
-            Q_EMIT valuesChanged();
+        call(QStringLiteral("IrFrameSize"), {}, [received](const QDBusMessage &r) {
+            received(r, [](QVariantMap &v, const QVariantList &a) {
+                v.insert(QStringLiteral("cameras.ir_frame_width"), a.value(0).toUInt());
+                v.insert(QStringLiteral("cameras.ir_frame_height"), a.value(1).toUInt());
+            });
         });
     });
 }
 
 void GazeSettings::unlock()
+{
+    checkAuthorization(true);
+}
+
+void GazeSettings::checkAuthorization(bool interactive)
 {
     // Ask polkit directly so the password prompt comes before any edit, like a lock button.
     QDBusArgument subject;
@@ -188,8 +243,8 @@ void GazeSettings::unlock()
     details.beginMap(QMetaType::fromType<QString>(), QMetaType::fromType<QString>());
     details.endMap();
 
-    constexpr uint AllowUserInteraction = 1;
-    const QVariantList args{QVariant::fromValue(subject), QStringLiteral("com.gundulabs.gaze.manage-config"), QVariant::fromValue(details), AllowUserInteraction, QString()};
+    const uint flags = interactive ? 1 : 0;
+    const QVariantList args{QVariant::fromValue(subject), QStringLiteral("com.gundulabs.gaze.manage-config"), QVariant::fromValue(details), flags, QString()};
     GazeBus::call(this, QStringLiteral("org.freedesktop.PolicyKit1"), QStringLiteral("/org/freedesktop/PolicyKit1/Authority"), QStringLiteral("org.freedesktop.PolicyKit1.Authority"), QStringLiteral("CheckAuthorization"), args, [this](const QDBusMessage &reply) {
         if (reply.type() == QDBusMessage::ErrorMessage) {
             setError(reply.errorMessage());
@@ -214,6 +269,9 @@ void GazeSettings::unlock()
 // An edit still being saved must reach the file first, or the restart kills the daemon mid-save and the edit is lost.
 void GazeSettings::restartService()
 {
+    if (m_restartState == QLatin1String("restarting")) {
+        return;
+    }
     m_restartWanted = true;
     if (m_applyTimer.isActive()) {
         m_applyTimer.stop();
@@ -248,12 +306,18 @@ void GazeSettings::sendRestart()
 }
 
 // systemd answers RestartUnit at once, while the old daemon is still running, so wait for the job to end.
-void GazeSettings::onJobRemoved(uint, const QDBusObjectPath &, const QString &unit, const QString &)
+void GazeSettings::onJobRemoved(uint, const QDBusObjectPath &, const QString &unit, const QString &result)
 {
-    if (m_restarting && unit == QLatin1String("gazed.service")) {
-        m_restarting = false;
-        waitForService(30);
+    if (!m_restarting || unit != QLatin1String("gazed.service")) {
+        return;
     }
+    m_restarting = false;
+    if (result != QLatin1String("done")) {
+        setRestartState(QStringLiteral("failed"));
+        setError(i18n("systemd could not restart Gaze: %1", result));
+        return;
+    }
+    waitForService(30);
 }
 
 // The daemon is not bus activated, so it is unreachable until the restart has registered its name again.
@@ -280,8 +344,14 @@ void GazeSettings::set(const QString &key, const QVariant &value)
     if (m_values.value(key) == value) {
         return;
     }
-    if (key == QLatin1String("security.level") && value.toString() == QLatin1String("custom")) {
-        seedCustomSecurity();
+    if (key == QLatin1String("security.level")) {
+        if (value.toString() == QLatin1String("custom")) {
+            seedCustomSecurity();
+        } else {
+            clearCustomSecurity();
+        }
+    } else if (key == QLatin1String("inference.execution_provider")) {
+        coupleInferenceDevice(value.toString());
     }
     m_values.insert(key, value);
     Q_EMIT valuesChanged();
@@ -316,8 +386,33 @@ void GazeSettings::seedCustomSecurity()
     m_values.insert(QStringLiteral("security.hybrid_policy"), policy);
 }
 
+void GazeSettings::clearCustomSecurity()
+{
+    m_values.insert(QStringLiteral("security.detector"), QString());
+    m_values.insert(QStringLiteral("security.recognizer"), QString());
+    m_values.insert(QStringLiteral("security.rgb_threshold"), 0.0);
+    m_values.insert(QStringLiteral("security.ir_threshold"), 0.0);
+    m_values.insert(QStringLiteral("security.hybrid_policy"), QString());
+}
+
+void GazeSettings::coupleInferenceDevice(const QString &provider)
+{
+    const QString device = m_values.value(QStringLiteral("inference.device")).toString();
+    if (provider == QLatin1String("cpu")) {
+        m_values.insert(QStringLiteral("inference.device"), QStringLiteral("cpu"));
+    } else if (provider == QLatin1String("auto") || provider == QLatin1String("vitis")) {
+        m_values.insert(QStringLiteral("inference.device"), QStringLiteral("npu"));
+    } else if (device.isEmpty()) {
+        m_values.insert(QStringLiteral("inference.device"), QStringLiteral("cpu"));
+    }
+}
+
 void GazeSettings::apply()
 {
+    if (m_applying) {
+        m_applyAgain = true;
+        return;
+    }
     QDBusArgument config;
     config.beginStructure();
     for (const Group &group : layout()) {
@@ -337,6 +432,11 @@ void GazeSettings::apply()
     m_applying = true;
     auto finished = [this] {
         m_applying = false;
+        if (m_applyAgain) {
+            m_applyAgain = false;
+            apply();
+            return;
+        }
         if (m_restartWanted) {
             sendRestart();
         }

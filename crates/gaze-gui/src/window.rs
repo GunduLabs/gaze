@@ -340,6 +340,11 @@ fn schedule_config_apply(queue: &ApplyQueue, cfg: Config) {
     ));
 }
 
+fn config_apply_idle(queue: &ApplyQueue) -> bool {
+    let q = queue.borrow();
+    q.pending.is_none() && q.debounce.is_none() && !q.in_flight
+}
+
 fn flush_config_apply(queue: &ApplyQueue) {
     if let Some(id) = queue.borrow_mut().debounce.take() {
         id.remove();
@@ -1585,6 +1590,45 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 if let Some(allowed) = check_auth(authority.clone()).await {
                     is_authorized.set(allowed);
                     update_locked_state();
+                }
+            }
+        }
+    ));
+
+    glib::MainContext::default().spawn_local(glib::clone!(
+        #[strong]
+        proxy_cell,
+        #[strong]
+        apply_queue,
+        #[strong]
+        load_config,
+        async move {
+            let Ok(proxy) = shared_proxy(&proxy_cell).await else {
+                return;
+            };
+            let gaze = proxy.inner();
+            let Ok(builder) = zbus::fdo::PropertiesProxy::builder(gaze.connection())
+                .destination(gaze.destination().to_owned())
+                .and_then(|builder| builder.path(gaze.path().to_owned()))
+                .map(|builder| builder.cache_properties(zbus::proxy::CacheProperties::No))
+            else {
+                return;
+            };
+            let Ok(properties) = builder.build().await else {
+                return;
+            };
+            let Ok(mut changes) = properties.receive_properties_changed().await else {
+                return;
+            };
+
+            while let Some(change) = changes.next().await {
+                let Ok(args) = change.args() else {
+                    continue;
+                };
+                let config_changed = args.changed_properties().contains_key("Config")
+                    || args.invalidated_properties().contains(&"Config");
+                if config_changed && config_apply_idle(&apply_queue) {
+                    load_config();
                 }
             }
         }

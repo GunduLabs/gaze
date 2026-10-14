@@ -22,6 +22,7 @@ KCM.ScrollViewKCM {
             text: i18n("Configure")
             tooltip: i18n("Configure Gaze")
             icon.name: "configure"
+            enabled: kcm.depth < 2
             onTriggered: kcm.push("SettingsPage.qml")
         },
         Kirigami.Action {
@@ -88,6 +89,7 @@ KCM.ScrollViewKCM {
             helpfulAction: Kirigami.Action {
                 text: i18n("Add Face…")
                 icon.name: "list-add"
+                enabled: !root.enrolling && !root.testing
                 onTriggered: enrollDialog.openFor("")
             }
         }
@@ -113,8 +115,8 @@ KCM.ScrollViewKCM {
                 }
                 Repeater {
                     model: [
-                        { label: i18n("RGB"), on: rgb },
-                        { label: i18n("IR"), on: ir }
+                        { label: i18n("RGB"), on: row.rgb },
+                        { label: i18n("IR"), on: row.ir }
                     ]
                     delegate: QQC2.Label {
                         required property var modelData
@@ -133,6 +135,7 @@ KCM.ScrollViewKCM {
                     icon.name: "edit-rename"
                     text: i18n("Rename")
                     display: QQC2.AbstractButton.IconOnly
+                    enabled: !root.enrolling && !root.testing
                     onClicked: {
                         renameDialog.faceName = row.name;
                         renameDialog.open();
@@ -153,6 +156,7 @@ KCM.ScrollViewKCM {
                     icon.name: "edit-delete"
                     text: i18n("Delete")
                     display: QQC2.AbstractButton.IconOnly
+                    enabled: !root.enrolling && !root.testing
                     onClicked: {
                         deleteDialog.faceName = row.name;
                         deleteDialog.open();
@@ -322,14 +326,27 @@ KCM.ScrollViewKCM {
         property string faceName
         title: i18n("Rename Face")
         standardButtons: Kirigami.Dialog.Cancel | Kirigami.Dialog.Ok
-        onAccepted: if (nameEdit.text.length > 0 && nameEdit.text !== faceName && !kcm.hasFace(nameEdit.text)) kcm.renameFace(faceName, nameEdit.text)
+        readonly property string newName: nameEdit.text.trim()
+        onAccepted: if (newName.length > 0 && newName !== faceName && !kcm.hasFace(newName)) kcm.renameFace(faceName, newName)
         onOpened: {
             nameEdit.text = faceName;
             nameEdit.forceActiveFocus();
         }
-        QQC2.TextField {
-            id: nameEdit
-            onAccepted: renameDialog.accept()
+        ColumnLayout {
+            spacing: Kirigami.Units.smallSpacing
+
+            QQC2.TextField {
+                id: nameEdit
+                Layout.fillWidth: true
+                onAccepted: renameDialog.accept()
+            }
+            QQC2.Label {
+                Layout.fillWidth: true
+                visible: renameDialog.newName !== renameDialog.faceName && kcm.hasFace(renameDialog.newName)
+                text: i18n("A face with this name already exists")
+                color: Kirigami.Theme.negativeTextColor
+                wrapMode: Text.WordWrap
+            }
         }
     }
 }

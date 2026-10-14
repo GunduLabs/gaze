@@ -492,7 +492,7 @@ enable_kde() {
     say "  ${DIM}Face auth runs in the slot KScreenLocker starts for biometrics, alongside${RESET}"
     say "  ${DIM}the password field, so a match unlocks without pressing a key.${RESET}"
     say "  ${DIM}Lock your screen and look at the camera to try it.${RESET}"
-    say "  ${DIM}Find Face Unlock in System Settings, or run gaze-gui.${RESET}"
+    say "  ${DIM}Find Gaze in System Settings (Face Unlock on Plasma 5), or run gaze-gui.${RESET}"
     say "  ${DIM}The login greeter is off by default: sudo gaze-kde-pam enable-login${RESET}"
     link "$KDE_DOCS_URL"
 }

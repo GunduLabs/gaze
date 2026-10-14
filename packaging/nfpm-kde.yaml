@@ -20,12 +20,7 @@ contents:
     dst: "/usr/bin/gaze-kde-pam"
     file_info:
       mode: 0755
-  # System Settings scans this directory and launches the entry's Exec.
-  - src: "integrations/kde/gaze-face-unlock.desktop"
-    dst: "/usr/share/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop"
-    file_info:
-      mode: 0644
-
+${KCM_CONTENTS}
 deb:
   signature:
     method: debsign
@@ -44,36 +39,22 @@ scripts:
   postremove: "packaging/postrm-kde.sh"
 
 overrides:
-  # RPM hosts build the System Settings page, so the staged tree replaces the external module that launches gaze-gui.
-  rpm:
-    contents:
-      - src: "integrations/kde/gaze-kde-pam"
-        dst: "/usr/bin/gaze-kde-pam"
-        file_info:
-          mode: 0755
-      - src: "dist/kcm/usr/lib64/qt6/plugins/plasma/kcms/systemsettings/kcm_gaze.so"
-        dst: "/usr/lib64/qt6/plugins/plasma/kcms/systemsettings/kcm_gaze.so"
-        file_info:
-          mode: 0755
-      - src: "dist/kcm/usr/share/applications/kcm_gaze.desktop"
-        dst: "/usr/share/applications/kcm_gaze.desktop"
-        file_info:
-          mode: 0644
-      - src: "dist/kcm/usr/share/applications/com.gundulabs.Gaze.Settings.desktop"
-        dst: "/usr/share/applications/com.gundulabs.Gaze.Settings.desktop"
-        file_info:
-          mode: 0644
+  deb:
     depends:
-      - kf6-kirigami
+${KCM_DEPENDS}
+${DEB_LIB_DEPENDS}
+    recommends:
+      - gaze
+${KCM_RECOMMENDS}
+  rpm:
+    depends:
+${KCM_DEPENDS}
 ${RPM_LIB_DEPENDS}
     recommends:
       - gaze
-      - gaze-gui
-  deb:
-    recommends:
-      - gaze
-      - gaze-gui
   archlinux:
+    depends:
+${KCM_DEPENDS}
     recommends:
       - gaze
-      - gaze-gui
+${KCM_RECOMMENDS}

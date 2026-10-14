@@ -21,7 +21,14 @@ QQC2.SpinBox {
     editable: true
     enabled: kcm.settings.editable
     value: Math.round(Number(kcm.settings.values[key] ?? realFrom) * factor)
-    textFromValue: (v) => Number(v / factor).toFixed(decimals)
-    valueFromText: (t) => Math.round(Number.fromLocaleString(Qt.locale(), t) * factor)
+    validator: DoubleValidator {
+        bottom: Math.min(root.realFrom, root.realTo)
+        top: Math.max(root.realFrom, root.realTo)
+        decimals: root.decimals
+        notation: DoubleValidator.StandardNotation
+        locale: root.locale.name
+    }
+    textFromValue: (v, locale) => Number(v / factor).toLocaleString(locale, 'f', decimals)
+    valueFromText: (t, locale) => Math.round(Number.fromLocaleString(locale, t) * factor)
     onValueModified: kcm.settings.set(key, value / factor)
 }

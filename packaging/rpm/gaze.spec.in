@@ -167,7 +167,6 @@ Enable with gaze-omarchy enable from an unlocked Omarchy desktop.
 %package kde
 Summary:        KDE Plasma lock screen and System Settings integration for Gaze
 Recommends:     %{name}%{?_isa} = %{version}-%{release}
-Recommends:     %{name}-gui%{?_isa} = %{version}-%{release}
 Requires:       kf6-kirigami
 
 %description kde
@@ -204,7 +203,7 @@ semodule_package -o gaze-gdm-camera.pp -m gaze-gdm-camera.mod
 checkmodule -M -m -o gaze-greeter-keyring.mod packaging/selinux/gaze-greeter-keyring.te
 semodule_package -o gaze-greeter-keyring.pp -m gaze-greeter-keyring.mod
 
-cmake -S integrations/kde/kcm -B kcm-build -DCMAKE_INSTALL_PREFIX=%{_prefix} -DCMAKE_BUILD_TYPE=Release
+CXXFLAGS="%{optflags}" LDFLAGS="%{?build_ldflags}" cmake -S integrations/kde/kcm -B kcm-build -DCMAKE_INSTALL_PREFIX=%{_prefix} -DCMAKE_BUILD_TYPE=Release
 cmake --build kcm-build %{?_smp_mflags}
 
 %install
@@ -374,6 +373,7 @@ ${SCRIPTLET_HYPRLOCK_POSTUN}
 %{_libdir}/qt6/plugins/plasma/kcms/systemsettings/kcm_gaze.so
 %{_datadir}/applications/kcm_gaze.desktop
 %{_datadir}/applications/com.gundulabs.Gaze.Settings.desktop
+%{_datadir}/icons/hicolor/scalable/apps/com.gundulabs.Gaze.Settings.svg
 
 %changelog
 * ${CHANGELOG_DATE} Gundu Labs <maintainers@gundulabs.com> - ${VERSION}-${PACKAGE_RELEASE}

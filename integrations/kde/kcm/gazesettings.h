@@ -8,9 +8,11 @@
 #include <QDBusMessage>
 #include <QDBusObjectPath>
 #include <QObject>
+#include <QStringList>
 #include <QTimer>
 #include <QVariantMap>
 #include <functional>
+#include <memory>
 
 /**
  * The daemon configuration as a flat key/value map for QML.
@@ -49,6 +51,8 @@ public:
 
 private Q_SLOTS:
     void onJobRemoved(uint id, const QDBusObjectPath &job, const QString &unit, const QString &result);
+    void onPropertiesChanged(const QString &interface, const QVariantMap &changed, const QStringList &invalidated);
+    void onAuthorityChanged();
 
 Q_SIGNALS:
     void restartStateChanged();
@@ -60,8 +64,12 @@ Q_SIGNALS:
 private:
     void call(const QString &method, const QVariantList &args, GazeBus::Reply done);
     void setError(const QString &error);
+    void checkAuthorization(bool interactive);
+    bool editPending() const;
     void apply();
     void seedCustomSecurity();
+    void clearCustomSecurity();
+    void coupleInferenceDevice(const QString &provider);
     void waitForService(int attempts);
     void sendRestart();
     void setRestartState(const QString &state);
@@ -73,6 +81,7 @@ private:
     bool m_restarting = false;
     bool m_restartWanted = false;
     bool m_applying = false;
+    bool m_applyAgain = false;
     QString m_error;
     QTimer m_applyTimer;
 };

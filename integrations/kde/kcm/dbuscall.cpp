@@ -26,4 +26,9 @@ void callGaze(QObject *owner, const QString &method, const QVariantList &args, R
 {
     call(owner, Service, Path, Service, method, args, std::move(done));
 }
+
+void sendGaze(const QString &method)
+{
+    QDBusConnection::systemBus().send(QDBusMessage::createMethodCall(Service, Path, Service, method));
+}
 }

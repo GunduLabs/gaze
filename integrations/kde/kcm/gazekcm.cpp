@@ -64,6 +64,9 @@ GazeKcm::GazeKcm(QObject *parent, const KPluginMetaData &data)
     m_testTimeout.setSingleShot(true);
     m_testTimeout.setInterval(TestTimeoutMs);
     connect(&m_testTimeout, &QTimer::timeout, this, [this] {
+        if (m_testState != QLatin1String("running")) {
+            return;
+        }
         call(QStringLiteral("VerifyStop"), {});
         finishTest(QStringLiteral("timeout"));
     });
@@ -78,6 +81,18 @@ GazeKcm::GazeKcm(QObject *parent, const KPluginMetaData &data)
 
     refresh();
     m_settings.load();
+}
+
+GazeKcm::~GazeKcm()
+{
+    if (m_enrollState == QLatin1String("running")) {
+        GazeBus::sendGaze(QStringLiteral("EnrollStop"));
+    } else if (m_testState == QLatin1String("running")) {
+        GazeBus::sendGaze(QStringLiteral("VerifyStop"));
+    } else {
+        return;
+    }
+    GazeBus::sendGaze(QStringLiteral("Release"));
 }
 
 void GazeKcm::setError(const QString &error)
@@ -98,7 +113,7 @@ void GazeKcm::refresh()
     call(QStringLiteral("ListFaces"), {m_user}, [this](const QDBusMessage &reply) {
         if (reply.type() == QDBusMessage::ErrorMessage) {
             // A user without a profile yet is an empty list, not a failure.
-            const bool noProfile = reply.errorMessage().contains(QLatin1String("not found"), Qt::CaseInsensitive);
+            const bool noProfile = reply.errorName() == QLatin1String("org.freedesktop.DBus.Error.FileNotFound");
             m_faces.setFaces({});
             setError(noProfile ? QString() : reply.errorMessage());
             return;
@@ -288,7 +303,11 @@ void GazeKcm::testFace()
             setError(error);
             finishTest(QStringLiteral("failed"));
         },
-        [this] { m_testTimeout.start(); });
+        [this] {
+            if (m_testState == QLatin1String("running")) {
+                m_testTimeout.start();
+            }
+        });
 }
 
 void GazeKcm::onVerifyStatus(const QDBusMessage &message)

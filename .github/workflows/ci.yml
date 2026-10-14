@@ -216,7 +216,8 @@ jobs:
             openssl-devel \
             pkg-config \
             gettext \
-            gcc
+            gcc \
+            gcc-c++
 
       - name: Install openSUSE Tumbleweed dependencies
         if: ${{ matrix.distro == 'opensuse' }}
@@ -350,9 +351,11 @@ jobs:
           just build-selinux
           test -f dist/selinux/gaze-gdm-camera.pp
 
-      - name: Build the Plasma settings page
-        if: ${{ matrix.format == 'rpm' }}
-        run: just build-kcm rpm
+      - name: Stage the System Settings entry
+        if: ${{ matrix.format != 'srpm' }}
+        env:
+          GAZE_KCM: ${{ matrix.format == 'rpm' && 'plasma6' || 'legacy' }}
+        run: just build-kcm ${{ matrix.format }}
 
       - name: Build and verify ${{ matrix.format }} packages
         if: ${{ matrix.format != 'srpm' }}

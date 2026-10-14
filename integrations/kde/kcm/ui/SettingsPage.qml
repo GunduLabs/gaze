@@ -31,6 +31,7 @@ KCM.SimpleKCM {
         Kirigami.Action {
             text: i18n("Restart Service")
             icon.name: "system-reboot"
+            enabled: kcm.settings.restartState !== "restarting"
             onTriggered: kcm.settings.restartService()
         }
     ]
