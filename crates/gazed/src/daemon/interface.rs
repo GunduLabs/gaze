@@ -53,7 +53,8 @@ impl AuthDaemon {
 
         if !Self::seat_camera_available(caller_uid, target_uid).await {
             return Err(fdo::Error::AccessDenied(
-                "refusing face auth: the seat camera belongs to another user's session".into(),
+                "refusing face authentication: the seat camera belongs to another user's session"
+                    .into(),
             ));
         }
 

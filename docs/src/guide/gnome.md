@@ -70,7 +70,7 @@ The window has a single **Behavior** page with two groups:
 | Group | Contains |
 |---|---|
 | **Face authentication** | `Enable face authentication (lock screen)`, `Face retry mode`, `Maximum face tries`. Applies to this session's lock screen only. |
-| **GDM login screen** | `Enable face auth at GDM login`. Applies to the login screen and asks for admin authorization. |
+| **GDM login screen** | `Enable face authentication at GDM login`. Applies to the login screen and asks for admin authorization. |
 
 ## Retry behavior
 
@@ -84,7 +84,7 @@ desktop session can differ.
 | Face retry mode | `face-retry-mode` | `disabled`, `fixed`, `infinite` | `fixed` |
 | Maximum face tries | `max-face-tries` | 2 to 20 | 3 |
 
-- `disabled`: one attempt. After it fails, face auth stops for that cycle and you
+- `disabled`: one attempt. After it fails, face authentication stops for that cycle and you
   finish with your password.
 - `fixed`: retries until `max-face-tries` failures, then stops for that cycle.
 - `infinite`: keeps retrying for as long as the prompt is open. The password entry
@@ -103,7 +103,7 @@ gsettings set org.gnome.shell.extensions.gaze max-face-tries 5
 To set these for the GDM login screen, write them into the same
 `/etc/dconf/db/gdm.d/99-gaze` override described below and run `sudo dconf update`.
 
-## Create a face profile
+## Enroll a face
 
 Enrollment does not live in the extension preferences. Use the Gaze settings app or the CLI:
 
@@ -193,7 +193,7 @@ happens. Run `sudo gaze doctor`: it reports the stale file and how to replace it
 
 ## Optional: enable face at GDM login
 
-The easiest way is the **Enable face auth at GDM login** switch, under **Behavior → GDM login screen** in the [extension preferences](#open-the-extension-preferences). Toggling it triggers a polkit prompt, then the daemon writes `/etc/dconf/db/gdm.d/99-gaze` and runs `dconf update` for you.
+The easiest way is the **Enable face authentication at GDM login** switch, under **Behavior → GDM login screen** in the [extension preferences](#open-the-extension-preferences). Toggling it triggers a polkit prompt, then the daemon writes `/etc/dconf/db/gdm.d/99-gaze` and runs `dconf update` for you.
 
 Reboot to apply. Restarting GDM also works, but it immediately logs out active desktop sessions.
 
@@ -217,7 +217,7 @@ At the GDM login screen, Gaze still matches against the selected user's enrolled
 
 ## Disable face at GDM login
 
-Flip the **Enable face auth at GDM login** switch back off under **Behavior → GDM login screen**, or remove the override manually:
+Flip the **Enable face authentication at GDM login** switch back off under **Behavior → GDM login screen**, or remove the override manually:
 
 ```bash
 sudo rm -f /etc/dconf/db/gdm.d/99-gaze*
@@ -226,7 +226,7 @@ sudo dconf update
 
 ## Nothing appears at the GDM login screen
 
-If the lock screen works but the login screen never offers face auth, and the GDM
+If the lock screen works but the login screen never offers face authentication, and the GDM
 journal shows nothing, check whether the greeter has extensions switched off:
 
 ```bash
@@ -250,4 +250,4 @@ seat. `gaze doctor` reports this and names the file for you.
 ## Verify GNOME flow
 
 - Lock screen, then try unlock with face.
-- If login face auth is enabled, test a full logout/login cycle.
+- If login face authentication is enabled, test a full logout/login cycle.

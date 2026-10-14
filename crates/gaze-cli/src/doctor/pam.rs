@@ -370,7 +370,7 @@ pub(super) fn check_pam(report: &mut Report) {
                 report.warning(
                     "PAM ordering",
                     format!(
-                        "{} runs after {} in {}, so face auth won't be tried until those prompts resolve",
+                        "{} runs after {} in {}, so face authentication won't be tried until those prompts resolve",
                         PAM_MODULES.join("/"),
                         conflicts.join(", "),
                         path.display()

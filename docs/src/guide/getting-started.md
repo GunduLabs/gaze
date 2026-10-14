@@ -65,7 +65,7 @@ gaze auth --verbose
 gaze-gui
 ```
 
-Use the GUI to enroll additional face profiles (for example, with glasses and without glasses).
+Use the GUI to enroll additional faces (for example, with glasses and without glasses).
 
 ## Step 6: Verify GNOME lock screen auth (optional)
 
@@ -79,7 +79,7 @@ gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
 Run these commands from a GNOME session that started **after** the package was installed. GNOME Shell scans extension directories when a session starts and drops extension IDs it has not seen. If you enable the extension in the session where you installed it, the setting may appear to work but disappear after you log out. Reboot, then run the commands again. `gaze doctor` reports this as `GNOME extension: installed, but not enabled for the current user` and prints the same steps. See [The extension disappears again after a logout](/guide/gnome#the-extension-disappears-again-after-a-logout).
 
 Hands-free lock screen and GDM login authentication through this extension are specific to GNOME. Cinnamon has a separate extension for its lock screen and PolKit prompts; see the [Cinnamon guide](/guide/cinnamon). KDE Plasma uses the biometric PAM slot that KScreenLocker starts in advance; see the [KDE Plasma guide](/guide/kde). Other login surfaces use PAM integrations. See the guides for [Hyprland](/guide/hyprland), [LightDM](/guide/lightdm), [console login (TTY)](/guide/console), and [PAM](/guide/pam).
-GDM login face auth is separate and disabled by default due to GNOME keyring behavior.
+GDM login face authentication is separate and disabled by default due to GNOME keyring behavior.
 See [GNOME Extension](/guide/gnome) for details and optional login enablement, including the optional TPM-backed keyring unlock that removes that caveat.
 
 ## If something fails
@@ -96,4 +96,4 @@ Go to the [troubleshooting guide](/guide/troubleshooting) for camera, daemon, PA
 - Set up the [Cinnamon Extension](/guide/cinnamon) for the Cinnamon lock screen and PolKit prompts
 - Set up the [KDE Plasma](/guide/kde) lock screen and System Settings page
 - Enable face unlock for [Hyprland (hyprlock)](/guide/hyprland)
-- Add face auth to [LightDM](/guide/lightdm) or a [console login (TTY)](/guide/console)
+- Add face authentication to [LightDM](/guide/lightdm) or a [console login (TTY)](/guide/console)

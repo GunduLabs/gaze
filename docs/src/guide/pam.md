@@ -97,7 +97,7 @@ Pick one of the Gaze entries, then test with a real PAM prompt:
 sudo -v
 ```
 
-If camera opens and face auth runs, PAM wiring is active.
+If camera opens and face authentication runs, PAM wiring is active.
 
 ### Selective setup: password at GDM, face authentication for sudo and Polkit
 
@@ -398,7 +398,7 @@ Removing the Gaze package deletes the marker along with the rest of `/etc/gaze`.
 
 ### Polkit (graphical "Authentication Required" prompts)
 
-Arch's `polkit` package ships no `/etc/pam.d/polkit-1`, so the `polkit-1` PAM service falls back to the vendor default at `/usr/lib/pam.d/polkit-1`, which just does `include system-auth`. Since Gaze avoids patching `system-auth` (see above), graphical polkit prompts (`pkexec`, GNOME Settings, package manager GUIs, etc.) don't get face auth unless a `/etc/pam.d/polkit-1` override is installed too. The Arch package and `dev-link-system.sh` create one automatically, and only on Arch:
+Arch's `polkit` package ships no `/etc/pam.d/polkit-1`, so the `polkit-1` PAM service falls back to the vendor default at `/usr/lib/pam.d/polkit-1`, which just does `include system-auth`. Since Gaze avoids patching `system-auth` (see above), graphical polkit prompts (`pkexec`, GNOME Settings, package manager GUIs, etc.) don't get face authentication unless a `/etc/pam.d/polkit-1` override is installed too. The Arch package and `dev-link-system.sh` create one automatically, and only on Arch:
 
 ```text
 #%PAM-1.0
@@ -419,7 +419,7 @@ pkexec true
 
 Some Arch derivatives (Omarchy, for one) do ship an `/etc/pam.d/polkit-1` of their own. There the package adds only the `pam_gaze.so` line, above the first `auth` line, and keeps the rest of the file as it is; the original is copied to `/etc/gaze/polkit-1.pam.bak` first (`dev-link-system.sh` does the same, to `polkit-1.pam.dev.bak`). Removing Gaze strips that line back out and leaves the file in place, rather than deleting a file Gaze did not create.
 
-Debian/Ubuntu and Fedora ship their own `polkit-1` PAM service and do not use `system-auth` the way Arch does, so Gaze never writes this file there. On those systems polkit picks up face auth through the shared auth stack (`pam-auth-update` on Debian/Ubuntu, the `gaze` authselect feature on Fedora). Recent Debian and Ubuntu releases ship that file as a vendor default in `/usr/lib/pam.d/polkit-1` instead of `/etc/pam.d/polkit-1`, but it still includes `common-auth`, so the shared-stack route works either way. An explicit `/etc/pam.d/polkit-1` override is only needed there if you deliberately took Gaze out of the shared stack, as in [Selective setup](#selective-setup-password-at-gdm-face-authentication-for-sudo-and-polkit).
+Debian/Ubuntu and Fedora ship their own `polkit-1` PAM service and do not use `system-auth` the way Arch does, so Gaze never writes this file there. On those systems polkit picks up face authentication through the shared auth stack (`pam-auth-update` on Debian/Ubuntu, the `gaze` authselect feature on Fedora). Recent Debian and Ubuntu releases ship that file as a vendor default in `/usr/lib/pam.d/polkit-1` instead of `/etc/pam.d/polkit-1`, but it still includes `common-auth`, so the shared-stack route works either way. An explicit `/etc/pam.d/polkit-1` override is only needed there if you deliberately took Gaze out of the shared stack, as in [Selective setup](#selective-setup-password-at-gdm-face-authentication-for-sudo-and-polkit).
 
 ## Other distros (manual)
 

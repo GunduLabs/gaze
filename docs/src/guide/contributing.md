@@ -177,7 +177,7 @@ bun run docs:build
 
 | Template | Use it for |
 | --- | --- |
-| Bug report | Face auth, the camera, the daemon, the GUI, or a desktop integration behaving incorrectly. |
+| Bug report | Face authentication, the camera, the daemon, the GUI, or a desktop integration behaving incorrectly. |
 | Installation & packaging | Anything that fails before Gaze runs: the installer, a package manager, a repository or GPG key, a missing shared library, a conflicting package, a broken upgrade. |
 | Feature request | A new capability, config key, desktop integration, or distribution. |
 | Documentation | Docs that are wrong, missing, outdated, or unclear. |

@@ -8,7 +8,7 @@
 #include <QTimer>
 #include <functional>
 
-#include "dbuscall.h"
+#include "gazebus.h"
 #include "facemodel.h"
 #include "gazesettings.h"
 

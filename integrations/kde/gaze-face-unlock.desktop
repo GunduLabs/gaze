@@ -3,8 +3,8 @@
 
 [Desktop Entry]
 Type=Application
-Name=Face Unlock
-Comment=Enrol faces and configure Gaze face authentication
+Name=Gaze
+Comment=Enroll faces and configure facial authentication
 Icon=com.gundulabs.Gaze
 Exec=gaze-gui
 Terminal=false

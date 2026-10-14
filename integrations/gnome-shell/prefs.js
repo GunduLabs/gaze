@@ -130,7 +130,7 @@ export default class GazePreferences extends ExtensionPreferences {
         });
 
         const gdmRow = new Adw.SwitchRow({
-            title: 'Enable face auth at GDM login',
+            title: 'Enable face authentication at GDM login',
             active: false,
             sensitive: false,
         });
@@ -161,11 +161,11 @@ export default class GazePreferences extends ExtensionPreferences {
             let message;
             if (accessDenied) {
                 message = desired
-                    ? 'Administrator authorization is required to enable face auth at the GDM login screen.'
-                    : 'Administrator authorization is required to disable face auth at the GDM login screen.';
+                    ? 'Administrator authorization is required to enable face authentication at the GDM login screen.'
+                    : 'Administrator authorization is required to disable face authentication at the GDM login screen.';
             } else {
                 Gio.DBusError.strip_remote_error(error);
-                message = `Could not update GDM login face auth: ${error.message}`;
+                message = `Could not update GDM login face authentication: ${error.message}`;
             }
             gdmRow.set_subtitle(message);
             if (typeof window.add_toast === 'function')

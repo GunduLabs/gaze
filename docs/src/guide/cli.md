@@ -3,7 +3,7 @@
 
 # CLI Guide
 
-The `gaze` command lets you enroll and manage face profiles, test authentication,
+The `gaze` command lets you enroll and manage faces, test authentication,
 and check your installation.
 
 All commands talk to the running `gazed` daemon over DBus.
@@ -123,7 +123,7 @@ Because silent mode is non-interactive, it cannot be cancelled from the terminal
 timeout 15 gaze auth --silent
 ```
 
-## Enroll a new face profile
+## Enroll a new face
 
 ```bash
 gaze add-face <name>
@@ -144,7 +144,7 @@ Use separate profiles when your appearance changes often.
 gaze refine-face <name>
 ```
 
-Use this if recognition is inconsistent in dim light or side angles. This also captures and adds missing camera spectra (e.g. adding IR captures to an RGB-only face profile if an IR camera was configured after initial enrollment).
+Use this if recognition is inconsistent in dim light or side angles. This also captures and adds missing camera spectra (e.g. adding IR captures to an RGB-only face if an IR camera was configured after initial enrollment).
 
 ## List, rename, and remove
 
@@ -154,7 +154,7 @@ gaze rename-face <old> <new>
 gaze remove-face <name>
 ```
 
-`gaze list-faces` prints all enrolled face profiles for the user, showing how many template captures each face has, and displaying `[RGB]` and `[IR]` badges for the camera spectra enrolled in that profile:
+`gaze list-faces` prints all faces enrolled for the user, showing how many template captures each face has, and displaying `[RGB]` and `[IR]` badges for the camera spectra enrolled in that profile:
 
 | Badge | Meaning |
 |---|---|
@@ -170,7 +170,7 @@ An RGB-only machine therefore shows a green `[RGB]` and a grey `[IR]`, not a fai
 gaze clear-user
 ```
 
-This permanently removes all face profiles for the current user.
+This permanently removes all enrolled faces for the current user.
 
 ## Check or clear a duress lockout
 

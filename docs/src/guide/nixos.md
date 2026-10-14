@@ -98,25 +98,25 @@ input to a revision with a newer `onnxruntime` instead of overriding `follows`.
 | `services.gaze.package` | flake's `gaze` | Daemon/CLI/PAM package |
 | `services.gaze.settings` | `{ }` | Options merged over the upstream defaults into `/etc/gaze/config.toml` (see [Configuration](/guide/configuration)) |
 | `services.gaze.mutableConfig` | `true` | Seed `/etc/gaze/config.toml` once and leave it editable (the GUI writes to it). Set to `false` for a fully declarative, read-only config |
-| `services.gaze.pam.defaultServices` | `[ "sudo" "polkit-1" ]` | PAM services that get face auth without further configuration |
-| `security.pam.services.<name>.gaze.enable` | true for `pam.defaultServices` | Attempt face auth for this PAM service |
+| `services.gaze.pam.defaultServices` | `[ "sudo" "polkit-1" ]` | PAM services that get face authentication without further configuration |
+| `security.pam.services.<name>.gaze.enable` | true for `pam.defaultServices` | Attempt face authentication for this PAM service |
 | `security.pam.services.<name>.gaze.control` | `"sufficient"` | PAM control field for the rule |
 | `security.pam.services.<name>.gaze.simultaneous` | `false` | Pass `simultaneous` to `pam_gaze.so` (face and password prompt at the same time in terminal and polkit prompts; lock screens still scan first) instead of sequential authentication |
-| `security.pam.services.<name>.gaze.retry` | `false` | Add a second `pam_gaze.so retry` rule below `pam_unix`, giving face auth one more attempt after a rejected password |
+| `security.pam.services.<name>.gaze.retry` | `false` | Add a second `pam_gaze.so retry` rule below `pam_unix`, giving face authentication one more attempt after a rejected password |
 | `security.pam.services.<name>.gaze.order` | `null` | Explicit rule `order`; `null` places gaze ahead of `pam_fprintd` and `pam_unix` |
 | `services.gaze.gui.enable` | `false` | Install `gaze-gui` |
 | `services.gaze.gui.package` | flake's `gaze-gui` | GUI package |
 | `services.gaze.gnome.enable` | `false` | Install the GNOME Shell extension and the `gdm-face` PAM service |
 | `services.gaze.gnome.extensionPackage` | flake's `gaze-gnome-extension` | GNOME Shell extension package |
-| `services.gaze.gnome.enableForUsers` | `true` | Turn the extension and lock screen face auth on in every GNOME user session via dconf defaults. Set to `false` if you manage `enabled-extensions` yourself |
-| `services.gaze.gnome.gdmFaceLogin` | `false` | Also enable face auth at the GDM login screen (read the [GNOME guide](/guide/gnome) first) |
+| `services.gaze.gnome.enableForUsers` | `true` | Turn the extension and lock screen face authentication on in every GNOME user session via dconf defaults. Set to `false` if you manage `enabled-extensions` yourself |
+| `services.gaze.gnome.gdmFaceLogin` | `false` | Also enable face authentication at the GDM login screen (read the [GNOME guide](/guide/gnome) first) |
 | `services.gaze.kde.lockScreen` | `false` | Define `kde-fingerprint` so the Plasma lock screen starts face unlock with no key press |
-| `services.gaze.kde.loginScreen` | `false` | Also run face auth in the Plasma Login Manager / SDDM stack (submit-driven; see the [KDE guide](/guide/kde)) |
+| `services.gaze.kde.loginScreen` | `false` | Also run face authentication in the Plasma Login Manager / SDDM stack (submit-driven; see the [KDE guide](/guide/kde)) |
 | `services.gaze.kde.unlockKwallet` | `false` | Wire KWallet auth/session hooks for KDE face login; requires `kde.loginScreen`, runtime opt-in, and wallet enrollment (below) |
 | `services.gaze.tpm.tcti` | `null` | `TPM2TOOLS_TCTI` for the daemon, e.g. `"device:/dev/tpm0"`. Only needed when neither `/dev/tpmrm0` nor `/dev/tpm0` is the right node |
 
 The gaze PAM rule is inserted ahead of both `pam_fprintd` and `pam_unix`, so
-face auth is tried first and the fingerprint reader and password both remain
+face authentication is tried first and the fingerprint reader and password both remain
 fallbacks. To put gaze somewhere else in the stack, set `order`, offsetting
 from the neighbouring rule rather than from a constant (nixpkgs assigns those
 numbers automatically and they change between releases):
@@ -169,7 +169,7 @@ services.gaze.gnome.enable = true;
 
 That installs the extension and, through
 `services.gaze.gnome.enableForUsers` (on by default), writes dconf defaults
-into the `user` profile that load it and switch lock screen face auth on for
+into the `user` profile that load it and switch lock screen face authentication on for
 every GNOME session. Log out and back in after the rebuild: GNOME Shell only
 scans extension directories at session start, so a running session will not
 pick up a newly installed extension.
@@ -201,7 +201,7 @@ home-manager or your own `programs.dconf.profiles.user` database, set
 set the key shadow each other rather than merging, and only the one listed
 first in the profile takes effect.
 
-GDM *login* face auth stays disabled unless you set
+GDM *login* face authentication stays disabled unless you set
 `services.gaze.gnome.gdmFaceLogin = true;`. The extension preferences and
 `gaze doctor` both report whatever that option compiled into the GDM dconf
 profile, but the toggle itself cannot change it: the profile belongs to your
@@ -234,7 +234,7 @@ camera. Don't set `kde.gaze.enable` by hand: that is the old submit-driven wirin
 and it conflicts with this one.
 
 The login greeter is separate and opt-in, because upstream gives it no up-front
-biometric slot, so face auth only runs when the login form is submitted:
+biometric slot, so face authentication only runs when the login form is submitted:
 
 ```nix
 services.gaze.kde.loginScreen = true;

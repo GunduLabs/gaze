@@ -17,7 +17,7 @@ pub const SECURITY_LEVEL_LABELS: [&str; 5] = ["Low", "Medium", "High", "Maximum"
 pub const MODEL_QUALITY_OPTIONS: [&str; 2] = ["standard", "accurate"];
 pub const MODEL_QUALITY_LABELS: [&str; 2] = ["Standard", "Accurate"];
 pub const HYBRID_POLICY_OPTIONS: [&str; 4] = ["default", "or", "fallback_on_dark", "and"];
-pub const HYBRID_POLICY_LABELS: [&str; 4] = ["Default", "Or", "Fallback on Dark", "And"];
+pub const HYBRID_POLICY_LABELS: [&str; 4] = ["Default", "Or", "Fallback on dark", "And"];
 pub const PARALLEL_CAPTURE_OPTIONS: [&str; 3] = ["never", "auto", "always"];
 pub const PARALLEL_CAPTURE_LABELS: [&str; 3] = [
     "Never (capture RGB, then IR)",
@@ -25,11 +25,16 @@ pub const PARALLEL_CAPTURE_LABELS: [&str; 3] = [
     "Always (capture RGB and IR at once)",
 ];
 pub const START_DELAY_SCOPE_OPTIONS: [&str; 2] = ["all", "screen_lock"];
-pub const START_DELAY_SCOPE_LABELS: [&str; 2] =
-    ["Every face auth (including sudo)", "Screen lockers only"];
+pub const START_DELAY_SCOPE_LABELS: [&str; 2] = [
+    "All face authentication (including sudo)",
+    "Screen lockers only",
+];
 // Clients validate syntax independently of the daemon's installed vendor runtime.
 pub const INFERENCE_EXECUTION_PROVIDER_OPTIONS: [&str; 4] = ["cpu", "auto", "openvino", "vitis"];
+pub const INFERENCE_EXECUTION_PROVIDER_LABELS: [&str; 4] =
+    ["CPU", "Automatic (NPU)", "Intel OpenVINO", "AMD Ryzen AI"];
 pub const INFERENCE_DEVICE_OPTIONS: [&str; 3] = ["cpu", "gpu", "npu"];
+pub const INFERENCE_DEVICE_LABELS: [&str; 3] = ["CPU", "GPU", "NPU"];
 pub const DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO: f64 = 0.25;
 pub const MIN_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.10;
 pub const MAX_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.75;
@@ -2700,6 +2705,14 @@ level = "low""#,
         assert_eq!(
             START_DELAY_SCOPE_OPTIONS.len(),
             START_DELAY_SCOPE_LABELS.len()
+        );
+        assert_eq!(
+            INFERENCE_EXECUTION_PROVIDER_OPTIONS.len(),
+            INFERENCE_EXECUTION_PROVIDER_LABELS.len()
+        );
+        assert_eq!(
+            INFERENCE_DEVICE_OPTIONS.len(),
+            INFERENCE_DEVICE_LABELS.len()
         );
     }
 

@@ -414,7 +414,7 @@ impl AuthDaemon {
                     has_rgb_templates,
                     has_ir_templates,
                     "Hybrid policy \"and\" requires both spectra but {} has no {} templates; \
-                     refusing to authenticate on one spectrum. Re-enrol to cover both.",
+                     refusing to authenticate on one spectrum. Re-enroll to cover both.",
                     username,
                     if has_rgb_templates { "IR" } else { "RGB" }
                 );

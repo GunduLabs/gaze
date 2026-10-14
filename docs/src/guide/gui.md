@@ -4,8 +4,8 @@
 # GUI Guide
 
 ::: tip On KDE Plasma
-`gaze-kde` adds a **Face Unlock** entry to System Settings that opens this app. See the
-[KDE Plasma guide](/guide/kde#system-settings).
+`gaze-kde` adds a native **Gaze** page to System Settings with the same features as
+this app. See the [KDE Plasma guide](/guide/kde#system-settings).
 :::
 
 Use `gaze-gui` to enroll your face, test recognition, and adjust Gaze settings.
@@ -18,9 +18,9 @@ gaze-gui
 
 - **Enroll a face:** Follow the camera prompts. If both RGB and IR cameras are configured, Gaze captures from both.
 - **View profiles:** The main window lists enrolled faces, their total template counts, and `RGB` and `IR` badges. A badge is green when the profile has captures for that spectrum, amber when a camera is configured but the profile has no captures, and grey when no camera is configured. An RGB-only machine therefore shows a green `RGB` badge and a grey `IR` badge; grey does not indicate a failure.
-- **Refine a profile:** Select its edit/refine icon to capture additional samples or add a missing spectrum. For example, you can add IR captures to an RGB-only profile after configuring an IR camera.
+- **Improve a face:** Select its improve icon to capture additional samples or add a missing spectrum. For example, you can add IR captures to an RGB-only face after configuring an IR camera.
 - **Test authentication:** Run a face scan to check whether Gaze recognizes you.
-- **Remove profiles:** Delete individual face profiles.
+- **Remove faces:** Delete individual faces.
 - **Change daemon settings:** Adjust the security level, cameras, liveness settings, and hybrid policy.
 
 ## Configuration dialog
@@ -62,11 +62,11 @@ using [Hardware Acceleration](/guide/acceleration), then restart the daemon afte
 **Auth**
 
 - Abort if SSH, abort if lid closed
-- Require a suspend first, which refuses face auth until the machine has suspended
+- Require a suspend first, which refuses face authentication until the machine has suspended
   and resumed once
 - Require confirmation on lock screen, require confirmation for elevated auth
 - Resume grace period and start delay, both in milliseconds
-- Start delay applies to, either every face auth or screen lockers only
+- Start delay applies to, either every face authentication or screen lockers only
 - Hybrid combining policy, used when both RGB and IR are enrolled
 
 **Storage**

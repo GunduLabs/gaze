@@ -9,6 +9,7 @@
 #include <QDBusConnection>
 #include <QDir>
 #include <QFile>
+#include <algorithm>
 
 #include <pwd.h>
 #include <unistd.h>
@@ -28,7 +29,7 @@ QString enrollPrompt(const QString &id)
     if (id == QLatin1String("look-left")) return i18n("Turn your face slightly left");
     if (id == QLatin1String("look-right")) return i18n("Turn your face slightly right");
     if (id == QLatin1String("captured")) return i18n("Captured");
-    if (id == QLatin1String("completed")) return i18n("✓ Enrollment Complete!");
+    if (id == QLatin1String("completed")) return i18n("Enrollment complete");
     if (id == QLatin1String("cancelled")) return i18n("Enrollment cancelled");
     if (id == QLatin1String("db-failed")) return i18n("Database error during enrollment");
     if (id == QLatin1String("camera-failed")) return i18n("Camera error during enrollment");
@@ -214,7 +215,7 @@ void GazeKcm::startEnroll(const QString &name)
         return;
     }
     m_enrollState = QStringLiteral("running");
-    m_prompt = i18n("Starting enrollment...");
+    m_prompt = i18n("Starting enrollment…");
     m_faceHint.clear();
     m_progress = 0;
     m_steps = 0;
@@ -321,7 +322,7 @@ void GazeKcm::onVerifyStatus(const QDBusMessage &message)
 
 QVariantList GazeKcm::cameraSources() const
 {
-    QVariantList sources;
+    QList<std::pair<QString, QString>> cameras;
     const QDir sysfs(QStringLiteral("/sys/class/video4linux"));
     for (const QString &node : sysfs.entryList({QStringLiteral("video*")}, QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::LocaleAware)) {
         // Each camera exposes metadata nodes next to its capture node. Only capture nodes have index 0.
@@ -330,9 +331,19 @@ QVariantList GazeKcm::cameraSources() const
             continue;
         }
         QFile name(sysfs.filePath(node + QStringLiteral("/name")));
-        const QString label = name.open(QIODevice::ReadOnly) ? QString::fromLocal8Bit(name.readAll().trimmed()) : QString();
         const QString device = QStringLiteral("/dev/") + node;
-        sources.append(QVariantMap{{QStringLiteral("text"), label.isEmpty() ? device : QStringLiteral("%1 (%2)").arg(label, device)}, {QStringLiteral("value"), device}});
+        const QString label = name.open(QIODevice::ReadOnly) ? QString::fromLocal8Bit(name.readAll().trimmed()) : QString();
+        cameras.append({label.isEmpty() ? device : label, device});
+    }
+
+    QVariantList sources;
+    for (const auto &[label, device] : cameras) {
+        const bool shared = std::count_if(cameras.cbegin(), cameras.cend(), [&](const auto &other) {
+                                return other.first == label;
+                            })
+            > 1;
+        const QString text = shared && label != device ? QStringLiteral("%1 (%2)").arg(label, device) : label;
+        sources.append(QVariantMap{{QStringLiteral("text"), text}, {QStringLiteral("value"), device}});
     }
     return sources;
 }

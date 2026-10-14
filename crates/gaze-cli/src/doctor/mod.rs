@@ -319,7 +319,11 @@ mod tests {
     #[test]
     fn a_feature_switched_off_is_not_a_checkmark_and_still_says_how_to_turn_it_on() {
         let mut report = Report::default();
-        report.off("GDM login face auth", "off", "Turn it on: flip the switch.");
+        report.off(
+            "GDM login face authentication",
+            "off",
+            "Turn it on: flip the switch.",
+        );
 
         let check = &report.checks[0];
         assert_eq!(check.level, Level::Off);

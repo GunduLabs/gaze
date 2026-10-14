@@ -48,7 +48,7 @@ pub fn load_or_create_dek(state_dir: &Path) -> anyhow::Result<SealedKey> {
             .map_err(|e| anyhow!("failed to parse sealed TPM private blob: {e}"))?;
         let dek = unseal_in(&mut context, public, private).context(
             "could not unseal the template key; if the TPM was cleared, delete the TPM state \
-             directory and re-enrol",
+             directory and re-enroll",
         )?;
         return Ok(dek);
     }

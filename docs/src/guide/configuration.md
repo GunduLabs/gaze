@@ -282,7 +282,7 @@ ir_frame_height = 340
 - Set both keys or neither. Each must be between 1 and 4096. Leave them out to
   let Gaze negotiate the size, which is the default.
 - If the camera cannot open at the forced size, Gaze logs a warning and falls back
-  to negotiating the size, so a wrong value never leaves face auth without a camera.
+  to negotiating the size, so a wrong value never leaves face authentication without a camera.
 - The override applies only to the IR camera. On Dell and Realtek modules that
   Gaze forces into 640x480 YUY2 mode, it replaces that 640x480.
 - In the GUI, turn on **IR Frame Size Override** under Hardware.
@@ -361,9 +361,9 @@ start_delay_ms = 0
 start_delay_scope = "screen_lock"
 ```
 
-`abort_if_ssh` asks logind whether the D-Bus caller's session is remote, falling back to the caller process environment and ancestry where logind is unreachable. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor. When logind is configured to suspend on lid close, a closed lid holds the attempt for up to 3 seconds instead of refusing it outright: if the suspend starts, face auth resumes after wake rather than failing in the locker that came up on lid close. See [Suspend during an attempt](/guide/how-it-works#suspend-during-an-attempt).
+`abort_if_ssh` asks logind whether the D-Bus caller's session is remote, falling back to the caller process environment and ancestry where logind is unreachable. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor. When logind is configured to suspend on lid close, a closed lid holds the attempt for up to 3 seconds instead of refusing it outright: if the suspend starts, face authentication resumes after wake rather than failing in the locker that came up on lid close. See [Suspend during an attempt](/guide/how-it-works#suspend-during-an-attempt).
 
-Aborting face authentication when you type a password is not a key in this file. It is a property of the PAM stack: [simultaneous mode](/guide/pam#what-gaze-installs) (`pam_gaze.so simultaneous`) stands Gaze down as soon as you submit a password, and [retry mode](/guide/pam#retry-after-a-rejected-password) (`pam_gaze.so retry`) gives face auth one more attempt if that password turns out to be wrong.
+Aborting face authentication when you type a password is not a key in this file. It is a property of the PAM stack: [simultaneous mode](/guide/pam#what-gaze-installs) (`pam_gaze.so simultaneous`) stands Gaze down as soon as you submit a password, and [retry mode](/guide/pam#retry-after-a-rejected-password) (`pam_gaze.so retry`) gives face authentication one more attempt if that password turns out to be wrong.
 
 `abort_before_first_resume` refuses face authentication until the machine has suspended and woken at least once, so the first authentication of a boot always falls through to the password. On GNOME that password is what unlocks the login keyring; authenticating with your face instead leaves the keyring locked and GNOME asks for the password again a moment later. With this enabled you type the password once at the GDM login and then unlock with your face for the rest of the session.
 
@@ -593,7 +593,7 @@ Settings:
 - `closed_threshold` is the classifier's closed-eye probability (0.5 to 0.99) needed to count an eye as shut. Lower it if a deliberate wink is missed; raise it if squinting or laughing trips it.
 - `hold_ms` is how long (0 to 5000 ms) the eye must stay shut. A normal blink takes 100 to 400 ms.
 
-The duress table lives only in `/etc/gaze/config.toml`. The GUI and `gaze config` leave it untouched, and the daemon reads it at the start of every face auth, so no restart is needed.
+The duress table lives only in `/etc/gaze/config.toml`. The GUI and `gaze config` leave it untouched, and the daemon reads it at the start of every face authentication, so no restart is needed.
 
 Limits to be aware of:
 

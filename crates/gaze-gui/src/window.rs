@@ -4,7 +4,7 @@
 use crate::capture_dialog;
 use gaze_core::config::{
     AuthConfig, CameraConfig, Config, DEFAULT_RGB_CAMERA, HYBRID_POLICY_LABELS,
-    INFERENCE_DEVICE_OPTIONS, INFERENCE_EXECUTION_PROVIDER_OPTIONS, InferenceConfig,
+    INFERENCE_DEVICE_LABELS, INFERENCE_EXECUTION_PROVIDER_LABELS, InferenceConfig,
     MAX_ENROLLMENT_FACE_SIZE_RATIO, MAX_IR_FRAME_DIMENSION, MAX_LIVENESS_MAX_SECONDS,
     MIN_ENROLLMENT_FACE_SIZE_RATIO, MIN_LIVENESS_MAX_SECONDS, MODEL_QUALITY_LABELS,
     PARALLEL_CAPTURE_LABELS, SECURITY_LEVEL_LABELS, START_DELAY_SCOPE_LABELS, SecurityLevel,
@@ -557,7 +557,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     let window = libadwaita::Window::builder()
         .transient_for(parent)
         .modal(true)
-        .title("Configuration")
+        .title("Settings")
         .default_width(600)
         .default_height(700)
         .build();
@@ -587,20 +587,20 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     page.add(&security_group);
 
     let level_row = libadwaita::ComboRow::new();
-    level_row.set_title("Security Level");
+    level_row.set_title("Security level");
     level_row.set_subtitle("Adjust the balance between speed and security");
     let level_model = gtk4::StringList::new(&SECURITY_LEVEL_LABELS);
     level_row.set_model(Some(&level_model));
     security_group.add(&level_row);
 
     let detector_row = libadwaita::ComboRow::new();
-    detector_row.set_title("Detector Level");
+    detector_row.set_title("Detector level");
     let detector_model = gtk4::StringList::new(&MODEL_QUALITY_LABELS);
     detector_row.set_model(Some(&detector_model));
     security_group.add(&detector_row);
 
     let recognizer_row = libadwaita::ComboRow::new();
-    recognizer_row.set_title("Recognizer Level");
+    recognizer_row.set_title("Recognizer level");
     let recognizer_model = gtk4::StringList::new(&MODEL_QUALITY_LABELS);
     recognizer_row.set_model(Some(&recognizer_model));
     security_group.add(&recognizer_row);
@@ -618,13 +618,13 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     };
 
     let rgb_threshold_row = make_threshold_row(
-        "RGB Recognizer Threshold",
+        "RGB recognizer threshold",
         "Minimum RGB similarity for a match",
     );
     security_group.add(&rgb_threshold_row);
 
     let ir_threshold_row = make_threshold_row(
-        "IR Recognizer Threshold",
+        "IR recognizer threshold",
         "Minimum IR similarity for a match",
     );
     security_group.add(&ir_threshold_row);
@@ -638,20 +638,20 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     inference_execution_provider_row
         .set_subtitle("CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI");
     let inference_execution_provider_model =
-        gtk4::StringList::new(&INFERENCE_EXECUTION_PROVIDER_OPTIONS);
+        gtk4::StringList::new(&INFERENCE_EXECUTION_PROVIDER_LABELS);
     inference_execution_provider_row.set_model(Some(&inference_execution_provider_model));
     hardware_group.add(&inference_execution_provider_row);
 
     let inference_device_row = libadwaita::ComboRow::new();
     inference_device_row.set_title("OpenVINO inference device");
     inference_device_row.set_subtitle("The Intel device used for all ONNX models");
-    let inference_device_model = gtk4::StringList::new(&INFERENCE_DEVICE_OPTIONS);
+    let inference_device_model = gtk4::StringList::new(&INFERENCE_DEVICE_LABELS);
     inference_device_row.set_model(Some(&inference_device_model));
     hardware_group.add(&inference_device_row);
 
     let cameras = gaze_vision::camera::rgb_choices().unwrap_or_else(|_| {
         vec![
-            ("Primary Camera".to_string(), DEFAULT_RGB_CAMERA.to_string()),
+            ("Primary camera".to_string(), DEFAULT_RGB_CAMERA.to_string()),
             (
                 gaze_vision::camera::RGB_NONE_DISPLAY_NAME.to_string(),
                 String::new(),
@@ -661,7 +661,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     let cam_names = cameras.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
 
     let camera_row = libadwaita::ComboRow::new();
-    camera_row.set_title("RGB Camera Source");
+    camera_row.set_title("RGB camera source");
     let cam_model =
         gtk4::StringList::new(&cam_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
     camera_row.set_model(Some(&cam_model));
@@ -674,13 +674,13 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         .collect::<Vec<_>>();
 
     let ir_row = libadwaita::ComboRow::new();
-    ir_row.set_title("IR Camera Source");
+    ir_row.set_title("IR camera source");
     let ir_model = gtk4::StringList::new(&ir_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
     ir_row.set_model(Some(&ir_model));
     hardware_group.add(&ir_row);
 
     let ir_frame_size_row = libadwaita::ExpanderRow::new();
-    ir_frame_size_row.set_title("IR Frame Size Override");
+    ir_frame_size_row.set_title("IR frame size override");
     ir_frame_size_row
         .set_subtitle("Force one resolution if the IR feed is green or corrupted on auto");
     ir_frame_size_row.set_show_enable_switch(true);
@@ -702,26 +702,27 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     ir_frame_size_row.add_row(&ir_frame_height_row);
 
     let emitter_row = libadwaita::ActionRow::new();
-    emitter_row.set_title("Force IR Emitter");
+    emitter_row.set_title("Force IR emitter");
     emitter_row
-        .set_subtitle("Override emitter control (only use if camera stays unlit automatically)");
+        .set_subtitle("Override emitter control, only if the IR emitter stays off on its own");
     let emitter_switch = gtk4::Switch::new();
     emitter_switch.set_valign(gtk4::Align::Center);
     emitter_row.add_suffix(&emitter_switch);
     hardware_group.add(&emitter_row);
 
     let parallel_capture_row = libadwaita::ComboRow::new();
-    parallel_capture_row.set_title("Parallel RGB + IR Capture");
-    parallel_capture_row
-        .set_subtitle("Faster hybrid auth, but some webcams cannot stream both sensors at once");
+    parallel_capture_row.set_title("Parallel RGB + IR capture");
+    parallel_capture_row.set_subtitle(
+        "Faster hybrid authentication, but some webcams cannot stream both sensors at once",
+    );
     let parallel_capture_model = gtk4::StringList::new(&PARALLEL_CAPTURE_LABELS);
     parallel_capture_row.set_model(Some(&parallel_capture_model));
     hardware_group.add(&parallel_capture_row);
 
     let dark_luma_threshold_row = libadwaita::SpinRow::with_range(0.0, 255.0, 1.0);
     dark_luma_threshold_row.set_digits(0);
-    dark_luma_threshold_row.set_title("Darkness Cutoff");
-    dark_luma_threshold_row.set_subtitle("Reject frames below this mean brightness (0-255)");
+    dark_luma_threshold_row.set_title("Darkness cutoff");
+    dark_luma_threshold_row.set_subtitle("Reject frames below this mean brightness (0–255)");
     hardware_group.add(&dark_luma_threshold_row);
 
     let enrollment_group = libadwaita::PreferencesGroup::new();
@@ -729,7 +730,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     page.add(&enrollment_group);
 
     let templates_row = libadwaita::SpinRow::with_range(1.0, 50.0, 1.0);
-    templates_row.set_title("Maximum Templates");
+    templates_row.set_title("Maximum templates");
     templates_row.set_subtitle("Number of capture sets stored per face");
     enrollment_group.add(&templates_row);
 
@@ -739,7 +740,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         0.01,
     );
     min_face_size_ratio_row.set_digits(2);
-    min_face_size_ratio_row.set_title("Minimum Face Size Ratio");
+    min_face_size_ratio_row.set_title("Minimum face size ratio");
     min_face_size_ratio_row
         .set_subtitle("Smallest accepted face during enrollment; lower allows more distance");
     enrollment_group.add(&min_face_size_ratio_row);
@@ -749,7 +750,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     page.add(&liveness_group);
 
     let liveness_enabled_row = libadwaita::ActionRow::new();
-    liveness_enabled_row.set_title("Enable Liveness Spoof Prevention");
+    liveness_enabled_row.set_title("Enable liveness spoof prevention");
     liveness_enabled_row.set_subtitle("Analyze face depth/reflectance to prevent photo spoofing");
     let liveness_enabled_switch = gtk4::Switch::new();
     liveness_enabled_switch.set_valign(gtk4::Align::Center);
@@ -762,14 +763,14 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
         0.01,
     );
     liveness_threshold_row.set_digits(3);
-    liveness_threshold_row.set_title("Liveness Threshold");
+    liveness_threshold_row.set_title("Liveness threshold");
     liveness_threshold_row.set_subtitle("Minimum spoof prevention confidence");
     liveness_group.add(&liveness_threshold_row);
 
     let liveness_max_seconds_row =
         libadwaita::SpinRow::with_range(MIN_LIVENESS_MAX_SECONDS, MAX_LIVENESS_MAX_SECONDS, 0.1);
     liveness_max_seconds_row.set_digits(1);
-    liveness_max_seconds_row.set_title("Maximum Liveness Duration");
+    liveness_max_seconds_row.set_title("Maximum liveness duration");
     liveness_max_seconds_row.set_subtitle("Maximum seconds analyzed for liveness verification");
     liveness_group.add(&liveness_max_seconds_row);
 
@@ -786,7 +787,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     auth_group.add(&abort_ssh_row);
 
     let abort_lid_row = libadwaita::ActionRow::new();
-    abort_lid_row.set_title("Abort if Lid Closed");
+    abort_lid_row.set_title("Abort if lid closed");
     abort_lid_row.set_subtitle("Prevent authentication when the laptop lid is closed");
     let abort_lid_switch = gtk4::Switch::new();
     abort_lid_switch.set_valign(gtk4::Align::Center);
@@ -794,7 +795,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     auth_group.add(&abort_lid_row);
 
     let abort_first_resume_row = libadwaita::ActionRow::new();
-    abort_first_resume_row.set_title("Require a Suspend First");
+    abort_first_resume_row.set_title("Require a suspend first");
     abort_first_resume_row
         .set_subtitle("Prevent authentication until the system has suspended and resumed once");
     let abort_first_resume_switch = gtk4::Switch::new();
@@ -803,7 +804,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     auth_group.add(&abort_first_resume_row);
 
     let require_confirm_lock_screen_row = libadwaita::ActionRow::new();
-    require_confirm_lock_screen_row.set_title("Require Confirmation on Lock Screen");
+    require_confirm_lock_screen_row.set_title("Require confirmation on lock screen");
     require_confirm_lock_screen_row.set_subtitle(
         "Require pressing Enter or clicking OK to authorize after face matches on the lock screen or login screen",
     );
@@ -813,7 +814,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     auth_group.add(&require_confirm_lock_screen_row);
 
     let require_confirm_elevation_row = libadwaita::ActionRow::new();
-    require_confirm_elevation_row.set_title("Require Confirmation for Elevated Auth");
+    require_confirm_elevation_row.set_title("Require confirmation for elevated authentication");
     require_confirm_elevation_row.set_subtitle(
         "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts",
     );
@@ -824,18 +825,18 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
     let resume_grace_row = libadwaita::SpinRow::with_range(0.0, 10000.0, 100.0);
     resume_grace_row.set_digits(0);
-    resume_grace_row.set_title("Resume Grace Period (ms)");
+    resume_grace_row.set_title("Resume grace period (ms)");
     resume_grace_row.set_subtitle("Delay face authentication on wake from suspend");
     auth_group.add(&resume_grace_row);
 
     let start_delay_row = libadwaita::SpinRow::with_range(0.0, 10000.0, 500.0);
     start_delay_row.set_digits(0);
-    start_delay_row.set_title("Start Delay (ms)");
+    start_delay_row.set_title("Start delay (ms)");
     start_delay_row.set_subtitle("Delay before face authentication starts");
     auth_group.add(&start_delay_row);
 
     let start_delay_scope_row = libadwaita::ComboRow::new();
-    start_delay_scope_row.set_title("Start Delay Applies To");
+    start_delay_scope_row.set_title("Start delay applies to");
     start_delay_scope_row.set_subtitle("Which prompts wait for the start delay");
     let start_delay_scope_model = gtk4::StringList::new(&START_DELAY_SCOPE_LABELS);
     start_delay_scope_row.set_model(Some(&start_delay_scope_model));
@@ -853,7 +854,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
     page.add(&storage_group);
 
     let encrypt_templates_row = libadwaita::ActionRow::new();
-    encrypt_templates_row.set_title("Encrypt Face Templates");
+    encrypt_templates_row.set_title("Encrypt face templates");
     encrypt_templates_row.set_subtitle("Encrypt face templates at rest with a TPM-sealed key");
     let encrypt_templates_switch = gtk4::Switch::new();
     encrypt_templates_switch.set_valign(gtk4::Align::Center);
@@ -873,7 +874,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
 
     let unlock_kwallet_row = libadwaita::ActionRow::new();
     unlock_kwallet_row.set_visible(false);
-    unlock_kwallet_row.set_title("Unlock KDE KWallet");
+    unlock_kwallet_row.set_title("Unlock KWallet");
     unlock_kwallet_row.set_subtitle("Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet");
     let unlock_kwallet_switch = gtk4::Switch::new();
     unlock_kwallet_switch.set_valign(gtk4::Align::Center);
@@ -1658,10 +1659,10 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     header.set_title_widget(Some(&title));
 
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_btn.set_tooltip_text(Some("Add new face"));
+    add_btn.set_tooltip_text(Some("Enroll a new face"));
 
     let test_btn = gtk4::Button::from_icon_name("media-playback-start-symbolic");
-    test_btn.set_tooltip_text(Some("Test Authentication"));
+    test_btn.set_tooltip_text(Some("Test face authentication"));
 
     let config_btn = gtk4::Button::from_icon_name("emblem-system-symbolic");
     config_btn.set_tooltip_text(Some("Configure Gaze"));
@@ -1686,7 +1687,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
     let face_group = libadwaita::PreferencesGroup::new();
     face_group.set_title("Enrolled Faces");
-    face_group.set_description(Some("Your registered face profiles"));
+    face_group.set_description(Some(&format!("Faces enrolled for {username}")));
 
     let face_list = gtk4::ListBox::new();
     face_list.add_css_class("boxed-list");
@@ -1698,7 +1699,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     let status_page = libadwaita::StatusPage::new();
     status_page.set_icon_name(Some("contact-new-symbolic"));
     status_page.set_title("No Faces Enrolled");
-    status_page.set_description(Some("Loading from daemon..."));
+    status_page.set_description(Some("Loading from the Gaze daemon…"));
     status_page.set_visible(true);
     face_list.set_visible(false);
     content.append(&status_page);
@@ -1787,7 +1788,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         return;
                     }
 
-                    let mut text = "✗ Verification failed".to_string();
+                    let mut text = "Face not recognized".to_string();
                     let mut matched_face: Option<String> = None;
 
                     // Without a deadline of its own the button stays stuck for as long as the
@@ -1800,21 +1801,21 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 let Ok(args) = signal.args() else { continue };
                                 let res = *args.result();
                                 if res == gaze_core::dbus::VerifyResult::VerifyMatch {
-                                    text = "✓ Authentication successful".to_string();
+                                    text = "Face recognized".to_string();
                                     let faces = args.faces();
                                     matched_face = faces
                                         .iter()
                                         .find(|(_, _, _, rgb_p, _, _, ir_p)| *rgb_p || *ir_p)
                                         .map(|(n, _, _, _, _, _, _)| n.clone());
                                 } else {
-                                    text = "✗ Authentication failed".to_string();
+                                    text = "Face not recognized".to_string();
                                 }
                                 break;
                             }
                             futures::future::Either::Left((None, _)) => break,
                             futures::future::Either::Right(_) => {
                                 let _ = proxy.verify_stop().await;
-                                text = "✗ Verification timed out".to_string();
+                                text = "No face seen before the test timed out".to_string();
                                 break;
                             }
                         }
@@ -1954,7 +1955,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                     } else if dbus_is_not_activatable(&err) {
                                         status_page.set_title("Daemon Starting");
                                         status_page.set_description(Some(
-                                            "Gaze daemon is starting up, please wait...",
+                                            "The Gaze daemon is starting up…",
                                         ));
                                         status_page.set_visible(true);
                                         face_list.set_visible(false);
@@ -1984,7 +1985,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
                             if faces.is_empty() {
                                 status_page.set_title("No Faces Enrolled");
-                                status_page.set_description(Some("Press + to add your first face"));
+                                status_page.set_description(Some("Enroll a face to get started"));
                                 status_page.set_visible(true);
                                 face_list.set_visible(false);
                             } else {
@@ -2045,12 +2046,15 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                     let rename_btn =
                                         gtk4::Button::from_icon_name("document-edit-symbolic");
                                     rename_btn.add_css_class("flat");
+                                    rename_btn.set_tooltip_text(Some("Rename"));
                                     let refine_btn =
-                                        gtk4::Button::from_icon_name("view-refresh-symbolic");
+                                        gtk4::Button::from_icon_name("camera-photo-symbolic");
                                     refine_btn.add_css_class("flat");
+                                    refine_btn.set_tooltip_text(Some("Improve this face"));
                                     let delete_btn =
                                         gtk4::Button::from_icon_name("user-trash-symbolic");
                                     delete_btn.add_css_class("flat");
+                                    delete_btn.set_tooltip_text(Some("Delete"));
 
                                     btn_box.append(&rename_btn);
                                     btn_box.append(&refine_btn);

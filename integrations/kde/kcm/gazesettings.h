@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "dbuscall.h"
+#include "gazebus.h"
 
 #include <QDBusMessage>
 #include <QDBusObjectPath>

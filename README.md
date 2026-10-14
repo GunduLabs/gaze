@@ -133,7 +133,7 @@ flatpak install --from https://packages.gundulabs.com/flatpak/com.gundulabs.Gaze
 
 On openSUSE Tumbleweed, the RPM post-install script enables Gaze in the shared PAM stack. If needed, reapply that setting with `sudo pam-config --add --gaze && sudo pam-config --update`.
 
-For GNOME lock screen face unlock after a manual package install, also install `gaze-gnome-extension` (`gaze-gnome-extension-bin` on Arch) and reboot. Then run `gnome-extensions enable gaze@gundulabs.com` and `gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true` from your GNOME session. On Cinnamon, install `gaze-cinnamon-extension` and enable it from **System Settings → Extensions**; see the [Cinnamon guide](https://gaze.gundulabs.com/guide/cinnamon). On KDE Plasma, install `gaze-kde` (`gaze-kde-bin` on Arch) to enable hands-free lock screen face unlock and add a Face Unlock entry to System Settings; see the [KDE guide](https://gaze.gundulabs.com/guide/kde).
+For GNOME lock screen face unlock after a manual package install, also install `gaze-gnome-extension` (`gaze-gnome-extension-bin` on Arch) and reboot. Then run `gnome-extensions enable gaze@gundulabs.com` and `gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true` from your GNOME session. On Cinnamon, install `gaze-cinnamon-extension` and enable it from **System Settings → Extensions**; see the [Cinnamon guide](https://gaze.gundulabs.com/guide/cinnamon). On KDE Plasma, install `gaze-kde` (`gaze-kde-bin` on Arch) to enable hands-free lock screen face unlock and add a Gaze page to System Settings; see the [KDE guide](https://gaze.gundulabs.com/guide/kde).
 
 </details>
 
@@ -198,7 +198,7 @@ Camera → Face Detection (SCRFD) → Alignment → Embedding (ArcFace) → Matc
 | `gaze-security` | TPM sealing and the privileged credential store behind template encryption and keyring unlock |
 | `gaze-gnome-extension` | GNOME Shell extension for lock screen and GDM auth |
 | `gaze-cinnamon-extension` | Cinnamon Spices extension for lock screen and PolKit auth |
-| `gaze-kde` | KDE Plasma lock screen wiring and a Face Unlock entry in System Settings |
+| `gaze-kde` | KDE Plasma lock screen wiring and a Gaze page in System Settings |
 | `gaze-omarchy` | Omarchy Quickshell lock plugin with independent password, fingerprint and face authentication |
 | `gaze-hyprlock` | PAM service for hyprlock face unlock on Hyprland |
 

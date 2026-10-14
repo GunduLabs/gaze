@@ -58,7 +58,7 @@ The GNOME extension package is installed only when a GNOME desktop session is
 detected. On KDE Plasma and other desktops, the installer skips GNOME-specific
 packages so it does not pull in GNOME Shell. When run from GNOME as your normal
 user, it also enables lock screen face unlock for that user. GDM loads the
-extension by default, but GDM login face auth is not enabled unless you
+extension by default, but GDM login face authentication is not enabled unless you
 explicitly run the docs command for it.
 EOF
 }
@@ -492,7 +492,7 @@ enable_kde() {
     say "  ${DIM}Face auth runs in the slot KScreenLocker starts for biometrics, alongside${RESET}"
     say "  ${DIM}the password field, so a match unlocks without pressing a key.${RESET}"
     say "  ${DIM}Lock your screen and look at the camera to try it.${RESET}"
-    say "  ${DIM}Find Gaze in System Settings (Face Unlock on Plasma 5), or run gaze-gui.${RESET}"
+    say "  ${DIM}Find Gaze in System Settings, or run gaze-gui.${RESET}"
     say "  ${DIM}The login greeter is off by default: sudo gaze-kde-pam enable-login${RESET}"
     link "$KDE_DOCS_URL"
 }
@@ -1220,7 +1220,7 @@ say ""
 title "Desktop integration"
 if want_gnome_extension_package; then
     ok "GNOME lock screen face unlock: enabled after reboot"
-    say "  GDM login face auth: off"
+    say "  GDM login face authentication: off"
 elif want_cinnamon_extension_package; then
     ok "Cinnamon extension: enabled for this user"
 elif is_omarchy_session; then

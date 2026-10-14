@@ -36,7 +36,7 @@ yay -S gaze-kde-bin
 `gaze-kde` wires up the lock screen and adds a System Settings entry. The one-line
 installer installs it when it detects a KDE Plasma session.
 
-Lock your screen and look at the camera. Face auth runs while the password field
+Lock your screen and look at the camera. Face authentication runs while the password field
 waits; whichever succeeds first wins. `gaze doctor` reports whether it is wired
 up under "KDE lock screen".
 
@@ -54,8 +54,8 @@ camera at a time, so adding or testing a face fails while `gaze-gui` or another
 client is enrolling, and a login or `sudo` prompt cancels it.
 
 Ubuntu 24.04 ships Plasma 5, which cannot load the page, so there `gaze-kde` adds
-a **Face Unlock** entry that opens `gaze-gui` instead. Make sure `gaze-gui` is
-installed for that entry to work; the one-line installer includes it.
+a **Gaze** entry that opens `gaze-gui` instead. Make sure `gaze-gui` is installed
+for that entry to work; the one-line installer includes it.
 
 ## How the lock screen works
 
@@ -137,7 +137,7 @@ instead of going straight to the desktop.
 On Fedora, Debian, and openSUSE, Gaze installs into the shared authentication
 stack (`password-auth` or `common-auth`) that `/etc/pam.d/kde` also includes. Once a
 biometric slot runs Gaze, the module stands down in the services that reach it
-that way, so a single lock screen does not run face auth two or three times over
+that way, so a single lock screen does not run face authentication two or three times over
 and have those clients fight for one camera. `kde` yields to either slot, and
 `kde-smartcard` yields to `kde-fingerprint` if both somehow have a line.
 
@@ -191,7 +191,7 @@ lock screen's biometric slot for the reason above.
 
 The login greeter (Plasma Login Manager, or SDDM) is a different program from the
 lock screen, and on every version shipping today it starts PAM only when you
-submit the login form. So face auth there is not hands-free: press Enter with the
+submit the login form. So face authentication there is not hands-free: press Enter with the
 password field empty and look at the camera.
 
 This behavior comes from the greeter, not from Gaze. For comparison,
@@ -240,7 +240,7 @@ counterpart of `kde-fingerprint` on the lock screen.
 
 `enable-login` already handles it. If `plasmalogin-fingerprint` exists, in
 `/etc/pam.d` or in the vendor directory, Gaze goes in there, ahead of `pam_fprintd`
-for the same reason as on the lock screen, and face auth then runs before you touch
+for the same reason as on the lock screen, and face authentication then runs before you touch
 anything. If it does not exist,
 nothing is written and you get the submit-triggered path above. The opt-in is
 remembered, so when your distribution ships a Plasma Login Manager carrying that
@@ -414,9 +414,10 @@ yay -R gaze-kde-bin
   has no enrolled face.
 - **Camera busy.** Another Gaze client (the GUI, or the GNOME extension on a
   mixed install) holds the camera. Close it and retry.
-- **The Face Unlock entry is missing from System Settings.** Restart System
-  Settings; it only scans for modules at startup. If it still does not appear,
-  check that `/usr/share/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop`
+- **The Gaze entry is missing from System Settings.** Restart System Settings;
+  it only scans for modules at startup. If it still does not appear, check that
+  `gaze-kde` is installed. On Ubuntu 24.04, also check that
+  `/usr/share/plasma/systemsettings/externalmodules/gaze-face-unlock.desktop`
   exists and that `gaze-gui` is installed.
 - **The camera never comes on at the login greeter.** That path is opt-in; run
   `sudo gaze-kde-pam enable-login`. Remember it only starts when you submit the

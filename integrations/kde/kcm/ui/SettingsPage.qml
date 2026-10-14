@@ -25,12 +25,12 @@ KCM.SimpleKCM {
         { text: i18n("Accurate"), value: "accurate" }
     ]
 
-    title: i18n("Configuration")
+    title: i18n("Settings")
 
     actions: [
         Kirigami.Action {
             text: i18n("Restart Service")
-            icon.name: "system-reboot"
+            icon.name: "view-refresh"
             enabled: kcm.settings.restartState !== "restarting"
             onTriggered: kcm.settings.restartService()
         }
@@ -63,7 +63,7 @@ KCM.SimpleKCM {
                 Kirigami.Action {
                     visible: kcm.settings.restartState === "suggested"
                     text: i18n("Restart Service")
-                    icon.name: "system-reboot"
+                    icon.name: "view-refresh"
                     onTriggered: kcm.settings.restartService()
                 }
             ]
@@ -83,7 +83,7 @@ KCM.SimpleKCM {
 
         SectionHeader { text: i18n("Security") }
         SettingRow {
-            title: i18n("Security Level")
+            title: i18n("Security level")
             hint: i18n("Adjust the balance between speed and security")
             OptionCombo {
                 key: "security.level"
@@ -97,7 +97,7 @@ KCM.SimpleKCM {
             }
         }
         SettingRow {
-            title: i18n("Detector Level")
+            title: i18n("Detector level")
             visible: page.custom
             OptionCombo {
                 key: "security.detector"
@@ -105,7 +105,7 @@ KCM.SimpleKCM {
             }
         }
         SettingRow {
-            title: i18n("Recognizer Level")
+            title: i18n("Recognizer level")
             visible: page.custom
             OptionCombo {
                 key: "security.recognizer"
@@ -113,7 +113,7 @@ KCM.SimpleKCM {
             }
         }
         SettingRow {
-            title: i18n("RGB Recognizer Threshold")
+            title: i18n("RGB recognizer threshold")
             visible: page.custom
             hint: i18n("Minimum RGB similarity for a match")
             NumberField {
@@ -125,7 +125,7 @@ KCM.SimpleKCM {
             }
         }
         SettingRow {
-            title: i18n("IR Recognizer Threshold")
+            title: i18n("IR recognizer threshold")
             visible: page.custom
             hint: i18n("Minimum IR similarity for a match")
             NumberField {
@@ -145,7 +145,7 @@ KCM.SimpleKCM {
                 options: [
                     { text: i18n("Default"), value: "default" },
                     { text: i18n("Or"), value: "or" },
-                    { text: i18n("Fallback on Dark"), value: "fallback_on_dark" },
+                    { text: i18n("Fallback on dark"), value: "fallback_on_dark" },
                     { text: i18n("And"), value: "and" }
                 ]
             }
@@ -158,10 +158,10 @@ KCM.SimpleKCM {
             OptionCombo {
                 key: "inference.execution_provider"
                 options: [
-                    { text: i18n("cpu"), value: "cpu" },
-                    { text: i18n("auto"), value: "auto" },
-                    { text: i18n("openvino"), value: "openvino" },
-                    { text: i18n("vitis"), value: "vitis" }
+                    { text: i18n("CPU"), value: "cpu" },
+                    { text: i18n("Automatic (NPU)"), value: "auto" },
+                    { text: i18n("Intel OpenVINO"), value: "openvino" },
+                    { text: i18n("AMD Ryzen AI"), value: "vitis" }
                 ]
             }
         }
@@ -172,31 +172,30 @@ KCM.SimpleKCM {
             OptionCombo {
                 key: "inference.device"
                 options: [
-                    { text: i18n("cpu"), value: "cpu" },
-                    { text: i18n("gpu"), value: "gpu" },
-                    { text: i18n("npu"), value: "npu" }
+                    { text: i18n("CPU"), value: "cpu" },
+                    { text: i18n("GPU"), value: "gpu" },
+                    { text: i18n("NPU"), value: "npu" }
                 ]
             }
         }
         SettingRow {
-            title: i18n("RGB Camera Source")
+            title: i18n("RGB camera source")
             OptionCombo {
                 key: "cameras.rgb"
-                options: [
-                    { text: i18n("None"), value: "" },
-                    { text: i18n("Primary Camera"), value: "primary" }
-                ].concat(kcm.cameraSources())
+                options: [{ text: i18n("Primary camera"), value: "primary" }]
+                    .concat(kcm.cameraSources())
+                    .concat([{ text: i18n("None (IR only)"), value: "" }])
             }
         }
         SettingRow {
-            title: i18n("IR Camera Source")
+            title: i18n("IR camera source")
             OptionCombo {
                 key: "cameras.ir"
                 options: [{ text: i18n("None"), value: "" }].concat(kcm.cameraSources())
             }
         }
         SettingRow {
-            title: i18n("IR Frame Size Override")
+            title: i18n("IR frame size override")
             hint: i18n("Force one resolution if the IR feed is green or corrupted on auto")
             QQC2.Label {
                 visible: frameOverride.checked
@@ -229,13 +228,13 @@ KCM.SimpleKCM {
             }
         }
         SwitchRow {
-            title: i18n("Force IR Emitter")
+            title: i18n("Force IR emitter")
             key: "cameras.emitter_enabled"
-            hint: i18n("Override emitter control (only use if camera stays unlit automatically)")
+            hint: i18n("Override emitter control, only if the IR emitter stays off on its own")
         }
         SettingRow {
-            title: i18n("Parallel RGB + IR Capture")
-            hint: i18n("Faster hybrid auth, but some webcams cannot stream both sensors at once")
+            title: i18n("Parallel RGB + IR capture")
+            hint: i18n("Faster hybrid authentication, but some webcams cannot stream both sensors at once")
             OptionCombo {
                 key: "cameras.parallel_capture"
                 options: [
@@ -246,8 +245,8 @@ KCM.SimpleKCM {
             }
         }
         SettingRow {
-            title: i18n("Darkness Cutoff")
-            hint: i18n("Reject frames below this mean brightness (0-255)")
+            title: i18n("Darkness cutoff")
+            hint: i18n("Reject frames below this mean brightness (0–255)")
             NumberField {
                 key: "cameras.dark_luma_threshold"
                 realFrom: 0
@@ -259,7 +258,7 @@ KCM.SimpleKCM {
 
         SectionHeader { text: i18n("Enrollment") }
         SettingRow {
-            title: i18n("Maximum Templates")
+            title: i18n("Maximum templates")
             hint: i18n("Number of capture sets stored per face")
             NumberField {
                 key: "enrollment.max_templates"
@@ -270,7 +269,7 @@ KCM.SimpleKCM {
             }
         }
         SettingRow {
-            title: i18n("Minimum Face Size Ratio")
+            title: i18n("Minimum face size ratio")
             hint: i18n("Smallest accepted face during enrollment; lower allows more distance")
             NumberField {
                 key: "enrollment.min_face_size_ratio"
@@ -283,13 +282,13 @@ KCM.SimpleKCM {
 
         SectionHeader { text: i18n("Liveness Anti-Spoofing") }
         SwitchRow {
-            title: i18n("Enable Liveness Spoof Prevention")
+            title: i18n("Enable liveness spoof prevention")
             key: "liveness.enabled"
             allowed: !page.walletOn
             hint: i18n("Analyze face depth/reflectance to prevent photo spoofing")
         }
         SettingRow {
-            title: i18n("Liveness Threshold")
+            title: i18n("Liveness threshold")
             visible: page.livenessOn
             hint: i18n("Minimum spoof prevention confidence")
             NumberField {
@@ -301,7 +300,7 @@ KCM.SimpleKCM {
             }
         }
         SettingRow {
-            title: i18n("Maximum Liveness Duration")
+            title: i18n("Maximum liveness duration")
             visible: page.livenessOn
             hint: i18n("Maximum seconds analyzed for liveness verification")
             NumberField {
@@ -320,27 +319,27 @@ KCM.SimpleKCM {
             hint: i18n("Prevent authentication over SSH connections")
         }
         SwitchRow {
-            title: i18n("Abort if Lid Closed")
+            title: i18n("Abort if lid closed")
             key: "auth.abort_if_lid_closed"
             hint: i18n("Prevent authentication when the laptop lid is closed")
         }
         SwitchRow {
-            title: i18n("Require a Suspend First")
+            title: i18n("Require a suspend first")
             key: "auth.abort_before_first_resume"
             hint: i18n("Prevent authentication until the system has suspended and resumed once")
         }
         SwitchRow {
-            title: i18n("Require Confirmation on Lock Screen")
+            title: i18n("Require confirmation on lock screen")
             key: "auth.require_confirmation_lock_screen"
             hint: i18n("Require pressing Enter or clicking OK to authorize after face matches on the lock screen or login screen")
         }
         SwitchRow {
-            title: i18n("Require Confirmation for Elevated Auth")
+            title: i18n("Require confirmation for elevated authentication")
             key: "auth.require_confirmation_elevation"
             hint: i18n("Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts")
         }
         SettingRow {
-            title: i18n("Resume Grace Period (ms)")
+            title: i18n("Resume grace period (ms)")
             hint: i18n("Delay face authentication on wake from suspend")
             NumberField {
                 key: "auth.resume_grace_ms"
@@ -351,7 +350,7 @@ KCM.SimpleKCM {
             }
         }
         SettingRow {
-            title: i18n("Start Delay (ms)")
+            title: i18n("Start delay (ms)")
             hint: i18n("Delay before face authentication starts")
             NumberField {
                 key: "auth.start_delay_ms"
@@ -362,13 +361,13 @@ KCM.SimpleKCM {
             }
         }
         SettingRow {
-            title: i18n("Start Delay Applies To")
+            title: i18n("Start delay applies to")
             visible: Number(values["auth.start_delay_ms"]) > 0
             hint: i18n("Which prompts wait for the start delay")
             OptionCombo {
                 key: "auth.start_delay_scope"
                 options: [
-                    { text: i18n("Every face auth (including sudo)"), value: "all" },
+                    { text: i18n("All face authentication (including sudo)"), value: "all" },
                     { text: i18n("Screen lockers only"), value: "screen_lock" }
                 ]
             }
@@ -376,7 +375,7 @@ KCM.SimpleKCM {
 
         SectionHeader { text: i18n("Storage") }
         SwitchRow {
-            title: i18n("Encrypt Face Templates")
+            title: i18n("Encrypt face templates")
             key: "storage.encrypt_templates"
             allowed: !page.walletOn
             hint: i18n("Encrypt face templates at rest with a TPM-sealed key")
@@ -388,7 +387,7 @@ KCM.SimpleKCM {
             hint: i18n("Use an enrolled password after liveness-protected GDM or greetd face login")
         }
         SwitchRow {
-            title: i18n("Unlock KDE KWallet")
+            title: i18n("Unlock KWallet")
             key: "storage.unlock_kwallet"
             allowed: (page.kwalletOn || page.walletReady)
             hint: i18n("Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet")

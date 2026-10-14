@@ -318,7 +318,7 @@ void GazeSettings::onJobRemoved(uint, const QDBusObjectPath &, const QString &un
     m_restarting = false;
     if (result != QLatin1String("done")) {
         setRestartState(QStringLiteral("failed"));
-        setError(i18n("systemd could not restart Gaze: %1", result));
+        setError(i18n("Could not restart the Gaze service (%1)", result));
         return;
     }
     waitForService(30);
@@ -339,7 +339,7 @@ void GazeSettings::waitForService(int attempts)
         QTimer::singleShot(500, this, [this, attempts] { waitForService(attempts - 1); });
     } else {
         setRestartState(QStringLiteral("failed"));
-        setError(i18n("Gaze did not come back after the restart"));
+        setError(i18n("The Gaze service did not start again after the restart"));
     }
 }
 
