@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "dbuscall.h"
+
 #include <QDBusMessage>
 #include <QDBusObjectPath>
 #include <QObject>
@@ -56,8 +58,7 @@ Q_SIGNALS:
     void errorChanged();
 
 private:
-    using Reply = std::function<void(const QDBusMessage &)>;
-    void call(const QString &method, const QVariantList &args, Reply done);
+    void call(const QString &method, const QVariantList &args, GazeBus::Reply done);
     void setError(const QString &error);
     void apply();
     void seedCustomSecurity();

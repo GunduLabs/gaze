@@ -8,6 +8,7 @@
 #include <QTimer>
 #include <functional>
 
+#include "dbuscall.h"
 #include "facemodel.h"
 #include "gazesettings.h"
 
@@ -67,8 +68,7 @@ private Q_SLOTS:
     void onVerifyStatus(const QDBusMessage &message);
 
 private:
-    using Reply = std::function<void(const QDBusMessage &)>;
-    void call(const QString &method, const QVariantList &args, Reply done = {});
+    void call(const QString &method, const QVariantList &args, GazeBus::Reply done = {});
     void callFaceMethod(const QString &method, const QVariantList &args);
     void finishEnroll(const QString &state, const QString &prompt);
     void finishTest(const QString &state);

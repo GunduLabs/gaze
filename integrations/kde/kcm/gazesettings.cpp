@@ -7,13 +7,10 @@
 #include <QDBusArgument>
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
-#include <QDBusPendingCallWatcher>
 #include <QDBusVariant>
 
 namespace
 {
-constexpr QLatin1String Service("com.gundulabs.Gaze");
-constexpr QLatin1String Path("/com/gundulabs/Gaze");
 constexpr int ApplyDelayMs = 400;
 
 struct Field {
@@ -132,26 +129,14 @@ void GazeSettings::setError(const QString &error)
     }
 }
 
-void GazeSettings::call(const QString &method, const QVariantList &args, Reply done)
+void GazeSettings::call(const QString &method, const QVariantList &args, GazeBus::Reply done)
 {
-    auto message = QDBusMessage::createMethodCall(Service, Path, Service, method);
-    message.setArguments(args);
-    message.setInteractiveAuthorizationAllowed(true);
-    auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(message), this);
-    connect(watcher, &QDBusPendingCallWatcher::finished, this, [done = std::move(done)](QDBusPendingCallWatcher *self) {
-        self->deleteLater();
-        done(self->reply());
-    });
+    GazeBus::callGaze(this, method, args, std::move(done));
 }
 
 void GazeSettings::load()
 {
-    auto message = QDBusMessage::createMethodCall(Service, Path, QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"));
-    message.setArguments({Service, QStringLiteral("Config")});
-    auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(message), this);
-    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this](QDBusPendingCallWatcher *self) {
-        self->deleteLater();
-        const QDBusMessage reply = self->reply();
+    GazeBus::call(this, GazeBus::Service, GazeBus::Path, QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"), {GazeBus::Service, QStringLiteral("Config")}, [this](const QDBusMessage &reply) {
         if (reply.type() == QDBusMessage::ErrorMessage) {
             setError(reply.errorMessage());
             return;
@@ -204,19 +189,8 @@ void GazeSettings::unlock()
     details.endMap();
 
     constexpr uint AllowUserInteraction = 1;
-    auto message = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.PolicyKit1"),
-                                                  QStringLiteral("/org/freedesktop/PolicyKit1/Authority"),
-                                                  QStringLiteral("org.freedesktop.PolicyKit1.Authority"),
-                                                  QStringLiteral("CheckAuthorization"));
-    message.setArguments({QVariant::fromValue(subject),
-                          QStringLiteral("com.gundulabs.gaze.manage-config"),
-                          QVariant::fromValue(details),
-                          AllowUserInteraction,
-                          QString()});
-    auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(message, 120000), this);
-    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this](QDBusPendingCallWatcher *self) {
-        self->deleteLater();
-        const QDBusMessage reply = self->reply();
+    const QVariantList args{QVariant::fromValue(subject), QStringLiteral("com.gundulabs.gaze.manage-config"), QVariant::fromValue(details), AllowUserInteraction, QString()};
+    GazeBus::call(this, QStringLiteral("org.freedesktop.PolicyKit1"), QStringLiteral("/org/freedesktop/PolicyKit1/Authority"), QStringLiteral("org.freedesktop.PolicyKit1.Authority"), QStringLiteral("CheckAuthorization"), args, [this](const QDBusMessage &reply) {
         if (reply.type() == QDBusMessage::ErrorMessage) {
             setError(reply.errorMessage());
             return;
@@ -261,17 +235,8 @@ void GazeSettings::sendRestart()
 {
     m_restartWanted = false;
     setRestartState(QStringLiteral("restarting"));
-    auto message = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.systemd1"),
-                                                  QStringLiteral("/org/freedesktop/systemd1"),
-                                                  QStringLiteral("org.freedesktop.systemd1.Manager"),
-                                                  QStringLiteral("RestartUnit"));
-    message.setArguments({QStringLiteral("gazed.service"), QStringLiteral("replace")});
-    message.setInteractiveAuthorizationAllowed(true);
     m_restarting = true;
-    auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(message, 120000), this);
-    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this](QDBusPendingCallWatcher *self) {
-        self->deleteLater();
-        const QDBusMessage reply = self->reply();
+    GazeBus::call(this, QStringLiteral("org.freedesktop.systemd1"), QStringLiteral("/org/freedesktop/systemd1"), QStringLiteral("org.freedesktop.systemd1.Manager"), QStringLiteral("RestartUnit"), {QStringLiteral("gazed.service"), QStringLiteral("replace")}, [this](const QDBusMessage &reply) {
         if (reply.type() == QDBusMessage::ErrorMessage) {
             m_restarting = false;
             setRestartState(QStringLiteral("failed"));

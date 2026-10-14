@@ -7,7 +7,6 @@
 #include <KPluginFactory>
 #include <QDBusArgument>
 #include <QDBusConnection>
-#include <QDBusPendingCallWatcher>
 #include <QDir>
 #include <QFile>
 
@@ -18,8 +17,6 @@ K_PLUGIN_CLASS_WITH_JSON(GazeKcm, "kcm_gaze.json")
 
 namespace
 {
-constexpr QLatin1String Service("com.gundulabs.Gaze");
-constexpr QLatin1String Path("/com/gundulabs/Gaze");
 constexpr int TestTimeoutMs = 20000;
 constexpr int TestResultMs = 4000;
 
@@ -59,10 +56,10 @@ GazeKcm::GazeKcm(QObject *parent, const KPluginMetaData &data)
     setButtons(NoAdditionalButton);
 
     auto bus = QDBusConnection::systemBus();
-    bus.connect(Service, Path, Service, QStringLiteral("EnrollStatus"), this, SLOT(onEnrollStatus(QDBusMessage)));
-    bus.connect(Service, Path, Service, QStringLiteral("FaceStatus"), this, SLOT(onFaceStatus(QDBusMessage)));
-    bus.connect(Service, Path, Service, QStringLiteral("PreviewFrame"), this, SLOT(onPreviewFrame(QDBusMessage)));
-    bus.connect(Service, Path, Service, QStringLiteral("VerifyStatus"), this, SLOT(onVerifyStatus(QDBusMessage)));
+    bus.connect(GazeBus::Service, GazeBus::Path, GazeBus::Service, QStringLiteral("EnrollStatus"), this, SLOT(onEnrollStatus(QDBusMessage)));
+    bus.connect(GazeBus::Service, GazeBus::Path, GazeBus::Service, QStringLiteral("FaceStatus"), this, SLOT(onFaceStatus(QDBusMessage)));
+    bus.connect(GazeBus::Service, GazeBus::Path, GazeBus::Service, QStringLiteral("PreviewFrame"), this, SLOT(onPreviewFrame(QDBusMessage)));
+    bus.connect(GazeBus::Service, GazeBus::Path, GazeBus::Service, QStringLiteral("VerifyStatus"), this, SLOT(onVerifyStatus(QDBusMessage)));
 
     m_testTimeout.setSingleShot(true);
     m_testTimeout.setInterval(TestTimeoutMs);
@@ -91,18 +88,9 @@ void GazeKcm::setError(const QString &error)
     }
 }
 
-void GazeKcm::call(const QString &method, const QVariantList &args, Reply done)
+void GazeKcm::call(const QString &method, const QVariantList &args, GazeBus::Reply done)
 {
-    auto message = QDBusMessage::createMethodCall(Service, Path, Service, method);
-    message.setArguments(args);
-    message.setInteractiveAuthorizationAllowed(true);
-    auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(message), this);
-    connect(watcher, &QDBusPendingCallWatcher::finished, this, [done = std::move(done)](QDBusPendingCallWatcher *self) {
-        self->deleteLater();
-        if (done) {
-            done(self->reply());
-        }
-    });
+    GazeBus::callGaze(this, method, args, std::move(done));
 }
 
 void GazeKcm::refresh()
