@@ -53,7 +53,8 @@ same daemon code runs on every surface, so a problem you can reproduce with
 2. Gaze checks three refusals in order: no suspend or resume since boot
    (`auth.abort_before_first_resume`), the caller sits inside an SSH session
    (`auth.abort_if_ssh`), and the laptop lid is closed (`auth.abort_if_lid_closed`). Any of
-   them ends the attempt before a camera is touched.
+   them ends the attempt before a camera is touched. A closed lid is the exception when
+   logind is set to suspend on lid close: see [Suspend during an attempt](#suspend-during-an-attempt).
 3. Gaze works out which spectra can run. RGB runs when `cameras.rgb` is set *and* you have
    RGB templates enrolled; IR runs on the same rule. If neither can run, or if
    `security.hybrid_policy = "and"` demands both but you enrolled only one, the attempt ends
@@ -62,6 +63,28 @@ same daemon code runs on every surface, so a problem you can reproduce with
    already been locked counts against the delay, so a screen locked longer than
    `start_delay_ms` starts immediately. The lid is checked once more after the delay, since it
    can close while Gaze waits.
+
+### Suspend during an attempt
+
+A locker started on lid close, such as hyprlock from hypridle's `before_sleep_cmd`, asks
+for face auth a moment before the machine sleeps. Without special handling that attempt
+fails against a closed lid or a black frame, and the locker shows a password prompt after
+resume with Gaze no longer scanning.
+
+Gaze follows logind's `PrepareForSleep` signal so such an attempt is held instead:
+
+- If the system is already suspending when the request arrives, the request waits for the
+  resume.
+- If the lid is closed and logind's lid action (`HandleLidSwitch`, or its `ExternalPower`
+  and `Docked` variants) is a suspend or hibernate, Gaze waits up to 3 s for the suspend to
+  start before refusing. A docked laptop, or one set to `ignore` or `lock`, is refused at
+  once as before.
+- If the suspend starts during the start delay or mid-capture, the cameras are released and
+  the attempt pauses.
+
+After the resume the attempt starts over with `auth.resume_grace_ms` as its delay. If the
+lid is still closed then, `auth.abort_if_lid_closed` refuses it. A client that cancels
+while the attempt is held ends it as usual.
 
 ### Opening the camera
 

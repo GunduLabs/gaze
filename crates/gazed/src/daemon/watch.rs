@@ -16,10 +16,24 @@ pub(super) async fn prepare_for_sleep_stream(
     zbus::MessageStream::for_match_rule(rule, conn, None).await
 }
 
+async fn preparing_for_sleep(conn: &zbus::Connection) -> zbus::Result<bool> {
+    zbus::Proxy::new(
+        conn,
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1",
+        "org.freedesktop.login1.Manager",
+    )
+    .await?
+    .get_property("PreparingForSleep")
+    .await
+    .map_err(Into::into)
+}
+
 pub async fn watch_resume(
     conn: zbus::Connection,
     resume_pending: Arc<AtomicBool>,
     resume_seen: Arc<AtomicBool>,
+    sleeping: tokio::sync::watch::Sender<bool>,
 ) {
     let mut stream = match prepare_for_sleep_stream(&conn).await {
         Ok(stream) => stream,
@@ -29,12 +43,73 @@ pub async fn watch_resume(
         }
     };
 
+    if let Ok(true) = preparing_for_sleep(&conn).await {
+        sleeping.send_replace(true);
+    }
+
     while let Some(Ok(msg)) = stream.next().await {
-        if let Ok(false) = msg.body().deserialize::<bool>() {
-            resume_pending.store(true, Ordering::SeqCst);
-            resume_seen.store(true, Ordering::SeqCst);
+        match msg.body().deserialize::<bool>() {
+            Ok(true) => {
+                sleeping.send_replace(true);
+            }
+            Ok(false) => {
+                resume_pending.store(true, Ordering::SeqCst);
+                resume_seen.store(true, Ordering::SeqCst);
+                sleeping.send_replace(false);
+            }
+            Err(_) => {}
         }
     }
+}
+
+pub(super) async fn sleep_reaches(
+    sleeping: &mut tokio::sync::watch::Receiver<bool>,
+    state: bool,
+) -> bool {
+    sleeping.wait_for(|s| *s == state).await.is_ok()
+}
+
+pub(super) async fn hold_for_sleep(
+    sleeping: &mut tokio::sync::watch::Receiver<bool>,
+    cancel: &mut oneshot::Receiver<()>,
+    lid_wait: bool,
+) -> SleepHold {
+    let already_sleeping = *sleeping.borrow();
+    if lid_wait && !already_sleeping {
+        info!("Lid is closed, waiting to see whether the system suspends");
+        tokio::select! {
+            biased;
+            _ = &mut *cancel => return SleepHold::Cancelled,
+            started = tokio::time::timeout(LID_SLEEP_WAIT, sleep_reaches(sleeping, true)) => {
+                if !matches!(started, Ok(true)) {
+                    return SleepHold::LidClosed;
+                }
+            }
+        }
+    }
+
+    let sleeping_now = *sleeping.borrow();
+    if !sleeping_now {
+        return SleepHold::Awake;
+    }
+
+    info!("System is suspending, holding face auth until resume");
+    tokio::select! {
+        biased;
+        _ = &mut *cancel => SleepHold::Cancelled,
+        _ = sleep_reaches(sleeping, false) => {
+            info!("Resumed, restarting face auth");
+            SleepHold::Resumed
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SleepHold {
+    Awake,
+    Resumed,
+    Cancelled,
+    LidClosed,
 }
 
 /// Subscribe to NameOwnerChanged, resolving only once the match rule is installed. Call it
@@ -182,6 +257,57 @@ mod tests {
             map.insert("LockedHint".to_string(), value);
         }
         map
+    }
+
+    #[tokio::test]
+    async fn an_awake_system_is_not_held() {
+        let (_tx, mut sleeping) = tokio::sync::watch::channel(false);
+        let (_cancel_tx, mut cancel) = oneshot::channel::<()>();
+        assert_eq!(
+            hold_for_sleep(&mut sleeping, &mut cancel, false).await,
+            SleepHold::Awake
+        );
+    }
+
+    #[tokio::test]
+    async fn a_suspending_system_holds_auth_until_resume() {
+        let (tx, mut sleeping) = tokio::sync::watch::channel(true);
+        let (_cancel_tx, mut cancel) = oneshot::channel::<()>();
+        tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            tx.send_replace(false);
+        });
+        assert_eq!(
+            hold_for_sleep(&mut sleeping, &mut cancel, false).await,
+            SleepHold::Resumed
+        );
+    }
+
+    #[tokio::test]
+    async fn a_closed_lid_followed_by_suspend_is_held_until_resume() {
+        let (tx, mut sleeping) = tokio::sync::watch::channel(false);
+        let (_cancel_tx, mut cancel) = oneshot::channel::<()>();
+        tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            tx.send_replace(true);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            tx.send_replace(false);
+        });
+        assert_eq!(
+            hold_for_sleep(&mut sleeping, &mut cancel, true).await,
+            SleepHold::Resumed
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelling_ends_a_held_attempt() {
+        let (_tx, mut sleeping) = tokio::sync::watch::channel(true);
+        let (cancel_tx, mut cancel) = oneshot::channel::<()>();
+        cancel_tx.send(()).unwrap();
+        assert_eq!(
+            hold_for_sleep(&mut sleeping, &mut cancel, true).await,
+            SleepHold::Cancelled
+        );
     }
 
     #[test]
