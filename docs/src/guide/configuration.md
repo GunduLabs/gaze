@@ -361,7 +361,7 @@ start_delay_ms = 0
 start_delay_scope = "screen_lock"
 ```
 
-`abort_if_ssh` asks logind whether the D-Bus caller's session is remote, falling back to the caller process environment and ancestry where logind is unreachable. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor.
+`abort_if_ssh` asks logind whether the D-Bus caller's session is remote, falling back to the caller process environment and ancestry where logind is unreachable. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor. When logind is configured to suspend on lid close, a closed lid holds the attempt for up to 3 seconds instead of refusing it outright: if the suspend starts, face auth resumes after wake rather than failing in the locker that came up on lid close. See [Suspend during an attempt](/guide/how-it-works#suspend-during-an-attempt).
 
 Aborting face authentication when you type a password is not a key in this file. It is a property of the PAM stack: [simultaneous mode](/guide/pam#what-gaze-installs) (`pam_gaze.so simultaneous`) stands Gaze down as soon as you submit a password, and [retry mode](/guide/pam#retry-after-a-rejected-password) (`pam_gaze.so retry`) gives face auth one more attempt if that password turns out to be wrong.
 
