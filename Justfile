@@ -55,8 +55,8 @@ default:
 # Build all Rust workspace binaries (release)
 [group("build")]
 build-rust: prepare-ort
-    {{ opencv_env }} cargo build -p gazed --release
-    {{ opencv_env }} cargo build -p gaze-cli {{ gui_pkg }} -p pam-gaze -p pam-gaze-grosshack --release
+    {{ opencv_env }} cargo build --locked -p gazed --release
+    {{ opencv_env }} cargo build --locked -p gaze-cli {{ gui_pkg }} -p pam-gaze -p pam-gaze-grosshack --release
     scripts/check-pam-link.sh target/release/libpam_gaze.so target/release/libpam_gaze_grosshack.so
 
 # Stage the gaze-kde System Settings files in dist/kcm

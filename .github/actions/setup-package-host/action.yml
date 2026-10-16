@@ -1,0 +1,277 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Set up release package host
+description: Installs a release container's system libraries, just, nfpm and optionally the Rust toolchain.
+
+inputs:
+  format:
+    description: Package format (deb, rpm or archlinux).
+    required: true
+  distro:
+    description: Distribution id from the release matrix.
+    required: true
+  deb-suite:
+    description: Debian or Ubuntu suite codename, empty on other distributions.
+    default: ""
+  just-version:
+    description: just release to install.
+    required: true
+  nfpm-version:
+    description: nfpm release to install, with its v prefix.
+    required: true
+  rust:
+    description: Install the Rust toolchain.
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Install Debian/Ubuntu dependencies
+      if: ${{ inputs.format == 'deb' }}
+      shell: sh
+      run: |
+        apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+          git \
+          ca-certificates \
+          curl \
+          build-essential \
+          dpkg-dev \
+          clang \
+          libclang-dev \
+          libcairo2-dev \
+          libglib2.0-dev \
+          libgdk-pixbuf-2.0-dev \
+          libgstreamer1.0-dev \
+          libgstreamer-plugins-base1.0-dev \
+          gstreamer1.0-plugins-base \
+          gstreamer1.0-plugins-good \
+          gstreamer1.0-pipewire \
+          libpango1.0-dev \
+          libgraphene-1.0-dev \
+          libopencv-dev \
+          libv4l-dev \
+          libpam0g-dev \
+          libtss2-dev \
+          libgtk-4-dev \
+          libadwaita-1-dev \
+          libssl-dev \
+          gnupg \
+          devscripts \
+          gettext-base \
+          pkg-config
+
+    - name: Install Plasma 6 build dependencies
+      if: ${{ inputs.format == 'deb' && inputs.deb-suite != 'noble' }}
+      shell: sh
+      run: |
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+          cmake \
+          extra-cmake-modules \
+          qt6-base-dev \
+          qt6-declarative-dev \
+          libkf6coreaddons-dev \
+          libkf6i18n-dev \
+          libkf6kcmutils-dev \
+          libkirigami-dev
+
+    - name: Install Fedora dependencies
+      if: ${{ inputs.distro == 'fedora' }}
+      shell: sh
+      run: |
+        dnf install -y \
+          git \
+          ca-certificates \
+          curl \
+          clang \
+          clang-devel \
+          opencv-devel \
+          libv4l-devel \
+          pam-devel \
+          tpm2-tss-devel \
+          checkpolicy \
+          policycoreutils \
+          gtk4-devel \
+          libadwaita-devel \
+          cmake \
+          extra-cmake-modules \
+          qt6-qtbase-devel \
+          qt6-qtdeclarative-devel \
+          kf6-kcoreaddons-devel \
+          kf6-ki18n-devel \
+          kf6-kcmutils-devel \
+          kf6-kirigami-devel \
+          gstreamer1-devel \
+          gstreamer1-plugins-base-devel \
+          gstreamer1-plugins-base \
+          gstreamer1-plugins-good \
+          pipewire-gstreamer \
+          openssl-devel \
+          gnupg2 \
+          rpm-sign \
+          pkg-config \
+          gettext \
+          gcc \
+          gcc-c++
+
+    - name: Install openSUSE Tumbleweed dependencies
+      if: ${{ inputs.distro == 'opensuse' }}
+      shell: sh
+      run: |
+        export ZYPP_MEDIA_CURL_IPRESOLVE=4
+        zypper --non-interactive modifyrepo --disable repo-openh264 || true
+        retry() {
+          for attempt in 1 2 3; do
+            if "$@"; then
+              return 0
+            fi
+            echo "::warning::'$*' failed (attempt $attempt/3)"
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 15))
+            fi
+          done
+          echo "::error::'$*' failed after 3 attempts"
+          return 1
+        }
+        retry zypper --non-interactive refresh
+        retry zypper --non-interactive dist-upgrade --no-recommends --allow-vendor-change
+        retry zypper --non-interactive install --no-recommends \
+          git \
+          ca-certificates \
+          curl \
+          clang \
+          clang-devel \
+          opencv-devel \
+          libv4l-devel \
+          pam-devel \
+          tpm2-0-tss-devel \
+          checkpolicy \
+          policycoreutils \
+          gtk4-devel \
+          libadwaita-devel \
+          cmake \
+          kf6-extra-cmake-modules \
+          qt6-base-devel \
+          qt6-declarative-devel \
+          kf6-kcoreaddons-devel \
+          kf6-ki18n-devel \
+          kf6-kcmutils-devel \
+          kf6-kirigami-devel \
+          gstreamer-devel \
+          gstreamer-plugins-base-devel \
+          gstreamer-plugins-base \
+          gstreamer-plugins-good \
+          gstreamer-plugin-pipewire \
+          libopenssl-devel \
+          gpg2 \
+          pkgconf-pkg-config \
+          envsubst \
+          gcc \
+          gcc-c++ \
+          binutils \
+          bash
+        echo "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" >>"$GITHUB_ENV"
+
+    - name: Install Arch dependencies
+      if: ${{ inputs.format == 'archlinux' }}
+      shell: sh
+      run: |
+        pacman -Syu --noconfirm
+        pacman -S --noconfirm \
+          base-devel \
+          git \
+          ca-certificates \
+          curl \
+          clang \
+          llvm \
+          opencv \
+          v4l-utils \
+          pam \
+          tpm2-tss \
+          gtk4 \
+          libadwaita \
+          gstreamer \
+          gst-plugins-base \
+          gst-plugins-good \
+          gst-plugin-pipewire \
+          openssl \
+          gnupg \
+          pkgconf \
+          gettext \
+          gcc \
+          cmake \
+          extra-cmake-modules \
+          qt6-base \
+          qt6-declarative \
+          kcoreaddons \
+          ki18n \
+          kcmutils \
+          kirigami
+
+    - name: Install Rust toolchain
+      if: ${{ inputs.rust == 'true' && inputs.distro != 'opensuse' }}
+      uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+
+    - name: Install just
+      if: ${{ inputs.distro != 'opensuse' }}
+      uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+      with:
+        just-version: ${{ inputs.just-version }}
+
+    - name: Install just, and the Rust toolchain if asked, on openSUSE
+      if: ${{ inputs.distro == 'opensuse' }}
+      shell: sh
+      env:
+        JUST_VERSION: ${{ inputs.just-version }}
+        INSTALL_RUST: ${{ inputs.rust }}
+      run: |
+        case "$(uname -m)" in
+          x86_64) just_target="x86_64-unknown-linux-musl" ;;
+          aarch64|arm64) just_target="aarch64-unknown-linux-musl" ;;
+          *) echo "Unsupported just install architecture: $(uname -m)" >&2; exit 1 ;;
+        esac
+        if [ "$INSTALL_RUST" = true ]; then
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
+            | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
+          echo "PATH=$HOME/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" >>"$GITHUB_ENV"
+          "$HOME/.cargo/bin/rustc" --version
+        fi
+        just_url="https://github.com/casey/just/releases/download/${JUST_VERSION}"
+        just_archive="just-${JUST_VERSION}-${just_target}.tar.gz"
+        curl -fsSL "$just_url/$just_archive" -o "/tmp/$just_archive"
+        curl -fsSL "$just_url/SHA256SUMS" -o /tmp/just.sha256sums
+        (cd /tmp && grep "  ${just_archive}\$" just.sha256sums | sha256sum -c -)
+        tar -xzf "/tmp/$just_archive" -C /usr/local/bin just
+        just --version
+
+    - name: Install nfpm
+      shell: sh
+      env:
+        NFPM_VERSION: ${{ inputs.nfpm-version }}
+      run: |
+        case "$(uname -m)" in
+          x86_64) nfpm_arch="x86_64" ;;
+          aarch64|arm64) nfpm_arch="arm64" ;;
+          *) echo "Unsupported nfpm install architecture: $(uname -m)" >&2; exit 1 ;;
+        esac
+        nfpm_version="${NFPM_VERSION#v}"
+        nfpm_url="https://github.com/goreleaser/nfpm/releases/download/${NFPM_VERSION}"
+        nfpm_archive="nfpm_${nfpm_version}_Linux_${nfpm_arch}.tar.gz"
+        curl -fsSL "$nfpm_url/$nfpm_archive" -o "/tmp/$nfpm_archive"
+        curl -fsSL "$nfpm_url/checksums.txt" -o /tmp/nfpm.sha256sums
+        (cd /tmp && grep "  ${nfpm_archive}\$" nfpm.sha256sums | sha256sum -c -)
+        tar -xzf "/tmp/$nfpm_archive" -C /usr/local/bin nfpm
+        nfpm --version
+
+    - name: Configure Arch LLVM/Clang environment
+      if: ${{ inputs.distro == 'archlinux' }}
+      shell: sh
+      run: |
+        {
+          echo "LLVM_CONFIG_PATH=/usr/bin/llvm-config"
+          echo "LIBCLANG_PATH=/usr/lib"
+          echo "CLANG_PATH=/usr/bin/clang"
+          echo "CXX=/usr/bin/clang++"
+          echo "CC=/usr/bin/clang"
+        } >> "$GITHUB_ENV"
