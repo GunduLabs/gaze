@@ -151,35 +151,19 @@ body:
   - type: textarea
     id: doctor
     attributes:
-      label: "`gaze doctor` output"
+      label: "`gaze doctor --report` file"
       description: |
-        Run this as your normal desktop user from inside a graphical session, not over SSH and not with `sudo`, because it inspects that user's PipeWire session and desktop integration. Paste the complete output, including the parts that pass.
-      render: text
-    validations:
-      required: true
-
-  - type: textarea
-    id: journal
-    attributes:
-      label: Daemon log
-      description: |
-        Reproduce the problem, then immediately run:
+        Reproduce the problem first, so the daemon log includes it. Then run this as your normal desktop user from inside a graphical session, not over SSH and not with `sudo`, because it inspects that user's PipeWire session and desktop integration:
 
         ```bash
-        journalctl -u gazed -b --no-pager | tail -300
+        gaze doctor --report
         ```
 
-        Paste the whole thing. The lines just *before* the failure are usually the ones that explain it.
-      render: text
+        It writes a `gaze-report-<time>.txt` file with the doctor results, versions, OS and desktop details, installed packages, the PAM lines that mention Gaze, the daemon status and log, and your config. Your user and host names are already replaced. Read it, then drag the file into this box.
+
+        On a Gaze release without `--report`, paste the full `gaze doctor` output, `journalctl -u gazed -b --no-pager | tail -300`, and `gaze config --show` instead.
     validations:
       required: true
-
-  - type: textarea
-    id: config
-    attributes:
-      label: "`gaze config --show` output"
-      description: Or the contents of `/etc/gaze/config.toml`. Needed for anything involving cameras, thresholds, liveness, confirmation, or encrypted templates.
-      render: toml
 
   - type: textarea
     id: camera

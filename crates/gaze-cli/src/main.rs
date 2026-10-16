@@ -23,8 +23,9 @@ use gaze_core::config::{
 };
 use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon,
-    apply_config_with_keyring_to_daemon, connect_gaze, dbus_error_message, dbus_is_file_not_found,
-    load_config_with_keyring_from_daemon, try_load_config_from_daemon,
+    apply_config_with_keyring_to_daemon, connect_gaze, daemon_unavailable_hint, dbus_error_message,
+    dbus_is_file_not_found, dbus_is_not_activatable, load_config_with_keyring_from_daemon,
+    try_load_config_from_daemon,
 };
 use std::{future::Future, time::Duration};
 use tui::{AuthScreen, BusyScreen, EnrollScreen, Tone, TuiAction, TuiTerminal};
@@ -75,7 +76,11 @@ fn command_requires_root(command: &Commands) -> Option<&'static str> {
         Commands::RemoveFace { .. } => Some("remove-face"),
         Commands::RenameFace { .. } => Some("rename-face"),
         Commands::ClearUser { .. } => Some("clear-user"),
-        Commands::Config { show } => (!show).then_some("config"),
+        Commands::Config { show, action } => match action {
+            Some(ConfigAction::Get { .. }) => None,
+            Some(ConfigAction::Set { .. }) => Some("config"),
+            None => (!show).then_some("config"),
+        },
         Commands::Keyring { .. } => Some("keyring"),
         Commands::Auth { .. }
         | Commands::ListFaces { .. }
@@ -88,7 +93,7 @@ fn command_requires_root(command: &Commands) -> Option<&'static str> {
 fn command_target_user(command: &Commands) -> Option<&str> {
     match command {
         Commands::Auth { user, .. }
-        | Commands::ListFaces { user }
+        | Commands::ListFaces { user, .. }
         | Commands::Duress { user, .. }
         | Commands::Doctor { user, .. } => user.as_deref(),
         _ => None,
@@ -145,6 +150,38 @@ fn capture_tone(status: CaptureStatus) -> Tone {
         | CaptureStatus::TooFar
         | CaptureStatus::TooClose => Tone::Warn,
     }
+}
+
+async fn describe_dbus_error(proxy: &GazeProxy<'_>, context: &str, err: &zbus::Error) -> String {
+    if dbus_is_not_activatable(err) {
+        let (problem, fix) = daemon_unavailable_hint(proxy.inner().connection()).await;
+        format!("{context}: {problem}\n  {fix}")
+    } else {
+        format!("{context}: {}", dbus_error_message(err))
+    }
+}
+
+fn exit_with_error(message: &str) -> ! {
+    let _ = Term::stderr().write_line(&format!("{} {message}", style("✗").red().bold()));
+    std::process::exit(1);
+}
+
+fn json_string(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn interactive_terminal() -> bool {
@@ -233,6 +270,8 @@ enum Commands {
     ListFaces {
         #[arg(short, long)]
         user: Option<String>,
+        #[arg(long, help = "Print the faces as JSON")]
+        json: bool,
     },
     /// Remove an enrolled face
     RemoveFace {
@@ -254,6 +293,8 @@ enum Commands {
     ClearUser {
         #[arg(short, long)]
         user: Option<String>,
+        #[arg(short = 'y', long, help = "Skip the confirmation prompt")]
+        yes: bool,
     },
     /// Show or clear the face authentication lockout set by a duress signal
     Duress {
@@ -262,10 +303,13 @@ enum Commands {
         #[arg(short, long)]
         user: Option<String>,
     },
-    /// Configure daemon and GDM settings interactively
+    /// Configure daemon and GDM settings interactively, or read and change one setting
+    #[command(args_conflicts_with_subcommands = true)]
     Config {
-        #[arg(long, help = "Print current values and exit")]
+        #[arg(long, help = "Print every setting as TOML and exit")]
         show: bool,
+        #[command(subcommand)]
+        action: Option<ConfigAction>,
     },
     /// Enroll or replace a TPM-protected GNOME Keyring or KWallet credential (root only)
     Keyring {
@@ -288,6 +332,10 @@ enum Commands {
             help = "Benchmark detector, recognizer, and liveness model inference speed"
         )]
         benchmark: bool,
+        #[arg(long, conflicts_with = "report", help = "Print the results as JSON")]
+        json: bool,
+        #[arg(long, help = "Write a redacted bug report file to attach to an issue")]
+        report: bool,
     },
     /// Remove Gaze packages, PAM integration, configuration, models, and user data
     Uninstall {
@@ -298,6 +346,31 @@ enum Commands {
         #[arg(long, help = "Print the planned commands without executing them")]
         dry_run: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Print one setting, such as `security.level`
+    Get { key: String },
+    /// Change one setting, such as `liveness.enabled true`
+    Set { key: String, value: String },
+}
+
+fn config_show_text(config: &Config) -> anyhow::Result<String> {
+    Ok(format!(
+        "{}\n# Resolved values\n\
+         # security: detector = {}, recognizer = {}, rgb_threshold = {:.2}, ir_threshold = {:.2}, hybrid_policy = {}\n\
+         # cameras.parallel_capture = {}\n\
+         # auth.start_delay_scope = {}\n",
+        config.to_toml()?.trim_end(),
+        config.security.detector(),
+        config.security.recognizer(),
+        config.security.rgb_threshold(),
+        config.security.ir_threshold(),
+        config.security.hybrid_policy(),
+        config.cameras.parallel_capture(),
+        config.auth.start_delay_scope()
+    ))
 }
 
 fn ensure_configured_source_listed(options: &mut Vec<(String, String)>, configured: &str) {
@@ -349,6 +422,71 @@ async fn run_config_wizard(
         "\n{}\n",
         style("Gaze Config Wizard").cyan().bold()
     ))?;
+
+    let mut cameras = gaze_vision::camera::rgb_choices()
+        .map_err(|e| anyhow::anyhow!("Could not list cameras: {e}"))?;
+    ensure_configured_source_listed(&mut cameras, &config.cameras.rgb);
+    let cam_names: Vec<String> = cameras.iter().map(|(n, _)| n.clone()).collect();
+    let default_cam_idx = gaze_vision::camera::source_index(&cameras, &config.cameras.rgb);
+
+    let selected_cam_idx = Select::with_theme(&theme)
+        .with_prompt("RGB camera source")
+        .items(&cam_names)
+        .default(default_cam_idx)
+        .interact()?;
+
+    config.cameras.rgb = cameras[selected_cam_idx].1.clone();
+
+    config.cameras.dark_luma_threshold = Input::<u8>::with_theme(&theme)
+        .with_prompt("Darkness cutoff: reject frames below this mean brightness (0-255)")
+        .default(config.cameras.dark_luma_threshold)
+        .interact_text()?;
+
+    let mut ir_options = gaze_vision::camera::ir_choices();
+    ensure_configured_source_listed(&mut ir_options, &config.cameras.ir);
+
+    let ir_names: Vec<String> = ir_options.iter().map(|(n, _)| n.clone()).collect();
+    let default_ir_idx = gaze_vision::camera::source_index(&ir_options, &config.cameras.ir);
+
+    let selected_ir_idx = Select::with_theme(&theme)
+        .with_prompt("IR camera source")
+        .items(&ir_names)
+        .default(default_ir_idx)
+        .interact()?;
+
+    config.cameras.ir = ir_options[selected_ir_idx].1.clone();
+
+    if config.cameras.rgb.is_empty() && config.cameras.ir.is_empty() {
+        term.write_line(&format!(
+            "{} No IR camera selected, so keeping the primary RGB camera",
+            style("!").yellow().bold()
+        ))?;
+        config.cameras.rgb = gaze_core::config::DEFAULT_RGB_CAMERA.to_string();
+    }
+
+    if config.cameras.ir.is_empty() {
+        config.cameras.emitter_enabled = false;
+        config.cameras.parallel_capture = "never".to_string();
+    } else {
+        config.cameras.emitter_enabled = Confirm::with_theme(&theme)
+            .with_prompt("Force IR emitter override (only use if emitter stays off automatically)")
+            .default(config.cameras.emitter_enabled)
+            .interact()?;
+
+        if config.cameras.rgb.is_empty() {
+            config.cameras.parallel_capture = "never".to_string();
+        } else {
+            let capture_idx = Select::with_theme(&theme)
+                .with_prompt(
+                    "Capture RGB and IR at the same time (faster, but some webcams cannot)",
+                )
+                .items(gaze_core::config::PARALLEL_CAPTURE_LABELS.as_slice())
+                .default(config.cameras.parallel_capture_index() as usize)
+                .interact()?;
+            config.cameras.parallel_capture =
+                gaze_core::config::CameraConfig::parallel_capture_from_index(capture_idx);
+        }
+    }
 
     let selected = Select::with_theme(&theme)
         .with_prompt("Security level")
@@ -432,73 +570,6 @@ async fn run_config_wizard(
             config.inference.execution_provider,
             config.inference.device
         ))?;
-    }
-
-    let mut cameras = gaze_vision::camera::rgb_choices().unwrap_or_default();
-    if cameras.is_empty() {
-        anyhow::bail!("No PipeWire cameras detected! Please ensure your video inputs are active.");
-    }
-    ensure_configured_source_listed(&mut cameras, &config.cameras.rgb);
-    let cam_names: Vec<String> = cameras.iter().map(|(n, _)| n.clone()).collect();
-    let default_cam_idx = gaze_vision::camera::source_index(&cameras, &config.cameras.rgb);
-
-    let selected_cam_idx = Select::with_theme(&theme)
-        .with_prompt("RGB camera source")
-        .items(&cam_names)
-        .default(default_cam_idx)
-        .interact()?;
-
-    config.cameras.rgb = cameras[selected_cam_idx].1.clone();
-
-    config.cameras.dark_luma_threshold = Input::<u8>::with_theme(&theme)
-        .with_prompt("Darkness cutoff: reject frames below this mean brightness (0-255)")
-        .default(config.cameras.dark_luma_threshold)
-        .interact_text()?;
-
-    let mut ir_options = gaze_vision::camera::ir_choices();
-    ensure_configured_source_listed(&mut ir_options, &config.cameras.ir);
-
-    let ir_names: Vec<String> = ir_options.iter().map(|(n, _)| n.clone()).collect();
-    let default_ir_idx = gaze_vision::camera::source_index(&ir_options, &config.cameras.ir);
-
-    let selected_ir_idx = Select::with_theme(&theme)
-        .with_prompt("IR camera source")
-        .items(&ir_names)
-        .default(default_ir_idx)
-        .interact()?;
-
-    config.cameras.ir = ir_options[selected_ir_idx].1.clone();
-
-    if config.cameras.rgb.is_empty() && config.cameras.ir.is_empty() {
-        term.write_line(&format!(
-            "{} No IR camera selected, so keeping the primary RGB camera",
-            style("!").yellow().bold()
-        ))?;
-        config.cameras.rgb = gaze_core::config::DEFAULT_RGB_CAMERA.to_string();
-    }
-
-    if config.cameras.ir.is_empty() {
-        config.cameras.emitter_enabled = false;
-        config.cameras.parallel_capture = "never".to_string();
-    } else {
-        config.cameras.emitter_enabled = Confirm::with_theme(&theme)
-            .with_prompt("Force IR emitter override (only use if emitter stays off automatically)")
-            .default(config.cameras.emitter_enabled)
-            .interact()?;
-
-        if config.cameras.rgb.is_empty() {
-            config.cameras.parallel_capture = "never".to_string();
-        } else {
-            let capture_idx = Select::with_theme(&theme)
-                .with_prompt(
-                    "Capture RGB and IR at the same time (faster, but some webcams cannot)",
-                )
-                .items(gaze_core::config::PARALLEL_CAPTURE_LABELS.as_slice())
-                .default(config.cameras.parallel_capture_index() as usize)
-                .interact()?;
-            config.cameras.parallel_capture =
-                gaze_core::config::CameraConfig::parallel_capture_from_index(capture_idx);
-        }
     }
 
     config.auth.abort_if_ssh = Confirm::with_theme(&theme)
@@ -689,12 +760,7 @@ async fn handle_enroll(
     let term = Term::stdout();
 
     if let Err(err) = proxy.claim(user).await {
-        term.write_line(&format!(
-            "{} Failed to claim device: {}",
-            style("✗").red().bold(),
-            dbus_error_message(&err)
-        ))?;
-        std::process::exit(1);
+        exit_with_error(&describe_dbus_error(proxy, "Failed to claim device", &err).await);
     }
 
     let mut enroll_stream = proxy.receive_enroll_status().await?;
@@ -709,7 +775,7 @@ async fn handle_enroll(
     if let Err(err) = proxy.enroll_start(face).await {
         drop(terminal);
         let _ = proxy.release().await;
-        anyhow::bail!("Failed to start enrollment: {}", dbus_error_message(&err));
+        exit_with_error(&describe_dbus_error(proxy, "Failed to start enrollment", &err).await);
     }
 
     let mut current_enroll_msg = "Waiting for capture prompt".to_string();
@@ -801,7 +867,7 @@ async fn handle_enroll(
     }
     let _ = proxy.release().await;
     if is_cancelled {
-        term.write_line(&format!(
+        Term::stderr().write_line(&format!(
             "\n{} Enrollment cancelled",
             style("✗").red().bold()
         ))?;
@@ -815,7 +881,7 @@ async fn handle_enroll(
             style(face).green()
         ))?;
     } else if is_failed {
-        term.write_line(&format!(
+        Term::stderr().write_line(&format!(
             "{} Enrollment failed: {}",
             style("✗").red().bold(),
             current_enroll_msg
@@ -836,7 +902,10 @@ async fn handle_auth(
     let has_faces = match proxy.list_faces(user).await {
         Ok(faces) => !faces.is_empty(),
         Err(ref e) if gaze_core::dbus::dbus_is_file_not_found(e) => false,
-        Err(e) => return Err(e.into()),
+        Err(_) if silent => std::process::exit(1),
+        Err(e) => {
+            exit_with_error(&describe_dbus_error(proxy, "Failed to read enrolled faces", &e).await)
+        }
     };
     if !has_faces {
         if !silent {
@@ -853,14 +922,10 @@ async fn handle_auth(
     let start = std::time::Instant::now();
 
     if let Err(err) = proxy.claim(user).await {
-        if !silent {
-            term.write_line(&format!(
-                "{} Failed to claim device: {}",
-                style("✗").red().bold(),
-                dbus_error_message(&err)
-            ))?;
+        if silent {
+            std::process::exit(1);
         }
-        std::process::exit(1);
+        exit_with_error(&describe_dbus_error(proxy, "Failed to claim device", &err).await);
     }
 
     let mut status_stream = proxy.receive_verify_status().await?;
@@ -880,11 +945,11 @@ async fn handle_auth(
 
     if let Err(e) = proxy.verify_start("any").await {
         drop(terminal);
-        if !silent {
-            term.write_line(&format!("{} Daemon error: {}", style("✗").red().bold(), e))?;
-        }
         let _ = proxy.release().await;
-        std::process::exit(1);
+        if silent {
+            std::process::exit(1);
+        }
+        exit_with_error(&describe_dbus_error(proxy, "Could not start the face scan", &e).await);
     }
 
     let mut status_msg = format!("Scanning face for {user}...");
@@ -970,7 +1035,7 @@ async fn handle_auth(
         let _ = proxy.verify_stop().await;
         let _ = proxy.release().await;
         if !silent {
-            term.write_line(&format!(
+            Term::stderr().write_line(&format!(
                 "{} Timed out waiting for the daemon to decide ({}ms)",
                 style("✗").red().bold(),
                 start.elapsed().as_millis()
@@ -1069,7 +1134,8 @@ async fn handle_auth(
     }
 
     if !authenticated && !silent {
-        term.write_line(&format!(
+        let err_term = Term::stderr();
+        err_term.write_line(&format!(
             "{} Authentication failed ({}ms)",
             style("✗").red().bold(),
             start.elapsed().as_millis()
@@ -1077,7 +1143,7 @@ async fn handle_auth(
         // "Authentication failed" alone can sound like a face mismatch even if the camera never
         // opened. Verbose mode has already printed the full diagnostic list.
         if !verbose && let Some(reason) = diagnostics.last() {
-            term.write_line(&format!("  {}", style(reason).yellow()))?;
+            err_term.write_line(&format!("  {}", style(reason).yellow()))?;
         }
     }
 
@@ -1126,7 +1192,35 @@ fn write_no_faces(term: &Term, user: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<()> {
+async fn print_faces_json(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<()> {
+    let faces = match proxy.list_faces(user).await {
+        Ok(faces) => faces,
+        Err(err) if dbus_is_file_not_found(&err) => Vec::new(),
+        Err(err) => {
+            exit_with_error(&describe_dbus_error(proxy, "Failed to fetch faces", &err).await)
+        }
+    };
+    let entries: Vec<String> = faces
+        .iter()
+        .map(|(face, count, has_rgb, has_ir)| {
+            format!(
+                "{{\"name\":{},\"captures\":{count},\"rgb\":{has_rgb},\"ir\":{has_ir}}}",
+                json_string(face)
+            )
+        })
+        .collect();
+    println!(
+        "{{\"user\":{},\"faces\":[{}]}}",
+        json_string(user),
+        entries.join(",")
+    );
+    Ok(())
+}
+
+async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str, json: bool) -> anyhow::Result<()> {
+    if json {
+        return print_faces_json(proxy, user).await;
+    }
     let term = Term::stdout();
     let cameras = try_load_config_from_daemon(proxy)
         .await
@@ -1178,16 +1272,17 @@ async fn handle_list_faces(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
             if dbus_is_file_not_found(&e) {
                 write_no_faces(&term, user)?;
             } else {
-                term.write_line(&format!(
-                    "{} Failed to fetch faces: {}",
-                    style("✗").red().bold(),
-                    dbus_error_message(&e)
-                ))?;
-                std::process::exit(1);
+                exit_with_error(&describe_dbus_error(proxy, "Failed to fetch faces", &e).await);
             }
         }
     }
     Ok(())
+}
+
+fn exit_face_not_found(face: &str, user: &str) -> ! {
+    exit_with_error(&format!(
+        "Face '{face}' not found for '{user}'. Run `gaze list-faces` to see the enrolled faces."
+    ))
 }
 
 async fn handle_remove_face(proxy: &GazeProxy<'_>, user: &str, face: &str) -> anyhow::Result<()> {
@@ -1209,21 +1304,10 @@ async fn handle_remove_face(proxy: &GazeProxy<'_>, user: &str, face: &str) -> an
                 user
             ))?;
         }
-        Ok(false) => {
-            term.write_line(&format!(
-                "{} Face '{}' not found for '{}'",
-                style("!").yellow().bold(),
-                face,
-                user
-            ))?;
-        }
+        Ok(false) => exit_face_not_found(face, user),
+        Err(err) if dbus_is_file_not_found(&err) => exit_face_not_found(face, user),
         Err(err) => {
-            term.write_line(&format!(
-                "{} Failed to remove face: {}",
-                style("✗").red().bold(),
-                dbus_error_message(&err)
-            ))?;
-            std::process::exit(1);
+            exit_with_error(&describe_dbus_error(proxy, "Failed to remove face", &err).await)
         }
     }
     Ok(())
@@ -1254,21 +1338,10 @@ async fn handle_rename_face(
                 user
             ))?;
         }
-        Ok(false) => {
-            term.write_line(&format!(
-                "{} Face '{}' not found for '{}'",
-                style("!").yellow().bold(),
-                from,
-                user
-            ))?;
-        }
+        Ok(false) => exit_face_not_found(from, user),
+        Err(err) if dbus_is_file_not_found(&err) => exit_face_not_found(from, user),
         Err(err) => {
-            term.write_line(&format!(
-                "{} Failed to rename face: {}",
-                style("✗").red().bold(),
-                dbus_error_message(&err)
-            ))?;
-            std::process::exit(1);
+            exit_with_error(&describe_dbus_error(proxy, "Failed to rename face", &err).await)
         }
     }
     Ok(())
@@ -1277,12 +1350,12 @@ async fn handle_rename_face(
 async fn handle_duress(proxy: &GazeProxy<'_>, user: &str, clear: bool) -> anyhow::Result<()> {
     let term = Term::stdout();
     if clear {
-        let cleared = proxy.clear_duress(user).await.map_err(|err| {
-            anyhow::anyhow!(
-                "Failed to clear the duress lockout: {}",
-                dbus_error_message(&err)
-            )
-        })?;
+        let cleared = match proxy.clear_duress(user).await {
+            Ok(cleared) => cleared,
+            Err(err) => exit_with_error(
+                &describe_dbus_error(proxy, "Failed to clear the duress lockout", &err).await,
+            ),
+        };
         if cleared {
             term.write_line(&format!(
                 "Face authentication re-enabled for {}.",
@@ -1297,12 +1370,12 @@ async fn handle_duress(proxy: &GazeProxy<'_>, user: &str, clear: bool) -> anyhow
         return Ok(());
     }
 
-    let locked = proxy.duress_locked(user).await.map_err(|err| {
-        anyhow::anyhow!(
-            "Failed to read the duress lockout: {}",
-            dbus_error_message(&err)
-        )
-    })?;
+    let locked = match proxy.duress_locked(user).await {
+        Ok(locked) => locked,
+        Err(err) => exit_with_error(
+            &describe_dbus_error(proxy, "Failed to read the duress lockout", &err).await,
+        ),
+    };
     if locked {
         term.write_line(&format!(
             "Face authentication for {} is {} after a duress signal. Log in with your password, \
@@ -1320,8 +1393,26 @@ async fn handle_duress(proxy: &GazeProxy<'_>, user: &str, clear: bool) -> anyhow
     Ok(())
 }
 
-async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<()> {
+async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str, yes: bool) -> anyhow::Result<()> {
     let term = Term::stdout();
+    if !yes {
+        if !interactive_terminal() {
+            anyhow::bail!(
+                "gaze clear-user deletes every face and stored keyring credential for '{user}'; \
+                 pass --yes to confirm"
+            );
+        }
+        let proceed = Confirm::with_theme(&ColorfulTheme::default())
+            .with_prompt(format!(
+                "Delete every enrolled face and stored keyring or KWallet credential for '{user}'?"
+            ))
+            .default(false)
+            .interact()?;
+        if !proceed {
+            term.write_line("Cancelled; nothing was deleted.")?;
+            return Ok(());
+        }
+    }
     let result = run_busy(
         "Clear user",
         format!("Deleting all data for {user}..."),
@@ -1352,12 +1443,7 @@ async fn handle_clear_user(proxy: &GazeProxy<'_>, user: &str) -> anyhow::Result<
             ))?;
         }
         Err(err) => {
-            term.write_line(&format!(
-                "{} Failed to clear user: {}",
-                style("✗").red().bold(),
-                dbus_error_message(&err)
-            ))?;
-            std::process::exit(1);
+            exit_with_error(&describe_dbus_error(proxy, "Failed to clear user", &err).await)
         }
     }
     Ok(())
@@ -1392,6 +1478,26 @@ fn reset_gnome_user_settings_cmd() -> String {
         "if command -v dconf >/dev/null 2>&1; then",
         "dconf reset -f /org/gnome/shell/extensions/gaze/ 2>/dev/null || true;",
         "fi' || true;",
+        "done; fi",
+    ]
+    .join(" ")
+}
+
+fn reset_cinnamon_user_settings_cmd() -> String {
+    [
+        "if command -v getent >/dev/null 2>&1; then",
+        "getent passwd | while IFS=: read -r user _ uid _ _ home _; do",
+        r#"[ "$uid" -ge 1000 ] 2>/dev/null || continue;"#,
+        r#"[ -d "$home" ] || continue;"#,
+        r#"sudo rm -rf "$home/.config/cinnamon/spices/gaze@gundulabs.com" "$home/.cinnamon/configs/gaze@gundulabs.com" "$home/.local/share/cinnamon/extensions/gaze@gundulabs.com";"#,
+        "command -v dbus-run-session >/dev/null 2>&1 || continue;",
+        r#"sudo -u "$user" env HOME="$home" dbus-run-session sh -c 'EXT_ID="gaze@gundulabs.com";"#,
+        "command -v gsettings >/dev/null 2>&1 || exit 0;",
+        "current=$(gsettings get org.cinnamon enabled-extensions 2>/dev/null) || exit 0;",
+        r#"case "$current" in *"$EXT_ID"*)"#,
+        r#"next=$(printf "%s" "$current" | sed "s/\047$EXT_ID\047, //; s/, \047$EXT_ID\047//; s/\047$EXT_ID\047//");"#,
+        r#"gsettings set org.cinnamon enabled-extensions "$next" 2>/dev/null || true;;"#,
+        "esac' || true;",
         "done; fi",
     ]
     .join(" ")
@@ -1498,9 +1604,9 @@ fn remove_arch_pam_configuration_cmd() -> String {
 }
 
 fn remove_rpm_ostree_packages_cmd() -> String {
-    "sudo rpm-ostree uninstall gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde \
+    "sudo rpm-ostree uninstall gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde \
       2>/dev/null || \
-      for pkg in gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde; do \
+      for pkg in gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde; do \
       sudo rpm-ostree uninstall \"$pkg\" 2>/dev/null || true; \
       done"
         .into()
@@ -1509,8 +1615,8 @@ fn remove_rpm_ostree_packages_cmd() -> String {
 fn remove_pacman_packages_cmd() -> String {
     // AUR builds split off `-debug` packages; remove those first since they can
     // depend on the base package.
-    "for base in gaze-omarchy-bin gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde gaze-bin gaze-gui-bin \
-      gaze-gnome-extension-bin gaze-hyprlock-bin gaze-kde-bin; do \
+    "for base in gaze-omarchy-bin gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde \
+      gaze-bin gaze-gui-bin gaze-gnome-extension-bin gaze-cinnamon-extension-bin gaze-hyprlock-bin gaze-kde-bin; do \
       for pkg in \"$base-debug\" \"$base\"; do \
       if pacman -Q \"$pkg\" >/dev/null 2>&1; then \
       sudo pacman -Rns --noconfirm \"$pkg\" || true; \
@@ -1522,7 +1628,7 @@ fn remove_pacman_packages_cmd() -> String {
 
 fn remove_zypper_packages_cmd() -> String {
     // Include every optional openSUSE integration package.
-    "sudo zypper --non-interactive remove --no-confirm gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
+    "sudo zypper --non-interactive remove --no-confirm gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
         .into()
 }
 
@@ -1576,7 +1682,7 @@ fn append_package_manager_uninstall_steps(
         PackageManager::Apt => {
             plan.push((
                 "Remove apt packages",
-                "sudo apt-get remove --purge -y gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
+                "sudo apt-get remove --purge -y gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
                     .into(),
             ));
             plan.push((
@@ -1599,7 +1705,7 @@ fn append_package_manager_uninstall_steps(
         PackageManager::Dnf => {
             plan.push((
                 "Remove dnf packages",
-                "sudo dnf remove -y gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
+                "sudo dnf remove -y gaze-omarchy gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde 2>/dev/null || true"
                     .into(),
             ));
             plan.push((
@@ -1708,6 +1814,10 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
     plan.push((
         "Remove GDM dconf overrides",
         remove_gdm_dconf_overrides_cmd(),
+    ));
+    plan.push((
+        "Disable the Cinnamon extension and remove its settings",
+        reset_cinnamon_user_settings_cmd(),
     ));
 
     if which("pam-auth-update") {
@@ -1936,9 +2046,21 @@ async fn run() -> anyhow::Result<()> {
             keep_data,
             dry_run,
         } => return handle_uninstall(*yes, *keep_data, *dry_run),
-        Commands::Doctor { user, benchmark } => {
+        Commands::Doctor {
+            user,
+            benchmark,
+            json,
+            report,
+        } => {
             let username = user.clone().unwrap_or_else(get_current_user);
-            let healthy = doctor::run(&username, *benchmark).await?;
+            let output = if *json {
+                doctor::Output::Json
+            } else if *report {
+                doctor::Output::Report
+            } else {
+                doctor::Output::Human
+            };
+            let healthy = doctor::run(&username, *benchmark, output).await?;
             if !healthy {
                 std::process::exit(1);
             }
@@ -1977,8 +2099,8 @@ async fn run() -> anyhow::Result<()> {
         Commands::RefineFace { user, face } => {
             handle_enroll(&proxy, &user.unwrap_or_else(get_current_user), &face, true).await?;
         }
-        Commands::ListFaces { user } => {
-            handle_list_faces(&proxy, &user.unwrap_or_else(get_current_user)).await?;
+        Commands::ListFaces { user, json } => {
+            handle_list_faces(&proxy, &user.unwrap_or_else(get_current_user), json).await?;
         }
         Commands::RemoveFace { user, face } => {
             handle_remove_face(&proxy, &user.unwrap_or_else(get_current_user), &face).await?;
@@ -1986,157 +2108,41 @@ async fn run() -> anyhow::Result<()> {
         Commands::RenameFace { user, from, to } => {
             handle_rename_face(&proxy, &user.unwrap_or_else(get_current_user), &from, &to).await?;
         }
-        Commands::ClearUser { user } => {
-            handle_clear_user(&proxy, &user.unwrap_or_else(get_current_user)).await?;
+        Commands::ClearUser { user, yes } => {
+            handle_clear_user(&proxy, &user.unwrap_or_else(get_current_user), yes).await?;
         }
         Commands::Duress { clear, user } => {
             handle_duress(&proxy, &user.unwrap_or_else(get_current_user), clear).await?;
         }
-        Commands::Config { show } => {
-            let (config, keyring_supported) = load_config_with_keyring_from_daemon(&proxy).await?;
-            if show {
-                println!(
-                    "{} {}",
-                    style("inference.execution_provider:").bold(),
-                    config.inference.execution_provider
-                );
-                println!(
-                    "{} {}",
-                    style("inference.device:").bold(),
-                    config.inference.device
-                );
-                let level_name = config.security.level.as_str();
-                println!("{} {}", style("security.level:").bold(), level_name);
-                println!(
-                    "{} {}",
-                    style("security.detector:").bold(),
-                    config.security.detector()
-                );
-                println!(
-                    "{} {}",
-                    style("security.recognizer:").bold(),
-                    config.security.recognizer()
-                );
-                println!(
-                    "{} {:.2}",
-                    style("security.rgb_threshold:").bold(),
-                    config.security.rgb_threshold()
-                );
-                println!(
-                    "{} {:.2}",
-                    style("security.ir_threshold:").bold(),
-                    config.security.ir_threshold()
-                );
-                println!(
-                    "{} {}",
-                    style("security.hybrid_policy:").bold(),
-                    if config.security.hybrid_policy.is_empty() {
-                        format!("\"\" (resolved: {})", config.security.hybrid_policy())
+        Commands::Config { show, action } => {
+            let (config, keyring_supported) =
+                match load_config_with_keyring_from_daemon(&proxy).await {
+                    Ok(loaded) => loaded,
+                    Err(err) => match err.downcast_ref::<zbus::Error>() {
+                        Some(dbus) => exit_with_error(
+                            &describe_dbus_error(&proxy, "Failed to read the configuration", dbus)
+                                .await,
+                        ),
+                        None => return Err(err),
+                    },
+                };
+            match action {
+                Some(ConfigAction::Get { key }) => println!("{}", config.get_key(&key)?),
+                Some(ConfigAction::Set { key, value }) => {
+                    let updated = config.with_key(&key, &value)?;
+                    let saved = if keyring_supported.gnome || keyring_supported.kwallet {
+                        apply_config_with_keyring_to_daemon(&proxy, &updated).await
                     } else {
-                        config.security.hybrid_policy.clone()
-                    }
-                );
-                println!("{} {}", style("cameras.rgb:").bold(), config.cameras.rgb);
-                println!("{} {}", style("cameras.ir:").bold(), config.cameras.ir);
-                println!(
-                    "{} {}",
-                    style("cameras.emitter_enabled:").bold(),
-                    config.cameras.emitter_enabled
-                );
-                println!(
-                    "{} {}",
-                    style("cameras.dark_luma_threshold:").bold(),
-                    config.cameras.dark_luma_threshold
-                );
-                println!(
-                    "{} {}",
-                    style("cameras.parallel_capture:").bold(),
-                    config.cameras.parallel_capture()
-                );
-                println!(
-                    "{} {}",
-                    style("auth.abort_if_ssh:").bold(),
-                    config.auth.abort_if_ssh
-                );
-                println!(
-                    "{} {}",
-                    style("auth.abort_if_lid_closed:").bold(),
-                    config.auth.abort_if_lid_closed
-                );
-                println!(
-                    "{} {}",
-                    style("auth.abort_before_first_resume:").bold(),
-                    config.auth.abort_before_first_resume
-                );
-                println!(
-                    "{} {}",
-                    style("auth.require_confirmation_lock_screen:").bold(),
-                    config.auth.require_confirmation_lock_screen
-                );
-                println!(
-                    "{} {}",
-                    style("auth.require_confirmation_elevation:").bold(),
-                    config.auth.require_confirmation_elevation
-                );
-                println!(
-                    "{} {}",
-                    style("auth.resume_grace_ms:").bold(),
-                    config.auth.resume_grace_ms
-                );
-                println!(
-                    "{} {}",
-                    style("auth.start_delay_ms:").bold(),
-                    config.auth.start_delay_ms
-                );
-                println!(
-                    "{} {}",
-                    style("auth.start_delay_scope:").bold(),
-                    config.auth.start_delay_scope()
-                );
-
-                println!(
-                    "{} {}",
-                    style("enrollment.max_templates:").bold(),
-                    config.enrollment.max_templates
-                );
-                println!(
-                    "{} {:.2}",
-                    style("enrollment.min_face_size_ratio:").bold(),
-                    config.enrollment.min_face_size_ratio
-                );
-                println!(
-                    "{} {}",
-                    style("liveness.enabled:").bold(),
-                    config.liveness.enabled
-                );
-                println!(
-                    "{} {:.2}",
-                    style("liveness.threshold:").bold(),
-                    config.liveness.threshold
-                );
-                println!(
-                    "{} {:.1}s",
-                    style("liveness.max_seconds:").bold(),
-                    config.liveness.max_seconds
-                );
-                println!(
-                    "{} {}",
-                    style("storage.encrypt_templates:").bold(),
-                    config.storage.encrypt_templates
-                );
-                println!(
-                    "{} {}",
-                    style("storage.unlock_gnome_keyring:").bold(),
-                    config.storage.unlock_gnome_keyring
-                );
-                println!(
-                    "{} {}",
-                    style("storage.unlock_kwallet:").bold(),
-                    config.storage.unlock_kwallet
-                );
-                return Ok(());
+                        apply_config_to_daemon(&proxy, &updated).await
+                    };
+                    saved.map_err(|e| anyhow::anyhow!("Failed to save configuration: {e}"))?;
+                    println!("{key} = {}", updated.get_key(&key)?);
+                }
+                None if show => print!("{}", config_show_text(&config)?),
+                None => {
+                    run_config_wizard(&Term::stdout(), &proxy, config, keyring_supported).await?
+                }
             }
-            run_config_wizard(&Term::stdout(), &proxy, config, keyring_supported).await?;
         }
 
         Commands::Doctor { .. } | Commands::Uninstall { .. } | Commands::Keyring { .. } => {
@@ -2227,6 +2233,8 @@ mod tests {
             Commands::Doctor {
                 user: Some(ref user),
                 benchmark: false,
+                json: false,
+                report: false,
             } if user == "alice"
         ));
 
@@ -2367,6 +2375,10 @@ mod tests {
     fn uninstall_plan_removes_per_user_extensions_and_core_dumps() {
         let plan = build_uninstall_plan(true);
         assert!(plan_has(&plan, "Remove per-user GNOME extension copies"));
+        assert!(plan_has(
+            &plan,
+            "Disable the Cinnamon extension and remove its settings"
+        ));
         assert!(plan_has(&plan, "Remove gaze core dumps"));
 
         let (_, cmd) = plan
@@ -2660,14 +2672,78 @@ mod tests {
     }
 
     #[test]
+    fn every_package_manager_removes_the_cinnamon_extension() {
+        for manager in [
+            PackageManager::Apt,
+            PackageManager::Zypper,
+            PackageManager::Dnf,
+            PackageManager::RpmOstree,
+            PackageManager::Pacman,
+        ] {
+            let mut plan = Vec::new();
+            append_package_manager_uninstall_steps(&mut plan, manager);
+            assert!(
+                plan.iter()
+                    .any(|(_, cmd)| cmd.contains("gaze-cinnamon-extension")),
+                "{manager:?} leaves gaze-cinnamon-extension installed"
+            );
+        }
+        assert!(remove_pacman_packages_cmd().contains("gaze-cinnamon-extension-bin"));
+    }
+
+    #[test]
+    fn clear_user_and_config_get_set_parse() {
+        let cli = Cli::try_parse_from(["gaze", "clear-user", "--yes"]).unwrap();
+        assert!(matches!(cli.command, Commands::ClearUser { yes: true, .. }));
+        let cli =
+            Cli::try_parse_from(["gaze", "config", "set", "liveness.enabled", "true"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Config {
+                action: Some(ConfigAction::Set { ref key, ref value }),
+                ..
+            } if key == "liveness.enabled" && value == "true"
+        ));
+        assert!(
+            Cli::try_parse_from(["gaze", "config", "--show", "get", "security.level"]).is_err()
+        );
+        assert!(Cli::try_parse_from(["gaze", "doctor", "--json", "--report"]).is_err());
+    }
+
+    #[test]
     fn showing_the_config_stays_unprivileged_while_editing_it_does_not() {
         assert_eq!(
-            command_requires_root(&Commands::Config { show: true }),
+            command_requires_root(&Commands::Config {
+                show: true,
+                action: None
+            }),
             None,
             "reading the config is not a privileged operation"
         );
         assert_eq!(
-            command_requires_root(&Commands::Config { show: false }),
+            command_requires_root(&Commands::Config {
+                show: false,
+                action: None
+            }),
+            Some("config")
+        );
+        assert_eq!(
+            command_requires_root(&Commands::Config {
+                show: false,
+                action: Some(ConfigAction::Get {
+                    key: "security.level".into()
+                })
+            }),
+            None
+        );
+        assert_eq!(
+            command_requires_root(&Commands::Config {
+                show: false,
+                action: Some(ConfigAction::Set {
+                    key: "liveness.enabled".into(),
+                    value: "true".into()
+                })
+            }),
             Some("config")
         );
     }
@@ -2684,7 +2760,8 @@ mod tests {
         );
         assert_eq!(
             command_target_user(&Commands::ListFaces {
-                user: Some("bob".into())
+                user: Some("bob".into()),
+                json: false
             }),
             Some("bob")
         );
@@ -2697,7 +2774,10 @@ mod tests {
             None
         );
         assert_eq!(
-            command_target_user(&Commands::Config { show: true }),
+            command_target_user(&Commands::Config {
+                show: true,
+                action: None
+            }),
             None,
             "config is never run against another account"
         );

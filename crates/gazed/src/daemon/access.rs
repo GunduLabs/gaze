@@ -638,7 +638,9 @@ mod tests {
         assert!(!AuthDaemon::face_barred_for_admin_prompt(Some("polkit-1")));
         let guard = AdminPromptGuard::new();
         assert!(AuthDaemon::face_barred_for_admin_prompt(Some("polkit-1")));
-        assert!(AuthDaemon::face_barred_for_admin_prompt(Some("/etc/pam.d/polkit-1")));
+        assert!(AuthDaemon::face_barred_for_admin_prompt(Some(
+            "/etc/pam.d/polkit-1"
+        )));
         assert!(!AuthDaemon::face_barred_for_admin_prompt(Some("sudo")));
         assert!(!AuthDaemon::face_barred_for_admin_prompt(None));
         drop(guard);

@@ -26,6 +26,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 mod acceleration;
+mod bug_report;
 mod camera;
 mod config;
 mod daemon;
@@ -93,6 +94,24 @@ enum Level {
     Error,
 }
 
+impl Level {
+    fn as_str(self) -> &'static str {
+        match self {
+            Level::Pass => "pass",
+            Level::Off => "off",
+            Level::Warning => "warning",
+            Level::Error => "error",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Output {
+    Human,
+    Json,
+    Report,
+}
+
 #[derive(Debug)]
 struct Check {
     level: Level,
@@ -149,9 +168,8 @@ impl Report {
         self.count(Level::Error) == 0
     }
 
-    fn print(&self) -> anyhow::Result<()> {
-        let term = Term::stdout();
-        term.write_line(&format!("\n{}\n", style("Gaze doctor").cyan().bold()))?;
+    fn render(&self) -> String {
+        let mut out = format!("\n{}\n\n", style("Gaze doctor").cyan().bold());
 
         for check in &self.checks {
             let (symbol, label) = match check.level {
@@ -163,10 +181,10 @@ impl Report {
                 ),
                 Level::Error => (style("✗").red().bold(), style(check.name).red().bold()),
             };
-            term.write_line(&format!("  {symbol} {label}: {}", check.message))?;
+            out.push_str(&format!("  {symbol} {label}: {}\n", check.message));
             if let Some(fix) = &check.fix {
                 for line in fix.lines() {
-                    term.write_line(&format!("      {}", style(line).dim()))?;
+                    out.push_str(&format!("      {}\n", style(line).dim()));
                 }
             }
         }
@@ -175,25 +193,55 @@ impl Report {
         let off = self.count(Level::Off);
         let warnings = self.count(Level::Warning);
         let errors = self.count(Level::Error);
-        term.write_line(&format!(
-            "\n{} {passed} passed, {off} off, {warnings} warning{}, {errors} error{}",
+        out.push_str(&format!(
+            "\n{} {passed} passed, {off} off, {warnings} warning{}, {errors} error{}\n",
             style("Summary:").bold(),
             if warnings == 1 { "" } else { "s" },
             if errors == 1 { "" } else { "s" }
-        ))?;
+        ));
         if off > 0 {
-            term.write_line(
-                &style("○ marks a working feature you have switched off; the line under it turns it on.")
+            out.push_str(&format!(
+                "{}\n",
+                style("○ marks a working feature you have switched off; the line under it turns it on.")
                     .dim()
-                    .to_string(),
-            )?;
+            ));
         }
-        term.write_line("")?;
+        out.push('\n');
+        out
+    }
+
+    fn print(&self) -> anyhow::Result<()> {
+        Term::stdout().write_str(&self.render())?;
         Ok(())
+    }
+
+    fn to_json(&self) -> String {
+        let checks: Vec<String> = self
+            .checks
+            .iter()
+            .map(|check| {
+                format!(
+                    "{{\"level\":\"{}\",\"name\":{},\"message\":{},\"fix\":{}}}",
+                    check.level.as_str(),
+                    crate::json_string(check.name),
+                    crate::json_string(&check.message),
+                    check
+                        .fix
+                        .as_deref()
+                        .map(crate::json_string)
+                        .unwrap_or_else(|| "null".to_string())
+                )
+            })
+            .collect();
+        format!(
+            "{{\"healthy\":{},\"checks\":[{}]}}",
+            self.is_healthy(),
+            checks.join(",")
+        )
     }
 }
 
-pub async fn run(username: &str, benchmark: bool) -> anyhow::Result<bool> {
+pub async fn run(username: &str, benchmark: bool, output: Output) -> anyhow::Result<bool> {
     let mut report = Report::default();
 
     check_platform(&mut report);
@@ -238,7 +286,18 @@ pub async fn run(username: &str, benchmark: bool) -> anyhow::Result<bool> {
     )
     .await;
 
-    report.print()?;
+    match output {
+        Output::Human => report.print()?,
+        Output::Json => println!("{}", report.to_json()),
+        Output::Report => {
+            report.print()?;
+            let path = bug_report::write(&report, username)?;
+            println!(
+                "Wrote {}. Check it, then attach it to a new issue: https://github.com/GunduLabs/gaze/issues/new/choose",
+                path.display()
+            );
+        }
+    }
     Ok(report.is_healthy())
 }
 
@@ -339,6 +398,17 @@ mod tests {
         assert!(
             report.is_healthy(),
             "switching a feature off is a choice, not a failure"
+        );
+    }
+
+    #[test]
+    fn json_output_carries_every_check_and_the_verdict() {
+        let mut report = Report::default();
+        report.pass("CPU", "AVX2 is available");
+        report.error("DBus", "gazed \"down\"", "Run it");
+        assert_eq!(
+            report.to_json(),
+            r#"{"healthy":false,"checks":[{"level":"pass","name":"CPU","message":"AVX2 is available","fix":null},{"level":"error","name":"DBus","message":"gazed \"down\"","fix":"Run it"}]}"#
         );
     }
 

@@ -288,7 +288,12 @@ pub enum DaemonState {
 }
 
 impl DaemonState {
-    pub fn from_unit(load_state: &str, active_state: &str, sub_state: &str, file_state: &str) -> Self {
+    pub fn from_unit(
+        load_state: &str,
+        active_state: &str,
+        sub_state: &str,
+        file_state: &str,
+    ) -> Self {
         if load_state == "not-found" {
             return Self::NotInstalled;
         }
@@ -302,6 +307,49 @@ impl DaemonState {
     }
 }
 
+impl DaemonState {
+    pub fn problem_and_fix(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Starting => (
+                "gazed is starting but is not on the bus yet (its first start downloads face models)",
+                "Wait a minute and try again; `journalctl -u gazed -f` shows its progress.",
+            ),
+            Self::Failed => (
+                "gazed stopped with an error",
+                "Run `journalctl -u gazed -n 50` to see why, then `sudo systemctl restart gazed`.",
+            ),
+            Self::Disabled => (
+                "gazed is disabled",
+                "Run `sudo systemctl enable --now gazed`.",
+            ),
+            Self::Stopped => ("gazed is not running", "Run `sudo systemctl start gazed`."),
+            Self::NotInstalled => (
+                "the gazed service is not installed",
+                "Install the gaze package for your distribution.",
+            ),
+        }
+    }
+}
+
+pub async fn daemon_unavailable_hint(connection: &zbus::Connection) -> (String, String) {
+    if !crate::cpu::supports_inference() {
+        return (
+            crate::cpu::UNSUPPORTED_CPU_MESSAGE.to_string(),
+            crate::cpu::UNSUPPORTED_CPU_FIX.to_string(),
+        );
+    }
+    match gazed_unit_state_on(connection).await {
+        Ok(state) => {
+            let (problem, fix) = state.problem_and_fix();
+            (problem.to_string(), fix.to_string())
+        }
+        Err(_) => (
+            "gazed is not on the system bus".to_string(),
+            "Run `sudo systemctl start gazed`, then `gaze doctor`.".to_string(),
+        ),
+    }
+}
+
 pub async fn gazed_unit_state_on(connection: &zbus::Connection) -> anyhow::Result<DaemonState> {
     let manager = zbus::Proxy::new(
         connection,
@@ -310,7 +358,8 @@ pub async fn gazed_unit_state_on(connection: &zbus::Connection) -> anyhow::Resul
         "org.freedesktop.systemd1.Manager",
     )
     .await?;
-    let path: zbus::zvariant::OwnedObjectPath = manager.call("LoadUnit", &("gazed.service",)).await?;
+    let path: zbus::zvariant::OwnedObjectPath =
+        manager.call("LoadUnit", &("gazed.service",)).await?;
     let unit = zbus::Proxy::new(
         connection,
         "org.freedesktop.systemd1",
@@ -1183,7 +1232,10 @@ mod tests {
         let state = DaemonState::from_unit;
         assert_eq!(state("loaded", "activating", "start", "enabled"), Starting);
         assert_eq!(state("loaded", "active", "running", "enabled"), Starting);
-        assert_eq!(state("loaded", "activating", "auto-restart", "enabled"), Failed);
+        assert_eq!(
+            state("loaded", "activating", "auto-restart", "enabled"),
+            Failed
+        );
         assert_eq!(state("loaded", "failed", "failed", "enabled"), Failed);
         assert_eq!(state("loaded", "inactive", "dead", "disabled"), Disabled);
         assert_eq!(state("masked", "inactive", "dead", "masked"), Disabled);

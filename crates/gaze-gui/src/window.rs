@@ -1997,10 +1997,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         face_list.set_visible(false);
                                         return;
                                     } else if dbus_is_not_activatable(&err) {
-                                        let state =
-                                            gazed_unit_state_on(proxy.inner().connection())
-                                                .await
-                                                .ok();
+                                        let state = gazed_unit_state_on(proxy.inner().connection())
+                                            .await
+                                            .ok();
                                         let (title, description, retry) = daemon_state_text(state);
                                         status_page.set_title(title);
                                         status_page.set_description(Some(description));

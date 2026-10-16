@@ -20,13 +20,6 @@ the repository, deletes `gazed` core dumps, and clears `/etc/gaze`,
 `pam-config` entries, Tumbleweed repository, and signing key. Before making any
 changes, it shows you the plan and asks for confirmation.
 
-::: warning `gaze uninstall` leaves `gaze-cinnamon-extension` installed
-The command removes `gaze`, `gaze-gui`, `gaze-gnome-extension`, `gaze-hyprlock`,
-`gaze-kde`, and `gaze-omarchy`. If you also installed the Cinnamon extension,
-remove it separately with your package manager, then follow
-[Reset Cinnamon lock screen settings](#reset-cinnamon-lock-screen-settings).
-:::
-
 Useful flags:
 
 - `--keep-data`: preserve `/var/lib/gaze` (enrolled faces)

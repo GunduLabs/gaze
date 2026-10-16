@@ -181,17 +181,6 @@ pub(super) struct Daemon {
 }
 
 pub(super) async fn connect_daemon(report: &mut Report) -> Option<Daemon> {
-    let service_state = match command_output("systemctl", &["is-active", "gazed"]) {
-        Ok((_, state)) => state,
-        Err(_) => String::new(),
-    };
-    let daemon_starting = service_state == "active";
-    let ready_wait = if daemon_starting {
-        DAEMON_READY_TIMEOUT
-    } else {
-        Duration::ZERO
-    };
-
     let proxy = match tokio::time::timeout(DAEMON_TIMEOUT, gaze_core::dbus::connect_gaze()).await {
         Ok(Ok(proxy)) => proxy,
         Ok(Err(err)) => {
@@ -212,6 +201,16 @@ pub(super) async fn connect_daemon(report: &mut Report) -> Option<Daemon> {
         }
     };
 
+    let unit_state = gaze_core::dbus::gazed_unit_state_on(proxy.inner().connection())
+        .await
+        .ok();
+    let daemon_starting = unit_state == Some(gaze_core::dbus::DaemonState::Starting);
+    let ready_wait = if daemon_starting {
+        DAEMON_READY_TIMEOUT
+    } else {
+        Duration::ZERO
+    };
+
     let name_wait_started = Instant::now();
     let name_owned = gaze_name_has_owner(&proxy, ready_wait).await;
     // `gazed` downloads models before claiming its name. Once it is on the bus,
@@ -223,13 +222,7 @@ pub(super) async fn connect_daemon(report: &mut Report) -> Option<Daemon> {
     } else {
         // Later calls would fail with the same "not activatable" error. Report the cause
         // once rather than repeating it as separate camera and enrollment faults.
-        let (message, fix) = if !gaze_core::cpu::supports_inference() {
-            (
-                "gazed cannot run on this CPU (no AVX2), so it never reaches the system bus"
-                    .to_string(),
-                gaze_core::cpu::UNSUPPORTED_CPU_FIX.to_string(),
-            )
-        } else if daemon_starting {
+        let (message, fix) = if daemon_starting && gaze_core::cpu::supports_inference() {
             (
                 "gazed is running but has not claimed com.gundulabs.Gaze yet (models may be downloading)"
                     .to_string(),
@@ -237,18 +230,7 @@ pub(super) async fn connect_daemon(report: &mut Report) -> Option<Daemon> {
                     .to_string(),
             )
         } else {
-            (
-                format!(
-                    "gazed is not on the system bus (the service is {})",
-                    if service_state.is_empty() {
-                        "not reporting a state"
-                    } else {
-                        service_state.as_str()
-                    }
-                ),
-                "Run `sudo systemctl start gazed`, then `journalctl -u gazed -n 100 --no-pager` if it does not stay up."
-                    .to_string(),
-            )
+            gaze_core::dbus::daemon_unavailable_hint(proxy.inner().connection()).await
         };
         report.error("DBus", message, fix);
         return None;
@@ -393,7 +375,7 @@ pub(super) async fn check_daemon(
 }
 
 pub(super) async fn check_benchmark(report: &mut Report, proxy: &GazeProxy<'_>) {
-    let term = Term::stdout();
+    let term = Term::stderr();
     let _ = term.write_line(&format!(
         "{} Benchmarking model inference (this can take a few seconds)...",
         style("i").cyan().bold()
