@@ -278,6 +278,58 @@ pub fn dbus_is_unknown_method(err: &zbus::Error) -> bool {
     err.to_string().contains("UnknownMethod")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DaemonState {
+    Starting,
+    Failed,
+    Disabled,
+    Stopped,
+    NotInstalled,
+}
+
+impl DaemonState {
+    pub fn from_unit(load_state: &str, active_state: &str, sub_state: &str, file_state: &str) -> Self {
+        if load_state == "not-found" {
+            return Self::NotInstalled;
+        }
+        match active_state {
+            "failed" => Self::Failed,
+            _ if sub_state == "auto-restart" => Self::Failed,
+            "active" | "activating" | "reloading" => Self::Starting,
+            _ if matches!(file_state, "disabled" | "masked" | "masked-runtime") => Self::Disabled,
+            _ => Self::Stopped,
+        }
+    }
+}
+
+pub async fn gazed_unit_state_on(connection: &zbus::Connection) -> anyhow::Result<DaemonState> {
+    let manager = zbus::Proxy::new(
+        connection,
+        "org.freedesktop.systemd1",
+        "/org/freedesktop/systemd1",
+        "org.freedesktop.systemd1.Manager",
+    )
+    .await?;
+    let path: zbus::zvariant::OwnedObjectPath = manager.call("LoadUnit", &("gazed.service",)).await?;
+    let unit = zbus::Proxy::new(
+        connection,
+        "org.freedesktop.systemd1",
+        path,
+        "org.freedesktop.systemd1.Unit",
+    )
+    .await?;
+    let load_state: String = unit.get_property("LoadState").await?;
+    let active_state: String = unit.get_property("ActiveState").await?;
+    let sub_state: String = unit.get_property("SubState").await?;
+    let file_state: String = unit.get_property("UnitFileState").await?;
+    Ok(DaemonState::from_unit(
+        &load_state,
+        &active_state,
+        &sub_state,
+        &file_state,
+    ))
+}
+
 /// Deadline for a client waiting for a verification result. The daemon's own
 /// deadline expires first, so reaching this one means it stopped answering rather
 /// than rejecting the face.
@@ -1123,5 +1175,19 @@ mod tests {
         let err = zbus::Error::Failure("camera unavailable".to_string());
         assert!(!dbus_is_not_activatable(&err));
         assert!(!dbus_is_unknown_method(&err));
+    }
+
+    #[test]
+    fn daemon_state_treats_a_restart_loop_as_failed() {
+        use DaemonState::*;
+        let state = DaemonState::from_unit;
+        assert_eq!(state("loaded", "activating", "start", "enabled"), Starting);
+        assert_eq!(state("loaded", "active", "running", "enabled"), Starting);
+        assert_eq!(state("loaded", "activating", "auto-restart", "enabled"), Failed);
+        assert_eq!(state("loaded", "failed", "failed", "enabled"), Failed);
+        assert_eq!(state("loaded", "inactive", "dead", "disabled"), Disabled);
+        assert_eq!(state("masked", "inactive", "dead", "masked"), Disabled);
+        assert_eq!(state("loaded", "inactive", "dead", "enabled"), Stopped);
+        assert_eq!(state("not-found", "inactive", "dead", ""), NotInstalled);
     }
 }

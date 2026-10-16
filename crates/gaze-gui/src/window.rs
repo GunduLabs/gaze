@@ -10,9 +10,9 @@ use gaze_core::config::{
     PARALLEL_CAPTURE_LABELS, SECURITY_LEVEL_LABELS, START_DELAY_SCOPE_LABELS, SecurityLevel,
 };
 use gaze_core::dbus::{
-    GazeProxy, apply_config_to_daemon, apply_config_with_keyring_to_daemon, connect_gaze,
-    dbus_error_message, dbus_is_file_not_found, dbus_is_not_activatable, load_config_from_daemon,
-    load_config_with_keyring_from_daemon,
+    DaemonState, GazeProxy, apply_config_to_daemon, apply_config_with_keyring_to_daemon,
+    connect_gaze, dbus_error_message, dbus_is_file_not_found, dbus_is_not_activatable,
+    gazed_unit_state_on, load_config_from_daemon, load_config_with_keyring_from_daemon,
 };
 use gaze_vision::camera::{is_listed_source, source_index};
 use gtk4::glib;
@@ -72,6 +72,50 @@ fn add_toast(window: &libadwaita::ApplicationWindow, text: impl AsRef<str>) -> l
 
 fn add_dbus_error_toast(window: &libadwaita::ApplicationWindow, prefix: &str, err: &zbus::Error) {
     add_toast(window, format!("{}: {}", prefix, dbus_error_message(err)));
+}
+
+async fn confirm_face_removal(window: &libadwaita::ApplicationWindow, face_name: &str) -> bool {
+    let dialog = libadwaita::MessageDialog::builder()
+        .heading(format!("Remove \u{201c}{face_name}\u{201d}?"))
+        .body("Gaze will stop recognizing this face. You can enroll it again later.")
+        .transient_for(window)
+        .build();
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("remove", "Remove");
+    dialog.set_response_appearance("remove", libadwaita::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+    dialog.choose_future().await == "remove"
+}
+
+fn daemon_state_text(state: Option<DaemonState>) -> (&'static str, &'static str, Duration) {
+    match state {
+        Some(DaemonState::Failed) => (
+            "Daemon Failed",
+            "The Gaze daemon stopped with an error. Check `journalctl -u gazed -n 50`, then run `sudo systemctl restart gazed`.",
+            Duration::from_secs(10),
+        ),
+        Some(DaemonState::Disabled) => (
+            "Daemon Disabled",
+            "The Gaze daemon is turned off. Turn it on with `sudo systemctl enable --now gazed`.",
+            Duration::from_secs(10),
+        ),
+        Some(DaemonState::Stopped) => (
+            "Daemon Stopped",
+            "The Gaze daemon is not running. Start it with `sudo systemctl start gazed`.",
+            Duration::from_secs(10),
+        ),
+        Some(DaemonState::NotInstalled) => (
+            "Daemon Not Installed",
+            "The gazed service is missing. Install the gaze package for your distribution.",
+            Duration::from_secs(10),
+        ),
+        Some(DaemonState::Starting) | None => (
+            "Daemon Starting",
+            "The Gaze daemon is starting up. Its first start downloads face models, which can take a few minutes.",
+            Duration::from_secs(3),
+        ),
+    }
 }
 
 fn show_daemon_pending_toast(window: &libadwaita::ApplicationWindow) {
@@ -1953,14 +1997,17 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         face_list.set_visible(false);
                                         return;
                                     } else if dbus_is_not_activatable(&err) {
-                                        status_page.set_title("Daemon Starting");
-                                        status_page.set_description(Some(
-                                            "The Gaze daemon is starting up…",
-                                        ));
+                                        let state =
+                                            gazed_unit_state_on(proxy.inner().connection())
+                                                .await
+                                                .ok();
+                                        let (title, description, retry) = daemon_state_text(state);
+                                        status_page.set_title(title);
+                                        status_page.set_description(Some(description));
                                         status_page.set_visible(true);
                                         face_list.set_visible(false);
                                         glib::timeout_add_local_once(
-                                            std::time::Duration::from_secs(3),
+                                            retry,
                                             glib::clone!(
                                                 #[strong]
                                                 refresh,
@@ -2268,6 +2315,11 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                 #[strong]
                                                 proxy,
                                                 async move {
+                                                    if !confirm_face_removal(&window, &face_name)
+                                                        .await
+                                                    {
+                                                        return;
+                                                    }
                                                     if let Err(err) = proxy
                                                         .delete_face(&username, &face_name)
                                                         .await
