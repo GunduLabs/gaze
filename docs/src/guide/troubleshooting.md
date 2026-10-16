@@ -18,7 +18,7 @@ Each line is marked with what it found:
 | Mark | Meaning |
 |---|---|
 | `✓` | Working. |
-| `○` | A working feature you have switched off, such as GDM login face authentication or template encryption. Not a problem. The dim line underneath is the recipe that switches it on. |
+| `○` | An optional feature you have switched off, such as GDM login face authentication. The dim line underneath is the recipe that switches it on. Disabled template encryption is reported as a warning because templates are stored in plaintext. |
 | `!` | Warning: Gaze still works, but something is degraded or not wired up. |
 | `✗` | Error: this part will not work until you fix it. `gaze doctor` exits `1`. |
 
@@ -53,7 +53,7 @@ That command shows the most recent daemon log messages.
 
 ### Daemon exits when template encryption is enabled
 
-If `gazed` refuses to start and the logs show a message like *"template encryption is enabled ([storage] encrypt_templates) but no usable TPM is available"*, the daemon is failing closed on purpose: it will not store biometric data unencrypted once you have asked for encryption.
+If `gazed` refuses to start and the logs show a message like *"template encryption is enabled ([storage] encrypt_templates) but no usable TPM is available"*, the daemon is failing closed on purpose. Encryption is enabled by default for new or omitted storage settings; it will not silently store biometric data unencrypted.
 
 ```bash
 journalctl -u gazed -n 50 --no-pager
@@ -81,9 +81,38 @@ sudo systemctl restart gazed
 If the TPM was reset/cleared after you enrolled, the previously sealed key can no longer be unsealed. Delete the stale key directory and re-enroll your faces:
 
 ```bash
-sudo rm -rf /var/lib/gaze/tpm
-sudo systemctl restart gazed
+sudo systemctl stop gazed
+# Destructive: only after confirming TPM reset and backing up any state you need.
+# The old encrypted templates cannot be recovered without their original TPM key.
+sudo rm -rf /var/lib/gaze/tpm /var/lib/gaze/users
+sudo systemctl start gazed
 ```
+
+### Legacy template or incomplete TPM key errors after upgrading
+
+If logs mention `unbound or plaintext templates require explicit migration` or
+`legacy unbound templates require explicit migration`, stop the daemon and run the
+[template maintenance procedure](/guide/configuration#upgrade-legacy-encrypted-templates).
+This also applies to mixed stores left by an interrupted older migration. Do not
+simply keep retrying startup: plaintext and legacy ciphertext are deliberately not
+authenticated or rebound automatically. If the store's account ownership cannot be
+trusted, re-enroll instead.
+
+If logs mention an `incomplete legacy TPM key pair`, restore the missing `dek.pub`
+or `dek.priv` from a protected backup. Do not delete the surviving file to bypass
+the error; a new key cannot decrypt the existing templates. An invalid `dek.blob`
+is also an error and never triggers fallback to legacy files.
+
+A `template storage needs recovery` error means a storage/config rollback failed.
+Matching and writes are disabled in that daemon process. Stop it, preserve a
+protected copy of `/var/lib/gaze` (including any `.gaze-recode-users-*` sibling
+store), check disk space and filesystem errors, then restart. The active `users`
+directory is a complete store. Startup removes abandoned staging copies and
+validates the active format against the configured setting. If a crash occurred
+after publishing plaintext but before saving an encryption-disable request, the
+still-enabled setting rejects that plaintext; verify the active store's ownership
+and run the explicit maintenance migration above. It is not silently trusted on
+restart. Keep password login available throughout recovery.
 
 ### Daemon fails with "error while loading shared libraries: libopencv_*" (Arch Linux)
 

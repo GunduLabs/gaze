@@ -85,6 +85,39 @@ fn main() -> anyhow::Result<()> {
         )
         .init();
 
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    anyhow::ensure!(
+        args.is_empty() || (args.len() == 1 && args[0] == "--migrate-legacy-templates"),
+        "unknown argument; supported maintenance option: --migrate-legacy-templates"
+    );
+    Config::migrate_file(CONFIG_PATH);
+    let config = Config::load()?;
+    let _store_lock = UserDatabase::lock_store(std::path::Path::new(USERS_DIR))?;
+    if let Some(warning) = gaze_security::storage::encryption_warning(
+        gaze_security::storage::disk_encryption_for_paths(&[
+            std::path::Path::new(USERS_DIR),
+            std::path::Path::new(tpm::STATE_DIR),
+            std::path::Path::new(gaze_security::keyring::STORE_DIR),
+            std::path::Path::new(gaze_security::keyring::KWALLET_STORE_DIR),
+        ]),
+    ) {
+        warn!("{warning}");
+    }
+    if args.len() == 1 && args[0] == "--migrate-legacy-templates" {
+        let dek = tpm::load_or_create_dek(std::path::Path::new(tpm::STATE_DIR))?;
+        let cipher = crypto::EmbeddingCipher::new(&dek);
+        let db = UserDatabase::new_with_cipher(
+            USERS_DIR,
+            config.enrollment.max_templates as usize,
+            None,
+        )?;
+        let migrated = db.migrate_legacy_with(&cipher)?;
+        info!(
+            migrated,
+            "Migrated templates to owner-bound encryption; restart gazed"
+        );
+        return Ok(());
+    }
     if !gaze_core::cpu::supports_inference() {
         error!(
             "{}. {}",
@@ -94,8 +127,6 @@ fn main() -> anyhow::Result<()> {
         std::process::exit(i32::from(gaze_core::cpu::EXIT_UNSUPPORTED_CPU));
     }
 
-    Config::migrate_file(CONFIG_PATH);
-    let config = Config::load()?;
     gaze_vision::inference::prepare_environment(&config.inference)?;
     run(config)
 }
@@ -166,6 +197,11 @@ async fn run(config: Config) -> anyhow::Result<()> {
         None
     };
 
+    if !config.storage.encrypt_templates {
+        warn!(
+            "Face-template encryption is disabled: biometrics are stored in plaintext. Enable [storage] encrypt_templates with a usable TPM, and protect state storage with full-disk encryption."
+        );
+    }
     let cipher = if config.storage.encrypt_templates {
         let dek = tpm::load_or_create_dek(std::path::Path::new(tpm::STATE_DIR)).map_err(|e| {
             anyhow::anyhow!(
@@ -183,24 +219,10 @@ async fn run(config: Config) -> anyhow::Result<()> {
     let encrypt_templates = config.storage.encrypt_templates;
     let mut db =
         UserDatabase::new_with_cipher(USERS_DIR, config.enrollment.max_templates as usize, cipher)?;
-    if encrypt_templates && !db.has_encrypted_templates()? {
-        match db.migrate_plaintext_to_encrypted() {
-            Ok(0) => {}
-            Ok(n) => {
-                info!(
-                    migrated = n,
-                    "Encrypted existing plaintext templates at rest"
-                );
-                db.load_all()?;
-            }
-            Err(e) => {
-                return Err(anyhow::anyhow!(
-                    "template encryption is enabled ([storage] encrypt_templates) but the \
-                     existing templates could not be encrypted, so the daemon is refusing to \
-                     start on a database it would only be able to read in part: {e}"
-                ));
-            }
-        }
+    if encrypt_templates {
+        // Do not silently authenticate planted plaintext or rebind legacy ciphertext,
+        // even when an older interrupted migration left a mixed store.
+        db.require_bound_templates()?;
     }
 
     if !encrypt_templates && db.has_encrypted_templates()? {

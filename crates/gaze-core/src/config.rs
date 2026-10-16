@@ -560,9 +560,9 @@ impl InferenceConfig {
 }
 
 // Its own table: a security preset replaces `[security]` wholesale, resetting it.
-#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct StorageConfig {
-    #[serde(default = "default_false")]
+    #[serde(default = "default_true")]
     pub encrypt_templates: bool,
     #[serde(default = "default_false")]
     pub unlock_gnome_keyring: bool,
@@ -579,6 +579,16 @@ impl Config {
             return true;
         }
         false
+    }
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            encrypt_templates: true,
+            unlock_gnome_keyring: false,
+            unlock_kwallet: false,
+        }
     }
 }
 
@@ -2086,7 +2096,7 @@ mod tests {
         .unwrap();
 
         let config = Config::load_from(path.to_str().unwrap()).unwrap();
-        assert!(!config.storage.encrypt_templates);
+        assert!(config.storage.encrypt_templates);
         assert_eq!(config.security.level, "high");
         assert_eq!(
             unknown_config_keys(&std::fs::read_to_string(&path).unwrap()),
@@ -2197,7 +2207,7 @@ mod tests {
             config.enrollment.min_face_size_ratio,
             DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO
         );
-        assert!(!config.storage.encrypt_templates);
+        assert!(config.storage.encrypt_templates);
     }
 
     #[test]
@@ -2380,7 +2390,7 @@ mod tests {
             config.enrollment.min_face_size_ratio,
             DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO
         );
-        assert!(!config.storage.encrypt_templates);
+        assert!(config.storage.encrypt_templates);
     }
 
     #[test]
@@ -2666,7 +2676,7 @@ mod tests {
     }
 
     #[test]
-    fn storage_encrypt_templates_parses_and_defaults_false() {
+    fn storage_encrypt_templates_defaults_true_but_respects_explicit_opt_out() {
         let enabled: Config = toml_edit::de::from_str(
             r#"
             [storage]
@@ -2686,7 +2696,13 @@ mod tests {
 level = "low""#,
         )
         .unwrap();
-        assert!(!absent.storage.encrypt_templates);
+        assert!(absent.storage.encrypt_templates);
+        assert!(StorageConfig::default().encrypt_templates);
+        let empty_table: Config = toml_edit::de::from_str("[storage]").unwrap();
+        assert!(empty_table.storage.encrypt_templates);
+        let disabled: Config =
+            toml_edit::de::from_str("[storage]\nencrypt_templates = false").unwrap();
+        assert!(!disabled.storage.encrypt_templates);
     }
 
     #[test]

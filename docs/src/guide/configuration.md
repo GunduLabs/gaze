@@ -54,7 +54,7 @@ threshold = 0.8
 max_seconds = 2.0
 
 [storage]
-encrypt_templates = false
+encrypt_templates = true
 unlock_kwallet = false # optional TPM-backed KDE wallet unlock
 unlock_gnome_keyring = false
 
@@ -460,9 +460,10 @@ Models are auto-downloaded on first run if missing.
 
 ## Encrypt face templates with the TPM
 
-By default, enrolled face embeddings are stored as plaintext files under
-`/var/lib/gaze/users` (readable only by root). On a machine with a TPM 2.0 chip
-you can additionally encrypt them at rest:
+Template encryption defaults to **on** for new installations and configurations
+that omit this setting. It requires a usable TPM 2.0 chip. Existing configurations
+that explicitly set `encrypt_templates = false` remain opted out; their embeddings
+are plaintext under `/var/lib/gaze/users`, readable only by root. To enable encryption:
 
 ```toml
 [storage]
@@ -471,32 +472,87 @@ encrypt_templates = true
 
 When enabled, `gazed` seals a random AES-256 key to the TPM and stores every
 embedding AES-256-GCM encrypted under it. The sealed key lives in
-`/var/lib/gaze/tpm` and can only be unsealed by **this** TPM, so a stolen disk
-(or a backup restored on another machine) yields nothing usable.
+`/var/lib/gaze/tpm/dek.blob` and can only be unsealed by **this** TPM, so a stolen
+disk (or a backup restored on another machine) cannot be decrypted without access
+to that TPM. The `GZE2` format also authenticates the account name and embedding
+filename, including its RGB/IR suffix: moving ciphertext to another account or
+changing its spectrum makes authentication fail. Face labels can still be renamed
+without re-encryption. This does not protect against privileged code on the running
+machine, account-name reuse, or replay of an older valid template for the same account.
 
 Behavior to be aware of:
 
 - **Fail-closed.** If `encrypt_templates = true` but no usable TPM is found, the
   daemon refuses to start rather than silently writing unprotected biometrics.
   Check `journalctl -u gazed` and either fix the TPM (e.g. enable it in firmware)
-  or set the flag back to `false`.
+  or explicitly set the flag to `false` to accept plaintext storage. Disabling
+  template encryption also disables keyring/wallet unlock, which requires encryption.
 - **Machine binding only.** The key is sealed to the TPM's storage hierarchy
   with no PCR policy, so firmware, kernel, and Secure Boot updates do **not**
   lock you out. It protects against the disk leaving the machine, not against
-  boot-chain tampering on the machine itself.
-- **Automatic migration.** Edit the flag in `/etc/gaze/config.toml` and restart
-  the daemon. Turning it on encrypts any existing plaintext templates in place;
-  turning it off decrypts them back to plaintext, which also needs the TPM that
-  sealed them.
+  boot-chain tampering on the machine itself. Daemon startup, credential enrollment,
+  and `gaze doctor` warn if state storage appears unencrypted or its encryption
+  cannot be verified. Detection is best effort: visible dm-crypt backing paths are
+  recognized; inaccessible sysfs, network, overlay, or unsupported storage layouts
+  produce an unknown-status warning. Full-disk encryption must cover the state
+  storage, not just your home directory. Root can still recover secrets after unlock.
+- **Explicit migration.** Enabling encryption through `gaze config` or the GUI
+  explicitly migrates the existing plaintext store. If you enable it by hand-editing
+  the file, or upgrade an older plaintext or mixed-format store, run the maintenance
+  procedure below. Startup never silently encrypts planted plaintext or rebinds
+  legacy ciphertext. Turning encryption off decrypts current-format templates,
+  which also needs the TPM that sealed them. Migration stages a complete replacement
+  store and atomically exchanges directories, so it needs enough free space for a
+  second copy and a filesystem supporting atomic directory exchange. Unsupported
+  filesystems fail without publishing a partial conversion. A failed live config
+  save restores the old store.
+- **Legacy encrypted templates.** Older `GZE1` ciphertext has no account binding
+  and is never accepted for matching or automatically rebound during normal startup.
+  Follow the explicit maintenance procedure below, or remove the old templates and
+  re-enroll.
 - **TPM reset.** If the TPM is cleared, the sealed key (and therefore the
-  encrypted templates) becomes unrecoverable. Delete `/var/lib/gaze/tpm` and
-  re-enroll. The daemon will not start with sealed data it can no longer unseal.
+  encrypted templates) becomes unrecoverable. Archive or remove the unreadable
+  template store and stale `/var/lib/gaze/tpm`, then re-enroll. The daemon will not
+  start with a sealed key it can no longer unseal.
 
 Apply changes with:
 
 ```bash
 sudo systemctl restart gazed
 ```
+
+### Upgrade legacy encrypted templates
+
+Use this procedure for older encrypted, plaintext, or mixed-format templates when
+enabling encryption by editing the config or upgrading an omitted storage setting.
+Only migrate a store whose existing account-directory ownership you trust. Legacy
+encryption cannot prove that a template has not already been moved between users;
+if in doubt, re-enroll instead. Keep a protected backup of both `/var/lib/gaze/users`
+and `/var/lib/gaze/tpm` before migrating, and retain a working password login.
+
+```bash
+sudo systemctl stop gazed
+sudo gazed --migrate-legacy-templates
+sudo systemctl start gazed
+```
+
+The maintenance command does not load camera/inference models. A process lock
+prevents it from running concurrently with the daemon. It validates all encrypted
+records and binds plaintext inputs before publishing one complete owner-bound store; failed staging leaves
+the original store intact. After a successful upgrade, the command is not needed
+again. Normal startup still rejects any plaintext or legacy ciphertext introduced later.
+
+The old `dek.pub` / `dek.priv` key pair is upgraded automatically to a single
+owner-only `dek.blob` after successful unsealing. An incomplete legacy pair is an
+error, not permission to create a replacement key: restore the missing blob from
+backup. A malformed bundle never falls back to the old files.
+
+Enrollment likewise publishes a fully synced batch before evicting old templates.
+Interrupted staging and deletion directories are excluded from matching and cleaned
+on startup. Names beginning with `.gaze-` are reserved for internal storage;
+pre-existing labels with that prefix must be renamed or removed before migration,
+not silently discarded. If storage rollback itself fails, matching and mutations fail closed
+until restart; both complete store copies are retained for recovery.
 
 ## Unlock GNOME Keyring after a GDM or greetd face login
 

@@ -209,40 +209,28 @@ impl AuthDaemon {
             }
         };
 
-        let save_config = || {
-            new_config
-                .save_to(CONFIG_PATH)
-                .map_err(|e| fdo::Error::Failed(format!("Failed to save config: {e}")))
-        };
-
-        match pending_cipher {
-            Some(cipher) if want_encrypt => {
-                let mut db = self.db.lock().await;
-                db.set_cipher(Some(cipher));
-                let n = match db.migrate_plaintext_to_encrypted() {
-                    Ok(n) => n,
-                    Err(e) => {
-                        db.set_cipher(None);
-                        return Err(fdo::Error::Failed(format!(
-                            "failed to encrypt existing templates: {e}"
-                        )));
-                    }
-                };
-                drop(db);
-                save_config()?;
-                info!(migrated = n, "Enabled template encryption");
-            }
-            Some(cipher) => {
-                let mut db = self.db.lock().await;
-                let n = db.decrypt_all_with(&cipher).map_err(|e| {
-                    fdo::Error::Failed(format!("failed to decrypt existing templates: {e}"))
-                })?;
-                db.set_cipher(None);
-                drop(db);
-                save_config()?;
-                info!(decrypted = n, "Disabled template encryption");
-            }
-            None => save_config()?,
+        let migrated = self
+            .db
+            .lock()
+            .await
+            .apply_settings(
+                pending_cipher,
+                want_encrypt,
+                reload
+                    .recognizer
+                    .then_some(new_config.security.recognizer()),
+                new_config.enrollment.max_templates as usize,
+                || new_config.save_to(CONFIG_PATH),
+            )
+            .map_err(|e| {
+                fdo::Error::Failed(format!("Failed to apply template storage settings: {e}"))
+            })?;
+        if migrated > 0 {
+            info!(
+                migrated,
+                encrypted = want_encrypt,
+                "Changed template encryption"
+            );
         }
 
         if let Some(detector) = new_detector {
@@ -286,15 +274,6 @@ impl AuthDaemon {
 
         let mut abort_before_first_resume = self.abort_before_first_resume.lock().await;
         *abort_before_first_resume = new_config.auth.abort_before_first_resume;
-
-        {
-            let mut db = self.db.lock().await;
-            db.set_max_templates(new_config.enrollment.max_templates as usize);
-            if reload.recognizer {
-                db.use_recognizer(new_config.security.recognizer())
-                    .map_err(|e| fdo::Error::Failed(format!("Failed to reload templates: {e}")))?;
-            }
-        }
 
         info!("Config reloaded successfully");
         Ok(())

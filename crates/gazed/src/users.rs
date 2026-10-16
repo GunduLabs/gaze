@@ -4,10 +4,11 @@
 use gaze_vision::face::Spectrum;
 use ndarray::Array1;
 
+use std::cell::Cell;
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use crate::crypto::{self, EmbeddingCipher};
@@ -16,6 +17,65 @@ type FaceMap = HashMap<String, HashMap<String, (Array1<f32>, Spectrum)>>;
 pub type FaceScore = (String, f32, f32, bool, u32);
 
 const RECOGNIZER_TAG: &str = "recognizer";
+const PRIVATE_PREFIX: &str = ".gaze-";
+
+fn sync_dir(path: &Path) -> std::io::Result<()> {
+    File::open(path)?.sync_all()
+}
+
+/// A private directory which is invisible to store walkers, including after a crash.
+struct StagingDir(PathBuf);
+
+impl StagingDir {
+    fn new(parent: &Path, prefix: &str) -> std::io::Result<Self> {
+        let path = parent.join(format!("{prefix}{}", uuid::Uuid::new_v4()));
+        fs::DirBuilder::new().mode(0o700).create(&path)?;
+        Ok(Self(path))
+    }
+}
+
+impl Drop for StagingDir {
+    fn drop(&mut self) {
+        if let Err(error) = fs::remove_dir_all(&self.0)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(path = %self.0.display(), %error, "could not clean up private staging directory");
+        }
+    }
+}
+
+/// Migrations replace the complete store in one namespace operation. Never fall back to
+/// a sequence of file renames: a crash would otherwise publish a mixed-format store.
+fn exchange_dirs(left: &Path, right: &Path) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let left = std::ffi::CString::new(left.as_os_str().as_bytes())?;
+    let right = std::ffi::CString::new(right.as_os_str().as_bytes())?;
+    #[cfg(target_os = "linux")]
+    let result = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            left.as_ptr(),
+            libc::AT_FDCWD,
+            right.as_ptr(),
+            libc::RENAME_EXCHANGE,
+        )
+    };
+    #[cfg(target_os = "macos")]
+    let result = unsafe { libc::renamex_np(left.as_ptr(), right.as_ptr(), libc::RENAME_SWAP) };
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let result = {
+        let _ = (left, right);
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "atomic directory exchange is unavailable",
+        ));
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
 
 #[derive(Debug)]
 pub enum UserDbError {
@@ -52,9 +112,21 @@ pub struct UserDatabase {
     users: HashMap<String, FaceMap>,
     cipher: Option<EmbeddingCipher>,
     recognizer: Option<String>,
+    unavailable: Cell<bool>,
+    #[cfg(test)]
+    fail_reload: bool,
+    #[cfg(test)]
+    fail_rollback: bool,
 }
 
 impl UserDatabase {
+    fn is_abandoned_name(name: &str) -> bool {
+        [".gaze-stage-", ".gaze-deleted-"].iter().any(|prefix| {
+            name.strip_prefix(prefix)
+                .is_some_and(|suffix| uuid::Uuid::parse_str(suffix).is_ok())
+        })
+    }
+
     fn validate_component(kind: &str, value: &str) -> Result<(), UserDbError> {
         if value.is_empty() || value.trim() != value {
             return Err(UserDbError::InvalidName(format!(
@@ -63,6 +135,7 @@ impl UserDatabase {
         }
         if value == "."
             || value == ".."
+            || value.starts_with(PRIVATE_PREFIX)
             || value.contains('/')
             || value.contains('\\')
             || value.contains('\0')
@@ -111,6 +184,50 @@ impl UserDatabase {
         fs::remove_dir_all(path)
     }
 
+    fn retire_dir(path: &Path) -> std::io::Result<()> {
+        let meta = fs::symlink_metadata(path)?;
+        if !meta.is_dir() || meta.file_type().is_symlink() {
+            return Err(std::io::Error::other("refusing to retire a non-directory"));
+        }
+        let parent = path
+            .parent()
+            .ok_or_else(|| std::io::Error::other("directory has no parent"))?;
+        let retired = parent.join(format!(".gaze-deleted-{}", uuid::Uuid::new_v4()));
+        fs::rename(path, &retired)?;
+        sync_dir(parent)?;
+        // The durable rename revoked it. Cleanup is best effort and can resume at startup.
+        if let Err(error) = Self::remove_private_dir_all(&retired) {
+            tracing::warn!(path = %retired.display(), %error, "retired templates await cleanup");
+        }
+        sync_dir(parent)
+    }
+
+    /// Held for the process lifetime by gazed, including maintenance invocations.
+    pub fn lock_store(base_dir: &Path) -> anyhow::Result<File> {
+        use std::os::fd::AsRawFd;
+        let parent = base_dir
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("store has no parent"))?;
+        Self::ensure_private_dir(parent)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(parent.join(".gaze-store.lock"))?;
+        anyhow::ensure!(
+            file.metadata()?.is_file(),
+            "store lock is not a regular file"
+        );
+        anyhow::ensure!(
+            unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
+            "template store is already in use; stop gazed before maintenance"
+        );
+        Ok(file)
+    }
+
     pub fn new(base_dir: &str, max_templates: usize) -> anyhow::Result<Self> {
         Self::new_with_cipher(base_dir, max_templates, None)
     }
@@ -121,12 +238,23 @@ impl UserDatabase {
         cipher: Option<EmbeddingCipher>,
     ) -> anyhow::Result<Self> {
         let mut db = Self {
-            base_dir: PathBuf::from(base_dir),
+            base_dir: if Path::new(base_dir).is_absolute() {
+                PathBuf::from(base_dir)
+            } else {
+                std::env::current_dir()?.join(base_dir)
+            },
             max_templates,
             users: HashMap::new(),
             cipher,
             recognizer: None,
+            unavailable: Cell::new(false),
+            #[cfg(test)]
+            fail_reload: false,
+            #[cfg(test)]
+            fail_rollback: false,
         };
+        db.init_dirs()?;
+        db.cleanup_abandoned_staging()?;
         db.load_all()?;
         Ok(db)
     }
@@ -140,8 +268,12 @@ impl UserDatabase {
     }
 
     pub fn use_recognizer(&mut self, recognizer: &str) -> anyhow::Result<()> {
-        self.recognizer = Some(recognizer.to_string());
-        self.load_all()
+        let previous = self.recognizer.replace(recognizer.to_string());
+        if let Err(error) = self.load_all() {
+            self.recognizer = previous;
+            return Err(error);
+        }
+        Ok(())
     }
 
     fn recognizer_tag(dir: &Path) -> Option<String> {
@@ -162,7 +294,8 @@ impl UserDatabase {
             Err(e) => return Err(e),
         };
         file.write_all(recognizer.as_bytes())?;
-        file.flush()
+        file.sync_all()?;
+        sync_dir(dir)
     }
 
     // Untagged templates predate tagging, so they can only be attributed to the recognizer
@@ -185,8 +318,23 @@ impl UserDatabase {
         Ok(adopted)
     }
 
+    fn ensure_available(&self) -> std::io::Result<()> {
+        if self.unavailable.get() {
+            return Err(std::io::Error::other(
+                "template storage needs recovery; restart gazed before matching or modifying templates",
+            ));
+        }
+        Ok(())
+    }
+
     fn init_dirs(&self) -> std::io::Result<()> {
-        Self::ensure_private_dir(&self.base_dir)
+        self.ensure_available()?;
+        Self::ensure_private_dir(&self.base_dir)?;
+        sync_dir(&self.base_dir)?;
+        if let Some(parent) = self.base_dir.parent() {
+            sync_dir(parent)?;
+        }
+        Ok(())
     }
 
     fn user_dir(&self, username: &str) -> PathBuf {
@@ -195,6 +343,27 @@ impl UserDatabase {
 
     fn face_dir(&self, username: &str, face_name: &str) -> PathBuf {
         self.user_dir(username).join(face_name)
+    }
+
+    // Face labels are deliberately excluded so a rename needs no re-encryption. The
+    // filename binds UUID and spectrum; the account name prevents cross-user substitution.
+    fn embedding_aad(&self, path: &Path) -> anyhow::Result<Vec<u8>> {
+        let relative = path.strip_prefix(&self.base_dir)?;
+        let username = relative
+            .components()
+            .next()
+            .and_then(|c| c.as_os_str().to_str())
+            .ok_or_else(|| anyhow::anyhow!("embedding has no account"))?;
+        Self::validate_username(username)?;
+        let filename = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow::anyhow!("embedding has no filename"))?;
+        let mut aad = b"gaze-template-v2\0".to_vec();
+        aad.extend_from_slice(username.as_bytes());
+        aad.push(0);
+        aad.extend_from_slice(filename.as_bytes());
+        Ok(aad)
     }
 
     fn read_embedding(&self, path: &Path) -> anyhow::Result<Array1<f32>> {
@@ -210,7 +379,7 @@ impl UserDatabase {
                     path.display()
                 )
             })?;
-            cipher.decrypt(&raw)?
+            cipher.decrypt(&raw, &self.embedding_aad(path)?)?
         } else if self.cipher.is_some() {
             // Plaintext here would bypass AES-GCM authentication and allow an unauthenticated
             // template into the encrypted store; it must go through explicit migration instead.
@@ -233,37 +402,34 @@ impl UserDatabase {
         Ok(Array1::from_vec(embed_vec))
     }
 
-    fn encode_embedding(&self, embed: &Array1<f32>) -> anyhow::Result<Vec<u8>> {
-        let embed_slice = embed.as_slice().expect("Failed to get embedding slice");
+    fn encode_embedding(&self, path: &Path, embed: &Array1<f32>) -> anyhow::Result<Vec<u8>> {
+        anyhow::ensure!(
+            !embed.is_empty() && embed.iter().all(|v| v.is_finite()),
+            "invalid embedding values"
+        );
         // Templates are not portable across architectures with different endianness.
-        let plain: &[u8] = unsafe {
-            std::slice::from_raw_parts(
-                embed_slice.as_ptr() as *const u8,
-                std::mem::size_of_val(embed_slice),
-            )
-        };
+        let plain: Vec<u8> = embed.iter().flat_map(|value| value.to_ne_bytes()).collect();
         match &self.cipher {
-            Some(cipher) => cipher.encrypt(plain),
-            None => Ok(plain.to_vec()),
+            Some(cipher) => cipher.encrypt(&plain, &self.embedding_aad(path)?),
+            None => Ok(plain),
         }
     }
 
     fn write_embedding(&self, path: &Path, embed: &Array1<f32>) -> anyhow::Result<()> {
-        let bytes = self.encode_embedding(embed)?;
+        let bytes = self.encode_embedding(path, embed)?;
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
             .open(path)?;
         file.write_all(&bytes)?;
-        file.flush()?;
+        file.sync_all()?;
         Ok(())
     }
 
     pub fn load_all(&mut self) -> anyhow::Result<()> {
         self.init_dirs()?;
-        self.users.clear();
-
+        let mut users = HashMap::new();
         for user_entry in fs::read_dir(&self.base_dir)? {
             let user_entry = user_entry?;
             if !user_entry.file_type()?.is_dir() {
@@ -294,74 +460,100 @@ impl UserDatabase {
                 if Self::validate_face_name(&face_name).is_err() {
                     continue;
                 }
-                let mut embeddings = HashMap::new();
-                let mut stale = 0usize;
-
-                let mut walk_stack = vec![face_path.clone()];
-                while let Some(current_path) = walk_stack.pop() {
-                    let from_other_recognizer =
-                        match (&self.recognizer, Self::recognizer_tag(&current_path)) {
-                            (Some(current), Some(tag)) => *current != tag,
-                            _ => false,
-                        };
-                    for entry in fs::read_dir(current_path)? {
-                        let entry = entry?;
-                        let path = entry.path();
-                        let file_type = entry.file_type()?;
-                        if file_type.is_dir() {
-                            walk_stack.push(path);
-                        } else if file_type.is_file()
-                            && path.extension().and_then(|e| e.to_str()) == Some("bin")
-                        {
-                            if from_other_recognizer {
-                                stale += 1;
-                                continue;
-                            }
-                            let embed = match self.read_embedding(&path) {
-                                Ok(embed) => embed,
-                                Err(err) => {
-                                    tracing::warn!(
-                                        path = %path.display(),
-                                        %err,
-                                        "ignoring an unreadable template; it will not be matched \
-                                         against and the face may appear unenrolled"
-                                    );
-                                    continue;
-                                }
-                            };
-                            let stem = path.file_stem().unwrap().to_string_lossy();
-                            let (uuid, spectrum) = if stem.ends_with("_ir") {
-                                (stem.strip_suffix("_ir").unwrap().to_string(), Spectrum::Ir)
-                            } else if stem.ends_with("_rgb") {
-                                (
-                                    stem.strip_suffix("_rgb").unwrap().to_string(),
-                                    Spectrum::Rgb,
-                                )
-                            } else {
-                                (stem.into_owned(), Spectrum::Rgb)
-                            };
-                            embeddings.insert(uuid, (embed, spectrum));
-                        }
-                    }
-                }
-                if stale > 0 {
-                    tracing::warn!(
-                        username = %username,
-                        face = %face_name,
-                        stale,
-                        recognizer = self.recognizer.as_deref().unwrap_or_default(),
-                        "ignoring templates enrolled under a different security level's \
-                         recognizer; re-enroll this face to use it at the current level"
-                    );
-                }
-                faces.insert(face_name, embeddings);
+                faces.insert(face_name.clone(), self.load_face(&username, &face_name)?);
             }
-            self.users.insert(username, faces);
+            users.insert(username, faces);
+            #[cfg(test)]
+            if self.fail_reload {
+                anyhow::bail!("injected directory traversal failure");
+            }
         }
+        self.users = users;
         Ok(())
     }
 
+    fn load_face(
+        &self,
+        username: &str,
+        face_name: &str,
+    ) -> anyhow::Result<HashMap<String, (Array1<f32>, Spectrum)>> {
+        let mut embeddings = HashMap::new();
+        let mut stale_count = 0;
+        let mut stack = vec![self.face_dir(username, face_name)];
+        while let Some(dir) = stack.pop() {
+            let stale = matches!((&self.recognizer, Self::recognizer_tag(&dir)), (Some(current), Some(tag)) if *current != tag);
+            for entry in fs::read_dir(&dir)? {
+                let entry = entry?;
+                if entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(PRIVATE_PREFIX)
+                {
+                    continue;
+                }
+                let path = entry.path();
+                let kind = entry.file_type()?;
+                if kind.is_dir() {
+                    stack.push(path);
+                } else if kind.is_file() && path.extension().and_then(|e| e.to_str()) == Some("bin")
+                {
+                    if stale {
+                        stale_count += 1;
+                        continue;
+                    }
+                    let embed = match self.read_embedding(&path) {
+                        Ok(embed) => embed,
+                        Err(error) => {
+                            tracing::warn!(path = %path.display(), %error, "ignoring an unreadable template; it will not be matched");
+                            continue;
+                        }
+                    };
+                    let stem = path.file_stem().unwrap().to_string_lossy();
+                    let (id, spectrum) = if let Some(id) = stem.strip_suffix("_ir") {
+                        (id.to_string(), Spectrum::Ir)
+                    } else {
+                        (
+                            stem.strip_suffix("_rgb").unwrap_or(&stem).to_string(),
+                            Spectrum::Rgb,
+                        )
+                    };
+                    embeddings.insert(id, (embed, spectrum));
+                }
+            }
+        }
+        if stale_count > 0 {
+            tracing::warn!(
+                username,
+                face = face_name,
+                stale = stale_count,
+                recognizer = self.recognizer.as_deref().unwrap_or_default(),
+                "ignoring templates enrolled under a different recognizer; re-enroll this face"
+            );
+        }
+        Ok(embeddings)
+    }
+
+    fn refresh_face(&mut self, username: &str, face_name: &str) -> Result<(), UserDbError> {
+        match self.load_face(username, face_name) {
+            Ok(embeddings) => {
+                self.users
+                    .entry(username.to_string())
+                    .or_default()
+                    .insert(face_name.to_string(), embeddings);
+                Ok(())
+            }
+            Err(error) => {
+                // Never retain revoked/stale embeddings if reconciliation fails.
+                if let Some(faces) = self.users.get_mut(username) {
+                    faces.remove(face_name);
+                }
+                Err(UserDbError::Io(std::io::Error::other(error.to_string())))
+            }
+        }
+    }
+
     fn collect_bin_files(&self) -> anyhow::Result<Vec<PathBuf>> {
+        self.ensure_available()?;
         let mut files = Vec::new();
         if !self.base_dir.exists() {
             return Ok(files);
@@ -372,7 +564,12 @@ impl UserDatabase {
                 let entry = entry?;
                 let path = entry.path();
                 let file_type = entry.file_type()?;
-                if file_type.is_dir() {
+                if file_type.is_dir()
+                    && !entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(PRIVATE_PREFIX)
+                {
                     stack.push(path);
                 } else if file_type.is_file()
                     && path.extension().and_then(|e| e.to_str()) == Some("bin")
@@ -384,6 +581,19 @@ impl UserDatabase {
         Ok(files)
     }
 
+    /// Startup must never turn unauthenticated input into trusted ciphertext. Only
+    /// privileged live config changes or the explicit maintenance command may migrate it.
+    pub fn require_bound_templates(&self) -> anyhow::Result<()> {
+        for path in self.collect_bin_files()? {
+            let bytes = fs::read(&path)?;
+            anyhow::ensure!(
+                crypto::is_encrypted(&bytes) && !crypto::is_legacy(&bytes),
+                "unbound or plaintext templates require explicit migration: stop gazed, verify template ownership, then run sudo gazed --migrate-legacy-templates, or re-enroll"
+            );
+        }
+        Ok(())
+    }
+
     pub fn has_encrypted_templates(&self) -> anyhow::Result<bool> {
         for path in self.collect_bin_files()? {
             if crypto::is_encrypted(&fs::read(&path)?) {
@@ -393,78 +603,287 @@ impl UserDatabase {
         Ok(false)
     }
 
-    fn stage_file_bytes(path: &Path, bytes: &[u8]) -> anyhow::Result<PathBuf> {
-        let parent = path
+    fn recode_prefix(&self) -> anyhow::Result<String> {
+        let name = self
+            .base_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow::anyhow!("store must have a directory name"))?;
+        Ok(format!(".gaze-recode-{name}-"))
+    }
+
+    fn cleanup_abandoned_staging(&self) -> anyhow::Result<()> {
+        // A directory exchange leaves either the unpublished new store or the old store
+        // at this sibling path. Neither is authoritative; remove it after a restart.
+        let parent = self
+            .base_dir
             .parent()
-            .ok_or_else(|| anyhow::anyhow!("embedding path has no parent: {}", path.display()))?;
-        let file_name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
-            anyhow::anyhow!("embedding path has no file name: {}", path.display())
-        })?;
-        let tmp = parent.join(format!(".{file_name}.{}.tmp", std::process::id()));
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&tmp)?;
-        if let Err(e) = file.write_all(bytes).and_then(|_| file.flush()) {
-            let _ = fs::remove_file(&tmp);
-            return Err(e.into());
+            .ok_or_else(|| anyhow::anyhow!("store has no parent"))?;
+        let prefix = self.recode_prefix()?;
+        for entry in fs::read_dir(parent)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if let Some(suffix) = name.strip_prefix(&prefix)
+                && uuid::Uuid::parse_str(suffix).is_ok()
+                && entry.file_type()?.is_dir()
+            {
+                Self::remove_private_dir_all(&entry.path())?;
+                sync_dir(parent)?;
+            }
         }
-        drop(file);
-        Ok(tmp)
+        let mut stack = vec![self.base_dir.clone()];
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(&dir)? {
+                let entry = entry?;
+                if !entry.file_type()?.is_dir() {
+                    continue;
+                }
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if Self::is_abandoned_name(&name) {
+                    Self::remove_private_dir_all(&entry.path())?;
+                    sync_dir(&dir)?;
+                } else if !name.starts_with(PRIVATE_PREFIX) {
+                    stack.push(entry.path());
+                }
+            }
+        }
+        Ok(())
     }
 
     fn recode_all_templates(
         &self,
-        recode: impl Fn(&[u8]) -> anyhow::Result<Option<Vec<u8>>>,
+        recode: impl Fn(&Path, &[u8]) -> anyhow::Result<Option<Vec<u8>>>,
     ) -> anyhow::Result<usize> {
-        let mut staged: Vec<(PathBuf, PathBuf)> = Vec::new();
+        self.recode_all_templates_and_then(recode, || Ok(()))
+    }
 
-        // Stage every conversion before replacing originals so a bad key or conversion error
-        // leaves them untouched. The later renames are atomic per file, not across the store.
-        let staging = (|| -> anyhow::Result<()> {
-            for path in self.collect_bin_files()? {
-                let Some(bytes) = recode(&fs::read(&path)?)? else {
+    fn recode_all_templates_and_then(
+        &self,
+        recode: impl Fn(&Path, &[u8]) -> anyhow::Result<Option<Vec<u8>>>,
+        persist: impl FnOnce() -> anyhow::Result<()>,
+    ) -> anyhow::Result<usize> {
+        self.ensure_available()?;
+        // Validate before staging. An already-current store needs no writes or directory swap.
+        let mut conversions = HashMap::new();
+        for path in self.collect_bin_files()? {
+            if let Some(bytes) = recode(&path, &fs::read(&path)?)? {
+                conversions.insert(path, bytes);
+            }
+        }
+        let changed = conversions.len();
+        if changed == 0 {
+            persist()?;
+            return Ok(0);
+        }
+        let parent = self
+            .base_dir
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("store has no parent"))?;
+        let staged = StagingDir::new(parent, &self.recode_prefix()?)?;
+        let mut stack = vec![(self.base_dir.clone(), staged.0.clone())];
+        let mut directories = Vec::new();
+        while let Some((source, target)) = stack.pop() {
+            directories.push(target.clone());
+            for entry in fs::read_dir(&source)? {
+                let entry = entry?;
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if Self::is_abandoned_name(&name) && entry.file_type()?.is_dir() {
                     continue;
-                };
-                staged.push((Self::stage_file_bytes(&path, &bytes)?, path));
+                }
+                anyhow::ensure!(
+                    !name.starts_with(PRIVATE_PREFIX),
+                    "reserved entry in template store: {}; rename or remove it before migration",
+                    entry.path().display()
+                );
+                let path = entry.path();
+                let destination = target.join(entry.file_name());
+                let kind = entry.file_type()?;
+                if kind.is_dir() {
+                    fs::DirBuilder::new().mode(0o700).create(&destination)?;
+                    stack.push((path, destination));
+                } else if kind.is_file() {
+                    let bytes = match conversions.remove(&path) {
+                        Some(bytes) => bytes,
+                        None => fs::read(&path)?,
+                    };
+                    let mut file = OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .mode(0o600)
+                        .open(destination)?;
+                    file.write_all(&bytes)?;
+                    file.sync_all()?;
+                } else {
+                    anyhow::bail!("non-regular entry in template store: {}", path.display());
+                }
             }
-            Ok(())
-        })();
-
-        if let Err(e) = staging {
-            for (tmp, _) in &staged {
-                let _ = fs::remove_file(tmp);
+        }
+        anyhow::ensure!(
+            conversions.is_empty(),
+            "template store changed during migration"
+        );
+        for dir in directories.iter().rev() {
+            sync_dir(dir)?;
+        }
+        sync_dir(parent)?;
+        exchange_dirs(&self.base_dir, &staged.0)?;
+        // Keep the old store until both the new store and its config have committed.
+        let commit = sync_dir(parent)
+            .map_err(anyhow::Error::from)
+            .and_then(|_| persist());
+        if let Err(error) = commit {
+            let rollback = self
+                .rollback_recode(&staged.0)
+                .and_then(|_| sync_dir(parent));
+            if let Err(rollback_error) = rollback {
+                self.unavailable.set(true);
+                tracing::error!(backup = %staged.0.display(), %error, %rollback_error,
+                    "storage rollback failed; matching and mutations disabled until restart");
+                // Preserve both complete copies. Never delete the backup on rollback failure.
+                std::mem::forget(staged);
+                return Err(error.context(format!(
+                    "storage rollback failed: {rollback_error}; restart gazed"
+                )));
             }
-            return Err(e);
+            return Err(error);
         }
+        drop(staged);
+        // Cleanup cannot turn a durable successful commit into a reported failed conversion.
+        if let Err(error) = sync_dir(parent) {
+            tracing::warn!(%error, "could not sync retired-store cleanup; startup will retry");
+        }
+        Ok(changed)
+    }
 
-        for (tmp, path) in &staged {
-            fs::rename(tmp, path)?;
+    fn rollback_recode(&self, staged: &Path) -> std::io::Result<()> {
+        #[cfg(test)]
+        if self.fail_rollback {
+            return Err(std::io::Error::other("injected rollback failure"));
         }
-        Ok(staged.len())
+        exchange_dirs(&self.base_dir, staged)
+    }
+
+    /// Change disk format, saved configuration and the live cipher as one operation.
+    /// The caller holds the DB lock; a failed config write restores the exact old store.
+    pub fn change_encryption(
+        &mut self,
+        cipher: EmbeddingCipher,
+        enabled: bool,
+        persist: impl FnOnce() -> anyhow::Result<()>,
+    ) -> anyhow::Result<usize> {
+        let count = self.recode_all_templates_and_then(
+            |path, raw| self.recode_embedding(&cipher, enabled, false, path, raw),
+            persist,
+        )?;
+        self.cipher = enabled.then_some(cipher);
+        Ok(count)
+    }
+
+    /// Prepare recognizer filtering before saving settings. A rejected update restores
+    /// the previous snapshot without another fallible disk read.
+    pub fn apply_settings(
+        &mut self,
+        pending_cipher: Option<EmbeddingCipher>,
+        encrypt: bool,
+        recognizer: Option<&str>,
+        max_templates: usize,
+        persist: impl FnOnce() -> anyhow::Result<()>,
+    ) -> anyhow::Result<usize> {
+        self.ensure_available()?;
+        anyhow::ensure!(
+            pending_cipher.is_some() || encrypt == self.is_encrypted(),
+            "encryption change requires a TPM cipher"
+        );
+        let previous_recognizer = self.recognizer.clone();
+        let previous_users = if let Some(recognizer) = recognizer {
+            let previous = std::mem::take(&mut self.users);
+            if let Err(error) = self.use_recognizer(recognizer) {
+                self.users = previous;
+                return Err(error);
+            }
+            Some(previous)
+        } else {
+            None
+        };
+        let result = match pending_cipher {
+            Some(cipher) => self.change_encryption(cipher, encrypt, persist),
+            None => persist().map(|_| 0),
+        };
+        if result.is_err() {
+            self.recognizer = previous_recognizer;
+            if let Some(users) = previous_users {
+                self.users = users;
+            }
+        } else {
+            self.max_templates = max_templates;
+        }
+        result
+    }
+
+    fn recode_embedding(
+        &self,
+        cipher: &EmbeddingCipher,
+        encrypt: bool,
+        allow_legacy: bool,
+        path: &Path,
+        raw: &[u8],
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        let aad = self.embedding_aad(path)?;
+        if crypto::is_legacy(raw) {
+            anyhow::ensure!(
+                allow_legacy,
+                "legacy unbound templates require explicit migration: stop gazed, then run sudo gazed --migrate-legacy-templates, or re-enroll"
+            );
+            let plain = cipher.decrypt_legacy(raw)?;
+            return if encrypt {
+                cipher.encrypt(&plain, &aad).map(Some)
+            } else {
+                Ok(Some(plain))
+            };
+        }
+        if crypto::is_encrypted(raw) {
+            let plain = cipher.decrypt(raw, &aad)?;
+            return if encrypt { Ok(None) } else { Ok(Some(plain)) };
+        }
+        if encrypt {
+            cipher.encrypt(raw, &aad).map(Some)
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn migrate_plaintext_to_encrypted(&self) -> anyhow::Result<usize> {
         let Some(cipher) = self.cipher.as_ref() else {
             return Ok(0);
         };
-        self.recode_all_templates(|raw| {
-            if crypto::is_encrypted(raw) {
-                Ok(None)
-            } else {
-                cipher.encrypt(raw).map(Some)
-            }
+        self.encrypt_all_with(cipher)
+    }
+
+    pub fn encrypt_all_with(&self, cipher: &EmbeddingCipher) -> anyhow::Result<usize> {
+        self.encrypt_all_with_legacy(cipher, false)
+    }
+
+    /// Maintenance-only opt-in: the operator must trust the legacy directory ownership.
+    pub fn migrate_legacy_with(&self, cipher: &EmbeddingCipher) -> anyhow::Result<usize> {
+        self.encrypt_all_with_legacy(cipher, true)
+    }
+
+    fn encrypt_all_with_legacy(
+        &self,
+        cipher: &EmbeddingCipher,
+        allow_legacy: bool,
+    ) -> anyhow::Result<usize> {
+        self.recode_all_templates(|path, raw| {
+            self.recode_embedding(cipher, true, allow_legacy, path, raw)
         })
     }
 
     pub fn decrypt_all_with(&self, cipher: &EmbeddingCipher) -> anyhow::Result<usize> {
-        self.recode_all_templates(|raw| {
-            if crypto::is_encrypted(raw) {
-                cipher.decrypt(raw).map(Some)
-            } else {
-                Ok(None)
-            }
+        self.recode_all_templates(|path, raw| {
+            self.recode_embedding(cipher, false, false, path, raw)
         })
     }
 
@@ -475,46 +894,71 @@ impl UserDatabase {
         template_id: &str,
         embeddings: Vec<(Array1<f32>, Spectrum)>,
     ) -> Result<(), UserDbError> {
-        self.init_dirs()?;
         Self::validate_username(username)?;
         Self::validate_face_name(face_name)?;
         Self::validate_template_id(template_id)?;
-
+        if embeddings.is_empty() {
+            return Err(UserDbError::InvalidName(
+                "an enrollment must contain embeddings".into(),
+            ));
+        }
+        self.init_dirs()?;
         let user_dir = self.user_dir(username);
         let face_dir = self.face_dir(username, face_name);
         Self::ensure_private_dir(&user_dir)?;
         Self::ensure_private_dir(&face_dir)?;
-        let template_dir = self.face_dir(username, face_name).join(template_id);
-
-        if !template_dir.exists() {
-            let mut templates = self.list_template_ids(username, face_name)?;
-            while templates.len() >= self.max_templates && self.max_templates > 0 {
-                let oldest_id = templates.remove(0);
-                self.remove_template_dir(username, face_name, &oldest_id)
-                    .map_err(|e| UserDbError::Io(std::io::Error::other(e.to_string())))?;
+        sync_dir(&self.base_dir)?;
+        sync_dir(&user_dir)?;
+        let template_dir = face_dir.join(template_id);
+        let existing = match fs::symlink_metadata(&template_dir) {
+            Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => true,
+            Ok(_) => {
+                return Err(UserDbError::Io(std::io::Error::other(
+                    "template path is not a private directory",
+                )));
             }
-        }
-
-        Self::ensure_private_dir(&template_dir)?;
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error.into()),
+        };
+        let templates = self.list_template_ids(username, face_name)?;
+        let staged = StagingDir::new(&face_dir, ".gaze-stage-")?;
         if let Some(recognizer) = &self.recognizer {
-            Self::write_recognizer_tag(&template_dir, recognizer)?;
+            Self::write_recognizer_tag(&staged.0, recognizer)?;
         }
-
         for (embed, spectrum) in embeddings {
-            let uuid = uuid::Uuid::new_v4().to_string();
             let suffix = match spectrum {
                 Spectrum::Rgb => "rgb",
                 Spectrum::Ir => "ir",
             };
-            let file_path = template_dir.join(format!("{}_{}.bin", uuid, suffix));
+            let file_path = staged
+                .0
+                .join(format!("{}_{suffix}.bin", uuid::Uuid::new_v4()));
             self.write_embedding(&file_path, &embed)
                 .map_err(|err| UserDbError::Io(std::io::Error::other(err.to_string())))?;
         }
-
-        self.load_all()
-            .map_err(|e| UserDbError::Io(std::io::Error::other(e.to_string())))?;
-
-        Ok(())
+        sync_dir(&staged.0)?;
+        // An existing ID appends an atomic batch, never replaces a nonempty directory.
+        let destination = if existing {
+            template_dir.join(format!("batch-{}", uuid::Uuid::new_v4()))
+        } else {
+            template_dir
+        };
+        fs::rename(&staged.0, &destination)?;
+        let committed = (|| -> Result<(), UserDbError> {
+            sync_dir(destination.parent().unwrap())?;
+            sync_dir(&face_dir)?;
+            if !existing && self.max_templates > 0 {
+                let excess = (templates.len() + 1).saturating_sub(self.max_templates);
+                for oldest_id in templates.iter().take(excess) {
+                    self.remove_template_dir(username, face_name, oldest_id)
+                        .map_err(|e| UserDbError::Io(std::io::Error::other(e.to_string())))?;
+                }
+            }
+            Ok(())
+        })();
+        // Only the affected face is read/decrypted, including after a post-commit error.
+        let refresh = self.refresh_face(username, face_name);
+        committed.and(refresh)
     }
 
     pub fn list_template_ids(
@@ -522,6 +966,7 @@ impl UserDatabase {
         username: &str,
         face_name: &str,
     ) -> Result<Vec<String>, UserDbError> {
+        self.ensure_available()?;
         Self::validate_username(username)?;
         Self::validate_face_name(face_name)?;
         let face_dir = self.face_dir(username, face_name);
@@ -570,11 +1015,12 @@ impl UserDatabase {
         if !template_dir.exists() {
             return Ok(false);
         }
-        Self::remove_private_dir_all(&template_dir)?;
+        Self::retire_dir(&template_dir)?;
         Ok(true)
     }
 
     pub fn remove_face(&mut self, username: &str, face_name: &str) -> Result<(), UserDbError> {
+        self.ensure_available()?;
         Self::validate_username(username)?;
         Self::validate_face_name(face_name)?;
         let Some(faces) = self.users.get(username) else {
@@ -584,21 +1030,18 @@ impl UserDatabase {
             return Err(UserDbError::FaceNotFound(face_name.to_string()));
         }
 
-        let face_dir = self.base_dir.join(username).join(face_name);
-        if face_dir.exists()
-            && let Err(e) = Self::remove_private_dir_all(&face_dir)
-        {
-            // A partial delete would leave in-memory templates outliving their files,
-            // so resync from disk rather than trusting either side.
-            let _ = self.load_all();
-            return Err(e.into());
-        }
-
+        let face_dir = self.face_dir(username, face_name);
+        let result = if face_dir.exists() {
+            Self::retire_dir(&face_dir)
+        } else {
+            Ok(())
+        };
+        // A failed sync may follow a successful rename. Invalidate conservatively even
+        // on failure; no partial recursive delete can leave cached matches behind.
         if let Some(faces) = self.users.get_mut(username) {
             faces.remove(face_name);
         }
-
-        Ok(())
+        result.map_err(Into::into)
     }
 
     pub fn rename_face(
@@ -608,6 +1051,7 @@ impl UserDatabase {
         new_face_name: &str,
     ) -> Result<(), UserDbError> {
         Self::validate_username(username)?;
+        self.ensure_available()?;
         Self::validate_face_name(old_face_name)?;
         Self::validate_face_name(new_face_name)?;
         if old_face_name == new_face_name {
@@ -653,21 +1097,21 @@ impl UserDatabase {
         }
 
         faces.insert(new_face_name.to_string(), embeddings);
-
+        sync_dir(&self.user_dir(username))?;
         Ok(())
     }
 
     pub fn clear_user(&mut self, username: &str) -> Result<(), UserDbError> {
+        self.ensure_available()?;
         Self::validate_username(username)?;
         let user_dir = self.user_dir(username);
-        if user_dir.exists()
-            && let Err(e) = Self::remove_private_dir_all(&user_dir)
-        {
-            let _ = self.load_all();
-            return Err(e.into());
-        }
+        let result = if user_dir.exists() {
+            Self::retire_dir(&user_dir)
+        } else {
+            Ok(())
+        };
         self.users.remove(username);
-        Ok(())
+        result.map_err(Into::into)
     }
 
     pub fn match_faces(
@@ -677,6 +1121,7 @@ impl UserDatabase {
         threshold: f32,
         spectrum: Spectrum,
     ) -> Result<Vec<FaceScore>, UserDbError> {
+        self.ensure_available()?;
         Self::validate_username(username)?;
         let faces = self
             .users
@@ -729,6 +1174,7 @@ impl UserDatabase {
         &self,
         username: &str,
     ) -> Result<Vec<(String, u32, bool, bool)>, UserDbError> {
+        self.ensure_available()?;
         Self::validate_username(username)?;
         let Some(face_map) = self.users.get(username) else {
             return Err(UserDbError::UserNotFound(username.to_string()));
@@ -752,6 +1198,7 @@ impl UserDatabase {
     }
 
     pub fn has_enrolled_faces(&self, username: &str) -> Result<bool, UserDbError> {
+        self.ensure_available()?;
         Self::validate_username(username)?;
         Ok(self
             .users
@@ -760,7 +1207,7 @@ impl UserDatabase {
     }
 
     pub fn get_user_embeddings(&self, username: &str) -> Option<Vec<&Array1<f32>>> {
-        if Self::validate_username(username).is_err() {
+        if self.ensure_available().is_err() || Self::validate_username(username).is_err() {
             return None;
         }
         self.users.get(username).map(|faces| {
@@ -825,6 +1272,318 @@ mod tests {
         let mut faces = db.list_faces(username).unwrap();
         faces.sort_by(|a, b| a.0.cmp(&b.0));
         faces
+    }
+
+    #[test]
+    fn failed_config_save_restores_the_exact_store_and_live_cipher() {
+        let temp = TempDir::new("config-rollback");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 4).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        let file = db.collect_bin_files().unwrap().pop().unwrap();
+        let plaintext = fs::read(&file).unwrap();
+        assert!(
+            db.change_encryption(test_cipher(), true, || anyhow::bail!("config read-only"))
+                .is_err()
+        );
+        assert_eq!(fs::read(&file).unwrap(), plaintext);
+        assert!(!db.is_encrypted());
+        assert!(db.has_enrolled_faces("alice").unwrap());
+        db.change_encryption(test_cipher(), true, || Ok(()))
+            .unwrap();
+        let ciphertext = fs::read(&file).unwrap();
+        assert!(crypto::is_encrypted(&ciphertext));
+        assert!(
+            db.change_encryption(test_cipher(), false, || anyhow::bail!("config read-only"))
+                .is_err()
+        );
+        assert_eq!(fs::read(&file).unwrap(), ciphertext);
+        assert!(db.is_encrypted());
+        db.load_all().unwrap();
+        assert!(db.has_enrolled_faces("alice").unwrap());
+    }
+
+    #[test]
+    fn failed_rollback_preserves_backup_and_disables_matching_and_writes() {
+        let temp = TempDir::new("rollback-failure");
+        let base = temp.path().join("users");
+        let mut db = UserDatabase::new(base.to_str().unwrap(), 4).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        db.fail_rollback = true;
+        assert!(
+            db.change_encryption(test_cipher(), true, || anyhow::bail!("config read-only"))
+                .is_err()
+        );
+        assert!(
+            db.match_faces("alice", &embedding(&[1.0]), 0.5, Spectrum::Rgb)
+                .is_err()
+        );
+        assert!(
+            db.add_template("alice", "work", "2", rgb_embeds(vec![embedding(&[1.0])]))
+                .is_err()
+        );
+        assert!(db.load_all().is_err());
+        assert!(db.get_user_embeddings("alice").is_none());
+        assert_eq!(
+            fs::read_dir(temp.path()).unwrap().count(),
+            2,
+            "both complete stores must survive"
+        );
+        drop(db);
+        let db =
+            UserDatabase::new_with_cipher(base.to_str().unwrap(), 4, Some(test_cipher())).unwrap();
+        assert!(db.has_enrolled_faces("alice").unwrap());
+        assert_eq!(
+            fs::read_dir(temp.path()).unwrap().count(),
+            1,
+            "restart cleans the abandoned backup"
+        );
+    }
+
+    #[test]
+    fn rejected_settings_restore_recognizer_snapshot_and_template_cap() {
+        let temp = TempDir::new("settings-rollback");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 4).unwrap();
+        db.use_recognizer("old").unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        assert!(
+            db.apply_settings(Some(test_cipher()), true, Some("new"), 1, || anyhow::bail!(
+                "config read-only"
+            ))
+            .is_err()
+        );
+        assert_eq!(db.recognizer.as_deref(), Some("old"));
+        assert_eq!(db.max_templates, 4);
+        assert!(!db.is_encrypted());
+        assert!(db.has_enrolled_faces("alice").unwrap());
+        db.fail_reload = true;
+        let saved = Cell::new(false);
+        assert!(
+            db.apply_settings(None, false, Some("new"), 1, || {
+                saved.set(true);
+                Ok(())
+            })
+            .is_err()
+        );
+        assert!(
+            !saved.get(),
+            "a failed recognizer reload must happen before saving config"
+        );
+        assert!(db.has_enrolled_faces("alice").unwrap());
+    }
+
+    #[test]
+    fn legacy_ciphertext_is_only_accepted_by_explicit_maintenance() {
+        use aes_gcm::aead::{Aead, KeyInit};
+        let temp = TempDir::new("legacy-migration");
+        let base = temp.path().to_str().unwrap();
+        let mut db = UserDatabase::new(base, 4).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        let file = db.collect_bin_files().unwrap().pop().unwrap();
+        let plaintext = fs::read(&file).unwrap();
+        let cipher = aes_gcm::Aes256Gcm::new_from_slice(&[42; crypto::KEY_LEN]).unwrap();
+        let nonce = aes_gcm::Nonce::from([0; 12]);
+        let mut legacy = b"GZE1".to_vec();
+        legacy.extend_from_slice(&nonce);
+        legacy.extend_from_slice(&cipher.encrypt(&nonce, plaintext.as_slice()).unwrap());
+        fs::write(&file, &legacy).unwrap();
+        db.set_cipher(Some(test_cipher()));
+        db.load_all().unwrap();
+        assert!(!db.has_enrolled_faces("alice").unwrap());
+        assert!(db.migrate_plaintext_to_encrypted().is_err());
+        assert!(db.decrypt_all_with(&test_cipher()).is_err());
+        assert_eq!(fs::read(&file).unwrap(), legacy);
+        assert_eq!(db.migrate_legacy_with(&test_cipher()).unwrap(), 1);
+        assert!(fs::read(&file).unwrap().starts_with(b"GZE2"));
+        db.load_all().unwrap();
+        assert!(db.has_enrolled_faces("alice").unwrap());
+        // Reintroducing a legacy record later must not silently rebind it.
+        fs::write(&file, legacy).unwrap();
+        assert!(db.migrate_plaintext_to_encrypted().is_err());
+    }
+
+    #[test]
+    fn a_current_store_is_not_rewritten_on_startup() {
+        use std::os::unix::fs::MetadataExt;
+        let temp = TempDir::new("no-op-migration");
+        let mut db =
+            UserDatabase::new_with_cipher(temp.path().to_str().unwrap(), 4, Some(test_cipher()))
+                .unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        let file = db.collect_bin_files().unwrap().pop().unwrap();
+        let inode = fs::metadata(&file).unwrap().ino();
+        assert_eq!(db.migrate_plaintext_to_encrypted().unwrap(), 0);
+        assert_eq!(fs::metadata(&file).unwrap().ino(), inode);
+    }
+
+    #[test]
+    fn daemon_and_maintenance_cannot_lock_the_same_store() {
+        let temp = TempDir::new("store-lock");
+        let base = temp.path().join("users");
+        let lock = UserDatabase::lock_store(&base).unwrap();
+        assert!(UserDatabase::lock_store(&base).is_err());
+        drop(lock);
+        assert!(UserDatabase::lock_store(&base).is_ok());
+    }
+
+    #[test]
+    fn cleanup_does_not_delete_arbitrary_reserved_labels() {
+        let temp = TempDir::new("reserved-label");
+        fs::create_dir_all(temp.path().join("alice/.gaze-existing-face")).unwrap();
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 4).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        assert!(
+            db.change_encryption(test_cipher(), true, || Ok(()))
+                .is_err()
+        );
+        assert!(temp.path().join("alice/.gaze-existing-face").is_dir());
+    }
+
+    #[test]
+    fn encrypted_templates_reject_owner_and_spectrum_substitution() {
+        let temp = TempDir::new("identity-binding");
+        let base = temp.path().to_str().unwrap();
+        let mut db = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
+        db.add_template(
+            "alice",
+            "work",
+            "1",
+            rgb_embeds(vec![embedding(&[1.0, 0.0])]),
+        )
+        .unwrap();
+        fs::rename(temp.path().join("alice"), temp.path().join("bob")).unwrap();
+        db.load_all().unwrap();
+        assert!(!db.has_enrolled_faces("bob").unwrap());
+        fs::rename(temp.path().join("bob"), temp.path().join("alice")).unwrap();
+        let file = db.collect_bin_files().unwrap().pop().unwrap();
+        let renamed = file.with_file_name(
+            file.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .replace("_rgb.bin", "_ir.bin"),
+        );
+        fs::rename(file, renamed).unwrap();
+        db.load_all().unwrap();
+        assert!(!db.has_enrolled_faces("alice").unwrap());
+    }
+
+    #[test]
+    fn encrypted_face_rename_preserves_authenticated_templates() {
+        let temp = TempDir::new("bound-rename");
+        let base = temp.path().to_str().unwrap();
+        let mut db = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        db.rename_face("alice", "work", "office").unwrap();
+        db.load_all().unwrap();
+        assert!(db.has_enrolled_faces("alice").unwrap());
+        assert_eq!(
+            sorted_faces(&db, "alice"),
+            vec![("office".into(), 1, true, false)]
+        );
+    }
+
+    #[test]
+    fn failed_enrollment_preserves_previous_disk_and_cached_templates() {
+        let temp = TempDir::new("stage-failure");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 1).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        // The first staged embedding succeeds; the next one fails validation.
+        assert!(
+            db.add_template(
+                "alice",
+                "work",
+                "2",
+                rgb_embeds(vec![embedding(&[0.5]), embedding(&[])])
+            )
+            .is_err()
+        );
+        assert_eq!(db.list_template_ids("alice", "work").unwrap(), vec!["1"]);
+        assert_eq!(db.get_user_embeddings("alice").unwrap().len(), 1);
+        db.load_all().unwrap();
+        assert_eq!(db.get_user_embeddings("alice").unwrap().len(), 1);
+        assert_eq!(
+            fs::read_dir(temp.path().join("alice/work"))
+                .unwrap()
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn traversal_failure_and_recognizer_failure_preserve_the_snapshot() {
+        let temp = TempDir::new("reload-transaction");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 4).unwrap();
+        db.use_recognizer("old").unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        db.fail_reload = true;
+        assert!(db.load_all().is_err());
+        assert!(db.use_recognizer("new").is_err());
+        assert_eq!(db.recognizer.as_deref(), Some("old"));
+        assert!(db.has_enrolled_faces("alice").unwrap());
+        // Enrollment must not invoke the failing full-store reload.
+        db.add_template("alice", "work", "2", rgb_embeds(vec![embedding(&[0.5])]))
+            .unwrap();
+        assert_eq!(db.get_user_embeddings("alice").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn abandoned_staging_and_retired_templates_never_load_or_count_toward_the_cap() {
+        let temp = TempDir::new("abandoned");
+        let base = temp.path().to_str().unwrap();
+        let mut db = UserDatabase::new(base, 4).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        let file = db.collect_bin_files().unwrap().pop().unwrap();
+        for prefix in [".gaze-stage-", ".gaze-deleted-"] {
+            let dir = temp
+                .path()
+                .join("alice/work")
+                .join(format!("{prefix}{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&dir).unwrap();
+            fs::copy(&file, dir.join("stray_rgb.bin")).unwrap();
+        }
+        db.load_all().unwrap();
+        assert_eq!(db.get_user_embeddings("alice").unwrap().len(), 1);
+        assert_eq!(db.list_template_ids("alice", "work").unwrap(), vec!["1"]);
+        let db = UserDatabase::new(base, 4).unwrap();
+        assert_eq!(db.collect_bin_files().unwrap().len(), 1);
+        assert_eq!(
+            fs::read_dir(temp.path().join("alice/work"))
+                .unwrap()
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn migration_finishes_a_mixed_store_and_binds_every_template() {
+        let temp = TempDir::new("mixed-migration");
+        let base = temp.path().to_str().unwrap();
+        let mut db = UserDatabase::new(base, 4).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        db.set_cipher(Some(test_cipher()));
+        db.add_template("alice", "work", "2", rgb_embeds(vec![embedding(&[0.5])]))
+            .unwrap();
+        assert!(
+            db.require_bound_templates().is_err(),
+            "startup must not silently authenticate the plaintext half"
+        );
+        assert_eq!(db.migrate_legacy_with(&test_cipher()).unwrap(), 1);
+        db.require_bound_templates().unwrap();
+        db.load_all().unwrap();
+        assert_eq!(db.get_user_embeddings("alice").unwrap().len(), 2);
+        assert!(all_bins_encrypted(&db));
+        assert_eq!(db.migrate_plaintext_to_encrypted().unwrap(), 0);
     }
 
     #[test]
