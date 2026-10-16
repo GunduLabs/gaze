@@ -19,7 +19,7 @@ needed. They still act on the account that invoked them, not on `root`, so
 `gaze add-face default` enrolls a face for you. To manage root's enrollment,
 pass `-u root`.
 
-`gaze auth`, `gaze list-faces`, `gaze doctor`, and `gaze config --show` are read-only and stay unprivileged.
+`gaze auth`, `gaze list-faces`, `gaze doctor`, `gaze config --show`, and `gaze config get` are read-only and stay unprivileged. `gaze config set` asks for privileges like the wizard does.
 
 The `gazed` daemon enforces this independently of the CLI: a non-root DBus caller must pass a polkit check for `com.gundulabs.gaze.manage-faces` or `com.gundulabs.gaze.manage-config`. That is how the [GUI](/guide/gui) authorizes the same operations, and it means calling the DBus methods directly does not bypass the requirement. While one of these prompts is open, `gazed` refuses face authentication for the polkit dialog, so changing Gaze's faces or settings always takes a password.
 
@@ -68,6 +68,16 @@ To measure model inference speed on the current hardware:
 ```bash
 gaze doctor --benchmark
 ```
+
+For scripts, `gaze doctor --json` prints every check as JSON instead of the usual list.
+
+When filing a bug, run:
+
+```bash
+gaze doctor --report
+```
+
+It writes a `gaze-report-<time>.txt` file to the current directory (or the temporary directory if that is not writable). The file holds the doctor results, Gaze version, OS release, kernel, desktop session, installed Gaze packages, every PAM line that mentions Gaze, the `gazed` service status and its last 200 journal lines, and `/etc/gaze/config.toml`. Your user name and host name are replaced with `<user>` and `<host>`. Read it before attaching it to an issue.
 
 This asks the running `gazed` daemon to run each loaded model (detector, RGB/IR recognizers, and liveness if enabled) a few times on synthetic input and reports average, p95, and minimum latency plus FPS for each. It does not need a face in frame and does not touch the camera.
 
@@ -162,7 +172,9 @@ gaze remove-face <name>
 | Amber | A camera is configured for that spectrum, but this profile has no captures from it. Run `gaze refine-face <name>`. |
 | Grey | No camera is configured for that spectrum, so there is nothing to enrol. |
 
-An RGB-only machine therefore shows a green `[RGB]` and a grey `[IR]`, not a failure.
+An RGB-only machine therefore shows a green `[RGB]` and a grey `[IR]`, not a failure. `gaze list-faces --json` prints the same list as JSON.
+
+`gaze remove-face` and `gaze rename-face` exit with status `1` when the face does not exist.
 
 ## Delete all faces for current user
 
@@ -170,7 +182,7 @@ An RGB-only machine therefore shows a green `[RGB]` and a grey `[IR]`, not a fai
 gaze clear-user
 ```
 
-This permanently removes all enrolled faces for the current user.
+This permanently removes all enrolled faces and any stored GNOME Keyring or KWallet credential for the current user. It asks for confirmation first; pass `--yes` to skip the prompt in scripts. Without a terminal and without `--yes`, it refuses.
 
 ## Check or clear a duress lockout
 
@@ -238,7 +250,17 @@ Show-only mode:
 gaze config --show
 ```
 
-Prints all current config values without opening the editor: inference execution provider and device, security level, detector and recognizer model, RGB and IR thresholds, hybrid combining policy (both the raw value and what it resolves to), camera sources, emitter state, parallel capture mode, dark-frame threshold, auth behavior, enrollment limit and minimum face-size ratio, liveness settings, and whether template encryption and GNOME Keyring unlock are on.
+Prints every setting as TOML, in the same layout as `/etc/gaze/config.toml`, followed by comments with the values that presets resolve to (detector, recognizer, thresholds, hybrid policy, parallel capture, and start delay scope).
+
+To read or change one setting without the wizard:
+
+```bash
+gaze config get security.level
+gaze config set liveness.enabled true
+gaze config set cameras.dark_luma_threshold 40
+```
+
+`set` checks the value against the setting's type and the same validation the daemon uses, then applies it through `gazed`.
 
 ## Shell completions
 

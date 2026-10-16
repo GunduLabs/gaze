@@ -1198,6 +1198,76 @@ impl Config {
         Self::load_from(CONFIG_PATH)
     }
 
+    pub fn to_toml(&self) -> anyhow::Result<String> {
+        Ok(toml_edit::ser::to_string_pretty(self)?)
+    }
+
+    pub fn get_key(&self, key: &str) -> anyhow::Result<String> {
+        let doc = toml_edit::ser::to_document(self)?;
+        let mut item = doc.as_item();
+        for part in key.split('.') {
+            item = item
+                .get(part)
+                .ok_or_else(|| anyhow::anyhow!("unknown setting `{key}`"))?;
+        }
+        let Some(value) = item.as_value() else {
+            anyhow::bail!(
+                "`{key}` is a section; ask for one of its settings, such as `{key}.<name>`"
+            );
+        };
+        Ok(match value.as_str() {
+            Some(text) => text.to_string(),
+            None => value.to_string().trim().to_string(),
+        })
+    }
+
+    pub fn with_key(&self, key: &str, raw: &str) -> anyhow::Result<Config> {
+        let (section, leaf) = key
+            .rsplit_once('.')
+            .ok_or_else(|| anyhow::anyhow!("use section.setting, for example `security.level`"))?;
+        let mut doc = toml_edit::ser::to_document(self)?;
+        let mut table = doc.as_item_mut();
+        for part in section.split('.') {
+            table = table
+                .get_mut(part)
+                .ok_or_else(|| anyhow::anyhow!("unknown setting `{key}`"))?;
+        }
+        let table = table
+            .as_table_like_mut()
+            .ok_or_else(|| anyhow::anyhow!("unknown setting `{key}`"))?;
+        let current = table
+            .get(leaf)
+            .and_then(toml_edit::Item::as_value)
+            .ok_or_else(|| anyhow::anyhow!("unknown setting `{key}`"))?;
+        let raw = raw.trim();
+        let value = match current {
+            toml_edit::Value::Boolean(_) => toml_edit::value(
+                raw.parse::<bool>()
+                    .map_err(|_| anyhow::anyhow!("`{key}` takes true or false"))?,
+            ),
+            toml_edit::Value::Integer(_) => toml_edit::value(
+                raw.parse::<i64>()
+                    .map_err(|_| anyhow::anyhow!("`{key}` takes a whole number"))?,
+            ),
+            toml_edit::Value::Float(_) => toml_edit::value(
+                raw.parse::<f64>()
+                    .map_err(|_| anyhow::anyhow!("`{key}` takes a number"))?,
+            ),
+            toml_edit::Value::String(_) => toml_edit::value(raw),
+            _ => anyhow::bail!("`{key}` cannot be set from the command line; edit {CONFIG_PATH}"),
+        };
+        table.insert(leaf, value);
+        let config: Config = toml_edit::de::from_document(doc)
+            .map_err(|e| anyhow::anyhow!("invalid value for `{key}`: {e}"))?;
+        config.security.validate()?;
+        config.enrollment.validate()?;
+        config.inference.validate()?;
+        config.liveness.validate()?;
+        config.cameras.validate()?;
+        config.duress.validate()?;
+        Ok(config)
+    }
+
     pub fn migrate_file(path: &str) {
         let Ok(contents) = std::fs::read_to_string(path) else {
             return;
@@ -1385,6 +1455,34 @@ fn merge_into_toml_table(target: &mut toml_edit::Table, desired: &toml_edit::Tab
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_keys_round_trip_through_get_and_set() {
+        let config = Config::default();
+        let enabled = config.liveness.enabled;
+        assert_eq!(
+            config.get_key("liveness.enabled").unwrap(),
+            enabled.to_string()
+        );
+        let changed = config
+            .with_key("liveness.enabled", &(!enabled).to_string())
+            .unwrap();
+        assert_eq!(changed.liveness.enabled, !enabled);
+        let changed = config
+            .with_key("cameras.dark_luma_threshold", "42")
+            .unwrap();
+        assert_eq!(changed.cameras.dark_luma_threshold, 42);
+        assert!(
+            config
+                .with_key("cameras.dark_luma_threshold", "300")
+                .is_err()
+        );
+        assert!(config.with_key("liveness.enabled", "maybe").is_err());
+        assert!(config.with_key("liveness.nonsense", "1").is_err());
+        assert!(config.with_key("liveness", "1").is_err());
+        assert!(config.get_key("liveness").is_err());
+        assert!(config.to_toml().unwrap().contains("[duress]"));
+    }
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
