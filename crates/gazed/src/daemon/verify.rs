@@ -317,8 +317,18 @@ impl AuthDaemon {
             ));
         }
         let claim = self.check_claim(&header).await?;
-        self.ensure_auth_not_aborted(&header).await?;
-        let lid_wait = self.lid_closed_wait().await?;
+        let (caller_uid, target_uid) = Self::ensure_claim_camera_access(&header, &claim).await?;
+        let mut rx =
+            replace_claim_task(&self.claim_state, &self.active_cancel, claim.epoch).await?;
+        let config = self.settings.for_run(&mut rx).await?;
+        let lid_wait = tokio::select! {
+            biased;
+            _ = &mut rx => return Err(fdo::Error::Failed("capture cancelled".into())),
+            result = async {
+                self.ensure_auth_not_aborted(&header, &config.auth).await?;
+                self.lid_closed_wait(config.auth.abort_if_lid_closed).await
+            } => result?,
+        };
         let mut sleeping = self.sleeping.clone();
         // Ignore sleep notifications predating this request.
         sleeping.borrow_and_update();
@@ -334,10 +344,8 @@ impl AuthDaemon {
         let recognizer_ir_arc = self.recognizer_ir.clone();
         let liveness_arc = self.liveness.clone();
         let db_arc = self.db.clone();
-        let rgb_threshold_arc = self.rgb_threshold.clone();
-        let ir_threshold_arc = self.ir_threshold.clone();
-
-        let config = self.current_config().await;
+        let rgb_threshold = config.security.rgb_threshold();
+        let ir_threshold = config.security.ir_threshold();
         let active_session = active_session().await;
         let surface = Self::classify_surface(pam_service.as_deref(), active_session.as_ref());
         let lock_elapsed_ms = self.lock_elapsed_ms(active_session.as_ref()).await;
@@ -352,32 +360,30 @@ impl AuthDaemon {
             lock_elapsed_ms,
             "Face auth requested"
         );
-        let abort_if_lid_closed = *self.abort_if_lid_closed.lock().await;
-        let rgb_device = self.rgb_device.lock().await.clone();
-        let ir_device = self.ir_device.lock().await.clone();
-        let emitter_enabled = *self.emitter_enabled.lock().await;
-        let mut ir_node = self.ir_node.lock().await.clone();
-        if emitter_enabled
-            && ir_node.is_empty()
-            && let Some(resolved) = gaze_vision::camera::resolve_node(&ir_device)
-        {
-            *self.ir_node.lock().await = resolved.clone();
-            ir_node = resolved;
-        }
-        let liveness_cfg = self.liveness_config.lock().await.clone();
-        // Check the state used by this attempt, not the Config property (which reads disk).
-        // This exact liveness snapshot is moved into the verification task below.
+        let abort_if_lid_closed = config.auth.abort_if_lid_closed;
+        let sources = resolve_configured_sources(&config.cameras);
+        let rgb_device = sources.rgb;
+        let ir_device = sources.ir;
+        let ir_node = sources.ir_node;
+        let emitter_enabled = config.cameras.emitter_enabled;
+        let serial_capture = sources.serial_capture;
+        let liveness_cfg = config.liveness.clone();
         validate_keyring_verification(
             require_keyring,
             &liveness_cfg,
             self.db.lock().await.is_encrypted(),
         )?;
-        let hybrid_policy = self.hybrid_policy.lock().await.clone();
-        let serial_capture = *self.serial_capture.lock().await;
+        let hybrid_policy = config.security.hybrid_policy().to_string();
         let duress_cfg = config.duress.clone();
         if duress_cfg.enabled && self.eye_state.lock().await.is_none() {
             let inference = config.inference.clone();
-            match tokio::task::spawn_blocking(move || load_eye_state(&inference)).await {
+            let loading = tokio::task::spawn_blocking(move || load_eye_state(&inference));
+            let loaded = tokio::select! {
+                biased;
+                _ = &mut rx => return Err(fdo::Error::Failed("capture cancelled".into())),
+                loaded = loading => loaded,
+            };
+            match loaded {
                 Ok(Ok(classifier)) => *self.eye_state.lock().await = Some(classifier),
                 Ok(Err(e)) => {
                     warn!("Duress detection is enabled but the eye-state model failed to load: {e}")
@@ -391,9 +397,6 @@ impl AuthDaemon {
         let camera_lease = self.camera_lease.clone();
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
-        let (caller_uid, target_uid) = Self::ensure_claim_camera_access(&header, &claim).await?;
-        let mut rx =
-            replace_claim_task(&self.claim_state, &self.active_cancel, claim.epoch).await?;
 
         self.rt_handle.spawn(async move {
             let ctxt = match SignalEmitter::new(&conn, path) {
@@ -568,7 +571,6 @@ impl AuthDaemon {
                     let liveness_arc = liveness_arc.clone();
                     let db_arc = db_arc.clone();
                     let username_clone = username.clone();
-                    let rgb_threshold_arc = rgb_threshold_arc.clone();
                     let liveness_enabled = liveness_cfg.enabled;
                     let liveness_threshold = liveness_cfg.effective_threshold();
                     let rgb_device_clone = rgb_device.clone();
@@ -688,7 +690,7 @@ impl AuthDaemon {
                             }
 
                             if status == CaptureStatus::Usable && let Some(data) = embed_opt {
-                                let threshold = *rgb_threshold_arc.blocking_lock();
+                                let threshold = rgb_threshold;
                                 let db = db_arc.blocking_lock();
                                 let scores = match db.match_faces(&username_clone, &data.embedding, threshold, Spectrum::Rgb) {
                                     Ok(s) => s,
@@ -794,7 +796,6 @@ impl AuthDaemon {
                     let recognizer_ir_arc = recognizer_ir_arc.clone();
                     let db_arc = db_arc.clone();
                     let username_clone = username.clone();
-                    let ir_threshold_arc = ir_threshold_arc.clone();
                     let liveness_enabled = liveness_cfg.enabled;
                     let ir_device_clone = ir_device.clone();
                     let ir_node_clone = ir_node.clone();
@@ -893,7 +894,7 @@ impl AuthDaemon {
                             let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, status, latest_embed, cam.fps()));
 
                             if status == CaptureStatus::Usable && let Some(data) = embed_opt {
-                                let threshold = *ir_threshold_arc.blocking_lock();
+                                let threshold = ir_threshold;
                                 let db = db_arc.blocking_lock();
                                 let scores = match db.match_faces(&username_clone, &data.embedding, threshold, Spectrum::Ir) {
                                     Ok(s) => s,
@@ -979,8 +980,6 @@ impl AuthDaemon {
 
                 macro_rules! hybrid_scores {
                     () => {{
-                        let rgb_threshold = *rgb_threshold_arc.lock().await;
-                        let ir_threshold = *ir_threshold_arc.lock().await;
                         let db = db_arc.lock().await;
                         let final_scores = build_hybrid_scores(
                             &db,
@@ -1211,6 +1210,7 @@ impl AuthDaemon {
                 held = true;
                 delay = Duration::from_millis(config.auth.resume_grace_ms);
             }
+            drop(config);
         });
 
         Ok(())

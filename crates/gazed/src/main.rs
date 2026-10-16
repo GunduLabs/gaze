@@ -257,8 +257,6 @@ async fn run(config: Config) -> anyhow::Result<()> {
 
     warn_on_ir_misconfig(&config.cameras);
 
-    let sources = gaze_vision::camera::resolve_configured_sources(&config.cameras);
-
     let resume_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let resume_seen = Arc::new(std::sync::atomic::AtomicBool::new(
         daemon::resume_seen_marker_exists(),
@@ -279,18 +277,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
         eye_state: Arc::new(Mutex::new(eye_state)),
         duress_lockout: Arc::new(duress::DuressLockout::new(duress::DURESS_DIR)),
         db: Arc::new(Mutex::new(db)),
-        rgb_threshold: Arc::new(Mutex::new(security.rgb_threshold())),
-        ir_threshold: Arc::new(Mutex::new(security.ir_threshold())),
-        rgb_device: Arc::new(Mutex::new(sources.rgb)),
-        ir_device: Arc::new(Mutex::new(sources.ir)),
-        ir_node: Arc::new(Mutex::new(sources.ir_node)),
-        serial_capture: Arc::new(Mutex::new(sources.serial_capture)),
-        emitter_enabled: Arc::new(Mutex::new(config.cameras.emitter_enabled)),
-        liveness_config: Arc::new(Mutex::new(config.liveness.clone())),
-        hybrid_policy: Arc::new(Mutex::new(security.hybrid_policy().to_string())),
-        abort_if_ssh: Arc::new(Mutex::new(config.auth.abort_if_ssh)),
-        abort_if_lid_closed: Arc::new(Mutex::new(config.auth.abort_if_lid_closed)),
-        abort_before_first_resume: Arc::new(Mutex::new(config.auth.abort_before_first_resume)),
+        settings: daemon::ConfigState::new(config),
         claim_state: claim_state.clone(),
         active_cancel: active_cancel.clone(),
         pam_internal: pam_internal.clone(),
@@ -300,8 +287,6 @@ async fn run(config: Config) -> anyhow::Result<()> {
         sleeping,
         lock_epochs: lock_epochs.clone(),
         benchmark_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        last_good_config: Arc::new(Mutex::new(config.clone())),
-        loaded_model_config: Mutex::new(config.clone()),
         rt_handle: tokio::runtime::Handle::current(),
     };
 

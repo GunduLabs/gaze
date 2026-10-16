@@ -295,7 +295,10 @@ impl AuthDaemon {
         let recognizer_ir_arc = self.recognizer_ir.clone();
         let db_arc = self.db.clone();
 
-        let config = self.current_config().await;
+        let (caller_uid, target_uid) = Self::ensure_claim_camera_access(&header, &claim).await?;
+        let mut rx =
+            replace_claim_task(&self.claim_state, &self.active_cancel, claim.epoch).await?;
+        let config = self.settings.for_run(&mut rx).await?;
         let sources = resolve_configured_sources(&config.cameras);
         let rgb_device = sources.rgb;
         let ir_device = sources.ir;
@@ -305,9 +308,6 @@ impl AuthDaemon {
         let path = ctxt.path().to_owned();
         let claim_state = self.claim_state.clone();
         let camera_lease = self.camera_lease.clone();
-        let (caller_uid, target_uid) = Self::ensure_claim_camera_access(&header, &claim).await?;
-        let mut rx =
-            replace_claim_task(&self.claim_state, &self.active_cancel, claim.epoch).await?;
 
         self.rt_handle.spawn(async move {
             let ctxt = match SignalEmitter::new(&conn, path) {
@@ -926,6 +926,7 @@ impl AuthDaemon {
                 }
             })
             .await;
+            drop(config);
         });
 
         Ok(())
@@ -970,7 +971,7 @@ impl AuthDaemon {
             Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
         }
 
-        let Some(_slot) = BenchmarkSlot::acquire(&self.benchmark_running) else {
+        let Some(slot) = BenchmarkSlot::acquire(&self.benchmark_running) else {
             return Err(fdo::Error::Failed(
                 "RETRYABLE: a benchmark is already running".into(),
             ));
@@ -980,15 +981,19 @@ impl AuthDaemon {
         let recognizer_rgb_arc = self.recognizer_rgb.clone();
         let recognizer_ir_arc = self.recognizer_ir.clone();
         let liveness_arc = self.liveness.clone();
+        let config = self.settings.read().await;
 
         self.rt_handle
             .spawn_blocking(move || {
-                run_inference_benchmark(
+                let _slot = slot;
+                let result = run_inference_benchmark(
                     detector_arc,
                     recognizer_rgb_arc,
                     recognizer_ir_arc,
                     liveness_arc,
-                )
+                );
+                drop(config);
+                result
             })
             .await
             .map_err(|e| fdo::Error::Failed(format!("benchmark task panicked: {e}")))?
