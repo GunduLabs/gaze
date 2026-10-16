@@ -8,24 +8,177 @@ use crate::config::{
 };
 use serde::{Deserialize, Serialize};
 use zbus::proxy;
-use zbus::zvariant::{OwnedValue, Type, Value};
+use zbus::{OwnedVariant, Type, Variant};
 
 use strum_macros::{AsRefStr, Display, EnumString, VariantNames};
 
 /// Defines the stable wire layout for Config properties. Keep this type unchanged
 /// when adding settings because daemon and client packages may be upgraded separately.
-#[derive(Clone, Debug, Value, OwnedValue, Type)]
+#[derive(Clone, Debug, Serialize, Deserialize, Variant, OwnedVariant, Type)]
 pub struct DbusConfig {
-    inference: InferenceConfig,
-    security: SecurityLevel,
+    inference: DbusInferenceConfig,
+    security: DbusSecurityLevel,
     cameras: DbusCameraConfig,
-    auth: AuthConfig,
-    enrollment: EnrollmentConfig,
-    liveness: LivenessConfig,
+    auth: DbusAuthConfig,
+    enrollment: DbusEnrollmentConfig,
+    liveness: DbusLivenessConfig,
     storage: DbusStorageConfig,
 }
 
-#[derive(Clone, Debug, Value, OwnedValue, Type)]
+#[derive(Clone, Debug, Serialize, Deserialize, Variant, OwnedVariant, Type)]
+struct DbusInferenceConfig {
+    execution_provider: String,
+    device: String,
+}
+
+impl From<InferenceConfig> for DbusInferenceConfig {
+    fn from(inference: InferenceConfig) -> Self {
+        Self {
+            execution_provider: inference.execution_provider,
+            device: inference.device,
+        }
+    }
+}
+
+impl From<DbusInferenceConfig> for InferenceConfig {
+    fn from(inference: DbusInferenceConfig) -> Self {
+        Self {
+            execution_provider: inference.execution_provider,
+            device: inference.device,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Variant, OwnedVariant, Type)]
+struct DbusSecurityLevel {
+    level: String,
+    detector: String,
+    recognizer: String,
+    rgb_threshold: f64,
+    ir_threshold: f64,
+    hybrid_policy: String,
+}
+
+impl From<SecurityLevel> for DbusSecurityLevel {
+    fn from(security: SecurityLevel) -> Self {
+        Self {
+            level: security.level,
+            detector: security.detector,
+            recognizer: security.recognizer,
+            rgb_threshold: security.rgb_threshold,
+            ir_threshold: security.ir_threshold,
+            hybrid_policy: security.hybrid_policy,
+        }
+    }
+}
+
+impl From<DbusSecurityLevel> for SecurityLevel {
+    fn from(security: DbusSecurityLevel) -> Self {
+        Self {
+            level: security.level,
+            detector: security.detector,
+            recognizer: security.recognizer,
+            rgb_threshold: security.rgb_threshold,
+            ir_threshold: security.ir_threshold,
+            hybrid_policy: security.hybrid_policy,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Variant, OwnedVariant, Type)]
+struct DbusAuthConfig {
+    abort_if_ssh: bool,
+    abort_if_lid_closed: bool,
+    abort_before_first_resume: bool,
+    require_confirmation_lock_screen: bool,
+    require_confirmation_elevation: bool,
+    resume_grace_ms: u64,
+    start_delay_ms: u64,
+    start_delay_scope: String,
+}
+
+impl From<AuthConfig> for DbusAuthConfig {
+    fn from(auth: AuthConfig) -> Self {
+        Self {
+            abort_if_ssh: auth.abort_if_ssh,
+            abort_if_lid_closed: auth.abort_if_lid_closed,
+            abort_before_first_resume: auth.abort_before_first_resume,
+            require_confirmation_lock_screen: auth.require_confirmation_lock_screen,
+            require_confirmation_elevation: auth.require_confirmation_elevation,
+            resume_grace_ms: auth.resume_grace_ms,
+            start_delay_ms: auth.start_delay_ms,
+            start_delay_scope: auth.start_delay_scope,
+        }
+    }
+}
+
+impl From<DbusAuthConfig> for AuthConfig {
+    fn from(auth: DbusAuthConfig) -> Self {
+        Self {
+            abort_if_ssh: auth.abort_if_ssh,
+            abort_if_lid_closed: auth.abort_if_lid_closed,
+            abort_before_first_resume: auth.abort_before_first_resume,
+            require_confirmation_lock_screen: auth.require_confirmation_lock_screen,
+            require_confirmation_elevation: auth.require_confirmation_elevation,
+            resume_grace_ms: auth.resume_grace_ms,
+            start_delay_ms: auth.start_delay_ms,
+            start_delay_scope: auth.start_delay_scope,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Variant, OwnedVariant, Type)]
+struct DbusEnrollmentConfig {
+    max_templates: u32,
+    min_face_size_ratio: f64,
+}
+
+impl From<EnrollmentConfig> for DbusEnrollmentConfig {
+    fn from(enrollment: EnrollmentConfig) -> Self {
+        Self {
+            max_templates: enrollment.max_templates,
+            min_face_size_ratio: enrollment.min_face_size_ratio,
+        }
+    }
+}
+
+impl From<DbusEnrollmentConfig> for EnrollmentConfig {
+    fn from(enrollment: DbusEnrollmentConfig) -> Self {
+        Self {
+            max_templates: enrollment.max_templates,
+            min_face_size_ratio: enrollment.min_face_size_ratio,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Variant, OwnedVariant, Type)]
+struct DbusLivenessConfig {
+    enabled: bool,
+    threshold: f64,
+    max_seconds: f64,
+}
+
+impl From<LivenessConfig> for DbusLivenessConfig {
+    fn from(liveness: LivenessConfig) -> Self {
+        Self {
+            enabled: liveness.enabled,
+            threshold: liveness.threshold,
+            max_seconds: liveness.max_seconds,
+        }
+    }
+}
+
+impl From<DbusLivenessConfig> for LivenessConfig {
+    fn from(liveness: DbusLivenessConfig) -> Self {
+        Self {
+            enabled: liveness.enabled,
+            threshold: liveness.threshold,
+            max_seconds: liveness.max_seconds,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Variant, OwnedVariant, Type)]
 struct DbusCameraConfig {
     rgb: String,
     ir: String,
@@ -60,7 +213,7 @@ impl From<DbusCameraConfig> for CameraConfig {
     }
 }
 
-#[derive(Clone, Debug, Value, OwnedValue, Type)]
+#[derive(Clone, Debug, Serialize, Deserialize, Variant, OwnedVariant, Type)]
 struct DbusStorageConfig {
     encrypt_templates: bool,
 }
@@ -68,12 +221,12 @@ struct DbusStorageConfig {
 impl From<Config> for DbusConfig {
     fn from(config: Config) -> Self {
         Self {
-            inference: config.inference,
-            security: config.security,
+            inference: config.inference.into(),
+            security: config.security.into(),
             cameras: config.cameras.into(),
-            auth: config.auth,
-            enrollment: config.enrollment,
-            liveness: config.liveness,
+            auth: config.auth.into(),
+            enrollment: config.enrollment.into(),
+            liveness: config.liveness.into(),
             storage: DbusStorageConfig {
                 encrypt_templates: config.storage.encrypt_templates,
             },
@@ -84,12 +237,12 @@ impl From<Config> for DbusConfig {
 impl From<DbusConfig> for Config {
     fn from(config: DbusConfig) -> Self {
         Self {
-            inference: config.inference,
-            security: config.security,
+            inference: config.inference.into(),
+            security: config.security.into(),
             cameras: config.cameras.into(),
-            auth: config.auth,
-            enrollment: config.enrollment,
-            liveness: config.liveness,
+            auth: config.auth.into(),
+            enrollment: config.enrollment.into(),
+            liveness: config.liveness.into(),
             storage: crate::config::StorageConfig {
                 encrypt_templates: config.storage.encrypt_templates,
                 unlock_gnome_keyring: false,
@@ -114,7 +267,7 @@ impl From<DbusConfig> for Config {
     AsRefStr,
     VariantNames,
 )]
-#[zvariant(signature = "s")]
+#[zbus(signature = "s")]
 #[serde(rename_all = "kebab-case")]
 pub enum CaptureStatus {
     #[strum(serialize = "Camera is not in use...")]
@@ -175,7 +328,7 @@ impl CaptureStatus {
     AsRefStr,
     VariantNames,
 )]
-#[zvariant(signature = "s")]
+#[zbus(signature = "s")]
 #[serde(rename_all = "kebab-case")]
 pub enum EnrollPrompt {
     #[strum(serialize = "Face the camera")]
@@ -214,7 +367,7 @@ pub enum EnrollPrompt {
     AsRefStr,
     VariantNames,
 )]
-#[zvariant(signature = "s")]
+#[zbus(signature = "s")]
 #[serde(rename_all = "kebab-case")]
 pub enum VerifyResult {
     VerifyMatch,
@@ -233,7 +386,7 @@ pub const GAZE_MSG_FACE_TOO_DARK: &str = "GAZE_MSG_FACE_TOO_DARK";
 pub const GAZE_MSG_FACE_TIMED_OUT: &str = "GAZE_MSG_FACE_TIMED_OUT";
 pub const GAZE_MSG_FACE_UNAVAILABLE: &str = "GAZE_MSG_FACE_UNAVAILABLE";
 
-#[derive(Clone, Debug, Serialize, Deserialize, Value, OwnedValue, Type)]
+#[derive(Clone, Debug, Serialize, Deserialize, Variant, OwnedVariant, Type)]
 pub struct BenchmarkResult {
     pub component: String,
     pub execution_provider: String,
@@ -358,8 +511,7 @@ pub async fn gazed_unit_state_on(connection: &zbus::Connection) -> anyhow::Resul
         "org.freedesktop.systemd1.Manager",
     )
     .await?;
-    let path: zbus::zvariant::OwnedObjectPath =
-        manager.call("LoadUnit", &("gazed.service",)).await?;
+    let path: zbus::OwnedObjectPath = manager.call("LoadUnit", &("gazed.service",)).await?;
     let unit = zbus::Proxy::new(
         connection,
         "org.freedesktop.systemd1",
@@ -420,15 +572,28 @@ pub fn benchmark_from_reply(
 }
 
 pub async fn try_load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Option<Config>> {
-    let raw: OwnedValue = proxy
-        .inner()
-        .get_property("Config")
+    let raw = raw_property(proxy, "Config")
         .await
         .map_err(|e| anyhow::anyhow!("Failed to read config property: {e}"))?;
     config_from_property(raw)
 }
 
-pub fn config_from_property(raw: OwnedValue) -> anyhow::Result<Option<Config>> {
+async fn raw_property(proxy: &GazeProxy<'_>, name: &str) -> zbus::Result<OwnedVariant> {
+    let inner = proxy.inner();
+    let reply = inner
+        .connection()
+        .call_method(
+            Some(inner.destination()),
+            inner.path(),
+            Some("org.freedesktop.DBus.Properties"),
+            "Get",
+            &(inner.interface(), name),
+        )
+        .await?;
+    reply.body().deserialize::<OwnedVariant>()
+}
+
+pub fn config_from_property(raw: OwnedVariant) -> anyhow::Result<Option<Config>> {
     let expected = <DbusConfig as Type>::SIGNATURE;
     let actual = raw.value_signature();
     if actual != expected {
@@ -448,7 +613,7 @@ pub fn config_from_property(raw: OwnedValue) -> anyhow::Result<Option<Config>> {
 
 /// Decode a complete update while preserving the legacy Config property's wire format.
 pub fn config_update_from_property(
-    raw: OwnedValue,
+    raw: OwnedVariant,
     unlock_gnome_keyring: bool,
 ) -> anyhow::Result<Config> {
     let mut config = config_from_property(raw)?
@@ -555,7 +720,7 @@ pub async fn apply_config_with_keyring_to_daemon(
     apply_ir_frame_size_to_daemon(proxy, config).await?;
     let unlock_gnome_keyring = config.storage.unlock_gnome_keyring;
     let unlock_kwallet = config.storage.unlock_kwallet;
-    let config = OwnedValue::try_from(DbusConfig::from(config.clone()))?;
+    let config = OwnedVariant::try_from(DbusConfig::from(config.clone()))?;
     match proxy
         .set_config_with_wallets(config.try_clone()?, unlock_gnome_keyring, unlock_kwallet)
         .await
@@ -626,7 +791,7 @@ pub async fn active_session_lookup_on(
         "org.freedesktop.login1.Seat",
     )
     .await?;
-    let active_session: (String, zbus::zvariant::ObjectPath) =
+    let active_session: (String, zbus::OwnedObjectPath) =
         proxy.get_property("ActiveSession").await?;
     let path = active_session.1.to_string();
     // logind reports an empty id on the root path when the active VT holds no session.
@@ -641,7 +806,7 @@ pub async fn active_session_lookup_on(
         "org.freedesktop.login1.Session",
     )
     .await?;
-    let user: (u32, zbus::zvariant::ObjectPath) = session_proxy.get_property("User").await?;
+    let user: (u32, zbus::OwnedObjectPath) = session_proxy.get_property("User").await?;
     let class: String = session_proxy.get_property("Class").await?;
 
     Ok(Some(ActiveSession {
@@ -668,7 +833,7 @@ pub async fn seat0_session_uids_on(connection: &zbus::Connection) -> anyhow::Res
         "org.freedesktop.login1.Manager",
     )
     .await?;
-    let sessions: Vec<(String, u32, String, String, zbus::zvariant::OwnedObjectPath)> =
+    let sessions: Vec<(String, u32, String, String, zbus::OwnedObjectPath)> =
         proxy.call("ListSessions", &()).await?;
 
     let mut uids = Vec::new();
@@ -697,7 +862,7 @@ pub async fn session_is_remote_on(connection: &zbus::Connection, pid: u32) -> an
         "org.freedesktop.login1.Manager",
     )
     .await?;
-    let path: zbus::zvariant::OwnedObjectPath = proxy.call("GetSessionByPID", &(pid,)).await?;
+    let path: zbus::OwnedObjectPath = proxy.call("GetSessionByPID", &(pid,)).await?;
     let session_proxy = zbus::Proxy::new(
         connection,
         "org.freedesktop.login1",
@@ -717,7 +882,7 @@ pub async fn session_paths_on(connection: &zbus::Connection) -> anyhow::Result<V
         "org.freedesktop.login1.Manager",
     )
     .await?;
-    let sessions: Vec<(String, u32, String, String, zbus::zvariant::OwnedObjectPath)> =
+    let sessions: Vec<(String, u32, String, String, zbus::OwnedObjectPath)> =
         proxy.call("ListSessions", &()).await?;
 
     Ok(sessions
@@ -727,10 +892,7 @@ pub async fn session_paths_on(connection: &zbus::Connection) -> anyhow::Result<V
 }
 
 /// Treats an unreadable session as live, so a failed lookup keeps the seat looking occupied.
-async fn session_is_closing(
-    connection: &zbus::Connection,
-    path: &zbus::zvariant::OwnedObjectPath,
-) -> bool {
+async fn session_is_closing(connection: &zbus::Connection, path: &zbus::OwnedObjectPath) -> bool {
     let Ok(proxy) = zbus::Proxy::new(
         connection,
         "org.freedesktop.login1",
@@ -774,7 +936,7 @@ pub trait Gaze {
     #[zbus(allow_interactive_auth)]
     async fn set_config_with_wallets(
         &self,
-        config: OwnedValue,
+        config: OwnedVariant,
         unlock_gnome_keyring: bool,
         unlock_kwallet: bool,
     ) -> zbus::Result<()>;
@@ -806,7 +968,7 @@ pub trait Gaze {
     #[zbus(allow_interactive_auth)]
     async fn set_config_with_keyring(
         &self,
-        config: OwnedValue,
+        config: OwnedVariant,
         unlock_gnome_keyring: bool,
     ) -> zbus::Result<()>;
 
@@ -927,7 +1089,7 @@ mod tests {
         );
     }
 
-    #[derive(Clone, Debug, Serialize, Deserialize, Value, OwnedValue, Type)]
+    #[derive(Clone, Debug, Serialize, Deserialize, Variant, OwnedVariant, Type)]
     struct OldBenchmarkResult {
         component: String,
         mean_ms: f64,
@@ -938,14 +1100,12 @@ mod tests {
 
     fn benchmark_method_return<B>(body: &B) -> zbus::message::Message
     where
-        B: serde::Serialize + zvariant::DynamicType,
+        B: serde::Serialize + zbus::DynamicType,
     {
         zbus::message::Message::method_call("/com/gundulabs/Gaze", "Benchmark")
-            .expect("a valid path and member")
             .interface("com.gundulabs.Gaze")
-            .expect("a valid interface")
             .build(body)
-            .expect("the body serializes")
+            .expect("a valid message")
     }
 
     fn benchmark_result(requested_device: &str, fallback_reason: &str) -> BenchmarkResult {
@@ -999,7 +1159,7 @@ mod tests {
 
         assert_eq!(body.signature(), <Vec<BenchmarkResult> as Type>::SIGNATURE);
         assert!(
-            body.deserialize::<OwnedValue>().is_err(),
+            body.deserialize::<OwnedVariant>().is_err(),
             "a method reply body is the value itself, so reading it as a variant must fail"
         );
     }
@@ -1041,33 +1201,33 @@ mod tests {
         assert_eq!(VerifyResult::VerifyNoMatch.as_ref(), "VerifyNoMatch");
     }
 
-    #[derive(Clone, Debug, Value, OwnedValue, Type)]
+    #[derive(Clone, Debug, Variant, OwnedVariant, Type)]
     struct OldStorage {
         encrypt_templates: bool,
     }
 
-    #[derive(Clone, Debug, Value, OwnedValue, Type)]
+    #[derive(Clone, Debug, Variant, OwnedVariant, Type)]
     struct OldConfig {
-        security: crate::config::SecurityLevel,
+        security: DbusSecurityLevel,
         cameras: DbusCameraConfig,
-        auth: crate::config::AuthConfig,
-        enrollment: crate::config::EnrollmentConfig,
-        liveness: crate::config::LivenessConfig,
+        auth: DbusAuthConfig,
+        enrollment: DbusEnrollmentConfig,
+        liveness: DbusLivenessConfig,
         storage: OldStorage,
     }
 
-    fn old_daemon_property() -> OwnedValue {
+    fn old_daemon_property() -> OwnedVariant {
         let old = OldConfig {
-            security: Default::default(),
+            security: SecurityLevel::default().into(),
             cameras: CameraConfig::default().into(),
-            auth: Default::default(),
-            enrollment: Default::default(),
-            liveness: Default::default(),
+            auth: AuthConfig::default().into(),
+            enrollment: EnrollmentConfig::default().into(),
+            liveness: LivenessConfig::default().into(),
             storage: OldStorage {
                 encrypt_templates: false,
             },
         };
-        OwnedValue::try_from(Value::from(old)).expect("old config converts to a value")
+        OwnedVariant::try_from(Variant::from(old)).expect("old config converts to a value")
     }
 
     #[test]
@@ -1085,7 +1245,7 @@ mod tests {
             config.storage.unlock_gnome_keyring = false;
 
             let wire = DbusConfig::from(config);
-            let raw = OwnedValue::try_from(Value::from(wire)).unwrap();
+            let raw = OwnedVariant::try_from(Variant::from(wire)).unwrap();
             // A keyring-aware client sees the flag, so an inconsistent update is a real error.
             assert!(config_update_from_property(raw.try_clone().unwrap(), true).is_err());
             let updated = config_update_from_property(raw, false).unwrap();
@@ -1102,7 +1262,7 @@ mod tests {
                 let mut config = Config::default();
                 config.liveness.enabled = liveness;
                 config.storage.encrypt_templates = encryption;
-                let raw = OwnedValue::try_from(DbusConfig::from(config)).unwrap();
+                let raw = OwnedVariant::try_from(DbusConfig::from(config)).unwrap();
                 let updated = config_update_from_property(raw, true);
                 assert_eq!(updated.is_ok(), liveness && encryption);
                 if let Ok(updated) = updated {
@@ -1116,7 +1276,7 @@ mod tests {
     fn the_ir_frame_size_stays_off_the_legacy_config_wire() {
         let mut config = Config::default();
         config.cameras.set_ir_frame_size(Some((340, 340)));
-        let raw = OwnedValue::try_from(DbusConfig::from(config)).unwrap();
+        let raw = OwnedVariant::try_from(DbusConfig::from(config)).unwrap();
         let decoded = config_from_property(raw)
             .expect("no error")
             .expect("current layout is readable");
@@ -1125,7 +1285,8 @@ mod tests {
 
     #[test]
     fn current_layout_decodes() {
-        let raw = OwnedValue::try_from(Value::from(DbusConfig::from(Config::default()))).unwrap();
+        let raw =
+            OwnedVariant::try_from(Variant::from(DbusConfig::from(Config::default()))).unwrap();
         let decoded = config_from_property(raw)
             .expect("no error")
             .expect("current layout is readable");

@@ -19,15 +19,14 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
 
-use enumflags2::BitFlag;
 use futures::StreamExt;
+use gaze_core::polkit::{ALLOW_USER_INTERACTION, AuthorityProxy, NO_INTERACTION, Subject};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::Duration;
 use zbus::Connection;
-use zbus_polkit::policykit1::{AuthorityProxy, CheckAuthorizationFlags, Subject};
 
 type RefreshCb = Rc<dyn Fn()>;
 
@@ -125,13 +124,13 @@ fn show_daemon_pending_toast(window: &libadwaita::ApplicationWindow) {
 async fn authorize_face_enrollment() -> anyhow::Result<()> {
     let conn = Connection::system().await?;
     let authority = AuthorityProxy::new(&conn).await?;
-    let subject = Subject::new_for_owner(std::process::id(), None, None)?;
+    let subject = Subject::unix_process(std::process::id())?;
     let result = authority
         .check_authorization(
             &subject,
             "com.gundulabs.gaze.manage-faces",
             &HashMap::new(),
-            CheckAuthorizationFlags::AllowUserInteraction.into(),
+            ALLOW_USER_INTERACTION,
             "",
         )
         .await?;
@@ -1565,7 +1564,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                             return;
                         }
                     };
-                    let subject = match Subject::new_for_owner(std::process::id(), None, None) {
+                    let subject = match Subject::unix_process(std::process::id()) {
                         Ok(subject) => subject,
                         Err(e) => {
                             eprintln!("gaze-gui: polkit subject creation failed: {e}");
@@ -1578,7 +1577,7 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                             &subject,
                             "com.gundulabs.gaze.manage-config",
                             &HashMap::new(),
-                            CheckAuthorizationFlags::AllowUserInteraction.into(),
+                            ALLOW_USER_INTERACTION,
                             "",
                         )
                         .await
@@ -1608,13 +1607,13 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
             };
 
             let check_auth = |auth: AuthorityProxy<'static>| async move {
-                let subject = Subject::new_for_owner(std::process::id(), None, None).ok()?;
+                let subject = Subject::unix_process(std::process::id()).ok()?;
 
                 auth.check_authorization(
                     &subject,
                     "com.gundulabs.gaze.manage-config",
                     &HashMap::new(),
-                    CheckAuthorizationFlags::empty(),
+                    NO_INTERACTION,
                     "",
                 )
                 .await
@@ -1652,14 +1651,13 @@ fn show_config_dialog(parent: &libadwaita::ApplicationWindow, overlay: &libadwai
                 return;
             };
             let gaze = proxy.inner();
-            let Ok(builder) = zbus::fdo::PropertiesProxy::builder(gaze.connection())
+            let Ok(properties) = zbus::fdo::PropertiesProxy::builder(gaze.connection())
                 .destination(gaze.destination().to_owned())
-                .and_then(|builder| builder.path(gaze.path().to_owned()))
-                .map(|builder| builder.cache_properties(zbus::proxy::CacheProperties::No))
+                .path(gaze.path().to_owned())
+                .cache_properties(zbus::proxy::CacheProperties::No)
+                .build()
+                .await
             else {
-                return;
-            };
-            let Ok(properties) = builder.build().await else {
                 return;
             };
             let Ok(mut changes) = properties.receive_properties_changed().await else {

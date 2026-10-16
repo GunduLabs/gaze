@@ -7,3 +7,4 @@ pub mod cpu;
 pub mod dbus;
 pub mod desktop;
 pub mod ir;
+pub mod polkit;

@@ -8,11 +8,11 @@ pub(super) async fn prepare_for_sleep_stream(
 ) -> zbus::Result<zbus::MessageStream> {
     let rule = zbus::MatchRule::builder()
         .msg_type(zbus::message::Type::Signal)
-        .sender("org.freedesktop.login1")?
-        .interface("org.freedesktop.login1.Manager")?
-        .member("PrepareForSleep")?
-        .path("/org/freedesktop/login1")?
-        .build();
+        .sender("org.freedesktop.login1")
+        .interface("org.freedesktop.login1.Manager")
+        .member("PrepareForSleep")
+        .path("/org/freedesktop/login1")
+        .build()?;
     zbus::MessageStream::for_match_rule(rule, conn, None).await
 }
 
@@ -175,18 +175,18 @@ pub(super) async fn session_properties_stream(
 ) -> zbus::Result<zbus::MessageStream> {
     let rule = zbus::MatchRule::builder()
         .msg_type(zbus::message::Type::Signal)
-        .sender("org.freedesktop.login1")?
-        .interface("org.freedesktop.DBus.Properties")?
-        .member("PropertiesChanged")?
-        .path_namespace(gaze_core::dbus::LOGIN_SESSION_PATH_PREFIX)?
-        .build();
+        .sender("org.freedesktop.login1")
+        .interface("org.freedesktop.DBus.Properties")
+        .member("PropertiesChanged")
+        .path_namespace(gaze_core::dbus::LOGIN_SESSION_PATH_PREFIX)
+        .build()?;
     zbus::MessageStream::for_match_rule(rule, conn, None).await
 }
 
 pub(super) fn locked_hint_from_changed(body: &zbus::message::Body) -> Option<bool> {
     let (interface, changed, _invalidated): (
         String,
-        std::collections::HashMap<String, zbus::zvariant::Value>,
+        std::collections::HashMap<String, zbus::Variant>,
         Vec<String>,
     ) = body.deserialize().ok()?;
 
@@ -198,14 +198,14 @@ pub(super) fn locked_hint_from_changed(body: &zbus::message::Body) -> Option<boo
 /// Split out so it can be unit-tested without synthesising D-Bus bodies.
 fn locked_hint_from_parts(
     interface: &str,
-    changed: &std::collections::HashMap<String, zbus::zvariant::Value>,
+    changed: &std::collections::HashMap<String, zbus::Variant>,
 ) -> Option<bool> {
     if interface != "org.freedesktop.login1.Session" {
         return None;
     }
 
     match changed.get("LockedHint")? {
-        zbus::zvariant::Value::Bool(locked) => Some(*locked),
+        zbus::Variant::Bool(locked) => Some(*locked),
         _ => None,
     }
 }
@@ -249,8 +249,8 @@ mod tests {
     use super::*;
 
     fn changed_with(
-        value: Option<zbus::zvariant::Value>,
-    ) -> std::collections::HashMap<String, zbus::zvariant::Value> {
+        value: Option<zbus::Variant>,
+    ) -> std::collections::HashMap<String, zbus::Variant> {
         let mut map = std::collections::HashMap::new();
         if let Some(value) = value {
             map.insert("LockedHint".to_string(), value);
@@ -315,7 +315,7 @@ mod tests {
             assert_eq!(
                 locked_hint_from_parts(
                     "org.freedesktop.login1.Session",
-                    &changed_with(Some(zbus::zvariant::Value::Bool(locked))),
+                    &changed_with(Some(zbus::Variant::Bool(locked))),
                 ),
                 Some(locked)
             );
@@ -333,7 +333,7 @@ mod tests {
             assert_eq!(
                 locked_hint_from_parts(
                     interface,
-                    &changed_with(Some(zbus::zvariant::Value::Bool(true))),
+                    &changed_with(Some(zbus::Variant::Bool(true))),
                 ),
                 None,
                 "interface {interface:?} must not yield a lock state"
@@ -348,13 +348,13 @@ mod tests {
         assert_eq!(
             locked_hint_from_parts(
                 session,
-                &changed_with(Some(zbus::zvariant::Value::Str("true".into()))),
+                &changed_with(Some(zbus::Variant::Str("true".into()))),
             ),
             None,
             "a string LockedHint must not be trusted"
         );
         assert_eq!(
-            locked_hint_from_parts(session, &changed_with(Some(zbus::zvariant::Value::U32(1))),),
+            locked_hint_from_parts(session, &changed_with(Some(zbus::Variant::U32(1))),),
             None
         );
     }
@@ -362,7 +362,7 @@ mod tests {
     #[test]
     fn other_properties_do_not_trigger_lock_tracking() {
         let mut map = std::collections::HashMap::new();
-        map.insert("Active".to_string(), zbus::zvariant::Value::Bool(true));
+        map.insert("Active".to_string(), zbus::Variant::Bool(true));
         assert_eq!(
             locked_hint_from_parts("org.freedesktop.login1.Session", &map),
             None
