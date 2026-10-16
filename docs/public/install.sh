@@ -7,6 +7,7 @@
 #        curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
 set -e
 
+{
 PKG_BASE_URL="https://packages.gundulabs.com"
 HYPRLAND_DOCS_URL="https://gaze.gundulabs.com/guide/hyprland"
 KDE_DOCS_URL="https://gaze.gundulabs.com/guide/kde"
@@ -14,7 +15,10 @@ OMARCHY_DOCS_URL="https://gaze.gundulabs.com/guide/omarchy"
 PAM_DOCS_URL="https://gaze.gundulabs.com/guide/pam"
 PAM_SUDO_OPTOUT="/etc/gaze/pam-sudo.optout"
 REPO_KEY_FPR="505AC1C71AFEDBD5555235F6CB4FA24E5C1C7C98"
+PAM_OPTOUT="/etc/gaze/pam.optout"
 AUTO_YES=0
+NO_PAM=0
+PROBLEMS=""
 
 ESC="$(printf '\033')"
 if [ -t 1 ] && [ "${TERM:-}" != "dumb" ] && [ -z "${NO_COLOR:-}" ]; then
@@ -52,6 +56,7 @@ Usage:
 
 Options:
   -y, --yes                  Use detected defaults without prompting
+      --no-pam               Install without adding Gaze to any PAM stack
   -h, --help                 Show this help
 
 The GNOME extension package is installed only when a GNOME desktop session is
@@ -66,6 +71,7 @@ EOF
 while [ "$#" -gt 0 ]; do
     case "$1" in
     -y | --yes) AUTO_YES=1 ;;
+    --no-pam) NO_PAM=1 ;;
     -h | --help)
         usage
         exit 0
@@ -530,7 +536,7 @@ configure_pam_arch() {
         return 0
     fi
 
-    if sudo test -e "$PAM_SUDO_OPTOUT"; then
+    if $SUDO test -e "$PAM_SUDO_OPTOUT"; then
         say "Leaving $pam_file alone ($PAM_SUDO_OPTOUT exists)."
         return 0
     fi
@@ -540,7 +546,7 @@ configure_pam_arch() {
         return 0
     fi
 
-    if sudo grep -qxF "$pam_file" /etc/gaze/pam-arch.configured 2>/dev/null; then
+    if $SUDO grep -qxF "$pam_file" /etc/gaze/pam-arch.configured 2>/dev/null; then
         say "Gaze was removed from $pam_file by hand; leaving it that way."
         say "Delete $PAM_SUDO_OPTOUT and re-run to undo."
         record_pam_sudo_optout
@@ -567,13 +573,13 @@ configure_pam_arch() {
         }
         { print }
     ' "$pam_file" >"$TMP/pam-sudo" &&
-        sudo install -m 644 "$TMP/pam-sudo" "$pam_file" && {
+        $SUDO install -m 644 "$TMP/pam-sudo" "$pam_file" && {
         ok "Configured $pam_file to use Gaze face authentication."
         say "$pam_file belongs to the sudo package, so pacman will report it as"
         say "modified and write .pacnew files on later sudo updates."
         say "Delete the pam_gaze.so and faillock gate lines to opt out; Gaze will not put them back."
-        sudo mkdir -p /etc/gaze
-        sudo grep -qxF "$pam_file" /etc/gaze/pam-arch.configured 2>/dev/null ||
+        $SUDO mkdir -p /etc/gaze
+        $SUDO grep -qxF "$pam_file" /etc/gaze/pam-arch.configured 2>/dev/null ||
             printf '%s\n' "$pam_file" | sudo tee -a /etc/gaze/pam-arch.configured >/dev/null
     } || {
         warn "Could not configure PAM for sudo automatically."
@@ -585,13 +591,13 @@ configure_pam_arch() {
 }
 
 record_pam_sudo_optout() {
-    sudo test -e "$PAM_SUDO_OPTOUT" && return 0
-    sudo mkdir -p /etc/gaze
+    $SUDO test -e "$PAM_SUDO_OPTOUT" && return 0
+    $SUDO mkdir -p /etc/gaze
     printf '%s\n%s\n' \
         "# Gaze leaves /etc/pam.d/sudo alone while this file exists." \
         "# Delete it to let the next install or upgrade add pam_gaze.so back." |
-        sudo tee "$PAM_SUDO_OPTOUT" >/dev/null
-    sudo chmod 644 "$PAM_SUDO_OPTOUT" || true
+        $SUDO tee "$PAM_SUDO_OPTOUT" >/dev/null
+    $SUDO chmod 644 "$PAM_SUDO_OPTOUT" || true
 }
 
 configure_authselect() {
@@ -599,16 +605,16 @@ configure_authselect() {
         return 0
     fi
 
-    current_authselect="$(sudo authselect current 2>/dev/null || true)"
+    current_authselect="$($SUDO authselect current 2>/dev/null || true)"
 
-    if ! sudo test -f /etc/gaze/authselect.previous; then
+    if ! $SUDO test -f /etc/gaze/authselect.previous; then
         case "$current_authselect" in
         *"Profile ID: gaze"*) ;;
         "") ;;
         *)
             if printf '%s\n' "$current_authselect" >"$TMP/authselect.previous" &&
-                sudo mkdir -p /etc/gaze &&
-                sudo cp "$TMP/authselect.previous" /etc/gaze/authselect.previous; then
+                $SUDO mkdir -p /etc/gaze &&
+                $SUDO cp "$TMP/authselect.previous" /etc/gaze/authselect.previous; then
                 :
             fi
             ;;
@@ -619,16 +625,20 @@ configure_authselect() {
     # user already had (e.g. with-fingerprint) instead of silently dropping them.
     preserved_features="$(printf '%s\n' "$current_authselect" | awk '/^- /{print $2}')"
 
-    if sudo authselect select gaze with-silent-lastlog --force >/dev/null 2>&1; then
+    if [ "${OSTREE_PENDING:-0}" -eq 1 ]; then
+        if arm_authselect_after_reboot "$preserved_features"; then
+            ok "The Gaze authselect profile will be selected on the next boot."
+        else
+            problem "Could not stage the authselect profile; after rebooting run: sudo authselect select gaze with-silent-lastlog --force"
+        fi
+    elif $SUDO authselect select gaze with-silent-lastlog --force >/dev/null 2>&1; then
         ok "Enabled the Gaze PAM authselect profile."
         for feature in $preserved_features; do
             [ "$feature" = "with-silent-lastlog" ] && continue
-            sudo authselect enable-feature "$feature" >/dev/null 2>&1 || true
+            $SUDO authselect enable-feature "$feature" >/dev/null 2>&1 || true
         done
     else
-        warn "Could not enable the Gaze PAM authselect profile automatically."
-        say "After installation, run:"
-        cmd "sudo authselect select gaze with-silent-lastlog --force"
+        problem "Could not enable the Gaze PAM authselect profile; run: sudo authselect select gaze with-silent-lastlog --force"
     fi
 }
 
@@ -642,8 +652,8 @@ configure_pam_opensuse() {
 
     # Query output contains auth: only when a module is active. Preserve the
     # user's selected mode when the installer runs again.
-    gaze_config="$(sudo pam-config -q --gaze </dev/null 2>/dev/null || true)"
-    grosshack_config="$(sudo pam-config -q --gaze_grosshack </dev/null 2>/dev/null || true)"
+    gaze_config="$($SUDO pam-config -q --gaze </dev/null 2>/dev/null || true)"
+    grosshack_config="$($SUDO pam-config -q --gaze_grosshack </dev/null 2>/dev/null || true)"
     gaze_active=0
     grosshack_active=0
     if printf '%s\n' "$gaze_config" | grep -qE '^[[:space:]]*auth:'; then
@@ -666,8 +676,8 @@ configure_pam_opensuse() {
 
     # Enable the default mode and regenerate common-*.
     pam_config_error="$TMP/pam-config.err"
-    if sudo pam-config --add --gaze </dev/null 2>"$pam_config_error" &&
-        sudo pam-config --update </dev/null 2>>"$pam_config_error"; then
+    if $SUDO pam-config --add --gaze </dev/null 2>"$pam_config_error" &&
+        $SUDO pam-config --update </dev/null 2>>"$pam_config_error"; then
         ok "Enabled the Gaze PAM module through pam-config."
     else
         warn "Could not enable the Gaze PAM module through pam-config."
@@ -687,10 +697,113 @@ need uname
 need awk
 need id
 need gpg
+if [ "$(id -u)" -eq 0 ]; then
+    SUDO=""
+else
+    need sudo
+    SUDO="sudo"
+fi
+
+problem() {
+    warn "$*"
+    PROBLEMS="${PROBLEMS}  • $*
+"
+}
+
+ostree_install() {
+    OSTREE_LAST_PENDING=0
+    if $SUDO rpm-ostree install --idempotent --apply-live "$@" </dev/null 2>/dev/null; then
+        return 0
+    fi
+    $SUDO rpm-ostree install --idempotent "$@" </dev/null || return 1
+    OSTREE_LAST_PENDING=1
+}
+
+record_pam_optout() {
+    $SUDO test -e "$PAM_OPTOUT" && return 0
+    $SUDO mkdir -p /etc/gaze
+    printf '%s\n%s\n' \
+        "# Gaze installers and package scripts leave PAM alone while this file exists." \
+        "# Delete it and re-run the installer to add Gaze to PAM." |
+        $SUDO tee "$PAM_OPTOUT" >/dev/null
+    $SUDO chmod 644 "$PAM_OPTOUT" || true
+}
+
+stage_systemd_unit() {
+    $SUDO mkdir -p /etc/systemd/system/multi-user.target.wants
+    $SUDO ln -sf "$1" "/etc/systemd/system/multi-user.target.wants/$(basename "$1")"
+}
+
+arm_authselect_after_reboot() {
+    finish_script=/etc/gaze/finish-install.sh
+    finish_unit=/etc/systemd/system/gaze-finish-install.service
+    {
+        printf '#!/bin/sh\n'
+        printf 'authselect select gaze with-silent-lastlog --force || exit 1\n'
+        for feature in $1; do
+            [ "$feature" = "with-silent-lastlog" ] && continue
+            printf 'authselect enable-feature %s || true\n' "$feature"
+        done
+        printf 'rm -f %s /etc/systemd/system/multi-user.target.wants/gaze-finish-install.service "$0"\n' "$finish_unit"
+    } >"$TMP/finish-install.sh"
+    cat >"$TMP/gaze-finish-install.service" <<EOF
+[Unit]
+Description=Select the Gaze authselect profile once its layered package is booted
+ConditionPathExists=/usr/share/authselect/vendor/gaze
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh $finish_script
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    $SUDO mkdir -p /etc/gaze
+    $SUDO install -m 755 "$TMP/finish-install.sh" "$finish_script" &&
+        $SUDO install -m 644 "$TMP/gaze-finish-install.service" "$finish_unit" &&
+        stage_systemd_unit "$finish_unit"
+}
+
+enable_gazed() {
+    if [ "${OSTREE_PENDING:-0}" -eq 1 ]; then
+        if stage_systemd_unit /usr/lib/systemd/system/gazed.service; then
+            ok "The Gaze daemon will start with the next boot."
+        else
+            problem "Could not stage the Gaze daemon; after rebooting run: sudo systemctl enable --now gazed"
+        fi
+        return 0
+    fi
+    if [ ! -d /run/systemd/system ]; then
+        problem "systemd is not running here; start the daemon with: sudo systemctl enable --now gazed"
+        return 0
+    fi
+    if enable_output="$($SUDO systemctl enable --now gazed </dev/null 2>&1)"; then
+        ok "Enabled the Gaze daemon."
+    else
+        problem "Could not enable the Gaze daemon:"
+        printf '%s\n' "$enable_output" | sed 's/^/    /'
+    fi
+}
+
+verify_install() {
+    [ "${OSTREE_PENDING:-0}" -eq 1 ] && return 0
+    if [ -d /run/systemd/system ]; then
+        sleep 2
+        state="$(systemctl is-active gazed 2>/dev/null || true)"
+        if [ "$state" = "active" ]; then
+            ok "The Gaze daemon is running."
+        else
+            problem "The Gaze daemon is ${state:-not running}; see: journalctl -u gazed -n 50"
+        fi
+    fi
+    if [ "$NO_PAM" -eq 0 ] && ! grep -rqsE '^[[:space:]]*-?auth[[:space:]].*pam_gaze' /etc/pam.d/; then
+        problem "No PAM service uses pam_gaze yet, so sudo and login will not offer face authentication."
+    fi
+}
 
 fetch_repo_key() {
     key_path="$TMP/gundulabs-repo.asc"
-    if ! curl -fsSL "${PKG_BASE_URL}/keys/gundulabs-repo.asc" -o "$key_path"; then
+    if ! curl --proto '=https' --tlsv1.2 -fsSL "${PKG_BASE_URL}/keys/gundulabs-repo.asc" -o "$key_path"; then
         die "Could not download the repository signing key."
     fi
     key_info="$TMP/gundulabs-repo.key-info"
@@ -863,7 +976,7 @@ require_published_repository() {
         return 0
     fi
 
-    metadata_status="$(curl -sS -I -o /dev/null -w '%{http_code}' --max-time 20 "$metadata_url" 2>/dev/null || true)"
+    metadata_status="$(curl --proto '=https' --tlsv1.2 -sS -I -o /dev/null -w '%{http_code}' --max-time 20 "$metadata_url" 2>/dev/null || true)"
     case "$metadata_status" in
     404 | 403)
         fail "No Gaze package repository has been published for this platform yet."
@@ -880,6 +993,15 @@ require_published_repository() {
 }
 
 require_published_repository
+
+if is_arch && [ "$(id -u)" -eq 0 ]; then
+    die "AUR helpers refuse to build as root. Re-run this installer as your normal user."
+fi
+
+if [ "$NO_PAM" -eq 0 ] && [ -e "$PAM_OPTOUT" ]; then
+    say "Leaving PAM alone: $PAM_OPTOUT exists. Delete it and re-run to add Gaze to PAM."
+    NO_PAM=1
+fi
 
 # ── plan ──────────────────────────────────────────────────────────────────────
 
@@ -905,7 +1027,11 @@ if is_deb; then
     if want_hyprlock_setup; then
         plan "Install gaze-hyprlock and configure hyprlock"
     fi
-    plan "Set up the PAM modules through pam-auth-update if available"
+    if [ "$NO_PAM" -eq 1 ]; then
+        plan "Leave PAM unchanged (--no-pam)"
+    else
+        plan "Set up the PAM modules through pam-auth-update if available"
+    fi
     plan "Enable the Gaze daemon"
 elif is_rpm; then
     if is_opensuse_tumbleweed; then
@@ -938,7 +1064,9 @@ elif is_rpm; then
     if want_hyprlock_setup; then
         plan "Install gaze-hyprlock and configure hyprlock"
     fi
-    if is_opensuse_tumbleweed; then
+    if [ "$NO_PAM" -eq 1 ]; then
+        plan "Leave PAM unchanged (--no-pam)"
+    elif is_opensuse_tumbleweed; then
         plan "Enable the Gaze PAM module through pam-config if available"
     else
         plan "Enable the Gaze PAM profile through authselect if available"
@@ -966,7 +1094,11 @@ elif is_arch; then
     if want_hyprlock_setup; then
         plan "Install gaze-hyprlock-bin and configure hyprlock"
     fi
-    plan "Configure PAM for sudo"
+    if [ "$NO_PAM" -eq 1 ]; then
+        plan "Leave PAM unchanged (--no-pam)"
+    else
+        plan "Configure PAM for sudo"
+    fi
     plan "Enable the Gaze daemon"
 fi
 
@@ -976,14 +1108,14 @@ prompt_continue
 if is_deb; then
     if [ -f /etc/apt/sources.list.d/gundulabs.list ] || [ -f /usr/share/keyrings/gundulabs-archive-keyring.gpg ]; then
         say "Refreshing repository configuration..."
-        sudo rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
+        $SUDO rm -f /etc/apt/sources.list.d/gundulabs.list /usr/share/keyrings/gundulabs-archive-keyring.gpg
     fi
 elif is_rpm; then
     if [ -f /etc/yum.repos.d/gundulabs.repo ] ||
         [ -f /etc/zypp/repos.d/gundulabs.repo ] ||
         [ -f /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs ]; then
         say "Refreshing repository configuration..."
-        sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/zypp/repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+        $SUDO rm -f /etc/yum.repos.d/gundulabs.repo /etc/zypp/repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
     fi
 fi
 
@@ -991,21 +1123,25 @@ fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+if [ "$NO_PAM" -eq 1 ]; then
+    record_pam_optout
+fi
+
 if is_deb; then
     step "Configuring apt repository"
     KEY_PATH="$(fetch_repo_key)"
     gpg --dearmor --yes --output "$TMP/gundulabs-archive-keyring.gpg" "$KEY_PATH"
-    sudo mkdir -p -m 0755 /usr/share/keyrings
-    sudo cp "$TMP/gundulabs-archive-keyring.gpg" /usr/share/keyrings/gundulabs-archive-keyring.gpg
-    sudo chmod 0644 /usr/share/keyrings/gundulabs-archive-keyring.gpg
+    $SUDO mkdir -p -m 0755 /usr/share/keyrings
+    $SUDO cp "$TMP/gundulabs-archive-keyring.gpg" /usr/share/keyrings/gundulabs-archive-keyring.gpg
+    $SUDO chmod 0644 /usr/share/keyrings/gundulabs-archive-keyring.gpg
     # Pin to the detected suite (already vetted by supported_deb_suite) so each distro gets
     # the package built against its own glibc, and to the host arch so apt skips i386.
     DEB_ARCH="$(dpkg --print-architecture)"
     printf '%s\n' "deb [arch=${DEB_ARCH} signed-by=/usr/share/keyrings/gundulabs-archive-keyring.gpg] ${PKG_BASE_URL}/deb ${DISTRO_CODENAME} main" |
-        sudo tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
+        $SUDO tee /etc/apt/sources.list.d/gundulabs.list >/dev/null
 
     step "Updating package index"
-    sudo apt-get update </dev/null
+    $SUDO apt-get update </dev/null
 
     step "Installing packages"
     DEB_PKGS="gaze gaze-gui"
@@ -1018,36 +1154,40 @@ if is_deb; then
     if want_hyprlock_setup; then
         DEB_PKGS="$DEB_PKGS gaze-hyprlock"
     fi
-    sudo apt-get install -y $DEB_PKGS </dev/null
+    $SUDO apt-get install -y $DEB_PKGS </dev/null
     if is_kde_session; then
         KDE_PKGS="gaze-kde"
-        install_kde_packages sudo apt-get install -y $KDE_PKGS </dev/null
+        install_kde_packages $SUDO apt-get install -y $KDE_PKGS </dev/null
+    fi
+    if [ "$NO_PAM" -eq 1 ] && command -v pam-auth-update >/dev/null 2>&1; then
+        $SUDO env DEBIAN_FRONTEND=noninteractive pam-auth-update --remove gaze gaze-simultaneous gaze-retry </dev/null ||
+            problem "Could not remove the Gaze PAM profiles; run: sudo pam-auth-update --remove gaze"
     fi
 
     step "Desktop integration"
     enable_desktop_integrations
 
     step "Enabling Gaze daemon"
-    sudo systemctl enable --now gazed </dev/null 2>/dev/null || true
+    enable_gazed
 
 elif is_rpm; then
     step "Configuring repository"
     # Verify and install the key before configuring the repository.
     KEY_PATH="$(fetch_repo_key)"
+    $SUDO mkdir -p /etc/pki/rpm-gpg
+    $SUDO cp "$KEY_PATH" /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
+    $SUDO chmod 0644 /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
     if [ "$RPM_TOOL" != "rpm-ostree" ]; then
         if is_opensuse_tumbleweed; then
-            sudo mkdir -p /etc/pki/rpm-gpg
-            sudo cp "$KEY_PATH" /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
-            sudo chmod 0644 /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
-            sudo rpm --import "$KEY_PATH"
+            $SUDO rpm --import "$KEY_PATH"
         else
-            sudo rpm --import "$KEY_PATH" 2>/dev/null || true
+            $SUDO rpm --import "$KEY_PATH" 2>/dev/null || true
         fi
     fi
     if is_opensuse_tumbleweed; then
         # Stock zypper reads repositories from /etc/zypp/repos.d.
-        sudo mkdir -p /etc/zypp/repos.d
-        sudo tee /etc/zypp/repos.d/gundulabs.repo >/dev/null <<EOF
+        $SUDO mkdir -p /etc/zypp/repos.d
+        $SUDO tee /etc/zypp/repos.d/gundulabs.repo >/dev/null <<EOF
 [gundulabs]
 name=Gundu Labs
 baseurl=${PKG_BASE_URL}/rpm/opensuse/tumbleweed/\$basearch
@@ -1058,27 +1198,27 @@ gpgcheck=1
 gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
 EOF
     else
-        sudo mkdir -p /etc/yum.repos.d
-        sudo tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
+        $SUDO mkdir -p /etc/yum.repos.d
+        $SUDO tee /etc/yum.repos.d/gundulabs.repo >/dev/null <<EOF
 [gundulabs]
 name=Gundu Labs
 baseurl=${PKG_BASE_URL}/rpm/fedora/\$releasever/\$basearch
 enabled=1
 gpgcheck=1
 repo_gpgcheck=1
-gpgkey=${PKG_BASE_URL}/keys/gundulabs-repo.asc
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
 EOF
     fi
 
     step "Refreshing repository metadata"
     if [ "$RPM_TOOL" = "zypper" ]; then
-        sudo zypper --non-interactive refresh gundulabs </dev/null
+        $SUDO zypper --non-interactive refresh gundulabs </dev/null
     elif [ "$RPM_TOOL" = "rpm-ostree" ]; then
-        sudo rpm-ostree refresh-md </dev/null 2>/dev/null || true
+        $SUDO rpm-ostree refresh-md </dev/null 2>/dev/null || true
     elif command -v dnf >/dev/null 2>&1; then
-        sudo dnf makecache </dev/null
+        $SUDO dnf makecache </dev/null
     else
-        sudo yum makecache </dev/null
+        $SUDO yum makecache </dev/null
     fi
 
     step "Installing packages"
@@ -1097,32 +1237,40 @@ EOF
         RPM_PKGS="$RPM_PKGS gaze-hyprlock"
     fi
     if [ "$RPM_TOOL" = "rpm-ostree" ]; then
-        if sudo rpm-ostree install --idempotent --apply-live $RPM_PKGS </dev/null 2>/dev/null; then
-            ok "Layered and live-applied packages via rpm-ostree."
+        ostree_install $RPM_PKGS || die "rpm-ostree could not layer the Gaze packages."
+        OSTREE_PENDING=$OSTREE_LAST_PENDING
+        if [ "$OSTREE_PENDING" -eq 1 ]; then
+            ok "Layered packages via rpm-ostree; they take effect after a reboot."
         else
-            sudo rpm-ostree install --idempotent $RPM_PKGS </dev/null
-            ok "Layered packages via rpm-ostree (system reboot required to activate)."
+            ok "Layered and live-applied packages via rpm-ostree."
         fi
     elif [ "$RPM_TOOL" = "zypper" ]; then
-        sudo zypper --non-interactive install $RPM_PKGS </dev/null
+        $SUDO zypper --non-interactive install $RPM_PKGS </dev/null
     elif command -v dnf >/dev/null 2>&1; then
-        sudo dnf install -y $RPM_PKGS </dev/null
+        $SUDO dnf install -y $RPM_PKGS </dev/null
     else
-        sudo yum install -y $RPM_PKGS </dev/null
+        $SUDO yum install -y $RPM_PKGS </dev/null
     fi
     if is_kde_session; then
         KDE_PKGS="gaze-kde"
-        if [ "$RPM_TOOL" = "zypper" ]; then
-            install_kde_packages sudo zypper --non-interactive install $KDE_PKGS </dev/null
+        if [ "$RPM_TOOL" = "rpm-ostree" ]; then
+            install_kde_packages ostree_install $KDE_PKGS
+            if [ "${KDE_PACKAGES_INSTALLED:-0}" -eq 1 ] && [ "$OSTREE_LAST_PENDING" -eq 1 ] && [ "$OSTREE_PENDING" -eq 0 ]; then
+                warn "gaze-kde was layered for the next boot; reboot to get KDE lock screen face unlock."
+            fi
+        elif [ "$RPM_TOOL" = "zypper" ]; then
+            install_kde_packages $SUDO zypper --non-interactive install $KDE_PKGS </dev/null
         elif command -v dnf >/dev/null 2>&1; then
-            install_kde_packages sudo dnf install -y $KDE_PKGS </dev/null
+            install_kde_packages $SUDO dnf install -y $KDE_PKGS </dev/null
         else
-            install_kde_packages sudo yum install -y $KDE_PKGS </dev/null
+            install_kde_packages $SUDO yum install -y $KDE_PKGS </dev/null
         fi
     fi
 
     step "Configuring PAM"
-    if is_opensuse_tumbleweed; then
+    if [ "$NO_PAM" -eq 1 ]; then
+        say "Leaving PAM unchanged."
+    elif is_opensuse_tumbleweed; then
         configure_pam_opensuse
     else
         configure_authselect
@@ -1132,7 +1280,7 @@ EOF
     enable_desktop_integrations
 
     step "Enabling Gaze daemon"
-    sudo systemctl enable --now gazed </dev/null 2>/dev/null || true
+    enable_gazed
 
 elif is_arch; then
     step "Checking for AUR helper"
@@ -1178,7 +1326,7 @@ elif is_arch; then
     # --needed skips anything already at this version, so re-running the installer does
     # not rebuild from source. stdin is the piped installer itself, so close it the way
     # the apt/dnf paths do: a helper that reads a prompt from there would eat the rest of
-    # this script. sudo still reads its password from the terminal.
+    # this script. $SUDO still reads its password from the terminal.
     "$AUR_HELPER" -S --needed --noconfirm $AUR_PKGS </dev/null
     if is_kde_session; then
         KDE_PKGS="gaze-kde-bin"
@@ -1186,29 +1334,54 @@ elif is_arch; then
     fi
 
     step "Configuring PAM"
-    configure_pam_arch
+    if [ "$NO_PAM" -eq 1 ]; then
+        say "Leaving PAM unchanged."
+    else
+        configure_pam_arch
+    fi
 
     step "Desktop integration"
     enable_desktop_integrations
 
     step "Enabling Gaze daemon"
-    sudo systemctl enable --now gazed </dev/null 2>/dev/null || true
+    enable_gazed
 fi
 
 # ── done ─────────────────────────────────────────────────────────────────────
 
-printf '\n%s\n\n' "${GREEN}${BOLD}✓ Gaze installed successfully${RESET}"
+verify_install
+
+if [ "${OSTREE_PENDING:-0}" -eq 1 ]; then
+    printf '\n%s\n\n' "${YELLOW}${BOLD}! Gaze is staged; reboot to finish installing${RESET}"
+elif [ -z "$PROBLEMS" ]; then
+    printf '\n%s\n\n' "${GREEN}${BOLD}✓ Gaze installed successfully${RESET}"
+else
+    printf '\n%s\n' "${YELLOW}${BOLD}! Gaze installed, but some steps need attention:${RESET}"
+    printf '%s\n' "$PROBLEMS"
+fi
+
+NEXT_STEP=0
+next_step() {
+    NEXT_STEP=$((NEXT_STEP + 1))
+    printf '  %s. %s%-22s%s %s%s%s\n' "$NEXT_STEP" "$BOLD" "$1" "$RESET" "$DIM" "$2" "$RESET"
+}
 
 title "Next steps"
-say "  1. ${BOLD}gaze config${RESET}            ${DIM}configure your camera and security settings${RESET}"
-say "  2. ${BOLD}gaze add-face <name>${RESET}   ${DIM}enroll your face${RESET}"
-say "  3. ${BOLD}gaze auth${RESET}              ${DIM}test it in the terminal${RESET}"
-if want_gnome_extension_package; then
-    say "  4. ${BOLD}Reboot${RESET}                 ${DIM}GNOME Shell and GDM only pick up the new extension at startup${RESET}"
+if [ "${OSTREE_PENDING:-0}" -eq 1 ]; then
+    next_step "Reboot" "rpm-ostree applies the packages; the daemon and PAM finish at boot"
+fi
+if [ -n "$PROBLEMS" ]; then
+    next_step "gaze doctor" "diagnose the steps above"
+fi
+next_step "gaze config" "configure your camera and security settings"
+next_step "gaze add-face <name>" "enroll your face"
+next_step "gaze auth" "test it in the terminal"
+if want_gnome_extension_package && [ "${OSTREE_PENDING:-0}" -eq 0 ]; then
+    next_step "Reboot" "GNOME Shell and GDM only pick up the new extension at startup"
 elif want_cinnamon_extension_package; then
-    say "  4. ${BOLD}Restart Cinnamon${RESET}       ${DIM}Press Alt+F2, type r, and press Enter to reload Cinnamon${RESET}"
+    next_step "Restart Cinnamon" "Press Alt+F2, type r, and press Enter to reload Cinnamon"
 elif is_omarchy_session; then
-    say "  4. ${BOLD}gaze-omarchy doctor${RESET}    ${DIM}check Omarchy lock integration after enrollment${RESET}"
+    next_step "gaze-omarchy doctor" "check Omarchy lock integration after enrollment"
 fi
 say ""
 title "Try it"
@@ -1243,3 +1416,4 @@ if want_hyprlock_setup; then
     ok "hyprlock: configured (auth.pam.module = hyprlock-gaze)"
 fi
 say ""
+}
