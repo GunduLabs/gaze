@@ -691,6 +691,12 @@ class GazeCinnamonExtension {
             }
           }
 
+          if (this._confirmMode) {
+            this._confirmMode = false;
+            this._infoMessageLabel?.hide();
+          }
+          this._passwordBox?.show();
+
           if (this._passwordEntry) {
             this._passwordEntry.hint_text = hintText;
             this._passwordEntry.password_visible = echoOn;
