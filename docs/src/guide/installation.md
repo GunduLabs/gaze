@@ -61,6 +61,16 @@ For non-interactive installs:
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
 ```
 
+To install without adding Gaze to any PAM stack, pass `--no-pam`. The installer records the choice in `/etc/gaze/pam.optout`, and package upgrades leave PAM alone while that file exists. Delete it and re-run the installer to turn face authentication on for PAM.
+
+```bash
+curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --no-pam
+```
+
+The installer runs as your normal user and asks for `sudo` when it needs it. As root it runs without `sudo`, except on Arch, where AUR helpers refuse to build as root. At the end it checks that the daemon is running and that a PAM service uses Gaze, and lists anything that needs attention instead of reporting success.
+
+On image-based Fedora (Silverblue, Kinoite, Bazzite), packages that cannot be applied live take effect after a reboot. The installer stages the daemon and the authselect profile so both finish on that boot.
+
 ## Path B: manual package install
 
 Use this if you prefer to configure package sources yourself. Debian/Ubuntu, Fedora-compatible systems, and openSUSE Tumbleweed use Gundu Labs repositories. Arch Linux and Arch-compatible distributions such as Manjaro and CachyOS use the AUR packages.

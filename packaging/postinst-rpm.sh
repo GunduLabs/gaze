@@ -51,6 +51,7 @@ is_suse() {
 configure_pam_suse() {
 	# Only SUSE builds install this vendor definition.
 	command -v pam-config >/dev/null 2>&1 || return 0
+	[ -e /etc/gaze/pam.optout ] && return 0
 	[ -f /usr/lib/pam-config.d/gaze.conf ] || return 0
 
 	# pam-config always writes pam_unix as required, so the retry line could never rescue a

@@ -1604,14 +1604,19 @@ fn append_package_manager_uninstall_steps(
             ));
             plan.push((
                 "Remove dnf repo",
-                "sudo rm -f /etc/yum.repos.d/gundulabs.repo".into(),
+                "sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs"
+                    .into(),
             ));
         }
         PackageManager::RpmOstree => {
             plan.push(("Remove layered packages", remove_rpm_ostree_packages_cmd()));
             plan.push((
                 "Remove dnf repo",
-                "sudo rm -f /etc/yum.repos.d/gundulabs.repo".into(),
+                "sudo rm -f /etc/yum.repos.d/gundulabs.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs \
+                  /etc/systemd/system/gaze-finish-install.service \
+                  /etc/systemd/system/multi-user.target.wants/gaze-finish-install.service \
+                  /etc/systemd/system/multi-user.target.wants/gazed.service"
+                    .into(),
             ));
             plan.push((
                 "Reboot to finalize removal",

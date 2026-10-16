@@ -49,5 +49,5 @@ if [ -d /run/systemd/system ]; then
 		systemctl enable --now gazed >/dev/null 2>&1 || true
 		systemctl try-restart gazed >/dev/null 2>&1 || true
 	fi
-	pam-auth-update --package >/dev/null 2>&1 || true
+	[ -e /etc/gaze/pam.optout ] || pam-auth-update --package >/dev/null 2>&1 || true
 fi

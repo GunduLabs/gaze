@@ -7,6 +7,7 @@ set -e
 PAM_STATE=/etc/gaze/pam-arch.configured
 PAM_POLKIT_STATE=/etc/gaze/pam-arch.polkit-configured
 PAM_SUDO_OPTOUT=/etc/gaze/pam-sudo.optout
+PAM_OPTOUT=/etc/gaze/pam.optout
 
 cpu_lacks_avx2() {
 	case "$(uname -m)" in
@@ -163,8 +164,10 @@ check_deprecated_pam_grosshack() {
 
 check_deprecated_pam_grosshack
 warn_missing_avx2
-configure_pam_sudo
-configure_pam_polkit
+if [ ! -e "$PAM_OPTOUT" ]; then
+	configure_pam_sudo
+	configure_pam_polkit
+fi
 
 if [ -d /run/systemd/system ]; then
 	systemctl daemon-reload >/dev/null 2>&1 || true
