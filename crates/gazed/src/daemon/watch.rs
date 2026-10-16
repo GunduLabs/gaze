@@ -331,10 +331,7 @@ mod tests {
             "org.freedesktop.login1.session",
         ] {
             assert_eq!(
-                locked_hint_from_parts(
-                    interface,
-                    &changed_with(Some(zbus::Variant::Bool(true))),
-                ),
+                locked_hint_from_parts(interface, &changed_with(Some(zbus::Variant::Bool(true))),),
                 None,
                 "interface {interface:?} must not yield a lock state"
             );
