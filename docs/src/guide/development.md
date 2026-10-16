@@ -443,6 +443,27 @@ access, pass a directory with one folder per target (such as `arch` or
 PAM modules are simulated. Unlock an actual Plasma session, or use
 `just kde-harness`, before treating a distribution release as fully verified.
 
+## Testing Cinnamon compatibility
+
+With Node.js 22 or newer, run:
+
+```bash
+node scripts/test-cinnamon.mjs
+```
+
+This downloads Cinnamon's Polkit agent from 6.2, 6.4, 6.6 and the 6.8
+development series, plus the 6.8 lock screen unlock dialog, and runs them with
+the Gaze extension. Releases before 6.2 have no Cinnamon Polkit agent, so there
+the tests only check D-Bus registration and a clean disable. The tests cover
+confirmation by keyboard and button, password prompts and fallback, camera
+hints, error messages, Polkit retries, lock screen retry modes, and restoring
+every upstream method on disable. CI runs the same command. To use downloaded
+sources without network access, pass a directory with one folder per Cinnamon
+tag (such as `6.6.9`) holding the files the script would otherwise download.
+
+Widgets, signals and D-Bus are simulated. Unlock an actual Cinnamon session and
+approve a Polkit prompt before treating a release as fully verified.
+
 ## Packaging
 
 ```bash
