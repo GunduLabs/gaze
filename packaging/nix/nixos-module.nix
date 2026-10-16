@@ -293,9 +293,8 @@ in
             }
           );
 
-          # Keep the four handoff rules adjacent. A failed face attempt jumps
-          # over both KWallet and the success terminator to the original stack;
-          # success saves PAM_AUTHTOK without asking pam_unix for a password.
+          # Keep handoff rules adjacent: failure skips KWallet and the success terminator;
+          # success saves PAM_AUTHTOK without prompting through pam_unix.
           config.rules.auth.gazeWalletNologin = lib.mkIf walletLogin {
             order = gazeOrder - 2;
             control = "requisite";
@@ -387,11 +386,12 @@ in
         systemd.services.gazed = {
           description = "Daemon for Gaze";
           # Mirrors packaging/config/gazed.service.
-          after = [ "dbus.service" ];
+          after = [ "dbus.service" "network-online.target" ];
           requires = [ "dbus.service" ];
+          wants = [ "network-online.target" ];
           wantedBy = [ "multi-user.target" ];
-          startLimitIntervalSec = 60;
-          startLimitBurst = 5;
+          # Retry offline model downloads without hitting the start limit.
+          startLimitIntervalSec = 0;
           environment = {
             XDG_CACHE_HOME = "/var/cache/gaze";
           }
@@ -407,6 +407,10 @@ in
             StateDirectory = "gaze";
             StateDirectoryMode = "0700";
             CacheDirectory = "gaze";
+            RuntimeDirectory = "gaze";
+            RuntimeDirectoryMode = "0700";
+            # Keep resume history until reboot.
+            RuntimeDirectoryPreserve = "yes";
             UMask = "0077";
             LimitCORE = 0;
             NoNewPrivileges = true;
@@ -489,11 +493,8 @@ in
           shareWithReader = slot == "kde-fingerprint" && readerHasFingerprintSlot;
         in
         {
-          # Use a face-only, sequential stack: this noninteractive slot cannot
-          # answer prompts, so simultaneous mode is not appropriate here.
-          # The gates run before Gaze: a `success=done` match ends the whole auth
-          # stack, so anything behind it (faillock, nologin) would otherwise be
-          # skipped by a face unlock. Mirrors gaze-kde-pam's managed block.
+          # This face-only slot cannot answer prompts; keep it sequential.
+          # Run faillock/nologin first: success=done skips the rest of the auth stack.
           security.pam.services.${slot}.text = ''
             auth       requisite                      pam_nologin.so
             auth       requisite                      pam_faillock.so preauth
@@ -519,11 +520,8 @@ in
         security.pam.services.plasmalogin.gaze.enable = lib.mkDefault true;
         security.pam.services.sddm.gaze.enable = lib.mkDefault true;
 
-        # Plasma Login Manager runs this service alongside the password field,
-        # so face authentication can start before submission. Versions without
-        # plasma-login-manager!185 do not start this service or read its config.
-        # The gates run before Gaze for the same `success=done` reason as the
-        # lock-screen slot above.
+        # Pre-submit face auth requires plasma-login-manager!185.
+        # As above, run gates before Gaze because success=done ends authentication.
         security.pam.services."plasmalogin-fingerprint".text =
           if cfg.kde.unlockKwallet then
             let

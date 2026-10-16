@@ -3,10 +3,11 @@
 
 [Unit]
 Description=Daemon for Gaze
-After=dbus.service
+After=dbus.service network-online.target
 Requires=dbus.service
-StartLimitIntervalSec=60
-StartLimitBurst=5
+Wants=network-online.target
+# Retry offline model downloads without hitting the start limit.
+StartLimitIntervalSec=0
 
 [Service]
 ExecStart=/usr/bin/gazed
@@ -18,6 +19,10 @@ RestartPreventExitStatus=78
 StateDirectory=gaze
 StateDirectoryMode=0700
 CacheDirectory=gaze
+RuntimeDirectory=gaze
+RuntimeDirectoryMode=0700
+# Keep resume history until reboot.
+RuntimeDirectoryPreserve=yes
 Environment=XDG_CACHE_HOME=/var/cache/gaze
 UMask=0077
 LimitCORE=0

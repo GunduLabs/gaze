@@ -260,13 +260,16 @@ async fn run(config: Config) -> anyhow::Result<()> {
     let sources = gaze_vision::camera::resolve_configured_sources(&config.cameras);
 
     let resume_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let resume_seen = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let resume_seen = Arc::new(std::sync::atomic::AtomicBool::new(
+        daemon::resume_seen_marker_exists(),
+    ));
     let (sleeping_tx, sleeping) = tokio::sync::watch::channel(false);
     let lock_epochs: daemon::LockEpochs = Arc::new(Mutex::new(std::collections::HashMap::new()));
     let claim_state: daemon::ClaimStateHandle = Arc::new(Mutex::new(None));
     let active_cancel: daemon::ActiveCancelHandle = Arc::new(Mutex::new(None));
     let pam_internal: daemon::PamInternalSets =
         Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let camera_lease: daemon::CameraLease = Arc::new(Mutex::new(()));
 
     let daemon = AuthDaemon {
         detector: Arc::new(std::sync::Mutex::new(detector)),
@@ -291,6 +294,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
         claim_state: claim_state.clone(),
         active_cancel: active_cancel.clone(),
         pam_internal: pam_internal.clone(),
+        camera_lease: camera_lease.clone(),
         resume_pending: resume_pending.clone(),
         resume_seen: resume_seen.clone(),
         sleeping,
@@ -308,18 +312,18 @@ async fn run(config: Config) -> anyhow::Result<()> {
         .build()
         .await?;
 
-    tokio::spawn(daemon::watch_resume(
+    let resume_watcher = tokio::spawn(daemon::watch_resume(
         conn.clone(),
         resume_pending,
         resume_seen,
         sleeping_tx,
     ));
-    tokio::spawn(daemon::watch_session_locks(conn.clone(), lock_epochs));
+    let lock_watcher = tokio::spawn(daemon::watch_session_locks(conn.clone(), lock_epochs));
 
     // No client can claim before the well-known name exists, so subscribing here is what makes
     // the watcher airtight. Fatal by design, so systemd restarts rather than stranding claims.
     let claim_owners = daemon::subscribe_claim_owners(&conn).await?;
-    tokio::spawn(daemon::watch_claim_owner(
+    let claim_watcher = tokio::spawn(daemon::watch_claim_owner(
         claim_owners,
         claim_state,
         active_cancel,
@@ -329,9 +333,16 @@ async fn run(config: Config) -> anyhow::Result<()> {
     conn.request_name("com.gundulabs.Gaze").await?;
 
     info!("Gaze Daemon listening on System Bus");
-    std::future::pending::<()>().await;
-
-    Ok(())
+    let (watcher, result) = tokio::select! {
+        result = resume_watcher => ("PrepareForSleep watcher", result),
+        result = lock_watcher => ("session LockedHint watcher", result),
+        result = claim_watcher => ("NameOwnerChanged watcher", result),
+    };
+    match result {
+        Ok(Ok(())) => anyhow::bail!("{watcher} exited unexpectedly"),
+        Ok(Err(e)) => anyhow::bail!("{watcher} failed: {e}"),
+        Err(e) => anyhow::bail!("{watcher} panicked: {e}"),
+    }
 }
 
 #[cfg(test)]

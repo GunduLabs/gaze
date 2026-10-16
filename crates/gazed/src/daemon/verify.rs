@@ -3,6 +3,33 @@
 
 use super::*;
 
+#[derive(Default)]
+struct VerifyFrameBudget {
+    rgb: u32,
+    ir: u32,
+}
+
+impl VerifyFrameBudget {
+    fn frames(&mut self, spectrum: Spectrum) -> &mut u32 {
+        match spectrum {
+            Spectrum::Rgb => &mut self.rgb,
+            Spectrum::Ir => &mut self.ir,
+        }
+    }
+
+    /// Reset this camera's budget; return whether shared deadlines should reset.
+    fn phase_started(&mut self, spectrum: Spectrum, serial_capture: bool) -> bool {
+        *self.frames(spectrum) = 0;
+        serial_capture
+    }
+
+    fn frame_spent(&mut self, spectrum: Spectrum, max_frames: u32) -> bool {
+        let frames = self.frames(spectrum);
+        *frames = frames.saturating_add(1);
+        *frames > max_frames
+    }
+}
+
 pub(super) enum VerifyMsg {
     PhaseStarted(Spectrum),
     Diagnostic(String),
@@ -38,9 +65,8 @@ impl VerifyGiveUp {
     }
 }
 
-/// Checks whether a verification run has reached either deadline. Both are needed because
-/// `Clipped` and `Ready` refresh `since_face` but not `since_usable`; alone, they can keep a run
-/// alive without producing a frame that can be used for matching.
+/// Bound both missing faces and unusable frames: `Clipped` and `Ready` refresh only
+/// the face deadline, so framing problems cannot keep verification alive forever.
 pub(super) fn verify_give_up(since_face: Duration, since_usable: Duration) -> Option<VerifyGiveUp> {
     if since_face >= VERIFY_NO_FACE_TIMEOUT {
         return Some(VerifyGiveUp::NoFace);
@@ -294,6 +320,8 @@ impl AuthDaemon {
         self.ensure_auth_not_aborted(&header).await?;
         let lid_wait = self.lid_closed_wait().await?;
         let mut sleeping = self.sleeping.clone();
+        // Ignore sleep notifications predating this request.
+        sleeping.borrow_and_update();
 
         let resumed = self.resume_pending.load(Ordering::SeqCst);
         let resume_pending = self.resume_pending.clone();
@@ -360,6 +388,7 @@ impl AuthDaemon {
         let eye_state_arc = self.eye_state.clone();
         let duress_lockout = self.duress_lockout.clone();
         let duress_locked = duress_lockout.is_locked(&username);
+        let camera_lease = self.camera_lease.clone();
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
         let (caller_uid, target_uid) = Self::ensure_claim_camera_access(&header, &claim).await?;
@@ -459,25 +488,58 @@ impl AuthDaemon {
                             let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::NoFace, CaptureStatus::NoFace).await;
                             return;
                         }
-                        true = sleep_reaches(&mut sleeping, true) => continue,
+                        changed = sleeping.changed() => {
+                            if changed.is_err() {
+                                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
+                                return;
+                            }
+                            held = true;
+                            delay = Duration::from_millis(config.auth.resume_grace_ms);
+                            continue;
+                        }
                         _ = tokio::time::sleep(delay) => {}
                     }
                 }
-                if (held || !delay.is_zero()) && abort_if_lid_closed && Self::is_lid_closed().await {
-                    warn!("Laptop lid is closed, aborting face auth");
-                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
-                    return;
-                }
-
-                // A configured delay may span a seat switch or claim revocation.
-                if !Self::seat_camera_available(caller_uid, target_uid).await
+                let _camera_lease_guard = match acquire_camera_lease(
+                    &camera_lease,
+                    &mut rx,
+                    Some(&mut sleeping),
+                    async {
+                        if abort_if_lid_closed && Self::is_lid_closed().await {
+                            warn!("Laptop lid is closed, aborting face auth");
+                            return false;
+                        }
+                        // Check the seat last, after all other waits.
+                        let allowed = Self::seat_camera_available(caller_uid, target_uid).await;
+                        if !allowed {
+                            warn!("VerifyStart: seat camera access changed before capture");
+                        }
+                        allowed
+                    },
+                ).await {
+                    Ok(guard) => guard,
+                    Err(CameraLeaseError::SleepChanged) => {
+                        held = true;
+                        delay = Duration::from_millis(config.auth.resume_grace_ms);
+                        continue;
+                    }
+                    Err(reason) => {
+                        info!(?reason, "VerifyStart: camera lease refused");
+                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
+                        return;
+                    }
+                };
+                if duress_lockout.is_locked(&username)
                     || rx.try_recv() != Err(oneshot::error::TryRecvError::Empty)
                 {
                     let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
                     return;
                 }
-
-                resume_pending.store(false, Ordering::SeqCst);
+                if !acknowledge_resume(&mut sleeping, &resume_pending) {
+                    held = true;
+                    delay = Duration::from_millis(config.auth.resume_grace_ms);
+                    continue;
+                }
                 let mut run_rgb = run_rgb;
 
                 info!(
@@ -541,6 +603,7 @@ impl AuthDaemon {
                             }
                         };
                         tracing::debug!("RGB camera opened successfully at: {}", rgb_device_clone);
+                        let _ = tx.blocking_send(VerifyMsg::PhaseStarted(Spectrum::Rgb));
 
                         let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, false);
                         let dark_hands_over_to_ir = should_yield_rgb_to_ir(
@@ -907,7 +970,7 @@ impl AuthDaemon {
                 let mut dark_since: Option<Instant> = None;
                 let mut last_face_at = Instant::now();
                 let mut last_usable_at = Instant::now();
-                let mut frames_seen: u32 = 0;
+                let mut frame_budget = VerifyFrameBudget::default();
 
                 let mut rgb_success_embed = None;
                 let mut ir_success_embed = None;
@@ -992,21 +1055,13 @@ impl AuthDaemon {
                                 break;
                             };
                             match msg {
-                                VerifyMsg::PhaseStarted(Spectrum::Ir) if serial_capture => {
-                                    // RGB and IR run serially on single-function cameras. Give
-                                    // IR a fresh no-face window after RGB releases the device.
-                                    last_face_at = Instant::now();
-                                    last_usable_at = Instant::now();
-                                    frames_seen = 0;
-                                    dark_since = None;
+                                VerifyMsg::PhaseStarted(spectrum) => {
+                                    if frame_budget.phase_started(spectrum, serial_capture) {
+                                        last_face_at = Instant::now();
+                                        last_usable_at = Instant::now();
+                                        dark_since = None;
+                                    }
                                 }
-                                VerifyMsg::PhaseStarted(Spectrum::Rgb) => {
-                                    last_face_at = Instant::now();
-                                    last_usable_at = Instant::now();
-                                    frames_seen = 0;
-                                    dark_since = None;
-                                }
-                                VerifyMsg::PhaseStarted(_) => {}
                                 VerifyMsg::Diagnostic(message) => {
                                     let _ = Self::verify_diagnostic(&ctxt, &message).await;
                                 }
@@ -1034,8 +1089,7 @@ impl AuthDaemon {
 
                                     if has_face {
                                         last_usable_at = Instant::now();
-                                        frames_seen += 1;
-                                        if frames_seen > liveness_cfg.effective_max_frames(fps) {
+                                        if frame_budget.frame_spent(spectrum, liveness_cfg.effective_max_frames(fps)) {
                                             stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                                             let final_scores = hybrid_scores!();
                                             let matched = final_scores
@@ -1167,6 +1221,58 @@ impl AuthDaemon {
 mod tests {
     use super::*;
     use gaze_core::dbus::CaptureStatus;
+
+    #[test]
+    fn parallel_cameras_have_independent_frame_budgets() {
+        let mut budget = VerifyFrameBudget::default();
+        for _ in 0..60 {
+            assert!(!budget.frame_spent(Spectrum::Rgb, 60));
+            assert!(!budget.frame_spent(Spectrum::Ir, 60));
+        }
+        assert!(budget.frame_spent(Spectrum::Rgb, 60));
+        assert!(budget.frame_spent(Spectrum::Ir, 60));
+    }
+
+    #[test]
+    fn late_rgb_start_preserves_ir_frames_and_shared_deadlines() {
+        let mut budget = VerifyFrameBudget::default();
+        for _ in 0..60 {
+            assert!(!budget.frame_spent(Spectrum::Ir, 60));
+        }
+        assert!(!budget.phase_started(Spectrum::Rgb, false));
+        assert!(budget.frame_spent(Spectrum::Ir, 60));
+        assert!(!budget.frame_spent(Spectrum::Rgb, 60));
+    }
+
+    #[test]
+    fn late_ir_start_preserves_rgb_frames_and_shared_deadlines() {
+        let mut budget = VerifyFrameBudget::default();
+        assert!(!budget.frame_spent(Spectrum::Rgb, 1));
+        assert!(!budget.phase_started(Spectrum::Ir, false));
+        assert!(budget.frame_spent(Spectrum::Rgb, 1));
+    }
+
+    #[test]
+    fn serial_handoff_refreshes_deadlines_and_only_the_new_phase_budget() {
+        let mut budget = VerifyFrameBudget::default();
+        assert!(!budget.frame_spent(Spectrum::Rgb, 1));
+        assert!(!budget.frame_spent(Spectrum::Ir, 1));
+        assert!(budget.phase_started(Spectrum::Ir, true));
+        assert!(!budget.frame_spent(Spectrum::Ir, 1));
+        assert!(budget.frame_spent(Spectrum::Rgb, 1));
+    }
+
+    #[test]
+    fn each_camera_uses_its_own_fps_adjusted_limit() {
+        let mut budget = VerifyFrameBudget::default();
+        for _ in 0..30 {
+            assert!(!budget.frame_spent(Spectrum::Rgb, 30));
+            assert!(!budget.frame_spent(Spectrum::Ir, 60));
+            assert!(!budget.frame_spent(Spectrum::Ir, 60));
+        }
+        assert!(budget.frame_spent(Spectrum::Rgb, 30));
+        assert!(budget.frame_spent(Spectrum::Ir, 60));
+    }
 
     #[test]
     fn watchdog_polls_faster_than_the_timeouts_it_guards() {
