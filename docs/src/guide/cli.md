@@ -21,7 +21,7 @@ pass `-u root`.
 
 `gaze auth`, `gaze list-faces`, `gaze doctor`, and `gaze config --show` are read-only and stay unprivileged.
 
-The `gazed` daemon enforces this independently of the CLI: a non-root DBus caller must pass a polkit check for `com.gundulabs.gaze.manage-faces` or `com.gundulabs.gaze.manage-config`. That is how the [GUI](/guide/gui) authorizes the same operations, and it means calling the DBus methods directly does not bypass the requirement.
+The `gazed` daemon enforces this independently of the CLI: a non-root DBus caller must pass a polkit check for `com.gundulabs.gaze.manage-faces` or `com.gundulabs.gaze.manage-config`. That is how the [GUI](/guide/gui) authorizes the same operations, and it means calling the DBus methods directly does not bypass the requirement. While one of these prompts is open, `gazed` refuses face authentication for the polkit dialog, so changing Gaze's faces or settings always takes a password.
 
 ## Most common workflow
 
