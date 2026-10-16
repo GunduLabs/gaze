@@ -83,8 +83,19 @@
       "schedule": ["* 0-5 * * *"],
     },
     {
-      "description": "Never pin actions or container images to a digest. The presets that do this, helpers:pinGitHubActionDigests and docker:pinDigests, are deliberately left out of extends above; this rule is the backstop in case they ever come back, and it is last in packageRules so it overrides anything a preset sets",
-      "matchManagers": ["github-actions", "dockerfile", "docker-compose"],
+      "description": "Pin GitHub Actions to commit SHAs so a moved tag cannot change code that sees release secrets; Renovate keeps the SHA and its version comment current",
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["action"],
+      "pinDigests": true,
+    },
+    {
+      "description": "Never pin container images to a digest. docker:pinDigests is deliberately left out of extends above; these rules are the backstop in case it ever comes back, and they are last in packageRules so they override anything a preset sets",
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "pinDigests": false,
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["container", "service"],
       "pinDigests": false,
     },
   ],

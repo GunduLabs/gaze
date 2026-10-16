@@ -29,7 +29,7 @@ runs:
         echo "FLATPAK_RUNTIME_VERSION=$runtime_version" >> "$GITHUB_ENV"
 
     - name: Restore flatpak-builder state
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: .flatpak-builder
         key: flatpak-builder-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packaging/flatpak/com.gundulabs.Gaze.yml', 'Cargo.lock') }}
@@ -37,7 +37,7 @@ runs:
           flatpak-builder-${{ runner.os }}-${{ runner.arch }}-
 
     - name: Restore Flatpak runtimes and SDKs
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.local/share/flatpak
         key: flatpak-runtimes-${{ runner.os }}-${{ runner.arch }}-gnome${{ env.FLATPAK_RUNTIME_VERSION }}-v1
