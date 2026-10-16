@@ -62,7 +62,7 @@ jobs:
       - name: Parse POSIX scripts with dash
         run: |
           for f in docs/public/install.sh packaging/*.sh scripts/check-pam-link.sh \
-            scripts/dev-link-system.sh scripts/setup-hooks.sh scripts/pre-commit \
+            scripts/dev-link-system.sh scripts/setup-hooks.sh scripts/test-install.sh scripts/pre-commit \
             integrations/omarchy/gaze-omarchy integrations/kde/gaze-kde-pam; do
             dash -n "$f"
           done
@@ -77,6 +77,52 @@ jobs:
             scripts/pre-commit \
             integrations/omarchy/gaze-omarchy \
             integrations/kde/gaze-kde-pam
+
+  installer:
+    name: Installer (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu 24.04
+            container: ubuntu:24.04
+            family: deb
+          - name: Debian 13
+            container: debian:13
+            family: deb
+          - name: Fedora 44
+            container: fedora:44
+            family: fedora
+          - name: openSUSE Tumbleweed
+            container: opensuse/tumbleweed:latest
+            family: opensuse
+          - name: Arch Linux
+            container: archlinux:latest
+            family: arch
+          - name: Ubuntu 22.04, unsupported
+            container: ubuntu:22.04
+            family: unsupported
+
+    steps:
+      - name: Install installer prerequisites
+        run: |
+          if command -v apt-get >/dev/null; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl
+          elif command -v zypper >/dev/null; then
+            zypper --non-interactive install --no-recommends curl gawk
+          fi
+
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Dry-run the installer
+        run: sh scripts/test-install.sh ${{ matrix.family }}
 
   audit:
     name: Audit

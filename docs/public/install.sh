@@ -15,6 +15,7 @@ PAM_DOCS_URL="https://gaze.gundulabs.com/guide/pam"
 PAM_SUDO_OPTOUT="/etc/gaze/pam-sudo.optout"
 REPO_KEY_FPR="505AC1C71AFEDBD5555235F6CB4FA24E5C1C7C98"
 AUTO_YES=0
+DRY_RUN=0
 
 ESC="$(printf '\033')"
 if [ -t 1 ] && [ "${TERM:-}" != "dumb" ] && [ -z "${NO_COLOR:-}" ]; then
@@ -52,6 +53,8 @@ Usage:
 
 Options:
   -y, --yes                  Use detected defaults without prompting
+      --dry-run              Print the detected platform and the install commands,
+                             then exit without changing anything
   -h, --help                 Show this help
 
 The GNOME extension package is installed only when a GNOME desktop session is
@@ -66,6 +69,7 @@ EOF
 while [ "$#" -gt 0 ]; do
     case "$1" in
     -y | --yes) AUTO_YES=1 ;;
+    --dry-run) DRY_RUN=1 ;;
     -h | --help)
         usage
         exit 0
@@ -686,7 +690,9 @@ need grep
 need uname
 need awk
 need id
-need gpg
+if [ "$DRY_RUN" -eq 0 ]; then
+    need gpg
+fi
 
 fetch_repo_key() {
     key_path="$TMP/gundulabs-repo.asc"
@@ -881,11 +887,96 @@ require_published_repository() {
 
 require_published_repository
 
+select_packages() {
+    KDE_PKGS=""
+    if is_arch; then
+        PKGS="gaze-bin gaze-gui-bin"
+        suffix="-bin"
+    else
+        PKGS="gaze gaze-gui"
+        suffix=""
+    fi
+    if is_opensuse_tumbleweed; then
+        # Minimal Tumbleweed installations may not include pam-config.
+        PKGS="$PKGS pam-config"
+    fi
+    if want_gnome_extension_package; then
+        PKGS="$PKGS gaze-gnome-extension$suffix"
+    fi
+    if want_cinnamon_extension_package; then
+        PKGS="$PKGS gaze-cinnamon-extension$suffix"
+    fi
+    if is_arch && is_omarchy_session; then
+        PKGS="$PKGS gaze-omarchy-bin"
+    fi
+    if want_hyprlock_setup; then
+        PKGS="$PKGS gaze-hyprlock$suffix"
+    fi
+    if is_kde_session; then
+        KDE_PKGS="gaze-kde$suffix"
+    fi
+}
+
+select_install_command() {
+    if is_deb; then
+        INSTALL_CMD="sudo apt-get install -y"
+    elif is_arch; then
+        INSTALL_CMD="$AUR_HELPER -S --needed --noconfirm"
+    elif [ "$RPM_TOOL" = "zypper" ]; then
+        INSTALL_CMD="sudo zypper --non-interactive install"
+    elif [ "$RPM_TOOL" = "rpm-ostree" ]; then
+        INSTALL_CMD="sudo rpm-ostree install --idempotent"
+    else
+        INSTALL_CMD="sudo $RPM_TOOL install -y"
+    fi
+}
+
+require_aur_helper() {
+    AUR_HELPER=""
+    for helper in yay paru; do
+        if command -v "$helper" >/dev/null 2>&1; then
+            AUR_HELPER="$helper"
+            break
+        fi
+    done
+
+    if [ -z "$AUR_HELPER" ]; then
+        fail "No AUR helper found (tried: yay, paru)."
+        say ""
+        say "Gaze is distributed via the AUR and requires an AUR helper to install."
+        say "We recommend yay. To install it:"
+        say ""
+        cmd "sudo pacman -S --needed base-devel git"
+        cmd "git clone https://aur.archlinux.org/yay.git"
+        cmd "cd yay && makepkg -si"
+        say ""
+        say "Then re-run this installer."
+        exit 1
+    fi
+}
+
+print_dry_run() {
+    live=""
+    if [ "${RPM_TOOL:-}" = "rpm-ostree" ]; then
+        live=" --apply-live"
+    fi
+    echo ""
+    title "Dry run"
+    say "  Package manager: ${PKG_TOOL}"
+    say "  Install: ${INSTALL_CMD}${live} ${PKGS}"
+    if [ -n "$KDE_PKGS" ]; then
+        say "  Install (optional): ${INSTALL_CMD} ${KDE_PKGS}"
+    fi
+    say ""
+    say "Nothing was changed."
+}
+
 # ── plan ──────────────────────────────────────────────────────────────────────
 
 plan() { printf '  %s\n' "• $*"; }
 
 if is_deb; then
+    PKG_TOOL="apt"
     say "Detected platform: ${BOLD}Debian/Ubuntu ${DISTRO_CODENAME}${RESET} (${PKG_ARCH}), package manager: apt"
     STEP_TOTAL=5
     echo ""
@@ -919,6 +1010,7 @@ elif is_rpm; then
     else
         RPM_TOOL="yum"
     fi
+    PKG_TOOL="$RPM_TOOL"
     say "Detected platform: ${BOLD}${NAME:-RPM-compatible distribution} ${DISTRO_VERSION_ID}${RESET} (${PKG_ARCH}), package manager: ${RPM_TOOL}"
     STEP_TOTAL=6
     echo ""
@@ -945,6 +1037,7 @@ elif is_rpm; then
     fi
     plan "Enable the Gaze daemon"
 elif is_arch; then
+    PKG_TOOL="AUR helper (yay/paru)"
     say "Detected platform: ${BOLD}Arch-compatible${RESET} (${PKG_ARCH}), package manager: AUR helper (yay/paru)"
     STEP_TOTAL=5
     echo ""
@@ -968,6 +1061,17 @@ elif is_arch; then
     fi
     plan "Configure PAM for sudo"
     plan "Enable the Gaze daemon"
+fi
+
+select_packages
+if [ "$DRY_RUN" -eq 1 ]; then
+    if is_arch; then
+        require_aur_helper
+        PKG_TOOL="$AUR_HELPER"
+    fi
+    select_install_command
+    print_dry_run
+    exit 0
 fi
 
 prompt_continue
@@ -1008,20 +1112,10 @@ if is_deb; then
     sudo apt-get update </dev/null
 
     step "Installing packages"
-    DEB_PKGS="gaze gaze-gui"
-    if want_gnome_extension_package; then
-        DEB_PKGS="$DEB_PKGS gaze-gnome-extension"
-    fi
-    if want_cinnamon_extension_package; then
-        DEB_PKGS="$DEB_PKGS gaze-cinnamon-extension"
-    fi
-    if want_hyprlock_setup; then
-        DEB_PKGS="$DEB_PKGS gaze-hyprlock"
-    fi
-    sudo apt-get install -y $DEB_PKGS </dev/null
-    if is_kde_session; then
-        KDE_PKGS="gaze-kde"
-        install_kde_packages sudo apt-get install -y $KDE_PKGS </dev/null
+    select_install_command
+    $INSTALL_CMD $PKGS </dev/null
+    if [ -n "$KDE_PKGS" ]; then
+        install_kde_packages $INSTALL_CMD $KDE_PKGS </dev/null
     fi
 
     step "Desktop integration"
@@ -1082,43 +1176,19 @@ EOF
     fi
 
     step "Installing packages"
-    RPM_PKGS="gaze gaze-gui"
-    if is_opensuse_tumbleweed; then
-        # Minimal Tumbleweed installations may not include pam-config.
-        RPM_PKGS="$RPM_PKGS pam-config"
-    fi
-    if want_gnome_extension_package; then
-        RPM_PKGS="$RPM_PKGS gaze-gnome-extension"
-    fi
-    if want_cinnamon_extension_package; then
-        RPM_PKGS="$RPM_PKGS gaze-cinnamon-extension"
-    fi
-    if want_hyprlock_setup; then
-        RPM_PKGS="$RPM_PKGS gaze-hyprlock"
-    fi
+    select_install_command
     if [ "$RPM_TOOL" = "rpm-ostree" ]; then
-        if sudo rpm-ostree install --idempotent --apply-live $RPM_PKGS </dev/null 2>/dev/null; then
+        if $INSTALL_CMD --apply-live $PKGS </dev/null 2>/dev/null; then
             ok "Layered and live-applied packages via rpm-ostree."
         else
-            sudo rpm-ostree install --idempotent $RPM_PKGS </dev/null
+            $INSTALL_CMD $PKGS </dev/null
             ok "Layered packages via rpm-ostree (system reboot required to activate)."
         fi
-    elif [ "$RPM_TOOL" = "zypper" ]; then
-        sudo zypper --non-interactive install $RPM_PKGS </dev/null
-    elif command -v dnf >/dev/null 2>&1; then
-        sudo dnf install -y $RPM_PKGS </dev/null
     else
-        sudo yum install -y $RPM_PKGS </dev/null
+        $INSTALL_CMD $PKGS </dev/null
     fi
-    if is_kde_session; then
-        KDE_PKGS="gaze-kde"
-        if [ "$RPM_TOOL" = "zypper" ]; then
-            install_kde_packages sudo zypper --non-interactive install $KDE_PKGS </dev/null
-        elif command -v dnf >/dev/null 2>&1; then
-            install_kde_packages sudo dnf install -y $KDE_PKGS </dev/null
-        else
-            install_kde_packages sudo yum install -y $KDE_PKGS </dev/null
-        fi
+    if [ -n "$KDE_PKGS" ]; then
+        install_kde_packages $INSTALL_CMD $KDE_PKGS </dev/null
     fi
 
     step "Configuring PAM"
@@ -1136,53 +1206,19 @@ EOF
 
 elif is_arch; then
     step "Checking for AUR helper"
-    AUR_HELPER=""
-    for helper in yay paru; do
-        if command -v "$helper" >/dev/null 2>&1; then
-            AUR_HELPER="$helper"
-            break
-        fi
-    done
-
-    if [ -z "$AUR_HELPER" ]; then
-        fail "No AUR helper found (tried: yay, paru)."
-        say ""
-        say "Gaze is distributed via the AUR and requires an AUR helper to install."
-        say "We recommend yay. To install it:"
-        say ""
-        cmd "sudo pacman -S --needed base-devel git"
-        cmd "git clone https://aur.archlinux.org/yay.git"
-        cmd "cd yay && makepkg -si"
-        say ""
-        say "Then re-run this installer."
-        exit 1
-    fi
-
+    require_aur_helper
     ok "Found AUR helper: $AUR_HELPER"
 
     step "Installing packages from AUR"
     warn_replacing_bare_gaze_package
-    AUR_PKGS="gaze-bin gaze-gui-bin"
-    if want_gnome_extension_package; then
-        AUR_PKGS="$AUR_PKGS gaze-gnome-extension-bin"
-    fi
-    if want_cinnamon_extension_package; then
-        AUR_PKGS="$AUR_PKGS gaze-cinnamon-extension-bin"
-    fi
-    if is_omarchy_session; then
-        AUR_PKGS="$AUR_PKGS gaze-omarchy-bin"
-    fi
-    if want_hyprlock_setup; then
-        AUR_PKGS="$AUR_PKGS gaze-hyprlock-bin"
-    fi
+    select_install_command
     # --needed skips anything already at this version, so re-running the installer does
     # not rebuild from source. stdin is the piped installer itself, so close it the way
     # the apt/dnf paths do: a helper that reads a prompt from there would eat the rest of
     # this script. sudo still reads its password from the terminal.
-    "$AUR_HELPER" -S --needed --noconfirm $AUR_PKGS </dev/null
-    if is_kde_session; then
-        KDE_PKGS="gaze-kde-bin"
-        install_kde_packages "$AUR_HELPER" -S --needed --noconfirm $KDE_PKGS </dev/null
+    $INSTALL_CMD $PKGS </dev/null
+    if [ -n "$KDE_PKGS" ]; then
+        install_kde_packages $INSTALL_CMD $KDE_PKGS </dev/null
     fi
 
     step "Configuring PAM"

@@ -464,6 +464,25 @@ tag (such as `6.6.9`) holding the files the script would otherwise download.
 Widgets, signals and D-Bus are simulated. Unlock an actual Cinnamon session and
 approve a Polkit prompt before treating a release as fully verified.
 
+## Testing the installer
+
+Inside a container of the distribution family you want to check, run as root:
+
+```bash
+sh scripts/test-install.sh deb       # or fedora, opensuse, arch, unsupported
+```
+
+This runs `install.sh --dry-run` once per desktop session (GNOME, Cinnamon, KDE,
+Hyprland, and none) and checks the package manager and install commands it
+reports. The Fedora run repeats with a stubbed rpm-ostree to cover image-based
+systems, and the Arch run checks the missing-helper error and the yay and paru
+paths. CI runs it on Ubuntu 24.04, Debian 13, Fedora 44, openSUSE Tumbleweed,
+Arch Linux, and Ubuntu 22.04 (which must be refused). The installer checks that
+the package repository is published, so the run needs network access.
+
+A dry run stops before any package manager, PAM, or service change, so it does
+not replace installing on a real system.
+
 ## Packaging
 
 ```bash

@@ -2,11 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Run with: node scripts/test-cinnamon.mjs [upstream-source-directory]
-// Downloads Cinnamon's Polkit agent (6.2 through the 6.8 development series) and its
-// lock screen unlock dialog (6.8 development series) when no source directory is given.
-// Executes those upstream classes and Gaze's extension together. Native widgets,
-// GObject signals and D-Bus are simulated; this is not a replacement for testing
-// Polkit prompts and unlock in an actual Cinnamon session.
+// Widgets, signals and D-Bus are simulated; still test in a real Cinnamon session.
 import assert from 'node:assert/strict';
 import {readFile, writeFile, mkdir, mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';

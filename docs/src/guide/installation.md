@@ -61,6 +61,14 @@ For non-interactive installs:
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --yes
 ```
 
+To see what the installer would do on your system first, without changing anything:
+
+```bash
+curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --dry-run
+```
+
+It prints the detected platform, the planned steps, and the exact package install command.
+
 ## Path B: manual package install
 
 Use this if you prefer to configure package sources yourself. Debian/Ubuntu, Fedora-compatible systems, and openSUSE Tumbleweed use Gundu Labs repositories. Arch Linux and Arch-compatible distributions such as Manjaro and CachyOS use the AUR packages.
