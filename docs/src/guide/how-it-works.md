@@ -19,7 +19,7 @@ enabled as a fallback.
 - Gaze processes faces locally on your machine; it does not send face data to a cloud service.
 - No cloud account is required.
 - Face embeddings are stored on disk in Gaze's local data directory, which is readable only by root.
-- You can optionally encrypt them at rest with a key sealed to the TPM. A stolen disk then cannot be used to recover the embeddings on another machine. See [template encryption](/guide/configuration#encrypt-face-templates-with-the-tpm).
+- Template encryption is enabled by default and requires a usable TPM 2.0; an existing explicit opt-out remains respected. AES-GCM binds each encrypted embedding to its account name and filename. TPM sealing protects a disk taken to another machine, not an alternate boot on the same machine: use full-disk encryption too. See [template encryption and legacy migration](/guide/configuration#encrypt-face-templates-with-the-tpm).
 - If you enable [GNOME Keyring unlock](/guide/gnome#optional-tpm-backed-keyring-unlock), your account password is additionally stored in a TPM-protected record so a face login can unlock the keyring. That record is recoverable by root on this machine; read the security notes before turning it on.
 
 ## Authentication pipeline
@@ -226,7 +226,7 @@ That makes authentication more robust for:
 By default, Gaze stores its data in these locations:
 
 - User embeddings: `/var/lib/gaze/users`
-- TPM-sealed encryption key (only when template encryption is enabled): `/var/lib/gaze/tpm`
+- TPM-sealed encryption key (when template encryption is enabled): `/var/lib/gaze/tpm/dek.blob`
 - TPM-protected GNOME Keyring credentials (only when `gaze keyring` has been run): `/var/lib/gaze/keyring`
 - Model files: `/var/cache/gaze`
 - Config file: `/etc/gaze/config.toml`

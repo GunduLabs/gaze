@@ -7,8 +7,19 @@ pub(super) fn check_tpm(report: &mut Report, config: Option<&Config>) {
     let Some(config) = config else {
         return;
     };
+    let storage = gaze_security::storage::disk_encryption_for_paths(&[
+        Path::new(gaze_core::config::USERS_DIR),
+        Path::new("/var/lib/gaze/tpm"),
+        Path::new(gaze_security::keyring::STORE_DIR),
+        Path::new(gaze_security::keyring::KWALLET_STORE_DIR),
+    ]);
+    if let Some(warning) = gaze_security::storage::encryption_warning(storage) {
+        report.warning("State storage", warning, "Protect the filesystem holding /var/lib/gaze with full-disk encryption. Root on an unlocked machine can still recover TPM-sealed secrets.");
+    } else {
+        report.pass("State storage", "dm-crypt protects every visible backing-device path; TPM secrets remain recoverable by root after unlock");
+    }
     if !config.storage.encrypt_templates {
-        report.off(
+        report.warning(
             "TPM",
             "template encryption is off, so face templates sit on disk unencrypted and no TPM is required",
             format!("Turn it on: set `encrypt_templates = true` under [storage] in {CONFIG_PATH}, then restart gazed."),
