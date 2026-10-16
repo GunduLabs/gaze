@@ -5,9 +5,11 @@ use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tracing::{debug, info};
 
 const RELEASE_BASE: &str = "https://github.com/deepinsight/insightface/releases/download/v0.7";
+const MODEL_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const BUFFALO_SC_SHA256: &str = "57d31b56b6ffa911c8a73cfc1707c73cab76efe7f13b675a05223bf42de47c72";
 const BUFFALO_L_SHA256: &str = "80ffe37d8a5940d59a7384c201a2a38d4741f2f3c51eef46ebb28218a7b0ca2f";
 const DET_500M_SHA256: &str = "5e4447f50245bbd7966bd6c0fa52938c61474a04ec7def48753668a9d8b4ea3a";
@@ -148,28 +150,42 @@ fn verify_known_model(path: &Path, model_name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+struct DownloadTemp(PathBuf);
+
+impl Drop for DownloadTemp {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
 fn download_file(url: &str, dest: &Path, expected_sha256: &str) -> anyhow::Result<()> {
-    info!(url, "Downloading model file");
-    let resp = ureq::get(url).call()?;
-    let mut reader = resp.into_body().into_reader();
+    info!(url, timeout = ?MODEL_DOWNLOAD_TIMEOUT, "Downloading model file");
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(MODEL_DOWNLOAD_TIMEOUT))
+        .build()
+        .into();
+    let resp = agent.get(url).call()?;
+    save_download(resp.into_body().into_reader(), dest, expected_sha256)
+}
+
+fn save_download(mut reader: impl Read, dest: &Path, expected_sha256: &str) -> anyhow::Result<()> {
     let file_name = dest
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| anyhow::anyhow!("invalid model file path"))?;
-    let tmp_path = dest.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
+    let tmp_path = dest.with_file_name(format!(".{file_name}.{}.tmp", uuid::Uuid::new_v4()));
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
         .open(&tmp_path)?;
+    // Only clean up files we created.
+    let temp = DownloadTemp(tmp_path);
     std::io::copy(&mut reader, &mut file)?;
     file.flush()?;
     drop(file);
-    if let Err(err) = verify_sha256(&tmp_path, expected_sha256) {
-        let _ = fs::remove_file(&tmp_path);
-        return Err(err);
-    }
-    fs::rename(&tmp_path, dest)?;
+    verify_sha256(&temp.0, expected_sha256)?;
+    fs::rename(&temp.0, dest)?;
     Ok(())
 }
 
@@ -331,6 +347,79 @@ mod tests {
             zip.write_all(bytes).unwrap();
         }
         zip.finish().unwrap();
+    }
+
+    #[test]
+    fn timed_out_download_is_cleaned_up_and_can_be_retried_in_the_same_process() {
+        struct TimeoutAfterChunk(bool);
+        impl Read for TimeoutAfterChunk {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if self.0 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "body stalled",
+                    ));
+                }
+                self.0 = true;
+                let n = buf.len().min(3);
+                buf[..n].copy_from_slice(&b"abc"[..n]);
+                Ok(n)
+            }
+        }
+
+        let temp = TempDir::new("download-timeout");
+        let dest = temp.path().join("model.onnx");
+        let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        let err = save_download(TimeoutAfterChunk(false), &dest, expected).unwrap_err();
+        assert_eq!(
+            err.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::TimedOut,
+        );
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
+
+        save_download(&b"abc"[..], &dest, expected).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"abc");
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
+        assert_eq!(
+            fs::metadata(dest).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn checksum_failure_cleans_up_without_replacing_an_existing_model() {
+        let temp = TempDir::new("download-checksum");
+        let dest = temp.path().join("model.onnx");
+        fs::write(&dest, b"existing model").unwrap();
+        assert!(save_download(&b"abc"[..], &dest, DET_500M_SHA256).is_err());
+        assert_eq!(fs::read(&dest).unwrap(), b"existing model");
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_download_rename_also_cleans_up_the_temp_file() {
+        let temp = TempDir::new("download-rename");
+        let dest = temp.path().join("model.onnx");
+        fs::create_dir(&dest).unwrap();
+        let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        assert!(save_download(&b"abc"[..], &dest, expected).is_err());
+        assert!(dest.is_dir());
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn legacy_pid_temp_files_do_not_prevent_a_new_download() {
+        let temp = TempDir::new("download-legacy-temp");
+        let dest = temp.path().join("model.onnx");
+        let stale = temp
+            .path()
+            .join(format!(".model.onnx.{}.tmp", std::process::id()));
+        fs::write(&stale, b"partial").unwrap();
+        let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        save_download(&b"abc"[..], &dest, expected).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"abc");
+        assert_eq!(fs::read(&stale).unwrap(), b"partial");
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 2);
     }
 
     #[test]

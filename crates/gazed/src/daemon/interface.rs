@@ -10,9 +10,7 @@ enum EnrollMsg {
     Error(String),
 }
 
-/// Restricts KWallet unlock to KDE greeter services. Any other caller likely
-/// indicates a client bug or a confused-deputy attempt from another login path.
-/// Keeping this as a pure predicate lets us test the allowlist without D-Bus.
+/// Restrict KWallet unlock to KDE greeter PAM services.
 fn is_kwallet_pam_service(pam_service: &str) -> bool {
     matches!(
         pam_service,
@@ -306,7 +304,8 @@ impl AuthDaemon {
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
         let claim_state = self.claim_state.clone();
-        Self::ensure_claim_camera_access(&header, &claim).await?;
+        let camera_lease = self.camera_lease.clone();
+        let (caller_uid, target_uid) = Self::ensure_claim_camera_access(&header, &claim).await?;
         let mut rx =
             replace_claim_task(&self.claim_state, &self.active_cancel, claim.epoch).await?;
 
@@ -324,6 +323,24 @@ impl AuthDaemon {
 
             if !run_rgb && !run_ir {
                 error!("No cameras configured for enrollment");
+                let _ = Self::enroll_status(&ctxt, &face_name, 0, 5, true, EnrollPrompt::Cancelled, -1.0).await;
+                return;
+            }
+
+            let _camera_lease_guard = match acquire_camera_lease(
+                &camera_lease,
+                &mut rx,
+                None,
+                Self::seat_camera_available(caller_uid, target_uid),
+            ).await {
+                Ok(guard) => guard,
+                Err(reason) => {
+                    info!(?reason, "EnrollStart: camera lease refused");
+                    let _ = Self::enroll_status(&ctxt, &face_name, 0, 5, true, EnrollPrompt::Cancelled, -1.0).await;
+                    return;
+                }
+            };
+            if rx.try_recv() != Err(oneshot::error::TryRecvError::Empty) {
                 let _ = Self::enroll_status(&ctxt, &face_name, 0, 5, true, EnrollPrompt::Cancelled, -1.0).await;
                 return;
             }

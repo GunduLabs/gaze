@@ -6,11 +6,12 @@ use ndarray::Array1;
 use opencv::core::Mat;
 use std::collections::HashMap;
 use std::ffi::CString;
+use std::future::{Future, pending};
 use std::ptr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{Mutex, OwnedMutexGuard, oneshot};
 use tracing::{error, info, warn};
 use zbus::names::BusName;
 use zbus::{fdo, message::Header, object_server::SignalEmitter};
@@ -94,6 +95,76 @@ pub type ActiveCancelHandle = Arc<Mutex<Option<oneshot::Sender<()>>>>;
 /// ends without cleaning up loses its entries when its connection goes away.
 pub type PamInternalSets =
     Arc<Mutex<HashMap<u32, HashMap<String, std::collections::HashSet<String>>>>>;
+
+/// Held through capture-thread teardown.
+pub type CameraLease = Arc<Mutex<()>>;
+
+#[derive(Debug, PartialEq, Eq)]
+enum CameraLeaseError {
+    Cancelled,
+    SleepChanged,
+    AccessDenied,
+}
+
+/// Detect coalesced suspend/resume cycles even when the final value is false.
+fn take_sleep_change(
+    sleeping: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<bool, CameraLeaseError> {
+    sleeping
+        .has_changed()
+        .map_err(|_| CameraLeaseError::Cancelled)?;
+    let state = sleeping.borrow_and_update();
+    Ok(state.has_changed() || *state)
+}
+
+/// Recheck authorization after acquiring the lease; both waits are cancellable.
+async fn acquire_camera_lease(
+    lease: &CameraLease,
+    cancel: &mut oneshot::Receiver<()>,
+    mut sleeping: Option<&mut tokio::sync::watch::Receiver<bool>>,
+    authorized: impl Future<Output = bool>,
+) -> Result<OwnedMutexGuard<()>, CameraLeaseError> {
+    if let Some(receiver) = sleeping.as_deref_mut()
+        && take_sleep_change(receiver)?
+    {
+        return Err(CameraLeaseError::SleepChanged);
+    }
+
+    let result = tokio::select! {
+        biased;
+        _ = &mut *cancel => Err(CameraLeaseError::Cancelled),
+        changed = async {
+            match sleeping.as_deref_mut() {
+                Some(receiver) => receiver.changed().await,
+                None => pending().await,
+            }
+        } => {
+            match changed {
+                Ok(()) => Err(CameraLeaseError::SleepChanged),
+                Err(_) => Err(CameraLeaseError::Cancelled),
+            }
+        }
+        result = async {
+            let guard = lease.clone().lock_owned().await;
+            if authorized.await {
+                Ok(guard)
+            } else {
+                Err(CameraLeaseError::AccessDenied)
+            }
+        } => result,
+    };
+
+    // Catch notifications arriving during authorization's final poll.
+    if cancel.try_recv() != Err(oneshot::error::TryRecvError::Empty) {
+        return Err(CameraLeaseError::Cancelled);
+    }
+    if let Some(receiver) = sleeping
+        && take_sleep_change(receiver)?
+    {
+        return Err(CameraLeaseError::SleepChanged);
+    }
+    result
+}
 
 fn forget_pam_internal_sender(
     sets: &mut HashMap<u32, HashMap<String, std::collections::HashSet<String>>>,
@@ -365,6 +436,7 @@ pub struct AuthDaemon {
     pub claim_state: ClaimStateHandle,
     pub active_cancel: ActiveCancelHandle,
     pub pam_internal: PamInternalSets,
+    pub camera_lease: CameraLease,
     pub resume_pending: Arc<AtomicBool>,
     pub resume_seen: Arc<AtomicBool>,
     pub sleeping: tokio::sync::watch::Receiver<bool>,
@@ -439,7 +511,175 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use tokio::sync::oneshot::error::TryRecvError;
-    use tokio::sync::{Mutex, oneshot};
+    use tokio::sync::{Mutex, oneshot, watch};
+
+    #[tokio::test]
+    async fn seat_authorization_is_rechecked_after_the_previous_capture_stops() {
+        let lease = Arc::new(Mutex::new(()));
+        let previous = lease.clone().lock_owned().await;
+        let allowed = AtomicBool::new(true);
+        let checked = AtomicBool::new(false);
+        let (_cancel_tx, mut cancel) = oneshot::channel();
+        let attempt = acquire_camera_lease(&lease, &mut cancel, None, async {
+            checked.store(true, Ordering::SeqCst);
+            allowed.load(Ordering::SeqCst)
+        });
+        tokio::pin!(attempt);
+        assert!(futures::poll!(&mut attempt).is_pending());
+        assert!(!checked.load(Ordering::SeqCst));
+
+        allowed.store(false, Ordering::SeqCst);
+        drop(previous);
+        assert_eq!(attempt.await.unwrap_err(), CameraLeaseError::AccessDenied);
+        assert!(checked.load(Ordering::SeqCst));
+        assert!(lease.try_lock().is_ok());
+    }
+
+    #[tokio::test]
+    async fn cancellation_while_waiting_never_runs_authorization() {
+        let lease = Arc::new(Mutex::new(()));
+        let previous = lease.clone().lock_owned().await;
+        let checked = AtomicBool::new(false);
+        let (cancel_tx, mut cancel) = oneshot::channel();
+        let attempt = acquire_camera_lease(&lease, &mut cancel, None, async {
+            checked.store(true, Ordering::SeqCst);
+            true
+        });
+        tokio::pin!(attempt);
+        assert!(futures::poll!(&mut attempt).is_pending());
+        cancel_tx.send(()).unwrap();
+        assert_eq!(attempt.await.unwrap_err(), CameraLeaseError::Cancelled);
+        assert!(!checked.load(Ordering::SeqCst));
+        drop(previous);
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_authorization_releases_the_lease() {
+        let lease = Arc::new(Mutex::new(()));
+        let (cancel_tx, mut cancel) = oneshot::channel();
+        let attempt = acquire_camera_lease(&lease, &mut cancel, None, pending());
+        tokio::pin!(attempt);
+        assert!(futures::poll!(&mut attempt).is_pending());
+        assert!(lease.try_lock().is_err());
+        cancel_tx.send(()).unwrap();
+        assert_eq!(attempt.await.unwrap_err(), CameraLeaseError::Cancelled);
+        assert!(lease.try_lock().is_ok());
+    }
+
+    #[tokio::test]
+    async fn suspend_while_waiting_does_not_acquire_the_camera() {
+        let lease = Arc::new(Mutex::new(()));
+        let previous = lease.clone().lock_owned().await;
+        let (_cancel_tx, mut cancel) = oneshot::channel();
+        let (sleep_tx, mut sleeping) = watch::channel(false);
+        let attempt =
+            acquire_camera_lease(&lease, &mut cancel, Some(&mut sleeping), async { true });
+        tokio::pin!(attempt);
+        assert!(futures::poll!(&mut attempt).is_pending());
+        sleep_tx.send_replace(true);
+        assert_eq!(attempt.await.unwrap_err(), CameraLeaseError::SleepChanged);
+        drop(previous);
+    }
+
+    #[tokio::test]
+    async fn a_coalesced_suspend_resume_cycle_interrupts_the_lease_wait() {
+        let lease = Arc::new(Mutex::new(()));
+        let previous = lease.clone().lock_owned().await;
+        let (_cancel_tx, mut cancel) = oneshot::channel();
+        let (sleep_tx, mut sleeping) = watch::channel(false);
+        let attempt =
+            acquire_camera_lease(&lease, &mut cancel, Some(&mut sleeping), async { true });
+        tokio::pin!(attempt);
+        assert!(futures::poll!(&mut attempt).is_pending());
+        sleep_tx.send_replace(true);
+        sleep_tx.send_replace(false);
+        drop(previous);
+        assert_eq!(attempt.await.unwrap_err(), CameraLeaseError::SleepChanged);
+        assert!(lease.try_lock().is_ok());
+    }
+
+    #[tokio::test]
+    async fn suspend_during_authorization_releases_the_lease() {
+        let lease = Arc::new(Mutex::new(()));
+        let (_cancel_tx, mut cancel) = oneshot::channel();
+        let (sleep_tx, mut sleeping) = watch::channel(false);
+        let attempt = acquire_camera_lease(&lease, &mut cancel, Some(&mut sleeping), pending());
+        tokio::pin!(attempt);
+        assert!(futures::poll!(&mut attempt).is_pending());
+        assert!(lease.try_lock().is_err());
+        sleep_tx.send_replace(true);
+        assert_eq!(attempt.await.unwrap_err(), CameraLeaseError::SleepChanged);
+        assert!(lease.try_lock().is_ok());
+    }
+
+    #[tokio::test]
+    async fn successful_authorization_holds_the_lease_until_teardown_finishes() {
+        let lease = Arc::new(Mutex::new(()));
+        let (_cancel_tx, mut cancel) = oneshot::channel();
+        let guard = acquire_camera_lease(&lease, &mut cancel, None, async { true })
+            .await
+            .unwrap();
+        assert!(lease.try_lock().is_err());
+        drop(guard);
+        assert!(lease.try_lock().is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_resume_in_the_final_authorization_poll_is_not_missed() {
+        let lease = Arc::new(Mutex::new(()));
+        let (_cancel_tx, mut cancel) = oneshot::channel();
+        let (sleep_tx, mut sleeping) = watch::channel(false);
+        let result = acquire_camera_lease(&lease, &mut cancel, Some(&mut sleeping), async {
+            sleep_tx.send_replace(true);
+            sleep_tx.send_replace(false);
+            true
+        })
+        .await;
+        assert_eq!(result.unwrap_err(), CameraLeaseError::SleepChanged);
+        assert!(lease.try_lock().is_ok());
+    }
+
+    #[tokio::test]
+    async fn cancellation_in_the_final_authorization_poll_is_not_missed() {
+        let lease = Arc::new(Mutex::new(()));
+        let (cancel_tx, mut cancel) = oneshot::channel();
+        let result = acquire_camera_lease(&lease, &mut cancel, None, async {
+            cancel_tx.send(()).unwrap();
+            true
+        })
+        .await;
+        assert_eq!(result.unwrap_err(), CameraLeaseError::Cancelled);
+        assert!(lease.try_lock().is_ok());
+    }
+
+    #[test]
+    fn lease_future_can_run_on_the_multithreaded_daemon_runtime() {
+        fn assert_send(_: impl Send) {}
+        let lease = Arc::new(Mutex::new(()));
+        let (_cancel_tx, mut cancel) = oneshot::channel();
+        let (_sleep_tx, mut sleeping) = watch::channel(false);
+        assert_send(acquire_camera_lease(
+            &lease,
+            &mut cancel,
+            Some(&mut sleeping),
+            async { true },
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_closed_sleep_watcher_fails_closed() {
+        let lease = Arc::new(Mutex::new(()));
+        let (_cancel_tx, mut cancel) = oneshot::channel();
+        let (sleep_tx, mut sleeping) = watch::channel(false);
+        drop(sleep_tx);
+        assert_eq!(
+            acquire_camera_lease(&lease, &mut cancel, Some(&mut sleeping), async { true })
+                .await
+                .unwrap_err(),
+            CameraLeaseError::Cancelled,
+        );
+        assert!(lease.try_lock().is_ok());
+    }
 
     #[test]
     fn a_vanished_sender_loses_only_its_internal_services() {
