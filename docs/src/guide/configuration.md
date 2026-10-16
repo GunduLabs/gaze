@@ -8,6 +8,12 @@ Gaze is configured with `/etc/gaze/config.toml`.
 The defaults work for many setups. Common adjustments include choosing a camera
 source or changing the security level.
 
+GUI and `gaze config` changes are applied live after validation and model preparation.
+A successful update cancels active capture and waits for its threads to stop before
+publishing the new settings and models. Failed preparation leaves the current run alone.
+Manual file edits, including `[duress]`, take effect after `sudo systemctl restart gazed`;
+the running daemon keeps its applied configuration if the file is edited or removed.
+
 ::: tip Editing config requires admin privileges
 The daemon requires authorization before saving changes. `gaze config` prompts
 for your password through `sudo`, while `gaze config --show` is read-only and
@@ -649,7 +655,7 @@ Settings:
 - `closed_threshold` is the classifier's closed-eye probability (0.5 to 0.99) needed to count an eye as shut. Lower it if a deliberate wink is missed; raise it if squinting or laughing trips it.
 - `hold_ms` is how long (0 to 5000 ms) the eye must stay shut. A normal blink takes 100 to 400 ms.
 
-The duress table lives only in `/etc/gaze/config.toml`. The GUI and `gaze config` leave it untouched, and the daemon reads it at the start of every face authentication, so no restart is needed.
+The duress table lives only in `/etc/gaze/config.toml`. The GUI and `gaze config` leave it untouched. Restart with `sudo systemctl restart gazed` after editing it.
 
 Limits to be aware of:
 

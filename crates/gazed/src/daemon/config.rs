@@ -2,6 +2,89 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::*;
+use tokio::sync::{OwnedRwLockReadGuard, RwLock};
+
+/// Applied settings; read guards pin their model generation through teardown.
+pub struct ConfigState {
+    current: Arc<RwLock<Config>>,
+    updates: Arc<Mutex<()>>,
+}
+
+impl ConfigState {
+    pub fn new(mut config: Config) -> Self {
+        if config.clamp_keyring() {
+            warn!(
+                path = CONFIG_PATH,
+                "keyring unlock needs encryption and liveness; ignoring the keyring options"
+            );
+        }
+        Self {
+            current: Arc::new(RwLock::new(config)),
+            updates: Arc::new(Mutex::new(())),
+        }
+    }
+
+    pub(super) async fn read(&self) -> OwnedRwLockReadGuard<Config> {
+        self.current.clone().read_owned().await
+    }
+
+    /// Register cancellation before taking this guard; keep it through capture teardown.
+    pub(super) async fn for_run(
+        &self,
+        cancel: &mut oneshot::Receiver<()>,
+    ) -> fdo::Result<OwnedRwLockReadGuard<Config>> {
+        let config = tokio::select! {
+            biased;
+            _ = &mut *cancel => return Err(fdo::Error::Failed("capture cancelled".into())),
+            config = self.read() => config,
+        };
+        if cancel.try_recv() != Err(oneshot::error::TryRecvError::Empty) {
+            return Err(fdo::Error::Failed("capture cancelled".into()));
+        }
+        Ok(config)
+    }
+
+    async fn apply<P: Send + 'static>(
+        &self,
+        active_cancel: &ActiveCancelHandle,
+        prepare: impl FnOnce(Config) -> fdo::Result<(Config, P)> + Send + 'static,
+        commit: impl FnOnce(&Config, P) -> fdo::Result<()> + Send + 'static,
+    ) -> fdo::Result<()> {
+        let update = self.updates.clone().lock_owned().await;
+        let current = self.read().await.clone();
+        // Retain serialization if cancellation leaves the preparation worker running.
+        let (requested, prepared, update) = tokio::task::spawn_blocking(move || {
+            let (requested, prepared) = prepare(current)?;
+            Ok::<_, fdo::Error>((requested, prepared, update))
+        })
+        .await
+        .map_err(|e| fdo::Error::Failed(format!("Config preparation task failed: {e}")))??;
+
+        // Queue the writer before cancellation so new runs cannot enter the old snapshot.
+        let write = self.current.clone().write_owned();
+        tokio::pin!(write);
+        let current = match futures::poll!(&mut write) {
+            std::task::Poll::Ready(current) => current,
+            std::task::Poll::Pending => {
+                if let Some(cancel) = active_cancel.lock().await.take() {
+                    let _ = cancel.send(());
+                }
+                write.await
+            }
+        };
+
+        tokio::task::spawn_blocking(move || {
+            // Keep both locks in the worker even if the requesting D-Bus task is dropped.
+            let _update = update;
+            let mut current = current;
+            commit(&requested, prepared)?;
+            *current = requested;
+            Ok(())
+        })
+        .await
+        .map_err(|e| fdo::Error::Failed(format!("Config commit task failed: {e}")))?
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 struct ModelReloads {
@@ -92,54 +175,26 @@ pub(super) fn write_gdm_face_auth(enabled: bool) -> fdo::Result<bool> {
     Ok(enabled)
 }
 
-impl AuthDaemon {
-    /// `update` builds the new config from the current one under the write lock, so concurrent
-    /// writers cannot each start from the same snapshot and silently undo one another.
-    pub(super) async fn apply_config(
-        &self,
-        update: impl FnOnce(Config) -> fdo::Result<Config> + Send,
-    ) -> fdo::Result<()> {
-        let mut loaded_model_config = self.loaded_model_config.lock().await;
-        let current = self.current_config().await;
-        let duress = current.duress.clone();
-        let mut new_config = update(current)?;
-        new_config.duress = duress;
-        new_config
-            .security
-            .validate()
-            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
-        new_config
-            .enrollment
-            .validate()
-            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
-        new_config
-            .inference
-            .validate()
-            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
-        new_config
-            .liveness
-            .validate()
-            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
-        new_config
-            .cameras
-            .validate()
-            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+struct PreparedConfig {
+    reload: ModelReloads,
+    detector: Option<FaceDetector>,
+    recognizers: Option<(FaceRecognizer, FaceRecognizer)>,
+    liveness: Option<LivenessDetector>,
+    cipher: Option<crate::crypto::EmbeddingCipher>,
+}
 
-        self.cancel_active_tasks().await;
-
-        let reload = ModelReloads::between(&loaded_model_config, &new_config);
-        let security = &new_config.security;
+impl PreparedConfig {
+    fn load(current: &Config, requested: &Config) -> fdo::Result<Self> {
+        let reload = ModelReloads::between(current, requested);
+        let security = &requested.security;
         info!(
             ?reload,
             detector = security.detector(),
             recognizer = security.recognizer(),
-            execution_provider = new_config.inference.execution_provider,
-            device = new_config.inference.device,
-            "Applying model settings"
+            execution_provider = requested.inference.execution_provider,
+            device = requested.inference.device,
+            "Preparing model settings"
         );
-
-        // Prepare every replacement before touching the running sessions. A failed
-        // load must leave both the sessions and their remembered settings intact.
         let paths = if reload.detector || reload.recognizer {
             Some(
                 crate::models::ensure_models(
@@ -152,38 +207,40 @@ impl AuthDaemon {
         } else {
             None
         };
-        let new_detector = if reload.detector {
+        let detector = if reload.detector {
             let (path, _) = paths
                 .as_ref()
                 .expect("detector reload requires model paths");
             Some(
-                FaceDetector::new_with_inference(path.to_str().unwrap(), &new_config.inference)
+                FaceDetector::new_with_inference(path.to_str().unwrap(), &requested.inference)
                     .map_err(|e| fdo::Error::Failed(format!("Failed to load detector: {e}")))?,
             )
         } else {
             None
         };
-        let new_recognizers = if reload.recognizer {
+        let recognizers = if reload.recognizer {
             let (_, path) = paths
                 .as_ref()
                 .expect("recognizer reload requires model paths");
-            let rgb = FaceRecognizer::new_with_inference(
-                path.to_str().unwrap(),
-                &new_config.inference,
-            )
-            .map_err(|e| fdo::Error::Failed(format!("Failed to load RGB recognizer: {e}")))?;
+            let rgb =
+                FaceRecognizer::new_with_inference(path.to_str().unwrap(), &requested.inference)
+                    .map_err(|e| {
+                        fdo::Error::Failed(format!("Failed to load RGB recognizer: {e}"))
+                    })?;
             let ir =
-                FaceRecognizer::new_with_inference(path.to_str().unwrap(), &new_config.inference)
-                    .map_err(|e| fdo::Error::Failed(format!("Failed to load IR recognizer: {e}")))?;
+                FaceRecognizer::new_with_inference(path.to_str().unwrap(), &requested.inference)
+                    .map_err(|e| {
+                        fdo::Error::Failed(format!("Failed to load IR recognizer: {e}"))
+                    })?;
             Some((rgb, ir))
         } else {
             None
         };
-        let new_liveness_detector = if reload.liveness && new_config.liveness.enabled {
+        let liveness = if reload.liveness && requested.liveness.enabled {
             let path = crate::models::ensure_liveness_model(gaze_core::config::MODELS_DIR)
                 .map_err(|e| fdo::Error::Failed(format!("Failed to ensure liveness model: {e}")))?;
             Some(
-                LivenessDetector::new_with_inference(path.to_str().unwrap(), &new_config.inference)
+                LivenessDetector::new_with_inference(path.to_str().unwrap(), &requested.inference)
                     .map_err(|e| {
                         fdo::Error::Failed(format!("Failed to load liveness model: {e}"))
                     })?,
@@ -191,92 +248,99 @@ impl AuthDaemon {
         } else {
             None
         };
-
-        // Every step that can fail runs before any live setting changes, so a rejected
-        // request leaves the daemon, the config file and the GUI agreeing on the old values.
-        let want_encrypt = new_config.storage.encrypt_templates;
-        let pending_cipher = {
-            let db = self.db.lock().await;
-            if want_encrypt != db.is_encrypted() {
-                let dek =
-                    crate::tpm::load_or_create_dek(std::path::Path::new(crate::tpm::STATE_DIR))
-                        .map_err(|e| {
-                            fdo::Error::Failed(format!("cannot change template encryption: {e}"))
-                        })?;
-                Some(crate::crypto::EmbeddingCipher::new(&dek))
-            } else {
-                None
-            }
-        };
-
-        let migrated = self
-            .db
-            .lock()
-            .await
-            .apply_settings(
-                pending_cipher,
-                want_encrypt,
-                reload
-                    .recognizer
-                    .then_some(new_config.security.recognizer()),
-                new_config.enrollment.max_templates as usize,
-                || new_config.save_to(CONFIG_PATH),
-            )
-            .map_err(|e| {
-                fdo::Error::Failed(format!("Failed to apply template storage settings: {e}"))
+        let cipher = if current.storage.encrypt_templates != requested.storage.encrypt_templates {
+            let state_dir = std::path::Path::new(crate::tpm::STATE_DIR);
+            let dek = crate::tpm::load_or_create_dek(state_dir).map_err(|e| {
+                fdo::Error::Failed(format!("cannot change template encryption: {e}"))
             })?;
-        if migrated > 0 {
-            info!(
-                migrated,
-                encrypted = want_encrypt,
-                "Changed template encryption"
-            );
-        }
+            Some(crate::crypto::EmbeddingCipher::new(&dek))
+        } else {
+            None
+        };
+        Ok(Self {
+            reload,
+            detector,
+            recognizers,
+            liveness,
+            cipher,
+        })
+    }
+}
 
-        if let Some(detector) = new_detector {
-            *self.detector.lock().unwrap_or_else(|e| e.into_inner()) = detector;
-        }
-        if let Some((rgb, ir)) = new_recognizers {
-            let mut recognizer_rgb = self.recognizer_rgb.lock().await;
-            let mut recognizer_ir = self.recognizer_ir.lock().await;
-            *recognizer_rgb = rgb;
-            *recognizer_ir = ir;
-        }
-        if reload.liveness {
-            *self.liveness.lock().await = new_liveness_detector;
-        }
-        if reload.inference {
-            // The optional eye-state session is loaded lazily by verification.
-            *self.eye_state.lock().await = None;
-        }
-        *loaded_model_config = new_config.clone();
+impl AuthDaemon {
+    pub(super) async fn apply_config(
+        &self,
+        update: impl FnOnce(Config) -> fdo::Result<Config> + Send + 'static,
+    ) -> fdo::Result<()> {
+        let db = self.db.clone();
+        let detector = self.detector.clone();
+        let recognizer_rgb = self.recognizer_rgb.clone();
+        let recognizer_ir = self.recognizer_ir.clone();
+        let liveness = self.liveness.clone();
+        let eye_state = self.eye_state.clone();
+        self.settings
+            .apply(
+                &self.active_cancel,
+                move |current| {
+                    let mut requested = update(current.clone())?;
+                    requested.duress = current.duress.clone();
+                    requested
+                        .security
+                        .validate()
+                        .and_then(|_| requested.enrollment.validate())
+                        .and_then(|_| requested.inference.validate())
+                        .and_then(|_| requested.liveness.validate())
+                        .and_then(|_| requested.cameras.validate())
+                        .and_then(|_| requested.storage.validate_keyring(&requested.liveness))
+                        .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+                    let prepared = PreparedConfig::load(&current, &requested)?;
+                    Ok((requested, prepared))
+                },
+                move |requested, prepared| {
+                    let migrated = db
+                        .blocking_lock()
+                        .apply_settings(
+                            prepared.cipher,
+                            requested.storage.encrypt_templates,
+                            prepared
+                                .reload
+                                .recognizer
+                                .then_some(requested.security.recognizer()),
+                            requested.enrollment.max_templates as usize,
+                            || requested.save_to(CONFIG_PATH),
+                        )
+                        .map_err(|e| {
+                            fdo::Error::Failed(format!(
+                                "Failed to apply template storage settings: {e}"
+                            ))
+                        })?;
+                    if migrated > 0 {
+                        info!(
+                            migrated,
+                            encrypted = requested.storage.encrypt_templates,
+                            "Changed template encryption"
+                        );
+                    }
 
-        *self.rgb_threshold.lock().await = new_config.security.rgb_threshold();
-        *self.ir_threshold.lock().await = new_config.security.ir_threshold();
-        *self.hybrid_policy.lock().await = new_config.security.hybrid_policy().to_string();
-
-        let sources = resolve_configured_sources(&new_config.cameras);
-        *self.rgb_device.lock().await = sources.rgb;
-        *self.ir_device.lock().await = sources.ir;
-        *self.ir_node.lock().await = sources.ir_node;
-        *self.serial_capture.lock().await = sources.serial_capture;
-        *self.emitter_enabled.lock().await = new_config.cameras.emitter_enabled;
-
-        let mut live_cfg = self.liveness_config.lock().await;
-        *live_cfg = new_config.liveness.clone();
-        drop(live_cfg);
-
-        let mut abort_if_ssh = self.abort_if_ssh.lock().await;
-        *abort_if_ssh = new_config.auth.abort_if_ssh;
-
-        let mut abort_if_lid_closed = self.abort_if_lid_closed.lock().await;
-        *abort_if_lid_closed = new_config.auth.abort_if_lid_closed;
-
-        let mut abort_before_first_resume = self.abort_before_first_resume.lock().await;
-        *abort_before_first_resume = new_config.auth.abort_before_first_resume;
-
-        info!("Config reloaded successfully");
-        Ok(())
+                    // No fallible work remains, and every model user has finished teardown.
+                    if let Some(replacement) = prepared.detector {
+                        *detector.lock().unwrap_or_else(|e| e.into_inner()) = replacement;
+                    }
+                    if let Some((rgb, ir)) = prepared.recognizers {
+                        *recognizer_rgb.blocking_lock() = rgb;
+                        *recognizer_ir.blocking_lock() = ir;
+                    }
+                    if prepared.reload.liveness {
+                        *liveness.blocking_lock() = prepared.liveness;
+                    }
+                    if prepared.reload.inference {
+                        *eye_state.blocking_lock() = None;
+                    }
+                    info!("Config reloaded successfully");
+                    Ok(())
+                },
+            )
+            .await
     }
 }
 
@@ -373,14 +437,293 @@ mod tests {
         }
     }
 
-    #[test]
-    fn reading_edited_disk_settings_does_not_hide_a_needed_reload() {
-        let loaded = Config::default();
-        let mut on_disk = loaded.clone();
-        on_disk.security = SecurityLevel::high();
-        let mut last_good = loaded.clone();
-        let requested = resolve_config(Ok(on_disk), &mut last_good);
-        assert_eq!(last_good.security.level, "high");
+    #[tokio::test]
+    async fn config_warnings_are_not_repeated_by_property_reads() {
+        use std::io::{Read, Seek};
+
+        let output = Arc::new(tempfile::tempfile().unwrap());
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(output.clone())
+            .finish();
+        let _subscriber = tracing::subscriber::set_default(subscriber);
+        let mut config = Config::default();
+        config.storage.encrypt_templates = false;
+        config.storage.unlock_gnome_keyring = true;
+        let settings = ConfigState::new(config);
+        for _ in 0..3 {
+            assert!(!settings.read().await.storage.unlock_gnome_keyring);
+        }
+        let mut reader = output.as_ref();
+        reader.rewind().unwrap();
+        let mut logs = String::new();
+        reader.read_to_string(&mut logs).unwrap();
+        assert_eq!(logs.matches("ignoring the keyring options").count(), 1);
+    }
+
+    #[tokio::test]
+    async fn model_reloads_are_computed_from_the_applied_snapshot() {
+        let settings = ConfigState::new(Config::default());
+        let loaded = settings.read().await;
+        let mut requested = loaded.clone();
+        requested.security = SecurityLevel::high();
         assert_reloads(&loaded, &requested, (true, true, false, false));
+        assert_eq!(settings.read().await.security.level, "medium");
+    }
+
+    #[tokio::test]
+    async fn failed_preparation_leaves_the_capture_and_config_untouched() {
+        let settings = ConfigState::new(Config::default());
+        let (tx, mut rx) = oneshot::channel();
+        let cancel = Arc::new(Mutex::new(Some(tx)));
+        let run = settings.for_run(&mut rx).await.unwrap();
+        let committed = Arc::new(AtomicBool::new(false));
+        let marker = committed.clone();
+        let result = settings
+            .apply(
+                &cancel,
+                |_| Err::<(Config, ()), _>(fdo::Error::Failed("model load failed".into())),
+                move |_, ()| {
+                    marker.store(true, Ordering::SeqCst);
+                    Ok(())
+                },
+            )
+            .await;
+        assert!(result.is_err());
+        assert!(!committed.load(Ordering::SeqCst));
+        assert_eq!(rx.try_recv(), Err(oneshot::error::TryRecvError::Empty));
+        assert_eq!(run.security.level, "medium");
+        assert_eq!(settings.read().await.security.level, "medium");
+    }
+
+    #[tokio::test]
+    async fn updates_cancel_capture_but_wait_for_teardown_before_swapping_models() {
+        let settings = Arc::new(ConfigState::new(Config::default()));
+        let (tx, mut rx) = oneshot::channel();
+        let cancel = Arc::new(Mutex::new(Some(tx)));
+        let run = settings.for_run(&mut rx).await.unwrap();
+        let committed = Arc::new(AtomicBool::new(false));
+        let marker = committed.clone();
+        let writer = settings.clone();
+        let updating = tokio::spawn(async move {
+            writer
+                .apply(
+                    &cancel,
+                    |mut config| {
+                        config.security = SecurityLevel::high();
+                        Ok((config, ()))
+                    },
+                    move |_, ()| {
+                        marker.store(true, Ordering::SeqCst);
+                        Ok(())
+                    },
+                )
+                .await
+        });
+        rx.await.unwrap();
+        assert!(!committed.load(Ordering::SeqCst));
+        assert_eq!(run.security.level, "medium");
+
+        let (_next_tx, mut next_rx) = oneshot::channel();
+        let next_run = settings.for_run(&mut next_rx);
+        tokio::pin!(next_run);
+        assert!(futures::poll!(&mut next_run).is_pending());
+        drop(run);
+        updating.await.unwrap().unwrap();
+        assert!(committed.load(Ordering::SeqCst));
+        assert_eq!(next_run.await.unwrap().security.level, "high");
+    }
+
+    #[tokio::test]
+    async fn a_run_waiting_for_config_can_be_cancelled() {
+        let settings = ConfigState::new(Config::default());
+        let writer = settings.current.write().await;
+        let (tx, mut rx) = oneshot::channel();
+        let run = settings.for_run(&mut rx);
+        tokio::pin!(run);
+        assert!(futures::poll!(&mut run).is_pending());
+        tx.send(()).unwrap();
+        assert!(run.await.is_err());
+        drop(writer);
+        assert!(settings.current.try_write().is_ok());
+    }
+
+    #[tokio::test]
+    async fn concurrent_updates_build_on_the_last_successful_commit() {
+        let settings = ConfigState::new(Config::default());
+        let cancel = Arc::new(Mutex::new(None));
+        let (camera, liveness) = tokio::join!(
+            settings.apply(
+                &cancel,
+                |mut config| {
+                    config.cameras.rgb = "/dev/video8".into();
+                    Ok((config, ()))
+                },
+                |_, ()| Ok(()),
+            ),
+            settings.apply(
+                &cancel,
+                |mut config| {
+                    config.liveness.threshold = 0.95;
+                    Ok((config, ()))
+                },
+                |_, ()| Ok(()),
+            ),
+        );
+        camera.unwrap();
+        liveness.unwrap();
+        let current = settings.read().await;
+        assert_eq!(current.cameras.rgb, "/dev/video8");
+        assert_eq!(current.liveness.threshold, 0.95);
+    }
+
+    #[tokio::test]
+    async fn blocking_preparation_keeps_the_runtime_and_old_capture_available() {
+        let settings = Arc::new(ConfigState::new(Config::default()));
+        let (cancel_tx, mut cancel_rx) = oneshot::channel();
+        let cancel = Arc::new(Mutex::new(Some(cancel_tx)));
+        let run = settings.for_run(&mut cancel_rx).await.unwrap();
+        let (started_tx, started_rx) = oneshot::channel();
+        let (finish_tx, finish_rx) = oneshot::channel();
+        let writer = settings.clone();
+        let updating = tokio::spawn(async move {
+            writer
+                .apply(
+                    &cancel,
+                    move |mut config| {
+                        started_tx.send(()).unwrap();
+                        finish_rx.blocking_recv().unwrap();
+                        config.liveness.threshold = 0.95;
+                        Ok((config, ()))
+                    },
+                    |_, ()| Ok(()),
+                )
+                .await
+        });
+        started_rx.await.unwrap();
+        assert_eq!(
+            settings.read().await.liveness.threshold,
+            run.liveness.threshold
+        );
+        assert_eq!(
+            cancel_rx.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        );
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        finish_tx.send(()).unwrap();
+        cancel_rx.await.unwrap();
+        drop(run);
+        updating.await.unwrap().unwrap();
+        assert_eq!(settings.read().await.liveness.threshold, 0.95);
+    }
+
+    #[tokio::test]
+    async fn cancelled_preparation_stays_serialized_until_its_worker_finishes() {
+        let settings = Arc::new(ConfigState::new(Config::default()));
+        let cancel = Arc::new(Mutex::new(None));
+        let (started_tx, started_rx) = oneshot::channel();
+        let (finish_tx, finish_rx) = oneshot::channel();
+        let writer = settings.clone();
+        let first_cancel = cancel.clone();
+        let updating = tokio::spawn(async move {
+            writer
+                .apply(
+                    &first_cancel,
+                    move |mut config| {
+                        started_tx.send(()).unwrap();
+                        finish_rx.blocking_recv().unwrap();
+                        config.security = SecurityLevel::high();
+                        Ok((config, ()))
+                    },
+                    |_, ()| panic!("an abandoned preparation must not commit"),
+                )
+                .await
+        });
+        started_rx.await.unwrap();
+        updating.abort();
+        assert!(updating.await.unwrap_err().is_cancelled());
+        assert!(settings.updates.try_lock().is_err());
+        let next = settings.apply(
+            &cancel,
+            |mut config| {
+                config.liveness.threshold = 0.95;
+                Ok((config, ()))
+            },
+            |_, ()| Ok(()),
+        );
+        tokio::pin!(next);
+        assert!(futures::poll!(&mut next).is_pending());
+        assert_eq!(settings.read().await.security.level, "medium");
+        finish_tx.send(()).unwrap();
+        next.await.unwrap();
+        let current = settings.read().await;
+        assert_eq!(current.security.level, "medium");
+        assert_eq!(current.liveness.threshold, 0.95);
+    }
+
+    #[tokio::test]
+    async fn a_blocking_commit_pins_settings_even_after_the_request_is_dropped() {
+        let settings = Arc::new(ConfigState::new(Config::default()));
+        let cancel = Arc::new(Mutex::new(None));
+        let (started_tx, started_rx) = oneshot::channel();
+        let (finish_tx, finish_rx) = oneshot::channel();
+        let writer = settings.clone();
+        let updating = tokio::spawn(async move {
+            writer
+                .apply(
+                    &cancel,
+                    |mut config| {
+                        config.liveness.threshold = 0.95;
+                        Ok((config, ()))
+                    },
+                    move |_, ()| {
+                        started_tx.send(()).unwrap();
+                        finish_rx.blocking_recv().unwrap();
+                        Ok(())
+                    },
+                )
+                .await
+        });
+        started_rx.await.unwrap();
+        updating.abort();
+        assert!(updating.await.unwrap_err().is_cancelled());
+        let read = settings.read();
+        tokio::pin!(read);
+        assert!(futures::poll!(&mut read).is_pending());
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        finish_tx.send(()).unwrap();
+        assert_eq!(read.await.liveness.threshold, 0.95);
+    }
+
+    #[tokio::test]
+    async fn failed_persistence_keeps_the_snapshot_and_allows_a_retry() {
+        let settings = ConfigState::new(Config::default());
+        let cancel = Arc::new(Mutex::new(None));
+        let before = settings.read().await.to_toml().unwrap();
+        let result = settings
+            .apply(
+                &cancel,
+                |mut config| {
+                    config.security = SecurityLevel::high();
+                    Ok((config, ()))
+                },
+                |_, ()| Err(fdo::Error::Failed("read-only config file".into())),
+            )
+            .await;
+        assert!(result.is_err());
+        assert_eq!(settings.read().await.to_toml().unwrap(), before);
+        settings
+            .apply(
+                &cancel,
+                |mut config| {
+                    config.security = SecurityLevel::high();
+                    Ok((config, ()))
+                },
+                |_, ()| Ok(()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(settings.read().await.security.level, "high");
     }
 }

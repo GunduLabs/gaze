@@ -36,8 +36,7 @@ impl AuthDaemon {
     }
 
     pub(super) async fn current_config(&self) -> Config {
-        let mut last_good = self.last_good_config.lock().await;
-        resolve_config(Config::load_from(CONFIG_PATH), &mut last_good)
+        self.settings.read().await.clone()
     }
 
     pub(super) fn map_user_db_error(err: UserDbError) -> fdo::Error {
@@ -249,18 +248,20 @@ impl AuthDaemon {
         abort_before_first_resume && !resume_seen
     }
 
-    pub(super) async fn ensure_auth_not_aborted(&self, header: &Header<'_>) -> fdo::Result<()> {
-        let abort_before_first_resume = *self.abort_before_first_resume.lock().await;
+    pub(super) async fn ensure_auth_not_aborted(
+        &self,
+        header: &Header<'_>,
+        auth: &gaze_core::config::AuthConfig,
+    ) -> fdo::Result<()> {
         if Self::resume_gate_blocks(
-            abort_before_first_resume,
+            auth.abort_before_first_resume,
             self.resume_seen.load(Ordering::SeqCst),
         ) {
             warn!("No suspend/resume since boot, aborting face auth");
             return Err(fdo::Error::Failed("no suspend/resume since boot".into()));
         }
 
-        let abort_if_ssh = *self.abort_if_ssh.lock().await;
-        if abort_if_ssh {
+        if auth.abort_if_ssh {
             let caller_pid = Self::caller_pid(header).await.ok();
             let heuristic_is_ssh =
                 Self::caller_is_ssh_session_at(std::path::Path::new("/proc"), caller_pid);
@@ -277,8 +278,7 @@ impl AuthDaemon {
         Ok(())
     }
 
-    pub(super) async fn lid_closed_wait(&self) -> fdo::Result<bool> {
-        let abort_if_lid_closed = *self.abort_if_lid_closed.lock().await;
+    pub(super) async fn lid_closed_wait(&self, abort_if_lid_closed: bool) -> fdo::Result<bool> {
         if !abort_if_lid_closed || !Self::is_lid_closed().await {
             return Ok(false);
         }
@@ -545,9 +545,8 @@ impl AuthDaemon {
         Err(fdo::Error::Failed("Daemon is not claimed".into()))
     }
 
-    // Every capture opens the seat's V4L2 device, so a bystander's camera must never
-    // authenticate another user: the target, or a caller vouching for them, has to hold the seat.
-    // `active` is (uid, is_greeter) for the active seat; `seat_unoccupied` is its own check.
+    // Protect bystanders' cameras by checking seat ownership before capture.
+    // `active` is (uid, is_greeter); `seat_unoccupied` is checked separately.
     pub(super) fn seat_camera_allowed(
         caller_uid: u32,
         target_uid: u32,

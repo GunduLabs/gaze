@@ -44,6 +44,7 @@ mod verify;
 mod watch;
 
 use benchmark::*;
+pub use config::ConfigState;
 use config::*;
 pub use verify::*;
 pub use watch::*;
@@ -421,18 +422,7 @@ pub struct AuthDaemon {
     pub eye_state: Arc<Mutex<Option<EyeStateClassifier>>>,
     pub duress_lockout: Arc<DuressLockout>,
     pub db: Arc<Mutex<UserDatabase>>,
-    pub rgb_threshold: Arc<Mutex<f32>>,
-    pub ir_threshold: Arc<Mutex<f32>>,
-    pub rgb_device: Arc<Mutex<String>>,
-    pub ir_device: Arc<Mutex<String>>,
-    pub ir_node: Arc<Mutex<String>>,
-    pub serial_capture: Arc<Mutex<bool>>,
-    pub emitter_enabled: Arc<Mutex<bool>>,
-    pub liveness_config: Arc<Mutex<gaze_core::config::LivenessConfig>>,
-    pub hybrid_policy: Arc<Mutex<String>>,
-    pub abort_if_ssh: Arc<Mutex<bool>>,
-    pub abort_if_lid_closed: Arc<Mutex<bool>>,
-    pub abort_before_first_resume: Arc<Mutex<bool>>,
+    pub settings: ConfigState,
     pub claim_state: ClaimStateHandle,
     pub active_cancel: ActiveCancelHandle,
     pub pam_internal: PamInternalSets,
@@ -442,10 +432,6 @@ pub struct AuthDaemon {
     pub sleeping: tokio::sync::watch::Receiver<bool>,
     pub lock_epochs: LockEpochs,
     pub benchmark_running: Arc<AtomicBool>,
-    pub last_good_config: Arc<Mutex<Config>>,
-    /// Settings used by the loaded sessions, independent of reads from disk. Holding
-    /// this lock also serializes config writes and model replacements.
-    pub loaded_model_config: Mutex<Config>,
     pub rt_handle: tokio::runtime::Handle,
 }
 
@@ -461,30 +447,6 @@ fn validate_keyring_verification(
     }
     .validate_keyring(liveness)
     .map_err(|e| fdo::Error::Failed(format!("Keyring verification unavailable: {e}")))
-}
-
-fn resolve_config(loaded: anyhow::Result<Config>, last_good: &mut Config) -> Config {
-    match loaded {
-        Ok(mut config) => {
-            if config.clamp_keyring() {
-                warn!(
-                    path = CONFIG_PATH,
-                    "keyring unlock needs storage.encrypt_templates and liveness.enabled; \
-                     ignoring the keyring options"
-                );
-            }
-            *last_good = config.clone();
-            config
-        }
-        Err(e) => {
-            error!(
-                error = %e,
-                path = CONFIG_PATH,
-                "config is unreadable; keeping the last valid configuration"
-            );
-            last_good.clone()
-        }
-    }
 }
 
 /// When each logind session last became locked, keyed by session object path.
@@ -768,42 +730,39 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_hand_edited_keyring_opt_in_is_ignored_rather_than_breaking_face_login() {
-        let mut on_disk = gaze_core::config::Config::default();
+    #[tokio::test]
+    async fn a_hand_edited_keyring_opt_in_is_ignored_rather_than_breaking_face_login() {
+        let mut on_disk = Config::default();
         on_disk.storage.unlock_gnome_keyring = true;
         on_disk.storage.encrypt_templates = false;
         on_disk.liveness.enabled = true;
+        let settings = ConfigState::new(on_disk);
+        assert!(!settings.read().await.storage.unlock_gnome_keyring);
+        assert!(!settings.read().await.storage.unlock_gnome_keyring);
 
-        let mut last_good = gaze_core::config::Config::default();
-        let resolved = super::resolve_config(Ok(on_disk), &mut last_good);
-        assert!(!resolved.storage.unlock_gnome_keyring);
-        assert!(
-            !last_good.storage.unlock_gnome_keyring,
-            "the clamped value is what gets remembered"
-        );
-
-        let mut valid = gaze_core::config::Config::default();
+        let mut valid = Config::default();
         valid.storage.unlock_gnome_keyring = true;
-        valid.storage.encrypt_templates = true;
-        valid.liveness.enabled = true;
-        let resolved = super::resolve_config(Ok(valid), &mut last_good);
-        assert!(resolved.storage.unlock_gnome_keyring);
+        let settings = ConfigState::new(valid);
+        assert!(settings.read().await.storage.unlock_gnome_keyring);
     }
 
-    #[test]
-    fn an_unreadable_config_keeps_the_last_good_one() {
-        let mut last_good = hardened_config();
-
-        let resolved = super::resolve_config(
-            Err(anyhow::anyhow!("expected `=` after key, found newline")),
-            &mut last_good,
-        );
-
-        assert_eq!(resolved.security.level, "maximum");
-        assert!(resolved.auth.require_confirmation_lock_screen);
-        assert!(resolved.auth.require_confirmation_elevation);
-        assert_eq!(last_good.security.level, "maximum");
+    #[tokio::test]
+    async fn a_missing_or_unreadable_file_keeps_the_running_snapshot() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        let path = path.to_str().unwrap();
+        hardened_config().save_to(path).unwrap();
+        let settings = ConfigState::new(Config::load_from(path).unwrap());
+        std::fs::remove_file(path).unwrap();
+        for unreadable in [false, true] {
+            if unreadable {
+                std::fs::write(path, "[broken").unwrap();
+            }
+            let current = settings.read().await;
+            assert_eq!(current.security.level, "maximum");
+            assert!(current.auth.require_confirmation_lock_screen);
+            assert!(current.auth.require_confirmation_elevation);
+        }
     }
 
     #[test]
@@ -816,17 +775,16 @@ mod tests {
         assert!(!defaults.auth.require_confirmation_elevation);
     }
 
-    #[test]
-    fn a_readable_config_replaces_the_last_good_one() {
-        let mut last_good = hardened_config();
-        let mut updated = gaze_core::config::Config::default();
-        updated.liveness.threshold = 0.95;
-
-        let resolved = super::resolve_config(Ok(updated), &mut last_good);
-
-        assert_eq!(resolved.liveness.threshold, 0.95);
-        assert_eq!(last_good.liveness.threshold, 0.95);
-        assert_eq!(last_good.security.level, "medium");
+    #[tokio::test]
+    async fn disk_edits_do_not_change_the_advertised_or_running_settings() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        let path = path.to_str().unwrap();
+        hardened_config().save_to(path).unwrap();
+        let settings = ConfigState::new(Config::load_from(path).unwrap());
+        Config::default().save_to(path).unwrap();
+        assert_eq!(Config::load_from(path).unwrap().security.level, "medium");
+        assert_eq!(settings.read().await.security.level, "maximum");
     }
 
     #[tokio::test]
