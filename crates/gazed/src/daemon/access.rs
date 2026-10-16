@@ -3,7 +3,29 @@
 
 use super::*;
 
+static GAZE_ADMIN_PROMPTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+struct AdminPromptGuard;
+
+impl AdminPromptGuard {
+    fn new() -> Self {
+        GAZE_ADMIN_PROMPTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for AdminPromptGuard {
+    fn drop(&mut self) {
+        GAZE_ADMIN_PROMPTS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 impl AuthDaemon {
+    pub(super) fn face_barred_for_admin_prompt(pam_service: Option<&str>) -> bool {
+        GAZE_ADMIN_PROMPTS.load(std::sync::atomic::Ordering::SeqCst) > 0
+            && pam_service.is_some_and(|s| Self::normalize_pam_service(s) == "polkit-1")
+    }
+
     pub fn normalize_pam_service(service: &str) -> String {
         let trimmed = service.trim();
         std::path::Path::new(trimmed)
@@ -491,6 +513,7 @@ impl AuthDaemon {
             Interaction::Deny => Default::default(),
         };
 
+        let _admin_prompt = matches!(interaction, Interaction::Allow).then(AdminPromptGuard::new);
         let result = authority
             .check_authorization(&subject, action_id, &details, flags, "")
             .await
@@ -609,6 +632,18 @@ mod tests {
     use gaze_core::config::AuthSurface;
     use gaze_core::dbus::ActiveSession;
     use std::sync::Arc;
+
+    #[test]
+    fn polkit_face_auth_is_barred_while_a_gaze_admin_prompt_is_open() {
+        assert!(!AuthDaemon::face_barred_for_admin_prompt(Some("polkit-1")));
+        let guard = AdminPromptGuard::new();
+        assert!(AuthDaemon::face_barred_for_admin_prompt(Some("polkit-1")));
+        assert!(AuthDaemon::face_barred_for_admin_prompt(Some("/etc/pam.d/polkit-1")));
+        assert!(!AuthDaemon::face_barred_for_admin_prompt(Some("sudo")));
+        assert!(!AuthDaemon::face_barred_for_admin_prompt(None));
+        drop(guard);
+        assert!(!AuthDaemon::face_barred_for_admin_prompt(Some("polkit-1")));
+    }
 
     fn session(class: &str) -> ActiveSession {
         ActiveSession {

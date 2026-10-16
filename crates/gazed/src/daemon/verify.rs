@@ -285,6 +285,11 @@ impl AuthDaemon {
         pam_service: Option<String>,
         require_keyring: bool,
     ) -> fdo::Result<()> {
+        if Self::face_barred_for_admin_prompt(pam_service.as_deref()) {
+            return Err(fdo::Error::AccessDenied(
+                "changing Gaze's own settings or faces needs a password, not a face match".into(),
+            ));
+        }
         let claim = self.check_claim(&header).await?;
         self.ensure_auth_not_aborted(&header).await?;
         let lid_wait = self.lid_closed_wait().await?;
