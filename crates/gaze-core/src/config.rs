@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
-use zvariant::{OwnedValue, Type, Value};
 
 pub const CONFIG_PATH: &str = "/etc/gaze/config.toml";
 pub const USERS_DIR: &str = "/var/lib/gaze/users";
@@ -130,7 +129,7 @@ fn round_threshold(threshold: f32) -> f64 {
     (threshold as f64 * 100.0).round() / 100.0
 }
 
-#[derive(Serialize, Clone, Debug, Value, OwnedValue, Type)]
+#[derive(Serialize, Clone, Debug)]
 pub struct SecurityLevel {
     pub level: String,
     pub detector: String,
@@ -479,7 +478,7 @@ pub struct Config {
     pub duress: DuressConfig,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct InferenceConfig {
     #[serde(default = "default_execution_provider")]
     pub execution_provider: String,
@@ -660,7 +659,7 @@ impl DuressConfig {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Value, OwnedValue, Type)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct LivenessConfig {
     #[serde(default = "default_liveness_enabled")]
     pub enabled: bool,
@@ -881,7 +880,7 @@ fn default_start_delay_scope() -> String {
     "screen_lock".to_string()
 }
 
-#[derive(Serialize, Clone, Debug, Value, OwnedValue, Type)]
+#[derive(Serialize, Clone, Debug)]
 pub struct AuthConfig {
     pub abort_if_ssh: bool,
     pub abort_if_lid_closed: bool,
@@ -1019,7 +1018,7 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, Value, OwnedValue, Type)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct EnrollmentConfig {
     #[serde(default = "default_max_templates")]
     pub max_templates: u32,
@@ -1210,7 +1209,8 @@ impl Config {
                 .get(part)
                 .ok_or_else(|| anyhow::anyhow!("unknown setting `{key}`"))?;
         }
-        let Some(value) = item.as_value() else {
+        let value = item.as_value().filter(|_| !item.is_table_like());
+        let Some(value) = value else {
             anyhow::bail!(
                 "`{key}` is a section; ask for one of its settings, such as `{key}.<name>`"
             );
@@ -2042,8 +2042,7 @@ mod tests {
 
     #[test]
     fn the_dbus_signature_is_unchanged() {
-        use zvariant::Type;
-        assert_eq!(AuthConfig::SIGNATURE.to_string(), "(bbbbbtts)");
+        use zbus::Type;
         assert_eq!(
             crate::dbus::DbusConfig::SIGNATURE.to_string(),
             "((ss)(sssdds)(ssbys)(bbbbbtts)(ud)(bdd)(b))"
@@ -2397,7 +2396,7 @@ mod tests {
             String::new(),
         );
 
-        let value = zvariant::OwnedValue::try_from(crate::dbus::DbusConfig::from(cfg)).unwrap();
+        let value = zbus::OwnedVariant::try_from(crate::dbus::DbusConfig::from(cfg)).unwrap();
         let back = crate::dbus::DbusConfig::try_from(value)
             .map(Config::from)
             .unwrap();

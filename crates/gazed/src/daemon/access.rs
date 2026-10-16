@@ -498,19 +498,17 @@ impl AuthDaemon {
     ) -> fdo::Result<()> {
         let conn = system_bus().await?;
 
-        let authority = zbus_polkit::policykit1::AuthorityProxy::new(&conn)
+        let authority = gaze_core::polkit::AuthorityProxy::new(&conn)
             .await
             .map_err(|e| fdo::Error::Failed(format!("Failed to create polkit proxy: {e}")))?;
 
-        let subject = zbus_polkit::policykit1::Subject::new_for_message_header(header)
+        let subject = gaze_core::polkit::Subject::for_message_header(header)
             .map_err(|e| fdo::Error::Failed(format!("Failed to create polkit subject: {e}")))?;
 
         let details: HashMap<&str, &str> = HashMap::new();
         let flags = match interaction {
-            Interaction::Allow => {
-                zbus_polkit::policykit1::CheckAuthorizationFlags::AllowUserInteraction.into()
-            }
-            Interaction::Deny => Default::default(),
+            Interaction::Allow => gaze_core::polkit::ALLOW_USER_INTERACTION,
+            Interaction::Deny => gaze_core::polkit::NO_INTERACTION,
         };
 
         let _admin_prompt = matches!(interaction, Interaction::Allow).then(AdminPromptGuard::new);

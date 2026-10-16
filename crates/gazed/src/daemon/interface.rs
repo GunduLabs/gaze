@@ -192,7 +192,7 @@ impl AuthDaemon {
 
     async fn verify_start(
         &self,
-        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(signal_emitter)] ctxt: SignalEmitter<'_>,
         #[zbus(header)] header: Header<'_>,
         _face_name: String,
     ) -> fdo::Result<()> {
@@ -201,7 +201,7 @@ impl AuthDaemon {
 
     async fn verify_start_for(
         &self,
-        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(signal_emitter)] ctxt: SignalEmitter<'_>,
         #[zbus(header)] header: Header<'_>,
         _face_name: String,
         pam_service: String,
@@ -212,7 +212,7 @@ impl AuthDaemon {
 
     async fn verify_start_for_keyring(
         &self,
-        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(signal_emitter)] ctxt: SignalEmitter<'_>,
         #[zbus(header)] header: Header<'_>,
     ) -> fdo::Result<()> {
         self.start_verification(ctxt, header, Some("gdm-face".into()), true)
@@ -221,7 +221,7 @@ impl AuthDaemon {
 
     async fn verify_start_for_kwallet(
         &self,
-        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(signal_emitter)] ctxt: SignalEmitter<'_>,
         #[zbus(header)] header: Header<'_>,
         pam_service: String,
     ) -> fdo::Result<()> {
@@ -256,7 +256,7 @@ impl AuthDaemon {
 
     async fn set_ir_frame_size(
         &self,
-        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(signal_emitter)] ctxt: SignalEmitter<'_>,
         #[zbus(header)] header: Header<'_>,
         width: u32,
         height: u32,
@@ -281,7 +281,7 @@ impl AuthDaemon {
 
     async fn enroll_start(
         &self,
-        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(signal_emitter)] ctxt: SignalEmitter<'_>,
         #[zbus(header)] header: Header<'_>,
         face_name: String,
     ) -> fdo::Result<()> {
@@ -1176,9 +1176,9 @@ impl AuthDaemon {
 
     async fn set_config_with_keyring(
         &self,
-        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(signal_emitter)] ctxt: SignalEmitter<'_>,
         #[zbus(header)] header: Header<'_>,
-        config: zbus::zvariant::OwnedValue,
+        config: zbus::OwnedVariant,
         unlock_gnome_keyring: bool,
     ) -> fdo::Result<()> {
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await?;
@@ -1201,9 +1201,9 @@ impl AuthDaemon {
 
     async fn set_config_with_wallets(
         &self,
-        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[zbus(signal_emitter)] ctxt: SignalEmitter<'_>,
         #[zbus(header)] header: Header<'_>,
-        config: zbus::zvariant::OwnedValue,
+        config: zbus::OwnedVariant,
         unlock_gnome_keyring: bool,
         unlock_kwallet: bool,
     ) -> fdo::Result<()> {

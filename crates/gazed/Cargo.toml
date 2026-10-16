@@ -36,7 +36,6 @@ zip.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 futures.workspace = true
-zbus_polkit.workspace = true
 tss-esapi.workspace = true
 zeroize.workspace = true
 

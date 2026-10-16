@@ -281,8 +281,8 @@ async fn run(config: Config) -> anyhow::Result<()> {
 
     info!(elapsed = ?t_load.elapsed(), "Models & user DB loaded");
 
-    let conn = Builder::system()?
-        .serve_at("/com/gundulabs/Gaze", daemon)?
+    let conn = Builder::system()
+        .serve_at("/com/gundulabs/Gaze", daemon)
         .build()
         .await?;
 

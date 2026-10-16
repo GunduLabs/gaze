@@ -24,8 +24,6 @@ gaze-vision.workspace = true
 gtk4 = { workspace = true, features = ["gnome_46"] }
 libadwaita = { workspace = true, features = ["v1_4"] }
 zbus.workspace = true
-zbus_polkit.workspace = true
-enumflags2.workspace = true
 anyhow.workspace = true
 opencv = { workspace = true, features = ["imgproc"] }
 tracing.workspace = true
