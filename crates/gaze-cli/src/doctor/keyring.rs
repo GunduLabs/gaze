@@ -84,7 +84,7 @@ pub(super) fn pam_entry(line: &str) -> Option<(&str, &str, &str, &str)> {
     let line = line.split('#').next()?.trim();
     let (kind, rest) = line.split_once(char::is_whitespace)?;
     let rest = rest.trim_start();
-    // @include also affects auth; ignoring it would miscount pam_gaze's success=1 jump.
+    // @include also affects auth and must count toward numeric PAM jumps.
     if kind == "@include" {
         return Some(("auth", "include", rest, ""));
     }
@@ -104,33 +104,76 @@ pub(super) fn pam_entry(line: &str) -> Option<(&str, &str, &str, &str)> {
 /// Recognize the packaged hand-off, including the session hook that starts the keyring.
 pub(super) fn gdm_face_stack_passes_the_token(contents: &str) -> bool {
     let entries: Vec<_> = contents.lines().filter_map(pam_entry).collect();
-    let auth: Vec<_> = entries
+    let auth: Vec<_> = entries.iter().filter(|entry| entry.0 == "auth").collect();
+    let faillock_mode = |options: &str, mode: &str| {
+        options
+            .split_ascii_whitespace()
+            .filter(|option| matches!(*option, "preauth" | "authfail" | "authsucc"))
+            .eq([mode])
+    };
+    let handoff = auth
         .iter()
-        .filter(|entry| entry.0 == "auth")
-        .filter(|entry| !(entry.1 == "required" && entry.2 == "pam_permit.so"))
-        .collect();
-    let handoff = auth.windows(3).any(|lines| {
-        let (_, control, module, options) = *lines[0];
-        module == "pam_gaze.so"
-            && control
+        .enumerate()
+        .any(|(index, &&(_, control, module, options))| {
+            if module != "pam_gaze.so"
+                || options
+                    .split_ascii_whitespace()
+                    .any(|option| option == "simultaneous")
+            {
+                return false;
+            }
+            let after_gaze = &auth[index + 1..];
+            let after_gate = if control
                 .split_ascii_whitespace()
                 .eq(["[success=1", "default=ignore]"])
-            && !options
-                .split_ascii_whitespace()
-                .any(|option| option == "simultaneous")
-            && lines[1].1 == "requisite"
-            && lines[1].2 == "pam_deny.so"
-            && lines[2].1 == "optional"
-            && lines[2].2 == "pam_gnome_keyring.so"
-            && lines[2]
-                .3
-                .split_ascii_whitespace()
-                .any(|option| option == "use_authtok")
-            && !lines[2]
-                .3
-                .split_ascii_whitespace()
-                .any(|option| option == "auto_start" || option.starts_with("only_if="))
-    });
+            {
+                let Some(deny) = after_gaze.first() else {
+                    return false;
+                };
+                if deny.1 != "requisite" || deny.2 != "pam_deny.so" {
+                    return false;
+                }
+                &after_gaze[1..]
+            } else if control.split_ascii_whitespace().eq([
+                "[success=2",
+                "auth_err=ignore",
+                "default=1]",
+            ]) {
+                let [authfail, deny, authsucc, ..] = after_gaze else {
+                    return false;
+                };
+                if !authfail.1.split_ascii_whitespace().eq(["[default=die]"])
+                    || authfail.2 != "pam_faillock.so"
+                    || !faillock_mode(authfail.3, "authfail")
+                    || deny.1 != "requisite"
+                    || deny.2 != "pam_deny.so"
+                    || authsucc.1 != "required"
+                    || authsucc.2 != "pam_faillock.so"
+                    || !faillock_mode(authsucc.3, "authsucc")
+                {
+                    return false;
+                }
+                &after_gaze[3..]
+            } else {
+                return false;
+            };
+            // Permit rows may follow the landing point, but must not change the jump's length.
+            let keyring = after_gate
+                .iter()
+                .find(|entry| !(entry.1 == "required" && entry.2 == "pam_permit.so"));
+            keyring.is_some_and(|entry| {
+                entry.1 == "optional"
+                    && entry.2 == "pam_gnome_keyring.so"
+                    && entry
+                        .3
+                        .split_ascii_whitespace()
+                        .any(|option| option == "use_authtok")
+                    && !entry
+                        .3
+                        .split_ascii_whitespace()
+                        .any(|option| option == "auto_start" || option.starts_with("only_if="))
+            })
+        });
     handoff && starts_keyring_session(&entries)
 }
 
@@ -148,9 +191,8 @@ pub(super) fn starts_keyring_session(entries: &[(&str, &str, &str, &str)]) -> bo
     })
 }
 
-/// greetd has no token-only service like `gdm-face`, so the keyring line just has to come after
-/// whatever runs `pam_gaze.so` without a face match jumping over it. A match then hands it the
-/// released credential and a typed password hands it the one `pam_unix` read.
+/// greetd's keyring hook must follow Gaze without a face match jumping over it.
+/// It receives either the released credential or the password read by pam_unix.
 pub(super) fn greetd_stack_passes_the_token(contents: &str) -> bool {
     let entries: Vec<_> = contents.lines().filter_map(pam_entry).collect();
     let auth: Vec<_> = entries.iter().filter(|entry| entry.0 == "auth").collect();
@@ -272,9 +314,12 @@ pub(super) fn check_keyring(report: &mut Report, username: &str, config: Option<
                 format!(
                     "This file is preserved across upgrades. Replace it with the packaged stack \
                      (look for /etc/pam.d/{GDM_FACE_PAM_SERVICE}.rpmnew, .pacnew or .dpkg-dist), \
-                     or edit it so pam_gaze.so uses `[success=1 default=ignore]` followed by \
-                     `auth requisite pam_deny.so` and `auth optional pam_gnome_keyring.so use_authtok`, \
-                     plus `session optional pam_gnome_keyring.so auto_start`."
+                     or restore the packaged faillock preauth/authfail/authsucc gates. Gaze uses \
+                     `[success=2 auth_err=ignore default=1]`, followed by \
+                     `auth [default=die] pam_faillock.so authfail`, `auth requisite pam_deny.so`, \
+                     `auth required pam_faillock.so authsucc`, and \
+                     `auth optional pam_gnome_keyring.so use_authtok`, plus \
+                     `session optional pam_gnome_keyring.so auto_start`."
                 ),
             );
             return;
@@ -588,6 +633,63 @@ mod tests {
     }
 
     #[test]
+    fn the_nixos_gdm_face_stack_passes_the_keyring_token() {
+        let module = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../packaging/nix/nixos-module.nix"
+        ))
+        .unwrap();
+        let stack = module
+            .split("security.pam.services.\"gdm-face\".text = ''")
+            .nth(1)
+            .unwrap()
+            .split("'';")
+            .next()
+            .unwrap();
+        assert!(gdm_face_stack_passes_the_token(stack));
+    }
+
+    #[test]
+    fn faillock_handoffs_require_the_correct_jumps_and_gates() {
+        let valid = "auth [success=2 auth_err=ignore default=1] /usr/lib/security/pam_gaze.so\n\
+            auth [default=die] pam_faillock.so authfail deny=3\n\
+            auth requisite pam_deny.so\n\
+            auth required pam_faillock.so authsucc\n\
+            auth required pam_permit.so\n\
+            auth optional pam_gnome_keyring.so use_authtok\n\
+            session optional pam_gnome_keyring.so auto_start\n";
+        assert!(gdm_face_stack_passes_the_token(valid));
+        assert!(gdm_face_stack_passes_the_token(
+            &valid.replace("auth required pam_permit.so\n", "")
+        ));
+        for broken in [
+            valid.replace("success=2", "success=1"),
+            valid.replace("success=2", "success=3"),
+            valid.replace("auth_err=ignore", "auth_err=1"),
+            valid.replace("default=1", "default=ignore"),
+            valid.replace("[default=die] pam_faillock.so", "optional pam_faillock.so"),
+            valid.replace("authfail deny=3", "authsucc deny=3"),
+            valid.replace("authfail deny=3", "authfail authsucc deny=3"),
+            valid.replace("auth required pam_faillock.so authsucc\n", ""),
+            valid.replace("authsucc\n", "preauth\n"),
+            valid.replace(
+                "auth required pam_faillock.so",
+                "auth optional pam_faillock.so",
+            ),
+            valid.replace("requisite pam_deny.so", "optional pam_deny.so"),
+            valid.replace(
+                "auth [default=die]",
+                "auth required pam_permit.so\nauth [default=die]",
+            ),
+            valid.replace("pam_gaze.so", "pam_gaze.so simultaneous"),
+            valid.replace("use_authtok", "use_authtok only_if=login"),
+            valid.replace("session optional pam_gnome_keyring.so auto_start\n", ""),
+        ] {
+            assert!(!gdm_face_stack_passes_the_token(&broken), "{broken}");
+        }
+    }
+
+    #[test]
     fn incomplete_or_misordered_keyring_stacks_are_not_reported_healthy() {
         let valid = "auth [success=1 default=ignore] /usr/lib/security/pam_gaze.so\n\
             auth requisite pam_deny.so\n\
@@ -606,6 +708,10 @@ mod tests {
             valid.replace("[success=1 default=ignore]", "sufficient"),
             valid.replace("pam_gaze.so", "pam_gaze.so simultaneous"),
             valid.replace("requisite pam_deny.so", "optional pam_deny.so"),
+            valid.replace(
+                "auth requisite",
+                "auth required pam_permit.so\nauth requisite",
+            ),
             valid.replace("auth requisite", "@include common-auth\nauth requisite"),
             valid.replace("use_authtok", "not_use_authtok"),
             valid.replace("use_authtok", "use_authtok only_if=login"),
