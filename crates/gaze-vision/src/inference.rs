@@ -109,21 +109,26 @@ impl InferenceRuntime {
 }
 
 fn session_builder(library: &RuntimeLibrary) -> anyhow::Result<SessionBuilder> {
+    let configure_error =
+        |error| anyhow::anyhow!("failed to configure ONNX Runtime session: {error}");
     Session::builder(&library.environment)
         .map_err(|error| {
             anyhow::anyhow!("failed to create an ONNX Runtime session builder: {error}")
         })?
         .with_optimization_level(GraphOptimizationLevel::All)
-        .and_then(|builder| {
-            builder.with_intra_threads(inference_threads(
-                std::thread::available_parallelism().map_or(1, usize::from),
-            ))
-        })
-        .and_then(|builder| builder.with_inter_threads(1))
-        .and_then(|builder| builder.with_parallel_execution(false))
-        .and_then(|builder| builder.with_intra_op_spinning(false))
-        .and_then(|builder| builder.with_inter_op_spinning(false))
-        .map_err(|error| anyhow::anyhow!("failed to configure ONNX Runtime session: {error}"))
+        .map_err(configure_error)?
+        .with_intra_threads(inference_threads(
+            std::thread::available_parallelism().map_or(1, usize::from),
+        ))
+        .map_err(configure_error)?
+        .with_inter_threads(1)
+        .map_err(configure_error)?
+        .with_parallel_execution(false)
+        .map_err(configure_error)?
+        .with_intra_op_spinning(false)
+        .map_err(configure_error)?
+        .with_inter_op_spinning(false)
+        .map_err(configure_error)
 }
 
 fn inference_threads(available: usize) -> usize {
