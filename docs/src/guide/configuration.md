@@ -262,6 +262,10 @@ When you configure an IR camera alongside RGB, Gaze captures templates from both
 during enrollment, then combines their results during verification according to
 the configured `hybrid_policy`.
 
+If the configured IR camera is not connected, for example a USB IR camera on an
+undocked laptop, Gaze enrolls and verifies with the RGB camera alone. The `and`
+policy is the exception: it keeps requiring both cameras and fails instead.
+
 ### IR only
 
 To authenticate with the IR camera alone and never open the RGB camera, set

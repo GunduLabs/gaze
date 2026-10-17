@@ -120,6 +120,10 @@ pub(super) fn ir_continues_without_rgb(policy: &str, run_ir: bool) -> bool {
     run_ir && policy != "and"
 }
 
+pub(super) fn rgb_continues_without_ir(policy: &str, run_rgb: bool) -> bool {
+    run_rgb && policy != "and"
+}
+
 pub(super) fn auth_streams(
     rgb_device: &str,
     ir_device: &str,
@@ -545,6 +549,20 @@ impl AuthDaemon {
                     continue;
                 }
                 let mut run_rgb = run_rgb;
+                let mut run_ir = run_ir;
+                if run_ir && rgb_continues_without_ir(&hybrid_policy, run_rgb) {
+                    let source = ir_device.clone();
+                    let disconnected = tokio::task::spawn_blocking(move || {
+                        gaze_vision::camera::camera_disconnected(&source, false)
+                    })
+                    .await
+                    .unwrap_or(false);
+                    if disconnected {
+                        warn!("VerifyStart: IR camera {ir_device:?} is not connected; continuing with RGB only");
+                        let _ = Self::verify_diagnostic(&ctxt, "IR camera is not connected; continuing with the RGB camera").await;
+                        run_ir = false;
+                    }
+                }
 
                 info!(
                     liveness_enabled = liveness_cfg.enabled,
@@ -1535,6 +1553,24 @@ mod tests {
         }
         assert!(!ir_continues_without_rgb("and", true));
         assert!(!ir_continues_without_rgb("fallback_on_dark", false));
+    }
+
+    #[test]
+    fn a_disconnected_ir_camera_hands_auth_to_rgb_unless_both_are_required() {
+        for policy in ["or", "fallback_on_dark", "default"] {
+            assert!(rgb_continues_without_ir(policy, true), "{policy}");
+            assert!(hybrid_auth_passed(
+                policy,
+                true,
+                false,
+                true,
+                CaptureStatus::Ready,
+                true,
+                false
+            ));
+        }
+        assert!(!rgb_continues_without_ir("and", true));
+        assert!(!rgb_continues_without_ir("fallback_on_dark", false));
     }
 
     #[test]

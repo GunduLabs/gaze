@@ -675,9 +675,7 @@ fn nodes_for_by_path(by_path: &str) -> Vec<String> {
         .collect()
 }
 
-/// Resolves a pinned PipeWire target to its V4L2 node. A device may link several nodes, including
-/// non-capture nodes such as metadata; negotiated caps distinguish the usable camera node.
-fn node_from_pipewire_target(target: &str, want_color: bool) -> Option<String> {
+fn pipewire_target_nodes(target: &str) -> Option<Vec<String>> {
     let by_path = v4l2_by_path_for_target(target)?;
     let mut nodes = nodes_for_by_path(&by_path);
     if nodes.is_empty()
@@ -685,6 +683,27 @@ fn node_from_pipewire_target(target: &str, want_color: bool) -> Option<String> {
     {
         nodes = nodes_for_by_path(base);
     }
+    Some(nodes)
+}
+
+pub fn camera_disconnected(source: &str, want_color: bool) -> bool {
+    let source = source.trim();
+    if let V4l2Fallback::SameNode(target) = v4l2_fallback_for(source) {
+        return pipewire_target_nodes(&target).is_some_and(|nodes| nodes.is_empty());
+    }
+    if source.starts_with("/dev/video") {
+        return resolve_privileged_node(source, want_color)
+            .is_some_and(|node| !std::path::Path::new(&node).exists());
+    }
+    let names_device =
+        source == DEFAULT_RGB_CAMERA || source == "pipewiresrc" || parse_usb_spec(source).is_some();
+    names_device && resolve_privileged_node(source, want_color).is_none()
+}
+
+/// Resolves a pinned PipeWire target to its V4L2 node. A device may link several nodes, including
+/// non-capture nodes such as metadata; negotiated caps distinguish the usable camera node.
+fn node_from_pipewire_target(target: &str, want_color: bool) -> Option<String> {
+    let nodes = pipewire_target_nodes(target)?;
     if let [only] = nodes.as_slice() {
         return Some(only.clone());
     }
@@ -915,10 +934,14 @@ impl Camera {
     ) -> anyhow::Result<Self> {
         gstreamer::init()?;
         let Some(node) = resolve_privileged_node(camera_source, want_color) else {
-            let err = anyhow::anyhow!(
-                "refusing privileged capture of {camera_source:?}: no backing /dev/video node \
-                 (PipeWire sessions and custom pipelines are not trusted for authentication)"
-            );
+            let err = if camera_disconnected(camera_source, want_color) {
+                anyhow::anyhow!("camera {camera_source:?} is not connected")
+            } else {
+                anyhow::anyhow!(
+                    "refusing privileged capture of {camera_source:?}: no backing /dev/video node \
+                     (PipeWire sessions and custom pipelines are not trusted for authentication)"
+                )
+            };
             return Self::open_libcamera_fallback(camera_source, want_color, None, err);
         };
         let force_ir_yuy2 = node_requires_forced_ir_yuy2(&node, want_color);
@@ -2290,6 +2313,24 @@ mod tests {
                 None,
                 "{source:?} must not resolve for privileged capture"
             );
+        }
+    }
+
+    #[test]
+    fn only_unplugged_v4l2_cameras_count_as_disconnected() {
+        assert!(camera_disconnected("/dev/video9999", false));
+        assert!(camera_disconnected(
+            "pipewiresrc target-object=v4l2_input.pci-0000_ff_1f.7-usb-0_9.9.9_1.0.3",
+            false
+        ));
+        for source in [
+            "videotestsrc num-buffers=2",
+            "pipewiresrc target-object=alsa_input.pci-0000_00_1f.3",
+            "pipewiresrc target-object=51",
+            "/dev/videofoo",
+            "",
+        ] {
+            assert!(!camera_disconnected(source, false), "{source:?}");
         }
     }
 
