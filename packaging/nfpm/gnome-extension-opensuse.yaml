@@ -54,8 +54,8 @@ rpm:
     key_file: "${NFPM_SIGNING_KEY_FILE}"
 
 scripts:
-  postinstall: "packaging/postinst-gnome-extension.sh"
-  postremove: "packaging/postrm-gnome-extension.sh"
+  postinstall: "packaging/scriptlets/postinst-gnome-extension.sh"
+  postremove: "packaging/scriptlets/postrm-gnome-extension.sh"
 
 depends:
   - gnome-shell

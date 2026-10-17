@@ -89,8 +89,8 @@ rpm:
 overrides:
   rpm:
     scripts:
-      postinstall: "packaging/postinst-rpm.sh"
-      preremove: "packaging/prerm-rpm.sh"
+      postinstall: "packaging/scriptlets/postinst-rpm.sh"
+      preremove: "packaging/scriptlets/prerm-rpm.sh"
     depends:
       - pam
       - pam-config

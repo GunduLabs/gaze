@@ -32,11 +32,11 @@ rpm:
 
 archlinux:
   scripts:
-    postupgrade: "packaging/postinst-kde.sh"
+    postupgrade: "packaging/scriptlets/postinst-kde.sh"
 
 scripts:
-  postinstall: "packaging/postinst-kde.sh"
-  postremove: "packaging/postrm-kde.sh"
+  postinstall: "packaging/scriptlets/postinst-kde.sh"
+  postremove: "packaging/scriptlets/postrm-kde.sh"
 
 overrides:
   deb:

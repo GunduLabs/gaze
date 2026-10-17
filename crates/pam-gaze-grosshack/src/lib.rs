@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #![allow(clippy::missing_safety_doc)]
-#[path = "../../pam-gaze/src/core.rs"]
+#[path = "../../pam-gaze/src/core/mod.rs"]
 pub mod core;
 pub use core::*;
 

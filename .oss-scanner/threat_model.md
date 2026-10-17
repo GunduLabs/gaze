@@ -22,9 +22,9 @@ Attackers we care about, in order: a local unprivileged user, a remote user reac
 
 Most important:
 
-- `crates/pam-gaze` (`auth.rs`, `core.rs`): the PAM entry points, D-Bus client, remote/SSH refusal (`caller_is_remote`, `service_is_network_facing`), and the mapping from daemon replies to PAM return codes. Any path that returns `PAM_SUCCESS` without a matching face is critical.
+- `crates/pam-gaze` (`auth.rs`, `core/`): the PAM entry points, D-Bus client, remote/SSH refusal (`caller_is_remote`, `service_is_network_facing`), and the mapping from daemon replies to PAM return codes. Any path that returns `PAM_SUCCESS` without a matching face is critical.
 - `crates/gazed/src/daemon` (`interface.rs`, `access.rs`, `verify.rs`, `config.rs`): D-Bus methods, caller identification, polkit checks, device claiming, and per-user scoping of enrollments and verification.
-- `crates/gazed/src/users.rs`, `crypto.rs`, `tpm.rs` and `crates/gaze-security`: template storage, AES-GCM encryption under a TPM-sealed key, and the keyring/KWallet password store that releases a user's password after face auth.
+- `crates/gazed/src/users/`, `crypto.rs`, `tpm/` and `crates/gaze-security`: template storage, AES-GCM encryption under a TPM-sealed key, and the keyring/KWallet password store that releases a user's password after face auth.
 - `crates/gazed/src/recognize.rs`, `liveness.rs`, `duress.rs`: match thresholds, anti-spoofing, and the eyes-closed duress signal.
 - `crates/gazed/src/models.rs`: download, checksum, and zip extraction of model files into `/var/cache/gaze`.
 

@@ -151,13 +151,13 @@ rpm:
 
 archlinux:
   scripts:
-    postupgrade: "packaging/postinst-arch.sh"
+    postupgrade: "packaging/scriptlets/postinst-arch.sh"
 
 overrides:
   deb:
     scripts:
-      postinstall: "packaging/postinst-deb.sh"
-      preremove: "packaging/prerm-deb.sh"
+      postinstall: "packaging/scriptlets/postinst-deb.sh"
+      preremove: "packaging/scriptlets/prerm-deb.sh"
     depends:
       - libpam0g
       - gstreamer1.0-plugins-base
@@ -166,8 +166,8 @@ overrides:
 ${DEB_LIB_DEPENDS}
   rpm:
     scripts:
-      postinstall: "packaging/postinst-rpm.sh"
-      preremove: "packaging/prerm-rpm.sh"
+      postinstall: "packaging/scriptlets/postinst-rpm.sh"
+      preremove: "packaging/scriptlets/prerm-rpm.sh"
     depends:
       - pam
       - gstreamer1-plugins-base
@@ -176,8 +176,8 @@ ${DEB_LIB_DEPENDS}
 ${RPM_LIB_DEPENDS}
   archlinux:
     scripts:
-      postinstall: "packaging/postinst-arch.sh"
-      preremove: "packaging/prerm-arch.sh"
+      postinstall: "packaging/scriptlets/postinst-arch.sh"
+      preremove: "packaging/scriptlets/prerm-arch.sh"
     depends:
       # The `_nfpm` recipe computes these bounds from the libopencv_core soversion linked by
       # gazed. Arch changes that version each minor release, so an unbounded dependency can break

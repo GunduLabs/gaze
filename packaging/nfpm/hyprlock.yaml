@@ -63,11 +63,11 @@ rpm:
 
 archlinux:
   scripts:
-    postupgrade: "packaging/postinst-hyprlock.sh"
+    postupgrade: "packaging/scriptlets/postinst-hyprlock.sh"
 
 scripts:
-  postinstall: "packaging/postinst-hyprlock.sh"
-  postremove: "packaging/postrm-hyprlock.sh"
+  postinstall: "packaging/scriptlets/postinst-hyprlock.sh"
+  postremove: "packaging/scriptlets/postrm-hyprlock.sh"
 
 overrides:
   deb:
