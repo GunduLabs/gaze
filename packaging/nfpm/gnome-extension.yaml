@@ -70,11 +70,11 @@ rpm:
 
 archlinux:
   scripts:
-    postupgrade: "packaging/postinst-gnome-extension.sh"
+    postupgrade: "packaging/scriptlets/postinst-gnome-extension.sh"
 
 scripts:
-  postinstall: "packaging/postinst-gnome-extension.sh"
-  postremove: "packaging/postrm-gnome-extension.sh"
+  postinstall: "packaging/scriptlets/postinst-gnome-extension.sh"
+  postremove: "packaging/scriptlets/postrm-gnome-extension.sh"
 
 depends:
   - gnome-shell

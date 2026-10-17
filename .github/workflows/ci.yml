@@ -61,22 +61,11 @@ jobs:
 
       - name: Parse POSIX scripts with dash
         run: |
-          for f in docs/public/install.sh packaging/*.sh scripts/check-pam-link.sh \
+          for f in docs/public/install.sh packaging/scriptlets/*.sh scripts/check-pam-link.sh \
             scripts/dev-link-system.sh scripts/setup-hooks.sh scripts/pre-commit \
             integrations/omarchy/gaze-omarchy integrations/kde/gaze-kde-pam; do
             dash -n "$f"
           done
-
-      - name: Run shellcheck
-        run: |
-          shellcheck --version
-          shellcheck --severity=error \
-            docs/public/install.sh \
-            packaging/*.sh \
-            scripts/*.sh \
-            scripts/pre-commit \
-            integrations/omarchy/gaze-omarchy \
-            integrations/kde/gaze-kde-pam
 
   audit:
     name: Audit

@@ -3,6 +3,7 @@
 
 mod camera_view;
 mod capture_dialog;
+mod config_dialog;
 mod window;
 
 use gtk4::prelude::*;

@@ -701,9 +701,9 @@ package-prebuilt format: _dist-packages prepare-ort
     # Use SUSE manifests together so packages do not mix PAM stack formats.
     # Other RPM hosts keep the existing manifests.
 
-    configs=(packaging/nfpm.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension.yaml packaging/nfpm-cinnamon-extension.yaml packaging/nfpm-hyprlock.yaml packaging/nfpm-kde.yaml packaging/nfpm-omarchy.yaml)
+    configs=(packaging/nfpm/gaze.yaml packaging/nfpm/gui.yaml packaging/nfpm/gnome-extension.yaml packaging/nfpm/cinnamon-extension.yaml packaging/nfpm/hyprlock.yaml packaging/nfpm/kde.yaml packaging/nfpm/omarchy.yaml)
     if [ "{{ format }}" = rpm ] && is_suse; then
-        configs=(packaging/nfpm-opensuse.yaml packaging/nfpm-gui.yaml packaging/nfpm-gnome-extension-opensuse.yaml packaging/nfpm-cinnamon-extension.yaml packaging/nfpm-hyprlock-opensuse.yaml packaging/nfpm-kde.yaml packaging/nfpm-omarchy.yaml)
+        configs=(packaging/nfpm/gaze-opensuse.yaml packaging/nfpm/gui.yaml packaging/nfpm/gnome-extension-opensuse.yaml packaging/nfpm/cinnamon-extension.yaml packaging/nfpm/hyprlock-opensuse.yaml packaging/nfpm/kde.yaml packaging/nfpm/omarchy.yaml)
     fi
 
     for config in "${configs[@]}"; do {{ quote(just_executable()) }} _nfpm "$config" "{{ format }}"; done
@@ -745,15 +745,15 @@ srpm: _dist-packages _srpm-sources
     export PACKAGE_RELEASE="{{ package_release }}"
     export ORT_VERSION="{{ ort_version }}"
     export CHANGELOG_DATE="$(date -u '+%a %b %d %Y')"
-    export SCRIPTLET_MAIN_POST="$(cat packaging/postinst-rpm.sh)"
-    export SCRIPTLET_EXTENSION_POST="$(cat packaging/postinst-gnome-extension.sh)"
-    export SCRIPTLET_EXTENSION_POSTUN="$(cat packaging/postrm-gnome-extension.sh)"
-    export SCRIPTLET_OMARCHY_PREUN="$(cat packaging/prerm-omarchy.sh)"
-    export SCRIPTLET_OMARCHY_POST="$(cat packaging/postinst-omarchy.sh)"
-    export SCRIPTLET_KDE_POST="$(cat packaging/postinst-kde.sh)"
-    export SCRIPTLET_KDE_POSTUN="$(cat packaging/postrm-kde.sh)"
-    export SCRIPTLET_HYPRLOCK_POST="$(cat packaging/postinst-hyprlock.sh)"
-    export SCRIPTLET_HYPRLOCK_POSTUN="$(cat packaging/postrm-hyprlock.sh)"
+    export SCRIPTLET_MAIN_POST="$(cat packaging/scriptlets/postinst-rpm.sh)"
+    export SCRIPTLET_EXTENSION_POST="$(cat packaging/scriptlets/postinst-gnome-extension.sh)"
+    export SCRIPTLET_EXTENSION_POSTUN="$(cat packaging/scriptlets/postrm-gnome-extension.sh)"
+    export SCRIPTLET_OMARCHY_PREUN="$(cat packaging/scriptlets/prerm-omarchy.sh)"
+    export SCRIPTLET_OMARCHY_POST="$(cat packaging/scriptlets/postinst-omarchy.sh)"
+    export SCRIPTLET_KDE_POST="$(cat packaging/scriptlets/postinst-kde.sh)"
+    export SCRIPTLET_KDE_POSTUN="$(cat packaging/scriptlets/postrm-kde.sh)"
+    export SCRIPTLET_HYPRLOCK_POST="$(cat packaging/scriptlets/postinst-hyprlock.sh)"
+    export SCRIPTLET_HYPRLOCK_POSTUN="$(cat packaging/scriptlets/postrm-hyprlock.sh)"
 
     mkdir -p "{{ srpm_topdir }}/SPECS"
     spec="{{ srpm_topdir }}/SPECS/gaze.spec"

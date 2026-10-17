@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Gundu Labs
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# GNOME Shell extension for Gaze (mirrors packaging/nfpm-gnome-extension.yaml).
+# GNOME Shell extension for Gaze (mirrors packaging/nfpm/gnome-extension.yaml).
 # GDM defaults and the gdm-face PAM service live in the NixOS module.
 {
   lib,

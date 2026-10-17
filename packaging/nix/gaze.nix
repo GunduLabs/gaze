@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Gundu Labs
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Daemon, CLI, and PAM modules for Gaze (mirrors packaging/nfpm.yaml).
+# Daemon, CLI, and PAM modules for Gaze (mirrors packaging/nfpm/gaze.yaml).
 {
   lib,
   rustPlatform,

@@ -34,8 +34,8 @@ rpm:
     key_file: "${NFPM_SIGNING_KEY_FILE}"
 
 scripts:
-  postinstall: "packaging/postinst-hyprlock.sh"
-  postremove: "packaging/postrm-hyprlock.sh"
+  postinstall: "packaging/scriptlets/postinst-hyprlock.sh"
+  postremove: "packaging/scriptlets/postrm-hyprlock.sh"
 
 recommends:
   - gaze

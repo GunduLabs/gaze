@@ -56,11 +56,11 @@ rpm:
 
 archlinux:
   scripts:
-    postupgrade: "packaging/postinst-omarchy.sh"
+    postupgrade: "packaging/scriptlets/postinst-omarchy.sh"
 
 scripts:
-  postinstall: "packaging/postinst-omarchy.sh"
-  preremove: "packaging/prerm-omarchy.sh"
+  postinstall: "packaging/scriptlets/postinst-omarchy.sh"
+  preremove: "packaging/scriptlets/prerm-omarchy.sh"
 
 overrides:
   deb:

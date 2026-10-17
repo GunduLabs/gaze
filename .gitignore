@@ -1,32 +1,19 @@
 # SPDX-FileCopyrightText: 2026 Gundu Labs
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-debug
-target
-.cargo/
-vendor/
-.flatpak-cache/
-flatpak-build/
-.flatpak-builder/
-
-**/*.rs.bk
-
-*.pdb
-
-**/mutants.out*/
-
-node_modules/
-docs/.vitepress/dist
-docs/.vitepress/cache
-docs/.vitepress/.temp
-
+target/
 dist/
+vendor/
 
-index.scip
-docs/archive/
+.flatpak-cache/
+.flatpak-builder/
+flatpak-build/
 
-# nix build outputs
 result
 result-*
-references/
-/build/
+
+node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+docs/.vitepress/.temp/
+docs/archive/
