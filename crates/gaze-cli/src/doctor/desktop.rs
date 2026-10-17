@@ -31,9 +31,8 @@ pub(super) fn owning_uid() -> u32 {
         .unwrap_or_else(|| unsafe { libc::getuid() })
 }
 
-/// Returns desktop names in the colon-delimited form used by the environment
-/// variables above, so callers can check for desktop names with `contains`.
-/// The CLI does not link `pam-gaze`.
+/// Returns colon-delimited desktop names for `contains` checks.
+/// The CLI does not link pam-gaze.
 pub(super) fn desktop_from_processes(uid: u32) -> String {
     use std::os::unix::fs::MetadataExt;
 
@@ -374,9 +373,8 @@ pub(super) fn check_kde_lock_screen(
     }
 }
 
-/// A greeter can scan before you type only when it starts a separate biometric
-/// service. Otherwise, face authentication begins after submission, as it does
-/// for a fingerprint reader.
+/// Pre-submit scanning requires a separate biometric service.
+/// Otherwise, face authentication starts on submission, like a fingerprint reader.
 pub(super) fn check_kde_login_greeter(report: &mut Report, plasmalogin_face: Option<&str>) {
     const NAME: &str = "KDE login greeter";
     match plasmalogin_face {
@@ -396,12 +394,9 @@ pub(super) fn check_kde_login_greeter(report: &mut Report, plasmalogin_face: Opt
     }
 }
 
-/// The KDE biometric slots start without anything to route a response back, so
-/// `require_confirmation_lock_screen` is silently ignored there by design:
-/// prompting would hang the slot for the rest of the lock rather than ask
-/// anybody anything. Say so when the toggle is on and a slot is wired, instead
-/// of letting the setting imply a confirmation that never happens.
-pub(super) fn check_kde_confirmation_bypass(
+/// KDE slots and login forms cannot answer a confirmation prompt.
+/// With confirmation required, PAM ignores Gaze and leaves password authentication available.
+pub(super) fn check_kde_confirmation(
     report: &mut Report,
     config: Option<&Config>,
     kde_fingerprint: Option<&str>,
@@ -416,28 +411,28 @@ pub(super) fn check_kde_confirmation_bypass(
     if !config.auth.require_confirmation_lock_screen {
         return;
     }
-    let mut bypassed = Vec::new();
+    let mut blocked = Vec::new();
     if slot_status(kde_fingerprint) == KdeLockStatus::Wired {
-        bypassed.push(KDE_FACE_PAM_FILE.trim_start_matches("/etc/pam.d/"));
+        blocked.push(KDE_FACE_PAM_FILE.trim_start_matches("/etc/pam.d/"));
     }
     if slot_status(kde_smartcard) == KdeLockStatus::Wired {
-        bypassed.push(KDE_SMARTCARD_PAM_FILE.trim_start_matches("/etc/pam.d/"));
+        blocked.push(KDE_SMARTCARD_PAM_FILE.trim_start_matches("/etc/pam.d/"));
     }
     if plasmalogin_face.is_some_and(|contents| slot_status(Some(contents)) == KdeLockStatus::Wired)
     {
-        bypassed.push(PLASMALOGIN_FACE_PAM_FILE.trim_start_matches("/etc/pam.d/"));
+        blocked.push(PLASMALOGIN_FACE_PAM_FILE.trim_start_matches("/etc/pam.d/"));
     }
-    bypassed.extend_from_slice(login_greeters);
-    if bypassed.is_empty() {
+    blocked.extend_from_slice(login_greeters);
+    if blocked.is_empty() {
         return;
     }
     report.warning(
         NAME,
         format!(
-            "require_confirmation_lock_screen is on, but {} cannot be prompted, so a face match unlocks without confirmation there",
-            bypassed.join(", ")
+            "require_confirmation_lock_screen is on, but {} cannot be prompted, so Gaze returns PAM_IGNORE and requires password fallback there",
+            blocked.join(", ")
         ),
-        "This is by design: the greeter never delivers a response to a noninteractive slot, and the login form never shows a second prompt, so asking would hang the slot or fail every login. Leave the toggle for surfaces that can prompt (sudo with a TTY, polkit, GNOME), or turn it off if the KDE bypass surprises you. See the KDE guide.",
+        "Use your password or a surface that can present confirmation (sudo with a TTY, polkit, GNOME). Disable the toggle only if face authentication without confirmation is intentional. See the KDE guide.",
     );
 }
 
@@ -596,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    fn kde_confirmation_bypass_is_reported_when_the_toggle_is_on_and_a_slot_is_wired() {
+    fn kde_confirmation_fallback_is_reported_when_the_toggle_is_on_and_a_slot_is_wired() {
         let check = |confirmation: bool,
                      fingerprint: Option<&str>,
                      smartcard: Option<&str>,
@@ -605,7 +600,7 @@ mod tests {
             let mut config = Config::default();
             config.auth.require_confirmation_lock_screen = confirmation;
             let mut report = Report::default();
-            check_kde_confirmation_bypass(
+            check_kde_confirmation(
                 &mut report,
                 Some(&config),
                 fingerprint,
@@ -623,7 +618,7 @@ mod tests {
         // Off means nothing to say, even when a slot is wired.
         assert!(check(false, Some("auth sufficient pam_gaze.so"), None, None, &[]).is_none());
         assert!(check(false, None, None, None, &["plasmalogin"]).is_none());
-        // On with nothing wired means nothing is bypassed.
+        // On with nothing wired means there is no affected service.
         assert!(check(true, None, None, None, &[]).is_none());
         assert!(check(true, Some("auth required pam_fprintd.so"), None, None, &[]).is_none());
 
@@ -631,6 +626,8 @@ mod tests {
             .expect("a wired slot with confirmation on must warn");
         assert_eq!(level, Level::Warning);
         assert!(message.contains("kde-fingerprint"), "{message}");
+        assert!(message.contains("PAM_IGNORE"), "{message}");
+        assert!(message.contains("password fallback"), "{message}");
         assert!(
             message.contains("require_confirmation_lock_screen"),
             "{message}"

@@ -23,6 +23,28 @@ cc -Wall -Wextra -Werror -fPIC -shared -DGAZE_MOCK_MODULE \
     "$repo/scripts/keyring-pam-harness.c" -lpam -o "$test_dir/mock.so"
 cc -Wall -Wextra -Werror "$repo/scripts/keyring-pam-harness.c" -lpam -o "$test_dir/driver"
 
+mkdir "$test_dir/tallies"
+export GAZE_TEST_PAM_USER
+GAZE_TEST_PAM_USER=$(id -un)
+faillock="pam_faillock.so dir=$test_dir/tallies deny=2 unlock_time=0 even_deny_root"
+
+render_stack() {
+    local template=$1 result=$2 token=$3 keyring=$4 drop_keyring=
+    if [ "$keyring" = removed ]; then drop_keyring='/pam_gnome_keyring\.so/d'; fi
+    # Keep the shipped controls and real faillock/deny modules; isolate tally files.
+    sed -n '/^auth/p' "$template" |
+        sed -e "${drop_keyring:-/^\$/d}" \
+            -e "s|pam_env.so|$test_dir/mock.so gaze 25 absent|" \
+            -e '/[[:space:]]include[[:space:]]/d' \
+            -e "s|pam_gaze.so|$test_dir/mock.so gaze $result $token|" \
+            -e "s|pam_faillock.so|$faillock|" \
+            -e "s|pam_gnome_keyring.so.*|$test_dir/mock.so keyring $test_dir/called $token|" \
+        > "$test_dir/gdm-face"
+}
+
+printf '%s\n' "auth required $faillock preauth" \
+    'auth required pam_permit.so' 'session required pam_permit.so' > "$test_dir/lockout-probe"
+
 for template in "$repo"/packaging/pam/gdm-face{,.arch,.deb,.suse}; do
     auth_keyring=$(sed -n '/^auth.*pam_gnome_keyring\.so/p' "$template")
     test "$auth_keyring" = "${auth_keyring//auto_start/}"
@@ -32,17 +54,8 @@ for template in "$repo"/packaging/pam/gdm-face{,.arch,.deb,.suse}; do
             for keyring in present removed; do
                 marker="$test_dir/called"
                 rm -f -- "$marker"
-                drop_keyring=
-                if [ "$keyring" = removed ]; then drop_keyring='/pam_gnome_keyring\.so/d'; fi
-                # Replace only module implementations and unrelated distro includes. Preserve
-                # the shipped order and controls, including pam_deny's real implementation.
-                sed -n '/^auth/p' "$template" |
-                    sed -e "${drop_keyring:-/^\$/d}" \
-                        -e "s|pam_env.so|$test_dir/mock.so gaze 25 absent|" \
-                        -e '/[[:space:]]include[[:space:]]/d' \
-                        -e "s|pam_gaze.so|$test_dir/mock.so gaze $result $token|" \
-                        -e "s|pam_gnome_keyring.so.*|$test_dir/mock.so keyring $marker $token|" \
-                    > "$test_dir/gdm-face"
+                rm -f -- "$test_dir/tallies/"*
+                render_stack "$template" "$result" "$token" "$keyring"
                 expected=failure
                 if [ "$result" -eq 0 ]; then expected=success; fi
                 "$test_dir/driver" "$test_dir" "$expected"
@@ -54,11 +67,39 @@ for template in "$repo"/packaging/pam/gdm-face{,.arch,.deb,.suse}; do
             done
         done
     done
+    # Two rejected faces lock the private account and prevent a later face success.
+    rm -f -- "$test_dir/tallies/"*
+    render_stack "$template" 7 absent removed
+    "$test_dir/driver" "$test_dir" failure
+    "$test_dir/driver" "$test_dir" failure
+    "$test_dir/driver" "$test_dir" failure lockout-probe
+    render_stack "$template" 0 absent removed
+    "$test_dir/driver" "$test_dir" failure
+
+    # A successful face resets the tally; non-decisions neither increment nor clear it.
+    rm -f -- "$test_dir/tallies/"*
+    render_stack "$template" 7 absent removed
+    "$test_dir/driver" "$test_dir" failure
+    render_stack "$template" 0 absent removed
+    "$test_dir/driver" "$test_dir" success
+    render_stack "$template" 7 absent removed
+    "$test_dir/driver" "$test_dir" failure
+    "$test_dir/driver" "$test_dir" success lockout-probe
+    for result in 9 25; do
+        rm -f -- "$test_dir/tallies/"*
+        render_stack "$template" 7 absent removed
+        "$test_dir/driver" "$test_dir" failure
+        render_stack "$template" "$result" absent removed
+        for _ in 1 2 3; do "$test_dir/driver" "$test_dir" failure; done
+        "$test_dir/driver" "$test_dir" success lockout-probe
+        render_stack "$template" 7 absent removed
+        "$test_dir/driver" "$test_dir" failure
+        "$test_dir/driver" "$test_dir" failure lockout-probe
+    done
 done
 
-# greetd has no pam_deny gate, so its keyring line runs on every login. It must see a token
-# exactly when Gaze released one. `required` stands in for the system-auth substack, and the
-# auth result is not asserted because the real stack's password modules are not modelled.
+# greetd always reaches keyring; it must see a token exactly when Gaze released one.
+# Do not assert authentication: the password-checking substack is not modelled.
 for result in 0 7 9 25; do
     for token in token absent; do
         marker="$test_dir/called"
@@ -74,4 +115,4 @@ for result in 0 7 9 25; do
     done
 done
 
-echo 'PASS: 32 GDM and 8 greetd PAM cases; only biometric success hands the keyring a token.'
+echo 'PASS: GDM keyring handoff and face lockout; greetd token handoff.'

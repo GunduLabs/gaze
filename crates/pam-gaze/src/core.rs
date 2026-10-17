@@ -269,9 +269,8 @@ pub unsafe fn read_first_pass_verdict(pamh: PamHandle) -> Option<FirstPassVerdic
 
 const SCAN_FINISHED_DATA_KEY: &CStr = c"gaze_scan_finished";
 
-/// A second Gaze entry reached this soon belongs to the same pass through a stack that lists
-/// Gaze twice, such as a locker's own line followed by an included `common-auth`. A genuinely new
-/// attempt on the same handle (sudo's next try) first waits for a typed password.
+/// Suppress duplicate Gaze entries in one stack pass, including shared-stack entries.
+/// A new attempt on the same handle first waits for a typed password.
 const SAME_PASS_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
 
 unsafe extern "C" fn free_scan_finished(_pamh: PamHandle, data: *mut c_void, _status: c_int) {
@@ -623,9 +622,8 @@ pub fn has_interactive_tty() -> bool {
     open_interactive_tty().is_some()
 }
 
-/// Fallback prompt when there is no controlling terminal to read Enter from.
-/// Treat an empty response as no consent. Some hosts answer unknown prompts with
-/// `""`; accepting that would confirm without the user pressing anything.
+/// Fallback confirmation without a controlling terminal.
+/// Empty replies are not consent: some hosts return them without user input.
 pub const TYPED_CONFIRMATION_PROMPT: &str = "Face Verified. Type 'yes' to confirm.";
 
 pub fn typed_confirmation_accepted(response: Option<&str>) -> bool {
@@ -659,11 +657,16 @@ pub fn confirmation_required(
     auth: Option<&gaze_core::config::AuthConfig>,
     service: Option<&str>,
 ) -> bool {
-    if is_kde_login_greeter(service) {
-        return false;
-    }
     let surface = gaze_core::config::classify_pam_service(service);
     auth.is_none_or(|auth| auth.requires_confirmation(surface))
+}
+
+pub fn confirmation_requires_fallback(
+    auth: Option<&gaze_core::config::AuthConfig>,
+    service: Option<&str>,
+) -> bool {
+    confirmation_required(auth, service)
+        && (service_cannot_be_prompted(service) || is_kde_login_greeter(service))
 }
 
 pub struct AuthState {
@@ -774,22 +777,25 @@ pub unsafe fn wait_for_password_and_fallback(pamh: PamHandle, state: &SharedAuth
 }
 
 pub unsafe fn stash_password_and_fallback(pamh: PamHandle, password: &[u8]) -> c_int {
-    // Password contained a NUL byte, so fail rather than panic.
-    let Ok(pw_cstr) = CString::new(password.to_vec()) else {
+    stash_password(password, |token| unsafe {
+        pam_set_item(pamh, PAM_AUTHTOK, token.as_ptr().cast())
+    })
+}
+
+fn stash_password(password: &[u8], set_token: impl FnOnce(&[u8]) -> c_int) -> c_int {
+    if password.contains(&0) {
         return PAM_AUTH_ERR;
-    };
-    unsafe {
-        pam_set_item(pamh, PAM_AUTHTOK, pw_cstr.as_ptr() as *const c_void);
     }
-    // Linux-PAM copies the token on pam_set_item, so wipe our copy immediately.
-    // This covers both the password fallback and the (empty) confirmation case.
-    unsafe {
-        let ptr = pw_cstr.as_ptr() as *mut u8;
-        let len = pw_cstr.as_bytes_with_nul().len();
-        std::slice::from_raw_parts_mut(ptr, len).zeroize();
+    // Reserve the terminator up front, avoiding an unwiped allocation on reallocation.
+    let mut token = SecretBytes::new(Vec::with_capacity(password.len() + 1));
+    token.extend_from_slice(password);
+    token.push(0);
+    // Linux-PAM copies the token; our mutable, zeroizing buffer is wiped on every exit.
+    if set_token(&token) == PAM_SUCCESS {
+        PAM_AUTHINFO_UNAVAIL
+    } else {
+        PAM_AUTH_ERR
     }
-    // pw_cstr drops here; its (now zeroed) allocation is freed.
-    PAM_AUTHINFO_UNAVAIL
 }
 
 pub fn give_up_message(status: Option<gaze_core::dbus::CaptureStatus>) -> &'static str {
@@ -1204,9 +1210,8 @@ pub fn face_auth_out_of_scope(service: Option<&str>, rhost: Option<&str>) -> boo
     caller_is_remote(rhost) || service_is_network_facing(service)
 }
 
-/// Services a root PAM host runs for someone sitting at this machine. A root daemon serving a
-/// network client (JupyterHub, Webmin, a VNC server) authenticates under any other name, often
-/// without `PAM_RHOST`, and must not be answered by whoever happens to face the camera.
+/// Local services allowed to face-authenticate from a root PAM host.
+/// Unknown services may serve network clients without PAM_RHOST and must use passwords.
 const LOCAL_ROOT_SERVICES: [&str; 26] = [
     "sudo",
     "sudo-i",
@@ -1734,18 +1739,64 @@ mod tests {
     }
 
     #[test]
-    fn kde_login_greeters_never_require_confirmation() {
+    fn kde_confirmation_falls_back_instead_of_unlocking_without_consent() {
         let on = gaze_core::config::AuthConfig {
             require_confirmation_lock_screen: true,
             require_confirmation_elevation: true,
             ..Default::default()
         };
-        for service in ["sddm", "plasmalogin"] {
-            assert!(!confirmation_required(Some(&on), Some(service)));
-            assert!(!confirmation_required(None, Some(service)));
+        let off = gaze_core::config::AuthConfig::default();
+        for service in [
+            "kde-fingerprint",
+            "kde-smartcard",
+            "plasmalogin-fingerprint",
+            "sddm",
+            "plasmalogin",
+        ] {
+            assert!(confirmation_required(Some(&on), Some(service)));
+            assert!(confirmation_required(None, Some(service)));
+            assert!(confirmation_requires_fallback(Some(&on), Some(service)));
+            assert!(confirmation_requires_fallback(None, Some(service)));
+            assert!(!confirmation_requires_fallback(Some(&off), Some(service)));
         }
-        assert!(confirmation_required(Some(&on), Some("kde")));
-        assert!(confirmation_required(Some(&on), Some("lightdm")));
+        for service in ["kde", "lightdm", "gdm-face", "sudo", "polkit-1"] {
+            assert!(confirmation_required(Some(&on), Some(service)));
+            assert!(!confirmation_requires_fallback(Some(&on), Some(service)));
+        }
+    }
+
+    #[test]
+    fn stashed_passwords_preserve_bytes_and_add_only_the_terminator() {
+        for password in [b"".as_slice(), b"synthetic-password", b"\xff\xfe"] {
+            assert_eq!(
+                stash_password(password, |token| {
+                    assert_eq!(&token[..password.len()], password);
+                    assert_eq!(token.last(), Some(&0));
+                    assert_eq!(token.len(), password.len() + 1);
+                    assert_ne!(token.as_ptr(), password.as_ptr());
+                    PAM_SUCCESS
+                }),
+                PAM_AUTHINFO_UNAVAIL
+            );
+        }
+    }
+
+    #[test]
+    fn a_nul_password_is_rejected_before_copying_or_setting_a_token() {
+        for password in [b"\0".as_slice(), b"a\0b", b"a\0"] {
+            assert_eq!(
+                stash_password(password, |_| panic!("invalid token was handed to PAM")),
+                PAM_AUTH_ERR
+            );
+        }
+    }
+
+    #[test]
+    fn a_failed_token_handoff_does_not_claim_password_fallback_is_ready() {
+        assert_eq!(
+            stash_password(b"synthetic-password", |_| PAM_SERVICE_ERR),
+            PAM_AUTH_ERR
+        );
     }
 
     #[test]

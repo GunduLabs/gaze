@@ -983,6 +983,8 @@ dependencies = [
  "serde_plain",
  "strum",
  "strum_macros",
+ "tempfile",
+ "tokio",
  "toml_edit",
  "tracing",
  "zbus",

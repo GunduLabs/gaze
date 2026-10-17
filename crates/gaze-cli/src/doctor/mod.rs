@@ -262,7 +262,7 @@ pub async fn run(username: &str, benchmark: bool, output: Output) -> anyhow::Res
     check_sudo_policy(&mut report, username);
     check_privileged_files(&mut report);
     check_desktop_integration(&mut report);
-    check_kde_confirmation_bypass(
+    check_kde_confirmation(
         &mut report,
         config,
         read_pam_service(KDE_FACE_PAM_FILE).as_deref(),
