@@ -11,7 +11,6 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
 
-use futures::StreamExt;
 use gaze_core::polkit::{ALLOW_USER_INTERACTION, AuthorityProxy, Subject};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -52,10 +51,7 @@ fn toast_overlay(window: &libadwaita::ApplicationWindow) -> Option<libadwaita::T
         .and_then(|c| c.downcast::<libadwaita::ToastOverlay>().ok())
 }
 
-pub fn add_toast(
-    window: &libadwaita::ApplicationWindow,
-    text: impl AsRef<str>,
-) -> libadwaita::Toast {
+fn add_toast(window: &libadwaita::ApplicationWindow, text: impl AsRef<str>) -> libadwaita::Toast {
     let toast = libadwaita::Toast::new(text.as_ref());
     if let Some(overlay) = toast_overlay(window) {
         overlay.add_toast(toast.clone());

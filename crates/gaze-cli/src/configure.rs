@@ -13,7 +13,7 @@ use gaze_core::config::{
 };
 use gaze_core::dbus::{GazeProxy, apply_config_to_daemon, apply_config_with_keyring_to_daemon};
 
-use crate::get_current_user;
+use crate::{get_current_user, keyring};
 
 pub fn config_show_text(config: &Config) -> anyhow::Result<String> {
     Ok(format!(

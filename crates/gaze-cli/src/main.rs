@@ -23,7 +23,7 @@ use gaze_core::config::Config;
 use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon,
     apply_config_with_keyring_to_daemon, connect_gaze, daemon_unavailable_hint, dbus_error_message,
-    dbus_is_file_not_found, dbus_is_not_activatable, load_config_with_keyring_from_daemon,
+    dbus_is_not_activatable, load_config_with_keyring_from_daemon,
 };
 use std::{future::Future, time::Duration};
 use tui::{AuthScreen, BusyScreen, EnrollScreen, Tone, TuiAction, TuiTerminal};
