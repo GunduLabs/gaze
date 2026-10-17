@@ -320,7 +320,19 @@ impl AuthDaemon {
             };
 
             let run_rgb = !rgb_device.is_empty();
-            let run_ir = !ir_device.is_empty();
+            let mut run_ir = !ir_device.is_empty();
+            if run_ir && rgb_continues_without_ir(config.security.hybrid_policy(), run_rgb) {
+                let source = ir_device.clone();
+                let disconnected = tokio::task::spawn_blocking(move || {
+                    gaze_vision::camera::camera_disconnected(&source, false)
+                })
+                .await
+                .unwrap_or(false);
+                if disconnected {
+                    warn!("EnrollStart: IR camera {ir_device:?} is not connected; enrolling RGB only");
+                    run_ir = false;
+                }
+            }
 
             if !run_rgb && !run_ir {
                 error!("No cameras configured for enrollment");
