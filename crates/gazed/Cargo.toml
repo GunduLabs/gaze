@@ -27,7 +27,6 @@ nalgebra.workspace = true
 ndarray.workspace = true
 opencv = { workspace = true, features = ["imgproc"] }
 ort.workspace = true
-sha2.workspace = true
 tokio = { workspace = true, features = ["full", "rt-multi-thread"] }
 ureq.workspace = true
 uuid = { workspace = true, features = ["v4"] }

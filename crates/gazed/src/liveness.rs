@@ -7,7 +7,7 @@ use ndarray::Array4;
 use ort::{session::Session, value::TensorRef};
 
 use gaze_core::config::InferenceConfig;
-use gaze_vision::inference::{InferenceRuntime, create_session};
+use gaze_vision::inference::{InferenceRuntime, ModelFile, create_session};
 
 // Fixed by how MiniFASNet v2 was trained (upstream calls it scale_2.7_80x80). A tighter crop
 // or another resolution shifts the score distribution and the threshold stops meaning anything.
@@ -23,7 +23,7 @@ pub struct LivenessDetector {
 
 impl LivenessDetector {
     pub fn new_with_inference(
-        model_path: &str,
+        model_path: &ModelFile,
         inference: &InferenceConfig,
     ) -> anyhow::Result<Self> {
         let (session, inference_runtime) = create_session(model_path, inference)?;

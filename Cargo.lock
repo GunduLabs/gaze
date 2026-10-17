@@ -1054,7 +1054,6 @@ dependencies = [
  "ndarray",
  "opencv",
  "ort",
- "sha2 0.11.1",
  "tempfile",
  "tokio",
  "tracing",
