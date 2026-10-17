@@ -588,8 +588,10 @@ in
         security.pam.services."gdm-face".text = ''
           auth       required                     pam_env.so
           auth       requisite                    ${pamPackage}/lib/security/pam_faillock.so preauth
-          auth       [success=1 default=ignore]    ${cfg.package}/lib/security/pam_gaze.so
+          auth       [success=2 auth_err=ignore default=1] ${cfg.package}/lib/security/pam_gaze.so
+          auth       [default=die]                 ${pamPackage}/lib/security/pam_faillock.so authfail
           auth       requisite                    pam_deny.so
+          auth       required                     ${pamPackage}/lib/security/pam_faillock.so authsucc
           auth       required                     pam_permit.so
           auth       optional                     ${pkgs.gnome-keyring}/lib/security/pam_gnome_keyring.so use_authtok
 

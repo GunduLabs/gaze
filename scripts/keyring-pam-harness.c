@@ -60,7 +60,8 @@ int main(int argc, char **argv) {
     if (argc != 3 && argc != 4) return 2;
     struct pam_conv conversation = { no_prompt, NULL };
     pam_handle_t *pamh = NULL;
-    int result = pam_start_confdir(argc == 4 ? argv[3] : "gdm-face", "synthetic-user", &conversation, argv[1], &pamh);
+    const char *user = getenv("GAZE_TEST_PAM_USER");
+    int result = pam_start_confdir(argc == 4 ? argv[3] : "gdm-face", user ? user : "synthetic-user", &conversation, argv[1], &pamh);
     if (result != PAM_SUCCESS) return 2;
     result = pam_authenticate(pamh, 0);
     if (argc == 4 && result == PAM_SUCCESS)

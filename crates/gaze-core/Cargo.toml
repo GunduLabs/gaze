@@ -28,3 +28,7 @@ strum_macros.workspace = true
 [build-dependencies]
 toml_edit = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
+tempfile = "=3.27.0"

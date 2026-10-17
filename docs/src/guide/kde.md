@@ -174,18 +174,17 @@ what has been recorded, and `faillock --reset` clears it.
 
 ## require_confirmation_lock_screen
 
-With `require_confirmation_lock_screen = true`, the face match unlocks the KDE lock screen on
-its own. There is no way to present a confirmation there: the greeter never
-delivers a response to a noninteractive slot, so asking would hang that slot for
-the rest of the lock rather than ask anybody anything. Denying the match instead
-would just mean no face unlock at all on KDE.
+With `require_confirmation_lock_screen = true`, Gaze returns `PAM_IGNORE` in the
+KDE biometric slots (`kde-fingerprint`, `kde-smartcard`) and at the Plasma Login
+Manager or SDDM greeter. These services cannot present a confirmation prompt,
+so Gaze does not scan or silently unlock without the consent you requested.
+Use your password instead; `gaze doctor` reports this fallback when the toggle
+is enabled for a wired KDE service.
 
-The login greeter (Plasma Login Manager or SDDM) skips confirmation too. Its login
-form never shows a second prompt, so asking would fail every face login.
-
-If you want a real confirmation step on KDE, use simultaneous mode (`pam_gaze.so simultaneous`) on a
-surface that can show a dialog, such as polkit prompts. It refuses to run in the
-lock screen's biometric slot for the reason above.
+For hands-free face unlock on these surfaces, explicitly disable
+`require_confirmation_lock_screen`. For a real confirmation step, use a surface
+that supports it, such as a terminal or polkit dialog. Simultaneous mode
+(`pam_gaze.so simultaneous`) cannot run in the lock screen's noninteractive slot.
 
 ## Login greeter
 

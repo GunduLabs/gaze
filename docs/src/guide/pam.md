@@ -26,6 +26,22 @@ second Gaze entry *below* the password module, giving face authentication one
 more chance after a rejected password. See
 [Retry after a rejected password](#retry-after-a-rejected-password).
 
+### Trusted daemon connection
+
+PAM connects directly to `/run/dbus/system_bus_socket`, ignoring
+`DBUS_SYSTEM_BUS_ADDRESS`. It verifies that the Gaze bus name is owned by UID 0
+and pins requests to that unique owner. A missing, untrusted, or disconnected
+daemon causes password fallback, never a successful face login.
+
+### Face-only GDM lockout
+
+The packaged `gdm-face` stacks, including NixOS, apply `pam_faillock` before
+scanning, record explicit face rejections, and clear the tally on successful face
+authentication. The system's faillock policy controls the attempt limit and
+unlock interval. Unavailable cameras and unenrolled users fail the face-only
+stack without adding or clearing failures, so automatic scans cannot lock out
+password login merely because face authentication is unavailable.
+
 ### Network logins are skipped
 
 A camera attached to this machine cannot see whoever is at the other end of a

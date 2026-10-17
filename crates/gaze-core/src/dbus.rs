@@ -531,14 +531,31 @@ pub async fn gazed_unit_state_on(connection: &zbus::Connection) -> anyhow::Resul
     ))
 }
 
-/// Deadline for a client waiting for a verification result. The daemon's own
-/// deadline expires first, so reaching this one means it stopped answering rather
-/// than rejecting the face.
+/// Verification client deadline; the daemon expires first.
+/// Reaching this deadline means it stopped answering, not that it rejected a face.
 pub const VERIFY_CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 pub async fn connect_gaze() -> zbus::Result<GazeProxy<'static>> {
-    let connection = zbus::Connection::system().await?;
-    GazeProxy::new(&connection).await
+    // PAM hosts must never interpret caller-controlled bus addresses, including unixexec.
+    let connection = zbus::connection::Builder::address("unix:path=/run/dbus/system_bus_socket")
+        .build()
+        .await?;
+    trusted_gaze_proxy_on(&connection).await
+}
+
+async fn trusted_gaze_proxy_on(connection: &zbus::Connection) -> zbus::Result<GazeProxy<'static>> {
+    let bus = zbus::fdo::DBusProxy::new(connection).await?;
+    let owner = bus.get_name_owner("com.gundulabs.Gaze".try_into()?).await?;
+    let uid = bus.get_connection_unix_user(owner.clone().into()).await?;
+    if uid != 0 {
+        return Err(zbus::fdo::Error::AccessDenied("gazed must be owned by uid 0".into()).into());
+    }
+    // Pin the checked owner so a subsequent name takeover cannot redirect PAM requests.
+    GazeProxy::builder(connection)
+        .destination(owner)
+        .cache_properties(zbus::proxy::CacheProperties::No)
+        .build()
+        .await
 }
 
 pub async fn try_benchmark_from_daemon(
@@ -822,9 +839,8 @@ pub async fn active_session_on(connection: &zbus::Connection) -> anyhow::Result<
         .ok_or_else(|| anyhow::anyhow!("seat0 has no active session"))
 }
 
-/// Returns the uid of every session on seat0, including background sessions.
-/// logind clears `ActiveSession` when the foreground VT has no session, so an
-/// empty active-session value does not mean the seat is unoccupied.
+/// Returns every seat0 session's uid, including background sessions.
+/// An empty ActiveSession on the foreground VT does not mean the seat is unoccupied.
 pub async fn seat0_session_uids_on(connection: &zbus::Connection) -> anyhow::Result<Vec<u32>> {
     let proxy = zbus::Proxy::new(
         connection,
@@ -851,9 +867,8 @@ pub async fn seat0_session_uids_on(connection: &zbus::Connection) -> anyhow::Res
     Ok(uids)
 }
 
-/// Checks whether logind marks the session that owns `pid` as remote. An `Err`
-/// means logind is unreachable or the process belongs to no session; neither case
-/// can be treated as a local session.
+/// Checks whether logind marks the session owning `pid` as remote.
+/// An unreachable logind or missing session is an error, never evidence of locality.
 pub async fn session_is_remote_on(connection: &zbus::Connection, pid: u32) -> anyhow::Result<bool> {
     let proxy = zbus::Proxy::new(
         connection,
@@ -1019,6 +1034,133 @@ pub trait Gaze {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TestBus {
+        process: std::process::Child,
+        address: String,
+        _directory: tempfile::TempDir,
+    }
+
+    impl TestBus {
+        fn new() -> Option<Self> {
+            use std::io::BufRead;
+            let directory = tempfile::tempdir().unwrap();
+            let address = format!("unix:path={}", directory.path().join("bus").display());
+            let process = std::process::Command::new("dbus-daemon")
+                .args([
+                    "--session",
+                    "--nofork",
+                    "--print-address=1",
+                    &format!("--address={address}"),
+                ])
+                .stdout(std::process::Stdio::piped())
+                .spawn();
+            let process = match process {
+                Ok(process) => process,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    eprintln!("SKIP: private-bus regression needs dbus-daemon");
+                    return None;
+                }
+                Err(error) => panic!("cannot start private bus: {error}"),
+            };
+            let mut bus = Self {
+                process,
+                address,
+                _directory: directory,
+            };
+            let mut published = String::new();
+            std::io::BufReader::new(bus.process.stdout.take().unwrap())
+                .read_line(&mut published)
+                .unwrap();
+            assert!(!published.trim().is_empty(), "private bus did not start");
+            Some(bus)
+        }
+    }
+
+    impl Drop for TestBus {
+        fn drop(&mut self) {
+            let _ = self.process.kill();
+            let _ = self.process.wait();
+        }
+    }
+
+    #[tokio::test]
+    async fn gaze_proxy_rejects_non_root_owners_and_pins_root_owners() {
+        let Some(bus) = TestBus::new() else { return };
+        let server = zbus::connection::Builder::address(bus.address.as_str())
+            .name("com.gundulabs.Gaze")
+            .build()
+            .await
+            .unwrap();
+        let client = zbus::connection::Builder::address(bus.address.as_str())
+            .build()
+            .await
+            .unwrap();
+        let result = trusted_gaze_proxy_on(&client).await;
+        if unsafe { libc::geteuid() } == 0 {
+            let proxy = result.unwrap();
+            assert_eq!(
+                proxy.inner().destination().as_str(),
+                server.unique_name().unwrap().as_str()
+            );
+            server.release_name("com.gundulabs.Gaze").await.unwrap();
+            client.request_name("com.gundulabs.Gaze").await.unwrap();
+            assert_eq!(
+                proxy.inner().destination().as_str(),
+                server.unique_name().unwrap().as_str()
+            );
+        } else {
+            assert!(result.unwrap_err().to_string().contains("uid 0"));
+        }
+    }
+
+    #[tokio::test]
+    async fn gaze_proxy_fails_closed_without_a_daemon_owner() {
+        let Some(bus) = TestBus::new() else { return };
+        let client = zbus::connection::Builder::address(bus.address.as_str())
+            .build()
+            .await
+            .unwrap();
+        assert!(trusted_gaze_proxy_on(&client).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn system_bus_address_ignores_caller_environment() {
+        if std::env::var_os("GAZE_TEST_SYSTEM_BUS_OVERRIDE").is_some() {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), connect_gaze()).await;
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let marker = directory.path().join("executed");
+        let socket = directory.path().join("untrusted-bus");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        for address in [
+            format!("unix:path={}", socket.display()),
+            format!("unixexec:path=/usr/bin/touch,argv1={}", marker.display()),
+        ] {
+            let result = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "dbus::tests::system_bus_address_ignores_caller_environment",
+                ])
+                .env("GAZE_TEST_SYSTEM_BUS_OVERRIDE", "1")
+                .env("DBUS_SYSTEM_BUS_ADDRESS", address)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            assert!(String::from_utf8_lossy(&result.stdout).contains("1 passed"));
+        }
+        assert!(
+            matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
+            "connected to a caller-controlled bus"
+        );
+        assert!(!marker.exists(), "caller-controlled unixexec was executed");
+    }
 
     #[test]
     fn a_mis_framed_face_still_counts_as_a_detected_face() {

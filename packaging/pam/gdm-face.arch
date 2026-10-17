@@ -5,9 +5,11 @@
 auth        required                                     pam_env.so
 # Face-only, so the lockout gate has to sit in front of Gaze: nothing behind it would run.
 auth        requisite                                    pam_faillock.so preauth
-# Only a successful biometric result skips pam_deny; then pass PAM_AUTHTOK to keyring.
-auth        [success=1 default=ignore]                    pam_gaze.so
+# Count rejected faces, not unavailable cameras or unenrolled users; only success clears failures.
+auth        [success=2 auth_err=ignore default=1]         pam_gaze.so
+auth        [default=die]                                pam_faillock.so authfail
 auth        requisite                                    pam_deny.so
+auth        required                                     pam_faillock.so authsucc
 auth        required                                     pam_permit.so
 auth        optional                                     pam_gnome_keyring.so use_authtok
 

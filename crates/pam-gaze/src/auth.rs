@@ -205,6 +205,9 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, options: Pam
 
     let matched = rt.block_on(async {
         let (config, proxy) = setup_auth_env().await.map_err(|_| PAM_AUTHINFO_UNAVAIL)?;
+        if confirmation_requires_fallback(Some(&config.auth), service.as_deref()) {
+            return Err(PAM_IGNORE);
+        }
 
         match enrollment_disposition(has_enrolled_faces_on(&proxy, &username).await) {
             EnrollmentDisposition::Ignore => return Err(PAM_IGNORE),
@@ -295,9 +298,6 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, options: Pam
 
     let authenticated = if !confirmation_required(Some(&loaded_config.auth), service.as_deref()) {
         unsafe { report_face_verified(pamh, service.as_deref(), silent, prompt_line, is_internal) };
-        PAM_SUCCESS
-    } else if service_cannot_be_prompted(service.as_deref()) {
-        // A prompt on a slot nobody answers blocks until the lock ends.
         PAM_SUCCESS
     } else if is_polkit {
         unsafe { confirm_via_polkit_dialog(pamh, is_internal) }
@@ -471,22 +471,20 @@ const PROMPT_RETIRE_TIMEOUT: Duration = Duration::from_secs(2);
 const PROMPT_SIGNAL_INTERVAL: Duration = Duration::from_millis(50);
 
 async fn authenticate_biometric_with_timeout(
+    proxy: &GazeProxy<'static>,
     username: &str,
     service: Option<&str>,
     timeout_duration: Duration,
     require_keyring: bool,
 ) -> Option<AuthOutcome> {
-    let auth_future = async {
-        let (_config, proxy) = setup_auth_env().await.ok()?;
-        authenticate_biometric_with_status_on(&proxy, username, service, require_keyring)
-            .await
-            .ok()
-            .map(|(outcome, _)| outcome)
-    };
-
-    tokio::select! {
-        res = auth_future => res,
-        _ = tokio::time::sleep(timeout_duration) => None,
+    match timeout(
+        timeout_duration,
+        authenticate_biometric_with_status_on(proxy, username, service, require_keyring),
+    )
+    .await
+    {
+        Ok(Ok((outcome, _))) => Some(outcome),
+        Ok(Err(_)) | Err(_) => None,
     }
 }
 
@@ -573,10 +571,8 @@ fn wait_for_prompt_finish_within(state: &SharedAuthState, deadline: Duration) ->
     shared_state.finished
 }
 
-/// Whether a prompt started now could be unblocked again, rather than parking a thread inside
-/// the caller's conversation with no way back out. An open `/dev/tty` is not enough: a locker
-/// launched from a shell has one, but its conversation waits on a condition variable that
-/// neither an injected newline nor EINTR can end.
+/// Only terminal-reading conversations can be retired with newline injection or EINTR.
+/// A graphical locker may inherit /dev/tty while still waiting on its own uninterruptible dialog.
 fn prompt_is_retirable(service: Option<&str>) -> bool {
     service_reads_the_tty(service) && has_interactive_tty()
 }
@@ -656,9 +652,8 @@ fn unblock_terminal() -> PromptUnblock {
     }
 }
 
-/// Blocks the host's prompt signals on this thread and on every thread started while it is held,
-/// so the kernel hands Ctrl-C or sudo's timeout to the prompt thread, the only one that unblocks
-/// them, where they interrupt the read they were meant for.
+/// Block prompt signals on this thread and its children so only the prompt thread receives them.
+/// That thread unblocks them to let Ctrl-C and host timeouts interrupt the intended read.
 struct RouteSignalsToPrompt {
     previous: libc::sigset_t,
 }
@@ -704,26 +699,25 @@ unsafe fn do_authenticate_simultaneous(
         Err(code) => return code,
     };
 
-    match enrollment_disposition(rt.block_on(has_enrolled_faces(&username))) {
+    let (config, proxy) = match rt.block_on(setup_auth_env()) {
+        Ok(environment) => environment,
+        Err(_) => return PAM_AUTHINFO_UNAVAIL,
+    };
+    if confirmation_requires_fallback(Some(&config.auth), service.as_deref()) {
+        return PAM_IGNORE;
+    }
+    match enrollment_disposition(rt.block_on(has_enrolled_faces_on(&proxy, &username))) {
         EnrollmentDisposition::Ignore => return PAM_IGNORE,
         EnrollmentDisposition::Unavailable => return PAM_AUTHINFO_UNAVAIL,
         EnrollmentDisposition::Continue => {}
     }
 
-    let (loaded_config, pam_internal) = match rt.block_on(setup_auth_env()) {
-        Ok((cfg, proxy)) => {
-            let internal = rt.block_on(gaze_core::dbus::get_pam_internal(&proxy));
-            (Some(cfg), internal)
-        }
-        Err(_) => (None, Vec::new()),
-    };
+    let pam_internal = rt.block_on(gaze_core::dbus::get_pam_internal(&proxy));
     let is_internal = service
         .as_deref()
         .is_some_and(|s| is_service_internal(s, &pam_internal));
 
-    let require_confirmation =
-        confirmation_required(loaded_config.as_ref().map(|c| &c.auth), service.as_deref());
-    let config = loaded_config.unwrap_or_default();
+    let require_confirmation = confirmation_required(Some(&config.auth), service.as_deref());
     let auth = config.auth.clone();
     let require_keyring = keyring_backend(service.as_deref(), &config).is_some();
     let finish = |authenticated: c_int| unsafe {
@@ -764,6 +758,7 @@ unsafe fn do_authenticate_simultaneous(
     if !concurrent {
         drop(signals_to_prompt);
         let bio = rt.block_on(authenticate_biometric_with_timeout(
+            &proxy,
             &username,
             service.as_deref(),
             camera_auth_timeout(&auth, service.as_deref()),
@@ -795,6 +790,7 @@ unsafe fn do_authenticate_simultaneous(
     });
 
     let biometric_fut = authenticate_biometric_with_timeout(
+        &proxy,
         &username,
         service.as_deref(),
         camera_auth_timeout(&auth, service.as_deref()),
@@ -816,6 +812,8 @@ unsafe fn do_authenticate_simultaneous(
 
     match select_res {
         SelectorResult::Password => {
+            // The cancelled verifier's drop guard needs the runtime to run its release task.
+            let _ = rt.block_on(async { timeout(PROMPT_RETIRE_TIMEOUT, proxy.release()).await });
             unsafe { record_first_pass_verdict(pamh, FirstPassVerdict::Preempted) };
             let fallback = unsafe { wait_for_password_and_fallback(pamh, &state) };
             let _ = prompt_thread.join();
