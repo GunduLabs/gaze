@@ -81,7 +81,14 @@ after upgrading.
 
 ## Select the inference device
 
-Gaze always loads its `.onnx` models through ONNX Runtime.
+Gaze always loads its `.onnx` models through ONNX Runtime. Cached models are
+checksum-verified; corrupt files trigger a fresh download, and replacements are
+published atomically after verification.
+
+RGB and IR use separate detector sessions. IR detector and recognizer sessions are
+loaded only when `cameras.ir` is configured. Each ONNX Runtime session uses at most
+two intra-op threads, sequential graph execution, and no thread-pool spinning;
+accelerator providers may manage additional threads of their own.
 
 The default uses the ONNX Runtime CPU execution provider:
 

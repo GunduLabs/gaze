@@ -290,15 +290,16 @@ impl AuthDaemon {
 
         UserDatabase::validate_face_name(&face_name).map_err(Self::map_user_db_error)?;
 
-        let detector_arc = self.detector.clone();
-        let recognizer_rgb_arc = self.recognizer_rgb.clone();
-        let recognizer_ir_arc = self.recognizer_ir.clone();
         let db_arc = self.db.clone();
 
         let (caller_uid, target_uid) = Self::ensure_claim_camera_access(&header, &claim).await?;
         let mut rx =
             replace_claim_task(&self.claim_state, &self.active_cancel, claim.epoch).await?;
         let config = self.settings.for_run(&mut rx).await?;
+        let sessions = self.capture_models(&config)?;
+        let detector_arc = sessions.rgb.detector;
+        let recognizer_rgb_arc = sessions.rgb.recognizer;
+        let ir_models = sessions.ir;
         let sources = resolve_configured_sources(&config.cameras);
         let rgb_device = sources.rgb;
         let ir_device = sources.ir;
@@ -439,7 +440,12 @@ impl AuthDaemon {
                                     let mut recognizer = recognizer_rgb_arc.blocking_lock();
                                     match process_frame_sync(&mut checker, &mut recognizer, &frame, false) {
                                         Ok(res) => res,
-                                        Err(_) => (CaptureStatus::NoFace, None),
+                                        Err(error) => {
+                                            let message = format!("RGB inference failed: {error:#}");
+                                            error!("{message}");
+                                            let _ = tx.blocking_send(EnrollMsg::Error(message));
+                                            return;
+                                        }
                                     }
                                 };
 
@@ -521,7 +527,12 @@ impl AuthDaemon {
                             let mut recognizer = recognizer_rgb_arc.blocking_lock();
                             match process_frame_sync(&mut checker, &mut recognizer, &frame, false) {
                                 Ok(res) => res,
-                                Err(_) => (CaptureStatus::NoFace, None),
+                                Err(error) => {
+                                    let message = format!("RGB inference failed: {error:#}");
+                                    error!("{message}");
+                                    let _ = tx.blocking_send(EnrollMsg::Error(message));
+                                    return;
+                                }
                             }
                         };
 
@@ -559,12 +570,12 @@ impl AuthDaemon {
             }
 
             let mut ir_thread = None;
-            if run_ir {
+            if let Some(ir_models) = ir_models.filter(|_| run_ir) {
                 let stop_clone = stop_flag.clone();
                 let tx = enroll_tx.clone();
-                let detector_arc = detector_arc.clone();
+                let detector_arc = ir_models.detector;
                 let config_clone = config.clone();
-                let recognizer_ir_arc = recognizer_ir_arc.clone();
+                let recognizer_ir_arc = ir_models.recognizer;
                 let completed_steps_clone = completed_steps_atomic.clone();
                 let ir_device_clone = ir_device.clone();
                 let ir_node_clone = ir_node.clone();
@@ -644,7 +655,12 @@ impl AuthDaemon {
                                     let mut recognizer = recognizer_ir_arc.blocking_lock();
                                     match process_frame_sync(&mut checker, &mut recognizer, &frame, false) {
                                         Ok(res) => res,
-                                        Err(_) => (CaptureStatus::NoFace, None),
+                                        Err(error) => {
+                                            let message = format!("IR inference failed: {error:#}");
+                                            error!("{message}");
+                                            let _ = tx.blocking_send(EnrollMsg::Error(message));
+                                            return;
+                                        }
                                     }
                                 };
 
@@ -725,7 +741,12 @@ impl AuthDaemon {
                             let mut recognizer = recognizer_ir_arc.blocking_lock();
                             match process_frame_sync(&mut checker, &mut recognizer, &frame, false) {
                                 Ok(res) => res,
-                                Err(_) => (CaptureStatus::NoFace, None),
+                                Err(error) => {
+                                    let message = format!("IR inference failed: {error:#}");
+                                    error!("{message}");
+                                    let _ = tx.blocking_send(EnrollMsg::Error(message));
+                                    return;
+                                }
                             }
                         };
 
@@ -977,21 +998,14 @@ impl AuthDaemon {
             ));
         };
 
-        let detector_arc = self.detector.clone();
-        let recognizer_rgb_arc = self.recognizer_rgb.clone();
-        let recognizer_ir_arc = self.recognizer_ir.clone();
         let liveness_arc = self.liveness.clone();
         let config = self.settings.read().await;
+        let sessions = self.capture_models(&config)?;
 
         self.rt_handle
             .spawn_blocking(move || {
                 let _slot = slot;
-                let result = run_inference_benchmark(
-                    detector_arc,
-                    recognizer_rgb_arc,
-                    recognizer_ir_arc,
-                    liveness_arc,
-                );
+                let result = run_inference_benchmark(sessions, liveness_arc);
                 drop(config);
                 result
             })

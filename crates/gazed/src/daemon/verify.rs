@@ -220,7 +220,7 @@ pub fn load_eye_state(
     inference: &gaze_core::config::InferenceConfig,
 ) -> anyhow::Result<EyeStateClassifier> {
     let path = crate::models::ensure_eye_state_model(gaze_core::config::MODELS_DIR)?;
-    EyeStateClassifier::new_with_inference(path.to_str().unwrap(), inference)
+    EyeStateClassifier::new_with_inference(&path, inference)
 }
 
 pub(super) fn eyes_closed_in_frame(
@@ -339,9 +339,10 @@ impl AuthDaemon {
         let username = claim.username.clone();
         let signal_destination = Self::signal_destination(&claim.sender)?;
 
-        let detector_arc = self.detector.clone();
-        let recognizer_rgb_arc = self.recognizer_rgb.clone();
-        let recognizer_ir_arc = self.recognizer_ir.clone();
+        let sessions = self.capture_models(&config)?;
+        let detector_arc = sessions.rgb.detector;
+        let recognizer_rgb_arc = sessions.rgb.recognizer;
+        let ir_models = sessions.ir;
         let liveness_arc = self.liveness.clone();
         let db_arc = self.db.clone();
         let rgb_threshold = config.security.rgb_threshold();
@@ -664,7 +665,12 @@ impl AuthDaemon {
                                 let mut recognizer = recognizer_rgb_arc.blocking_lock();
                                 match process_frame_sync(&mut checker, &mut recognizer, &frame, liveness_enabled || duress_enabled) {
                                     Ok(res) => res,
-                                    Err(_) => (CaptureStatus::NoFace, None),
+                                    Err(error) => {
+                                        let message = format!("RGB inference failed: {error:#}");
+                                        error!("{message}");
+                                        let _ = tx.blocking_send(VerifyMsg::Error(message));
+                                        return;
+                                    }
                                 }
                             };
                             tracing::debug!("Processed RGB frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
@@ -788,12 +794,12 @@ impl AuthDaemon {
                 }
 
                 let mut ir_thread = None;
-                if run_ir {
+                if let Some(ir_models) = ir_models.clone().filter(|_| run_ir) {
                     let stop_clone = stop_flag.clone();
                     let tx = result_tx.clone();
-                    let detector_arc = detector_arc.clone();
+                    let detector_arc = ir_models.detector;
                     let config_clone = config.clone();
-                    let recognizer_ir_arc = recognizer_ir_arc.clone();
+                    let recognizer_ir_arc = ir_models.recognizer;
                     let db_arc = db_arc.clone();
                     let username_clone = username.clone();
                     let liveness_enabled = liveness_cfg.enabled;
@@ -885,7 +891,12 @@ impl AuthDaemon {
                                 let mut recognizer = recognizer_ir_arc.blocking_lock();
                                 match process_frame_sync(&mut checker, &mut recognizer, &frame, duress_enabled) {
                                     Ok(res) => res,
-                                    Err(_) => (CaptureStatus::NoFace, None),
+                                    Err(error) => {
+                                        let message = format!("IR inference failed: {error:#}");
+                                        error!("{message}");
+                                        let _ = tx.blocking_send(VerifyMsg::Error(message));
+                                        return;
+                                    }
                                 }
                             };
                             tracing::debug!("Processed IR frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());

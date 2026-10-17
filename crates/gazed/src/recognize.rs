@@ -6,7 +6,7 @@ use ndarray::{Array1, Array4};
 use ort::{session::Session, value::TensorRef};
 
 use gaze_core::config::InferenceConfig;
-use gaze_vision::inference::{InferenceRuntime, create_session};
+use gaze_vision::inference::{InferenceRuntime, ModelFile, create_session};
 
 pub struct FaceRecognizer {
     session: Session,
@@ -24,7 +24,7 @@ fn normalize_embedding(row: Array1<f32>) -> anyhow::Result<Array1<f32>> {
 
 impl FaceRecognizer {
     pub fn new_with_inference(
-        model_path: &str,
+        model_path: &ModelFile,
         inference: &InferenceConfig,
     ) -> anyhow::Result<Self> {
         let (session, inference_runtime) = create_session(model_path, inference)?;

@@ -177,15 +177,23 @@ pub(super) fn write_gdm_face_auth(enabled: bool) -> fdo::Result<bool> {
 
 struct PreparedConfig {
     reload: ModelReloads,
-    detector: Option<FaceDetector>,
-    recognizers: Option<(FaceRecognizer, FaceRecognizer)>,
+    models: ModelSessions,
     liveness: Option<LivenessDetector>,
     cipher: Option<crate::crypto::EmbeddingCipher>,
 }
 
 impl PreparedConfig {
-    fn load(current: &Config, requested: &Config) -> fdo::Result<Self> {
+    fn load(
+        current: &Config,
+        requested: &Config,
+        current_models: &ModelSessions,
+    ) -> fdo::Result<Self> {
         let reload = ModelReloads::between(current, requested);
+        let add_ir = ir_models_needed(requested) && current_models.ir.is_none();
+        let mut models = current_models.clone();
+        if !ir_models_needed(requested) {
+            models.ir = None;
+        }
         let security = &requested.security;
         info!(
             ?reload,
@@ -195,7 +203,7 @@ impl PreparedConfig {
             device = requested.inference.device,
             "Preparing model settings"
         );
-        let paths = if reload.detector || reload.recognizer {
+        let paths = if reload.detector || reload.recognizer || add_ir {
             Some(
                 crate::models::ensure_models(
                     gaze_core::config::MODELS_DIR,
@@ -207,43 +215,47 @@ impl PreparedConfig {
         } else {
             None
         };
-        let detector = if reload.detector {
-            let (path, _) = paths
-                .as_ref()
-                .expect("detector reload requires model paths");
-            Some(
-                FaceDetector::new_with_inference(path.to_str().unwrap(), &requested.inference)
-                    .map_err(|e| fdo::Error::Failed(format!("Failed to load detector: {e}")))?,
-            )
-        } else {
-            None
-        };
-        let recognizers = if reload.recognizer {
-            let (_, path) = paths
-                .as_ref()
-                .expect("recognizer reload requires model paths");
-            let rgb =
-                FaceRecognizer::new_with_inference(path.to_str().unwrap(), &requested.inference)
-                    .map_err(|e| {
-                        fdo::Error::Failed(format!("Failed to load RGB recognizer: {e}"))
-                    })?;
-            let ir =
-                FaceRecognizer::new_with_inference(path.to_str().unwrap(), &requested.inference)
-                    .map_err(|e| {
-                        fdo::Error::Failed(format!("Failed to load IR recognizer: {e}"))
-                    })?;
-            Some((rgb, ir))
-        } else {
-            None
-        };
+        if let Some((detector, recognizer)) = paths.as_ref() {
+            for (spectrum, capture) in std::iter::once(("RGB", &mut models.rgb))
+                .chain(models.ir.iter_mut().map(|capture| ("IR", capture)))
+            {
+                if reload.detector {
+                    capture.detector = Arc::new(std::sync::Mutex::new(
+                        FaceDetector::new_with_inference(detector, &requested.inference).map_err(
+                            |e| {
+                                fdo::Error::Failed(format!(
+                                    "Failed to load {spectrum} detector: {e}"
+                                ))
+                            },
+                        )?,
+                    ));
+                }
+                if reload.recognizer {
+                    capture.recognizer = Arc::new(Mutex::new(
+                        FaceRecognizer::new_with_inference(recognizer, &requested.inference)
+                            .map_err(|e| {
+                                fdo::Error::Failed(format!(
+                                    "Failed to load {spectrum} recognizer: {e}"
+                                ))
+                            })?,
+                    ));
+                }
+            }
+            if add_ir {
+                models.ir = Some(
+                    CaptureModels::load(detector, recognizer, &requested.inference).map_err(
+                        |e| fdo::Error::Failed(format!("Failed to load IR models: {e:#}")),
+                    )?,
+                );
+            }
+        }
         let liveness = if reload.liveness && requested.liveness.enabled {
             let path = crate::models::ensure_liveness_model(gaze_core::config::MODELS_DIR)
                 .map_err(|e| fdo::Error::Failed(format!("Failed to ensure liveness model: {e}")))?;
             Some(
-                LivenessDetector::new_with_inference(path.to_str().unwrap(), &requested.inference)
-                    .map_err(|e| {
-                        fdo::Error::Failed(format!("Failed to load liveness model: {e}"))
-                    })?,
+                LivenessDetector::new_with_inference(&path, &requested.inference).map_err(|e| {
+                    fdo::Error::Failed(format!("Failed to load liveness model: {e}"))
+                })?,
             )
         } else {
             None
@@ -259,8 +271,7 @@ impl PreparedConfig {
         };
         Ok(Self {
             reload,
-            detector,
-            recognizers,
+            models,
             liveness,
             cipher,
         })
@@ -273,9 +284,8 @@ impl AuthDaemon {
         update: impl FnOnce(Config) -> fdo::Result<Config> + Send + 'static,
     ) -> fdo::Result<()> {
         let db = self.db.clone();
-        let detector = self.detector.clone();
-        let recognizer_rgb = self.recognizer_rgb.clone();
-        let recognizer_ir = self.recognizer_ir.clone();
+        let models = self.models.clone();
+        let current_models = models.clone();
         let liveness = self.liveness.clone();
         let eye_state = self.eye_state.clone();
         self.settings
@@ -293,7 +303,11 @@ impl AuthDaemon {
                         .and_then(|_| requested.cameras.validate())
                         .and_then(|_| requested.storage.validate_keyring(&requested.liveness))
                         .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
-                    let prepared = PreparedConfig::load(&current, &requested)?;
+                    let loaded = current_models
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .clone();
+                    let prepared = PreparedConfig::load(&current, &requested, &loaded)?;
                     Ok((requested, prepared))
                 },
                 move |requested, prepared| {
@@ -323,13 +337,7 @@ impl AuthDaemon {
                     }
 
                     // No fallible work remains, and every model user has finished teardown.
-                    if let Some(replacement) = prepared.detector {
-                        *detector.lock().unwrap_or_else(|e| e.into_inner()) = replacement;
-                    }
-                    if let Some((rgb, ir)) = prepared.recognizers {
-                        *recognizer_rgb.blocking_lock() = rgb;
-                        *recognizer_ir.blocking_lock() = ir;
-                    }
+                    *models.lock().unwrap_or_else(|error| error.into_inner()) = prepared.models;
                     if prepared.reload.liveness {
                         *liveness.blocking_lock() = prepared.liveness;
                     }

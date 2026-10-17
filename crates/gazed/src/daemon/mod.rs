@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use anyhow::Context;
 use futures::StreamExt;
 use ndarray::Array1;
 use opencv::core::Mat;
@@ -414,10 +415,64 @@ fn eyes_from_kpss(kpss: &ndarray::Array3<f32>) -> Option<[(f32, f32); 5]> {
     Some(pts)
 }
 
-pub struct AuthDaemon {
+#[derive(Clone)]
+pub struct CaptureModels {
     pub detector: Arc<std::sync::Mutex<FaceDetector>>,
-    pub recognizer_rgb: Arc<Mutex<FaceRecognizer>>,
-    pub recognizer_ir: Arc<Mutex<FaceRecognizer>>,
+    pub recognizer: Arc<Mutex<FaceRecognizer>>,
+}
+
+impl CaptureModels {
+    fn load(
+        detector: &gaze_vision::inference::ModelFile,
+        recognizer: &gaze_vision::inference::ModelFile,
+        inference: &gaze_core::config::InferenceConfig,
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            detector: Arc::new(std::sync::Mutex::new(
+                FaceDetector::new_with_inference(detector, inference)
+                    .context("Failed to load detector")?,
+            )),
+            recognizer: Arc::new(Mutex::new(
+                FaceRecognizer::new_with_inference(recognizer, inference)
+                    .context("Failed to load recognizer")?,
+            )),
+        })
+    }
+}
+
+#[derive(Clone)]
+pub struct ModelSessions {
+    pub rgb: CaptureModels,
+    pub ir: Option<CaptureModels>,
+}
+
+fn ir_models_needed(config: &Config) -> bool {
+    !config.cameras.ir.trim().is_empty()
+}
+
+impl ModelSessions {
+    pub fn load(
+        detector: &gaze_vision::inference::ModelFile,
+        recognizer: &gaze_vision::inference::ModelFile,
+        config: &Config,
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            rgb: CaptureModels::load(detector, recognizer, &config.inference)
+                .context("RGB model loading failed")?,
+            ir: if ir_models_needed(config) {
+                Some(
+                    CaptureModels::load(detector, recognizer, &config.inference)
+                        .context("IR model loading failed")?,
+                )
+            } else {
+                None
+            },
+        })
+    }
+}
+
+pub struct AuthDaemon {
+    pub models: Arc<std::sync::Mutex<ModelSessions>>,
     pub liveness: Arc<Mutex<Option<LivenessDetector>>>,
     pub eye_state: Arc<Mutex<Option<EyeStateClassifier>>>,
     pub duress_lockout: Arc<DuressLockout>,
@@ -433,6 +488,23 @@ pub struct AuthDaemon {
     pub lock_epochs: LockEpochs,
     pub benchmark_running: Arc<AtomicBool>,
     pub rt_handle: tokio::runtime::Handle,
+}
+
+impl AuthDaemon {
+    /// Capture callers hold an applied-config read guard through teardown.
+    fn capture_models(&self, config: &Config) -> fdo::Result<ModelSessions> {
+        let models = self
+            .models
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        if ir_models_needed(config) && models.ir.is_none() {
+            return Err(fdo::Error::Failed(
+                "IR camera is configured but its models are unavailable".into(),
+            ));
+        }
+        Ok(models)
+    }
 }
 
 fn validate_keyring_verification(
@@ -474,6 +546,55 @@ mod tests {
     use std::sync::Arc;
     use tokio::sync::oneshot::error::TryRecvError;
     use tokio::sync::{Mutex, oneshot, watch};
+
+    #[test]
+    fn ir_models_are_needed_only_for_a_configured_ir_source() {
+        let mut config = Config::default();
+        for source in ["", " ", "\t"] {
+            config.cameras.ir = source.into();
+            assert!(!ir_models_needed(&config));
+        }
+        for source in [
+            "/dev/video2",
+            "usb:1234:5678",
+            "pipewiresrc target-object=ir",
+        ] {
+            config.cameras.ir = source.into();
+            assert!(ir_models_needed(&config));
+        }
+    }
+
+    #[test]
+    fn invalid_models_return_an_error_instead_of_panicking_at_startup() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("invalid.onnx");
+        std::fs::write(&path, b"not an ONNX model").unwrap();
+        let model = gaze_vision::inference::ModelFile::verify(path, None).unwrap();
+        assert!(ModelSessions::load(&model, &model, &Config::default()).is_err());
+    }
+
+    #[test]
+    fn rgb_only_skips_ir_and_dual_spectrum_uses_independent_sessions() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("identity.onnx");
+        let identity = [
+            8, 8, 18, 4, 103, 97, 122, 101, 58, 87, 10, 16, 10, 1, 120, 18, 1, 121, 34, 8, 73, 100,
+            101, 110, 116, 105, 116, 121, 18, 9, 103, 97, 122, 101, 45, 116, 101, 115, 116, 90, 27,
+            10, 1, 120, 18, 22, 10, 20, 8, 1, 18, 16, 10, 2, 8, 1, 10, 2, 8, 3, 10, 2, 8, 2, 10, 2,
+            8, 2, 98, 27, 10, 1, 121, 18, 22, 10, 20, 8, 1, 18, 16, 10, 2, 8, 1, 10, 2, 8, 3, 10,
+            2, 8, 2, 10, 2, 8, 2, 66, 2, 16, 13,
+        ];
+        std::fs::write(&path, identity).unwrap();
+        let model = gaze_vision::inference::ModelFile::verify(path, None).unwrap();
+        let mut config = Config::default();
+        let rgb_only = ModelSessions::load(&model, &model, &config).unwrap();
+        assert!(rgb_only.ir.is_none());
+        config.cameras.ir = "/dev/video2".into();
+        let dual = ModelSessions::load(&model, &model, &config).unwrap();
+        let ir = dual.ir.as_ref().unwrap();
+        assert!(!Arc::ptr_eq(&dual.rgb.detector, &ir.detector));
+        assert!(!Arc::ptr_eq(&dual.rgb.recognizer, &ir.recognizer));
+    }
 
     #[tokio::test]
     async fn seat_authorization_is_rechecked_after_the_previous_capture_stops() {

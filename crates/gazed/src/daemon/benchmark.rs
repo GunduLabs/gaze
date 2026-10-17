@@ -44,45 +44,38 @@ pub(super) fn benchmark_component(
 }
 
 pub(super) fn run_inference_benchmark(
-    detector: Arc<std::sync::Mutex<FaceDetector>>,
-    recognizer_rgb: Arc<Mutex<FaceRecognizer>>,
-    recognizer_ir: Arc<Mutex<FaceRecognizer>>,
+    sessions: ModelSessions,
     liveness: Arc<Mutex<Option<LivenessDetector>>>,
 ) -> fdo::Result<Vec<gaze_core::dbus::BenchmarkResult>> {
     let mut results = Vec::new();
-
-    {
-        let mut detector = detector.lock().unwrap_or_else(|e| e.into_inner());
-        let runtime = detector.inference_runtime().clone();
-        let result =
-            benchmark_component(
-                "Face detector",
-                &runtime,
-                || Ok(detector.benchmark_infer()?),
-            )
-            .map_err(|e| fdo::Error::Failed(format!("detector benchmark failed: {e}")))?;
-        results.push(result);
-    }
-
     let synthetic_face = image::RgbImage::from_pixel(112, 112, image::Rgb([128, 128, 128]));
 
+    for (spectrum, models) in std::iter::once(("RGB", sessions.rgb))
+        .chain(sessions.ir.into_iter().map(|models| ("IR", models)))
     {
-        let mut recognizer = recognizer_rgb.blocking_lock();
+        {
+            let mut detector = models.detector.lock().unwrap_or_else(|e| e.into_inner());
+            let runtime = detector.inference_runtime().clone();
+            let label = if spectrum == "RGB" {
+                "Face detector"
+            } else {
+                "Face detector (IR)"
+            };
+            let result = benchmark_component(label, &runtime, || Ok(detector.benchmark_infer()?))
+                .map_err(|e| {
+                fdo::Error::Failed(format!("{spectrum} detector benchmark failed: {e}"))
+            })?;
+            results.push(result);
+        }
+        let mut recognizer = models.recognizer.blocking_lock();
         let runtime = recognizer.inference_runtime().clone();
-        let result = benchmark_component("Face recognizer (RGB)", &runtime, || {
-            recognizer.get_embedding(&synthetic_face).map(|_| ())
-        })
-        .map_err(|e| fdo::Error::Failed(format!("RGB recognizer benchmark failed: {e}")))?;
-        results.push(result);
-    }
-
-    {
-        let mut recognizer = recognizer_ir.blocking_lock();
-        let runtime = recognizer.inference_runtime().clone();
-        let result = benchmark_component("Face recognizer (IR)", &runtime, || {
-            recognizer.get_embedding(&synthetic_face).map(|_| ())
-        })
-        .map_err(|e| fdo::Error::Failed(format!("IR recognizer benchmark failed: {e}")))?;
+        let result =
+            benchmark_component(&format!("Face recognizer ({spectrum})"), &runtime, || {
+                recognizer.get_embedding(&synthetic_face).map(|_| ())
+            })
+            .map_err(|e| {
+                fdo::Error::Failed(format!("{spectrum} recognizer benchmark failed: {e}"))
+            })?;
         results.push(result);
     }
 

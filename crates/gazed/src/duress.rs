@@ -13,7 +13,7 @@ use ndarray::Array4;
 use ort::{session::Session, value::TensorRef};
 
 use gaze_core::config::InferenceConfig;
-use gaze_vision::inference::create_session;
+use gaze_vision::inference::{ModelFile, create_session};
 
 use crate::users::UserDatabase;
 
@@ -34,7 +34,7 @@ pub struct EyeStateClassifier {
 
 impl EyeStateClassifier {
     pub fn new_with_inference(
-        model_path: &str,
+        model_path: &ModelFile,
         inference: &InferenceConfig,
     ) -> anyhow::Result<Self> {
         let (session, _) = create_session(model_path, inference)?;

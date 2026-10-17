@@ -6,7 +6,7 @@ use opencv::prelude::*;
 use ort::{session::Session, value::TensorRef};
 use std::fmt;
 
-use crate::inference::{InferenceRuntime, create_session};
+use crate::inference::{InferenceRuntime, ModelFile, create_session};
 use gaze_core::config::InferenceConfig;
 
 #[derive(Debug)]
@@ -64,11 +64,11 @@ pub struct FaceDetector {
 
 impl FaceDetector {
     pub fn new_with_inference(
-        model_path: &str,
+        model_path: &ModelFile,
         inference: &InferenceConfig,
     ) -> Result<Self, DetectError> {
         let (session, inference_runtime) = create_session(model_path, inference)
-            .map_err(|error| DetectError::InitFailed(error.to_string()))?;
+            .map_err(|error| DetectError::InitFailed(format!("{error:#}")))?;
 
         Ok(Self {
             session,

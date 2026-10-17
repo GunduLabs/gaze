@@ -158,27 +158,12 @@ async fn run(config: Config) -> anyhow::Result<()> {
     let (det_path, rec_path) =
         models::ensure_models(MODELS_DIR, security.detector(), security.recognizer())?;
 
-    let detector = gaze_vision::detect::FaceDetector::new_with_inference(
-        det_path.to_str().unwrap(),
-        &config.inference,
-    )
-    .expect("Failed to load detection model");
-
-    let recognizer_rgb = recognize::FaceRecognizer::new_with_inference(
-        rec_path.to_str().unwrap(),
-        &config.inference,
-    )
-    .expect("Failed to load recognition model");
-    let recognizer_ir = recognize::FaceRecognizer::new_with_inference(
-        rec_path.to_str().unwrap(),
-        &config.inference,
-    )
-    .expect("Failed to load recognition model");
+    let sessions = daemon::ModelSessions::load(&det_path, &rec_path, &config)?;
 
     let liveness_detector = if config.liveness.enabled {
         let path = models::ensure_liveness_model(MODELS_DIR)?;
         Some(liveness::LivenessDetector::new_with_inference(
-            path.to_str().unwrap(),
+            &path,
             &config.inference,
         )?)
     } else {
@@ -270,9 +255,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
     let camera_lease: daemon::CameraLease = Arc::new(Mutex::new(()));
 
     let daemon = AuthDaemon {
-        detector: Arc::new(std::sync::Mutex::new(detector)),
-        recognizer_rgb: Arc::new(Mutex::new(recognizer_rgb)),
-        recognizer_ir: Arc::new(Mutex::new(recognizer_ir)),
+        models: Arc::new(std::sync::Mutex::new(sessions)),
         liveness: Arc::new(Mutex::new(liveness_detector)),
         eye_state: Arc::new(Mutex::new(eye_state)),
         duress_lockout: Arc::new(duress::DuressLockout::new(duress::DURESS_DIR)),
