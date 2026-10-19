@@ -50,7 +50,7 @@ libc = "0.2.191"
 nalgebra = "0.35.0"
 ndarray = "0.17.2"
 opencv = { version = "0.101.1", default-features = false }
-ort = { version = "2.0.0-rc.14", default-features = false, features = [
+ort = { version = "2.0.0-rc.15", default-features = false, features = [
     "std",
     "ndarray",
     "tracing",
@@ -66,7 +66,7 @@ serde_plain = "1.0.2"
 sha2 = "0.11.1"
 strum = "0.28"
 strum_macros = "0.28"
-tokio = "1.53.3"
+tokio = "1.54.0"
 toml_edit = "0.25.17"
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
