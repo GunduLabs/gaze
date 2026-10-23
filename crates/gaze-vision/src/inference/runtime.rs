@@ -120,7 +120,9 @@ pub fn prepare_environment(config: &InferenceConfig) -> anyhow::Result<()> {
 /// Validate the actual API, not only the version label, before ort's global initialization.
 /// Failure here leaves it possible to try another library rather than panicking in ort::api().
 fn library_version(path: &Path) -> anyhow::Result<String> {
-    let filename = CString::new(path.as_os_str().as_bytes())?;
+    // NODELETE retains the first load path, which ORT uses to find sibling providers.
+    let real_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let filename = CString::new(real_path.as_os_str().as_bytes())?;
     struct Handle(*mut libc::c_void);
     impl Drop for Handle {
         fn drop(&mut self) {
