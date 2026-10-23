@@ -120,7 +120,9 @@ pub fn prepare_environment(config: &InferenceConfig) -> anyhow::Result<()> {
 /// Validate the actual API, not only the version label, before ort's global initialization.
 /// Failure here leaves it possible to try another library rather than panicking in ort::api().
 fn library_version(path: &Path) -> anyhow::Result<String> {
-    let filename = CString::new(path.as_os_str().as_bytes())?;
+    // NODELETE retains the first load path, which ORT uses to find sibling providers.
+    let real_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let filename = CString::new(real_path.as_os_str().as_bytes())?;
     struct Handle(*mut libc::c_void);
     impl Drop for Handle {
         fn drop(&mut self) {
@@ -277,6 +279,63 @@ mod tests {
             device: "npu".into(),
         };
         assert_eq!(requested_provider(&explicit, &[]), "openvino");
+    }
+
+    #[test]
+    fn runtime_probe_preserves_the_real_sdk_directory() {
+        use std::os::unix::fs::symlink;
+        use std::process::Command;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "gaze-runtime-origin-{}-{unique}",
+            std::process::id()
+        ));
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(root.clone());
+        let sdk = root.join("sdk");
+        let registry = root.join("registry");
+        std::fs::create_dir_all(&sdk).unwrap();
+        std::fs::create_dir_all(&registry).unwrap();
+        let real = sdk.join("libonnxruntime.so");
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/runtime_origin.c");
+        assert!(
+            Command::new("cc")
+                .args(["-shared", "-fPIC"])
+                .arg(fixture)
+                .args(["-ldl", "-o"])
+                .arg(&real)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let registered = registry.join("libonnxruntime.so");
+        symlink(&real, &registered).unwrap();
+
+        assert_eq!(library_version(&registered).unwrap(), "1.24.1");
+        let filename = CString::new(real.as_os_str().as_bytes()).unwrap();
+        let handle = unsafe { libc::dlopen(filename.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) };
+        assert!(!handle.is_null());
+        let symbol = unsafe { libc::dlsym(handle, c"RuntimeOrigin".as_ptr()) };
+        assert!(!symbol.is_null());
+        let origin: unsafe extern "C" fn() -> *const libc::c_char =
+            unsafe { std::mem::transmute(symbol) };
+        let origin = unsafe { origin() };
+        assert!(!origin.is_null());
+        let loaded_from = unsafe { CStr::from_ptr(origin) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { libc::dlclose(handle) };
+        assert_eq!(Path::new(&loaded_from), real);
     }
 
     #[test]
