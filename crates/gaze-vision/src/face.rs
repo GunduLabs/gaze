@@ -266,7 +266,12 @@ impl RgbWarmupGate {
 
     pub fn classify_with_luma(&mut self, frame: &Mat) -> (RgbFrameKind, u8) {
         let luma = frame_mean_luma(frame).unwrap_or(0);
-        (self.classify_luma(luma, std::time::Instant::now()), luma)
+        (self.classify_mean_luma(luma), luma)
+    }
+
+    /// Apply the same exposure warmup to a measured region, such as a detected face.
+    pub fn classify_mean_luma(&mut self, luma: u8) -> RgbFrameKind {
+        self.classify_luma(luma, std::time::Instant::now())
     }
 
     fn classify_luma(&mut self, luma: u8, now: std::time::Instant) -> RgbFrameKind {
@@ -836,6 +841,27 @@ mod tests {
         assert_eq!(
             gate.classify_luma(120, start + frame_at(1300)),
             RgbFrameKind::Lit
+        );
+    }
+
+    #[test]
+    fn rgb_face_warmup_survives_a_bright_background_until_exposure_recovers() {
+        let mut stream = RgbWarmupGate::new(20);
+        let mut face = RgbWarmupGate::new(20);
+        let start = std::time::Instant::now();
+
+        // The first detected face is underexposed, then recovers on the next frame.
+        // A lit background must not consume the face's warmup grace.
+        assert_eq!(stream.classify_luma(40, start), RgbFrameKind::Lit);
+        assert_eq!(face.classify_luma(4, start), RgbFrameKind::WarmupDark);
+        assert_eq!(
+            face.classify_luma(113, start + frame_at(67)),
+            RgbFrameKind::Lit
+        );
+        // After recovery, real darkness is reported without another startup grace.
+        assert_eq!(
+            face.classify_luma(4, start + frame_at(134)),
+            RgbFrameKind::SteadyDark
         );
     }
 
