@@ -627,12 +627,10 @@ impl AuthDaemon {
                         let _ = tx.blocking_send(VerifyMsg::PhaseStarted(Spectrum::Rgb));
 
                         let mut checker = FaceChecker::new(detector_arc, &config_clone, Spectrum::Rgb, false);
-                        let dark_hands_over_to_ir = should_yield_rgb_to_ir(
-                            &hybrid_policy_clone,
-                            run_ir,
-                            CaptureStatus::TooDark,
-                        );
                         let mut warmup = RgbWarmupGate::new(config_clone.cameras.dark_luma_threshold);
+                        // A bright background can settle the whole-frame gate while the face
+                        // is still underexposed. Give face exposure its own bounded warmup.
+                        let mut face_warmup = RgbWarmupGate::new(config_clone.cameras.dark_luma_threshold);
                         let mut logged_dark_stream = false;
                         let mut logged_rgb_luma_statuses = Vec::new();
                         let mut live_scores: Vec<f32> = Vec::new();
@@ -652,29 +650,27 @@ impl AuthDaemon {
                                 break;
                             }
 
-                            if !dark_hands_over_to_ir {
-                                match warmup.classify_with_luma(&frame) {
-                                    (RgbFrameKind::Lit, _) => {}
-                                    (RgbFrameKind::WarmupDark, _) => continue,
-                                    (RgbFrameKind::SettledDark, luma) => {
-                                        if !logged_dark_stream {
-                                            let message = format!(
-                                                "RGB stream remains dark after warmup: mean_luma={luma}"
-                                            );
-                                            info!("{message}");
-                                            let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
-                                            logged_dark_stream = true;
-                                        }
+                            match warmup.classify_with_luma(&frame) {
+                                (RgbFrameKind::Lit, _) => {}
+                                (RgbFrameKind::WarmupDark, _) => continue,
+                                (RgbFrameKind::SettledDark, luma) => {
+                                    if !logged_dark_stream {
+                                        let message = format!(
+                                            "RGB stream remains dark after warmup: mean_luma={luma}"
+                                        );
+                                        info!("{message}");
+                                        let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
+                                        logged_dark_stream = true;
                                     }
-                                    (RgbFrameKind::SteadyDark, luma) => {
-                                        if !logged_dark_stream {
-                                            let message = format!(
-                                                "RGB stream never brightened: mean_luma={luma}"
-                                            );
-                                            info!("{message}");
-                                            let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
-                                            logged_dark_stream = true;
-                                        }
+                                }
+                                (RgbFrameKind::SteadyDark, luma) => {
+                                    if !logged_dark_stream {
+                                        let message = format!(
+                                            "RGB stream never brightened: mean_luma={luma}"
+                                        );
+                                        info!("{message}");
+                                        let _ = tx.blocking_send(VerifyMsg::Diagnostic(message));
+                                        logged_dark_stream = true;
                                     }
                                 }
                             }
@@ -692,6 +688,18 @@ impl AuthDaemon {
                                 }
                             };
                             tracing::debug!("Processed RGB frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
+
+                            if let Some(luma) = checker.rgb_face_luma() {
+                                let frame_kind = face_warmup.classify_mean_luma(luma.mean);
+                                tracing::debug!(
+                                    mean_luma = luma.mean,
+                                    ?frame_kind,
+                                    "RGB face exposure"
+                                );
+                                if frame_kind == RgbFrameKind::WarmupDark {
+                                    continue;
+                                }
+                            }
 
                             if let Some(luma) = checker.rgb_face_luma()
                                 && !logged_rgb_luma_statuses.contains(&status)
@@ -878,6 +886,12 @@ impl AuthDaemon {
                             emitter.stream_started();
 
                             let (frame_kind, luma) = dark_gate.classify_with_luma(&frame);
+                            tracing::debug!(
+                                mean_luma = luma,
+                                threshold = config_clone.cameras.dark_luma_threshold,
+                                ?frame_kind,
+                                "IR frame exposure"
+                            );
                             match frame_kind {
                                 IrFrameKind::Lit => {
                                     if !logged_lit_luma {
@@ -1693,7 +1707,7 @@ mod tests {
     }
 
     #[test]
-    fn hybrid_fallback_yields_dark_rgb_to_ir_immediately() {
+    fn hybrid_fallback_yields_settled_dark_rgb_to_ir() {
         for policy in ["fallback_on_dark", "default", ""] {
             assert!(should_yield_rgb_to_ir(policy, true, CaptureStatus::TooDark));
         }
