@@ -29,6 +29,16 @@ fn config_keys_round_trip_through_get_and_set() {
     assert!(config.with_key("liveness", "1").is_err());
     assert!(config.get_key("liveness").is_err());
     assert!(config.to_toml().unwrap().contains("[duress]"));
+    assert!(config.with_key("liveness.ir_model", "true").is_err());
+    assert!(config.with_key("liveness.ir_threshold", "0.6").is_err());
+    for (key, value) in [
+        ("duress.enabled", "true"),
+        ("duress.closed_threshold", "0.8"),
+        ("duress.hold_ms", "900"),
+    ] {
+        let err = config.with_key(key, value).unwrap_err().to_string();
+        assert!(err.contains("restart gazed"), "{key}: {err}");
+    }
 }
 use std::fs;
 use std::path::PathBuf;
@@ -396,6 +406,31 @@ fn liveness_validate_rejects_degenerate_settings() {
     cfg.max_seconds = 2.5;
     cfg.validate().unwrap();
     assert_eq!(cfg.effective_max_seconds(), 2.5);
+
+    for bad in [0.0, 1.01, f64::NAN] {
+        cfg.ir_threshold = bad;
+        assert!(cfg.validate().is_err(), "{bad}");
+        assert_eq!(cfg.effective_ir_threshold(), DEFAULT_IR_LIVENESS_THRESHOLD);
+    }
+    cfg.ir_threshold = 0.7;
+    cfg.validate().unwrap();
+    assert_eq!(cfg.effective_ir_threshold(), 0.7);
+}
+
+#[test]
+fn ir_model_is_opt_in_and_needs_liveness() {
+    let mut cfg = LivenessConfig::default();
+    assert!(!cfg.ir_model);
+    assert!(!cfg.ir_model_enabled());
+    cfg.ir_model = true;
+    assert!(cfg.ir_model_enabled());
+    cfg.enabled = false;
+    assert!(!cfg.ir_model_enabled());
+
+    let config: Config = toml_edit::de::from_str("[liveness]\nenabled = true\n").unwrap();
+    assert!(!config.liveness.ir_model);
+    assert_eq!(config.liveness.ir_threshold, DEFAULT_IR_LIVENESS_THRESHOLD);
+    assert!(unknown_config_keys("[liveness]\nir_model = true\nir_threshold = 0.6\n").is_empty());
 }
 
 #[test]
@@ -784,6 +819,8 @@ fn save_to_and_load_from_round_trip() {
             enabled: true,
             threshold: 0.9,
             max_seconds: 2.5,
+            ir_model: true,
+            ir_threshold: 0.6,
         },
         storage: StorageConfig {
             encrypt_templates: true,
@@ -829,6 +866,8 @@ fn save_to_and_load_from_round_trip() {
     assert!(loaded.liveness.enabled);
     assert_eq!(loaded.liveness.threshold, 0.9);
     assert_eq!(loaded.liveness.max_seconds, 2.5);
+    assert!(loaded.liveness.ir_model);
+    assert_eq!(loaded.liveness.ir_threshold, 0.6);
     assert!(loaded.storage.encrypt_templates);
     assert!(loaded.storage.unlock_gnome_keyring);
     assert!(loaded.storage.unlock_kwallet);

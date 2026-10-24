@@ -19,7 +19,7 @@ use zbus::{fdo, message::Header, object_server::SignalEmitter};
 
 use crate::align::{align_face, mat_to_rgb};
 use crate::duress::{DuressLockout, DuressTracker, EyeStateClassifier};
-use crate::liveness::LivenessDetector;
+use crate::liveness::{IrLivenessDetector, LivenessDetector};
 use crate::preview::PreviewStream;
 use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
@@ -474,6 +474,7 @@ impl ModelSessions {
 pub struct AuthDaemon {
     pub models: Arc<std::sync::Mutex<ModelSessions>>,
     pub liveness: Arc<Mutex<Option<LivenessDetector>>>,
+    pub ir_liveness: Arc<Mutex<Option<IrLivenessDetector>>>,
     pub eye_state: Arc<Mutex<Option<EyeStateClassifier>>>,
     pub duress_lockout: Arc<DuressLockout>,
     pub db: Arc<Mutex<UserDatabase>>,

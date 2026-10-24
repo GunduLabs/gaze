@@ -100,6 +100,10 @@ min_face_size_ratio = 0.25
 enabled = true
 threshold = 0.8
 max_seconds = 2.0
+# Opt-in IR anti-spoof model (FLIR) on top of the IR eye-motion check. Fails closed:
+# if it cannot load, IR face auth errors out to the password prompt. File-only setting.
+ir_model = false
+ir_threshold = 0.5
 
 [storage]
 # Encrypt face templates at rest with a TPM-sealed key (requires TPM 2.0).
