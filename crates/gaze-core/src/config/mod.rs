@@ -50,6 +50,7 @@ pub const MIN_LIVENESS_MAX_SECONDS: f64 = 0.2;
 pub const MAX_LIVENESS_MAX_SECONDS: f64 = 30.0;
 pub const DEFAULT_LIVENESS_MAX_SECONDS: f64 = 2.0;
 pub const MIN_LIVENESS_FRAMES: u32 = 6;
+pub const DEFAULT_IR_LIVENESS_THRESHOLD: f64 = 0.5;
 pub const DEFAULT_CAMERA_FPS: f64 = 30.0;
 pub const DEFAULT_DURESS_CLOSED_THRESHOLD: f64 = 0.9;
 pub const MIN_DURESS_CLOSED_THRESHOLD: f64 = 0.5;
@@ -290,6 +291,10 @@ pub struct LivenessConfig {
     pub threshold: f64,
     #[serde(default = "default_max_seconds")]
     pub max_seconds: f64,
+    #[serde(default)]
+    pub ir_model: bool,
+    #[serde(default = "default_ir_liveness_threshold")]
+    pub ir_threshold: f64,
 }
 
 fn default_liveness_enabled() -> bool {
@@ -301,6 +306,9 @@ fn default_liveness_threshold() -> f64 {
 fn default_max_seconds() -> f64 {
     DEFAULT_LIVENESS_MAX_SECONDS
 }
+fn default_ir_liveness_threshold() -> f64 {
+    DEFAULT_IR_LIVENESS_THRESHOLD
+}
 
 impl Default for LivenessConfig {
     fn default() -> Self {
@@ -308,6 +316,8 @@ impl Default for LivenessConfig {
             enabled: default_liveness_enabled(),
             threshold: default_liveness_threshold(),
             max_seconds: default_max_seconds(),
+            ir_model: false,
+            ir_threshold: default_ir_liveness_threshold(),
         }
     }
 }
@@ -330,6 +340,14 @@ impl LivenessConfig {
                 self.max_seconds
             );
         }
+        if !Self::threshold_in_range(self.ir_threshold) {
+            anyhow::bail!(
+                "liveness.ir_threshold must be between {} and {}, got {}",
+                MIN_LIVENESS_THRESHOLD,
+                MAX_LIVENESS_THRESHOLD,
+                self.ir_threshold
+            );
+        }
         Ok(())
     }
 
@@ -349,6 +367,18 @@ impl LivenessConfig {
         } else {
             default_liveness_threshold()
         }
+    }
+
+    pub fn effective_ir_threshold(&self) -> f64 {
+        if Self::threshold_in_range(self.ir_threshold) {
+            self.ir_threshold
+        } else {
+            default_ir_liveness_threshold()
+        }
+    }
+
+    pub fn ir_model_enabled(&self) -> bool {
+        self.enabled && self.ir_model
     }
 
     pub fn effective_max_seconds(&self) -> f64 {
@@ -728,6 +758,9 @@ const OPTIONAL_CONFIG_KEYS: [(&str, &str); 2] = [
     ("cameras", "ir_frame_height"),
 ];
 
+const FILE_ONLY_CONFIG_KEYS: [&str; 2] = ["liveness.ir_model", "liveness.ir_threshold"];
+const FILE_ONLY_CONFIG_SECTIONS: [&str; 1] = ["duress"];
+
 const LEGACY_CONFIG_KEYS: [&str; 3] = [
     "security.threshold",
     "auth.require_confirmation",
@@ -851,6 +884,9 @@ impl Config {
         let (section, leaf) = key
             .rsplit_once('.')
             .ok_or_else(|| anyhow::anyhow!("use section.setting, for example `security.level`"))?;
+        if FILE_ONLY_CONFIG_KEYS.contains(&key) || FILE_ONLY_CONFIG_SECTIONS.contains(&section) {
+            anyhow::bail!("`{key}` can only be set in {CONFIG_PATH}; edit it and restart gazed");
+        }
         let mut doc = toml_edit::ser::to_document(self)?;
         let mut table = doc.as_item_mut();
         for part in section.split('.') {
@@ -1108,6 +1144,16 @@ mod tests {
         assert!(config.with_key("liveness", "1").is_err());
         assert!(config.get_key("liveness").is_err());
         assert!(config.to_toml().unwrap().contains("[duress]"));
+        assert!(config.with_key("liveness.ir_model", "true").is_err());
+        assert!(config.with_key("liveness.ir_threshold", "0.6").is_err());
+        for (key, value) in [
+            ("duress.enabled", "true"),
+            ("duress.closed_threshold", "0.8"),
+            ("duress.hold_ms", "900"),
+        ] {
+            let err = config.with_key(key, value).unwrap_err().to_string();
+            assert!(err.contains("restart gazed"), "{key}: {err}");
+        }
     }
     use std::fs;
     use std::path::PathBuf;
@@ -1257,6 +1303,33 @@ mod tests {
         cfg.max_seconds = 2.5;
         cfg.validate().unwrap();
         assert_eq!(cfg.effective_max_seconds(), 2.5);
+
+        for bad in [0.0, 1.01, f64::NAN] {
+            cfg.ir_threshold = bad;
+            assert!(cfg.validate().is_err(), "{bad}");
+            assert_eq!(cfg.effective_ir_threshold(), DEFAULT_IR_LIVENESS_THRESHOLD);
+        }
+        cfg.ir_threshold = 0.7;
+        cfg.validate().unwrap();
+        assert_eq!(cfg.effective_ir_threshold(), 0.7);
+    }
+
+    #[test]
+    fn ir_model_is_opt_in_and_needs_liveness() {
+        let mut cfg = LivenessConfig::default();
+        assert!(!cfg.ir_model);
+        assert!(!cfg.ir_model_enabled());
+        cfg.ir_model = true;
+        assert!(cfg.ir_model_enabled());
+        cfg.enabled = false;
+        assert!(!cfg.ir_model_enabled());
+
+        let config: Config = toml_edit::de::from_str("[liveness]\nenabled = true\n").unwrap();
+        assert!(!config.liveness.ir_model);
+        assert_eq!(config.liveness.ir_threshold, DEFAULT_IR_LIVENESS_THRESHOLD);
+        assert!(
+            unknown_config_keys("[liveness]\nir_model = true\nir_threshold = 0.6\n").is_empty()
+        );
     }
 
     #[test]
@@ -1625,6 +1698,8 @@ mod tests {
                 enabled: true,
                 threshold: 0.9,
                 max_seconds: 2.5,
+                ir_model: true,
+                ir_threshold: 0.6,
             },
             storage: StorageConfig {
                 encrypt_templates: true,
@@ -1671,6 +1746,8 @@ mod tests {
         assert!(loaded.liveness.enabled);
         assert_eq!(loaded.liveness.threshold, 0.9);
         assert_eq!(loaded.liveness.max_seconds, 2.5);
+        assert!(loaded.liveness.ir_model);
+        assert_eq!(loaded.liveness.ir_threshold, 0.6);
         assert!(loaded.storage.encrypt_templates);
         assert!(loaded.storage.unlock_gnome_keyring);
         assert!(loaded.storage.unlock_kwallet);

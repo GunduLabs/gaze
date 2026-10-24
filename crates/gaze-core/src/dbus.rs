@@ -174,6 +174,7 @@ impl From<DbusLivenessConfig> for LivenessConfig {
             enabled: liveness.enabled,
             threshold: liveness.threshold,
             max_seconds: liveness.max_seconds,
+            ..LivenessConfig::default()
         }
     }
 }

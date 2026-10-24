@@ -171,6 +171,18 @@ async fn run(config: Config) -> anyhow::Result<()> {
         None
     };
 
+    let ir_liveness = if config.liveness.ir_model_enabled() {
+        match daemon::load_ir_liveness(&config.inference) {
+            Ok(detector) => Some(detector),
+            Err(e) => {
+                warn!("The IR anti-spoof model is enabled but failed to load: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let eye_state = if config.duress.enabled {
         match daemon::load_eye_state(&config.inference) {
             Ok(classifier) => Some(classifier),
@@ -258,6 +270,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
     let daemon = AuthDaemon {
         models: Arc::new(std::sync::Mutex::new(sessions)),
         liveness: Arc::new(Mutex::new(liveness_detector)),
+        ir_liveness: Arc::new(Mutex::new(ir_liveness)),
         eye_state: Arc::new(Mutex::new(eye_state)),
         duress_lockout: Arc::new(duress::DuressLockout::new(duress::DURESS_DIR)),
         db: Arc::new(Mutex::new(db)),

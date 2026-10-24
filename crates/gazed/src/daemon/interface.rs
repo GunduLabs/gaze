@@ -1022,13 +1022,14 @@ impl AuthDaemon {
         };
 
         let liveness_arc = self.liveness.clone();
+        let ir_liveness_arc = self.ir_liveness.clone();
         let config = self.settings.read().await;
         let sessions = self.capture_models(&config)?;
 
         self.rt_handle
             .spawn_blocking(move || {
                 let _slot = slot;
-                let result = run_inference_benchmark(sessions, liveness_arc);
+                let result = run_inference_benchmark(sessions, liveness_arc, ir_liveness_arc);
                 drop(config);
                 result
             })

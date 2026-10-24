@@ -48,7 +48,7 @@ you.
 
 | | Approach | Printed photo | Screen replay | Video replay |
 |---|---|---|---|---|
-| **Gaze** | MiniFASNet-V2 CNN (RGB) + eye-motion check (IR) | Blocked | Blocked | Partial |
+| **Gaze** | MiniFASNet-V2 CNN (RGB) + eye-motion check, optional FLIR CNN (IR) | Blocked | Blocked | Partial |
 | **Howdy** | None (only skips over-dark frames) | Not blocked | Not blocked | Not blocked |
 | **Visage** | Landmark-stability, zero-model eye micro-movement | Not blocked | Not blocked | Not blocked |
 | **Biopass** | Anti-spoof model (unnamed upstream) + IR-camera check | Blocked | Blocked | Partial |

@@ -220,11 +220,39 @@ pub(super) fn crop_liveness_face(data: &FaceData) -> anyhow::Result<image::RgbIm
     crate::liveness::crop_face(&*content, bbox)
 }
 
+pub(super) fn crop_ir_liveness_face(data: &FaceData) -> anyhow::Result<image::RgbImage> {
+    let mat_rgb = data
+        .liveness_frame
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("IR liveness frame was not retained"))?;
+    let rgb = mat_to_rgb(mat_rgb)?;
+    let (frame_w, frame_h) = data.frame_size;
+    let frame_w = frame_w.min(rgb.width()).max(1);
+    let frame_h = frame_h.min(rgb.height()).max(1);
+    let pad_x = (rgb.width() - frame_w) / 2;
+    let pad_y = (rgb.height() - frame_h) / 2;
+    let content = image::imageops::crop_imm(&rgb, pad_x, pad_y, frame_w, frame_h);
+    let bbox = [
+        data.bbox[0] - pad_x as f32,
+        data.bbox[1] - pad_y as f32,
+        data.bbox[2] - pad_x as f32,
+        data.bbox[3] - pad_y as f32,
+    ];
+    crate::liveness::crop_ir_face(&*content, bbox)
+}
+
 pub fn load_eye_state(
     inference: &gaze_core::config::InferenceConfig,
 ) -> anyhow::Result<EyeStateClassifier> {
     let path = crate::models::ensure_eye_state_model(gaze_core::config::MODELS_DIR)?;
     EyeStateClassifier::new_with_inference(&path, inference)
+}
+
+pub fn load_ir_liveness(
+    inference: &gaze_core::config::InferenceConfig,
+) -> anyhow::Result<IrLivenessDetector> {
+    let path = crate::models::ensure_ir_liveness_model(gaze_core::config::MODELS_DIR)?;
+    IrLivenessDetector::new_with_inference(&path, inference)
 }
 
 pub(super) fn eyes_closed_in_frame(
@@ -396,6 +424,24 @@ impl AuthDaemon {
                 Err(e) => warn!("Loading the eye-state model panicked: {e}"),
             }
         }
+        if liveness_cfg.ir_model_enabled()
+            && ir_models.is_some()
+            && self.ir_liveness.lock().await.is_none()
+        {
+            let inference = config.inference.clone();
+            let loading = tokio::task::spawn_blocking(move || load_ir_liveness(&inference));
+            let loaded = tokio::select! {
+                biased;
+                _ = &mut rx => return Err(fdo::Error::Failed("capture cancelled".into())),
+                loaded = loading => loaded,
+            };
+            match loaded {
+                Ok(Ok(detector)) => *self.ir_liveness.lock().await = Some(detector),
+                Ok(Err(e)) => warn!("The IR anti-spoof model is enabled but failed to load: {e}"),
+                Err(e) => warn!("Loading the IR anti-spoof model panicked: {e}"),
+            }
+        }
+        let ir_liveness_arc = self.ir_liveness.clone();
         let eye_state_arc = self.eye_state.clone();
         let duress_lockout = self.duress_lockout.clone();
         let duress_locked = duress_lockout.is_locked(&username);
@@ -838,6 +884,9 @@ impl AuthDaemon {
                     let db_arc = db_arc.clone();
                     let username_clone = username.clone();
                     let liveness_enabled = liveness_cfg.enabled;
+                    let ir_model = liveness_cfg.ir_model_enabled();
+                    let ir_liveness_threshold = liveness_cfg.effective_ir_threshold();
+                    let ir_liveness_arc = ir_liveness_arc.clone();
                     let ir_device_clone = ir_device.clone();
                     let ir_node_clone = ir_node.clone();
                     let emitter_enabled = emitter_enabled;
@@ -850,6 +899,13 @@ impl AuthDaemon {
                     let duress_hold = duress_cfg.effective_hold();
 
                     ir_thread = Some(std::thread::spawn(move || {
+                        if ir_model && ir_liveness_arc.blocking_lock().is_none() {
+                            let _ = tx.blocking_send(VerifyMsg::Error(
+                                "The IR anti-spoof model is enabled but unavailable".to_string(),
+                            ));
+                            return;
+                        }
+
                         // Wait for RGB to release its camera before opening IR and firing the emitter,
                         // so single-function devices keep one live stream. Bail if verify passed.
                         if ir_waits_for_rgb(run_rgb, serial_capture) {
@@ -888,6 +944,7 @@ impl AuthDaemon {
                         let mut logged_lit_luma = false;
                         let mut logged_dark_luma = false;
                         let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
+                        let mut ir_live_scores: Vec<f32> = Vec::new();
                         let mut duress = DuressTracker::new(duress_hold);
 
                         while let Some(frame) = cam.next_interruptible(&stop_clone) {
@@ -933,7 +990,7 @@ impl AuthDaemon {
                             let frame = checker.orient(frame);
                             let (status, embed_opt) = {
                                 let mut recognizer = recognizer_ir_arc.blocking_lock();
-                                match process_frame_sync(&mut checker, &mut recognizer, &frame, duress_enabled) {
+                                match process_frame_sync(&mut checker, &mut recognizer, &frame, ir_model || duress_enabled) {
                                     Ok(res) => res,
                                     Err(error) => {
                                         let message = format!("IR inference failed: {error:#}");
@@ -990,13 +1047,47 @@ impl AuthDaemon {
                                             landmark_seq.push(eyes);
                                         }
                                         let motion = crate::liveness::eye_motion_is_live(&landmark_seq, None);
-                                        liveness_passed = crate::liveness::motion_confirms_live(
-                                            &motion,
-                                            crate::liveness::MIN_MOTION_PAIRS,
-                                        );
+                                        if ir_model {
+                                            let liveness_face = match crop_ir_liveness_face(&data) {
+                                                Ok(face) => face,
+                                                Err(e) => {
+                                                    error!("IR liveness crop failed: {e}");
+                                                    continue;
+                                                }
+                                            };
+                                            let mut live_guard = ir_liveness_arc.blocking_lock();
+                                            let Some(detector) = live_guard.as_mut() else {
+                                                let _ = tx.blocking_send(VerifyMsg::Error(
+                                                    "The IR anti-spoof model is enabled but unavailable".to_string(),
+                                                ));
+                                                return;
+                                            };
+                                            let live_score = match detector.live_score(&liveness_face) {
+                                                Ok(score) => score,
+                                                Err(e) => {
+                                                    let _ = tx.blocking_send(VerifyMsg::Error(format!(
+                                                        "IR liveness inference failed: {e}"
+                                                    )));
+                                                    return;
+                                                }
+                                            };
+                                            drop(live_guard);
+                                            ir_live_scores.push(live_score);
+                                            liveness_passed = crate::liveness::ir_liveness_passes(
+                                                &ir_live_scores,
+                                                ir_liveness_threshold as f32,
+                                                &motion,
+                                            );
+                                        } else {
+                                            liveness_passed = crate::liveness::motion_confirms_live(
+                                                &motion,
+                                                crate::liveness::MIN_MOTION_PAIRS,
+                                            );
+                                        }
 
                                         tracing::debug!(
-                                            "Liveness checked (IR): motion={:?}, overall={}",
+                                            "Liveness checked (IR): scores={:?}, motion={:?}, overall={}",
+                                            ir_live_scores,
                                             motion,
                                             liveness_passed
                                         );
