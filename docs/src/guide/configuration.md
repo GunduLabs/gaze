@@ -358,7 +358,7 @@ the emitter bit and reads the register back. `gaze doctor` reports which check
 failed. This register value has only been verified with the Surface Pro 4 wiring,
 so it may not work with other Surface models or OV7251 devices.
 
-On the IR path, liveness uses eye-motion analysis across frames; the RGB MiniFASNet model is not applied to infrared.
+On the IR path, liveness uses eye-motion analysis across frames; the RGB MiniFASNet model is not applied to infrared. You can add an IR anti-spoof model with `ir_model`; see [IR anti-spoof model](#ir-anti-spoof-model).
 
 Driving the emitter blaster needs read/write access to the IR `/dev/video*` node. The daemon runs as root and is a member of the `video` group, so the default `root:video` device permissions are sufficient; no extra udev rule is required.
 
@@ -641,6 +641,27 @@ When enabled, Gaze runs a local MiniFASNet-V2 anti-spoofing model on the detecte
 Alongside the model, Gaze watches how far your eyes travel between frames, measured against the distance between them so it does not depend on how close you sit. A run that has accumulated several frame pairs and never seen movement above that floor is treated as a still object and refused even when the model is confident. Moving normally (breathing, blinking, small head shifts) clears it; once any pair shows movement, holding still afterwards does not undo it. On IR cameras this movement check is the whole liveness test, since the anti-spoof model is trained on colour frames.
 
 `max_seconds` caps how long (in seconds of usable face frames) Gaze examines the camera before giving up and falling back to your password. It bounds the whole attempt, not just the liveness stage: an unrecognised face spends the same budget. Gaze calculates the frame budget dynamically using your camera's actual frame rate (e.g. 2.0 seconds corresponds to 60 frames on a 30fps webcam, or 120 frames on a 60fps camera). Frames only count while a usable face is in view, and the RGB and IR phases each get the full budget. Raise it if authentication gives up before you are ready; `gaze auth --verbose` reports when a run ends this way.
+
+### IR anti-spoof model
+
+```toml
+[liveness]
+enabled = true
+ir_model = false
+ir_threshold = 0.5
+```
+
+`ir_model = true` adds an infrared anti-spoof model to the IR path: Alibaba DAMO's [FLIR](https://modelscope.cn/models/iic/cv_manual_face-liveness_flir/summary) classifier (about 1.3 MB, MIT). It downloads into `/var/cache/gaze` the first time it is needed and is checked against a pinned SHA-256.
+
+With it on, an IR match needs both the eye-motion check and the model. The model scores every matched frame, and Gaze passes once at least three are scored and their average live score reaches `ir_threshold`. This is stricter than the RGB rule, so one lucky frame cannot carry an attempt. A good model score alone never unlocks.
+
+It fails closed. If the model cannot be downloaded, loaded, or run, the IR attempt ends with an error and you enter your password. Gaze does not fall back to the motion-only check or to RGB alone.
+
+Notes:
+
+- These keys live only in `/etc/gaze/config.toml`. The GUI and `gaze config` leave them untouched; restart with `sudo systemctl restart gazed` after editing.
+- The model's training data is private and Gaze has no measured error rates for it on laptop IR sensors. `ir_threshold` defaults to 0.5, the model's even-odds point. Test with `gaze auth` before relying on it, and with `RUST_LOG=debug` to see the per-frame scores.
+- Upstream notes weaker results against 3D masks and in strong light.
 
 ## Duress Signal
 

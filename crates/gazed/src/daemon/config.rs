@@ -288,12 +288,15 @@ impl AuthDaemon {
         let current_models = models.clone();
         let liveness = self.liveness.clone();
         let eye_state = self.eye_state.clone();
+        let ir_liveness = self.ir_liveness.clone();
         self.settings
             .apply(
                 &self.active_cancel,
                 move |current| {
                     let mut requested = update(current.clone())?;
                     requested.duress = current.duress.clone();
+                    requested.liveness.ir_model = current.liveness.ir_model;
+                    requested.liveness.ir_threshold = current.liveness.ir_threshold;
                     requested
                         .security
                         .validate()
@@ -343,6 +346,7 @@ impl AuthDaemon {
                     }
                     if prepared.reload.inference {
                         *eye_state.blocking_lock() = None;
+                        *ir_liveness.blocking_lock() = None;
                     }
                     info!("Config reloaded successfully");
                     Ok(())

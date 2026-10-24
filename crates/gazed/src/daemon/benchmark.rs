@@ -46,6 +46,7 @@ pub(super) fn benchmark_component(
 pub(super) fn run_inference_benchmark(
     sessions: ModelSessions,
     liveness: Arc<Mutex<Option<LivenessDetector>>>,
+    ir_liveness: Arc<Mutex<Option<IrLivenessDetector>>>,
 ) -> fdo::Result<Vec<gaze_core::dbus::BenchmarkResult>> {
     let mut results = Vec::new();
     let synthetic_face = image::RgbImage::from_pixel(112, 112, image::Rgb([128, 128, 128]));
@@ -87,6 +88,18 @@ pub(super) fn run_inference_benchmark(
                 detector.live_score(&synthetic_face).map(|_| ())
             })
             .map_err(|e| fdo::Error::Failed(format!("liveness benchmark failed: {e}")))?;
+            results.push(result);
+        }
+    }
+
+    {
+        let mut ir_liveness_guard = ir_liveness.blocking_lock();
+        if let Some(detector) = ir_liveness_guard.as_mut() {
+            let runtime = detector.inference_runtime().clone();
+            let result = benchmark_component("Liveness (FLIR, IR)", &runtime, || {
+                detector.live_score(&synthetic_face).map(|_| ())
+            })
+            .map_err(|e| fdo::Error::Failed(format!("IR liveness benchmark failed: {e}")))?;
             results.push(result);
         }
     }

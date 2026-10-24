@@ -23,6 +23,11 @@ const LIVENESS_MODEL_SHA256: &str =
     "d7b3cd9ba8a7ceb13baa8c4720902e27ca3112eff52f926c08804af6b6eecc7b";
 const LIVENESS_MODEL_URL: &str = "https://huggingface.co/garciafido/minifasnet-v2-anti-spoofing-onnx/resolve/main/minifasnet_v2.onnx";
 
+pub const IR_LIVENESS_MODEL_NAME: &str = "flir_ir_liveness.onnx";
+const IR_LIVENESS_MODEL_SHA256: &str =
+    "df80cea7228b92562692e56aac965d35766c77399159798c552fb3c77b410c72";
+const IR_LIVENESS_MODEL_URL: &str = "https://modelscope.cn/api/v1/models/iic/cv_manual_face-liveness_flir/repo?Revision=2553744d053a9b2046421e1e7b7e9acac18cace6&FilePath=model.onnx";
+
 pub const EYE_STATE_MODEL_NAME: &str = "open_closed_eye.onnx";
 const EYE_STATE_MODEL_SHA256: &str =
     "4daa100034482525a26c9afb9297c16580a531189e66e3d2b2ac7d32becfd593";
@@ -70,6 +75,7 @@ fn expected_model_sha256(model_name: &str) -> Option<&'static str> {
         "det_10g.onnx" => Some(DET_10G_SHA256),
         "w600k_r50.onnx" => Some(W600K_R50_SHA256),
         LIVENESS_MODEL_NAME => Some(LIVENESS_MODEL_SHA256),
+        IR_LIVENESS_MODEL_NAME => Some(IR_LIVENESS_MODEL_SHA256),
         EYE_STATE_MODEL_NAME => Some(EYE_STATE_MODEL_SHA256),
         _ => None,
     }
@@ -287,6 +293,17 @@ pub fn ensure_liveness_model(models_dir: &str) -> anyhow::Result<ModelFile> {
         return Ok(model);
     }
     download_file(LIVENESS_MODEL_URL, &path, LIVENESS_MODEL_SHA256)
+}
+
+pub fn ensure_ir_liveness_model(models_dir: &str) -> anyhow::Result<ModelFile> {
+    let dir = Path::new(models_dir);
+    ensure_private_dir(dir)?;
+
+    let path = dir.join(IR_LIVENESS_MODEL_NAME);
+    if let Some(model) = cached_model(&path, IR_LIVENESS_MODEL_NAME)? {
+        return Ok(model);
+    }
+    download_file(IR_LIVENESS_MODEL_URL, &path, IR_LIVENESS_MODEL_SHA256)
 }
 
 pub fn ensure_eye_state_model(models_dir: &str) -> anyhow::Result<ModelFile> {
@@ -587,6 +604,10 @@ mod tests {
         assert_eq!(
             expected_model_sha256(LIVENESS_MODEL_NAME),
             Some(LIVENESS_MODEL_SHA256)
+        );
+        assert_eq!(
+            expected_model_sha256(IR_LIVENESS_MODEL_NAME),
+            Some(IR_LIVENESS_MODEL_SHA256)
         );
         assert_eq!(
             expected_model_sha256(EYE_STATE_MODEL_NAME),
