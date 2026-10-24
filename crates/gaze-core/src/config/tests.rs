@@ -736,6 +736,7 @@ fn load_from_missing_file_returns_default() {
     assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
     assert_eq!(config.cameras.dark_luma_threshold, 20);
     assert_eq!(config.cameras.parallel_capture(), "never");
+    assert!(config.cameras.auto_rotate);
     assert!(config.auth.abort_if_ssh);
     assert!(config.auth.abort_if_lid_closed);
     assert!(!config.auth.abort_before_first_resume);
@@ -763,6 +764,7 @@ fn save_to_and_load_from_round_trip() {
             emitter_enabled: true,
             dark_luma_threshold: 55,
             parallel_capture: "auto".to_string(),
+            auto_rotate: false,
             ir_frame_width: Some(340),
             ir_frame_height: Some(340),
         },
@@ -816,6 +818,7 @@ fn save_to_and_load_from_round_trip() {
     assert_eq!(loaded.cameras.dark_luma_threshold, 55);
     assert_eq!(loaded.cameras.parallel_capture(), "auto");
     assert_eq!(loaded.cameras.ir_frame_size(), Some((340, 340)));
+    assert!(!loaded.cameras.auto_rotate);
     assert!(loaded.auth.abort_if_ssh);
     assert!(!loaded.auth.abort_if_lid_closed);
     assert!(loaded.auth.abort_before_first_resume);

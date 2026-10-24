@@ -50,6 +50,9 @@ dark_luma_threshold = 20
 # RGB then IR, which every camera supports; "auto" goes parallel only when the two
 # sensors are separate hardware functions; "always" forces it. Requires `ir`.
 # parallel_capture = "never"
+# Turn camera frames upright on 2-in-1s held in portrait or upside down, using the
+# auto-rotate sensor (iio-sensor-proxy). Has no effect on machines without one.
+auto_rotate = true
 
 [auth]
 abort_if_ssh = true

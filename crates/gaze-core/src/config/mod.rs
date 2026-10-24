@@ -386,6 +386,8 @@ pub struct CameraConfig {
     pub dark_luma_threshold: u8,
     #[serde(default = "default_parallel_capture")]
     pub parallel_capture: String,
+    #[serde(default = "default_true")]
+    pub auto_rotate: bool,
 }
 
 fn default_rgb_device() -> String {
@@ -716,6 +718,7 @@ impl Default for CameraConfig {
             parallel_capture: default_parallel_capture(),
             ir_frame_width: None,
             ir_frame_height: None,
+            auto_rotate: true,
         }
     }
 }

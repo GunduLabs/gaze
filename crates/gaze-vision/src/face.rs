@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use crate::detect::{DetectError, FaceDetector};
+use crate::detect::{DetectError, DetectResult, FaceDetector};
+use crate::orientation::{OrientationHandle, Rotation};
 use gaze_core::config::Config;
 use gaze_core::dbus::{CaptureStatus, EnrollPrompt};
 use opencv::core::Mat;
@@ -14,6 +15,7 @@ const ENROLL_STABLE_YAW_RANGE: f32 = 0.08;
 const ENROLL_STABLE_PITCH_RANGE: f32 = 0.06;
 const ENROLL_HORIZONTAL_POSE_DELTA: f32 = 0.16;
 const ENROLL_VERTICAL_POSE_DELTA: f32 = 0.07;
+const ROTATION_SEARCH_INTERVAL: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Spectrum {
@@ -338,6 +340,11 @@ pub struct FaceChecker {
     pub spectrum: Spectrum,
     pub check_centering_and_proximity: bool,
     pub min_face_size_ratio: f32,
+    orientation: Option<OrientationHandle>,
+    searched_rotation: Rotation,
+    applied_rotation: Rotation,
+    rotation_changed: bool,
+    missed_faces: u32,
 }
 
 impl FaceChecker {
@@ -355,7 +362,83 @@ impl FaceChecker {
             spectrum,
             check_centering_and_proximity,
             min_face_size_ratio: config.enrollment.effective_min_face_size_ratio(),
+            orientation: None,
+            searched_rotation: Rotation::UPRIGHT,
+            applied_rotation: Rotation::UPRIGHT,
+            rotation_changed: false,
+            missed_faces: 0,
         }
+    }
+
+    pub fn with_orientation(mut self, orientation: Option<OrientationHandle>) -> Self {
+        self.orientation = orientation;
+        self
+    }
+
+    fn sensor_rotation(&self) -> Option<Option<Rotation>> {
+        self.orientation
+            .as_ref()
+            .map(|handle| handle.get().upright_rotation())
+    }
+
+    pub fn orient(&mut self, frame: Mat) -> Mat {
+        let rotation = match self.sensor_rotation() {
+            None => Rotation::UPRIGHT,
+            Some(sensor) => sensor.unwrap_or(self.searched_rotation),
+        };
+        if rotation != self.applied_rotation {
+            tracing::debug!(degrees = rotation.degrees(), "rotating camera frames");
+            self.applied_rotation = rotation;
+            self.rotation_changed = true;
+        }
+        if rotation == Rotation::UPRIGHT {
+            return frame;
+        }
+        match rotation.rotated(&frame) {
+            Ok(rotated) => rotated,
+            Err(err) => {
+                tracing::warn!("camera frame rotation failed: {err}");
+                frame
+            }
+        }
+    }
+
+    pub fn take_rotation_changed(&mut self) -> bool {
+        std::mem::take(&mut self.rotation_changed)
+    }
+
+    fn search_rotations_if_due(
+        &mut self,
+        frame: &Mat,
+    ) -> anyhow::Result<Option<(Mat, DetectResult)>> {
+        if !matches!(self.sensor_rotation(), Some(None)) {
+            return Ok(None);
+        }
+        self.missed_faces = self.missed_faces.saturating_add(1);
+        if !self.missed_faces.is_multiple_of(ROTATION_SEARCH_INTERVAL) {
+            return Ok(None);
+        }
+        for turns in 1..4 {
+            let turn = Rotation::clockwise_quarter_turns(turns);
+            let rotated = turn.rotated(frame)?;
+            let detection = lock_recover(&self.detector).detect(&rotated);
+            match detection {
+                Ok(result) => {
+                    self.searched_rotation = self.applied_rotation.then(turn);
+                    self.applied_rotation = self.searched_rotation;
+                    self.rotation_changed = true;
+                    self.missed_faces = 0;
+                    tracing::debug!(
+                        degrees = self.searched_rotation.degrees(),
+                        "found a face in rotated camera frames"
+                    );
+                    return Ok(Some((rotated, result)));
+                }
+                Err(DetectError::NoFacesDetected) => {}
+                Err(err) => return Err(err.into()),
+            }
+        }
+        Ok(None)
     }
 
     fn build_capture_result(
@@ -404,9 +487,19 @@ impl FaceChecker {
             let mut detector = lock_recover(&self.detector);
             detector.detect(frame)
         };
-        let (bboxes, kps, mat_rgb) = match detection {
-            Ok(result) => result,
-            Err(DetectError::NoFacesDetected) => return Ok((CaptureStatus::NoFace, None)),
+        let searched;
+        let (frame, (bboxes, kps, mat_rgb)) = match detection {
+            Ok(result) => {
+                self.missed_faces = 0;
+                (frame, result)
+            }
+            Err(DetectError::NoFacesDetected) => match self.search_rotations_if_due(frame)? {
+                Some((rotated, result)) => {
+                    searched = rotated;
+                    (&searched, result)
+                }
+                None => return Ok((CaptureStatus::NoFace, None)),
+            },
             Err(err) => return Err(err.into()),
         };
 

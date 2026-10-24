@@ -9,3 +9,4 @@ pub mod detect;
 pub mod face;
 #[cfg(feature = "detection")]
 pub mod inference;
+pub mod orientation;

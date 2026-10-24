@@ -350,6 +350,7 @@ fn configured_sources_leave_ir_empty_when_no_ir_configured() {
         emitter_enabled: false,
         dark_luma_threshold: 30,
         parallel_capture: "never".to_string(),
+        auto_rotate: true,
     };
     let sources = resolve_configured_sources(&cameras);
     assert_eq!(sources.rgb, "primary");
@@ -370,6 +371,7 @@ fn cameras_with(rgb: &str, ir: &str) -> CameraConfig {
         emitter_enabled: false,
         dark_luma_threshold: 30,
         parallel_capture: "never".to_string(),
+        auto_rotate: true,
     }
 }
 
@@ -471,6 +473,7 @@ fn configured_sources_resolve_an_ir_device_node() {
         emitter_enabled: true,
         dark_luma_threshold: 30,
         parallel_capture: "never".to_string(),
+        auto_rotate: true,
     };
     let sources = resolve_configured_sources(&cameras);
     assert_eq!(sources.rgb, "primary");
@@ -488,6 +491,7 @@ fn preferred_capture_source_falls_back_to_ir_when_rgb_is_unset() {
         emitter_enabled: true,
         dark_luma_threshold: 30,
         parallel_capture: "never".to_string(),
+        auto_rotate: true,
     };
     assert_eq!(
         preferred_capture_source(&cameras),
@@ -704,6 +708,7 @@ fn configured_sources_leave_the_node_empty_for_a_pipewire_ir_source() {
         emitter_enabled: true,
         dark_luma_threshold: 30,
         parallel_capture: "auto".to_string(),
+        auto_rotate: true,
     };
     let sources = resolve_configured_sources(&cameras);
     assert_eq!(sources.ir, "pipewiresrc target-object=device-name");

@@ -369,6 +369,23 @@ ir = "/dev/video2"
 emitter_enabled = true
 ```
 
+### Auth fails on a 2-in-1 in tablet mode
+
+In portrait or upside-down tablet mode Gaze turns camera frames upright using
+the auto-rotate sensor. If it still finds no face, check that the sensor is
+visible:
+
+```bash
+monitor-sensor --accel
+```
+
+If that prints no accelerometer, install and start `iio-sensor-proxy`. Run
+`journalctl -u gazed -b | grep -i orientation` to see what Gaze read from the
+sensor; no output means gazed did not find it. If a laptop that is never used as a tablet starts failing after an
+upgrade because its sensor reports the wrong orientation, set
+`cameras.auto_rotate = false`. See
+[Tablet mode on 2-in-1s](./configuration.md#tablet-mode-on-2-in-1s).
+
 ## 4. Lock screen does not trigger face authentication
 
 ### GNOME
