@@ -210,6 +210,7 @@ impl From<DbusCameraConfig> for CameraConfig {
             emitter_enabled: cameras.emitter_enabled,
             dark_luma_threshold: cameras.dark_luma_threshold,
             parallel_capture: cameras.parallel_capture,
+            auto_rotate: true,
         }
     }
 }
@@ -1424,6 +1425,17 @@ mod tests {
             .expect("no error")
             .expect("current layout is readable");
         assert_eq!(decoded.cameras.ir_frame_size(), None);
+    }
+
+    #[test]
+    fn auto_rotate_stays_off_the_legacy_config_wire() {
+        let mut config = Config::default();
+        config.cameras.auto_rotate = false;
+        let raw = OwnedVariant::try_from(DbusConfig::from(config)).unwrap();
+        let decoded = config_from_property(raw)
+            .expect("no error")
+            .expect("current layout is readable");
+        assert!(decoded.cameras.auto_rotate);
     }
 
     #[test]
