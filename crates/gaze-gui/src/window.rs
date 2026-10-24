@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use crate::capture_dialog;
-use crate::config_dialog::show_config_dialog;
+use crate::dialog::capture;
+use crate::dialog::config::show_config_dialog;
 use gaze_core::dbus::{
     DaemonState, GazeProxy, connect_gaze, dbus_error_message, dbus_is_file_not_found,
     dbus_is_not_activatable, gazed_unit_state_on, load_config_from_daemon,
@@ -155,10 +155,10 @@ async fn begin_face_capture(
     };
 
     let camera = match load_config_from_daemon(proxy).await {
-        Ok(cfg) => capture_dialog::CameraSetup::from_config(&cfg.cameras),
-        Err(_) => capture_dialog::CameraSetup::fallback(),
+        Ok(cfg) => capture::CameraSetup::from_config(&cfg.cameras),
+        Err(_) => capture::CameraSetup::fallback(),
     };
-    let feed = match capture_dialog::prepare_camera_feed(&camera) {
+    let feed = match capture::prepare_camera_feed(&camera) {
         Ok(feed) => feed,
         Err(err) => {
             add_toast(window, format!("Failed to start camera: {err}"));
@@ -177,7 +177,7 @@ async fn begin_face_capture(
         return;
     }
 
-    capture_dialog::show_capture_dialog(
+    capture::show_capture_dialog(
         window,
         username,
         face_name,

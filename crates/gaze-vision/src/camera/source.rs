@@ -559,3 +559,478 @@ pub(super) fn node_from_pipewire_target(target: &str, want_color: bool) -> Optio
         .or_else(|| nodes.first())
         .cloned()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_pipewire_target_names_the_udev_path_of_its_node() {
+        assert_eq!(
+            v4l2_by_path_for_target("v4l2_input.pci-0000_00_14.0-usb-0_7_1.0").as_deref(),
+            Some("pci-0000:00:14.0-usb-0:7:1.0")
+        );
+        // Only V4L2 nodes are linked by path; anything else has no node to fall back to.
+        assert_eq!(v4l2_by_path_for_target("alsa_input.pci-0000_00_1f.3"), None);
+        assert_eq!(v4l2_by_path_for_target("51"), None);
+        assert_eq!(v4l2_by_path_for_target("v4l2_input."), None);
+    }
+
+    #[test]
+    fn a_deduplicated_pipewire_target_falls_back_to_its_udev_path() {
+        let by_path = v4l2_by_path_for_target("v4l2_input.pci-0000_0d_00.4-usb-0_1_1.0.2").unwrap();
+        assert_eq!(by_path, "pci-0000:0d:00.4-usb-0:1:1.0.2");
+        assert_eq!(
+            without_dedup_suffix(&by_path),
+            Some("pci-0000:0d:00.4-usb-0:1:1.0")
+        );
+        assert_eq!(without_dedup_suffix("platform-camera"), None);
+        assert_eq!(without_dedup_suffix("pci-0000:0d:00.4-usb-0:1:1.x"), None);
+    }
+
+    #[test]
+    fn forced_ir_yuy2_follows_the_device_profile_flag() {
+        // Both single-node Realtek modules are flagged in ir-profiles/*.toml.
+        assert!(requires_forced_ir_yuy2(0x0bda, 0x5767, false));
+        assert!(requires_forced_ir_yuy2(0x0bda, 0x58c2, false));
+
+        // The quirk is IR-only, and never applies to unflagged or unknown devices.
+        assert!(!requires_forced_ir_yuy2(0x0bda, 0x58c2, true));
+        assert!(!requires_forced_ir_yuy2(0x046d, 0x085e, false));
+        assert!(!requires_forced_ir_yuy2(0xdead, 0xbeef, false));
+    }
+
+    #[test]
+    fn configured_sources_leave_ir_empty_when_no_ir_configured() {
+        let cameras = CameraConfig {
+            rgb: "primary".to_string(),
+            ir: String::new(),
+            ir_frame_width: None,
+            ir_frame_height: None,
+            emitter_enabled: false,
+            dark_luma_threshold: 30,
+            parallel_capture: "never".to_string(),
+            auto_rotate: true,
+        };
+        let sources = resolve_configured_sources(&cameras);
+        assert_eq!(sources.rgb, "primary");
+        assert_eq!(sources.ir, "");
+        assert_eq!(sources.ir_node, "");
+        assert_eq!(
+            preferred_capture_source(&cameras),
+            ("primary".to_string(), false)
+        );
+    }
+
+    fn cameras_with(rgb: &str, ir: &str) -> CameraConfig {
+        CameraConfig {
+            rgb: rgb.to_string(),
+            ir: ir.to_string(),
+            ir_frame_width: None,
+            ir_frame_height: None,
+            emitter_enabled: false,
+            dark_luma_threshold: 30,
+            parallel_capture: "never".to_string(),
+            auto_rotate: true,
+        }
+    }
+
+    #[test]
+    fn two_nodes_on_one_hardware_function_must_capture_one_at_a_time() {
+        assert!(functions_must_serialize(
+            Some("/sys/devices/pci0000:00/usb1/1-5/1-5:1.0".to_string()),
+            Some("/sys/devices/pci0000:00/usb1/1-5/1-5:1.0".to_string()),
+        ));
+    }
+
+    #[test]
+    fn separate_hardware_functions_may_stream_concurrently() {
+        assert!(!functions_must_serialize(
+            Some("/sys/devices/pci0000:00/usb1/1-5/1-5:1.0".to_string()),
+            Some("/sys/devices/pci0000:00/usb1/1-5/1-5:1.2".to_string()),
+        ));
+    }
+
+    #[test]
+    fn an_unreadable_hardware_function_keeps_the_serial_path() {
+        let known = || Some("/sys/devices/pci0000:00/usb1/1-5/1-5:1.0".to_string());
+        assert!(functions_must_serialize(None, known()));
+        assert!(functions_must_serialize(known(), None));
+        assert!(functions_must_serialize(None, None));
+    }
+
+    #[test]
+    fn a_single_node_rgb_ir_module_never_captures_in_parallel() {
+        assert!(capture_must_serialize(
+            Some("/dev/video0"),
+            Some("/dev/video0")
+        ));
+    }
+
+    #[test]
+    fn an_unresolvable_capture_node_falls_back_to_serial() {
+        assert!(capture_must_serialize(Some("/dev/video0"), None));
+        assert!(capture_must_serialize(None, None));
+        assert!(capture_must_serialize(
+            Some("/dev/video-absent-rgb"),
+            Some("/dev/video-absent-ir")
+        ));
+    }
+
+    #[test]
+    fn a_primary_rgb_source_serializes_against_a_dual_sensor_ir_function() {
+        let ir_function = "/sys/devices/pci0000:00/usb1/1-5/1-5:1.0";
+        assert!(serialize_for_unresolved_rgb(
+            &[ir_function.to_string()],
+            Some(ir_function)
+        ));
+    }
+
+    #[test]
+    fn a_primary_rgb_source_streams_beside_an_ir_only_function() {
+        assert!(!serialize_for_unresolved_rgb(
+            &["/sys/devices/pci0000:00/usb1/1-3/1-3:1.0".to_string()],
+            Some("/sys/devices/pci0000:00/usb1/1-5/1-5:1.0")
+        ));
+    }
+
+    #[test]
+    fn a_primary_rgb_source_stays_serial_when_nothing_enumerates() {
+        let ir_function = "/sys/devices/pci0000:00/usb1/1-5/1-5:1.0";
+        assert!(serialize_for_unresolved_rgb(&[], Some(ir_function)));
+        assert!(serialize_for_unresolved_rgb(
+            &[ir_function.to_string()],
+            None
+        ));
+        assert!(serialize_for_unresolved_rgb(&[], None));
+    }
+
+    #[test]
+    fn always_and_never_skip_hardware_detection_entirely() {
+        let mut cameras = cameras_with("primary", "/dev/video2");
+
+        cameras.parallel_capture = "never".to_string();
+        assert!(resolve_configured_sources(&cameras).serial_capture);
+
+        cameras.parallel_capture = "always".to_string();
+        assert!(!resolve_configured_sources(&cameras).serial_capture);
+    }
+
+    #[test]
+    fn an_unrecognised_capture_mode_stays_serial() {
+        let mut cameras = cameras_with("primary", "/dev/video2");
+        cameras.parallel_capture = "sometimes".to_string();
+        assert!(resolve_configured_sources(&cameras).serial_capture);
+    }
+
+    #[test]
+    fn configured_sources_resolve_an_ir_device_node() {
+        let cameras = CameraConfig {
+            rgb: "primary".to_string(),
+            ir: "/dev/video2".to_string(),
+            ir_frame_width: None,
+            ir_frame_height: None,
+            emitter_enabled: true,
+            dark_luma_threshold: 30,
+            parallel_capture: "never".to_string(),
+            auto_rotate: true,
+        };
+        let sources = resolve_configured_sources(&cameras);
+        assert_eq!(sources.rgb, "primary");
+        assert_eq!(sources.ir, "/dev/video2");
+        assert_eq!(sources.ir_node, "/dev/video2");
+    }
+
+    #[test]
+    fn preferred_capture_source_falls_back_to_ir_when_rgb_is_unset() {
+        let cameras = CameraConfig {
+            rgb: String::new(),
+            ir: "/dev/video2".to_string(),
+            ir_frame_width: None,
+            ir_frame_height: None,
+            emitter_enabled: true,
+            dark_luma_threshold: 30,
+            parallel_capture: "never".to_string(),
+            auto_rotate: true,
+        };
+        assert_eq!(
+            preferred_capture_source(&cameras),
+            ("/dev/video2".to_string(), true)
+        );
+    }
+
+    #[test]
+    fn classify_source_maps_every_supported_form() {
+        assert_eq!(
+            classify_source("primary", true).unwrap(),
+            SourceElement::Element("pipewiresrc".to_string())
+        );
+        assert_eq!(
+            classify_source("/dev/video0", true).unwrap(),
+            SourceElement::Element("v4l2src device=/dev/video0".to_string())
+        );
+        assert_eq!(
+            classify_source("/dev/video2", false).unwrap(),
+            SourceElement::Element("v4l2src device=/dev/video2".to_string())
+        );
+        assert_eq!(
+            classify_source("usb:046d:085e", true).unwrap(),
+            SourceElement::ResolveUsb {
+                vid: 0x046d,
+                pid: 0x085e,
+                want_color: true,
+            }
+        );
+        assert_eq!(
+            classify_source("usb:046d:085e", false).unwrap(),
+            SourceElement::ResolveUsb {
+                vid: 0x046d,
+                pid: 0x085e,
+                want_color: false,
+            }
+        );
+        assert_eq!(
+            classify_source("v4l2src device=/dev/video0", true).unwrap(),
+            SourceElement::Element("v4l2src device=/dev/video0".to_string())
+        );
+    }
+
+    #[test]
+    fn classify_source_rejects_malformed_values() {
+        assert!(classify_source("", true).is_err());
+        assert!(classify_source("/dev/video", true).is_err());
+        assert!(classify_source("/dev/video2 ! fakesink", true).is_err());
+        assert!(classify_source("usb:046d", true).is_err());
+        assert!(classify_source("usb:zzzz:085e", true).is_err());
+    }
+
+    #[test]
+    fn parse_usb_spec_reads_hex_vid_pid() {
+        assert_eq!(parse_usb_spec("usb:046d:085e"), Some((0x046d, 0x085e)));
+        assert_eq!(parse_usb_spec("usb:04F2:B67C"), Some((0x04f2, 0xb67c)));
+        assert_eq!(parse_usb_spec("pci:046d:085e"), None);
+        assert_eq!(parse_usb_spec("usb:046d"), None);
+        assert_eq!(parse_usb_spec("usb:zzzz:085e"), None);
+        assert_eq!(parse_usb_spec("primary"), None);
+    }
+
+    #[test]
+    fn select_usb_node_disambiguates_color_and_mono() {
+        // Brio-style single-function UVC: one VID:PID exposes a color node and a
+        // mono IR node. Also a second, color-only device.
+        let nodes = vec![
+            VideoNodeInfo {
+                node: "/dev/video0".to_string(),
+                vid: 0x046d,
+                pid: 0x085e,
+                is_color: true,
+            },
+            VideoNodeInfo {
+                node: "/dev/video2".to_string(),
+                vid: 0x046d,
+                pid: 0x085e,
+                is_color: false,
+            },
+            VideoNodeInfo {
+                node: "/dev/video4".to_string(),
+                vid: 0x1234,
+                pid: 0x5678,
+                is_color: true,
+            },
+        ];
+        assert_eq!(
+            select_usb_node(&nodes, 0x046d, 0x085e, true),
+            Some("/dev/video0".to_string())
+        );
+        assert_eq!(
+            select_usb_node(&nodes, 0x046d, 0x085e, false),
+            Some("/dev/video2".to_string())
+        );
+        // No mono node on a color-only device, and unknown ids resolve to nothing.
+        assert_eq!(select_usb_node(&nodes, 0x1234, 0x5678, false), None);
+        assert_eq!(select_usb_node(&nodes, 0xdead, 0xbeef, true), None);
+    }
+
+    #[test]
+    fn select_usb_node_prefers_lowest_numbered_node() {
+        let nodes = vec![
+            VideoNodeInfo {
+                node: "/dev/video10".to_string(),
+                vid: 0x046d,
+                pid: 0x085e,
+                is_color: true,
+            },
+            VideoNodeInfo {
+                node: "/dev/video2".to_string(),
+                vid: 0x046d,
+                pid: 0x085e,
+                is_color: true,
+            },
+        ];
+        assert_eq!(
+            select_usb_node(&nodes, 0x046d, 0x085e, true),
+            Some("/dev/video2".to_string())
+        );
+    }
+
+    #[test]
+    fn select_usb_node_reuses_single_node_for_known_ir_profile() {
+        let nodes = vec![VideoNodeInfo {
+            node: "/dev/video6".to_string(),
+            vid: 0x0bda,
+            pid: 0x58c2,
+            is_color: true,
+        }];
+
+        assert_eq!(
+            select_usb_node(&nodes, 0x0bda, 0x58c2, false),
+            Some("/dev/video6".to_string())
+        );
+    }
+
+    #[test]
+    fn configured_sources_leave_the_node_empty_for_a_pipewire_ir_source() {
+        let cameras = CameraConfig {
+            rgb: "primary".to_string(),
+            ir: "pipewiresrc target-object=device-name".to_string(),
+            ir_frame_width: None,
+            ir_frame_height: None,
+            emitter_enabled: true,
+            dark_luma_threshold: 30,
+            parallel_capture: "auto".to_string(),
+            auto_rotate: true,
+        };
+        let sources = resolve_configured_sources(&cameras);
+        assert_eq!(sources.ir, "pipewiresrc target-object=device-name");
+        assert_eq!(sources.ir_node, "");
+        assert!(
+            sources.serial_capture,
+            "an unresolvable node must keep the safe serial capture path"
+        );
+    }
+
+    #[test]
+    fn privileged_capture_keeps_canonical_kernel_nodes() {
+        assert_eq!(
+            resolve_privileged_node("/dev/video0", true),
+            Some("/dev/video0".to_string())
+        );
+        assert_eq!(
+            resolve_privileged_node("  /dev/video2  ", false),
+            Some("/dev/video2".to_string())
+        );
+    }
+
+    #[test]
+    fn privileged_capture_rejects_untrusted_or_malformed_sources() {
+        for source in [
+            "",
+            "videotestsrc num-buffers=2",
+            "v4l2src device=/dev/video0",
+            "/dev/video",
+            "/dev/video2 ! fakesink",
+            "/dev/videoX",
+            "usb:046d",
+            "usb:zzzz:085e",
+            "pipewiresrc fd=7",
+            "pipewiresrcfoo",
+            "pipewiresrc target-object=",
+        ] {
+            assert_eq!(
+                resolve_privileged_node(source, true),
+                None,
+                "{source:?} must not resolve for privileged capture"
+            );
+        }
+    }
+
+    #[test]
+    fn only_unplugged_v4l2_cameras_count_as_disconnected() {
+        assert!(camera_disconnected("/dev/video9999", false));
+        assert!(camera_disconnected(
+            "pipewiresrc target-object=v4l2_input.pci-0000_ff_1f.7-usb-0_9.9.9_1.0.3",
+            false
+        ));
+        for source in [
+            "videotestsrc num-buffers=2",
+            "pipewiresrc target-object=alsa_input.pci-0000_00_1f.3",
+            "pipewiresrc target-object=51",
+            "/dev/videofoo",
+            "",
+        ] {
+            assert!(!camera_disconnected(source, false), "{source:?}");
+        }
+    }
+
+    #[test]
+    fn libcamera_fallback_only_covers_primary_color_capture() {
+        assert!(libcamera_fallback_applies("primary", true, None));
+        assert!(libcamera_fallback_applies("  primary ", true, None));
+        assert!(!libcamera_fallback_applies("primary", false, None));
+        for source in [
+            "/dev/video0",
+            "usb:046d:085e",
+            "pipewiresrc",
+            "pipewiresrc target-object=device-name",
+            "videotestsrc",
+            "libcamerasrc",
+        ] {
+            assert!(
+                !libcamera_fallback_applies(source, true, None),
+                "{source:?} must keep its own failure"
+            );
+        }
+    }
+
+    #[test]
+    fn libcamera_negotiation_failures_point_at_the_software_isp() {
+        let hint = libcamera_negotiation_hint(
+            "Internal data stream error.: streaming stopped, reason not-negotiated (-4)",
+        )
+        .expect("not-negotiated gets a hint");
+        assert!(hint.contains("Failed to fork"));
+        assert!(
+            libcamera_negotiation_hint("Failed to configure camera: Invalid argument").is_none()
+        );
+    }
+
+    #[test]
+    fn libcamera_fallback_skips_nodes_that_are_not_media_controller_only() {
+        assert!(!libcamera_fallback_applies(
+            "primary",
+            true,
+            Some("/dev/video-gaze-test-missing")
+        ));
+    }
+
+    #[test]
+    fn the_querycap_code_matches_the_kernels_ior_encoding() {
+        let expected = (2 << 30)
+            | ((std::mem::size_of::<V4l2Capability>() as libc::c_ulong) << 16)
+            | ((b'V' as libc::c_ulong) << 8);
+        assert_eq!(std::mem::size_of::<V4l2Capability>(), 104);
+        assert_eq!(VIDIOC_QUERYCAP, expected);
+    }
+
+    #[test]
+    fn device_caps_are_used_only_when_the_driver_reports_them() {
+        let mc_only = V4L2_CAP_IO_MC | 0x1;
+        assert_eq!(
+            effective_device_caps(V4L2_CAP_DEVICE_CAPS | 0x1, mc_only),
+            mc_only
+        );
+        assert_eq!(effective_device_caps(0x1, mc_only), 0x1);
+    }
+
+    #[test]
+    fn libcamera_camera_names_survive_pipeline_parsing() {
+        assert_eq!(
+            libcamera_source_element("\\_SB_.LNK1"),
+            "libcamerasrc camera-name=\"\\\\_SB_.LNK1\""
+        );
+        assert_eq!(
+            libcamera_source_element("a \"b\""),
+            "libcamerasrc camera-name=\"a \\\"b\\\"\""
+        );
+    }
+}

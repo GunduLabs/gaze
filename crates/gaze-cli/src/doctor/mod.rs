@@ -26,7 +26,6 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 mod acceleration;
-mod bug_report;
 mod camera;
 mod config;
 mod daemon;
@@ -34,6 +33,7 @@ mod desktop;
 mod gnome;
 mod keyring;
 mod pam;
+mod report;
 
 use camera::*;
 use config::*;
@@ -291,7 +291,7 @@ pub async fn run(username: &str, benchmark: bool, output: Output) -> anyhow::Res
         Output::Json => println!("{}", report.to_json()),
         Output::Report => {
             report.print()?;
-            let path = bug_report::write(&report, username)?;
+            let path = report::write(&report, username)?;
             println!(
                 "Wrote {}. Check it, then attach it to a new issue: https://github.com/GunduLabs/gaze/issues/new/choose",
                 path.display()
