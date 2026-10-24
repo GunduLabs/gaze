@@ -756,6 +756,7 @@ const OPTIONAL_CONFIG_KEYS: [(&str, &str); 2] = [
 ];
 
 const FILE_ONLY_CONFIG_KEYS: [&str; 2] = ["liveness.ir_model", "liveness.ir_threshold"];
+const FILE_ONLY_CONFIG_SECTIONS: [&str; 1] = ["duress"];
 
 const LEGACY_CONFIG_KEYS: [&str; 3] = [
     "security.threshold",
@@ -880,7 +881,7 @@ impl Config {
         let (section, leaf) = key
             .rsplit_once('.')
             .ok_or_else(|| anyhow::anyhow!("use section.setting, for example `security.level`"))?;
-        if FILE_ONLY_CONFIG_KEYS.contains(&key) {
+        if FILE_ONLY_CONFIG_KEYS.contains(&key) || FILE_ONLY_CONFIG_SECTIONS.contains(&section) {
             anyhow::bail!("`{key}` can only be set in {CONFIG_PATH}; edit it and restart gazed");
         }
         let mut doc = toml_edit::ser::to_document(self)?;

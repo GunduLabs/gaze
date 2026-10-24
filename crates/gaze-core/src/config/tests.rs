@@ -31,6 +31,14 @@ fn config_keys_round_trip_through_get_and_set() {
     assert!(config.to_toml().unwrap().contains("[duress]"));
     assert!(config.with_key("liveness.ir_model", "true").is_err());
     assert!(config.with_key("liveness.ir_threshold", "0.6").is_err());
+    for (key, value) in [
+        ("duress.enabled", "true"),
+        ("duress.closed_threshold", "0.8"),
+        ("duress.hold_ms", "900"),
+    ] {
+        let err = config.with_key(key, value).unwrap_err().to_string();
+        assert!(err.contains("restart gazed"), "{key}: {err}");
+    }
 }
 use std::fs;
 use std::path::PathBuf;
