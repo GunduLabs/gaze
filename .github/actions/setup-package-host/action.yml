@@ -185,6 +185,7 @@ runs:
           curl \
           clang \
           llvm \
+          openmp \
           opencv \
           v4l-utils \
           pam \
