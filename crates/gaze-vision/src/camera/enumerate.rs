@@ -197,3 +197,92 @@ pub(super) fn is_mono_format(format: &str) -> bool {
         || format.starts_with("GREY")
         || matches!(format.as_str(), "R8" | "R16" | "Y8" | "Y16")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(display_name: &str, target: &str, node: Option<&str>) -> CameraEntry {
+        CameraEntry {
+            display_name: display_name.to_string(),
+            target: format!("pipewiresrc target-object={target}"),
+            node: node.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn shared_display_names_are_labelled_with_their_v4l2_node() {
+        let labelled = label_camera_entries(vec![
+            entry("ASUS 5M webcam (V4L2)", "cam0", Some("/dev/video0")),
+            entry("ASUS 5M webcam (V4L2)", "cam2", Some("/dev/video2")),
+        ]);
+
+        assert_eq!(
+            labelled
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "ASUS 5M webcam (V4L2) (/dev/video0)",
+                "ASUS 5M webcam (V4L2) (/dev/video2)"
+            ]
+        );
+        assert_eq!(labelled[1].1, "pipewiresrc target-object=cam2");
+    }
+
+    #[test]
+    fn a_unique_display_name_is_left_alone() {
+        let labelled = label_camera_entries(vec![
+            entry("Integrated Webcam", "cam0", Some("/dev/video0")),
+            entry("IR Camera", "cam2", Some("/dev/video2")),
+        ]);
+
+        assert_eq!(labelled[0].0, "Integrated Webcam");
+        assert_eq!(labelled[1].0, "IR Camera");
+    }
+
+    #[test]
+    fn shared_display_names_without_a_node_stay_as_they_are() {
+        let labelled = label_camera_entries(vec![
+            entry("ASUS 5M webcam (V4L2)", "cam0", None),
+            entry("ASUS 5M webcam (V4L2)", "cam2", Some("/dev/video2")),
+        ]);
+
+        assert_eq!(labelled[0].0, "ASUS 5M webcam (V4L2)");
+        assert_eq!(labelled[1].0, "ASUS 5M webcam (V4L2) (/dev/video2)");
+    }
+
+    #[test]
+    fn mono_format_detection_is_case_and_whitespace_insensitive() {
+        for format in [
+            "GRAY8", " gray16 ", "GREY", "grey12", "R8", "r16", "Y8", " y16 ",
+        ] {
+            assert!(is_mono_format(format), "{format} should be mono");
+        }
+
+        for format in ["RGB", "BGR", "RGBA", "YUY2", "NV12", "DMA_DRM", ""] {
+            assert!(!is_mono_format(format), "{format} should be color/unknown");
+        }
+    }
+
+    fn sample_options() -> Vec<(String, String)> {
+        vec![
+            (IR_NONE_DISPLAY_NAME.to_string(), String::new()),
+            ("Integrated IR".to_string(), "/dev/video2".to_string()),
+        ]
+    }
+
+    #[test]
+    fn source_index_resolves_configured_targets() {
+        let options = sample_options();
+        assert_eq!(source_index(&options, ""), 0);
+        assert_eq!(source_index(&options, "/dev/video2"), 1);
+    }
+
+    #[test]
+    fn source_index_falls_back_for_unlisted_targets() {
+        let options = sample_options();
+        assert!(!is_listed_source(&options, "/dev/video99"));
+        assert_eq!(source_index(&options, "/dev/video99"), 0);
+    }
+}

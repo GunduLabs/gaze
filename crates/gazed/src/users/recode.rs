@@ -288,3 +288,315 @@ impl UserDatabase {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::users::tests::{TempDir, all_bins_encrypted, embedding, rgb_embeds, test_cipher};
+
+    #[test]
+    fn failed_config_save_restores_the_exact_store_and_live_cipher() {
+        let temp = TempDir::new("config-rollback");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 4).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        let file = db.collect_bin_files().unwrap().pop().unwrap();
+        let plaintext = fs::read(&file).unwrap();
+        assert!(
+            db.change_encryption(test_cipher(), true, || anyhow::bail!("config read-only"))
+                .is_err()
+        );
+        assert_eq!(fs::read(&file).unwrap(), plaintext);
+        assert!(!db.is_encrypted());
+        assert!(db.has_enrolled_faces("alice").unwrap());
+        db.change_encryption(test_cipher(), true, || Ok(()))
+            .unwrap();
+        let ciphertext = fs::read(&file).unwrap();
+        assert!(crypto::is_encrypted(&ciphertext));
+        assert!(
+            db.change_encryption(test_cipher(), false, || anyhow::bail!("config read-only"))
+                .is_err()
+        );
+        assert_eq!(fs::read(&file).unwrap(), ciphertext);
+        assert!(db.is_encrypted());
+        db.load_all().unwrap();
+        assert!(db.has_enrolled_faces("alice").unwrap());
+    }
+
+    #[test]
+    fn failed_rollback_preserves_backup_and_disables_matching_and_writes() {
+        let temp = TempDir::new("rollback-failure");
+        let base = temp.path().join("users");
+        let mut db = UserDatabase::new(base.to_str().unwrap(), 4).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        db.fail_rollback = true;
+        assert!(
+            db.change_encryption(test_cipher(), true, || anyhow::bail!("config read-only"))
+                .is_err()
+        );
+        assert!(
+            db.match_faces("alice", &embedding(&[1.0]), 0.5, Spectrum::Rgb)
+                .is_err()
+        );
+        assert!(
+            db.add_template("alice", "work", "2", rgb_embeds(vec![embedding(&[1.0])]))
+                .is_err()
+        );
+        assert!(db.load_all().is_err());
+        assert!(db.get_user_embeddings("alice").is_none());
+        assert_eq!(
+            fs::read_dir(temp.path()).unwrap().count(),
+            2,
+            "both complete stores must survive"
+        );
+        drop(db);
+        let db =
+            UserDatabase::new_with_cipher(base.to_str().unwrap(), 4, Some(test_cipher())).unwrap();
+        assert!(db.has_enrolled_faces("alice").unwrap());
+        assert_eq!(
+            fs::read_dir(temp.path()).unwrap().count(),
+            1,
+            "restart cleans the abandoned backup"
+        );
+    }
+
+    #[test]
+    fn rejected_settings_restore_recognizer_snapshot_and_template_cap() {
+        let temp = TempDir::new("settings-rollback");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 4).unwrap();
+        db.use_recognizer("old").unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        assert!(
+            db.apply_settings(Some(test_cipher()), true, Some("new"), 1, || anyhow::bail!(
+                "config read-only"
+            ))
+            .is_err()
+        );
+        assert_eq!(db.recognizer.as_deref(), Some("old"));
+        assert_eq!(db.max_templates, 4);
+        assert!(!db.is_encrypted());
+        assert!(db.has_enrolled_faces("alice").unwrap());
+        db.fail_reload = true;
+        let saved = Cell::new(false);
+        assert!(
+            db.apply_settings(None, false, Some("new"), 1, || {
+                saved.set(true);
+                Ok(())
+            })
+            .is_err()
+        );
+        assert!(
+            !saved.get(),
+            "a failed recognizer reload must happen before saving config"
+        );
+        assert!(db.has_enrolled_faces("alice").unwrap());
+    }
+
+    #[test]
+    fn legacy_ciphertext_is_only_accepted_by_explicit_maintenance() {
+        use aes_gcm::aead::{Aead, KeyInit};
+        let temp = TempDir::new("legacy-migration");
+        let base = temp.path().to_str().unwrap();
+        let mut db = UserDatabase::new(base, 4).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        let file = db.collect_bin_files().unwrap().pop().unwrap();
+        let plaintext = fs::read(&file).unwrap();
+        let cipher = aes_gcm::Aes256Gcm::new_from_slice(&[42; crypto::KEY_LEN]).unwrap();
+        let nonce = aes_gcm::Nonce::from([0; 12]);
+        let mut legacy = b"GZE1".to_vec();
+        legacy.extend_from_slice(&nonce);
+        legacy.extend_from_slice(&cipher.encrypt(&nonce, plaintext.as_slice()).unwrap());
+        fs::write(&file, &legacy).unwrap();
+        db.set_cipher(Some(test_cipher()));
+        db.load_all().unwrap();
+        assert!(!db.has_enrolled_faces("alice").unwrap());
+        assert!(db.migrate_plaintext_to_encrypted().is_err());
+        assert!(db.decrypt_all_with(&test_cipher()).is_err());
+        assert_eq!(fs::read(&file).unwrap(), legacy);
+        assert_eq!(db.migrate_legacy_with(&test_cipher()).unwrap(), 1);
+        assert!(fs::read(&file).unwrap().starts_with(b"GZE2"));
+        db.load_all().unwrap();
+        assert!(db.has_enrolled_faces("alice").unwrap());
+        // Reintroducing a legacy record later must not silently rebind it.
+        fs::write(&file, legacy).unwrap();
+        assert!(db.migrate_plaintext_to_encrypted().is_err());
+    }
+
+    #[test]
+    fn a_current_store_is_not_rewritten_on_startup() {
+        use std::os::unix::fs::MetadataExt;
+        let temp = TempDir::new("no-op-migration");
+        let mut db =
+            UserDatabase::new_with_cipher(temp.path().to_str().unwrap(), 4, Some(test_cipher()))
+                .unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        let file = db.collect_bin_files().unwrap().pop().unwrap();
+        let inode = fs::metadata(&file).unwrap().ino();
+        assert_eq!(db.migrate_plaintext_to_encrypted().unwrap(), 0);
+        assert_eq!(fs::metadata(&file).unwrap().ino(), inode);
+    }
+
+    #[test]
+    fn cleanup_does_not_delete_arbitrary_reserved_labels() {
+        let temp = TempDir::new("reserved-label");
+        fs::create_dir_all(temp.path().join("alice/.gaze-existing-face")).unwrap();
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 4).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        assert!(
+            db.change_encryption(test_cipher(), true, || Ok(()))
+                .is_err()
+        );
+        assert!(temp.path().join("alice/.gaze-existing-face").is_dir());
+    }
+
+    #[test]
+    fn migration_finishes_a_mixed_store_and_binds_every_template() {
+        let temp = TempDir::new("mixed-migration");
+        let base = temp.path().to_str().unwrap();
+        let mut db = UserDatabase::new(base, 4).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        db.set_cipher(Some(test_cipher()));
+        db.add_template("alice", "work", "2", rgb_embeds(vec![embedding(&[0.5])]))
+            .unwrap();
+        assert!(
+            db.require_bound_templates().is_err(),
+            "startup must not silently authenticate the plaintext half"
+        );
+        assert_eq!(db.migrate_legacy_with(&test_cipher()).unwrap(), 1);
+        db.require_bound_templates().unwrap();
+        db.load_all().unwrap();
+        assert_eq!(db.get_user_embeddings("alice").unwrap().len(), 2);
+        assert!(all_bins_encrypted(&db));
+        assert_eq!(db.migrate_plaintext_to_encrypted().unwrap(), 0);
+    }
+
+    #[test]
+    fn migrate_plaintext_to_encrypted_converts_in_place() {
+        let temp = TempDir::new("enc-migrate");
+        let base = temp.path().to_str().unwrap();
+
+        let mut plain = UserDatabase::new(base, 4).unwrap();
+        plain
+            .add_template(
+                "alice",
+                "work",
+                "1",
+                rgb_embeds(vec![embedding(&[1.0, 2.0, 3.0])]),
+            )
+            .unwrap();
+        assert!(!all_bins_encrypted(&plain), "files start as plaintext");
+
+        let mut enc = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
+        assert_eq!(
+            enc.get_user_embeddings("alice").map(|v| v.len()),
+            Some(0),
+            "plaintext templates are not trusted once encryption is enabled"
+        );
+
+        let expected = enc.collect_bin_files().unwrap().len();
+        assert_eq!(enc.migrate_plaintext_to_encrypted().unwrap(), expected);
+        assert!(all_bins_encrypted(&enc));
+        assert_eq!(enc.migrate_plaintext_to_encrypted().unwrap(), 0);
+
+        enc.load_all().unwrap();
+        assert_eq!(enc.get_user_embeddings("alice").unwrap().len(), 1);
+
+        let reopened = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
+        assert_eq!(reopened.get_user_embeddings("alice").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn decrypt_all_with_reverses_encryption() {
+        let temp = TempDir::new("enc-decrypt");
+        let base = temp.path().to_str().unwrap();
+
+        let mut enc = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
+        enc.add_template(
+            "alice",
+            "work",
+            "1",
+            rgb_embeds(vec![embedding(&[1.0, 0.0])]),
+        )
+        .unwrap();
+        assert!(all_bins_encrypted(&enc));
+
+        let expected = enc.collect_bin_files().unwrap().len();
+        assert_eq!(enc.decrypt_all_with(&test_cipher()).unwrap(), expected);
+        assert!(!all_bins_encrypted(&enc));
+
+        let plain = UserDatabase::new(base, 4).unwrap();
+        assert_eq!(plain.get_user_embeddings("alice").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn migrating_an_already_encrypted_store_re_encrypts_nothing() {
+        let temp = TempDir::new("migrate-idempotent");
+        let base = temp.path().to_str().unwrap();
+        let mut db = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+
+        assert_eq!(db.migrate_plaintext_to_encrypted().unwrap(), 0);
+        assert!(all_bins_encrypted(&db));
+    }
+
+    #[test]
+    fn migrating_without_a_key_is_a_no_op() {
+        let temp = TempDir::new("migrate-no-key");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 4).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+
+        assert_eq!(db.migrate_plaintext_to_encrypted().unwrap(), 0);
+        assert!(!all_bins_encrypted(&db));
+    }
+
+    #[test]
+    fn decrypting_with_the_wrong_key_changes_nothing_on_disk() {
+        let temp = TempDir::new("wrong-key");
+        let base = temp.path().to_str().unwrap();
+        let mut db = UserDatabase::new_with_cipher(base, 4, Some(test_cipher())).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        let before: Vec<Vec<u8>> = db
+            .collect_bin_files()
+            .unwrap()
+            .iter()
+            .map(|path| fs::read(path).unwrap())
+            .collect();
+
+        assert!(
+            db.decrypt_all_with(&EmbeddingCipher::new(&[7u8; crypto::KEY_LEN]))
+                .is_err()
+        );
+
+        let after: Vec<Vec<u8>> = db
+            .collect_bin_files()
+            .unwrap()
+            .iter()
+            .map(|path| fs::read(path).unwrap())
+            .collect();
+        assert_eq!(
+            before, after,
+            "a failed pass must not half-rewrite the store"
+        );
+        let leftovers = fs::read_dir(temp.path().join("alice/work/1"))
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".tmp")
+            })
+            .count();
+        assert_eq!(leftovers, 0, "staging files must be cleaned up on failure");
+    }
+}

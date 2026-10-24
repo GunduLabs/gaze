@@ -398,3 +398,368 @@ impl SecurityLevel {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    #[test]
+    fn security_level_mappings_are_stable() {
+        let cases = [
+            (SecurityLevel::low(), "det_500m.onnx", "w600k_mbf.onnx", 0.3),
+            (
+                SecurityLevel::medium(),
+                "det_500m.onnx",
+                "w600k_mbf.onnx",
+                0.4,
+            ),
+            (SecurityLevel::high(), "det_10g.onnx", "w600k_r50.onnx", 0.5),
+            (
+                SecurityLevel::maximum(),
+                "det_10g.onnx",
+                "w600k_r50.onnx",
+                0.6,
+            ),
+        ];
+
+        for (level, detector, recognizer, threshold) in cases {
+            assert_eq!(level.detector(), detector);
+            assert_eq!(level.recognizer(), recognizer);
+            assert!((level.threshold() - threshold).abs() < f32::EPSILON);
+            assert!((level.ir_threshold() - threshold).abs() < f32::EPSILON);
+        }
+
+        let custom = SecurityLevel::custom(
+            "accurate".to_string(),
+            "accurate".to_string(),
+            0.73,
+            String::new(),
+        );
+        assert_eq!(custom.detector(), "det_10g.onnx");
+        assert_eq!(custom.recognizer(), "w600k_r50.onnx");
+        assert!((custom.threshold() - 0.73).abs() < f32::EPSILON);
+        assert!((custom.ir_threshold() - 0.73).abs() < f32::EPSILON);
+
+        let custom_standard = SecurityLevel::custom(
+            "standard".to_string(),
+            "standard".to_string(),
+            0.35,
+            String::new(),
+        );
+        assert_eq!(custom_standard.detector(), "det_500m.onnx");
+        assert_eq!(custom_standard.recognizer(), "w600k_mbf.onnx");
+        assert!((custom_standard.threshold() - 0.35).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn validate_rejects_out_of_range_custom_threshold() {
+        for bad in [-1.0, -0.5, 0.0, 0.09, 1.01, 5.0, f64::NAN, f64::INFINITY] {
+            let level = SecurityLevel::custom(
+                "standard".to_string(),
+                "standard".to_string(),
+                bad,
+                String::new(),
+            );
+            assert!(level.validate().is_err(), "{bad}");
+        }
+
+        for bad in [-1.0, -0.5, 0.0, 0.09, 1.01, 5.0, f64::NAN, f64::INFINITY] {
+            let level = SecurityLevel::custom_with_thresholds(
+                "standard".to_string(),
+                "standard".to_string(),
+                0.4,
+                bad,
+                String::new(),
+            );
+            assert!(level.validate().is_err(), "{bad}");
+        }
+
+        for good in [MIN_SECURITY_THRESHOLD, 0.4, MAX_SECURITY_THRESHOLD] {
+            let level = SecurityLevel::custom(
+                "standard".to_string(),
+                "standard".to_string(),
+                good,
+                String::new(),
+            );
+            level.validate().unwrap();
+        }
+    }
+
+    #[test]
+    fn out_of_range_custom_threshold_never_reaches_the_matcher() {
+        for bad in [-1.0, 0.0, 5.0, f64::NAN, f64::INFINITY] {
+            let level = SecurityLevel::custom(
+                "standard".to_string(),
+                "standard".to_string(),
+                bad,
+                String::new(),
+            );
+            assert_eq!(
+                level.threshold(),
+                DEFAULT_SECURITY_THRESHOLD as f32,
+                "{bad}"
+            );
+        }
+
+        let level = SecurityLevel::custom(
+            "standard".to_string(),
+            "standard".to_string(),
+            0.73,
+            String::new(),
+        );
+        assert!((level.threshold() - 0.73).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn custom_security_thresholds_are_spectrum_specific() {
+        let level = SecurityLevel::custom_with_thresholds(
+            "standard".to_string(),
+            "standard".to_string(),
+            0.73,
+            0.31,
+            String::new(),
+        );
+
+        assert!((level.rgb_threshold() - 0.73).abs() < f32::EPSILON);
+        assert!((level.ir_threshold() - 0.31).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn legacy_security_threshold_applies_to_both_spectra() {
+        let config: Config = toml_edit::de::from_str(
+            r#"
+            [security]
+            level = "custom"
+            detector = "standard"
+            recognizer = "standard"
+            threshold = 0.47
+            "#,
+        )
+        .unwrap();
+
+        assert!((config.security.rgb_threshold() - 0.47).abs() < f32::EPSILON);
+        assert!((config.security.ir_threshold() - 0.47).abs() < f32::EPSILON);
+
+        let migrated = toml_edit::ser::to_string(&config).unwrap();
+        assert!(migrated.contains("rgb_threshold = 0.47"));
+        assert!(migrated.contains("ir_threshold = 0.47"));
+
+        let security_section = migrated
+            .split("[security]")
+            .nth(1)
+            .and_then(|rest| rest.split("\n[").next())
+            .unwrap_or_default();
+        assert!(
+            !security_section
+                .lines()
+                .any(|line| line.trim_start().starts_with("threshold =")),
+            "the legacy security.threshold key must not be re-serialized: {security_section}"
+        );
+    }
+
+    #[test]
+    fn setting_one_spectrum_threshold_does_not_leak_into_the_other() {
+        let config: Config = toml_edit::de::from_str(
+            r#"
+            [security]
+            level = "custom"
+            detector = "standard"
+            recognizer = "standard"
+            rgb_threshold = 0.6
+            "#,
+        )
+        .unwrap();
+
+        assert!((config.security.rgb_threshold() - 0.6).abs() < f32::EPSILON);
+        assert_eq!(
+            config.security.ir_threshold(),
+            DEFAULT_SECURITY_THRESHOLD as f32,
+            "an unset ir_threshold must not silently inherit rgb_threshold"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_unknown_hybrid_policy() {
+        let bad = SecurityLevel::custom(
+            "standard".to_string(),
+            "standard".to_string(),
+            0.5,
+            "not-a-real-policy".to_string(),
+        );
+        assert!(bad.validate().is_err());
+
+        for policy in HYBRID_POLICY_OPTIONS {
+            let level = SecurityLevel::custom(
+                "standard".to_string(),
+                "standard".to_string(),
+                0.5,
+                policy.to_string(),
+            );
+            level.validate().unwrap();
+        }
+
+        let empty = SecurityLevel::custom(
+            "standard".to_string(),
+            "standard".to_string(),
+            0.5,
+            String::new(),
+        );
+        empty.validate().unwrap();
+        assert_eq!(empty.hybrid_policy(), "fallback_on_dark");
+    }
+
+    #[test]
+    fn preset_levels_ignore_a_stored_custom_threshold() {
+        for preset in ["low", "medium", "high", "maximum"] {
+            let mut level = SecurityLevel::medium();
+            level.level = preset.to_string();
+            level.rgb_threshold = -1.0;
+            level.ir_threshold = -1.0;
+            level.validate().unwrap();
+            assert!(level.threshold() > 0.0, "{preset}");
+            assert!(level.ir_threshold() > 0.0, "{preset}");
+        }
+    }
+
+    #[test]
+    fn validate_rejects_unknown_security_level() {
+        let mut level = SecurityLevel::medium();
+        level.level = "bogus".to_string();
+        assert!(level.validate().is_err());
+        // Known presets still validate.
+        for preset in ["low", "medium", "high", "maximum"] {
+            let mut l = SecurityLevel::medium();
+            l.level = preset.to_string();
+            l.validate().unwrap();
+        }
+    }
+
+    #[test]
+    fn unknown_level_falls_back_to_medium_without_panicking() {
+        let mut level = SecurityLevel::medium();
+        level.level = "bogus".to_string();
+        assert_eq!(level.detector(), "det_500m.onnx");
+        assert_eq!(level.recognizer(), "w600k_mbf.onnx");
+        assert!((level.threshold() - 0.4).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn hybrid_policy_mappings() {
+        let mut config = Config::default();
+
+        config.security.level = "low".to_string();
+        assert_eq!(config.security.hybrid_policy(), "or");
+
+        config.security.level = "medium".to_string();
+        assert_eq!(config.security.hybrid_policy(), "fallback_on_dark");
+
+        config.security.level = "high".to_string();
+        assert_eq!(config.security.hybrid_policy(), "fallback_on_dark");
+
+        config.security.level = "maximum".to_string();
+        assert_eq!(config.security.hybrid_policy(), "and");
+
+        config.security.level = "unknown".to_string();
+        assert_eq!(config.security.hybrid_policy(), "fallback_on_dark");
+
+        config.security.level = "custom".to_string();
+        config.security.hybrid_policy = "custom_policy".to_string();
+        assert_eq!(config.security.hybrid_policy(), "custom_policy");
+    }
+
+    #[test]
+    fn validation_errors_accumulate_across_fields() {
+        let level = SecurityLevel::custom_with_thresholds(
+            "sharp".to_string(),
+            "standard".to_string(),
+            1.5,
+            -0.1,
+            "sometimes".to_string(),
+        );
+
+        let fields: Vec<SecurityField> = level
+            .validation_errors()
+            .iter()
+            .map(|err| err.field)
+            .collect();
+        assert_eq!(
+            fields,
+            vec![
+                SecurityField::ModelQuality,
+                SecurityField::Threshold,
+                SecurityField::Threshold,
+                SecurityField::HybridPolicy,
+            ]
+        );
+    }
+
+    #[test]
+    fn validate_reports_only_the_first_error() {
+        let level = SecurityLevel::custom_with_thresholds(
+            "standard".to_string(),
+            "standard".to_string(),
+            1.5,
+            -0.1,
+            String::new(),
+        );
+
+        let message = level.validate().unwrap_err().to_string();
+        assert!(message.contains("security.rgb_threshold"), "{message}");
+        assert_eq!(level.validation_errors().len(), 2);
+    }
+
+    #[test]
+    fn an_unknown_level_stops_before_the_custom_checks() {
+        let mut level = SecurityLevel::custom_with_thresholds(
+            "sharp".to_string(),
+            "sharp".to_string(),
+            1.5,
+            -0.1,
+            "sometimes".to_string(),
+        );
+        level.level = "paranoid".to_string();
+
+        let errors = level.validation_errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].field, SecurityField::Level);
+    }
+
+    #[test]
+    fn custom_level_index_tracks_the_option_list() {
+        assert_eq!(
+            SecurityLevel::CUSTOM_LEVEL_INDEX as usize,
+            SECURITY_LEVEL_OPTIONS
+                .iter()
+                .position(|level| *level == "custom")
+                .expect("custom must be listed")
+        );
+    }
+
+    #[test]
+    fn custom_form_seeds_from_the_resolved_preset() {
+        let seed = SecurityLevel::high().custom_form();
+        assert_eq!(seed.detector, "accurate");
+        assert_eq!(seed.recognizer, "accurate");
+        assert_eq!(seed.rgb_threshold, 0.5);
+        assert_eq!(seed.ir_threshold, 0.5);
+        assert_eq!(seed.hybrid_policy, "fallback_on_dark");
+    }
+
+    #[test]
+    fn custom_form_keeps_stored_custom_values() {
+        let level = SecurityLevel::custom_with_thresholds(
+            "standard".to_string(),
+            "accurate".to_string(),
+            0.31,
+            0.62,
+            "and".to_string(),
+        );
+        let seed = level.custom_form();
+        assert_eq!(seed.detector, "standard");
+        assert_eq!(seed.recognizer, "accurate");
+        assert_eq!(seed.rgb_threshold, 0.31);
+        assert_eq!(seed.ir_threshold, 0.62);
+        assert_eq!(seed.hybrid_policy, "and");
+    }
+}
