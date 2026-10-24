@@ -36,7 +36,9 @@ mod tests {
     fn the_packaged_unit_prevents_restarts_on_the_unsupported_cpu_status() {
         let unit = include_str!("../../../packaging/config/gazed.service");
         assert!(
-            unit.contains(&format!("RestartPreventExitStatus={EXIT_UNSUPPORTED_CPU} 77")),
+            unit.contains(&format!(
+                "RestartPreventExitStatus={EXIT_UNSUPPORTED_CPU} 77"
+            )),
             "packaging/config/gazed.service must set RestartPreventExitStatus={EXIT_UNSUPPORTED_CPU} 77"
         );
 

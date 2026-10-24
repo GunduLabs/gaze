@@ -218,8 +218,8 @@ async fn run(mut config: Config) -> anyhow::Result<()> {
         config.storage.encrypt_templates = false;
         config.storage.unlock_gnome_keyring = false;
         config.storage.unlock_kwallet = false;
-        let managed = std::fs::symlink_metadata(CONFIG_PATH)
-            .is_ok_and(|meta| meta.file_type().is_symlink());
+        let managed =
+            std::fs::symlink_metadata(CONFIG_PATH).is_ok_and(|meta| meta.file_type().is_symlink());
         if managed {
             record_store_format = false;
         } else if let Err(e) = config.save_to(CONFIG_PATH) {
