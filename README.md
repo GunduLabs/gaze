@@ -21,7 +21,7 @@
 > [!NOTE]
 > Gaze includes local liveness anti-spoofing checks and supports infrared (IR) cameras. In high-security environments, we recommend keeping your usual system authentication enabled as a fallback.
 
-Gaze brings facial authentication to Linux with on-device face recognition, PAM integration, and tools for login, lock screens, `sudo`, and desktop management.
+Facial authentication for Linux with on-device face recognition, PAM integration, and tools for login, lock screen, sudo, and desktop management.
 
 ## Install
 
