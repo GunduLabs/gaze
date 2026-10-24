@@ -7,7 +7,7 @@ This page explains how Gaze's facial authentication pipeline works. You do not n
 
 ## Security & Liveness
 
-Gaze performs liveness checks locally and supports infrared (IR) cameras to help resist spoofing.
+Gaze provides facial authentication with local liveness anti-spoofing and support for infrared (IR) cameras.
 
 Using an IR camera alongside RGB liveness checks helps Gaze resist presentation
 attacks such as printed photos, screen replays, and videos. In high-security
