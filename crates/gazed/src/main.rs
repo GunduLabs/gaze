@@ -7,6 +7,7 @@ mod daemon;
 mod duress;
 mod liveness;
 pub mod models;
+mod orientation;
 mod preview;
 mod recognize;
 mod tpm;

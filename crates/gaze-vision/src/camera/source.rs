@@ -610,6 +610,7 @@ mod tests {
             emitter_enabled: false,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
+            auto_rotate: true,
         };
         let sources = resolve_configured_sources(&cameras);
         assert_eq!(sources.rgb, "primary");
@@ -630,6 +631,7 @@ mod tests {
             emitter_enabled: false,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
+            auto_rotate: true,
         }
     }
 
@@ -731,6 +733,7 @@ mod tests {
             emitter_enabled: true,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
+            auto_rotate: true,
         };
         let sources = resolve_configured_sources(&cameras);
         assert_eq!(sources.rgb, "primary");
@@ -748,6 +751,7 @@ mod tests {
             emitter_enabled: true,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
+            auto_rotate: true,
         };
         assert_eq!(
             preferred_capture_source(&cameras),
@@ -894,6 +898,7 @@ mod tests {
             emitter_enabled: true,
             dark_luma_threshold: 30,
             parallel_capture: "auto".to_string(),
+            auto_rotate: true,
         };
         let sources = resolve_configured_sources(&cameras);
         assert_eq!(sources.ir, "pipewiresrc target-object=device-name");

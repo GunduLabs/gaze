@@ -39,6 +39,7 @@ rgb = "primary"
 # ir_frame_height = 340
 # parallel_capture = "never" # "never", "auto", or "always" (requires ir)
 dark_luma_threshold = 20
+auto_rotate = true          # turn frames upright on 2-in-1s in tablet mode
 
 [auth]
 abort_if_ssh = true
@@ -238,6 +239,34 @@ dark_luma_threshold = 20
 ```
 
 With the default, a frame is skipped when its mean luminance (0-255, BT.601 weighted) falls below 20. Raise it to reject dimmer scenes, lower it to be more permissive.
+
+### Tablet mode on 2-in-1s
+
+On a 2-in-1 the camera sits in the screen bezel and turns with it, so in portrait
+or upside-down tablet mode the frames arrive sideways and the face detector finds
+nothing. Gaze reads the same orientation sensor your desktop uses for auto-rotate
+(through `iio-sensor-proxy`) and turns RGB and IR frames upright before detection.
+The enrollment preview turns with them.
+
+```toml
+[cameras]
+auto_rotate = true
+```
+
+- Machines without an accelerometer, or without `iio-sensor-proxy` running, are
+  unaffected: frames are used exactly as captured and nothing extra runs.
+- When the sensor reports a clear orientation, Gaze applies that one rotation.
+  It costs no extra detection work.
+- When the device lies flat, the sensor has no orientation to report. Only then,
+  and only after the upright frame shows no face, Gaze also tries the other three
+  rotations on every fifth such frame and keeps whichever one finds a face.
+- The rotation only decides which way a frame is turned. Recognition, liveness,
+  and the match threshold run unchanged on the result, so it cannot make a face
+  pass that would otherwise fail.
+- If a laptop's sensor reports the wrong orientation in normal use (a known issue
+  on some models), set `auto_rotate = false`.
+
+This setting is only available in the config file, not in the GUI.
 
 ## Infrared (IR) camera
 

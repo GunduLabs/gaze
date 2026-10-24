@@ -20,6 +20,7 @@ use zbus::{fdo, message::Header, object_server::SignalEmitter};
 use crate::align::{align_face, mat_to_rgb};
 use crate::duress::{DuressLockout, DuressTracker, EyeStateClassifier};
 use crate::liveness::LivenessDetector;
+use crate::orientation::OrientationWatch;
 use crate::preview::PreviewStream;
 use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
