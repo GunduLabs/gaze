@@ -3682,9 +3682,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.28.0"
+version = "1.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cc1186384beb7dd8eedea376413fd654937285ea6c9cfbb928dc3043ea4b606"
+checksum = "4a0e2d11620c50695fe12bbbfde96b3477fe606e7284c22d505c12ce51214514"
 dependencies = [
  "atomic",
  "getrandom 0.4.3",
@@ -4114,9 +4114,9 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "zbus"
-version = "6.0.0"
+version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "266223222c9d81e5966455a9da0783e35d56a7ccab79a03c2366b2d98f8fc8a9"
+checksum = "fcff5faa63a63d5b81051740f7382017f10b3440b3f401d97f0cf0b3b39c62d9"
 dependencies = [
  "async-trait",
  "bitflags 2.13.2",
@@ -4143,9 +4143,9 @@ dependencies = [
 
 [[package]]
 name = "zbus_macros"
-version = "6.0.0"
+version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69191782481ef4e0ac88ca487347c52e08bb85cceb2a163b79f7281fe5be0a3c"
+checksum = "5bba6e2bfe19571dc81b3e0be9f8daec6e5422db3e2eea2e766a859553e7bd37"
 dependencies = [
  "proc-macro2",
  "quote",
