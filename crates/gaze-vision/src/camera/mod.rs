@@ -821,4 +821,373 @@ impl Iterator for Camera {
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncated_camera_buffer_is_rejected_before_opencv_borrows_it() {
+        gstreamer::init().unwrap();
+        let info = gstreamer_video::VideoInfo::builder(gstreamer_video::VideoFormat::Bgr, 2, 2)
+            .build()
+            .unwrap();
+        let buffer = gstreamer::Buffer::from_mut_slice(vec![0u8; 1]);
+        let err = mirrored_bgr_frame(&buffer, &info).unwrap_err();
+        assert!(err.to_string().contains("smaller"), "{err}");
+    }
+
+    #[test]
+    fn camera_metadata_cannot_supply_a_negative_short_or_overflowing_layout() {
+        gstreamer::init().unwrap();
+        let info = gstreamer_video::VideoInfo::builder(gstreamer_video::VideoFormat::Bgr, 2, 2)
+            .build()
+            .unwrap();
+        for (offset, stride) in [(0, -8), (0, 3), (usize::MAX, 8), (16, 8)] {
+            let mut buffer = gstreamer::Buffer::from_mut_slice(vec![0u8; 16]);
+            gstreamer_video::VideoMeta::add_full(
+                buffer.get_mut().unwrap(),
+                gstreamer_video::VideoFrameFlags::empty(),
+                gstreamer_video::VideoFormat::Bgr,
+                2,
+                2,
+                &[offset],
+                &[stride],
+            )
+            .unwrap();
+            assert!(
+                mirrored_bgr_frame(&buffer, &info).is_err(),
+                "{offset}/{stride}"
+            );
+        }
+    }
+
+    #[test]
+    fn camera_frames_honor_metadata_offset_and_stride_and_copy_the_pixels() {
+        gstreamer::init().unwrap();
+        let info = gstreamer_video::VideoInfo::builder(gstreamer_video::VideoFormat::Bgr, 2, 2)
+            .build()
+            .unwrap();
+        let mut buffer = gstreamer::Buffer::from_mut_slice(vec![
+            99, 99, 99, 99, 99, 99, 99, 99, 1, 2, 3, 4, 5, 6, 0, 0, 7, 8, 9, 10, 11, 12, 0, 0,
+        ]);
+        gstreamer_video::VideoMeta::add_full(
+            buffer.get_mut().unwrap(),
+            gstreamer_video::VideoFrameFlags::empty(),
+            gstreamer_video::VideoFormat::Bgr,
+            2,
+            2,
+            &[8],
+            &[8],
+        )
+        .unwrap();
+        let frame = mirrored_bgr_frame(&buffer, &info).unwrap();
+        drop(buffer);
+        assert_eq!(
+            frame_to_bytes(&frame).unwrap(),
+            [4, 5, 6, 1, 2, 3, 10, 11, 12, 7, 8, 9]
+        );
+    }
+
+    #[test]
+    fn pipewire_elements_take_the_bound_descriptor() {
+        assert_eq!(bind_pipewire_fd("pipewiresrc", 7), "pipewiresrc fd=7");
+        assert_eq!(
+            bind_pipewire_fd("pipewiresrc target-object=cam1", 7),
+            "pipewiresrc target-object=cam1 fd=7"
+        );
+    }
+
+    #[test]
+    fn a_caller_supplied_descriptor_is_not_doubled() {
+        assert_eq!(bind_pipewire_fd("pipewiresrc fd=5", 7), "pipewiresrc fd=5");
+    }
+
+    #[test]
+    fn a_held_device_is_named_as_busy() {
+        assert!(device_is_busy(
+            "Could not open device: Device or resource busy"
+        ));
+        assert!(device_is_busy("v4l2 returned EBUSY"));
+        assert!(device_is_busy(
+            "The camera is already in use by another program (primary): \
+             Device '/dev/video0' is busy"
+        ));
+        assert!(!device_is_busy("No such file or directory"));
+    }
+
+    #[test]
+    fn a_briefly_busy_node_is_opened_on_retry() {
+        let mut calls = 0;
+        let result = retry_while_busy("/dev/video0", std::time::Duration::ZERO, || {
+            calls += 1;
+            if calls < PRIVILEGED_BUSY_ATTEMPTS {
+                anyhow::bail!("Device '/dev/video0' is busy")
+            }
+            Ok(calls)
+        });
+        assert_eq!(result.unwrap(), PRIVILEGED_BUSY_ATTEMPTS);
+    }
+
+    #[test]
+    fn a_node_that_stays_busy_fails_after_the_last_attempt() {
+        let mut calls = 0;
+        let result: anyhow::Result<()> =
+            retry_while_busy("/dev/video0", std::time::Duration::ZERO, || {
+                calls += 1;
+                anyhow::bail!("Device '/dev/video0' is busy")
+            });
+        assert!(device_is_busy(&format!("{:#}", result.unwrap_err())));
+        assert_eq!(calls, PRIVILEGED_BUSY_ATTEMPTS);
+    }
+
+    #[test]
+    fn other_open_errors_are_not_retried() {
+        let mut calls = 0;
+        let result: anyhow::Result<()> =
+            retry_while_busy("/dev/video0", std::time::Duration::ZERO, || {
+                calls += 1;
+                anyhow::bail!("No such file or directory")
+            });
+        assert!(result.is_err());
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn non_pipewire_elements_are_left_alone() {
+        // A V4L2 node has no PipeWire connection to inherit, and `fd=` means something else
+        // entirely on other elements.
+        assert_eq!(
+            bind_pipewire_fd("v4l2src device=/dev/video0", 7),
+            "v4l2src device=/dev/video0"
+        );
+        assert_eq!(bind_pipewire_fd("videotestsrc", 7), "videotestsrc");
+        // Guard against matching an element that merely starts with the same letters.
+        assert_eq!(bind_pipewire_fd("pipewiresrcfoo", 7), "pipewiresrcfoo");
+    }
+
+    #[test]
+    fn a_missing_socket_is_reported_rather_than_bound() {
+        assert!(PipeWireSession::connect_for_uid(u32::MAX).is_err());
+    }
+
+    #[test]
+    fn only_an_untargeted_pipewire_source_falls_back_to_any_camera() {
+        assert_eq!(v4l2_fallback_for("pipewiresrc"), V4l2Fallback::AnyDevice);
+        assert_eq!(
+            v4l2_fallback_for("v4l2src device=/dev/video0"),
+            V4l2Fallback::None
+        );
+        assert_eq!(v4l2_fallback_for("pipewiresrcfoo"), V4l2Fallback::None);
+        // A PipeWire source with no target still means "any camera", but it is not the bare
+        // element, so it takes the field-parsing path.
+        assert_eq!(v4l2_fallback_for("pipewiresrc fd=7"), V4l2Fallback::None);
+    }
+
+    #[test]
+    fn a_pinned_target_falls_back_only_to_its_own_node() {
+        assert_eq!(
+            v4l2_fallback_for("pipewiresrc target-object=cam1"),
+            V4l2Fallback::SameNode("cam1".to_string())
+        );
+        // The quoting and the trailing fields belong to the element, not to the target name.
+        assert_eq!(
+            v4l2_fallback_for("pipewiresrc target-object=\"cam1\" fd=7"),
+            V4l2Fallback::SameNode("cam1".to_string())
+        );
+        assert_eq!(
+            v4l2_fallback_for("pipewiresrc target-object=v4l2_input.pci-0000_00_14.0-usb-0_7_1.0"),
+            V4l2Fallback::SameNode("v4l2_input.pci-0000_00_14.0-usb-0_7_1.0".to_string())
+        );
+        assert_eq!(
+            v4l2_fallback_for("pipewiresrc target-object="),
+            V4l2Fallback::None
+        );
+    }
+
+    #[test]
+    fn a_failing_stream_keeps_the_reason_it_ended() {
+        // A failing element pushes EOS as well as posting the error, so the reason survives
+        // only if the bus is read first.
+        let mut camera =
+            Camera::open("videotestsrc ! identity error-after=3").expect("identity pipeline");
+        let stop = AtomicBool::new(false);
+        while camera.next_interruptible(&stop).is_some() {}
+
+        let reason = camera
+            .take_stream_error()
+            .expect("a pipeline error must be kept");
+        assert!(
+            reason.contains("Failed after iterations as requested"),
+            "unexpected reason: {reason}"
+        );
+        assert!(
+            camera.take_stream_error().is_none(),
+            "the reason is taken, so it is reported once"
+        );
+    }
+
+    #[test]
+    fn a_clean_end_of_stream_leaves_no_reason() {
+        let mut camera = Camera::open("videotestsrc num-buffers=2").expect("videotestsrc pipeline");
+        let stop = AtomicBool::new(false);
+        while camera.next_interruptible(&stop).is_some() {}
+
+        assert!(
+            camera.take_stream_error().is_none(),
+            "an ordinary EOS is not a failure"
+        );
+    }
+
+    #[test]
+    fn a_pinned_thread_keeps_its_session_when_the_default_moves() {
+        // A capture thread outlives the claim that started it, and the next claim rebinds the
+        // process-wide default. What the thread opens must not follow it.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+        let worker = std::thread::spawn(move || {
+            bind_pipewire_uid_for_thread(Some(1000));
+            tx.send(current_pipewire_uid()).unwrap();
+            go_rx.recv().unwrap();
+            tx.send(current_pipewire_uid()).unwrap();
+        });
+
+        assert_eq!(rx.recv().unwrap(), Some(1000));
+        set_pipewire_uid(Some(1001));
+        go_tx.send(()).unwrap();
+        assert_eq!(rx.recv().unwrap(), Some(1000));
+        worker.join().unwrap();
+
+        // An unpinned thread still follows the default, which is what a claim sets it for.
+        assert_eq!(
+            std::thread::spawn(current_pipewire_uid).join().unwrap(),
+            Some(1001)
+        );
+        set_pipewire_uid(None);
+    }
+
+    #[test]
+    fn realtek_ir_pipeline_forces_required_uncompressed_mode() {
+        let pipeline = camera_pipeline("v4l2src device=/dev/video0", true, None);
+        assert!(pipeline.contains("video/x-raw,format=YUY2,width=640,height=480"));
+        assert!(!pipeline.contains("image/jpeg"));
+
+        let rgb_pipeline = camera_pipeline("v4l2src device=/dev/video0", false, None);
+        assert!(rgb_pipeline.contains("image/jpeg"));
+    }
+
+    #[test]
+    fn open_scales_widescreen_to_square_pixels() {
+        let mut camera = Camera::open(
+            "videotestsrc num-buffers=3 ! capsfilter caps=video/x-raw,width=1280,height=720",
+        )
+        .expect("videotestsrc pipeline");
+        let frame = camera.next().expect("videotestsrc frame");
+        assert_eq!(frame.rows(), 480);
+        // Without the PAR pin videoscale keeps the source width (1280x480 at PAR 2/3).
+        let cols = frame.cols();
+        assert!(
+            (853..=854).contains(&cols),
+            "expected aspect-preserving width, got {cols}"
+        );
+    }
+
+    #[test]
+    fn iterator_ends_after_eos() {
+        let mut camera = Camera::open("videotestsrc num-buffers=2").expect("videotestsrc pipeline");
+        assert!(camera.next().is_some());
+        assert!(camera.next().is_some());
+        assert!(camera.next().is_none(), "iterator must end at EOS");
+    }
+
+    #[test]
+    fn iterator_ends_on_pipeline_error() {
+        let mut camera = Camera::open("videotestsrc is-live=true ! identity error-after=5")
+            .expect("identity pipeline");
+        let mut frames = 0;
+        while camera.next().is_some() {
+            frames += 1;
+            assert!(frames < 10, "iterator must end after the pipeline errors");
+        }
+    }
+
+    #[test]
+    fn interruptible_read_stops_when_live_pipeline_has_no_frames() {
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let worker_stop = stop.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+        let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
+
+        let worker = std::thread::spawn(move || {
+            let mut camera = Camera::open("appsrc is-live=true format=time")
+                .expect("live pipeline without frames");
+            ready_tx.send(()).expect("signal camera readiness");
+            let stopped = camera.next_interruptible(&worker_stop).is_none();
+            done_tx.send(stopped).expect("signal camera shutdown");
+        });
+
+        ready_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("camera must become ready");
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        stop.store(true, Ordering::Release);
+        assert!(
+            done_rx
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .expect("camera read must observe cancellation")
+        );
+        worker.join().expect("camera worker must exit");
+    }
+
+    #[test]
+    fn open_surfaces_malformed_sources() {
+        assert!(Camera::open("/dev/video").is_err());
+        assert!(Camera::open_ir("/dev/video2 ! fakesink", None).is_err());
+        assert!(Camera::open("usb:046d").is_err());
+    }
+
+    #[test]
+    fn privileged_open_refuses_custom_pipelines_without_touching_hardware() {
+        let err = Camera::open_privileged("videotestsrc num-buffers=2")
+            .err()
+            .expect("privileged open of a custom pipeline must fail");
+        assert!(
+            err.to_string().contains("refusing privileged capture"),
+            "unexpected error: {err:#}"
+        );
+        assert!(Camera::open_privileged("").is_err());
+        assert!(Camera::open_ir_privileged("v4l2src device=/dev/video0", None).is_err());
+    }
+
+    #[test]
+    fn ir_frame_size_constrains_raw_and_jpeg_caps() {
+        let pipeline = camera_pipeline("v4l2src device=/dev/video2", false, Some((340, 340)));
+        assert!(pipeline.contains("video/x-raw,width=340,height=340,pixel-aspect-ratio=1/1;"));
+        assert!(pipeline.contains("image/jpeg,width=340,height=340 ! decodebin"));
+
+        let forced = camera_pipeline("v4l2src device=/dev/video2", true, Some((340, 340)));
+        assert!(forced.contains("video/x-raw,format=YUY2,width=340,height=340,"));
+    }
+
+    #[test]
+    fn ir_frame_size_is_negotiated_when_the_source_supports_it() {
+        let mut camera =
+            Camera::open_ir("videotestsrc num-buffers=3", Some((480, 480))).expect("ir pipeline");
+        let frame = camera.next().expect("videotestsrc frame");
+        assert_eq!((frame.cols(), frame.rows()), (480, 480));
+    }
+
+    #[test]
+    fn unsupported_ir_frame_size_falls_back_to_auto_negotiation() {
+        let mut camera = Camera::open_ir(
+            "videotestsrc num-buffers=3 ! capsfilter caps=video/x-raw,width=1280,height=720",
+            Some((480, 480)),
+        )
+        .expect("fallback pipeline");
+        let frame = camera.next().expect("videotestsrc frame");
+        assert_eq!(frame.rows(), 480);
+        let cols = frame.cols();
+        assert!(
+            (853..=854).contains(&cols),
+            "expected the source's 16:9 aspect, got {cols}"
+        );
+    }
+}
