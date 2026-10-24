@@ -20,6 +20,13 @@ pub type FaceScore = (String, f32, f32, bool, u32);
 
 const RECOGNIZER_TAG: &str = "recognizer";
 const PRIVATE_PREFIX: &str = ".gaze-";
+const FORMAT_FILE: &str = ".gaze-store.format";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoreFormat {
+    Plain,
+    Encrypted,
+}
 
 fn sync_dir(path: &Path) -> std::io::Result<()> {
     File::open(path)?.sync_all()
@@ -228,6 +235,65 @@ impl UserDatabase {
             "template store is already in use; stop gazed before maintenance"
         );
         Ok(file)
+    }
+
+    fn format_path(base_dir: &Path) -> anyhow::Result<PathBuf> {
+        let parent = base_dir
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("store has no parent"))?;
+        Ok(parent.join(FORMAT_FILE))
+    }
+
+    pub fn recorded_format(base_dir: &Path) -> anyhow::Result<Option<StoreFormat>> {
+        let mut file = match OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(Self::format_path(base_dir)?)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let mut contents = String::new();
+        std::io::Read::read_to_string(&mut file, &mut contents)?;
+        Ok(Some(match contents.trim() {
+            "plain" => StoreFormat::Plain,
+            _ => StoreFormat::Encrypted,
+        }))
+    }
+
+    pub fn record_format(base_dir: &Path, format: StoreFormat) -> anyhow::Result<()> {
+        let path = Self::format_path(base_dir)?;
+        if Self::recorded_format(base_dir)? == Some(format) {
+            return Ok(());
+        }
+        let parent = path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("store has no parent"))?;
+        let tmp = parent.join(format!("{FORMAT_FILE}.{}.tmp", uuid::Uuid::new_v4()));
+        let contents: &[u8] = match format {
+            StoreFormat::Plain => b"plain\n",
+            StoreFormat::Encrypted => b"encrypted\n",
+        };
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        if let Err(error) = file.write_all(contents).and_then(|_| file.sync_all()) {
+            let _ = fs::remove_file(&tmp);
+            return Err(error.into());
+        }
+        if let Err(error) = fs::rename(&tmp, &path) {
+            let _ = fs::remove_file(&tmp);
+            return Err(error.into());
+        }
+        sync_dir(parent)?;
+        Ok(())
+    }
+
+    pub fn record_store_format(&self, format: StoreFormat) -> anyhow::Result<()> {
+        Self::record_format(&self.base_dir, format)
     }
 
     pub fn new(base_dir: &str, max_templates: usize) -> anyhow::Result<Self> {
@@ -1000,6 +1066,29 @@ mod tests {
         assert!(UserDatabase::lock_store(&base).is_err());
         drop(lock);
         assert!(UserDatabase::lock_store(&base).is_ok());
+    }
+
+    #[test]
+    fn store_format_round_trips_and_unknown_records_read_as_encrypted() {
+        let temp = TempDir::new("store-format");
+        let base = temp.path().join("users");
+        assert_eq!(UserDatabase::recorded_format(&base).unwrap(), None);
+        UserDatabase::record_format(&base, StoreFormat::Plain).unwrap();
+        assert_eq!(
+            UserDatabase::recorded_format(&base).unwrap(),
+            Some(StoreFormat::Plain)
+        );
+        UserDatabase::record_format(&base, StoreFormat::Encrypted).unwrap();
+        assert_eq!(
+            UserDatabase::recorded_format(&base).unwrap(),
+            Some(StoreFormat::Encrypted)
+        );
+        fs::write(temp.path().join(FORMAT_FILE), "unknown\n").unwrap();
+        assert_eq!(
+            UserDatabase::recorded_format(&base).unwrap(),
+            Some(StoreFormat::Encrypted)
+        );
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
     }
 
     #[test]

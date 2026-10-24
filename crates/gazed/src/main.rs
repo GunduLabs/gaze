@@ -132,8 +132,15 @@ fn main() -> anyhow::Result<()> {
     run(config)
 }
 
+const EXIT_STORAGE_BLOCKED: u8 = 77;
+
+fn storage_blocked(message: impl std::fmt::Display) -> ! {
+    error!("{message}");
+    std::process::exit(i32::from(EXIT_STORAGE_BLOCKED));
+}
+
 #[tokio::main]
-async fn run(config: Config) -> anyhow::Result<()> {
+async fn run(mut config: Config) -> anyhow::Result<()> {
     gaze_vision::inference::initialize_runtime(&config.inference)?;
 
     info!("Initializing Gaze Daemon...");
@@ -195,12 +202,43 @@ async fn run(config: Config) -> anyhow::Result<()> {
         None
     };
 
+    let users_dir = std::path::Path::new(USERS_DIR);
+    let recorded_format = UserDatabase::recorded_format(users_dir)?;
+    let upgraded_store = recorded_format.is_none() && users_dir.exists();
+    let mut record_store_format = true;
+    if config.storage.encrypt_templates
+        && upgraded_store
+        && !tpm::available()
+        && !UserDatabase::new(USERS_DIR, config.enrollment.max_templates as usize)?
+            .has_encrypted_templates()?
+    {
+        warn!(
+            "Template encryption is now on by default, but this machine has no TPM; keeping the existing plaintext templates working with encryption off"
+        );
+        config.storage.encrypt_templates = false;
+        config.storage.unlock_gnome_keyring = false;
+        config.storage.unlock_kwallet = false;
+        let managed = std::fs::symlink_metadata(CONFIG_PATH)
+            .is_ok_and(|meta| meta.file_type().is_symlink());
+        if managed {
+            record_store_format = false;
+        } else if let Err(e) = config.save_to(CONFIG_PATH) {
+            warn!("Could not record encrypt_templates = false in {CONFIG_PATH}: {e}");
+            record_store_format = false;
+        }
+    }
+
     if !config.storage.encrypt_templates {
         warn!(
             "Face-template encryption is disabled: biometrics are stored in plaintext. Enable [storage] encrypt_templates with a usable TPM, and protect state storage with full-disk encryption."
         );
     }
-    let cipher = if config.storage.encrypt_templates {
+    let dek = if config.storage.encrypt_templates {
+        if !tpm::available() {
+            storage_blocked(
+                "template encryption is enabled ([storage] encrypt_templates) but this machine has no TPM, so the daemon is refusing to start rather than write unprotected biometric data. Set encrypt_templates = false to accept plaintext storage",
+            );
+        }
         let dek = tpm::load_or_create_dek(std::path::Path::new(tpm::STATE_DIR)).map_err(|e| {
             anyhow::anyhow!(
                 "template encryption is enabled ([storage] encrypt_templates) but no usable TPM \
@@ -209,18 +247,33 @@ async fn run(config: Config) -> anyhow::Result<()> {
             )
         })?;
         info!("Template encryption enabled (AES-256-GCM under a TPM-sealed key)");
-        Some(crypto::EmbeddingCipher::new(&dek))
+        Some(dek)
     } else {
         None
     };
 
     let encrypt_templates = config.storage.encrypt_templates;
-    let mut db =
-        UserDatabase::new_with_cipher(USERS_DIR, config.enrollment.max_templates as usize, cipher)?;
-    if encrypt_templates {
-        // Do not silently authenticate planted plaintext or rebind legacy ciphertext,
-        // even when an older interrupted migration left a mixed store.
-        db.require_bound_templates()?;
+    let mut db = UserDatabase::new_with_cipher(
+        USERS_DIR,
+        config.enrollment.max_templates as usize,
+        dek.as_ref().map(|dek| crypto::EmbeddingCipher::new(dek)),
+    )?;
+    if let Some(dek) = &dek {
+        // Only stores never committed as encrypted may be bound here, so plaintext
+        // planted into an encrypted store is still rejected below.
+        if recorded_format != Some(users::StoreFormat::Encrypted) {
+            let migrated = db.migrate_legacy_with(&crypto::EmbeddingCipher::new(dek))?;
+            if migrated > 0 {
+                info!(
+                    migrated,
+                    "Bound existing templates to owner-checked TPM encryption"
+                );
+                db.load_all()?;
+            }
+        }
+        if let Err(e) = db.require_bound_templates() {
+            storage_blocked(e);
+        }
     }
 
     if !encrypt_templates && db.has_encrypted_templates()? {
@@ -240,6 +293,17 @@ async fn run(config: Config) -> anyhow::Result<()> {
                 "template encryption is disabled but encrypted templates remain and could not \
                  be decrypted, so those faces will not match until they are re-enrolled: {e}"
             ),
+        }
+    }
+
+    if record_store_format {
+        let format = if encrypt_templates {
+            users::StoreFormat::Encrypted
+        } else {
+            users::StoreFormat::Plain
+        };
+        if let Err(e) = UserDatabase::record_format(users_dir, format) {
+            warn!("Could not record the template store format: {e}");
         }
     }
 

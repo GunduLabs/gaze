@@ -542,20 +542,22 @@ Behavior to be aware of:
   recognized; inaccessible sysfs, network, overlay, or unsupported storage layouts
   produce an unknown-status warning. Full-disk encryption must cover the state
   storage, not just your home directory. Root can still recover secrets after unlock.
-- **Explicit migration.** Enabling encryption through `gaze config` or the GUI
-  explicitly migrates the existing plaintext store. If you enable it by hand-editing
-  the file, or upgrade an older plaintext or mixed-format store, run the maintenance
-  procedure below. Startup never silently encrypts planted plaintext or rebinds
-  legacy ciphertext. Turning encryption off decrypts current-format templates,
+- **Automatic migration.** When encryption is on, `gazed` encrypts existing
+  plaintext templates and rebinds older `GZE1` ciphertext on startup, as long as
+  the store has never been committed as encrypted by this version. This covers
+  upgrades and enabling encryption by editing the file. Once the store is recorded
+  as encrypted, startup rejects any plaintext or legacy ciphertext added later.
+  Enabling encryption through `gaze config` or the GUI migrates immediately.
+  Turning encryption off decrypts current-format templates,
   which also needs the TPM that sealed them. Migration stages a complete replacement
   store and atomically exchanges directories, so it needs enough free space for a
   second copy and a filesystem supporting atomic directory exchange. Unsupported
   filesystems fail without publishing a partial conversion. A failed live config
   save restores the old store.
-- **Legacy encrypted templates.** Older `GZE1` ciphertext has no account binding
-  and is never accepted for matching or automatically rebound during normal startup.
-  Follow the explicit maintenance procedure below, or remove the old templates and
-  re-enroll.
+- **Upgrades without a TPM.** A store enrolled before encryption became the
+  default, on a machine with no TPM, keeps working: `gazed` sets
+  `encrypt_templates = false` and logs a warning instead of refusing to start.
+  New installations without a TPM still fail closed.
 - **TPM reset.** If the TPM is cleared, the sealed key (and therefore the
   encrypted templates) becomes unrecoverable. Archive or remove the unreadable
   template store and stale `/var/lib/gaze/tpm`, then re-enroll. The daemon will not
@@ -567,14 +569,12 @@ Apply changes with:
 sudo systemctl restart gazed
 ```
 
-### Upgrade legacy encrypted templates
+### Repair a store rejected at startup
 
-Use this procedure for older encrypted, plaintext, or mixed-format templates when
-enabling encryption by editing the config or upgrading an omitted storage setting.
-Only migrate a store whose existing account-directory ownership you trust. Legacy
-encryption cannot prove that a template has not already been moved between users;
-if in doubt, re-enroll instead. Keep a protected backup of both `/var/lib/gaze/users`
-and `/var/lib/gaze/tpm` before migrating, and retain a working password login.
+Upgrades migrate automatically. If startup reports `unbound or plaintext templates
+require explicit migration`, plaintext or `GZE1` templates appeared in a store that
+was already encrypted, for example from a restored backup. Only migrate a store whose
+account-directory ownership you trust; if in doubt, re-enroll instead.
 
 ```bash
 sudo systemctl stop gazed
@@ -583,10 +583,8 @@ sudo systemctl start gazed
 ```
 
 The maintenance command does not load camera/inference models. A process lock
-prevents it from running concurrently with the daemon. It validates all encrypted
-records and binds plaintext inputs before publishing one complete owner-bound store; failed staging leaves
-the original store intact. After a successful upgrade, the command is not needed
-again. Normal startup still rejects any plaintext or legacy ciphertext introduced later.
+prevents it from running concurrently with the daemon. Failed staging leaves the
+original store intact.
 
 The old `dek.pub` / `dek.priv` key pair is upgraded automatically to a single
 owner-only `dek.blob` after successful unsealing. An incomplete legacy pair is an
