@@ -386,9 +386,8 @@ in
         systemd.services.gazed = {
           description = "Daemon for Gaze";
           # Mirrors packaging/config/gazed.service.
-          after = [ "dbus.service" "network-online.target" ];
+          after = [ "dbus.service" ];
           requires = [ "dbus.service" ];
-          wants = [ "network-online.target" ];
           wantedBy = [ "multi-user.target" ];
           # Retry offline model downloads without hitting the start limit.
           startLimitIntervalSec = 0;
@@ -402,8 +401,8 @@ in
             ExecStart = "${cfg.package}/bin/gazed";
             Restart = "on-failure";
             RestartSec = 5;
-            # 78 is gaze_core::cpu::EXIT_UNSUPPORTED_CPU (no AVX2); restarting only repeats it.
-            RestartPreventExitStatus = 78;
+            # 78 is gaze_core::cpu::EXIT_UNSUPPORTED_CPU (no AVX2), 77 a template-storage block.
+            RestartPreventExitStatus = "78 77";
             StateDirectory = "gaze";
             StateDirectoryMode = "0700";
             CacheDirectory = "gaze";

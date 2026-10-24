@@ -657,7 +657,7 @@ show_status() {
     printf 'tpm device: %s\n' "$tpm"
     flag=$(awk '/^[[:space:]]*encrypt_templates[[:space:]]*=/ {print $3; f=1} END{if(!f) print "unset"}' "$CONFIG_FILE" 2>/dev/null || echo unknown)
     printf 'encrypt_templates: %s\n' "$flag"
-    printf 'sealed key: %s\n' "$([ -e "$TPM_STATE_DIR/dek.priv" ] && echo present || echo absent)"
+    printf 'sealed key: %s\n' "$( { [ -e "$TPM_STATE_DIR/dek.blob" ] || [ -e "$TPM_STATE_DIR/dek.priv" ]; } && echo present || echo absent)"
     printf 'encrypted templates on disk: %s\n' "$(encrypted_template_count)"
 }
 

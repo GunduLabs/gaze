@@ -314,8 +314,9 @@ impl AuthDaemon {
                     Ok((requested, prepared))
                 },
                 move |requested, prepared| {
-                    let migrated = db
-                        .blocking_lock()
+                    let encryption_changed = prepared.cipher.is_some();
+                    let mut store = db.blocking_lock();
+                    let migrated = store
                         .apply_settings(
                             prepared.cipher,
                             requested.storage.encrypt_templates,
@@ -331,6 +332,17 @@ impl AuthDaemon {
                                 "Failed to apply template storage settings: {e}"
                             ))
                         })?;
+                    if encryption_changed {
+                        let format = if requested.storage.encrypt_templates {
+                            crate::users::StoreFormat::Encrypted
+                        } else {
+                            crate::users::StoreFormat::Plain
+                        };
+                        if let Err(e) = store.record_store_format(format) {
+                            warn!("Could not record the template store format: {e}");
+                        }
+                    }
+                    drop(store);
                     if migrated > 0 {
                         info!(
                             migrated,

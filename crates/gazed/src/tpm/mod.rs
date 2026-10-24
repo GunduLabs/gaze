@@ -68,6 +68,10 @@ pub fn load_or_create_dek(state_dir: &Path) -> anyhow::Result<SealedKey> {
     Ok(dek)
 }
 
+pub fn available() -> bool {
+    !present_devices().is_empty() || tcti_override_present()
+}
+
 fn present_devices() -> Vec<&'static str> {
     TPM_DEVICES
         .into_iter()
