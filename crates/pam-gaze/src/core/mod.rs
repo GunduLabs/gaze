@@ -1179,6 +1179,8 @@ unsafe fn get_pam_string(pamh: PamHandle, item_type: c_int) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn only_terminal_services_use_the_terminal() {
         for service in ["sudo", "su", "login"] {
