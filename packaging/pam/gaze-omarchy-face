@@ -6,8 +6,10 @@
 # PAM_IGNORE (unenrolled user), errors and an unavailable daemon reach pam_deny.
 auth        requisite                                    pam_nologin.so
 auth        requisite                                    pam_faillock.so preauth
-auth        sufficient                                   pam_gaze.so
-auth        required                                     pam_deny.so
+auth        [success=2 auth_err=ignore default=1]         pam_gaze.so
+auth        [default=die]                                pam_faillock.so authfail
+auth        requisite                                    pam_deny.so
+auth        required                                     pam_faillock.so authsucc
 account     required                                     pam_nologin.so
 account     required                                     pam_unix.so
 password    required                                     pam_deny.so
