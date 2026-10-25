@@ -136,6 +136,16 @@ impl UserDatabase {
             .map_err(anyhow::Error::from)
             .and_then(|_| persist());
         if let Err(error) = commit {
+            if error
+                .downcast_ref::<gaze_core::config::ConfigCommitUncertain>()
+                .is_some()
+            {
+                self.unavailable.set(true);
+                tracing::error!(backup = %staged.0.display(), %error,
+                    "config durability is uncertain; preserving both stores and disabling authentication until restart");
+                std::mem::forget(staged);
+                return Err(error);
+            }
             let rollback = self
                 .rollback_recode(&staged.0)
                 .and_then(|_| sync_dir(parent));
@@ -168,7 +178,7 @@ impl UserDatabase {
     }
 
     /// Change disk format, saved configuration and the live cipher as one operation.
-    /// The caller holds the DB lock; a failed config write restores the exact old store.
+    /// Pre-commit errors restore the old store; uncertain commits disable use until restart.
     pub fn change_encryption(
         &mut self,
         cipher: EmbeddingCipher,
@@ -213,6 +223,13 @@ impl UserDatabase {
             Some(cipher) => self.change_encryption(cipher, encrypt, persist),
             None => persist().map(|_| 0),
         };
+        if result.as_ref().is_err_and(|error| {
+            error
+                .downcast_ref::<gaze_core::config::ConfigCommitUncertain>()
+                .is_some()
+        }) {
+            self.unavailable.set(true);
+        }
         if result.is_err() {
             self.recognizer = previous_recognizer;
             if let Some(users) = previous_users {
@@ -293,6 +310,57 @@ impl UserDatabase {
 mod tests {
     use super::*;
     use crate::users::tests::{TempDir, all_bins_encrypted, embedding, rgb_embeds, test_cipher};
+
+    #[test]
+    fn uncertain_config_commit_preserves_both_stores_and_disables_matching() {
+        let temp = TempDir::new("config-uncertain");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 4).unwrap();
+        db.add_template("alice", "work", "1", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        let file = db.collect_bin_files().unwrap().pop().unwrap();
+        let relative = file.strip_prefix(temp.path()).unwrap().to_path_buf();
+        let result = db.change_encryption(test_cipher(), true, || {
+            Err(
+                gaze_core::config::ConfigCommitUncertain(std::io::Error::other(
+                    "injected directory sync failure",
+                ))
+                .into(),
+            )
+        });
+        assert!(result.is_err());
+        assert!(db.has_enrolled_faces("alice").is_err());
+        assert!(
+            db.match_faces("alice", &embedding(&[1.0]), 0.5, Spectrum::Rgb)
+                .is_err()
+        );
+        assert!(crypto::is_encrypted(&fs::read(&file).unwrap()));
+        let prefix = db.recode_prefix().unwrap();
+        let backup = fs::read_dir(temp.path().parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .find(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+            .expect("the old store must survive an uncertain commit");
+        assert!(!crypto::is_encrypted(
+            &fs::read(backup.path().join(relative)).unwrap()
+        ));
+        fs::remove_dir_all(backup.path()).unwrap();
+    }
+
+    #[test]
+    fn uncertain_plain_config_commit_also_disables_matching() {
+        let temp = TempDir::new("plain-config-uncertain");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 4).unwrap();
+        let result = db.apply_settings(None, false, None, 4, || {
+            Err(
+                gaze_core::config::ConfigCommitUncertain(std::io::Error::other(
+                    "injected directory sync failure",
+                ))
+                .into(),
+            )
+        });
+        assert!(result.is_err());
+        assert!(db.has_enrolled_faces("alice").is_err());
+    }
 
     #[test]
     fn failed_config_save_restores_the_exact_store_and_live_cipher() {
