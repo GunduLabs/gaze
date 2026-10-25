@@ -46,19 +46,22 @@ impl ConfigState {
 
     async fn apply<P: Send + 'static>(
         &self,
+        rt_handle: &tokio::runtime::Handle,
         active_cancel: &ActiveCancelHandle,
         prepare: impl FnOnce(Config) -> fdo::Result<(Config, P)> + Send + 'static,
         commit: impl FnOnce(&Config, P) -> fdo::Result<()> + Send + 'static,
     ) -> fdo::Result<()> {
         let update = self.updates.clone().lock_owned().await;
         let current = self.read().await.clone();
+        // D-Bus handlers run on zbus's runtime, so blocking work must use the stored Tokio handle.
         // Retain serialization if cancellation leaves the preparation worker running.
-        let (requested, prepared, update) = tokio::task::spawn_blocking(move || {
-            let (requested, prepared) = prepare(current)?;
-            Ok::<_, fdo::Error>((requested, prepared, update))
-        })
-        .await
-        .map_err(|e| fdo::Error::Failed(format!("Config preparation task failed: {e}")))??;
+        let (requested, prepared, update) = rt_handle
+            .spawn_blocking(move || {
+                let (requested, prepared) = prepare(current)?;
+                Ok::<_, fdo::Error>((requested, prepared, update))
+            })
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("Config preparation task failed: {e}")))??;
 
         // Queue the writer before cancellation so new runs cannot enter the old snapshot.
         let write = self.current.clone().write_owned();
@@ -73,16 +76,17 @@ impl ConfigState {
             }
         };
 
-        tokio::task::spawn_blocking(move || {
-            // Keep both locks in the worker even if the requesting D-Bus task is dropped.
-            let _update = update;
-            let mut current = current;
-            commit(&requested, prepared)?;
-            *current = requested;
-            Ok(())
-        })
-        .await
-        .map_err(|e| fdo::Error::Failed(format!("Config commit task failed: {e}")))?
+        rt_handle
+            .spawn_blocking(move || {
+                // Keep both locks in the worker even if the requesting D-Bus task is dropped.
+                let _update = update;
+                let mut current = current;
+                commit(&requested, prepared)?;
+                *current = requested;
+                Ok(())
+            })
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("Config commit task failed: {e}")))?
     }
 }
 
@@ -291,6 +295,7 @@ impl AuthDaemon {
         let ir_liveness = self.ir_liveness.clone();
         self.settings
             .apply(
+                &self.rt_handle,
                 &self.active_cancel,
                 move |current| {
                     let mut requested = update(current.clone())?;
@@ -496,9 +501,33 @@ mod tests {
         assert_eq!(settings.read().await.security.level, "medium");
     }
 
+    #[test]
+    fn apply_uses_stored_runtime_handle_without_current_tokio_context() {
+        assert!(tokio::runtime::Handle::try_current().is_err());
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let rt_handle = runtime.handle().clone();
+        let settings = ConfigState::new(Config::default());
+        let cancel = Arc::new(Mutex::new(None));
+
+        futures::executor::block_on(settings.apply(
+            &rt_handle,
+            &cancel,
+            |mut config| {
+                config.liveness.threshold = 0.95;
+                Ok((config, ()))
+            },
+            |_, ()| Ok(()),
+        ))
+        .unwrap();
+
+        let current = futures::executor::block_on(settings.read());
+        assert_eq!(current.liveness.threshold, 0.95);
+    }
+
     #[tokio::test]
     async fn failed_preparation_leaves_the_capture_and_config_untouched() {
         let settings = ConfigState::new(Config::default());
+        let rt_handle = tokio::runtime::Handle::current();
         let (tx, mut rx) = oneshot::channel();
         let cancel = Arc::new(Mutex::new(Some(tx)));
         let run = settings.for_run(&mut rx).await.unwrap();
@@ -506,6 +535,7 @@ mod tests {
         let marker = committed.clone();
         let result = settings
             .apply(
+                &rt_handle,
                 &cancel,
                 |_| Err::<(Config, ()), _>(fdo::Error::Failed("model load failed".into())),
                 move |_, ()| {
@@ -524,6 +554,7 @@ mod tests {
     #[tokio::test]
     async fn updates_cancel_capture_but_wait_for_teardown_before_swapping_models() {
         let settings = Arc::new(ConfigState::new(Config::default()));
+        let rt_handle = tokio::runtime::Handle::current();
         let (tx, mut rx) = oneshot::channel();
         let cancel = Arc::new(Mutex::new(Some(tx)));
         let run = settings.for_run(&mut rx).await.unwrap();
@@ -533,6 +564,7 @@ mod tests {
         let updating = tokio::spawn(async move {
             writer
                 .apply(
+                    &rt_handle,
                     &cancel,
                     |mut config| {
                         config.security = SecurityLevel::high();
@@ -576,9 +608,11 @@ mod tests {
     #[tokio::test]
     async fn concurrent_updates_build_on_the_last_successful_commit() {
         let settings = ConfigState::new(Config::default());
+        let rt_handle = tokio::runtime::Handle::current();
         let cancel = Arc::new(Mutex::new(None));
         let (camera, liveness) = tokio::join!(
             settings.apply(
+                &rt_handle,
                 &cancel,
                 |mut config| {
                     config.cameras.rgb = "/dev/video8".into();
@@ -587,6 +621,7 @@ mod tests {
                 |_, ()| Ok(()),
             ),
             settings.apply(
+                &rt_handle,
                 &cancel,
                 |mut config| {
                     config.liveness.threshold = 0.95;
@@ -605,6 +640,7 @@ mod tests {
     #[tokio::test]
     async fn blocking_preparation_keeps_the_runtime_and_old_capture_available() {
         let settings = Arc::new(ConfigState::new(Config::default()));
+        let rt_handle = tokio::runtime::Handle::current();
         let (cancel_tx, mut cancel_rx) = oneshot::channel();
         let cancel = Arc::new(Mutex::new(Some(cancel_tx)));
         let run = settings.for_run(&mut cancel_rx).await.unwrap();
@@ -614,6 +650,7 @@ mod tests {
         let updating = tokio::spawn(async move {
             writer
                 .apply(
+                    &rt_handle,
                     &cancel,
                     move |mut config| {
                         started_tx.send(()).unwrap();
@@ -645,6 +682,7 @@ mod tests {
     #[tokio::test]
     async fn cancelled_preparation_stays_serialized_until_its_worker_finishes() {
         let settings = Arc::new(ConfigState::new(Config::default()));
+        let rt_handle = tokio::runtime::Handle::current();
         let cancel = Arc::new(Mutex::new(None));
         let (started_tx, started_rx) = oneshot::channel();
         let (finish_tx, finish_rx) = oneshot::channel();
@@ -653,6 +691,7 @@ mod tests {
         let updating = tokio::spawn(async move {
             writer
                 .apply(
+                    &rt_handle,
                     &first_cancel,
                     move |mut config| {
                         started_tx.send(()).unwrap();
@@ -668,7 +707,9 @@ mod tests {
         updating.abort();
         assert!(updating.await.unwrap_err().is_cancelled());
         assert!(settings.updates.try_lock().is_err());
+        let rt_handle = tokio::runtime::Handle::current();
         let next = settings.apply(
+            &rt_handle,
             &cancel,
             |mut config| {
                 config.liveness.threshold = 0.95;
@@ -689,6 +730,7 @@ mod tests {
     #[tokio::test]
     async fn a_blocking_commit_pins_settings_even_after_the_request_is_dropped() {
         let settings = Arc::new(ConfigState::new(Config::default()));
+        let rt_handle = tokio::runtime::Handle::current();
         let cancel = Arc::new(Mutex::new(None));
         let (started_tx, started_rx) = oneshot::channel();
         let (finish_tx, finish_rx) = oneshot::channel();
@@ -696,6 +738,7 @@ mod tests {
         let updating = tokio::spawn(async move {
             writer
                 .apply(
+                    &rt_handle,
                     &cancel,
                     |mut config| {
                         config.liveness.threshold = 0.95;
@@ -723,10 +766,12 @@ mod tests {
     #[tokio::test]
     async fn failed_persistence_keeps_the_snapshot_and_allows_a_retry() {
         let settings = ConfigState::new(Config::default());
+        let rt_handle = tokio::runtime::Handle::current();
         let cancel = Arc::new(Mutex::new(None));
         let before = settings.read().await.to_toml().unwrap();
         let result = settings
             .apply(
+                &rt_handle,
                 &cancel,
                 |mut config| {
                     config.security = SecurityLevel::high();
@@ -739,6 +784,7 @@ mod tests {
         assert_eq!(settings.read().await.to_toml().unwrap(), before);
         settings
             .apply(
+                &rt_handle,
                 &cancel,
                 |mut config| {
                     config.security = SecurityLevel::high();
