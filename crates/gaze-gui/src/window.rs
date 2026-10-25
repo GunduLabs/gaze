@@ -149,12 +149,6 @@ async fn begin_face_capture(
         add_toast(window, format!("Face enrollment: {err}"));
         return;
     }
-    if let Err(err) = proxy.claim(username).await {
-        feed.stop();
-        add_dbus_error_toast(window, "Failed to claim device", &err);
-        return;
-    }
-
     capture::show_capture_dialog(
         window,
         username,
