@@ -502,30 +502,70 @@ fn interrupt_handler_address() -> usize {
     interrupt_noop_handler as *const () as usize
 }
 
+struct InterruptHandlerState {
+    active: usize,
+    previous: Option<libc::sigaction>,
+}
+
+static INTERRUPT_HANDLER_STATE: std::sync::Mutex<InterruptHandlerState> =
+    std::sync::Mutex::new(InterruptHandlerState {
+        active: 0,
+        previous: None,
+    });
+
 /// Borrows SIGUSR1 while a prompt is being interrupted, and gives the host process it runs
 /// inside its own back. `sa_flags = 0` withholds SA_RESTART, so the blocked read sees EINTR.
+///
+/// SIGUSR1 disposition is process-wide, so overlapping PAM operations share a single installed
+/// handler and only the last guard restores the host's original disposition.
 struct InterruptHandler {
-    previous: libc::sigaction,
+    installed: bool,
 }
 
 impl InterruptHandler {
     fn install() -> Self {
+        let mut state = INTERRUPT_HANDLER_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.active > 0 {
+            state.active += 1;
+            return Self { installed: true };
+        }
+
         unsafe {
             let mut action: libc::sigaction = std::mem::zeroed();
             action.sa_sigaction = interrupt_handler_address();
             libc::sigemptyset(&mut action.sa_mask);
             action.sa_flags = 0;
             let mut previous: libc::sigaction = std::mem::zeroed();
-            libc::sigaction(libc::SIGUSR1, &action, &mut previous);
-            Self { previous }
+            if libc::sigaction(libc::SIGUSR1, &action, &mut previous) != 0 {
+                return Self { installed: false };
+            }
+            state.previous = Some(previous);
+            state.active = 1;
+            Self { installed: true }
         }
     }
 }
 
 impl Drop for InterruptHandler {
     fn drop(&mut self) {
-        unsafe {
-            libc::sigaction(libc::SIGUSR1, &self.previous, std::ptr::null_mut());
+        if !self.installed {
+            return;
+        }
+        let mut state = INTERRUPT_HANDLER_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.active == 0 {
+            return;
+        }
+        state.active -= 1;
+        if state.active == 0 {
+            if let Some(previous) = state.previous.take() {
+                unsafe {
+                    libc::sigaction(libc::SIGUSR1, &previous, std::ptr::null_mut());
+                }
+            }
         }
     }
 }
@@ -1472,6 +1512,39 @@ mod tests {
 
         drop(tx);
         let _ = handle.join();
+    }
+
+    #[test]
+    fn overlapping_interrupt_handlers_restore_only_after_the_last_guard() {
+        extern "C" fn host_handler(_sig: c_int) {}
+
+        let _signals = exclusive_signals();
+        let mut host: libc::sigaction = unsafe { std::mem::zeroed() };
+        host.sa_sigaction = host_handler as *const () as usize;
+        let mut original: libc::sigaction = unsafe { std::mem::zeroed() };
+        unsafe { libc::sigaction(libc::SIGUSR1, &host, &mut original) };
+
+        let first = InterruptHandler::install();
+        let second = InterruptHandler::install();
+        drop(first);
+
+        let mut during: libc::sigaction = unsafe { std::mem::zeroed() };
+        unsafe { libc::sigaction(libc::SIGUSR1, std::ptr::null(), &mut during) };
+        assert_eq!(
+            during.sa_sigaction,
+            interrupt_handler_address(),
+            "the interrupt handler must remain active while another guard still exists"
+        );
+
+        drop(second);
+        let mut after: libc::sigaction = unsafe { std::mem::zeroed() };
+        unsafe { libc::sigaction(libc::SIGUSR1, std::ptr::null(), &mut after) };
+        assert_eq!(
+            after.sa_sigaction, host.sa_sigaction,
+            "the host's handler must be restored only after the last guard drops"
+        );
+
+        unsafe { libc::sigaction(libc::SIGUSR1, &original, std::ptr::null_mut()) };
     }
 
     #[test]
