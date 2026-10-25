@@ -513,11 +513,8 @@ static INTERRUPT_HANDLER_STATE: std::sync::Mutex<InterruptHandlerState> =
         previous: None,
     });
 
-/// Borrows SIGUSR1 while a prompt is being interrupted, and gives the host process it runs
-/// inside its own back. `sa_flags = 0` withholds SA_RESTART, so the blocked read sees EINTR.
-///
-/// SIGUSR1 disposition is process-wide, so overlapping PAM operations share a single installed
-/// handler and only the last guard restores the host's original disposition.
+/// Borrows process-wide SIGUSR1 while a prompt is being interrupted.
+/// Overlapping guards restore the host disposition only after the last drop.
 struct InterruptHandler {
     installed: bool,
 }
@@ -560,11 +557,11 @@ impl Drop for InterruptHandler {
             return;
         }
         state.active -= 1;
-        if state.active == 0 {
-            if let Some(previous) = state.previous.take() {
-                unsafe {
-                    libc::sigaction(libc::SIGUSR1, &previous, std::ptr::null_mut());
-                }
+        if state.active == 0
+            && let Some(previous) = state.previous.take()
+        {
+            unsafe {
+                libc::sigaction(libc::SIGUSR1, &previous, std::ptr::null_mut());
             }
         }
     }
