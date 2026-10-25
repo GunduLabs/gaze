@@ -874,9 +874,29 @@ fn create_temp_config_file(
     ))
 }
 
+/// Replacement succeeded, but its directory could not be synchronized.
+/// Callers must not assume that the old configuration is still on disk.
+#[derive(Debug)]
+pub struct ConfigCommitUncertain(pub std::io::Error);
+
+impl std::fmt::Display for ConfigCommitUncertain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "config replaced but directory sync failed: {}", self.0)
+    }
+}
+
+impl std::error::Error for ConfigCommitUncertain {}
+
 fn replace_file_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
     let parent = path
         .parent()
+        .map(|parent| {
+            if parent.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                parent
+            }
+        })
         .ok_or_else(|| std::io::Error::other("config path must have a parent directory"))?;
     let file_name = path
         .file_name()
@@ -889,11 +909,12 @@ fn replace_file_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
     let (tmp, mut file, mut cleanup) = create_temp_config_file(parent, file_name)?;
     file.write_all(contents.as_bytes())
         .and_then(|_| file.flush())?;
+    file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+    file.sync_all()?;
     drop(file);
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
     std::fs::rename(&tmp, path)?;
     cleanup.disarm();
-    Ok(())
+    std::fs::File::open(parent)?.sync_all()
 }
 
 impl Config {
@@ -1043,6 +1064,13 @@ impl Config {
             });
         let parent = path
             .parent()
+            .map(|parent| {
+                if parent.as_os_str().is_empty() {
+                    Path::new(".")
+                } else {
+                    parent
+                }
+            })
             .context("config path must have a parent directory")?;
         let file_name = path
             .file_name()
@@ -1058,13 +1086,18 @@ impl Config {
         file.write_all(encoded.as_bytes())
             .and_then(|_| file.flush())
             .with_context(|| format!("failed to write config file: {}", path.display()))?;
-        drop(file);
         let target_mode = existing_mode.unwrap_or(DEFAULT_CONFIG_MODE);
-        std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(target_mode))
+        file.set_permissions(std::fs::Permissions::from_mode(target_mode))
             .with_context(|| format!("failed to set mode {target_mode:o} on {}", path.display()))?;
+        file.sync_all()
+            .with_context(|| format!("failed to sync config file: {}", path.display()))?;
+        drop(file);
         std::fs::rename(&tmp_path, path)
             .with_context(|| format!("failed to replace config file: {}", path.display()))?;
         cleanup.disarm();
+        std::fs::File::open(parent)
+            .and_then(|dir| dir.sync_all())
+            .map_err(ConfigCommitUncertain)?;
         Ok(())
     }
 
