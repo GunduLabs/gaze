@@ -544,9 +544,9 @@ in
             auth       [success=done default=ignore]  ${cfg.package}/lib/security/pam_gaze.so
             auth       required                       pam_deny.so
 
-            account    required                       pam_permit.so
+            account    include                        plasmalogin
             password   required                       pam_deny.so
-            session    required                       pam_permit.so
+            session    include                        plasmalogin
           '';
       })
 
