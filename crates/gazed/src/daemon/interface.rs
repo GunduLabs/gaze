@@ -20,6 +20,14 @@ fn is_kwallet_pam_service(pam_service: &str) -> bool {
 
 #[interface(name = "com.gundulabs.Gaze")]
 impl AuthDaemon {
+    async fn authorize_enrollment(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
+        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_FACES).await
+    }
+
+    async fn authorize_settings(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
+        Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_CONFIG).await
+    }
+
     async fn register_extension(
         &self,
         #[zbus(header)] header: Header<'_>,
