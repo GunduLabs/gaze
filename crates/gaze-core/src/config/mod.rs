@@ -5,7 +5,8 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 mod security;
 
@@ -39,6 +40,7 @@ pub const INFERENCE_EXECUTION_PROVIDER_LABELS: [&str; 4] =
 pub const INFERENCE_DEVICE_OPTIONS: [&str; 3] = ["cpu", "gpu", "npu"];
 pub const INFERENCE_DEVICE_LABELS: [&str; 3] = ["CPU", "GPU", "NPU"];
 pub const DEFAULT_ENROLLMENT_MIN_FACE_SIZE_RATIO: f64 = 0.25;
+static CONFIG_TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub const MIN_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.10;
 pub const MAX_ENROLLMENT_FACE_SIZE_RATIO: f64 = 0.75;
 pub const DEFAULT_SECURITY_THRESHOLD: f64 = 0.4;
@@ -818,6 +820,60 @@ pub fn unknown_config_keys(contents: &str) -> Vec<String> {
     unknown
 }
 
+struct TempFileCleanup {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl TempFileCleanup {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TempFileCleanup {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn create_temp_config_file(
+    parent: &Path,
+    file_name: &str,
+) -> std::io::Result<(PathBuf, std::fs::File, TempFileCleanup)> {
+    for _ in 0..1024 {
+        let counter = CONFIG_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let tmp = parent.join(format!(
+            ".{file_name}.{}.{}.tmp",
+            std::process::id(),
+            counter
+        ));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)
+        {
+            Ok(file) => {
+                let cleanup = TempFileCleanup::new(tmp.clone());
+                return Ok((tmp, file, cleanup));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not create a unique temporary config file",
+    ))
+}
+
 fn replace_file_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
     let parent = path
         .parent()
@@ -830,25 +886,14 @@ fn replace_file_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
         .map(|meta| meta.permissions().mode() & 0o777)
         .unwrap_or(DEFAULT_CONFIG_MODE);
 
-    let tmp = parent.join(format!(".{file_name}.{}.tmp", std::process::id()));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&tmp)?;
-    if let Err(e) = file
-        .write_all(contents.as_bytes())
-        .and_then(|_| file.flush())
-    {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
+    let (tmp, mut file, mut cleanup) = create_temp_config_file(parent, file_name)?;
+    file.write_all(contents.as_bytes())
+        .and_then(|_| file.flush())?;
     drop(file);
-    if let Err(e) = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode)) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
-    std::fs::rename(&tmp, path)
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
+    std::fs::rename(&tmp, path)?;
+    cleanup.disarm();
+    Ok(())
 }
 
 impl Config {
@@ -1003,38 +1048,23 @@ impl Config {
             .file_name()
             .and_then(|n| n.to_str())
             .context("config path must have a valid file name")?;
-        let tmp_path = parent.join(format!(".{file_name}.{}.tmp", std::process::id()));
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&tmp_path)
+        let (tmp_path, mut file, mut cleanup) = create_temp_config_file(parent, file_name)
             .with_context(|| {
                 format!(
-                    "failed to create temporary config file: {}",
-                    tmp_path.display()
+                    "failed to create temporary config file for {}",
+                    path.display()
                 )
             })?;
-        if let Err(err) = file
-            .write_all(encoded.as_bytes())
+        file.write_all(encoded.as_bytes())
             .and_then(|_| file.flush())
-        {
-            let _ = std::fs::remove_file(&tmp_path);
-            return Err(err)
-                .with_context(|| format!("failed to write config file: {}", path.display()));
-        }
+            .with_context(|| format!("failed to write config file: {}", path.display()))?;
         drop(file);
         let target_mode = existing_mode.unwrap_or(DEFAULT_CONFIG_MODE);
-        if let Err(err) =
-            std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(target_mode))
-        {
-            let _ = std::fs::remove_file(&tmp_path);
-            return Err(err).with_context(|| {
-                format!("failed to set mode {target_mode:o} on {}", path.display())
-            });
-        }
+        std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(target_mode))
+            .with_context(|| format!("failed to set mode {target_mode:o} on {}", path.display()))?;
         std::fs::rename(&tmp_path, path)
             .with_context(|| format!("failed to replace config file: {}", path.display()))?;
+        cleanup.disarm();
         Ok(())
     }
 
@@ -1630,6 +1660,64 @@ mod tests {
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600,
             "a deliberately tightened mode must be kept"
+        );
+    }
+
+    fn config_temp_files(dir: &Path, file_name: &str) -> Vec<PathBuf> {
+        let prefix = format!(".{file_name}.");
+        fs::read_dir(dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.starts_with(&prefix) && name.ends_with(".tmp"))
+                    .unwrap_or(false)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn save_to_cleans_up_after_replace_failure_and_allows_retry() {
+        let temp = TempDir::new("rename-failure-retry");
+        let path = temp.path().join("config.toml");
+        fs::create_dir(&path).unwrap();
+
+        let err = Config::default()
+            .save_to(path.to_str().unwrap())
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("failed to replace config file"),
+            "unexpected error: {err:#}"
+        );
+        assert!(
+            config_temp_files(temp.path(), "config.toml").is_empty(),
+            "failed save must not leave a process-specific temp file"
+        );
+
+        fs::remove_dir(&path).unwrap();
+        Config::default().save_to(path.to_str().unwrap()).unwrap();
+        assert!(Config::load_from(path.to_str().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn atomic_replace_cleans_up_after_rename_failure_and_allows_retry() {
+        let temp = TempDir::new("atomic-rename-failure-retry");
+        let path = temp.path().join("config.toml");
+        fs::create_dir(&path).unwrap();
+
+        replace_file_atomically(&path, "[security]\nlevel = \"high\"\n").unwrap_err();
+        assert!(
+            config_temp_files(temp.path(), "config.toml").is_empty(),
+            "failed atomic replace must not leave a process-specific temp file"
+        );
+
+        fs::remove_dir(&path).unwrap();
+        replace_file_atomically(&path, "[security]\nlevel = \"high\"\n").unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "[security]\nlevel = \"high\"\n"
         );
     }
 
