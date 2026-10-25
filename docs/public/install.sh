@@ -622,12 +622,29 @@ record_pam_sudo_optout() {
     $SUDO chmod 644 "$PAM_SUDO_OPTOUT" || true
 }
 
+authselect_profile_id() {
+    awk -F: '/^Profile ID:/ { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit }'
+}
+
+authselect_profile_supports_gaze_select() {
+    case "$1" in
+    "" | gaze | custom/gaze | local | minimal) return 0 ;;
+    *) return 1 ;;
+    esac
+}
+
 configure_authselect() {
     if ! command -v authselect >/dev/null 2>&1; then
         return 0
     fi
 
     current_authselect="$($SUDO authselect current 2>/dev/null || true)"
+    current_profile="$(printf '%s\n' "$current_authselect" | authselect_profile_id)"
+
+    if ! authselect_profile_supports_gaze_select "$current_profile"; then
+        problem "Active authselect profile '$current_profile' is not replaced automatically; configure Gaze PAM manually to preserve the existing authentication backend."
+        return 0
+    fi
 
     if ! $SUDO test -f /etc/gaze/authselect.previous; then
         case "$current_authselect" in
