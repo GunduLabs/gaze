@@ -11,13 +11,10 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
 
-use gaze_core::polkit::{ALLOW_USER_INTERACTION, AuthorityProxy, Subject};
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::Duration;
-use zbus::Connection;
 
 type RefreshCb = Rc<dyn Fn()>;
 
@@ -111,25 +108,6 @@ fn show_daemon_pending_toast(window: &libadwaita::ApplicationWindow) {
     add_toast(window, "Connecting to the Gaze daemon…");
 }
 
-async fn authorize_face_enrollment() -> anyhow::Result<()> {
-    let conn = Connection::system().await?;
-    let authority = AuthorityProxy::new(&conn).await?;
-    let subject = Subject::unix_process(std::process::id())?;
-    let result = authority
-        .check_authorization(
-            &subject,
-            "com.gundulabs.gaze.manage-faces",
-            &HashMap::new(),
-            ALLOW_USER_INTERACTION,
-            "",
-        )
-        .await?;
-    if !result.is_authorized {
-        anyhow::bail!("authorization was cancelled or denied");
-    }
-    Ok(())
-}
-
 async fn begin_face_capture(
     window: &libadwaita::ApplicationWindow,
     username: &str,
@@ -139,7 +117,7 @@ async fn begin_face_capture(
 ) {
     // Start the Polkit request first. If it needs interaction, give the agent a moment to
     // present its prompt, then warm the camera while the user authenticates.
-    let mut authorization = Box::pin(authorize_face_enrollment());
+    let mut authorization = Box::pin(proxy.authorize_enrollment());
     let authorization_done = match futures::future::select(
         authorization.as_mut(),
         glib::timeout_future(AUTH_PROMPT_PRESENTATION_DELAY),
