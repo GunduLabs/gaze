@@ -266,6 +266,8 @@ pub fn show_capture_dialog(
     }
 
     start_btn.connect_clicked(glib::clone!(
+        #[strong]
+        username,
         #[weak]
         stop_btn,
         #[weak]
@@ -306,6 +308,10 @@ pub fn show_capture_dialog(
             let face_name = resolved_face.borrow().clone();
 
             glib::MainContext::default().spawn_local(glib::clone!(
+                #[weak(rename_to = start_btn)]
+                btn,
+                #[strong]
+                username,
                 #[strong]
                 proxy,
                 #[strong]
@@ -329,10 +335,18 @@ pub fn show_capture_dialog(
                 #[strong]
                 enrollment_completed,
                 async move {
+                    let start_failed = |message: &str| {
+                        prompt_label.set_text(message);
+                        start_btn.set_visible(true);
+                        stop_btn.set_visible(false);
+                        progress.set_visible(false);
+                        progress_label.set_visible(false);
+                        camera_mode.set_text(camera_kind);
+                    };
                     let mut enroll_stream = match proxy.receive_enroll_status().await {
                         Ok(s) => s,
                         Err(_) => {
-                            prompt_label.set_text("Failed to connect to enrollment stream.");
+                            start_failed("Failed to connect to enrollment stream. Try again.");
                             let _ = proxy.release().await;
                             return;
                         }
@@ -341,7 +355,7 @@ pub fn show_capture_dialog(
                     let mut capture_stream = match proxy.receive_face_status().await {
                         Ok(s) => s,
                         Err(_) => {
-                            prompt_label.set_text("Failed to connect to capture stream.");
+                            start_failed("Failed to connect to capture stream. Try again.");
                             let _ = proxy.release().await;
                             return;
                         }
@@ -349,8 +363,13 @@ pub fn show_capture_dialog(
 
                     let mut preview_stream = proxy.receive_preview_frame().await.ok();
 
+                    // Claim only when capture starts, not while the name-entry dialog is idle.
+                    if let Err(err) = proxy.claim(&username).await {
+                        start_failed(&format!("Could not claim camera: {err}. Try again."));
+                        return;
+                    }
                     if proxy.enroll_start(&face_name).await.is_err() {
-                        prompt_label.set_text("Daemon failed to start enrollment.");
+                        start_failed("Daemon failed to start enrollment. Try again.");
                         let _ = proxy.release().await;
                         return;
                     }
