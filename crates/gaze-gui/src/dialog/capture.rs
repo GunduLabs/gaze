@@ -14,6 +14,24 @@ use std::rc::Rc;
 use std::time::Duration;
 
 const PREVIEW_GRACE: Duration = Duration::from_secs(10);
+const ENROLLMENT_DEADLINE: Duration = Duration::from_secs(240);
+
+async fn wait_for_daemon_loss(proxy: &GazeProxy<'_>) {
+    let inner = proxy.inner();
+    let Ok(bus) = zbus::fdo::DBusProxy::new(inner.connection()).await else {
+        return;
+    };
+    loop {
+        if !bus
+            .name_has_owner(inner.destination().clone())
+            .await
+            .unwrap_or(false)
+        {
+            return;
+        }
+        glib::timeout_future(Duration::from_secs(1)).await;
+    }
+}
 
 pub struct CameraSetup {
     pub device: String,
@@ -104,6 +122,7 @@ pub fn show_capture_dialog(
     let resolved_face = Rc::new(RefCell::new(face_name.unwrap_or("default").to_string()));
     let existing_face_names = Rc::new(RefCell::new(HashSet::<String>::new()));
     let enrollment_completed = Rc::new(Cell::new(false));
+    let enrollment_task = Rc::new(RefCell::new(None::<futures::future::AbortHandle>));
     let face_name_valid = Rc::new(RefCell::new(is_refine));
     let mut face_name_entry: Option<libadwaita::EntryRow> = None;
 
@@ -176,6 +195,8 @@ pub fn show_capture_dialog(
 
     let show_cancel_confirmation = Rc::new(glib::clone!(
         #[strong]
+        enrollment_task,
+        #[strong]
         proxy,
         #[strong]
         feed,
@@ -203,12 +224,17 @@ pub fn show_capture_dialog(
                     feed,
                     #[strong]
                     on_done,
+                    #[strong]
+                    enrollment_task,
                     #[weak]
                     parent,
                     #[weak]
                     stop_btn,
                     move |c, response| {
                         if response == "discard" {
+                            if let Some(task) = enrollment_task.borrow_mut().take() {
+                                task.abort();
+                            }
                             stop_btn.set_visible(false);
                             glib::MainContext::default().spawn_local(glib::clone!(
                                 #[strong]
@@ -266,6 +292,8 @@ pub fn show_capture_dialog(
     }
 
     start_btn.connect_clicked(glib::clone!(
+        #[strong]
+        enrollment_task,
         #[weak]
         stop_btn,
         #[weak]
@@ -304,8 +332,10 @@ pub fn show_capture_dialog(
 
             let preview_live = Rc::new(Cell::new(false));
             let face_name = resolved_face.borrow().clone();
+            let (abort, registration) = futures::future::AbortHandle::new_pair();
+            *enrollment_task.borrow_mut() = Some(abort);
 
-            glib::MainContext::default().spawn_local(glib::clone!(
+            let task = glib::clone!(
                 #[strong]
                 proxy,
                 #[strong]
@@ -355,31 +385,30 @@ pub fn show_capture_dialog(
                         return;
                     }
 
-                    glib::timeout_add_local_once(
-                        PREVIEW_GRACE,
-                        glib::clone!(
-                            #[strong]
-                            feed,
-                            #[strong]
-                            camera_mode,
-                            #[strong]
-                            preview_live,
-                            move || {
-                                if preview_live.get() {
-                                    return;
-                                }
-                                // `set_active` restores only the overlay. Reopening the camera here
-                                // could race `gazed` for the device node.
-                                feed.set_active(true);
-                                camera_mode.set_text(&format!(
-                                    "{camera_kind} · live preview unavailable, look at the camera"
-                                ));
-                            }
-                        ),
-                    );
-
+                    let preview_grace = glib::timeout_future(PREVIEW_GRACE);
+                    let mut preview_grace_elapsed = false;
+                    let deadline = glib::timeout_future(ENROLLMENT_DEADLINE);
+                    let owner_lost = wait_for_daemon_loss(&proxy);
+                    futures::pin_mut!(deadline, owner_lost, preview_grace);
                     loop {
                         tokio::select! {
+                            _ = &mut preview_grace, if !preview_grace_elapsed => {
+                                preview_grace_elapsed = true;
+                                if !preview_live.get() {
+                                    feed.set_active(true);
+                                    camera_mode.set_text(&format!(
+                                        "{camera_kind} · live preview unavailable, look at the camera"
+                                    ));
+                                }
+                            }
+                            _ = &mut deadline => {
+                                prompt_label.set_text("Enrollment timed out. Close this window and try again.");
+                                break;
+                            }
+                            _ = &mut owner_lost => {
+                                prompt_label.set_text("Lost contact with the Gaze daemon. Close this window and try again.");
+                                break;
+                            }
                             Some(signal) = enroll_stream.next() => {
                                 if let Ok(args) = signal.args() {
                                     let prog = *args.progress();
@@ -452,9 +481,15 @@ pub fn show_capture_dialog(
                         }
                     }
 
+                    stop_btn.set_visible(false);
+                    feed.stop();
+                    let _ = proxy.enroll_stop().await;
                     let _ = proxy.release().await;
                 }
-            ));
+            );
+            glib::MainContext::default().spawn_local(async move {
+                let _ = futures::future::Abortable::new(task, registration).await;
+            });
         }
     ));
 
@@ -470,6 +505,8 @@ pub fn show_capture_dialog(
 
     dialog.connect_close_request(glib::clone!(
         #[strong]
+        enrollment_task,
+        #[strong]
         feed,
         #[strong]
         on_done,
@@ -484,6 +521,9 @@ pub fn show_capture_dialog(
                 show_cancel_confirmation(dialog.clone().upcast());
                 glib::Propagation::Stop
             } else {
+                if let Some(task) = enrollment_task.borrow_mut().take() {
+                    task.abort();
+                }
                 glib::MainContext::default().spawn_local(glib::clone!(
                     #[strong]
                     proxy,
