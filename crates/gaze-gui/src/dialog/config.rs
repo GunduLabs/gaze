@@ -18,12 +18,9 @@ use gtk4::prelude::*;
 use libadwaita::prelude::*;
 
 use futures::StreamExt;
-use gaze_core::polkit::{ALLOW_USER_INTERACTION, AuthorityProxy, NO_INTERACTION, Subject};
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
-use zbus::Connection;
 
 const CONFIG_APPLY_DEBOUNCE: Duration = Duration::from_millis(400);
 
@@ -1353,6 +1350,8 @@ pub fn show_config_dialog(
         load_config,
         #[strong]
         update_locked_state,
+        #[strong]
+        proxy_cell,
         move |_| {
             // Already unlocked, so the button is offering the other thing the banner can be
             // about: a configuration that could not be read.
@@ -1365,95 +1364,22 @@ pub fn show_config_dialog(
                 is_authorized,
                 #[strong]
                 update_locked_state,
+                #[strong]
+                proxy_cell,
                 async move {
-                    let conn = match Connection::system().await {
-                        Ok(conn) => conn,
-                        Err(e) => {
-                            eprintln!("gaze-gui: system bus connection failed: {e}");
-                            return;
-                        }
-                    };
-                    let authority = match AuthorityProxy::new(&conn).await {
-                        Ok(authority) => authority,
-                        Err(e) => {
-                            eprintln!("gaze-gui: polkit proxy creation failed: {e}");
-                            return;
-                        }
-                    };
-                    let subject = match Subject::unix_process(std::process::id()) {
-                        Ok(subject) => subject,
-                        Err(e) => {
-                            eprintln!("gaze-gui: polkit subject creation failed: {e}");
-                            return;
-                        }
-                    };
-
-                    match authority
-                        .check_authorization(
-                            &subject,
-                            "com.gundulabs.gaze.manage-config",
-                            &HashMap::new(),
-                            ALLOW_USER_INTERACTION,
-                            "",
-                        )
-                        .await
-                    {
-                        Ok(res) => {
-                            is_authorized.set(res.is_authorized);
-                            update_locked_state();
-                        }
-                        Err(e) => eprintln!("gaze-gui: polkit CheckAuthorization failed: {e}"),
+                    let result =
+                        async { shared_proxy(&proxy_cell).await?.authorize_settings().await }.await;
+                    is_authorized.set(result.is_ok());
+                    update_locked_state();
+                    if let Err(e) = result {
+                        eprintln!("gaze-gui: settings authorization failed: {e}");
                     }
                 }
             ));
         }
     ));
 
-    glib::MainContext::default().spawn_local(glib::clone!(
-        #[strong]
-        is_authorized,
-        #[strong]
-        update_locked_state,
-        async move {
-            let Ok(conn) = Connection::system().await else {
-                return;
-            };
-            let Ok(authority) = AuthorityProxy::new(&conn).await else {
-                return;
-            };
-
-            let check_auth = |auth: AuthorityProxy<'static>| async move {
-                let subject = Subject::unix_process(std::process::id()).ok()?;
-
-                auth.check_authorization(
-                    &subject,
-                    "com.gundulabs.gaze.manage-config",
-                    &HashMap::new(),
-                    NO_INTERACTION,
-                    "",
-                )
-                .await
-                .ok()
-                .map(|res| res.is_authorized)
-            };
-
-            if let Some(allowed) = check_auth(authority.clone()).await {
-                is_authorized.set(allowed);
-                update_locked_state();
-            }
-
-            let Ok(mut changed_stream) = authority.receive_changed().await else {
-                return;
-            };
-
-            while changed_stream.next().await.is_some() {
-                if let Some(allowed) = check_auth(authority.clone()).await {
-                    is_authorized.set(allowed);
-                    update_locked_state();
-                }
-            }
-        }
-    ));
+    // Unlock is only a UI hint; each write is independently authorized by the daemon.
 
     glib::MainContext::default().spawn_local(glib::clone!(
         #[strong]

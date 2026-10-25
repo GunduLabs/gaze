@@ -932,6 +932,8 @@ async fn session_is_closing(connection: &zbus::Connection, path: &zbus::OwnedObj
     default_path = "/com/gundulabs/Gaze"
 )]
 pub trait Gaze {
+    async fn authorize_enrollment(&self) -> zbus::Result<()>;
+    async fn authorize_settings(&self) -> zbus::Result<()>;
     async fn claim(&self, username: &str) -> zbus::Result<()>;
     async fn release(&self) -> zbus::Result<()>;
 
