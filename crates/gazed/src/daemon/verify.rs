@@ -408,9 +408,12 @@ impl AuthDaemon {
         )?;
         let hybrid_policy = config.security.hybrid_policy().to_string();
         let duress_cfg = config.duress.clone();
+        // D-Bus handlers run on zbus's runtime, so model retries must use the stored Tokio handle.
         if duress_cfg.enabled && self.eye_state.lock().await.is_none() {
             let inference = config.inference.clone();
-            let loading = tokio::task::spawn_blocking(move || load_eye_state(&inference));
+            let loading = self
+                .rt_handle
+                .spawn_blocking(move || load_eye_state(&inference));
             let loaded = tokio::select! {
                 biased;
                 _ = &mut rx => return Err(fdo::Error::Failed("capture cancelled".into())),
@@ -429,7 +432,9 @@ impl AuthDaemon {
             && self.ir_liveness.lock().await.is_none()
         {
             let inference = config.inference.clone();
-            let loading = tokio::task::spawn_blocking(move || load_ir_liveness(&inference));
+            let loading = self
+                .rt_handle
+                .spawn_blocking(move || load_ir_liveness(&inference));
             let loaded = tokio::select! {
                 biased;
                 _ = &mut rx => return Err(fdo::Error::Failed("capture cancelled".into())),
