@@ -186,9 +186,13 @@ impl DuressLockout {
     }
 
     pub fn lock(&self, username: &str) -> anyhow::Result<()> {
-        self.memory().insert(username.to_string());
+        let mut locked = self.memory();
+        locked.insert(username.to_string());
         let marker = self.marker(username)?;
         ensure_private_dir(&self.dir)?;
+        if let Some(parent) = self.dir.parent() {
+            std::fs::File::open(parent)?.sync_all()?;
+        }
         std::fs::OpenOptions::new()
             .write(true)
             .create(true)
@@ -196,17 +200,30 @@ impl DuressLockout {
             .mode(0o600)
             .open(&marker)?
             .sync_all()?;
+        std::fs::File::open(&self.dir)?.sync_all()?;
         Ok(())
     }
 
     pub fn clear(&self, username: &str) -> anyhow::Result<bool> {
-        let was_in_memory = self.memory().remove(username);
+        let mut locked = self.memory();
         let marker = self.marker(username)?;
         match std::fs::remove_file(&marker) {
-            Ok(()) => Ok(true),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(was_in_memory),
+            Ok(()) => {
+                if let Err(error) = std::fs::File::open(&self.dir).and_then(|dir| dir.sync_all()) {
+                    locked.insert(username.to_string());
+                    return Err(error.into());
+                }
+                locked.remove(username);
+                Ok(true)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if self.dir.exists() {
+                    std::fs::File::open(&self.dir)?.sync_all()?;
+                }
+                Ok(locked.remove(username))
+            }
             Err(e) => {
-                self.memory().insert(username.to_string());
+                locked.insert(username.to_string());
                 Err(e.into())
             }
         }
