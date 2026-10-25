@@ -294,6 +294,7 @@ pub fn show_capture_dialog(
     start_btn.connect_clicked(glib::clone!(
         #[strong]
         username,
+        #[strong]
         enrollment_task,
         #[weak]
         stop_btn,
