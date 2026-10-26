@@ -2,9 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Run with: node scripts/test-kcm.mjs
-// Executes Configure's actual QML JavaScript with a simulated KQuickConfigModule.
-// Back navigation may only change currentIndex, leaving depth unchanged. This
-// does not replace testing the rendered KCM in System Settings and kcmshell6.
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {test} from 'node:test';
@@ -17,10 +14,6 @@ const handler = action.match(/onTriggered:\s*(\{[\s\S]*\}|[^\n]+)/)?.[1];
 assert.ok(handler, 'find the Configure handler');
 const enabled = action.match(/^\s*enabled:\s*(.+)$/m)?.[1] ?? 'true';
 
-// KQuickConfigModule::depth is 1 + subPages.count(), not currentIndex + 1.
-// Its push() appends a subpage and increments currentIndex; navigating Back in
-// KCModuleQml syncs currentIndex from the PageRow without calling kcm.pop().
-// See KDE/kcmutils src/quick/kquickconfigmodule.cpp and src/kcmoduleqml.cpp.
 function module() {
     return {
         depth: 1,

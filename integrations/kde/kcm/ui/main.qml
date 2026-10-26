@@ -23,8 +23,6 @@ KCM.ScrollViewKCM {
             tooltip: i18n("Configure Gaze")
             icon.name: "configure"
             onTriggered: {
-                // Back navigation can retain subpages and only change currentIndex.
-                // Reuse Settings rather than disabling Configure or pushing duplicates.
                 if (kcm.depth > 1) {
                     kcm.currentIndex = 1;
                 } else {
