@@ -15,7 +15,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 categories = ["authentication"]
 homepage = "https://gaze.gundulabs.com"
@@ -75,4 +75,4 @@ ureq = "3.5.0"
 uuid = "1.29.0"
 zbus = "6.1.0"
 zeroize = "1.9.1"
-zip = "9.1.1"
+zip = "9.1.2"
