@@ -22,8 +22,15 @@ KCM.ScrollViewKCM {
             text: i18n("Configure")
             tooltip: i18n("Configure Gaze")
             icon.name: "configure"
-            enabled: kcm.depth < 2
-            onTriggered: kcm.push("SettingsPage.qml")
+            onTriggered: {
+                // Back navigation can retain subpages and only change currentIndex.
+                // Reuse Settings rather than disabling Configure or pushing duplicates.
+                if (kcm.depth > 1) {
+                    kcm.currentIndex = 1;
+                } else {
+                    kcm.push("SettingsPage.qml");
+                }
+            }
         },
         Kirigami.Action {
             text: i18n("Test")

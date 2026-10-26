@@ -156,6 +156,9 @@ jobs:
         with:
           node-version: "24.22.1"
 
+      - name: Test KCM navigation
+        run: node scripts/test-kcm.mjs
+
       - name: Test supported KDE distributions
         run: node scripts/test-kde.mjs
 
