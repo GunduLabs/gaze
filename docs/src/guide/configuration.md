@@ -589,7 +589,9 @@ original store intact.
 The old `dek.pub` / `dek.priv` key pair is upgraded automatically to a single
 owner-only `dek.blob` after successful unsealing. An incomplete legacy pair is an
 error, not permission to create a replacement key: restore the missing blob from
-backup. A malformed bundle never falls back to the old files.
+backup. A malformed bundle never falls back to the old files. If a bundle and
+legacy files coexist, their sealed blobs must match; conflicting key files are
+preserved and startup fails rather than choosing a key or deleting either set.
 
 Enrollment likewise publishes a fully synced batch before evicting old templates.
 Interrupted staging and deletion directories are excluded from matching and cleaned

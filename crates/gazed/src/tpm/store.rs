@@ -51,10 +51,10 @@ pub(super) fn read_sealed_blobs(dir: &Path) -> anyhow::Result<Option<(Vec<u8>, V
             (1..=4096).contains(&public_len) && (1..=4096).contains(&private_len),
             "invalid sealed-key bundle lengths"
         );
-        return Ok(Some((
-            bytes[9..9 + public_len].to_vec(),
-            bytes[9 + public_len..].to_vec(),
-        )));
+        let public = &bytes[9..9 + public_len];
+        let private = &bytes[9 + public_len..];
+        verify_legacy_blobs(dir, public, private)?;
+        return Ok(Some((public.to_vec(), private.to_vec())));
     }
     match (
         read_private_file(&dir.join(PUB_FILE))?,
@@ -68,11 +68,26 @@ pub(super) fn read_sealed_blobs(dir: &Path) -> anyhow::Result<Option<(Vec<u8>, V
     }
 }
 
+fn verify_legacy_blobs(dir: &Path, public: &[u8], private: &[u8]) -> anyhow::Result<()> {
+    for (name, expected) in [(PUB_FILE, public), (PRIV_FILE, private)] {
+        if let Some(bytes) = read_private_file(&dir.join(name))? {
+            ensure!(
+                bytes == expected,
+                "conflicting TPM key files: {} does not match the sealed-key bundle; \
+                 preserve all key files and restore a matching key set from backup",
+                dir.join(name).display()
+            );
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn persist_bundle(dir: &Path, public: &[u8], private: &[u8]) -> anyhow::Result<()> {
     ensure!(
         (1..=4096).contains(&public.len()) && (1..=4096).contains(&private.len()),
         "invalid sealed-key lengths"
     );
+    verify_legacy_blobs(dir, public, private)?;
     let mut bytes = BUNDLE_MAGIC.to_vec();
     bytes.extend_from_slice(&(public.len() as u32).to_le_bytes());
     bytes.extend_from_slice(public);
@@ -155,19 +170,84 @@ mod tests {
         assert!(read_sealed_blobs(dir.path()).is_err());
         write_private_file(&dir.path().join(PRIV_FILE), b"private").unwrap();
         persist_bundle(dir.path(), b"public", b"private").unwrap();
-        // A crash may leave either legacy file behind; the durable bundle is authoritative.
-        write_private_file(&dir.path().join(PRIV_FILE), b"old private").unwrap();
-        assert_eq!(
-            read_sealed_blobs(dir.path()).unwrap(),
-            Some((b"public".to_vec(), b"private".to_vec()))
-        );
-        persist_bundle(dir.path(), b"public", b"private").unwrap();
-        assert!(!dir.path().join(PRIV_FILE).exists());
+        for (name, bytes) in [(PUB_FILE, b"public".as_slice()), (PRIV_FILE, b"private")] {
+            write_private_file(&dir.path().join(name), bytes).unwrap();
+            assert_eq!(
+                read_sealed_blobs(dir.path()).unwrap(),
+                Some((b"public".to_vec(), b"private".to_vec()))
+            );
+            persist_bundle(dir.path(), b"public", b"private").unwrap();
+            assert!(!dir.path().join(name).exists());
+        }
         assert_eq!(
             fs::metadata(dir.path().join(BUNDLE_FILE)).unwrap().mode() & 0o777,
             0o600
         );
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn conflicting_key_files_are_preserved() {
+        for (public, private) in [
+            (
+                Some(b"old public".as_slice()),
+                Some(b"old private".as_slice()),
+            ),
+            (Some(b"old public".as_slice()), Some(b"private".as_slice())),
+            (Some(b"public".as_slice()), Some(b"old private".as_slice())),
+            (Some(b"old public".as_slice()), None),
+            (None, Some(b"old private".as_slice())),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            persist_bundle(dir.path(), b"public", b"private").unwrap();
+            for (name, bytes) in [(PUB_FILE, public), (PRIV_FILE, private)] {
+                if let Some(bytes) = bytes {
+                    write_private_file(&dir.path().join(name), bytes).unwrap();
+                }
+            }
+            let snapshot = || {
+                [BUNDLE_FILE, PUB_FILE, PRIV_FILE].map(|name| fs::read(dir.path().join(name)).ok())
+            };
+            let before = snapshot();
+            assert!(
+                read_sealed_blobs(dir.path())
+                    .unwrap_err()
+                    .to_string()
+                    .contains("conflicting TPM key files")
+            );
+            assert_eq!(snapshot(), before);
+            assert!(persist_bundle(dir.path(), b"public", b"private").is_err());
+            assert_eq!(snapshot(), before);
+        }
+    }
+
+    #[test]
+    fn matching_legacy_pair_can_be_cleaned_up() {
+        let dir = tempfile::tempdir().unwrap();
+        persist_bundle(dir.path(), b"public", b"private").unwrap();
+        write_private_file(&dir.path().join(PUB_FILE), b"public").unwrap();
+        write_private_file(&dir.path().join(PRIV_FILE), b"private").unwrap();
+        assert_eq!(
+            read_sealed_blobs(dir.path()).unwrap(),
+            Some((b"public".to_vec(), b"private".to_vec()))
+        );
+        persist_bundle(dir.path(), b"public", b"private").unwrap();
+        assert!(!dir.path().join(PUB_FILE).exists());
+        assert!(!dir.path().join(PRIV_FILE).exists());
+    }
+
+    #[test]
+    fn conflicting_legacy_pair_prevents_bundle_creation() {
+        let dir = tempfile::tempdir().unwrap();
+        write_private_file(&dir.path().join(PUB_FILE), b"old public").unwrap();
+        write_private_file(&dir.path().join(PRIV_FILE), b"old private").unwrap();
+        assert!(persist_bundle(dir.path(), b"public", b"private").is_err());
+        assert!(!dir.path().join(BUNDLE_FILE).exists());
+        assert_eq!(fs::read(dir.path().join(PUB_FILE)).unwrap(), b"old public");
+        assert_eq!(
+            fs::read(dir.path().join(PRIV_FILE)).unwrap(),
+            b"old private"
+        );
     }
 
     #[test]
