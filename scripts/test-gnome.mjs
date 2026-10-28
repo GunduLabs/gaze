@@ -282,6 +282,7 @@ async function environment(version, options = {}) {
     // Instantiate the upstream prototypes without their desktop/hardware setup.
     const verifier = Object.create(UserVerifier.ShellUserVerifier.prototype);
     Object.assign(verifier, {_settings: settings, _activeServices: new Set(),
+        _unavailableServices: new Set(),
         _messageQueue: [], _messageQueueTimeoutId: 0, _userName: 'alice',
         _userVerifier: remote, _cancellable: new Gio.Cancellable(),
         _hold: new Batch.Hold(), _defaultService: 'gdm-password',
@@ -519,20 +520,33 @@ for (const version of versions) {
     }
 }
 
+for (const version of versions)
 for (const retryMode of ['disabled', 'fixed', 'infinite']) {
-    test(`51.0: ${retryMode} face retries preserve password authentication`, async () => {
-        const env = await environment('51.0', {retryMode});
+    test(`${version}: ${retryMode} face retries preserve password authentication`, async () => {
+        const env = await environment(version, {retryMode});
         try {
             await begin(env);
+            if (env.services) env.services._onSecretInfoQuery('gdm-password', 'Password:');
+            else env.verifier._onSecretInfoQuery(null, 'gdm-password', 'Password:');
+            env.prompt._entry.text = 'test-password';
+            const passwordEntry = env.prompt._entry;
             for (let i = 0; i < 3; i++) {
-                env.services._onConversationStopped('gdm-face');
+                if (env.services) {
+                    env.services._onConversationStarted('gdm-face');
+                    env.services._onConversationStopped('gdm-face');
+                } else {
+                    env.verifier._activeServices.add('gdm-face');
+                    env.verifier._onConversationStopped(null, 'gdm-face');
+                }
+                env.verifier._clearMessageQueue();
                 await flush();
+                assert.equal(env.prompt._entry, passwordEntry);
+                assert.equal(passwordEntry.get_text(), 'test-password');
+                assert.equal(env.prompt._queryingService, 'gdm-password');
             }
             const expected = {disabled: 1, fixed: 2, infinite: 4}[retryMode];
             assert.equal(env.starts.filter(([service]) => service === 'gdm-face').length, expected);
             assert.equal(env.verifier.events?.some(([name]) => name === 'verification-failed') ?? false, false);
-            env.services._onSecretInfoQuery('gdm-password', 'Password:');
-            env.prompt._entry.text = 'test-password';
             env.prompt._activateNext();
             await flush();
             assert.deepEqual(env.answers, [['gdm-password', 'test-password']]);
