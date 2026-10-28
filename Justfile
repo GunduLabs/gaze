@@ -17,7 +17,7 @@ nfpm := require("nfpm")
 # Required by the `srpm` recipe only.
 rpmbuild := require("rpmbuild")
 # ONNX Runtime release bundled into the offline builds (flatpak and srpm).
-ort_version := env("ORT_VERSION", "1.31.0")
+ort_version := env("ORT_VERSION", "1.31.1")
 # Intel's onnxruntime-openvino build, which trails `ort_version`. Only `test-openvino` uses it.
 ort_openvino_version := env("ORT_OPENVINO_VERSION", "1.24.1")
 ort_openvino_dir := justfile_directory() / "target/ort-openvino"
