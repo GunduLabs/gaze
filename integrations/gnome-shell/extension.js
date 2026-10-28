@@ -1818,6 +1818,7 @@ export default class GazeFaceAuthExtension extends Extension {
             return function (client, serviceName) {
               if (serviceName === FACE_SERVICE_NAME) {
                 this._faceFailCounter = (this._faceFailCounter || 0) + 1;
+                this._activeServices.delete(serviceName);
               }
               if (serviceName === this._faceConfirmService) {
                 this._faceConfirmPending = false;
@@ -1864,11 +1865,23 @@ export default class GazeFaceAuthExtension extends Extension {
           "_verificationFailed",
           (original) => {
             return async function (serviceName, shouldRetry) {
-              if (serviceName === FACE_SERVICE_NAME) {
-                shouldRetry = this._canFaceRetry();
-                if (!shouldRetry) {
+              if (
+                serviceName === FACE_SERVICE_NAME &&
+                !this.serviceIsForeground(serviceName)
+              ) {
+                this._filterServiceMessages(serviceName, MESSAGE_TYPE.ERROR);
+                if (!this._canFaceRetry()) {
                   this._faceAuthFailed = true;
+                  return;
                 }
+
+                try {
+                  await this._handlePendingMessages();
+                  startFace(this);
+                } catch (e) {
+                  logError(e);
+                }
+                return;
               }
 
               return original.call(this, serviceName, shouldRetry);
