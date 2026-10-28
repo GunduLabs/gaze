@@ -9,6 +9,8 @@ version=${1:?ONNX Runtime version is required}
 ort_arch=${2:?ONNX Runtime architecture (x64 or aarch64) is required}
 dest=${3:?destination path is required}
 case "$version-$ort_arch" in
+    1.31.1-x64) sha256=c849e36a1ef3e22d4ff217b9d1ce4a3cf5b9467b975610913ae959ad5b16bdc9 ;;
+    1.31.1-aarch64) sha256=5317505e2da99be65f8e2775ba3c2afd6d2961fd78aba1bd8f56159f48820c78 ;;
     1.31.0-x64) sha256=cc5c72baf5ae5c8238a6841f0897227be2d02826b9cf98eaf02fdefaeeb03a57 ;;
     1.31.0-aarch64) sha256=c5b8b3cca31f3d643a3b313b8f42e2d0f16a4fcefd02cda343d97bd5306afaab ;;
     *) sha256=${ORT_SHA256:-} ;;
