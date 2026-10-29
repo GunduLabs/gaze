@@ -3,7 +3,7 @@
     "@viteplus/versions": "2.3.0",
     "esbuild": "0.28.2",
     "typescript": "7.0.2",
-    "vitepress": "2.0.0-alpha.20"
+    "vitepress": "2.0.0-alpha.21"
   },
   "scripts": {
     "docs:prepare": "./scripts/prepare-docs.sh",
