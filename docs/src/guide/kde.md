@@ -65,7 +65,11 @@ slots that run up front for biometrics, `kde-fingerprint` and `kde-smartcard`.
 That is the same slot a fingerprint reader uses, and it is why hands-free face
 unlock is possible here at all.
 
-`gaze-kde` puts Gaze in one of those two slots, inside a marked block:
+Plasma 6.8 and later start only `kde-fingerprint` up front. `kde-smartcard`
+becomes an unlock method you pick on the lock screen, which replaces the password
+field while it is selected, so it no longer runs hands-free.
+
+`gaze-kde` puts Gaze in one of those slots, inside a marked block:
 
 ```
 # BEGIN gaze (managed by gaze-kde; remove with `gaze-kde-pam disable`)
@@ -109,6 +113,13 @@ every distribution's `kde-fingerprint` names `pam_fprintd` whether or not `fprin
 is present, so the check is for the module on disk and for a device that `fprintd`
 reports. A reader that libfprint does not support leaves Gaze in `kde-fingerprint`.
 
+On Plasma 6.8 and later there is only one up-front slot, so Gaze always takes
+`kde-fingerprint` and goes in above the reader. Your face is checked first, and
+when it does not match, the reader gets its turn in the same unlock. An earlier
+`kde-smartcard` setup moves over the next time `gaze-kde-pam enable` runs, which
+every `gaze-kde` upgrade does. Until then, `gaze doctor` and `gaze-kde-pam status`
+warn that face unlock never starts on its own.
+
 On openSUSE and Gentoo the smartcard slot ships `pam_pkcs11 wait_for_card`, which
 blocks with no timeout. Gaze runs above it, so face unlock is unaffected, but after
 a face non-match that module goes on holding the slot for the rest of the lock.
@@ -146,7 +157,9 @@ stack (`password-auth` or `common-auth`) that `/etc/pam.d/kde` also includes. On
 biometric slot runs Gaze, the module stands down in the services that reach it
 that way, so a single lock screen does not run face authentication two or three times over
 and have those clients fight for one camera. `kde` yields to either slot, and
-`kde-smartcard` yields to `kde-fingerprint` if both somehow have a line.
+`kde-smartcard` yields to `kde-fingerprint` if both somehow have a line. On
+Plasma 6.8 and later, `kde` does not yield to `kde-smartcard`, which no longer
+starts up front.
 
 Removing `gaze-kde` restores the previous behaviour automatically, because the
 module decides by reading the slot files at authentication time rather than from
@@ -167,6 +180,11 @@ of falling through to it, so looking away a few times cannot spend your login
 attempts and lock the account. Gaze never does this in a stack that also serves
 the password, where failing outright would deny a correct password whenever the
 daemon is down.
+
+Nor does it when a working fingerprint reader shares the slot, since failing
+outright would also stop the reader. There a face non-match falls through to the
+reader, and only the reader's own failure is counted, exactly as it would be
+without Gaze.
 
 ::: warning An unrelated upstream bug can still lock you out
 On Plasma before 6.7 (and before the 6.5.x and 6.6.x backports), a *successful*

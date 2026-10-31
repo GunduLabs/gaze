@@ -452,7 +452,7 @@ jobs:
       - name: Evaluate NixOS module
         run: |
           # Twice, because the KDE lock screen slot is chosen from these two
-          # options: fprintd alone takes kde-smartcard, both together fall back
+          # options: fprintd alone takes kde-smartcard before Plasma 6.8, both together fall back
           # to sharing kde-fingerprint with the reader. One eval builds only one
           # of those branches.
           for p11 in false true; do
