@@ -54,13 +54,24 @@ function load(source, dependencies, exports, globals = {}) {
 const _ = text => text;
 const signalKey = Symbol('GObject.signals');
 const Gi = {gobject_prototype_symbol: Symbol('gobject_prototype'), hook_up_vfunc_symbol: Symbol('hook_up_vfunc')};
+let nextHandlerId = 1;
 class Emitter {
     connect(name, callback) {
         this.listeners ??= new Map();
         const callbacks = this.listeners.get(name) ?? [];
         callbacks.push(callback);
         this.listeners.set(name, callbacks);
-        return callbacks.length;
+        this.handlers ??= new Map();
+        const id = nextHandlerId++;
+        this.handlers.set(id, [name, callback]);
+        return id;
+    }
+    disconnect(id) {
+        const [name, callback] = this.handlers?.get(id) ?? [];
+        this.handlers?.delete(id);
+        const callbacks = this.listeners?.get(name);
+        if (callbacks)
+            this.listeners.set(name, callbacks.filter(item => item !== callback));
     }
     connectObject(...args) {
         for (let i = 0; i < args.length - 1; i += 2)
@@ -407,6 +418,18 @@ for (const version of versions) {
         assert.equal(Object.hasOwn(Object.getPrototypeOf(env.verifier), 'serviceIsFace'), false);
         for (const [proto, name, original] of env.overrides)
             assert.equal(proto[name], original, `restored upstream hook: ${name}`);
+    });
+
+    test(`${version}: disabling stops following gazed restarts`, async () => {
+        const env = await environment(version);
+        env.extension.disable();
+        let registered = false;
+        env.proxy.RegisterExtensionRemote = () => { registered = true; };
+        env.proxy.g_name_owner = ':1.42';
+        env.proxy.emit('notify::g-name-owner');
+        await flush();
+        assert.equal(registered, false);
+        assert.equal(env.errors.length, 0, env.errors.map(String).join('\n'));
     });
 
     for (const invalidate of ['disable', 'different user']) {
