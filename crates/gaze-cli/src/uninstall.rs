@@ -401,8 +401,10 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
         "for d in /home/*/.config/hypr /root/.config/hypr; do \
           f=\"$d/hyprlock.conf\"; \
           [ -f \"$f\" ] || continue; \
-          sudo sed -i.gaze-uninstall-bak \
-            '/^\\s*\\(pam_\\)\\?module\\s*=\\s*hyprlock-gaze\\(-simultaneous\\)\\?\\s*$/d' \"$f\" || true; \
+          sudo grep -q 'hyprlock-gaze' \"$f\" 2>/dev/null || continue; \
+          sudo sed --follow-symlinks -i.gaze-uninstall-bak \
+            '/^\\s*\\(pam_\\)\\?module\\s*=\\s*hyprlock-gaze\\(-simultaneous\\)\\?\\s*$/d' \"$f\" \
+            || echo \"  Could not edit $f; remove its hyprlock-gaze module line by hand.\"; \
           done"
             .into(),
     ));
@@ -547,8 +549,8 @@ pub fn handle_uninstall(yes: bool, keep_data: bool, dry_run: bool) -> anyhow::Re
         style("✓").green().bold()
     ))?;
     term.write_line(&format!(
-        "  {} If a hyprlock.conf referenced Gaze, a backup was left next to it \
-          as hyprlock.conf.gaze-uninstall-bak.",
+        "  {} If a hyprlock.conf referenced Gaze, a backup ending in .gaze-uninstall-bak \
+          was left next to it, or next to the file it links to.",
         style("i").cyan().bold()
     ))?;
     Ok(())
