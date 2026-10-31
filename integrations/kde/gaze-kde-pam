@@ -3,9 +3,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -eu
 
-# KScreenLocker starts both of these up front, which is what needs no key press.
+# KScreenLocker starts these up front, which is what needs no key press.
+# Plasma 6.8 and later start only the first.
 PAM_FILE=${GAZE_KDE_PAM_FILE:-/etc/pam.d/kde-fingerprint}
 SMARTCARD_PAM_FILE=${GAZE_KDE_SMARTCARD_PAM_FILE:-/etc/pam.d/kde-smartcard}
+LIBEXEC_DIRS=${GAZE_KDE_LIBEXEC_DIRS:-/usr/libexec /usr/lib /usr/lib64 /usr/lib/*/libexec /usr/lib64/libexec}
 LOGIN_PAM_FILES=${GAZE_KDE_LOGIN_PAM_FILES-/etc/pam.d/plasmalogin /etc/pam.d/sddm}
 # Plasma Login Manager's up-front helper, where a distro ships one.
 LOGIN_FACE_PAM_FILE=${GAZE_KDE_LOGIN_FACE_PAM_FILE:-/etc/pam.d/plasmalogin-fingerprint}
@@ -60,7 +62,8 @@ managed_block() {
 gaze_control() {
 	case $1 in
 	"$PAM_FILE" | "$SMARTCARD_PAM_FILE" | "$LOGIN_FACE_PAM_FILE")
-		if stack_matches "$(effective_file "$1")" 'pam_faillock[.]so.*authfail'; then
+		if stack_matches "$(effective_file "$1")" 'pam_faillock[.]so.*authfail' &&
+			! runs_fprintd "$(effective_file "$1")"; then
 			printf 'success=done default=die\n'
 			return 0
 		fi
@@ -227,11 +230,20 @@ slot_exists() {
 	[ -f "$1" ] || [ -f "$(vendor_file "$1")" ]
 }
 
+smartcard_runs_up_front() {
+	for dir in $LIBEXEC_DIRS; do
+		[ -e "$dir/kscreenlocker_worker" ] && return 1
+	done
+	return 0
+}
+
 # pam_fprintd blocks for its whole timeout, so whichever module runs second in a
-# slot is starved. KScreenLocker starts the smartcard slot up front too, so
-# handing that one to Gaze lets face and finger race instead of queueing.
+# slot is starved. Before Plasma 6.8, KScreenLocker starts the smartcard slot up
+# front too, so handing that one to Gaze lets face and finger race instead of queueing.
 preferred_lock_slot() {
-	if runs_fprintd "$(effective_file "$PAM_FILE")" && slot_exists "$SMARTCARD_PAM_FILE"; then
+	if ! smartcard_runs_up_front; then
+		printf '%s\n' "$PAM_FILE"
+	elif runs_fprintd "$(effective_file "$PAM_FILE")" && slot_exists "$SMARTCARD_PAM_FILE"; then
 		printf '%s\n' "$SMARTCARD_PAM_FILE"
 	elif slot_exists "$PAM_FILE" || ! slot_exists "$SMARTCARD_PAM_FILE"; then
 		printf '%s\n' "$PAM_FILE"
@@ -243,6 +255,9 @@ preferred_lock_slot() {
 # Never add a second slot to an install that already has one.
 wired_lock_slot() {
 	for target in "$PAM_FILE" "$SMARTCARD_PAM_FILE"; do
+		if [ "$target" = "$SMARTCARD_PAM_FILE" ] && ! smartcard_runs_up_front; then
+			continue
+		fi
 		if has_gaze "$(effective_file "$target")"; then
 			printf '%s\n' "$target"
 			return 0
@@ -471,6 +486,46 @@ report_vendor_drift() {
 	done
 }
 
+unwire_lock_slot() {
+	unwire_where=$(real_file "$1")
+	unwire_untouched=1
+	untouched_since_install "$1" || unwire_untouched=0
+
+	unwire_removed=0
+	remove_block "$1" || unwire_removed=$?
+	[ "$unwire_removed" -eq 1 ] && return 1
+
+	if [ -f "$(created_flag "$1")" ]; then
+		# Delete only what Gaze wrote and nobody has touched since. Comparing
+		# against the vendor file instead would keep a stale copy, or a
+		# face-only stack, shadowing the distribution's slot for good.
+		if [ "$unwire_untouched" -eq 1 ]; then
+			rm -f "$unwire_where" "$(created_flag "$1")" \
+				"$(installed_sum_flag "$1")" "$(vendor_sum_flag "$1")"
+			printf 'Removed %s.\n' "$unwire_where"
+		else
+			rm -f "$(created_flag "$1")" \
+				"$(installed_sum_flag "$1")" "$(vendor_sum_flag "$1")"
+			printf 'Kept %s: it has been changed since Gaze wrote it.\n' "$unwire_where"
+		fi
+		return 0
+	fi
+	if [ "$unwire_removed" -eq 0 ]; then
+		rm -f "$(installed_sum_flag "$1")"
+		printf 'Removed Gaze face unlock from the KDE lock screen (%s).\n' "$unwire_where"
+		return 0
+	fi
+	return "$NOTHING_TO_REMOVE"
+}
+
+leave_idle_smartcard_slot() {
+	smartcard_runs_up_front && return 0
+	grep -qF "$BEGIN_MARKER" "$(effective_file "$SMARTCARD_PAM_FILE")" 2>/dev/null || return 0
+	printf 'This Plasma no longer starts %s up front, so Gaze moves to %s.\n' \
+		"$SMARTCARD_PAM_FILE" "$PAM_FILE"
+	unwire_lock_slot "$SMARTCARD_PAM_FILE" || [ $? -eq "$NOTHING_TO_REMOVE" ]
+}
+
 enable() {
 	force=0
 	[ "${1:-}" = "--force" ] && force=1
@@ -486,6 +541,8 @@ enable() {
 	if ! pam_module_installed; then
 		printf 'Warning: pam_gaze.so is not installed yet; install the gaze package so face unlock works.\n' >&2
 	fi
+
+	leave_idle_smartcard_slot || return 1
 
 	slot=$(lock_slot)
 	where=$(real_file "$slot")
@@ -524,36 +581,12 @@ disable() {
 	removed_any=0
 	failed=0
 	for slot in "$PAM_FILE" "$SMARTCARD_PAM_FILE"; do
-		where=$(real_file "$slot")
-		untouched=1
-		untouched_since_install "$slot" || untouched=0
-
-		removed=0
-		remove_block "$slot" || removed=$?
-		if [ "$removed" -eq 1 ]; then
-			failed=1
-			continue
-		fi
-
-		if [ -f "$(created_flag "$slot")" ]; then
-			# Delete only what Gaze wrote and nobody has touched since. Comparing
-			# against the vendor file instead would keep a stale copy, or a
-			# face-only stack, shadowing the distribution's slot for good.
-			if [ "$untouched" -eq 1 ]; then
-				rm -f "$where" "$(created_flag "$slot")" \
-					"$(installed_sum_flag "$slot")" "$(vendor_sum_flag "$slot")"
-				printf 'Removed %s.\n' "$where"
-			else
-				rm -f "$(created_flag "$slot")" \
-					"$(installed_sum_flag "$slot")" "$(vendor_sum_flag "$slot")"
-				printf 'Kept %s: it has been changed since Gaze wrote it.\n' "$where"
-			fi
-			removed_any=1
-		elif [ "$removed" -eq 0 ]; then
-			rm -f "$(installed_sum_flag "$slot")"
-			printf 'Removed Gaze face unlock from the KDE lock screen (%s).\n' "$where"
-			removed_any=1
-		fi
+		unwired=0
+		unwire_lock_slot "$slot" || unwired=$?
+		case $unwired in
+		0) removed_any=1 ;;
+		1) failed=1 ;;
+		esac
 	done
 
 	[ "$failed" -eq 1 ] && return 1
@@ -693,6 +726,11 @@ status() {
 	else
 		printf 'lock screen: disabled (%s does not reference pam_gaze)\n' \
 			"$(effective_file "$(preferred_lock_slot)")"
+	fi
+	if ! smartcard_runs_up_front && has_gaze "$(effective_file "$SMARTCARD_PAM_FILE")"; then
+		printf 'warning: %s runs Gaze, but this Plasma only starts it once picked as the unlock method.\n' \
+			"$(effective_file "$SMARTCARD_PAM_FILE")" >&2
+		printf '         Run `sudo gaze-kde-pam enable` to move Gaze to %s.\n' "$PAM_FILE" >&2
 	fi
 
 	if slot_exists "$LOGIN_FACE_PAM_FILE"; then

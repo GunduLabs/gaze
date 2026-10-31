@@ -164,11 +164,12 @@ in
     kde = {
       lockScreen = lib.mkEnableOption ''
         hands-free face unlock on the KDE Plasma lock screen. KScreenLocker starts
-        two biometric services up front, alongside the password field, so face
-        auth begins with no key press. Gaze takes `kde-fingerprint`, or
-        `kde-smartcard` when {option}`services.fprintd.enable` already owns the
-        first, so face and finger race instead of queueing. The equivalent of the
-        `gaze-kde` package
+        `kde-fingerprint` up front, alongside the password field, so face auth
+        begins with no key press. Before Plasma 6.8 it starts `kde-smartcard` too,
+        and Gaze takes that one when {option}`services.fprintd.enable` already owns
+        the first, so face and finger race instead of queueing. From 6.8 on, Gaze
+        shares `kde-fingerprint` with the reader and runs first. The equivalent of
+        the `gaze-kde` package
       '';
 
       loginScreen = lib.mkEnableOption ''
@@ -481,11 +482,13 @@ in
           # the text of one would drop what it configured there.
           readerHasFingerprintSlot = config.services.fprintd.enable;
           p11HasSmartcardSlot = config.security.pam.p11.enable;
+          smartcardRunsUpFront =
+            lib.versionOlder (pkgs.kdePackages.kscreenlocker.version or "0") "6.7.90";
 
           # `pam_fprintd` occupies its slot for the full timeout. Sharing that slot
           # would delay whichever module runs second, so use a separate slot when possible.
           slot =
-            if readerHasFingerprintSlot && !p11HasSmartcardSlot then
+            if readerHasFingerprintSlot && !p11HasSmartcardSlot && smartcardRunsUpFront then
               "kde-smartcard"
             else
               "kde-fingerprint";

@@ -115,6 +115,32 @@ pub fn gdm_face_auth_from_dconf() -> Option<bool> {
     dconf_bool(&gdm_greeter_dconf_read(GDM_DCONF_FACE_AUTH_KEY)?)
 }
 
+const KSCREENLOCKER_WORKER: &str = "kscreenlocker_worker";
+const LIBEXEC_DIRS: [&str; 5] = [
+    "usr/libexec",
+    "usr/lib",
+    "usr/lib64",
+    "usr/lib64/libexec",
+    "run/current-system/sw/libexec",
+];
+
+pub fn kscreenlocker_starts_smartcard_slot() -> bool {
+    !kscreenlocker_worker_under(Path::new("/"))
+}
+
+fn kscreenlocker_worker_under(root: &Path) -> bool {
+    let fixed = LIBEXEC_DIRS.iter().map(|dir| root.join(dir));
+    let multiarch = std::iter::once(root.join("usr/lib"))
+        .filter_map(|lib| fs::read_dir(lib).ok())
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().contains("-linux-"))
+        .map(|entry| entry.path().join("libexec"));
+    fixed
+        .chain(multiarch)
+        .any(|dir| dir.join(KSCREENLOCKER_WORKER).exists())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +164,31 @@ mod tests {
             paths.len(),
             "each integration point needs its own path"
         );
+    }
+
+    #[test]
+    fn the_plasma_68_worker_is_found_wherever_a_distribution_installs_it() {
+        for dir in [
+            "usr/libexec",
+            "usr/lib",
+            "usr/lib/x86_64-linux-gnu/libexec",
+            "usr/lib/aarch64-linux-gnu/libexec",
+            "run/current-system/sw/libexec",
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            assert!(!kscreenlocker_worker_under(root.path()), "{dir}");
+            fs::create_dir_all(root.path().join(dir)).unwrap();
+            fs::write(root.path().join(dir).join(KSCREENLOCKER_WORKER), "").unwrap();
+            assert!(kscreenlocker_worker_under(root.path()), "{dir}");
+        }
+    }
+
+    #[test]
+    fn the_greeter_alone_does_not_mean_plasma_68() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("usr/libexec")).unwrap();
+        fs::write(root.path().join("usr/libexec/kscreenlocker_greet"), "").unwrap();
+        assert!(!kscreenlocker_worker_under(root.path()));
     }
 
     #[test]

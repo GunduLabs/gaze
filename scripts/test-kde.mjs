@@ -363,11 +363,13 @@ function dispatch(handlers, scenario, installed) {
     return status === 'success' && impression !== 'positive' ? 'perm_denied' : status;
 }
 
-async function environment(target, features, {reader = false, module = reader} = {}) {
+async function environment(target, features, {reader = false, module = reader, plasma68 = false} = {}) {
     const root = await mkdtemp(join(tmpdir(), 'gaze-kde-env-'));
     const etc = join(root, 'etc'), vendor = join(root, 'vendor');
-    const state = join(root, 'state'), security = join(root, 'security');
-    for (const dir of [etc, vendor, security]) await mkdir(dir, {recursive: true});
+    const state = join(root, 'state'), security = join(root, 'security'), libexec = join(root, 'libexec');
+    for (const dir of [etc, vendor, security, libexec]) await mkdir(dir, {recursive: true});
+    const upgradePlasma = () => writeFile(join(libexec, 'kscreenlocker_worker'), '');
+    if (plasma68) await upgradePlasma();
     const source = join(upstream, target);
     for (const dir of ['etc', 'vendor'])
         if (existsSync(join(source, dir))) await cp(join(source, dir), join(root, dir), {recursive: true});
@@ -395,6 +397,7 @@ async function environment(target, features, {reader = false, module = reader} =
         GAZE_KDE_STATE_DIR: state,
         GAZE_KDE_SECURITY_DIRS: security,
         GAZE_KDE_BUSCTL: busctl,
+        GAZE_KDE_LIBEXEC_DIRS: libexec,
     };
     const locate = name => [join(etc, name), join(vendor, name)].find(existsSync);
     const read = async name => locate(name) ? readFile(locate(name), 'utf8') : null;
@@ -415,7 +418,7 @@ async function environment(target, features, {reader = false, module = reader} =
     }
 
     return {
-        target, etc, vendor,
+        target, etc, vendor, upgradePlasma,
         exists: name => Boolean(locate(name)),
         read,
         run(...args) {
@@ -547,6 +550,33 @@ for (const target of Object.keys(targets)) {
                 assert.deepEqual(await env.authenticate('kde-fingerprint', {finger: 'success'}), finger);
             }
             assert.equal((await env.authenticate(expected, {face: 'success'})).status, 'success');
+        }, {reader: true});
+
+        scoped('Plasma 6.8 shares kde-fingerprint and the reader still gets its turn', async env => {
+            const runsReader = env.exists('kde-fingerprint') &&
+                (await env.handlers('kde-fingerprint')).some(handler => handler.module === 'pam_fprintd.so');
+            const finger = runsReader ? await env.authenticate('kde-fingerprint', {finger: 'success'}) : null;
+            env.run('enable');
+            assert.deepEqual(await env.wired(), ['kde-fingerprint']);
+            assert.equal((await env.authenticate('kde-fingerprint', {face: 'success'})).status, 'success');
+            if (!runsReader) return;
+            for (const face of NON_MATCHES) {
+                const result = await env.authenticate('kde-fingerprint', {face, finger: 'success'});
+                assert.equal(result.status, finger.status, `${face}\n${result.calls.join('\n')}`);
+            }
+        }, {reader: true, plasma68: true});
+
+        scoped('upgrading to Plasma 6.8 moves Gaze off the smartcard slot', async env => {
+            const before = await env.files();
+            const smartcard = await env.read('kde-smartcard');
+            env.run('enable');
+            await env.upgradePlasma();
+            env.run('enable');
+            assert.deepEqual(await env.wired(), ['kde-fingerprint']);
+            assert.equal(await env.read('kde-smartcard'), smartcard);
+            assert.match(env.status(), /lock screen: enabled/);
+            env.run('disable');
+            assert.deepEqual(await env.files(), before);
         }, {reader: true});
 
         scoped('a fingerprint module without a reader keeps the face slot', async env => {

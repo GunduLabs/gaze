@@ -269,6 +269,7 @@ pub(super) fn check_desktop_integration(report: &mut Report) {
             report,
             read_pam_service(KDE_FACE_PAM_FILE).as_deref(),
             read_pam_service(KDE_SMARTCARD_PAM_FILE).as_deref(),
+            kscreenlocker_starts_smartcard_slot(),
         );
         check_kde_login_greeter(
             report,
@@ -344,9 +345,25 @@ pub(super) fn check_kde_lock_screen(
     report: &mut Report,
     kde_fingerprint: Option<&str>,
     kde_smartcard: Option<&str>,
+    smartcard_up_front: bool,
 ) {
     const NAME: &str = "KDE lock screen";
-    let (status, file) = kde_lock_status(kde_fingerprint, kde_smartcard);
+    let (status, file) = if smartcard_up_front {
+        kde_lock_status(kde_fingerprint, kde_smartcard)
+    } else {
+        kde_lock_status(kde_fingerprint, None)
+    };
+    if status != KdeLockStatus::Wired
+        && !smartcard_up_front
+        && slot_status(kde_smartcard) == KdeLockStatus::Wired
+    {
+        report.warning(
+            NAME,
+            "kde-smartcard runs Gaze, but Plasma 6.8 and later only start that slot once it is picked as the unlock method, so face unlock never starts on its own",
+            "Run `sudo gaze-kde-pam enable`, which moves Gaze to kde-fingerprint.",
+        );
+        return;
+    }
     let slot = file.trim_start_matches("/etc/pam.d/");
     match status {
         KdeLockStatus::Wired => report.pass(
@@ -555,7 +572,7 @@ mod tests {
     fn kde_lock_screen_check_warns_unless_the_plain_module_is_wired() {
         let level = |fingerprint: Option<&str>, smartcard: Option<&str>| {
             let mut report = Report::default();
-            check_kde_lock_screen(&mut report, fingerprint, smartcard);
+            check_kde_lock_screen(&mut report, fingerprint, smartcard, true);
             report
                 .checks
                 .iter()
@@ -588,6 +605,33 @@ mod tests {
             Level::Warning
         );
         assert_eq!(level(None, None), Level::Warning);
+    }
+
+    #[test]
+    fn plasma_68_never_counts_the_smartcard_slot_as_wired() {
+        let check = |fingerprint: Option<&str>, smartcard: Option<&str>| {
+            let mut report = Report::default();
+            check_kde_lock_screen(&mut report, fingerprint, smartcard, false);
+            report
+                .checks
+                .into_iter()
+                .find(|check| check.name == "KDE lock screen")
+                .map(|check| (check.level, check.message))
+                .expect("the KDE lock screen check always reports")
+        };
+        let reader = Some("auth required pam_fprintd.so");
+        let gaze = Some("auth [success=done default=ignore] pam_gaze.so");
+
+        let (level, message) = check(reader, gaze);
+        assert_eq!(level, Level::Warning);
+        assert!(message.contains("kde-smartcard"), "{message}");
+        assert!(message.contains("6.8"), "{message}");
+
+        assert_eq!(check(gaze, gaze).0, Level::Pass);
+        assert_eq!(check(gaze, None).0, Level::Pass);
+        let (level, message) = check(reader, None);
+        assert_eq!(level, Level::Warning);
+        assert!(message.contains("kde-fingerprint"), "{message}");
     }
 
     #[test]

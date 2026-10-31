@@ -5,6 +5,7 @@ use super::{
     FACE_PAM_SERVICE, KDE_FACE_PAM_FILE, KDE_SMARTCARD_PAM_FILE, PLASMALOGIN_FACE_PAM_FILE,
     pam_service_name,
 };
+use gaze_core::desktop::kscreenlocker_starts_smartcard_slot;
 
 pub fn caller_is_remote(rhost: Option<&str>) -> bool {
     match rhost {
@@ -192,9 +193,10 @@ pub(super) fn face_slots_outranking(service: Option<&str>) -> &'static [&'static
 }
 
 pub fn service_defers_to_face_slot(service: Option<&str>) -> bool {
-    face_slots_outranking(service)
-        .iter()
-        .any(|path| pam_stack_runs_gaze(pam_service_contents(path).as_deref()))
+    face_slots_outranking(service).iter().any(|path| {
+        pam_stack_runs_gaze(pam_service_contents(path).as_deref())
+            && (*path != KDE_SMARTCARD_PAM_FILE || kscreenlocker_starts_smartcard_slot())
+    })
 }
 
 /// The greeter cannot route a response to this slot, so prompting would block it
