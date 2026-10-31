@@ -167,6 +167,21 @@ where
     }
 }
 
+fn give_up_code(service: Option<&str>, verdict: &Verdict) -> c_int {
+    let may_clear = match verdict {
+        Verdict::Exhausted => true,
+        Verdict::Reached(AuthOutcome::Unavailable, status) => {
+            *status != Some(gaze_core::dbus::CaptureStatus::Unused)
+        }
+        _ => false,
+    };
+    if may_clear && service_retires_unavailable_slot(service) {
+        PAM_AUTH_ERR
+    } else {
+        PAM_AUTHINFO_UNAVAIL
+    }
+}
+
 fn retry_is_warranted(verdict: Option<FirstPassVerdict>) -> bool {
     verdict.is_none_or(FirstPassVerdict::allows_retry)
 }
@@ -255,6 +270,7 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, options: Pam
         if let Some(handoff) = sequential_handoff(&verdict) {
             unsafe { record_first_pass_verdict(pamh, handoff) };
         }
+        let give_up = give_up_code(service.as_deref(), &verdict);
         match verdict {
             Verdict::Reached(AuthOutcome::Match, _) => Ok((config, is_internal, prompt_line)),
             Verdict::Reached(AuthOutcome::NoMatch, _) => {
@@ -271,7 +287,7 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, options: Pam
                 } else {
                     give_up_message(status)
                 });
-                Err(PAM_AUTHINFO_UNAVAIL)
+                Err(give_up)
             }
             Verdict::Exhausted => {
                 tell(if is_internal {
@@ -279,7 +295,7 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, options: Pam
                 } else {
                     FACE_TIMED_OUT
                 });
-                Err(PAM_AUTHINFO_UNAVAIL)
+                Err(give_up)
             }
             Verdict::Failed => {
                 tell(if is_internal {
@@ -287,7 +303,7 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, options: Pam
                 } else {
                     FACE_UNAVAILABLE
                 });
-                Err(PAM_AUTHINFO_UNAVAIL)
+                Err(give_up)
             }
         }
     });
@@ -1245,6 +1261,51 @@ mod tests {
             sequential_handoff(&Verdict::Failed),
             Some(FirstPassVerdict::Undecided)
         );
+    }
+
+    #[test]
+    fn kde_lock_slots_fail_a_give_up_the_next_look_could_clear() {
+        let clearable = [
+            Verdict::Exhausted,
+            Verdict::Reached(AuthOutcome::Unavailable, None),
+            Verdict::Reached(AuthOutcome::Unavailable, Some(CaptureStatus::NoFace)),
+            Verdict::Reached(AuthOutcome::Unavailable, Some(CaptureStatus::TooDark)),
+            Verdict::Reached(AuthOutcome::Unavailable, Some(CaptureStatus::Clipped)),
+        ];
+        let lasting = [
+            Verdict::Failed,
+            Verdict::Reached(AuthOutcome::Unavailable, Some(CaptureStatus::Unused)),
+        ];
+        for slot in [KDE_FACE_PAM_SERVICE, KDE_SMARTCARD_PAM_SERVICE] {
+            for verdict in &clearable {
+                assert_eq!(
+                    give_up_code(Some(slot), verdict),
+                    PAM_AUTH_ERR,
+                    "{slot} {verdict:?}"
+                );
+            }
+            for verdict in &lasting {
+                assert_eq!(
+                    give_up_code(Some(slot), verdict),
+                    PAM_AUTHINFO_UNAVAIL,
+                    "{slot} {verdict:?}"
+                );
+            }
+        }
+        for service in [
+            Some(PLASMALOGIN_FACE_PAM_SERVICE),
+            Some("kde"),
+            Some("sudo"),
+            None,
+        ] {
+            for verdict in clearable.iter().chain(&lasting) {
+                assert_eq!(
+                    give_up_code(service, verdict),
+                    PAM_AUTHINFO_UNAVAIL,
+                    "{service:?} {verdict:?}"
+                );
+            }
+        }
     }
 
     #[test]

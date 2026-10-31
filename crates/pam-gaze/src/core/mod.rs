@@ -28,7 +28,8 @@ pub use service::{
     OMARCHY_FACE_PAM_SERVICE, PLASMALOGIN_FACE_PAM_SERVICE, caller_is_remote,
     face_auth_out_of_scope, pam_stack_runs_gaze, root_service_is_local, service_cannot_be_prompted,
     service_defers_to_face_service, service_defers_to_face_slot, service_is_network_facing,
-    service_retries_transient_give_up, service_shows_only_error_messages,
+    service_retires_unavailable_slot, service_retries_transient_give_up,
+    service_shows_only_error_messages,
 };
 
 /// Sensitive PAM responses (passwords). Wiped on drop.

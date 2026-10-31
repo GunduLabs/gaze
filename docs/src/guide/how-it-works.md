@@ -194,6 +194,13 @@ Only a face that was actually judged returns `PAM_AUTH_ERR`. Every other ending 
 failed an attempt, so a dark room or a camera in use by another program does not count against
 you. A run that ends on a hardware error is reported the same way.
 
+The KDE lock screen's biometric slots (`kde-fingerprint`, `kde-smartcard`) are the exception.
+KScreenLocker stops calling a slot for the rest of the lock once it answers
+`PAM_AUTHINFO_UNAVAIL`, so there a dark room, no face or a spent budget returns `PAM_AUTH_ERR`
+and the slot stays armed. A daemon that cannot be reached or refuses the camera still returns
+`PAM_AUTHINFO_UNAVAIL`. Gaze wires these slots so a failure never reaches
+`pam_faillock authfail`, so nothing is counted.
+
 ## Reading it in the logs
 
 `journalctl -u gazed -b` records the shape of every attempt. The lines that map to the

@@ -213,6 +213,10 @@ pub fn service_retries_transient_give_up(service: Option<&str>) -> bool {
     is_unpromptable_slot(service)
 }
 
+pub fn service_retires_unavailable_slot(service: Option<&str>) -> bool {
+    is_kde_noninteractive_service(service)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -387,8 +391,12 @@ mod tests {
         // Discarding info messages is a KScreenLocker theme quirk, not a PLM one.
         for slot in [KDE_FACE_PAM_SERVICE, KDE_SMARTCARD_PAM_SERVICE] {
             assert!(service_shows_only_error_messages(Some(slot)), "{slot}");
+            assert!(service_retires_unavailable_slot(Some(slot)), "{slot}");
         }
         assert!(!service_shows_only_error_messages(Some(
+            PLASMALOGIN_FACE_PAM_SERVICE
+        )));
+        assert!(!service_retires_unavailable_slot(Some(
             PLASMALOGIN_FACE_PAM_SERVICE
         )));
 
@@ -409,10 +417,15 @@ mod tests {
                 !service_retries_transient_give_up(Some(service)),
                 "{service}"
             );
+            assert!(
+                !service_retires_unavailable_slot(Some(service)),
+                "{service}"
+            );
         }
         assert!(!service_cannot_be_prompted(None));
         assert!(!service_shows_only_error_messages(None));
         assert!(!service_retries_transient_give_up(None));
+        assert!(!service_retires_unavailable_slot(None));
     }
 
     #[test]
