@@ -115,12 +115,19 @@ a face non-match that module goes on holding the slot for the rest of the lock.
 
 ### One attempt per lock
 
-The greeter gives a noninteractive slot a single authentication per lock: it
-deliberately ignores biometric failures and only re-arms everything when a
-*password* attempt fails. Because the daemon stops looking a few seconds after it
-loses sight of a face, Gaze keeps retrying internally for its whole budget rather
-than giving up on the first empty frame. Waking the screen and looking up a
-moment later still unlocks.
+Before Plasma 6.8, the greeter gives a noninteractive slot a single
+authentication per lock: it deliberately ignores biometric failures and only
+re-arms everything when a *password* attempt fails. Plasma 6.8 also re-arms the
+slot every second while the lock screen UI is visible. Because the daemon stops
+looking a few seconds after it loses sight of a face, Gaze keeps retrying
+internally for its whole budget rather than giving up on the first empty frame.
+Waking the screen and looking up a moment later still unlocks.
+
+A slot that answers `PAM_AUTHINFO_UNAVAIL` is never called again for that lock,
+not even after a wrong password. So when Gaze gives up for a reason the next look
+could fix (too dark, no face, budget spent), it reports a plain failure in these
+slots and stays armed. Only an unreachable daemon or a refused camera retires the
+slot.
 
 ### Status messages
 
