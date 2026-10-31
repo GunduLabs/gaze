@@ -366,14 +366,9 @@ impl AuthDaemon {
                 return;
             }
 
-            let template_id = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs().to_string())
-                .unwrap_or_else(|_| "0".to_string());
-
             info!(
-                "EnrollStart: capturing faces for {}, target: {}, template: {}, run_rgb: {}, run_ir: {}",
-                username, face_name, template_id, run_rgb, run_ir
+                "EnrollStart: capturing faces for {}, target: {}, run_rgb: {}, run_ir: {}",
+                username, face_name, run_rgb, run_ir
             );
 
             let orientation_watch = OrientationWatch::start(config.cameras.auto_rotate).await;
@@ -946,7 +941,12 @@ impl AuthDaemon {
                 let mut db = db_arc.lock().await;
                 // Stop/replacement may arrive during the pause after the last capture.
                 let saved = if rx.try_recv() == Err(oneshot::error::TryRecvError::Empty) {
-                    Some(db.add_template(&username, &face_name, &template_id, captured_embeddings))
+                    let now_secs = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |d| d.as_secs());
+                    Some(db.next_template_id(&username, &face_name, now_secs).and_then(|template_id| {
+                        db.add_template(&username, &face_name, &template_id, captured_embeddings)
+                    }))
                 } else {
                     None
                 };
