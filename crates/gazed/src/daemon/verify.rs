@@ -4,13 +4,19 @@
 use super::*;
 
 #[derive(Default)]
+struct SpectrumBudget {
+    frames: u32,
+    held: u32,
+}
+
+#[derive(Default)]
 struct VerifyFrameBudget {
-    rgb: u32,
-    ir: u32,
+    rgb: SpectrumBudget,
+    ir: SpectrumBudget,
 }
 
 impl VerifyFrameBudget {
-    fn frames(&mut self, spectrum: Spectrum) -> &mut u32 {
+    fn budget(&mut self, spectrum: Spectrum) -> &mut SpectrumBudget {
         match spectrum {
             Spectrum::Rgb => &mut self.rgb,
             Spectrum::Ir => &mut self.ir,
@@ -19,14 +25,22 @@ impl VerifyFrameBudget {
 
     /// Reset this camera's budget; return whether shared deadlines should reset.
     fn phase_started(&mut self, spectrum: Spectrum, serial_capture: bool) -> bool {
-        *self.frames(spectrum) = 0;
+        *self.budget(spectrum) = SpectrumBudget::default();
         serial_capture
     }
 
     fn frame_spent(&mut self, spectrum: Spectrum, max_frames: u32) -> bool {
-        let frames = self.frames(spectrum);
-        *frames = frames.saturating_add(1);
-        *frames > max_frames
+        let budget = self.budget(spectrum);
+        budget.frames = budget.frames.saturating_add(1);
+        budget.frames > max_frames
+    }
+
+    fn duress_frame_held(&mut self, spectrum: Spectrum, max_held: u32) {
+        let budget = self.budget(spectrum);
+        if budget.held < max_held && budget.frames > 0 {
+            budget.held += 1;
+            budget.frames -= 1;
+        }
     }
 }
 
@@ -36,6 +50,7 @@ pub(super) enum VerifyMsg {
     Status(Spectrum, CaptureStatus, Option<ndarray::Array1<f32>>, f64),
     Success(Spectrum, ndarray::Array1<f32>),
     Duress(Spectrum),
+    DuressHeld(Spectrum, f64),
     Unavailable(Spectrum, String),
     Error(String),
 }
@@ -774,7 +789,7 @@ impl AuthDaemon {
                             }
 
                             let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
-                            let _ = tx.try_send(VerifyMsg::Status(Spectrum::Rgb, status, latest_embed, cam.fps()));
+                            let status_sent = tx.try_send(VerifyMsg::Status(Spectrum::Rgb, status, latest_embed, cam.fps())).is_ok();
 
                             if should_yield_rgb_to_ir(&hybrid_policy_clone, run_ir, status) {
                                 yielded_to_ir = true;
@@ -810,6 +825,9 @@ impl AuthDaemon {
                                             return;
                                         }
                                         if closed {
+                                            if status_sent {
+                                                let _ = tx.blocking_send(VerifyMsg::DuressHeld(Spectrum::Rgb, cam.fps()));
+                                            }
                                             continue;
                                         }
                                     }
@@ -1011,7 +1029,7 @@ impl AuthDaemon {
                             tracing::debug!("Processed IR frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
 
                             let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
-                            let _ = tx.try_send(VerifyMsg::Status(Spectrum::Ir, status, latest_embed, cam.fps()));
+                            let status_sent = tx.try_send(VerifyMsg::Status(Spectrum::Ir, status, latest_embed, cam.fps())).is_ok();
 
                             if status == CaptureStatus::Usable && let Some(data) = embed_opt {
                                 let threshold = ir_threshold;
@@ -1042,6 +1060,9 @@ impl AuthDaemon {
                                             return;
                                         }
                                         if closed {
+                                            if status_sent {
+                                                let _ = tx.blocking_send(VerifyMsg::DuressHeld(Spectrum::Ir, cam.fps()));
+                                            }
                                             continue;
                                         }
                                     }
@@ -1319,6 +1340,9 @@ impl AuthDaemon {
                                     let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
                                     break;
                                 }
+                                VerifyMsg::DuressHeld(spectrum, fps) => {
+                                    frame_budget.duress_frame_held(spectrum, duress_cfg.effective_hold_frames(fps));
+                                }
                                 VerifyMsg::Unavailable(Spectrum::Rgb, reason)
                                     if run_rgb && ir_continues_without_rgb(&hybrid_policy, run_ir) =>
                                 {
@@ -1375,6 +1399,35 @@ impl AuthDaemon {
 mod tests {
     use super::*;
     use gaze_core::dbus::CaptureStatus;
+
+    #[test]
+    fn duress_hold_frames_do_not_spend_the_liveness_budget() {
+        let mut budget = VerifyFrameBudget::default();
+        for _ in 0..10 {
+            assert!(!budget.frame_spent(Spectrum::Rgb, 2));
+            budget.duress_frame_held(Spectrum::Rgb, 10);
+        }
+        assert!(!budget.frame_spent(Spectrum::Rgb, 2));
+        budget.duress_frame_held(Spectrum::Rgb, 10);
+        assert!(!budget.frame_spent(Spectrum::Rgb, 2));
+        assert!(budget.frame_spent(Spectrum::Rgb, 2));
+    }
+
+    #[test]
+    fn duress_refunds_stay_per_camera_and_reset_with_the_phase() {
+        let mut budget = VerifyFrameBudget::default();
+        assert!(!budget.frame_spent(Spectrum::Ir, 1));
+        budget.duress_frame_held(Spectrum::Rgb, 5);
+        assert!(budget.frame_spent(Spectrum::Ir, 1));
+
+        assert!(!budget.frame_spent(Spectrum::Rgb, 1));
+        budget.duress_frame_held(Spectrum::Rgb, 1);
+        assert!(!budget.phase_started(Spectrum::Rgb, false));
+        assert!(!budget.frame_spent(Spectrum::Rgb, 1));
+        budget.duress_frame_held(Spectrum::Rgb, 1);
+        assert!(!budget.frame_spent(Spectrum::Rgb, 1));
+        assert!(budget.frame_spent(Spectrum::Rgb, 1));
+    }
 
     #[test]
     fn parallel_cameras_have_independent_frame_budgets() {

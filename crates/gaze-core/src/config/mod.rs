@@ -283,6 +283,18 @@ impl DuressConfig {
     pub fn effective_hold(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.hold_ms.min(MAX_DURESS_HOLD_MS))
     }
+
+    pub fn effective_hold_frames(&self, fps: f64) -> u32 {
+        (self.effective_hold().as_secs_f64() * sanitized_fps(fps)).ceil() as u32 + 1
+    }
+}
+
+fn sanitized_fps(fps: f64) -> f64 {
+    if fps > 0.0 && fps.is_finite() {
+        fps
+    } else {
+        DEFAULT_CAMERA_FPS
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -392,12 +404,7 @@ impl LivenessConfig {
     }
 
     pub fn effective_max_frames(&self, fps: f64) -> u32 {
-        let fps = if fps > 0.0 && fps.is_finite() {
-            fps
-        } else {
-            DEFAULT_CAMERA_FPS
-        };
-        let frames = (self.effective_max_seconds() * fps).round() as u32;
+        let frames = (self.effective_max_seconds() * sanitized_fps(fps)).round() as u32;
         frames.max(MIN_LIVENESS_FRAMES)
     }
 }
@@ -1908,6 +1915,22 @@ mod tests {
             long_hold.effective_hold(),
             std::time::Duration::from_millis(MAX_DURESS_HOLD_MS)
         );
+    }
+
+    #[test]
+    fn duress_hold_frames_cover_the_hold_at_camera_fps() {
+        let duress = DuressConfig {
+            hold_ms: 600,
+            ..DuressConfig::default()
+        };
+        assert_eq!(duress.effective_hold_frames(30.0), 19);
+        assert_eq!(duress.effective_hold_frames(f64::NAN), 19);
+
+        let long_hold = DuressConfig {
+            hold_ms: MAX_DURESS_HOLD_MS,
+            ..DuressConfig::default()
+        };
+        assert_eq!(long_hold.effective_hold_frames(30.0), 151);
     }
 
     #[test]
