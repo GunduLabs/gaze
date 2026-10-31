@@ -70,17 +70,21 @@ fn remove_gdm_dconf_overrides_cmd() -> String {
 
 fn restore_authselect_cmd() -> String {
     [
+        "current=$(sudo authselect current 2>/dev/null || true);",
+        r#"case "$(printf '%s\n' "$current" | sed -n 's/^Profile ID:[[:space:]]*//p')" in"#,
+        "gaze|custom/gaze)",
+        r#"profile=""; features="";"#,
         "if [ -f /etc/gaze/authselect.previous ]; then",
         r#"profile=$(sudo sed -n 's/^Profile ID:[[:space:]]*//p' /etc/gaze/authselect.previous);"#,
         r#"features=$(sudo sed -n 's/^- //p' /etc/gaze/authselect.previous | tr '\n' ' ');"#,
-        r#"if [ -n "$profile" ]; then"#,
-        r#"sudo authselect select "$profile" $features --force 2>/dev/null || true;"#,
-        "else",
-        "sudo authselect select sssd --force 2>/dev/null || true;",
         "fi;",
-        "else",
-        "sudo authselect select sssd --force 2>/dev/null || true;",
-        "fi",
+        r#"if [ -z "$profile" ]; then"#,
+        r#"if sudo authselect list 2>/dev/null | grep -q '^- local[[:space:]]'; then profile=local; else profile=sssd; fi;"#,
+        r#"features=$(printf '%s\n' "$current" | sed -n 's/^- //p' | grep -v -e '^with-face' -e '^with-silent-lastlog$' | tr '\n' ' ');"#,
+        "fi;",
+        r#"sudo authselect select "$profile" $features --force 2>/dev/null ||"#,
+        r#"sudo authselect select "$profile" --force 2>/dev/null || true;;"#,
+        "esac",
     ]
     .join(" ")
 }
