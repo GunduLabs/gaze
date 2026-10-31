@@ -1044,7 +1044,9 @@ impl Config {
                 tracing::warn!("{e}; using the default for the invalid camera setting");
             }
             if let Err(e) = config.duress.validate() {
-                tracing::warn!("{e}; using the default duress settings");
+                tracing::warn!(
+                    "{e}; an invalid duress.closed_threshold uses the default and duress.hold_ms is capped at {MAX_DURESS_HOLD_MS}"
+                );
             }
             Ok(config)
         } else {
