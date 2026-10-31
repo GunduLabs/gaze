@@ -786,6 +786,21 @@ impl UserDatabase {
         Ok(templates)
     }
 
+    pub fn next_template_id(
+        &self,
+        username: &str,
+        face_name: &str,
+        now_secs: u64,
+    ) -> Result<String, UserDbError> {
+        let newest = self
+            .list_template_ids(username, face_name)?
+            .iter()
+            .filter_map(|id| id.parse::<u64>().ok())
+            .max();
+        let next = newest.map_or(now_secs, |newest| now_secs.max(newest.saturating_add(1)));
+        Ok(next.to_string())
+    }
+
     fn remove_template_dir(
         &self,
         username: &str,
@@ -1615,6 +1630,33 @@ mod tests {
                 bin.display()
             );
         }
+    }
+
+    #[test]
+    fn a_clock_running_behind_still_evicts_the_oldest_enrolment() {
+        let temp = TempDir::new("clock-skew");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 2).unwrap();
+        for (now_secs, value) in [(2_000, 1.0), (3_000, 2.0), (500, 3.0)] {
+            let id = db.next_template_id("alice", "work", now_secs).unwrap();
+            db.add_template("alice", "work", &id, rgb_embeds(vec![embedding(&[value])]))
+                .unwrap();
+        }
+
+        assert_eq!(
+            db.list_template_ids("alice", "work").unwrap(),
+            vec!["3000", "3001"]
+        );
+    }
+
+    #[test]
+    fn next_template_id_follows_the_clock_when_it_is_ahead() {
+        let temp = TempDir::new("clock-ahead");
+        let mut db = UserDatabase::new(temp.path().to_str().unwrap(), 0).unwrap();
+        assert_eq!(db.next_template_id("alice", "work", 0).unwrap(), "0");
+        db.add_template("alice", "work", "10", rgb_embeds(vec![embedding(&[1.0])]))
+            .unwrap();
+        assert_eq!(db.next_template_id("alice", "work", 10).unwrap(), "11");
+        assert_eq!(db.next_template_id("alice", "work", 50).unwrap(), "50");
     }
 
     #[test]
