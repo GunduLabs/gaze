@@ -953,7 +953,7 @@ impl AuthDaemon {
                         let mut cam = match Camera::open_ir_privileged(&ir_device_clone, config_clone.cameras.ir_frame_size()) {
                             Ok(c) => c,
                             Err(e) => {
-                                let _ = tx.blocking_send(VerifyMsg::Error(format!("IR Camera open error: {e}")));
+                                let _ = tx.blocking_send(VerifyMsg::Unavailable(Spectrum::Ir, format!("IR Camera open error: {e}")));
                                 return;
                             }
                         };
@@ -1131,7 +1131,7 @@ impl AuthDaemon {
                             let reason = cam.take_stream_error().unwrap_or_else(|| {
                                 "IR camera stream stopped unexpectedly".to_string()
                             });
-                            let _ = tx.blocking_send(VerifyMsg::Error(reason));
+                            let _ = tx.blocking_send(VerifyMsg::Unavailable(Spectrum::Ir, reason));
                         }
                     }));
                 }
@@ -1350,6 +1350,19 @@ impl AuthDaemon {
                                     let _ = Self::verify_diagnostic(&ctxt, &format!("{reason}; continuing with the IR camera")).await;
                                     run_rgb = false;
                                     rgb_status = CaptureStatus::Unused;
+                                    if finish_if_auth_passed!() {
+                                        break;
+                                    }
+                                }
+                                VerifyMsg::Unavailable(Spectrum::Ir, reason)
+                                    if run_ir
+                                        && rgb_continues_without_ir(&hybrid_policy, run_rgb)
+                                        && !rgb_phase_done.load(std::sync::atomic::Ordering::Relaxed) =>
+                                {
+                                    warn!("VerifyStart: {reason}; continuing with RGB only");
+                                    let _ = Self::verify_diagnostic(&ctxt, &format!("{reason}; continuing with the RGB camera")).await;
+                                    run_ir = false;
+                                    ir_status = CaptureStatus::Unused;
                                     if finish_if_auth_passed!() {
                                         break;
                                     }
