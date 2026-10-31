@@ -808,6 +808,7 @@ export default class GazeFaceAuthExtension extends Extension {
         "com.gundulabs.Gaze",
         "/com/gundulabs/Gaze",
         (proxy, error) => {
+          if (this._dbusProxy !== proxy) return;
           if (error) {
             logError(error, "[gaze] Failed to connect to gazed");
             return;
@@ -820,15 +821,17 @@ export default class GazeFaceAuthExtension extends Extension {
         },
       );
 
-      this._dbusProxy.connect("notify::g-name-owner", () => {
-        if (this._dbusProxy.g_name_owner) {
+      this._nameOwnerId = this._dbusProxy.connect(
+        "notify::g-name-owner",
+        (proxy) => {
+          if (this._dbusProxy !== proxy || !proxy.g_name_owner) return;
           try {
-            this._dbusProxy.RegisterExtensionRemote(true);
-            registerPamInternalServices(this._dbusProxy);
+            proxy.RegisterExtensionRemote(true);
+            registerPamInternalServices(proxy);
           } catch (e) {}
           cacheCamera();
-        }
-      });
+        },
+      );
     } catch (e) {}
 
     const extensionSettings = this._extensionSettings;
@@ -2161,6 +2164,10 @@ export default class GazeFaceAuthExtension extends Extension {
     activeExtensionInstance = null;
     this._gazeEnableToken = null;
     if (this._dbusProxy) {
+      if (this._nameOwnerId) {
+        this._dbusProxy.disconnect(this._nameOwnerId);
+        this._nameOwnerId = 0;
+      }
       try {
         if (typeof this._dbusProxy.RemovePamInternalRemote === "function") {
           this._dbusProxy.RemovePamInternalRemote("polkit-1");
