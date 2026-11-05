@@ -315,15 +315,12 @@ pub(super) fn v4l2_nodes_with_color(want_color: bool) -> Vec<String> {
     if gstreamer::init().is_err() {
         return Vec::new();
     }
-    let monitor = gstreamer::DeviceMonitor::new();
-    let caps = gstreamer::Caps::builder("video/x-raw").build();
-    monitor.add_filter(Some("Video/Source"), Some(&caps));
-    if monitor.start().is_err() {
+    // Probe the provider directly: a DeviceMonitor drops its devices whenever the libcamera
+    // provider is present (it hides v4l2deviceprovider), leaving no node without PipeWire.
+    let Some(provider) = gstreamer::DeviceProviderFactory::by_name("v4l2deviceprovider") else {
         return Vec::new();
-    }
-    wait_for_device_updates(&monitor);
-    let devices = monitor.devices();
-    monitor.stop();
+    };
+    let devices = provider.devices();
 
     let mut seen = std::collections::HashSet::new();
     let mut nodes: Vec<String> = devices
