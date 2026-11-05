@@ -1298,12 +1298,11 @@ impl AuthDaemon {
 
     async fn get_gdm_face_auth(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<bool> {
         Self::ensure_config_read_access(&header).await?;
-        tokio::task::spawn_blocking(|| {
-            gdm_face_auth_from_dconf()
-                .unwrap_or_else(|| std::path::Path::new(GDM_FACE_OVERRIDE_PATH).exists())
+        run_gdm_task(&self.rt_handle, "read", || {
+            Ok(gdm_face_auth_from_dconf()
+                .unwrap_or_else(|| std::path::Path::new(GDM_FACE_OVERRIDE_PATH).exists()))
         })
         .await
-        .map_err(|e| fdo::Error::Failed(format!("Failed to read GDM face login: {e}")))
     }
 
     async fn set_gdm_face_auth(
@@ -1312,9 +1311,10 @@ impl AuthDaemon {
         enabled: bool,
     ) -> fdo::Result<bool> {
         Self::ensure_authorized(&header, POLKIT_ACTION_MANAGE_GDM_PROFILE).await?;
-        tokio::task::spawn_blocking(move || write_gdm_face_auth(enabled))
-            .await
-            .map_err(|e| fdo::Error::Failed(format!("Failed to update GDM face login: {e}")))?
+        run_gdm_task(&self.rt_handle, "update", move || {
+            write_gdm_face_auth(enabled)
+        })
+        .await
     }
 
     #[zbus(signal)]
