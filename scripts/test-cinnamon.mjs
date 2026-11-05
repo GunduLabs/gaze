@@ -532,6 +532,7 @@ for (const version of versions) {
     for (const [signal, message, expected] of [
         ['show-info', 'GAZE_MSG_FACE_NOT_RECOGNIZED', 'Face not recognized. Please enter your password.'],
         ['show-info', 'GAZE_MSG_FACE_TOO_DARK', 'Too dark for face authentication. Please enter your password.'],
+        ['show-info', 'GAZE_MSG_PASSWORD_REQUIRED', "Changing Gaze's settings or faces needs your password."],
         ['show-info', 'GAZE_MSG_SOMETHING_NEW', 'Face authentication failed. Please enter your password.'],
         ['show-error', 'Sorry, that didn’t work. Please try again.', 'Sorry, face authentication did not work. Please try again.'],
         ['show-error', 'Authentication failure', 'Authentication failure'],
@@ -675,6 +676,7 @@ for (const version of versions.filter(version => unlockVersions.has(version))) {
 
     for (const [handler, message, field, expected] of [
         ['_onAuthInfo', 'GAZE_MSG_FACE_NOT_RECOGNIZED', '_infoLabel', 'Face not recognized. Please enter your password.'],
+        ['_onAuthInfo', 'GAZE_MSG_PASSWORD_REQUIRED', '_infoLabel', "Changing Gaze's settings or faces needs your password."],
         ['_onAuthInfo', 'GAZE_MSG_SOMETHING_NEW', '_infoLabel', 'Face authentication failed. Please enter your password.'],
         ['_onAuthError', 'Sorry, that didn’t work. Please try again.', '_messageLabel', 'Sorry, face authentication did not work. Please try again.'],
         ['_onAuthError', 'Authentication failure', '_messageLabel', 'Authentication failure'],
