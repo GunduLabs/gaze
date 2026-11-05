@@ -351,6 +351,18 @@ pub(super) fn device_video_node(device: &gstreamer::Device) -> Option<String> {
     path.starts_with("/dev/video").then_some(path)
 }
 
+/// True when `node`'s sysfs device sits on a real PCI/USB bus, so frames come from hardware and
+/// not from a virtual device (v4l2loopback) that a user-level process could feed.
+pub fn is_physical_node(node: &str) -> bool {
+    let name = node.strip_prefix("/dev/").unwrap_or(node);
+    std::fs::canonicalize(format!("/sys/class/video4linux/{name}/device"))
+        .is_ok_and(|path| is_physical_device_path(&path.to_string_lossy()))
+}
+
+fn is_physical_device_path(path: &str) -> bool {
+    path.starts_with("/sys/devices/pci") && !path.contains("/virtual/")
+}
+
 pub fn resolve_privileged_node(source: &str, want_color: bool) -> Option<String> {
     let source = source.trim();
     if source.is_empty() {
@@ -563,6 +575,21 @@ pub(super) fn node_from_pipewire_target(target: &str, want_color: bool) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_pci_and_usb_backed_nodes_count_as_physical() {
+        assert!(is_physical_device_path(
+            "/sys/devices/pci0000:00/0000:00:14.0/usb3/3-8/3-8:1.2"
+        ));
+        assert!(is_physical_device_path(
+            "/sys/devices/pci0000:00/0000:00:05.0"
+        ));
+        assert!(!is_physical_device_path(
+            "/sys/devices/virtual/video4linux/video10"
+        ));
+        assert!(!is_physical_device_path("/sys/devices/platform/vivid.0"));
+        assert!(!is_physical_node("/dev/video-does-not-exist"));
+    }
 
     #[test]
     fn a_pipewire_target_names_the_udev_path_of_its_node() {
