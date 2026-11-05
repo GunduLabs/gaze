@@ -207,6 +207,7 @@ const GAZE_MSG_FACE_NOT_DETECTED = "GAZE_MSG_FACE_NOT_DETECTED";
 const GAZE_MSG_FACE_TOO_DARK = "GAZE_MSG_FACE_TOO_DARK";
 const GAZE_MSG_FACE_TIMED_OUT = "GAZE_MSG_FACE_TIMED_OUT";
 const GAZE_MSG_FACE_UNAVAILABLE = "GAZE_MSG_FACE_UNAVAILABLE";
+const GAZE_MSG_PASSWORD_REQUIRED = "GAZE_MSG_PASSWORD_REQUIRED";
 
 let activeExtensionInstance = null;
 
@@ -242,6 +243,10 @@ const INTERNAL_ERROR_MAP = new Map([
   [
     GAZE_MSG_FACE_UNAVAILABLE,
     "Face authentication unavailable. Please enter your password.",
+  ],
+  [
+    GAZE_MSG_PASSWORD_REQUIRED,
+    "Changing Gaze's settings or faces needs your password.",
   ],
 ]);
 
