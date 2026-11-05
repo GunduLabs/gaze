@@ -179,6 +179,17 @@ pub(super) fn write_gdm_face_auth(enabled: bool) -> fdo::Result<bool> {
     Ok(enabled)
 }
 
+pub(super) async fn run_gdm_task<T: Send + 'static>(
+    rt_handle: &tokio::runtime::Handle,
+    action: &str,
+    task: impl FnOnce() -> fdo::Result<T> + Send + 'static,
+) -> fdo::Result<T> {
+    rt_handle
+        .spawn_blocking(task)
+        .await
+        .map_err(|e| fdo::Error::Failed(format!("Failed to {action} GDM face login: {e}")))?
+}
+
 struct PreparedConfig {
     reload: ModelReloads,
     models: ModelSessions,
@@ -499,6 +510,18 @@ mod tests {
         requested.security = SecurityLevel::high();
         assert_reloads(&loaded, &requested, (true, true, false, false));
         assert_eq!(settings.read().await.security.level, "medium");
+    }
+
+    #[test]
+    fn gdm_tasks_use_stored_runtime_handle_without_current_tokio_context() {
+        assert!(tokio::runtime::Handle::try_current().is_err());
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let rt_handle = runtime.handle().clone();
+
+        let enabled =
+            futures::executor::block_on(run_gdm_task(&rt_handle, "read", || Ok(true))).unwrap();
+
+        assert!(enabled);
     }
 
     #[test]
