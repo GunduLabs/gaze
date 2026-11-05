@@ -8,7 +8,8 @@ ALLOWED="ld-linux-aarch64.so.1
 ld-linux-x86-64.so.2
 libc.so.6
 libgcc_s.so.1
-libm.so.6"
+libm.so.6
+libpam.so.0"
 
 status=0
 
@@ -35,6 +36,11 @@ for module in "$@"; do
         exit 1
     }
     needed=$(printf '%s\n' "$headers" | awk '/NEEDED/ { print $2 }' | sort -u)
+
+    if ! printf '%s\n' "$needed" | grep -qxF libpam.so.0; then
+        echo "check-pam-link: $module does not link libpam.so.0, so a host that loads libpam privately cannot resolve its PAM symbols" >&2
+        exit 1
+    fi
 
     for lib in $needed; do
         # Both modules share pam-gaze/src/auth.rs and its local credential
