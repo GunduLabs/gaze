@@ -360,7 +360,7 @@ impl AuthDaemon {
     ) -> fdo::Result<()> {
         if Self::face_barred_for_admin_prompt(pam_service.as_deref()) {
             return Err(fdo::Error::AccessDenied(
-                "changing Gaze's own settings or faces needs a password, not a face match".into(),
+                gaze_core::dbus::FACE_BARRED_FOR_ADMIN_PROMPT.into(),
             ));
         }
         let claim = self.check_claim(&header).await?;

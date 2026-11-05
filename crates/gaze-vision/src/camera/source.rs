@@ -348,13 +348,46 @@ pub(super) fn device_video_node(device: &gstreamer::Device) -> Option<String> {
     path.starts_with("/dev/video").then_some(path)
 }
 
+/// True when the node has a PCI or USB device ancestor. USB controllers can themselves
+/// live on the platform bus, so the sysfs path need not start with a PCI root.
+pub fn is_physical_node(node: &str) -> bool {
+    if video_node_index(node).is_none() {
+        return false;
+    }
+    let name = node.strip_prefix("/dev/").unwrap();
+    std::fs::canonicalize(format!("/sys/class/video4linux/{name}/device"))
+        .is_ok_and(|path| has_physical_bus_ancestor(&path))
+}
+
+fn has_physical_bus_ancestor(path: &std::path::Path) -> bool {
+    path.ancestors().any(|ancestor| {
+        std::fs::canonicalize(ancestor.join("subsystem")).is_ok_and(|bus| {
+            matches!(
+                bus.file_name().and_then(|name| name.to_str()),
+                Some("pci" | "usb")
+            )
+        })
+    })
+}
+
+fn select_physical_node(
+    nodes: impl IntoIterator<Item = String>,
+    mut is_physical: impl FnMut(&str) -> bool,
+) -> Option<String> {
+    nodes.into_iter().find(|node| is_physical(node))
+}
+
+fn first_physical_v4l2_node(want_color: bool) -> Option<String> {
+    select_physical_node(v4l2_nodes_with_color(want_color), is_physical_node)
+}
+
 pub fn resolve_privileged_node(source: &str, want_color: bool) -> Option<String> {
     let source = source.trim();
     if source.is_empty() {
         return None;
     }
     if source == DEFAULT_RGB_CAMERA {
-        return first_v4l2_node(want_color);
+        return first_physical_v4l2_node(want_color);
     }
     if let Some((vid, pid)) = parse_usb_spec(source) {
         return resolve_usb_video_node(vid, pid, want_color);
@@ -366,7 +399,7 @@ pub fn resolve_privileged_node(source: &str, want_color: bool) -> Option<String>
         return is_node.then(|| source.to_string());
     }
     match v4l2_fallback_for(source) {
-        V4l2Fallback::AnyDevice => first_v4l2_node(want_color),
+        V4l2Fallback::AnyDevice => first_physical_v4l2_node(want_color),
         V4l2Fallback::SameNode(target) => node_from_pipewire_target(&target, want_color),
         V4l2Fallback::None => None,
     }
@@ -560,6 +593,53 @@ pub(super) fn node_from_pipewire_target(target: &str, want_color: bool) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn physical_detection_follows_bus_links_instead_of_path_prefixes() {
+        use std::os::unix::fs::symlink;
+        let root = std::env::temp_dir().join(format!(
+            "gaze-physical-camera-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        for bus in ["pci", "usb", "platform"] {
+            std::fs::create_dir_all(root.join("bus").join(bus)).unwrap();
+        }
+        for (device, bus, expected) in [
+            ("devices/pci0000:00/0000:00:14.0", "pci", true),
+            ("devices/platform/soc/usb1/1-1/1-1:1.0", "usb", true),
+            ("devices/platform/vivid.0", "platform", false),
+        ] {
+            let device = root.join(device);
+            std::fs::create_dir_all(device.join("video4linux/video0")).unwrap();
+            symlink(root.join("bus").join(bus), device.join("subsystem")).unwrap();
+            assert_eq!(has_physical_bus_ancestor(&device), expected);
+            assert_eq!(
+                has_physical_bus_ancestor(&device.join("video4linux/video0")),
+                expected
+            );
+        }
+        let virtual_device = root.join("devices/virtual/video4linux/video10");
+        std::fs::create_dir_all(&virtual_device).unwrap();
+        assert!(!has_physical_bus_ancestor(&virtual_device));
+        assert!(!has_physical_bus_ancestor(&root.join("missing")));
+        assert!(!is_physical_node("/dev/video-does-not-exist"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn automatic_selection_skips_virtual_nodes_and_preserves_order() {
+        let nodes = || ["/dev/video0", "/dev/video2", "/dev/video4"].map(String::from);
+        assert_eq!(
+            select_physical_node(nodes(), |node| node != "/dev/video0"),
+            Some("/dev/video2".to_string())
+        );
+        assert_eq!(select_physical_node(nodes(), |_| false), None);
+        assert_eq!(select_physical_node(Vec::new(), |_| true), None);
+    }
 
     #[test]
     fn a_pipewire_target_names_the_udev_path_of_its_node() {

@@ -624,6 +624,12 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 To restore mail service before updating, disable Gaze in the shared stack with
 `sudo pam-auth-update --disable gaze gaze-simultaneous`.
 
+### Gaze's own settings ask for a password instead of your face
+
+This is expected. The **Unlock** button in the GUI, face enrollment, and the GDM login switch in the GNOME extension all open a Gaze admin prompt, and `gazed` refuses face authentication for it. The prompt reads "Changing Gaze's settings or faces needs your password."
+
+This stops a face match from changing Gaze itself, for example by enrolling another face. Other polkit prompts, such as `pkexec`, still use face authentication unless a Gaze prompt is open at the same time.
+
 ## 6. First run is slow
 
 The first authentication may take a little longer while Gaze downloads the
