@@ -180,7 +180,7 @@ pub(super) fn config_findings(config: &Config) -> Vec<Check> {
         error(err.to_string(), fix);
     }
 
-    let rgb = config.cameras.rgb.trim();
+    let rgb = &config.cameras.rgb;
     let ir = config.cameras.ir.trim();
     if rgb.is_empty() && ir.is_empty() {
         error(
@@ -188,18 +188,20 @@ pub(super) fn config_findings(config: &Config) -> Vec<Check> {
             "Set cameras.rgb to \"primary\" or configure an IR camera.",
         );
     }
-    if let Some(index) = rgb.strip_prefix("/dev/video") {
-        if index.is_empty() || !index.chars().all(|c| c.is_ascii_digit()) {
+    for rgb in rgb.iter() {
+        if let Some(index) = rgb.strip_prefix("/dev/video") {
+            if index.is_empty() || !index.chars().all(|c| c.is_ascii_digit()) {
+                error(
+                    format!("invalid RGB camera node {rgb:?}"),
+                    "Use /dev/video<number>, usb:VVVV:PPPP, \"primary\", or a GStreamer source.",
+                );
+            }
+        } else if rgb.starts_with("usb:") && gaze_vision::camera::parse_usb_spec(rgb).is_none() {
             error(
-                format!("invalid RGB camera node {rgb:?}"),
-                "Use /dev/video<number>, usb:VVVV:PPPP, \"primary\", or a GStreamer source.",
+                format!("invalid RGB USB spec {rgb:?}"),
+                "Use usb:VVVV:PPPP with hex VID:PID, for example usb:046d:085e.",
             );
         }
-    } else if rgb.starts_with("usb:") && gaze_vision::camera::parse_usb_spec(rgb).is_none() {
-        error(
-            format!("invalid RGB USB spec {rgb:?}"),
-            "Use usb:VVVV:PPPP with hex VID:PID, for example usb:046d:085e.",
-        );
     }
 
     if config.liveness.enabled {
@@ -363,7 +365,7 @@ mod tests {
         config.security.rgb_threshold = 1.5;
         config.security.ir_threshold = -0.1;
         config.security.hybrid_policy = "sometimes".to_string();
-        config.cameras.rgb = "/dev/videoX".to_string();
+        config.cameras.rgb = "/dev/videoX".into();
         config.enrollment.min_face_size_ratio = 0.05;
         config.liveness.threshold = f64::NAN;
         config.liveness.max_seconds = 0.0;

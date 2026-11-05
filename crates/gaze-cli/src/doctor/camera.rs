@@ -107,8 +107,20 @@ pub(super) fn check_cameras(report: &mut Report, config: Option<&Config>) {
         return;
     };
 
-    let rgb = config.cameras.rgb.trim();
-    if !rgb.is_empty() {
+    let rgb = config.cameras.rgb.first();
+    if matches!(
+        config.cameras.rgb,
+        gaze_core::config::CameraSources::Ordered(_)
+    ) && !rgb.is_empty()
+    {
+        report.pass(
+            "RGB camera",
+            format!(
+                "ordered sources {} will be tried at runtime; unavailable sources are skipped",
+                config.cameras.rgb
+            ),
+        );
+    } else if !rgb.is_empty() {
         match gaze_vision::camera::enumerate_cameras() {
             Ok(cameras) => {
                 let detected = cameras

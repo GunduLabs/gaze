@@ -537,7 +537,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 let (rgb_configured, ir_configured) =
                                     match load_config_from_daemon(&proxy).await {
                                         Ok(cfg) => (
-                                            !cfg.cameras.rgb.trim().is_empty(),
+                                            !cfg.cameras.rgb.is_empty(),
                                             !cfg.cameras.ir.trim().is_empty(),
                                         ),
                                         Err(_) => (true, true),

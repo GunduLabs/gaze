@@ -3,7 +3,7 @@
 
 use std::os::fd::AsRawFd;
 
-use gaze_core::config::{CameraConfig, DEFAULT_RGB_CAMERA};
+use gaze_core::config::{CameraConfig, CameraSources, DEFAULT_RGB_CAMERA};
 use gaze_core::ir::devices::{camera_function_of, find_device, usb_ids_of};
 
 use super::*;
@@ -21,7 +21,7 @@ pub(super) fn node_requires_forced_ir_yuy2(node: &str, want_color: bool) -> bool
 
 #[derive(Debug, Clone)]
 pub struct ConfiguredCameraSources {
-    pub rgb: String,
+    pub rgb: CameraSources,
     pub ir: String,
     pub ir_node: String,
     pub serial_capture: bool,
@@ -37,23 +37,23 @@ pub fn resolve_ir_source(cameras: &CameraConfig) -> Option<(String, String)> {
     }
 }
 
-pub fn resolve_rgb_source(cameras: &CameraConfig) -> Option<String> {
-    let rgb = cameras.rgb.trim();
-    if rgb.is_empty() {
-        None
-    } else {
-        Some(rgb.to_string())
-    }
+pub fn resolve_rgb_source(cameras: &CameraConfig) -> Option<CameraSources> {
+    (!cameras.rgb.is_empty()).then(|| cameras.rgb.clone())
 }
 
 pub fn resolve_configured_sources(cameras: &CameraConfig) -> ConfiguredCameraSources {
-    let rgb = resolve_rgb_source(cameras).unwrap_or_default();
+    let rgb = cameras.rgb.clone();
     let (ir, ir_node) = resolve_ir_source(cameras).unwrap_or_default();
     let serial_capture = match cameras.parallel_capture() {
         "always" => false,
         "auto" => {
-            let rgb_node = resolve_node_for(&rgb, true);
-            capture_must_serialize(rgb_node.as_deref(), non_empty(&ir_node))
+            // Any fallback may be selected when capture opens. Only run in
+            // parallel if every candidate is proven independent of IR.
+            rgb.is_empty()
+                || rgb.iter().any(|source| {
+                    let rgb_node = resolve_node_for(source, true);
+                    capture_must_serialize(rgb_node.as_deref(), non_empty(&ir_node))
+                })
         }
         _ => true,
     };
@@ -115,13 +115,13 @@ pub(super) fn serialize_for_unresolved_rgb(
             .any(|function| function == ir_function)
 }
 
-pub fn preferred_capture_source(cameras: &CameraConfig) -> (String, bool) {
+pub fn preferred_capture_source(cameras: &CameraConfig) -> (CameraSources, bool) {
     if let Some(rgb_source) = resolve_rgb_source(cameras) {
         (rgb_source, false)
     } else if let Some((ir_source, _)) = resolve_ir_source(cameras) {
-        (ir_source, true)
+        (ir_source.into(), true)
     } else {
-        (DEFAULT_RGB_CAMERA.to_string(), false)
+        (DEFAULT_RGB_CAMERA.into(), false)
     }
 }
 
@@ -736,7 +736,7 @@ mod tests {
     #[test]
     fn configured_sources_leave_ir_empty_when_no_ir_configured() {
         let cameras = CameraConfig {
-            rgb: "primary".to_string(),
+            rgb: "primary".into(),
             ir: String::new(),
             ir_frame_width: None,
             ir_frame_height: None,
@@ -746,18 +746,47 @@ mod tests {
             auto_rotate: true,
         };
         let sources = resolve_configured_sources(&cameras);
-        assert_eq!(sources.rgb, "primary");
+        assert_eq!(sources.rgb, "primary".into());
         assert_eq!(sources.ir, "");
         assert_eq!(sources.ir_node, "");
         assert_eq!(
             preferred_capture_source(&cameras),
-            ("primary".to_string(), false)
+            ("primary".into(), false)
         );
+    }
+
+    #[test]
+    fn configured_and_preview_sources_preserve_the_entire_rgb_fallback_list() {
+        let mut cameras = cameras_with("primary", "");
+        cameras.rgb = CameraSources::Ordered(vec!["usb:046d:081b".into(), "primary".into()]);
+        assert_eq!(resolve_configured_sources(&cameras).rgb, cameras.rgb);
+        assert_eq!(
+            preferred_capture_source(&cameras),
+            (cameras.rgb.clone(), false)
+        );
+
+        cameras.rgb = CameraSources::Ordered(vec![]);
+        cameras.ir = "/dev/video2".into();
+        assert!(resolve_configured_sources(&cameras).rgb.is_empty());
+        assert_eq!(
+            preferred_capture_source(&cameras),
+            ("/dev/video2".into(), true)
+        );
+    }
+
+    #[test]
+    fn auto_parallel_capture_accounts_for_every_rgb_fallback() {
+        let mut cameras = cameras_with("primary", "/dev/video2");
+        cameras.rgb = CameraSources::Ordered(vec!["/dev/video0".into(), "/dev/video2".into()]);
+        cameras.parallel_capture = "auto".into();
+        assert!(resolve_configured_sources(&cameras).serial_capture);
+        cameras.parallel_capture = "always".into();
+        assert!(!resolve_configured_sources(&cameras).serial_capture);
     }
 
     fn cameras_with(rgb: &str, ir: &str) -> CameraConfig {
         CameraConfig {
-            rgb: rgb.to_string(),
+            rgb: rgb.into(),
             ir: ir.to_string(),
             ir_frame_width: None,
             ir_frame_height: None,
@@ -859,7 +888,7 @@ mod tests {
     #[test]
     fn configured_sources_resolve_an_ir_device_node() {
         let cameras = CameraConfig {
-            rgb: "primary".to_string(),
+            rgb: "primary".into(),
             ir: "/dev/video2".to_string(),
             ir_frame_width: None,
             ir_frame_height: None,
@@ -869,7 +898,7 @@ mod tests {
             auto_rotate: true,
         };
         let sources = resolve_configured_sources(&cameras);
-        assert_eq!(sources.rgb, "primary");
+        assert_eq!(sources.rgb, "primary".into());
         assert_eq!(sources.ir, "/dev/video2");
         assert_eq!(sources.ir_node, "/dev/video2");
     }
@@ -877,7 +906,7 @@ mod tests {
     #[test]
     fn preferred_capture_source_falls_back_to_ir_when_rgb_is_unset() {
         let cameras = CameraConfig {
-            rgb: String::new(),
+            rgb: "".into(),
             ir: "/dev/video2".to_string(),
             ir_frame_width: None,
             ir_frame_height: None,
@@ -888,7 +917,7 @@ mod tests {
         };
         assert_eq!(
             preferred_capture_source(&cameras),
-            ("/dev/video2".to_string(), true)
+            ("/dev/video2".into(), true)
         );
     }
 
@@ -1024,7 +1053,7 @@ mod tests {
     #[test]
     fn configured_sources_leave_the_node_empty_for_a_pipewire_ir_source() {
         let cameras = CameraConfig {
-            rgb: "primary".to_string(),
+            rgb: "primary".into(),
             ir: "pipewiresrc target-object=device-name".to_string(),
             ir_frame_width: None,
             ir_frame_height: None,

@@ -426,7 +426,7 @@ impl AuthDaemon {
                                 continue;
                             }
 
-                            let mut cam = match Camera::open_privileged(&rgb_device_clone) {
+                            let mut cam = match Camera::open_rgb_privileged(&rgb_device_clone) {
                                 Ok(c) => c,
                                 Err(e) => {
                                     dead_streams += 1;
@@ -508,7 +508,7 @@ impl AuthDaemon {
                         }
                     }
 
-                    let mut cam = match Camera::open_privileged(&rgb_device_clone) {
+                    let mut cam = match Camera::open_rgb_privileged(&rgb_device_clone) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(EnrollMsg::Error(format!("RGB Camera open error: {e}")));

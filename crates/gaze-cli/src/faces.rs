@@ -86,7 +86,7 @@ pub async fn handle_list_faces(
         .flatten()
         .map(|config| {
             (
-                !config.cameras.rgb.trim().is_empty(),
+                !config.cameras.rgb.is_empty(),
                 !config.cameras.ir.trim().is_empty(),
             )
         });

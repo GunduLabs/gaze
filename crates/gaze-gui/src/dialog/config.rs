@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use gaze_core::config::{
-    AuthConfig, CameraConfig, Config, DEFAULT_RGB_CAMERA, HYBRID_POLICY_LABELS,
+    AuthConfig, CameraConfig, CameraSources, Config, DEFAULT_RGB_CAMERA, HYBRID_POLICY_LABELS,
     INFERENCE_DEVICE_LABELS, INFERENCE_EXECUTION_PROVIDER_LABELS, InferenceConfig,
     MAX_ENROLLMENT_FACE_SIZE_RATIO, MAX_IR_FRAME_DIMENSION, MAX_LIVENESS_MAX_SECONDS,
     MIN_ENROLLMENT_FACE_SIZE_RATIO, MIN_LIVENESS_MAX_SECONDS, MODEL_QUALITY_LABELS,
@@ -338,9 +338,16 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
     rows.rgb_threshold.set_value(seed.rgb_threshold);
     rows.ir_threshold.set_value(seed.ir_threshold);
 
-    let cam_idx = source_index(choices.cameras, &cfg.cameras.rgb);
+    let cam_idx = source_index(choices.cameras, cfg.cameras.rgb.first());
     rows.camera.set_selected(cam_idx as u32);
-    set_camera_row_subtitle(&rows.camera, choices.cameras, &cfg.cameras.rgb);
+    if matches!(cfg.cameras.rgb, CameraSources::Ordered(_)) {
+        rows.camera.set_subtitle(&format!(
+            "Ordered fallback: {}. Selecting a camera replaces this list.",
+            cfg.cameras.rgb
+        ));
+    } else {
+        set_camera_row_subtitle(&rows.camera, choices.cameras, cfg.cameras.rgb.first());
+    }
     let ir_idx = source_index(choices.ir_options, &cfg.cameras.ir);
     rows.ir.set_selected(ir_idx as u32);
     set_camera_row_subtitle(&rows.ir, choices.ir_options, &cfg.cameras.ir);
@@ -993,10 +1000,13 @@ pub fn show_config_dialog(
                 );
             }
 
-            if camera_touched.get() || is_listed_source(&cameras, &cfg.cameras.rgb) {
+            if camera_touched.get()
+                || (matches!(cfg.cameras.rgb, CameraSources::Single(_))
+                    && is_listed_source(&cameras, cfg.cameras.rgb.first()))
+            {
                 let cam_idx = camera_row.selected() as usize;
                 if let Some((_, target)) = cameras.get(cam_idx) {
-                    cfg.cameras.rgb = target.clone();
+                    cfg.cameras.rgb = target.clone().into();
                 }
             }
             if ir_touched.get() || is_listed_source(&ir_options, &cfg.cameras.ir) {

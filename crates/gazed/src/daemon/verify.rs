@@ -502,7 +502,7 @@ impl AuthDaemon {
             drop(db);
 
             let (run_rgb, run_ir) = auth_streams(
-                &rgb_device,
+                rgb_device.first(),
                 &ir_device,
                 has_rgb_templates,
                 has_ir_templates,
@@ -515,7 +515,7 @@ impl AuthDaemon {
                 return;
             }
 
-            if and_policy_unsatisfiable(&hybrid_policy, &rgb_device, &ir_device, run_rgb, run_ir) {
+            if and_policy_unsatisfiable(&hybrid_policy, rgb_device.first(), &ir_device, run_rgb, run_ir) {
                 error!(
                     run_rgb,
                     run_ir,
@@ -686,7 +686,7 @@ impl AuthDaemon {
                             .then(|| Instant::now() + VERIFY_SERIAL_RGB_BUDGET);
                         let mut yielded_to_ir = false;
 
-                        let mut cam = match Camera::open_privileged(&rgb_device_clone) {
+                        let mut cam = match Camera::open_rgb_privileged(&rgb_device_clone) {
                             Ok(c) => c,
                             Err(e) => {
                                 let _ = tx.blocking_send(VerifyMsg::Unavailable(Spectrum::Rgb, format!("RGB Camera open error: {e}")));

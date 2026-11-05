@@ -349,7 +349,49 @@ fn mirrored_bgr_frame(
     Ok(mirrored)
 }
 
+/// Retry only camera-open failures, never recognition or liveness failures.
+fn open_ordered<T>(
+    sources: &gaze_core::config::CameraSources,
+    mut open: impl FnMut(&str) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let mut failures = Vec::new();
+    for source in sources.iter() {
+        match open(source) {
+            Ok(camera) => {
+                info!(source, "RGB camera selected");
+                return Ok(camera);
+            }
+            Err(err) => {
+                warn!(source, error = %err, "RGB camera source could not be opened");
+                failures.push((source, err));
+            }
+        }
+    }
+    if failures.len() == 1 {
+        return Err(failures.pop().unwrap().1);
+    }
+    if failures.is_empty() {
+        anyhow::bail!("no RGB camera sources configured");
+    }
+    anyhow::bail!(
+        "could not open any RGB camera source: {}",
+        failures
+            .iter()
+            .map(|(source, err)| format!("{source:?}: {err:#}"))
+            .collect::<Vec<_>>()
+            .join("; ")
+    )
+}
+
 impl Camera {
+    pub fn open_rgb(sources: &gaze_core::config::CameraSources) -> anyhow::Result<Self> {
+        open_ordered(sources, Self::open)
+    }
+
+    pub fn open_rgb_privileged(sources: &gaze_core::config::CameraSources) -> anyhow::Result<Self> {
+        open_ordered(sources, Self::open_privileged)
+    }
+
     pub fn open(camera_source: &str) -> anyhow::Result<Self> {
         Self::open_kind(camera_source, true, None)
     }
@@ -831,6 +873,71 @@ impl Iterator for Camera {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rgb_open_tries_sources_in_order_and_stops_at_the_first_success() {
+        use gaze_core::config::CameraSources;
+        let sources = CameraSources::Ordered(vec![
+            "usb:046d:081b".into(),
+            "primary".into(),
+            "unused".into(),
+        ]);
+        let mut attempts = Vec::new();
+        let selected = open_ordered(&sources, |source| {
+            attempts.push(source.to_string());
+            if source == "primary" {
+                Ok(source.to_string())
+            } else {
+                anyhow::bail!("not connected")
+            }
+        })
+        .unwrap();
+        assert_eq!(selected, "primary");
+        assert_eq!(attempts, ["usb:046d:081b", "primary"]);
+
+        attempts.clear();
+        open_ordered(&sources, |source| {
+            attempts.push(source.to_string());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(attempts, ["usb:046d:081b"]);
+    }
+
+    #[test]
+    fn rgb_open_reports_all_failures_and_never_adds_an_implicit_fallback() {
+        use gaze_core::config::CameraSources;
+        let sources = CameraSources::Ordered(vec!["missing".into(), "busy".into()]);
+        let mut attempts = Vec::new();
+        let error = open_ordered::<()>(&sources, |source| {
+            attempts.push(source.to_string());
+            anyhow::bail!("cannot open {source}")
+        })
+        .unwrap_err()
+        .to_string();
+        assert_eq!(attempts, ["missing", "busy"]);
+        assert!(error.contains("cannot open missing"));
+        assert!(error.contains("cannot open busy"));
+        let error = open_ordered::<()>(&CameraSources::from("missing"), |_| {
+            anyhow::bail!("original error")
+        })
+        .unwrap_err()
+        .to_string();
+        assert_eq!(error, "original error");
+    }
+
+    #[test]
+    fn rgb_open_skips_blank_entries_and_does_not_open_a_disabled_camera() {
+        use gaze_core::config::CameraSources;
+        let sources = CameraSources::Ordered(vec![" ".into(), " primary ".into(), "".into()]);
+        let selected = open_ordered(&sources, |source| Ok(source.to_string())).unwrap();
+        assert_eq!(selected, "primary");
+        for sources in [CameraSources::Ordered(vec![]), CameraSources::from(" ")] {
+            assert!(
+                open_ordered::<()>(&sources, |_| panic!("disabled camera must not open")).is_err()
+            );
+        }
+    }
 
     #[test]
     fn truncated_camera_buffer_is_rejected_before_opencv_borrows_it() {
