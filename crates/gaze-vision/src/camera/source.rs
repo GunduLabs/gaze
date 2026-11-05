@@ -315,19 +315,18 @@ pub(super) fn v4l2_nodes_with_color(want_color: bool) -> Vec<String> {
     if gstreamer::init().is_err() {
         return Vec::new();
     }
-    let monitor = gstreamer::DeviceMonitor::new();
-    let caps = gstreamer::Caps::builder("video/x-raw").build();
-    monitor.add_filter(Some("Video/Source"), Some(&caps));
-    if monitor.start().is_err() {
+    // Probe the provider directly: a DeviceMonitor drops its devices whenever the libcamera
+    // provider is present (it hides v4l2deviceprovider), leaving no node without PipeWire.
+    let Some(provider) = gstreamer::DeviceProviderFactory::by_name("v4l2deviceprovider") else {
         return Vec::new();
-    }
-    wait_for_device_updates(&monitor);
-    let devices = monitor.devices();
-    monitor.stop();
+    };
+    let devices = provider.devices();
+    let raw_caps = gstreamer::Caps::builder("video/x-raw").build();
 
     let mut seen = std::collections::HashSet::new();
     let mut nodes: Vec<String> = devices
         .iter()
+        .filter(|device| is_raw_video_source(device, &raw_caps))
         .filter_map(|device| {
             let node = device_video_node(device)?;
             if !seen.insert(node.clone()) {
@@ -338,6 +337,13 @@ pub(super) fn v4l2_nodes_with_color(want_color: bool) -> Vec<String> {
         .collect();
     nodes.sort_by_key(|node| video_node_index(node).unwrap_or(u32::MAX));
     nodes
+}
+
+fn is_raw_video_source(device: &gstreamer::Device, raw_caps: &gstreamer::Caps) -> bool {
+    device.has_classes("Video/Source")
+        && device
+            .caps()
+            .is_some_and(|caps| caps.can_intersect(raw_caps))
 }
 
 pub(super) fn device_video_node(device: &gstreamer::Device) -> Option<String> {
@@ -596,6 +602,53 @@ pub(super) fn node_from_pipewire_target(target: &str, want_color: bool) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod test_device {
+        use gstreamer::{glib, subclass::prelude::*};
+
+        #[derive(Default)]
+        pub struct TestDevice;
+
+        #[glib::object_subclass]
+        impl ObjectSubclass for TestDevice {
+            const NAME: &'static str = "GazeSourceFilterTestDevice";
+            type Type = super::TestDevice;
+            type ParentType = gstreamer::Device;
+        }
+
+        impl ObjectImpl for TestDevice {}
+        impl GstObjectImpl for TestDevice {}
+        impl DeviceImpl for TestDevice {}
+    }
+
+    gstreamer::glib::wrapper! {
+        pub struct TestDevice(ObjectSubclass<test_device::TestDevice>)
+            @extends gstreamer::Device, gstreamer::Object;
+    }
+
+    #[test]
+    fn direct_provider_filter_accepts_only_raw_video_sources() {
+        gstreamer::init().unwrap();
+        let raw_caps = gstreamer::Caps::builder("video/x-raw").build();
+        for (class, caps, expected) in [
+            ("Video/Source", "video/x-raw,format=YUY2", true),
+            ("Video/Source", "video/x-raw,format=GRAY8", true),
+            ("Video/Sink", "video/x-raw,format=YUY2", false),
+            ("Audio/Source", "video/x-raw", false),
+            ("Video/Source", "image/jpeg", false),
+            ("Video/Source", "image/jpeg;video/x-raw", true),
+        ] {
+            let caps: gstreamer::Caps = caps.parse().unwrap();
+            let device: TestDevice = gstreamer::glib::Object::builder()
+                .property("device-class", class)
+                .property("caps", caps)
+                .build();
+            assert_eq!(
+                is_raw_video_source(device.upcast_ref(), &raw_caps),
+                expected
+            );
+        }
+    }
 
     #[test]
     fn physical_detection_follows_bus_links_instead_of_path_prefixes() {
