@@ -662,6 +662,8 @@ your installed package predates the fix for Ubuntu 26.04's PAM module search pat
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 ```
 
+If the line instead ends in `undefined symbol: pam_set_data`, your package's PAM module does not link libpam, so services that load libpam privately, such as the `(systemd)` user manager, cannot load it. Those log lines don't stop face authentication elsewhere, and updating the same way clears them.
+
 ## 10. Crash on launch (SIGSEGV or SIGILL) on older CPUs
 
 On CPUs without AVX2 (roughly pre-2013 Intel, pre-2015 AMD), older builds of `gaze` and `gaze-gui` crashed immediately with a segmentation fault because the ONNX Runtime they statically linked requires AVX2. Current packages no longer link ONNX Runtime into the client binaries, so update to the latest packages if you see this.

@@ -13,6 +13,7 @@
   onnxruntime,
   opencv,
   openssl,
+  pam,
   pipewire,
   tpm2-tss,
 }:
@@ -59,6 +60,7 @@ rustPlatform.buildRustPackage {
     onnxruntime
     opencv
     openssl
+    pam
     tpm2-tss
   ];
 

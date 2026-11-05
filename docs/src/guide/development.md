@@ -219,8 +219,8 @@ address space then abort on load, which has broken IMAP authentication before.
 A crate boundary, not a
 cargo feature, is what keeps this out, because features unify across packages
 built in one `cargo build` invocation. `just check-pam-link` verifies the built
-modules link only basic system libraries and, for the main PAM module, the TPM
-libraries needed for keyring unsealing. It runs as part of `just build-rust` and
+modules link libpam, and otherwise only basic system libraries and, for the main
+PAM module, the TPM libraries needed for keyring unsealing. It runs as part of `just build-rust` and
 every package build.
 :::
 
@@ -297,8 +297,8 @@ The CLI and GUI need no special setup; they talk to whichever `gazed` currently 
 - `target/release/libpam_gaze_grosshack.so` (the deprecated shim; only the openSUSE packages install it)
 
 `just build-rust` also runs `just check-pam-link` over it, which fails the build
-if the module links anything beyond libc, libgcc, libm, the dynamic loader, and
-the keyring's `libtss2-esys.so.0`, `libtss2-mu.so.0`, and `libtss2-tctildr.so.0`.
+if the module does not link `libpam.so.0`, or links anything beyond that, libc,
+libgcc, libm, the dynamic loader, and the keyring's `libtss2-esys.so.0`, `libtss2-mu.so.0`, and `libtss2-tctildr.so.0`.
 The TPM exception applies only to `libpam_gaze.so`, not the compatibility shim.
 
 To exercise them through real PAM, copy into the system PAM library directory (path is distro-specific):
