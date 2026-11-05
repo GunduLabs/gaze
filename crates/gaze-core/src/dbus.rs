@@ -387,6 +387,9 @@ pub const GAZE_MSG_FACE_NOT_DETECTED: &str = "GAZE_MSG_FACE_NOT_DETECTED";
 pub const GAZE_MSG_FACE_TOO_DARK: &str = "GAZE_MSG_FACE_TOO_DARK";
 pub const GAZE_MSG_FACE_TIMED_OUT: &str = "GAZE_MSG_FACE_TIMED_OUT";
 pub const GAZE_MSG_FACE_UNAVAILABLE: &str = "GAZE_MSG_FACE_UNAVAILABLE";
+pub const GAZE_MSG_PASSWORD_REQUIRED: &str = "GAZE_MSG_PASSWORD_REQUIRED";
+pub const FACE_BARRED_FOR_ADMIN_PROMPT: &str =
+    "changing Gaze's own settings or faces needs a password, not a face match";
 
 #[derive(Clone, Debug, Serialize, Deserialize, Variant, OwnedVariant, Type)]
 pub struct BenchmarkResult {
