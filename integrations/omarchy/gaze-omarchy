@@ -117,7 +117,7 @@ enable_plugin() {
 	# Recheck before restarting an authentication service.
 	unlocked_status
 	run omarchy restart shell || fail 'Restart the Omarchy shell while unlocked to load the plugin.'
-	printf 'Gaze Omarchy lock enabled. Enroll with gaze add-face default, then run gaze auth.\n'
+	printf 'Gaze Omarchy lock enabled. Enroll with gaze add-face default, then run gaze test.\n'
 }
 
 wait_for_stock() {
@@ -159,7 +159,7 @@ doctor() {
 	doctor_failed=0
 	compatible || issue 'Omarchy host differs from the reviewed baseline; update gaze-omarchy.'
 	pam_ready || issue 'Dedicated face PAM is missing, modified or untrusted; reinstall gaze-omarchy.'
-	enrolled || issue 'No enrollment or daemon unavailable; run gaze add-face default and gaze auth.'
+	enrolled || issue 'No enrollment or daemon unavailable; run gaze add-face default and gaze test.'
 	owns_link || issue 'Plugin is not installed for this user; run gaze-omarchy enable while unlocked.'
 	catalog=$(run omarchy-plugin-catalog 2>/dev/null) || catalog=
 	printf '%s\n' "$catalog" | jq -e --arg id "$PLUGIN_ID" \

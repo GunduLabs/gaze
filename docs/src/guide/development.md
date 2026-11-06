@@ -285,7 +285,7 @@ The CLI and GUI need no special setup; they talk to whichever `gazed` currently 
 
 ```bash
 ./target/release/gaze list-faces
-./target/release/gaze auth --verbose
+./target/release/gaze test
 ./target/release/gaze-gui
 ```
 

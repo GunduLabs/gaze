@@ -505,7 +505,7 @@ pub enum AuthSurface {
     ScreenLock,
     Elevation,
     Login,
-    /// No PAM prompt is involved, as with `gaze auth` or the GUI test button.
+    /// No PAM prompt is involved, as with `gaze test` or the GUI test button.
     /// These calls go straight to the daemon, so there is no locker to step away from.
     Direct,
 }

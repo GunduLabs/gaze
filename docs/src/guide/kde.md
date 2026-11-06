@@ -383,7 +383,7 @@ face unlock back on. Use `enable --force` to undo it.
 
 - `gazed` running (`systemctl status gazed`)
 - At least one enrolled face: `gaze add-face default`
-- A working camera (test with `gaze auth`)
+- A working camera (test with `gaze test`)
 
 ## Cameras at the login greeter
 

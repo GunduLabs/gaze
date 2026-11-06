@@ -307,7 +307,7 @@ sudo systemctl enable --now gazed
 
 ```bash
 gaze add-face default
-gaze auth --verbose
+gaze test
 ```
 
 ## Development and source builds

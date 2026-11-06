@@ -8,7 +8,7 @@ Gaze Omarchy integration installed. From your unlocked desktop, without sudo:
 
     gaze-omarchy enable
     gaze add-face default
-    gaze auth
+    gaze test
     gaze-omarchy doctor
 
 After package or Omarchy updates, run gaze-omarchy doctor. Reload the plugin
