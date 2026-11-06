@@ -131,7 +131,7 @@ Then exercise clients against the daemon that owns the system bus:
 
 ```bash
 ./target/release/gaze list-faces
-./target/release/gaze auth --verbose
+./target/release/gaze test
 ./target/release/gaze-gui
 ```
 
@@ -193,8 +193,8 @@ The bug form collects all of this, but if you are adding to an existing issue, t
 - Distribution and version, desktop environment and version, session type (Wayland or X11), and the display manager if a greeter or lock screen is involved. Several bugs are specific to one GNOME Shell or Plasma release.
 - The complete output of `gaze doctor`, run as your desktop user from inside a graphical session rather than over SSH or under `sudo`, so it can see that user's PipeWire session and desktop integration. Include the checks that pass, not only the ones that fail.
 - Daemon logs covering the failure, from `journalctl -u gazed -b --no-pager | tail -300`. The lines before the failure usually explain it.
-- Which surfaces are affected, and which ones work. A face match that succeeds under `gaze auth` and fails at a greeter points somewhere very different from one that fails everywhere.
-- For camera, IR, or recognition problems: `gaze config --show`, `gaze auth --verbose`, and the camera's vendor and model IDs from `udevadm info -q property -n /dev/video0`. Those IDs are what tell us whether your hardware needs a dedicated IR-emitter profile.
+- Which surfaces are affected, and which ones work. A face match that succeeds under `gaze test` and fails at a greeter points somewhere very different from one that fails everywhere.
+- For camera, IR, or recognition problems: `gaze config --show`, `gaze test`, and the camera's vendor and model IDs from `udevadm info -q property -n /dev/video0`. Those IDs are what tell us whether your hardware needs a dedicated IR-emitter profile.
 - For KDE: `gaze-kde-pam status` and your PAM stacks. On Fedora the vendor copy lives under `/usr/lib/pam.d` and only appears in `/etc/pam.d` once something has customized it, so include both paths.
 - For Omarchy: `gaze-omarchy doctor`, `omarchy-shell lock status`, and `/etc/pam.d/gaze-omarchy-face`.
 - Whether you have run `gaze uninstall` at any point. It deliberately removes `/etc/gaze/config.toml`, so a reinstall afterwards gives you a default config, which looks exactly like a bug that lost your settings.

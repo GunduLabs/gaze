@@ -5,7 +5,7 @@
 
 Use this guide to set up face authentication for `sudo`, polkit, and shared PAM stacks.
 
-`gaze auth` is a useful first check for the daemon and camera, but it does not
+`gaze test` is a useful first check for the daemon and camera, but it does not
 test the PAM stack itself.
 
 If you specifically want GNOME lock screen or GDM login behavior, use the [GNOME Extension guide](/guide/gnome).
@@ -296,7 +296,7 @@ installed.
 openSUSE's vendor `/usr/etc/sudoers` sets `Defaults targetpw`, so `sudo`
 authenticates the target user (root) rather than you. Root has no face
 enrollment, so the camera never starts and sudo asks for the root password even
-though `gaze auth` and `sudo -u "$USER" -v` work. `gaze doctor` reports this as
+though `gaze test` and `sudo -u "$USER" -v` work. `gaze doctor` reports this as
 **Sudo policy**. openSUSE ships a drop-in that exempts members of `wheel`:
 
 ```bash

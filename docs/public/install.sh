@@ -1414,7 +1414,7 @@ if [ -n "$PROBLEMS" ]; then
 fi
 next_step "gaze config" "configure your camera and security settings"
 next_step "gaze add-face <name>" "enroll your face"
-next_step "gaze auth" "test it in the terminal"
+next_step "gaze test" "test it in the terminal"
 if want_gnome_extension_package && [ "${OSTREE_PENDING:-0}" -eq 0 ]; then
     next_step "Reboot" "GNOME Shell and GDM only pick up the new extension at startup"
 elif want_cinnamon_extension_package; then

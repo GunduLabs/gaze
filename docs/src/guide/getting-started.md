@@ -50,14 +50,10 @@ Tips while enrolling:
 ## Step 4: Test authentication
 
 ```bash
-gaze auth
+gaze test
 ```
 
-To see more detail about the authentication attempt, add `--verbose`:
-
-```bash
-gaze auth --verbose
-```
+The test shows detailed diagnostics and match metrics by default. It does not grant privileges or test PAM integration.
 
 ## Step 5: Open the GUI (optional)
 

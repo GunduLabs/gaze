@@ -179,7 +179,7 @@ pub(super) fn check_cameras(report: &mut Report, config: Option<&Config>) {
                     report.warning(
                         "RGB camera",
                         "a custom GStreamer source is configured and was not opened by this read-only check",
-                        "Run `gaze auth` to verify that the custom source produces frames.",
+                        "Run `gaze test` to verify that the custom source produces frames.",
                     );
                 }
             }
@@ -236,7 +236,7 @@ pub(super) fn check_cameras(report: &mut Report, config: Option<&Config>) {
         report.warning(
             "IR camera",
             "a custom GStreamer source is configured and was not opened by this read-only check",
-            "Run `gaze auth` to verify that the IR source produces frames.",
+            "Run `gaze test` to verify that the IR source produces frames.",
         );
     }
 

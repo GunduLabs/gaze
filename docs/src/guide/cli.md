@@ -19,7 +19,7 @@ needed. They still act on the account that invoked them, not on `root`, so
 `gaze add-face default` enrolls a face for you. To manage root's enrollment,
 pass `-u root`.
 
-`gaze auth`, `gaze list-faces`, `gaze doctor`, `gaze config --show`, and `gaze config get` are read-only and stay unprivileged. `gaze config set` asks for privileges like the wizard does.
+`gaze list-faces`, `gaze doctor`, `gaze config --show`, and `gaze config get` are read-only and stay unprivileged. `gaze test` also stays unprivileged when testing your own account. `gaze config set` asks for privileges like the wizard does.
 
 The `gazed` daemon enforces this independently of the CLI: a non-root DBus caller must pass a polkit check for `com.gundulabs.gaze.manage-faces` or `com.gundulabs.gaze.manage-config`. That is how the [GUI](/guide/gui) authorizes the same operations, and it means calling the DBus methods directly does not bypass the requirement. While one of these prompts is open, `gazed` refuses face authentication for the polkit dialog, so changing Gaze's faces or settings always takes a password.
 
@@ -27,7 +27,7 @@ The `gazed` daemon enforces this independently of the CLI: a non-root DBus calle
 
 ```bash
 gaze add-face default
-gaze auth --verbose
+gaze test
 gaze refine-face default
 gaze list-faces
 gaze doctor
@@ -61,7 +61,7 @@ To inspect enrollment for another user (subject to the normal DBus authorization
 gaze doctor --user alice
 ```
 
-The camera checks enumerate devices but do not capture frames. Use `gaze auth` when you need an end-to-end camera and recognition test.
+The camera checks enumerate devices but do not capture frames. Use `gaze test` when you need an end-to-end camera and recognition test.
 
 To measure model inference speed on the current hardware:
 
@@ -81,48 +81,48 @@ It writes a `gaze-report-<time>.txt` file to the current directory (or the tempo
 
 This asks the running `gazed` daemon to run each loaded model (detector, RGB/IR recognizers, and liveness if enabled) a few times on synthetic input and reports average, p95, and minimum latency plus FPS for each. It does not need a face in frame and does not touch the camera.
 
-## Authenticate
+## Test face verification
 
 ```bash
-gaze auth
+gaze test
 ```
+
+This runs real camera capture and face verification through the daemon. It does not grant privileges or test PAM integration. Configured duress detection can trigger a persistent lockout.
 
 Useful options:
 
 ```bash
-gaze auth -v          # show detailed authentication metrics (short form)
-gaze auth --verbose   # same
-gaze auth -s          # run silently and report the result via exit code (short form)
-gaze auth --silent    # same
+gaze test -s          # run silently and report the result via exit code (short form)
+gaze test --silent    # same
 ```
 
-`--verbose` and `--silent` are mutually exclusive.
+`gaze auth` remains a compatibility alias. `-v` / `--verbose` is still accepted but is redundant; detailed metrics are shown by default. Explicit `--verbose` and `--silent` remain mutually exclusive.
 
 Result meanings:
 
-- `✓ Authenticated as: <face> (XX.X%, XXXms)`: pass: matched face name, score percentage, and elapsed time
-- `✗ Authentication failed (XXXms)`: no face passed the current threshold or liveness check
+- `✓ Face verification passed: <face> (XX.X%, XXXms)`: pass: matched face name, score percentage, and elapsed time
+- `✗ Face verification failed (XXXms)`: no face passed the current threshold or liveness check
 
-With `--verbose`, a per-face table is printed before the result showing the per-spectrum (RGB and IR) similarity score, match percentage, and pass/fail for each enrolled face.
+By default, a per-face table is printed before the result showing the per-spectrum (RGB and IR) similarity score, match percentage, and pass/fail for each enrolled face.
 
 ### Exit codes
 
-`gaze auth` reports its outcome through the exit status, so it can be used directly in scripts and `if` conditions:
+`gaze test` reports its outcome through the exit status, so it can be used directly in scripts and `if` conditions:
 
 | Code | Meaning |
 | --- | --- |
-| `0` | A face matched and the user was authenticated |
-| `1` | Authentication failed, no faces are enrolled, or the daemon could not be reached |
+| `0` | A face matched |
+| `1` | Face verification failed, no faces are enrolled, or the daemon could not be reached |
 | `130` | Cancelled from the terminal UI |
 
 This applies with and without `--silent`. Earlier releases exited `0` on a failed authentication, so scripts that only checked the exit status need to be re-checked.
 
 ### Silent mode
 
-`gaze auth --silent` skips the terminal UI entirely and writes nothing to stdout or stderr; the exit code is the only result. Use it in PAM helpers, scripts, and other headless contexts where no TTY is attached:
+`gaze test --silent` skips the terminal UI entirely and writes nothing to stdout or stderr; the exit code is the only result. Use it in PAM helpers, scripts, and other headless contexts where no TTY is attached:
 
 ```bash
-if gaze auth --silent; then
+if gaze test --silent; then
   echo "welcome back"
 fi
 ```
@@ -130,7 +130,7 @@ fi
 Because silent mode is non-interactive, it cannot be cancelled from the terminal UI and it does not start a polkit agent, so authenticating another user with `--user` fails instead of prompting. Silent mode has no timeout of its own, wrap it in `timeout(1)` if the caller needs a deadline:
 
 ```bash
-timeout 15 gaze auth --silent
+timeout 15 gaze test --silent
 ```
 
 ## Enroll a new face
@@ -302,7 +302,7 @@ gaze add-face work -u alice
 gaze doctor
 systemctl status gazed
 journalctl -u gazed -n 100 --no-pager
-gaze auth --verbose
+gaze test
 ```
 
 If you need help diagnosing failures, see the [troubleshooting guide](/guide/troubleshooting).
