@@ -229,6 +229,39 @@ presents both a color and an IR node under the same id. Prefer it over a raw
 `/dev/video*` path, which silently points at the wrong device if the cameras
 get renumbered.
 
+### Ordered RGB fallback
+
+`rgb` also accepts an ordered list. For example, prefer a dock's USB webcam,
+then use the built-in camera when the webcam is unplugged:
+
+```toml
+[cameras]
+rgb = ["usb:046d:081b", "primary"]
+```
+
+Gaze tries each non-empty source in order until one opens, for authentication,
+enrollment, and the GUI preview. A disconnected, busy, or otherwise unopenable
+source is skipped. If none opens, capture fails; Gaze does not add an implicit
+camera outside your list. The list is retried on each new capture, so docking
+and undocking do not require editing the config or restarting `gazed`.
+
+Fallback is only for opening the camera: dark frames, no face, a non-match, or a
+liveness failure do not switch to another source. Existing single-string values
+keep their behavior. An empty list (like `rgb = ""`) disables RGB; omitting the
+key still defaults to `"primary"`.
+
+Set the list in the config file or with
+`gaze config set cameras.rgb '["usb:046d:081b", "primary"]'`. The CLI wizard and
+GUI settings preserve an existing list when changing unrelated settings;
+selecting a different RGB camera replaces it with a single source. With
+`parallel_capture = "auto"`, RGB and IR only run concurrently if every RGB
+candidate is proven independent of the IR camera.
+
+For lid-closed use, also set `abort_if_lid_closed = false` in `[auth]`; camera
+fallback does not override that authentication policy. `primary` still means
+the first color node, not necessarily the built-in camera; pin the fallback
+explicitly if you need a particular device.
+
 ### Dark-frame rejection
 
 Gaze rejects frames that are too dark before running face detection:

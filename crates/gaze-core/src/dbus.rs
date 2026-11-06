@@ -3,8 +3,8 @@
 
 #![allow(unreachable_patterns)]
 use crate::config::{
-    AuthConfig, CameraConfig, Config, EnrollmentConfig, InferenceConfig, LivenessConfig,
-    SecurityLevel,
+    AuthConfig, CameraConfig, CameraSources, Config, EnrollmentConfig, InferenceConfig,
+    LivenessConfig, SecurityLevel,
 };
 use serde::{Deserialize, Serialize};
 use zbus::proxy;
@@ -191,7 +191,12 @@ struct DbusCameraConfig {
 impl From<CameraConfig> for DbusCameraConfig {
     fn from(cameras: CameraConfig) -> Self {
         Self {
-            rgb: cameras.rgb,
+            // Preserve the stable string field on the wire. Lists use TOML array
+            // syntax; ordinary source strings are unchanged.
+            rgb: match cameras.rgb {
+                CameraSources::Single(source) => source,
+                CameraSources::Ordered(sources) => toml_edit::Array::from_iter(sources).to_string(),
+            },
             ir: cameras.ir,
             emitter_enabled: cameras.emitter_enabled,
             dark_luma_threshold: cameras.dark_luma_threshold,
@@ -202,8 +207,15 @@ impl From<CameraConfig> for DbusCameraConfig {
 
 impl From<DbusCameraConfig> for CameraConfig {
     fn from(cameras: DbusCameraConfig) -> Self {
+        let rgb = if cameras.rgb.trim_start().starts_with('[') {
+            toml_edit::de::from_str::<CameraConfig>(&format!("rgb = {}", cameras.rgb))
+                .map(|config| config.rgb)
+                .unwrap_or_else(|_| cameras.rgb.into())
+        } else {
+            cameras.rgb.into()
+        };
         Self {
-            rgb: cameras.rgb,
+            rgb,
             ir: cameras.ir,
             ir_frame_width: None,
             ir_frame_height: None,
@@ -1430,6 +1442,24 @@ mod tests {
             .expect("no error")
             .expect("current layout is readable");
         assert_eq!(decoded.cameras.ir_frame_size(), None);
+    }
+
+    #[test]
+    fn rgb_fallback_lists_round_trip_without_changing_the_config_wire_signature() {
+        for rgb in [
+            CameraSources::from("primary"),
+            CameraSources::Ordered(vec!["usb:046d:081b".into(), "primary".into()]),
+            CameraSources::Ordered(vec!["source with \"quotes\" and \\slashes".into()]),
+            CameraSources::Ordered(vec![]),
+        ] {
+            let mut config = Config::default();
+            config.cameras.rgb = rgb.clone();
+            let wire = DbusConfig::from(config);
+            let raw = OwnedVariant::try_from(Variant::from(wire)).unwrap();
+            assert_eq!(raw.value_signature(), DbusConfig::SIGNATURE);
+            let decoded: Config = DbusConfig::try_from(raw).unwrap().into();
+            assert_eq!(decoded.cameras.rgb, rgb);
+        }
     }
 
     #[test]

@@ -409,10 +409,61 @@ impl LivenessConfig {
     }
 }
 
+/// A single camera source, or an ordered list tried until one opens.
+/// Keep the input shape when saving so existing string configurations stay unchanged.
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum CameraSources {
+    Single(String),
+    Ordered(Vec<String>),
+}
+
+impl CameraSources {
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        let sources = match self {
+            Self::Single(source) => std::slice::from_ref(source),
+            Self::Ordered(sources) => sources.as_slice(),
+        };
+        sources
+            .iter()
+            .map(|source| source.trim())
+            .filter(|source| !source.is_empty())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.iter().next().is_none()
+    }
+
+    pub fn first(&self) -> &str {
+        self.iter().next().unwrap_or_default()
+    }
+}
+
+impl From<String> for CameraSources {
+    fn from(source: String) -> Self {
+        Self::Single(source)
+    }
+}
+
+impl From<&str> for CameraSources {
+    fn from(source: &str) -> Self {
+        Self::Single(source.to_string())
+    }
+}
+
+impl std::fmt::Display for CameraSources {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Single(source) => source.fmt(f),
+            Self::Ordered(sources) => write!(f, "{sources:?}"),
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct CameraConfig {
     #[serde(default = "default_rgb_device")]
-    pub rgb: String,
+    pub rgb: CameraSources,
     #[serde(default)]
     pub ir: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -429,8 +480,8 @@ pub struct CameraConfig {
     pub auto_rotate: bool,
 }
 
-fn default_rgb_device() -> String {
-    DEFAULT_RGB_CAMERA.to_string()
+fn default_rgb_device() -> CameraSources {
+    DEFAULT_RGB_CAMERA.into()
 }
 
 fn ir_frame_dimension_valid(dimension: u32) -> bool {
@@ -976,6 +1027,15 @@ impl Config {
             .ok_or_else(|| anyhow::anyhow!("unknown setting `{key}`"))?;
         let raw = raw.trim();
         let value = match current {
+            _ if key == "cameras.rgb" => {
+                if raw.starts_with('[') {
+                    let sources: CameraConfig = toml_edit::de::from_str(&format!("rgb = {raw}"))
+                        .map_err(|e| anyhow::anyhow!("invalid value for `{key}`: {e}"))?;
+                    toml_edit::ser::to_document(&sources)?["rgb"].clone()
+                } else {
+                    toml_edit::value(raw)
+                }
+            }
             toml_edit::Value::Boolean(_) => toml_edit::value(
                 raw.parse::<bool>()
                     .map_err(|_| anyhow::anyhow!("`{key}` takes true or false"))?,
@@ -1189,6 +1249,90 @@ fn merge_into_toml_table(target: &mut toml_edit::Table, desired: &toml_edit::Tab
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rgb_sources_accept_strings_and_ordered_lists_and_preserve_their_shape() {
+        for value in [
+            r#""primary""#,
+            r#"["usb:046d:081b", "primary"]"#,
+            r#"["/dev/video4"]"#,
+            "[]",
+            r#""""#,
+        ] {
+            let config: Config =
+                toml_edit::de::from_str(&format!("[cameras]\nrgb = {value}")).unwrap();
+            let saved = config.to_toml().unwrap();
+            let loaded: Config = toml_edit::de::from_str(&saved).unwrap();
+            assert_eq!(loaded.cameras.rgb, config.cameras.rgb);
+            assert_eq!(saved.contains("rgb = ["), value.starts_with('['));
+        }
+        let defaults: Config = toml_edit::de::from_str("[cameras]").unwrap();
+        assert_eq!(
+            defaults.cameras.rgb,
+            CameraSources::Single("primary".into())
+        );
+        for value in ["42", "true", r#"["primary", 42]"#] {
+            assert!(
+                toml_edit::de::from_str::<Config>(&format!("[cameras]\nrgb = {value}")).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn rgb_sources_trim_and_ignore_empty_entries() {
+        let sources =
+            CameraSources::Ordered(vec![" ".into(), " usb:046d:081b ".into(), "primary".into()]);
+        assert_eq!(
+            sources.iter().collect::<Vec<_>>(),
+            ["usb:046d:081b", "primary"]
+        );
+        assert!(!sources.is_empty());
+        assert!(CameraSources::Ordered(vec![" ".into()]).is_empty());
+        assert!(CameraSources::Ordered(vec![]).is_empty());
+        assert!(CameraSources::from(" ").is_empty());
+    }
+
+    #[test]
+    fn rgb_fallback_lists_can_be_set_and_replaced_from_the_cli() {
+        let config = Config::default()
+            .with_key("cameras.rgb", r#"["usb:046d:081b", "primary"]"#)
+            .unwrap();
+        assert_eq!(
+            config.cameras.rgb.iter().collect::<Vec<_>>(),
+            ["usb:046d:081b", "primary"]
+        );
+        let replaced = config.with_key("cameras.rgb", "primary").unwrap();
+        assert_eq!(replaced.cameras.rgb, CameraSources::from("primary"));
+        assert!(
+            config
+                .with_key("cameras.rgb", r#"["primary", 42]"#)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn saving_rgb_fallback_lists_preserves_comments() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[cameras]\n# prefer the dock\nrgb = \"primary\" # camera\n",
+        )
+        .unwrap();
+        let mut config = Config::load_from(path.to_str().unwrap()).unwrap();
+        config.cameras.rgb = CameraSources::Ordered(vec!["usb:046d:081b".into(), "primary".into()]);
+        config.save_to(path.to_str().unwrap()).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("# prefer the dock"));
+        assert!(saved.contains("# camera"));
+        assert_eq!(
+            Config::load_from(path.to_str().unwrap())
+                .unwrap()
+                .cameras
+                .rgb,
+            config.cameras.rgb
+        );
+    }
 
     #[test]
     fn config_keys_round_trip_through_get_and_set() {
@@ -1775,7 +1919,7 @@ mod tests {
         );
         assert_eq!(config.inference.execution_provider, "cpu");
         assert_eq!(config.inference.device, "cpu");
-        assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
+        assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA.into());
         assert_eq!(config.cameras.dark_luma_threshold, 20);
         assert_eq!(config.cameras.parallel_capture(), "never");
         assert!(config.cameras.auto_rotate);
@@ -1801,7 +1945,7 @@ mod tests {
             },
             security: SecurityLevel::high(),
             cameras: CameraConfig {
-                rgb: "primary".to_string(),
+                rgb: "primary".into(),
                 ir: "pipewiresrc target-object=some-ir-camera".to_string(),
                 emitter_enabled: true,
                 dark_luma_threshold: 55,
@@ -1853,7 +1997,7 @@ mod tests {
             loaded.security.recognizer(),
             SecurityLevel::high().recognizer()
         );
-        assert_eq!(loaded.cameras.rgb, "primary");
+        assert_eq!(loaded.cameras.rgb, "primary".into());
         assert_eq!(
             loaded.cameras.ir,
             "pipewiresrc target-object=some-ir-camera"
@@ -1978,7 +2122,7 @@ mod tests {
             config.security.detector(),
             SecurityLevel::maximum().detector()
         );
-        assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA);
+        assert_eq!(config.cameras.rgb, DEFAULT_RGB_CAMERA.into());
         assert_eq!(config.cameras.dark_luma_threshold, 20);
         assert_eq!(config.cameras.parallel_capture(), "never");
         assert!(config.auth.abort_if_ssh);

@@ -105,14 +105,14 @@ pub struct CameraFeed {
 }
 
 impl CameraFeed {
-    pub fn new(device: &str) -> anyhow::Result<Self> {
+    pub fn new(device: &gaze_core::config::CameraSources) -> anyhow::Result<Self> {
         let (tx, rx) = mpsc::sync_channel::<FrameData>(1);
-        let device = device.to_string();
+        let device = device.clone();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_clone = stop_flag.clone();
 
         let thread_handle = thread::spawn(move || {
-            let mut cam = match Camera::open(&device) {
+            let mut cam = match Camera::open_rgb(&device) {
                 Ok(c) => c,
                 Err(err) => {
                     error!(%err, "Camera open failed");

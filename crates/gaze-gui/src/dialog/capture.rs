@@ -3,7 +3,7 @@
 
 use crate::camera::{CameraFeed, build_camera_widget};
 use futures::StreamExt;
-use gaze_core::config::{CameraConfig, DEFAULT_RGB_CAMERA};
+use gaze_core::config::{CameraConfig, CameraSources, DEFAULT_RGB_CAMERA};
 use gaze_core::dbus::{EnrollPrompt, GazeProxy};
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -34,7 +34,7 @@ async fn wait_for_daemon_loss(proxy: &GazeProxy<'_>) {
 }
 
 pub struct CameraSetup {
-    pub device: String,
+    pub device: CameraSources,
     pub is_ir: bool,
 }
 
@@ -46,7 +46,7 @@ impl CameraSetup {
 
     pub fn fallback() -> Self {
         Self {
-            device: DEFAULT_RGB_CAMERA.to_string(),
+            device: DEFAULT_RGB_CAMERA.into(),
             is_ir: false,
         }
     }
@@ -569,14 +569,25 @@ mod tests {
     #[test]
     fn fallback_is_the_default_rgb_camera() {
         let setup = CameraSetup::fallback();
-        assert_eq!(setup.device, DEFAULT_RGB_CAMERA);
+        assert_eq!(setup.device, DEFAULT_RGB_CAMERA.into());
+        assert!(!setup.is_ir);
+    }
+
+    #[test]
+    fn from_config_preserves_rgb_fallbacks_for_the_preview() {
+        let cameras = CameraConfig {
+            rgb: CameraSources::Ordered(vec!["usb:046d:081b".into(), "primary".into()]),
+            ..CameraConfig::default()
+        };
+        let setup = CameraSetup::from_config(&cameras);
+        assert_eq!(setup.device, cameras.rgb);
         assert!(!setup.is_ir);
     }
 
     #[test]
     fn from_config_prefers_rgb_but_honours_ir_only_configs() {
         let rgb = CameraConfig {
-            rgb: "/dev/video0".to_string(),
+            rgb: "/dev/video0".into(),
             ..CameraConfig::default()
         };
         let (device, is_ir) = gaze_vision::camera::preferred_capture_source(&rgb);
@@ -584,7 +595,7 @@ mod tests {
         assert_eq!(CameraSetup::from_config(&rgb).is_ir, is_ir);
 
         let ir_only = CameraConfig {
-            rgb: String::new(),
+            rgb: "".into(),
             ir: "/dev/video2".to_string(),
             emitter_enabled: true,
             ..CameraConfig::default()

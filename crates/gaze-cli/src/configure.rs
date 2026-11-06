@@ -4,7 +4,7 @@
 use console::{Term, style};
 use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 use gaze_core::config::{
-    AuthConfig, Config, DEFAULT_SECURITY_THRESHOLD, HYBRID_POLICY_OPTIONS,
+    AuthConfig, CameraSources, Config, DEFAULT_SECURITY_THRESHOLD, HYBRID_POLICY_OPTIONS,
     INFERENCE_DEVICE_OPTIONS, INFERENCE_EXECUTION_PROVIDER_OPTIONS, MAX_ENROLLMENT_FACE_SIZE_RATIO,
     MAX_LIVENESS_MAX_SECONDS, MAX_LIVENESS_THRESHOLD, MAX_SECURITY_THRESHOLD,
     MIN_ENROLLMENT_FACE_SIZE_RATIO, MIN_LIVENESS_MAX_SECONDS, MIN_LIVENESS_THRESHOLD,
@@ -84,9 +84,20 @@ pub async fn run_config_wizard(
 
     let mut cameras = gaze_vision::camera::rgb_choices()
         .map_err(|e| anyhow::anyhow!("Could not list cameras: {e}"))?;
-    ensure_configured_source_listed(&mut cameras, &config.cameras.rgb);
+    ensure_configured_source_listed(&mut cameras, config.cameras.rgb.first());
+    let mut default_cam_idx =
+        gaze_vision::camera::source_index(&cameras, config.cameras.rgb.first());
+    let keep_fallback_idx = if matches!(config.cameras.rgb, CameraSources::Ordered(_)) {
+        default_cam_idx = cameras.len();
+        cameras.push((
+            format!("Keep ordered fallback: {}", config.cameras.rgb),
+            String::new(),
+        ));
+        Some(default_cam_idx)
+    } else {
+        None
+    };
     let cam_names: Vec<String> = cameras.iter().map(|(n, _)| n.clone()).collect();
-    let default_cam_idx = gaze_vision::camera::source_index(&cameras, &config.cameras.rgb);
 
     let selected_cam_idx = Select::with_theme(&theme)
         .with_prompt("RGB camera source")
@@ -94,7 +105,9 @@ pub async fn run_config_wizard(
         .default(default_cam_idx)
         .interact()?;
 
-    config.cameras.rgb = cameras[selected_cam_idx].1.clone();
+    if Some(selected_cam_idx) != keep_fallback_idx {
+        config.cameras.rgb = cameras[selected_cam_idx].1.clone().into();
+    }
 
     config.cameras.dark_luma_threshold = Input::<u8>::with_theme(&theme)
         .with_prompt("Darkness cutoff: reject frames below this mean brightness (0-255)")
@@ -120,7 +133,7 @@ pub async fn run_config_wizard(
             "{} No IR camera selected, so keeping the primary RGB camera",
             style("!").yellow().bold()
         ))?;
-        config.cameras.rgb = gaze_core::config::DEFAULT_RGB_CAMERA.to_string();
+        config.cameras.rgb = gaze_core::config::DEFAULT_RGB_CAMERA.into();
     }
 
     if config.cameras.ir.is_empty() {

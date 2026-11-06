@@ -656,7 +656,7 @@ mod tests {
         camera.unwrap();
         liveness.unwrap();
         let current = settings.read().await;
-        assert_eq!(current.cameras.rgb, "/dev/video8");
+        assert_eq!(current.cameras.rgb, "/dev/video8".into());
         assert_eq!(current.liveness.threshold, 0.95);
     }
 

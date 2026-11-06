@@ -35,6 +35,10 @@ level = "medium"
 # Set rgb = "" to authenticate with the IR camera alone. Leaving the key out
 # keeps "primary". Requires `ir` and IR templates (re-enroll after switching).
 rgb = "primary"
+# Or try RGB sources in order until one opens (e.g. docked USB, then built-in):
+# rgb = ["usb:046d:081b", "primary"]
+# An empty list disables RGB. Fallback only applies to camera-open failures.
+# For lid-closed auth, also set auth.abort_if_lid_closed = false.
 # Infrared (Windows Hello) camera. Set this to a direct /dev/video* node or the
 # camera's GStreamer source string (e.g. "pipewiresrc target-object=<pipewire-target>").
 # ir = "/dev/video2"
