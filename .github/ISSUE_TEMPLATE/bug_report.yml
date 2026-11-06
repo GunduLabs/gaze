@@ -80,7 +80,7 @@ body:
       label: Which surfaces are affected?
       description: Check every one you have actually tried. Which ones *work* is as diagnostic as which ones fail, because the same face match can succeed on the CLI and fail at a greeter, and that narrows things down fast.
       options:
-        - label: "`gaze auth` on the command line"
+        - label: "`gaze test` on the command line"
         - label: "`gaze add-face` / `gaze refine-face` enrollment"
         - label: "`gaze-gui` (the desktop app)"
         - label: "`sudo` or another terminal elevation"
@@ -184,7 +184,7 @@ body:
   - type: textarea
     id: auth-verbose
     attributes:
-      label: "`gaze auth --verbose` output"
+      label: "`gaze test` output"
       description: For recognition, scoring, liveness, or IR-vs-RGB problems. Shows the per-face, per-spectrum scores and the pass/fail for each.
       render: text
 

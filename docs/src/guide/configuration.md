@@ -413,7 +413,7 @@ Aborting face authentication when you type a password is not a key in this file.
 
 `abort_before_first_resume` refuses face authentication until the machine has suspended and woken at least once, so the first authentication of a boot always falls through to the password. On GNOME that password is what unlocks the login keyring; authenticating with your face instead leaves the keyring locked and GNOME asks for the password again a moment later. With this enabled you type the password once at the GDM login and then unlock with your face for the rest of the session.
 
-Gaze arms the gate from logind's `PrepareForSleep` signal, the same signal `resume_grace_ms` uses, so hibernation counts as well as suspend. The state lives in `gazed` and is not persisted: if the daemon restarts, the next authentication is blocked again until the next resume. It applies to every surface, including `gaze auth` and the GUI's test button, so a test right after boot will report a failure until you suspend once.
+Gaze arms the gate from logind's `PrepareForSleep` signal, the same signal `resume_grace_ms` uses, so hibernation counts as well as suspend. The state lives in `gazed` and is not persisted: if the daemon restarts, the next authentication is blocked again until the next resume. It applies to every surface, including `gaze test` and the GUI's test button, so a test right after boot will report a failure until you suspend once.
 
 `require_confirmation_lock_screen` and `require_confirmation_elevation` each add a manual intent check step after a successful face match, and can be toggled independently. `require_confirmation_lock_screen` covers the lock screen and login/greeter screens (e.g. GDM); `require_confirmation_elevation` covers elevated auth prompts (`sudo`, `su`, `doas`, `run0`, polkit, `pkexec`). Both PAM modules honor them.
 
@@ -463,7 +463,7 @@ Where nothing sets it, every attempt waits the full delay.
 | `all` | Every face authentication prompt waits, `sudo` and polkit prompts included. |
 | `screen_lock` (default) | Only screen lockers wait. `sudo`, `su`, `doas`, `run0`, polkit, `pkexec` and display-manager greeters start scanning immediately. |
 
-Neither scope delays `gaze auth` or the GUI's test button. Those call the daemon directly, with no PAM prompt and no locker to step away from, so they always start scanning at once. The `resume_grace_ms` wait still applies to them, because that one is about the camera and display settling after suspend.
+Neither scope delays `gaze test` or the GUI's test button. Those call the daemon directly, with no PAM prompt and no locker to step away from, so they always start scanning at once. The `resume_grace_ms` wait still applies to them, because that one is about the camera and display settling after suspend.
 
 The default `screen_lock` scope gives you the delay on your lock screen without a slow `sudo`:
 
@@ -669,7 +669,7 @@ When enabled, Gaze runs a local MiniFASNet-V2 anti-spoofing model on the detecte
 
 Alongside the model, Gaze watches how far your eyes travel between frames, measured against the distance between them so it does not depend on how close you sit. A run that has accumulated several frame pairs and never seen movement above that floor is treated as a still object and refused even when the model is confident. Moving normally (breathing, blinking, small head shifts) clears it; once any pair shows movement, holding still afterwards does not undo it. On IR cameras this movement check is the whole liveness test, since the anti-spoof model is trained on colour frames.
 
-`max_seconds` caps how long (in seconds of usable face frames) Gaze examines the camera before giving up and falling back to your password. It bounds the whole attempt, not just the liveness stage: an unrecognised face spends the same budget. Gaze calculates the frame budget dynamically using your camera's actual frame rate (e.g. 2.0 seconds corresponds to 60 frames on a 30fps webcam, or 120 frames on a 60fps camera). Frames only count while a usable face is in view, and the RGB and IR phases each get the full budget. Raise it if authentication gives up before you are ready; `gaze auth --verbose` reports when a run ends this way.
+`max_seconds` caps how long (in seconds of usable face frames) Gaze examines the camera before giving up and falling back to your password. It bounds the whole attempt, not just the liveness stage: an unrecognised face spends the same budget. Gaze calculates the frame budget dynamically using your camera's actual frame rate (e.g. 2.0 seconds corresponds to 60 frames on a 30fps webcam, or 120 frames on a 60fps camera). Frames only count while a usable face is in view, and the RGB and IR phases each get the full budget. Raise it if authentication gives up before you are ready; `gaze test` reports when a run ends this way.
 
 ### IR anti-spoof model
 
@@ -689,7 +689,7 @@ It fails closed. If the model cannot be downloaded, loaded, or run, the IR attem
 Notes:
 
 - These keys live only in `/etc/gaze/config.toml`. The GUI and `gaze config` leave them untouched; restart with `sudo systemctl restart gazed` after editing.
-- The model's training data is private and Gaze has no measured error rates for it on laptop IR sensors. `ir_threshold` defaults to 0.5, the model's even-odds point. Test with `gaze auth` before relying on it, and with `RUST_LOG=debug` to see the per-frame scores.
+- The model's training data is private and Gaze has no measured error rates for it on laptop IR sensors. `ir_threshold` defaults to 0.5, the model's even-odds point. Test with `gaze test` before relying on it, and with `RUST_LOG=debug` to see the per-frame scores.
 - Upstream notes weaker results against 3D masks and in strong light.
 
 ## Duress Signal
@@ -722,13 +722,13 @@ Limits to be aware of:
 
 - Close your eye before the camera sees you. Any matched frame with both eyes open unlocks as usual.
 - Another non-face login method, such as a fingerprint, also clears the lock.
-- The classifier works on RGB and IR frames, but it is not perfect. Test it with `gaze auth` before relying on it: a held wink should end in a lockout, and `gaze duress --clear` resets it. Running `gazed` with `RUST_LOG=debug` logs the per-eye scores.
+- The classifier works on RGB and IR frames, but it is not perfect. Test it with `gaze test` before relying on it: a held wink should end in a lockout, and `gaze duress --clear` resets it. Running `gazed` with `RUST_LOG=debug` logs the per-eye scores.
 
 ## Recommended tuning workflow
 
 1. Start with `[security] level = "medium"`
 2. Enroll one profile: `gaze add-face default`
-3. Test 5 to 10 times using `gaze auth --verbose`
+3. Test 5 to 10 times using `gaze test`
 4. If photo or screen spoofing is a concern, keep `[liveness] enabled = true`
 5. If false accepts are too high, switch to `high`
 6. If false rejects are too high, run `gaze refine-face default`

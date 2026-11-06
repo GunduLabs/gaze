@@ -76,7 +76,7 @@ Then rebuild and enroll:
 ```bash
 sudo nixos-rebuild switch
 gaze add-face default
-gaze auth --verbose
+gaze test
 ```
 
 The recognition models are downloaded by the daemon into `/var/cache/gaze` on

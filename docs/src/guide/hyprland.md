@@ -86,7 +86,7 @@ No `gazed` configuration changes are required. The DBus policy already permits u
 
 - `gazed` daemon running (`systemctl status gazed`)
 - At least one enrolled face: `gaze add-face default`
-- Working camera (test with `gaze auth`)
+- Working camera (test with `gaze test`)
 
 ## Disable
 

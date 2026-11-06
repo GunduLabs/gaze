@@ -171,7 +171,7 @@ sudo reboot
 gaze add-face default
 
 # Test authentication
-gaze auth
+gaze test
 
 # Or use the GUI
 gaze-gui
@@ -249,9 +249,8 @@ See the [configuration guide](https://gaze.gundulabs.com/guide/configuration) fo
 ```
 gaze add-face <name>         Enroll a new face
 gaze refine-face <name>      Add samples to an existing enrollment
-gaze auth                    Authenticate
-gaze auth --verbose          Authenticate with detailed metrics
-gaze auth --silent           Authenticate silently (exit code only)
+gaze test                    Test face verification with detailed metrics
+gaze test --silent           Test silently (exit code only)
 gaze list-faces              List enrolled faces
 gaze rename-face <old> <new> Rename a face
 gaze remove-face <name>      Remove a face

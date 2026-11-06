@@ -23,7 +23,7 @@ Install manually on Arch with:
 yay -S --needed gaze-bin gaze-gui-bin gaze-omarchy-bin
 gaze config
 gaze add-face default
-gaze auth
+gaze test
 gaze-omarchy enable
 gaze-omarchy doctor
 ```
