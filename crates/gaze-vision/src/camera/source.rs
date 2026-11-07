@@ -528,7 +528,7 @@ pub(super) fn libcamera_camera_missing(detail: &str) -> bool {
 pub(super) fn libcamera_missing_hint(detail: &str) -> Option<&'static str> {
     libcamera_camera_missing(detail).then_some(
         ". libcamera does not list a camera while another program is using it, so close other \
-         camera apps or check that the camera is connected",
+         camera apps, check that the camera is connected, or pick a name from `cam --list`",
     )
 }
 
