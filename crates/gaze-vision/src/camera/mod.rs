@@ -434,6 +434,21 @@ impl Camera {
         frame_size: Option<(u32, u32)>,
     ) -> anyhow::Result<Self> {
         gstreamer::init()?;
+        // A `libcamera:<name>` source names a camera only libcamera can drive (Intel IPU6/IPU7
+        // MIPI sensors). The daemon runs libcamera itself, exactly as the `primary` fallback
+        // does, so no user-session PipeWire is involved and no injected frames can reach it.
+        if let Some(name) = parse_libcamera_spec(camera_source) {
+            let src_element = libcamera_source_element(name);
+            info!("Opening {camera_source:?} through {src_element}");
+            return Self::open_with_frame_size_fallback(camera_source, frame_size, |size| {
+                Self::open_source_element(&src_element, camera_source, false, None, size)
+            })
+            .map_err(|err| {
+                let detail = format!("{err:#}");
+                let hint = libcamera_negotiation_hint(&detail).unwrap_or_default();
+                anyhow::anyhow!("libcamera capture of {camera_source:?} failed: {detail}{hint}")
+            });
+        }
         let Some(node) = resolve_privileged_node(camera_source, want_color) else {
             let err = if camera_disconnected(camera_source, want_color) {
                 anyhow::anyhow!("camera {camera_source:?} is not connected")

@@ -219,6 +219,14 @@ pub(super) fn classify_source(source: &str, want_color: bool) -> anyhow::Result<
         }
         return Ok(SourceElement::Element(format!("v4l2src device={source}")));
     }
+    if source.starts_with(LIBCAMERA_SOURCE_PREFIX) {
+        let Some(name) = parse_libcamera_spec(source) else {
+            anyhow::bail!(
+                "invalid libcamera camera spec {source:?}; expected libcamera:<camera name>"
+            );
+        };
+        return Ok(SourceElement::Element(libcamera_source_element(name)));
+    }
     Ok(SourceElement::Element(source.to_string()))
 }
 
@@ -516,6 +524,39 @@ pub(super) fn libcamera_source_element(camera_name: &str) -> String {
     format!("libcamerasrc camera-name=\"{escaped}\"")
 }
 
+/// Prefix that names a libcamera camera directly, e.g. `libcamera:\_SB_.PC00.LNK0` for an Intel
+/// IPU6/IPU7 MIPI sensor whose `/dev/video*` nodes are raw capture nodes only libcamera can drive.
+pub const LIBCAMERA_SOURCE_PREFIX: &str = "libcamera:";
+
+/// The camera name in a `libcamera:<name>` spec, if `source` is one.
+pub fn parse_libcamera_spec(source: &str) -> Option<&str> {
+    source
+        .trim()
+        .strip_prefix(LIBCAMERA_SOURCE_PREFIX)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+}
+
+/// Names of the cameras libcamera currently exposes through `libcamerasrc`.
+pub fn libcamera_camera_names() -> Vec<String> {
+    if gstreamer::init().is_err() {
+        return Vec::new();
+    }
+    // Probe the provider directly: in a session with PipeWire, a DeviceMonitor hides
+    // libcameraprovider behind pipewiredeviceprovider and reports only pipewiresrc devices.
+    let Some(provider) = gstreamer::DeviceProviderFactory::by_name("libcameraprovider") else {
+        return Vec::new();
+    };
+    provider
+        .devices()
+        .iter()
+        .filter_map(|device| {
+            let element = device.create_element(None).ok()?;
+            element.property::<Option<String>>("camera-name")
+        })
+        .collect()
+}
+
 pub(super) const V4L2_BY_PATH_DIR: &str = "/dev/v4l/by-path";
 
 /// PipeWire names a V4L2 camera `v4l2_input.<udev ID_PATH>` with `:` rewritten as `_`, and udev
@@ -572,6 +613,9 @@ pub(super) fn pipewire_target_nodes(target: &str) -> Option<Vec<String>> {
 
 pub fn camera_disconnected(source: &str, want_color: bool) -> bool {
     let source = source.trim();
+    if let Some(name) = parse_libcamera_spec(source) {
+        return !libcamera_camera_names().iter().any(|camera| camera == name);
+    }
     if let V4l2Fallback::SameNode(target) = v4l2_fallback_for(source) {
         return pipewire_target_nodes(&target).is_some_and(|nodes| nodes.is_empty());
     }
@@ -695,6 +739,26 @@ mod tests {
         );
         assert_eq!(select_physical_node(nodes(), |_| false), None);
         assert_eq!(select_physical_node(Vec::new(), |_| true), None);
+    }
+
+    #[test]
+    fn libcamera_specs_name_a_camera() {
+        assert_eq!(
+            parse_libcamera_spec("libcamera:\\_SB_.PC00.LNK0"),
+            Some("\\_SB_.PC00.LNK0")
+        );
+        assert_eq!(parse_libcamera_spec("  libcamera: cam1 "), Some("cam1"));
+        assert_eq!(parse_libcamera_spec("libcamera:"), None);
+        assert_eq!(parse_libcamera_spec("/dev/video0"), None);
+    }
+
+    #[test]
+    fn libcamera_specs_classify_as_libcamerasrc() {
+        assert_eq!(
+            classify_source("libcamera:\\_SB_.PC00.LNK0", false).unwrap(),
+            SourceElement::Element("libcamerasrc camera-name=\"\\\\_SB_.PC00.LNK0\"".into())
+        );
+        assert!(classify_source("libcamera:", true).is_err());
     }
 
     #[test]
