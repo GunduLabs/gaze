@@ -669,6 +669,11 @@ impl Camera {
 
         appsink.set_drop(true);
         appsink.set_max_buffers(1);
+        // libcamerasrc timestamps do not follow the pipeline clock (seen on Intel IPU6), so a
+        // synchronising sink stalls after the first frame. Capture wants the newest frame now.
+        if src_element.trim_start().starts_with("libcamerasrc") {
+            appsink.set_sync(false);
+        }
 
         Self::start_pipeline(&pipeline, camera_source)?;
 
