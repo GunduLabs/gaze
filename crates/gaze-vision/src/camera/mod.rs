@@ -437,8 +437,8 @@ impl Camera {
         // A `libcamera:<name>` source names a camera only libcamera can drive (Intel IPU6/IPU7
         // MIPI sensors). The daemon runs libcamera itself, exactly as the `primary` fallback
         // does, so no user-session PipeWire is involved and no injected frames can reach it.
-        if let Some(name) = parse_libcamera_spec(camera_source) {
-            let src_element = libcamera_source_element(name);
+        if let Some(name) = libcamera_camera_for_source(camera_source) {
+            let src_element = libcamera_source_element(&name);
             info!("Opening {camera_source:?} through {src_element}");
             return Self::open_with_frame_size_fallback(camera_source, frame_size, |size| {
                 Self::open_source_element(&src_element, camera_source, false, None, size)
