@@ -109,7 +109,7 @@ fn current_pipewire_uid() -> Option<u32> {
 /// so a device held elsewhere fails during negotiation rather than at open.
 fn device_is_busy(detail: &str) -> bool {
     let detail = detail.to_ascii_lowercase();
-    detail.contains("busy") || detail.contains("ebusy")
+    detail.contains("busy") || detail.contains("ebusy") || detail.contains("already in use")
 }
 
 fn retry_while_busy<T>(
@@ -439,15 +439,21 @@ impl Camera {
         // does, so no user-session PipeWire is involved and no injected frames can reach it.
         if let Some(name) = libcamera_camera_for_source(camera_source) {
             let src_element = libcamera_source_element(&name);
-            info!("Opening {camera_source:?} through {src_element}");
             return Self::open_with_frame_size_fallback(camera_source, frame_size, |size| {
-                Self::open_source_element(&src_element, camera_source, false, None, size)
+                retry_while_busy(&name, PRIVILEGED_BUSY_RETRY_DELAY, || {
+                    Self::open_source_element(&src_element, camera_source, false, None, size)
+                })
             })
             .map_err(|err| {
                 let detail = format!("{err:#}");
                 let hint = libcamera_negotiation_hint(&detail).unwrap_or_default();
                 anyhow::anyhow!("libcamera capture of {camera_source:?} failed: {detail}{hint}")
             });
+        }
+        if let Some(target) = pipewire_libcamera_target(camera_source) {
+            anyhow::bail!(
+                "camera {camera_source:?} is not connected: no libcamera camera matches {target}"
+            );
         }
         let Some(node) = resolve_privileged_node(camera_source, want_color) else {
             let err = if camera_disconnected(camera_source, want_color) {
@@ -1045,6 +1051,9 @@ mod tests {
         assert!(device_is_busy(
             "The camera is already in use by another program (primary): \
              Device '/dev/video0' is busy"
+        ));
+        assert!(device_is_busy(
+            "Camera '\\_SB_.LNK1' is already in use.: libcamera::Camera::acquire() failed"
         ));
         assert!(!device_is_busy("No such file or directory"));
     }
