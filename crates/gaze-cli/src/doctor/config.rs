@@ -193,13 +193,20 @@ pub(super) fn config_findings(config: &Config) -> Vec<Check> {
             if index.is_empty() || !index.chars().all(|c| c.is_ascii_digit()) {
                 error(
                     format!("invalid RGB camera node {rgb:?}"),
-                    "Use /dev/video<number>, usb:VVVV:PPPP, \"primary\", or a GStreamer source.",
+                    "Use /dev/video<number>, usb:VVVV:PPPP, libcamera:<name>, \"primary\", or a GStreamer source.",
                 );
             }
         } else if rgb.starts_with("usb:") && gaze_vision::camera::parse_usb_spec(rgb).is_none() {
             error(
                 format!("invalid RGB USB spec {rgb:?}"),
                 "Use usb:VVVV:PPPP with hex VID:PID, for example usb:046d:085e.",
+            );
+        } else if rgb.starts_with("libcamera:")
+            && gaze_vision::camera::parse_libcamera_spec(rgb).is_none()
+        {
+            error(
+                format!("invalid RGB libcamera spec {rgb:?}"),
+                "Use libcamera:<camera name>, with a name from `cam --list`.",
             );
         }
     }

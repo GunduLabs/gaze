@@ -109,20 +109,27 @@ fn current_pipewire_uid() -> Option<u32> {
 /// so a device held elsewhere fails during negotiation rather than at open.
 fn device_is_busy(detail: &str) -> bool {
     let detail = detail.to_ascii_lowercase();
-    detail.contains("busy") || detail.contains("ebusy")
+    detail.contains("busy") || detail.contains("ebusy") || detail.contains("already in use")
 }
 
 fn retry_while_busy<T>(
     node: &str,
     delay: std::time::Duration,
+    open: impl FnMut() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    retry_while(node, delay, device_is_busy, open)
+}
+
+fn retry_while<T>(
+    node: &str,
+    delay: std::time::Duration,
+    retryable: impl Fn(&str) -> bool,
     mut open: impl FnMut() -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
     let mut attempt = 1;
     loop {
         match open() {
-            Err(err)
-                if attempt < PRIVILEGED_BUSY_ATTEMPTS && device_is_busy(&format!("{err:#}")) =>
-            {
+            Err(err) if attempt < PRIVILEGED_BUSY_ATTEMPTS && retryable(&format!("{err:#}")) => {
                 warn!(
                     attempt,
                     ?delay,
@@ -417,7 +424,10 @@ impl Camera {
         mut open: impl FnMut(Option<(u32, u32)>) -> anyhow::Result<Self>,
     ) -> anyhow::Result<Self> {
         match (open(frame_size), frame_size) {
-            (Err(err), Some((width, height))) if !device_is_busy(&format!("{err:#}")) => {
+            (Err(err), Some((width, height)))
+                if !device_is_busy(&format!("{err:#}"))
+                    && !libcamera_camera_missing(&format!("{err:#}")) =>
+            {
                 warn!(
                     "IR frame size {width}x{height} failed for {camera_source} ({err:#}); \
                      falling back to auto-negotiation"
@@ -434,6 +444,14 @@ impl Camera {
         frame_size: Option<(u32, u32)>,
     ) -> anyhow::Result<Self> {
         gstreamer::init()?;
+        // A `libcamera:<name>` source names a camera only libcamera can drive (Intel IPU6/IPU7
+        // MIPI sensors). The daemon runs libcamera itself, exactly as the `primary` fallback
+        // does, so no user-session PipeWire is involved and no injected frames can reach it.
+        if parse_libcamera_spec(camera_source).is_some()
+            || pipewire_libcamera_target(camera_source).is_some()
+        {
+            return Self::open_libcamera_source(camera_source, frame_size);
+        }
         let Some(node) = resolve_privileged_node(camera_source, want_color) else {
             let err = if camera_disconnected(camera_source, want_color) {
                 anyhow::anyhow!("camera {camera_source:?} is not connected")
@@ -461,6 +479,36 @@ impl Camera {
             })
         })
         .or_else(|err| Self::open_libcamera_fallback(camera_source, want_color, Some(&node), err))
+    }
+
+    fn open_libcamera_source(
+        camera_source: &str,
+        frame_size: Option<(u32, u32)>,
+    ) -> anyhow::Result<Self> {
+        let retryable = |detail: &str| device_is_busy(detail) || libcamera_camera_missing(detail);
+        Self::open_with_frame_size_fallback(camera_source, frame_size, |size| {
+            retry_while(
+                camera_source,
+                PRIVILEGED_BUSY_RETRY_DELAY,
+                retryable,
+                || {
+                    let name = libcamera_camera_for_source(camera_source).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Could not find a camera for {camera_source:?} in libcamera"
+                        )
+                    })?;
+                    let src_element = libcamera_source_element(&name);
+                    Self::open_source_element(&src_element, camera_source, false, None, size)
+                },
+            )
+        })
+        .map_err(|err| {
+            let detail = format!("{err:#}");
+            let hint = libcamera_negotiation_hint(&detail)
+                .or_else(|| libcamera_missing_hint(&detail))
+                .unwrap_or_default();
+            anyhow::anyhow!("libcamera capture of {camera_source:?} failed: {detail}{hint}")
+        })
     }
 
     fn open_libcamera_fallback(
@@ -654,6 +702,11 @@ impl Camera {
 
         appsink.set_drop(true);
         appsink.set_max_buffers(1);
+        // libcamerasrc timestamps do not follow the pipeline clock (seen on Intel IPU6), so a
+        // synchronising sink stalls after the first frame. Capture wants the newest frame now.
+        if src_element.trim_start().starts_with("libcamerasrc") {
+            appsink.set_sync(false);
+        }
 
         Self::start_pipeline(&pipeline, camera_source)?;
 
@@ -1025,6 +1078,9 @@ mod tests {
         assert!(device_is_busy(
             "The camera is already in use by another program (primary): \
              Device '/dev/video0' is busy"
+        ));
+        assert!(device_is_busy(
+            "Camera '\\_SB_.LNK1' is already in use.: libcamera::Camera::acquire() failed"
         ));
         assert!(!device_is_busy("No such file or directory"));
     }

@@ -194,7 +194,7 @@ pub(super) fn classify_source(source: &str, want_color: bool) -> anyhow::Result<
     let source = source.trim();
     if source.is_empty() {
         anyhow::bail!(
-            "camera source cannot be empty; use \"primary\", \"/dev/video<n>\", \"usb:VVVV:PPPP\", or a GStreamer source"
+            "camera source cannot be empty; use \"primary\", \"/dev/video<n>\", \"usb:VVVV:PPPP\", \"libcamera:<name>\", or a GStreamer source"
         );
     }
     if source == DEFAULT_RGB_CAMERA {
@@ -218,6 +218,14 @@ pub(super) fn classify_source(source: &str, want_color: bool) -> anyhow::Result<
             anyhow::bail!("invalid V4L2 camera node {source:?}; expected /dev/video<number>");
         }
         return Ok(SourceElement::Element(format!("v4l2src device={source}")));
+    }
+    if source.starts_with(LIBCAMERA_SOURCE_PREFIX) {
+        let Some(name) = parse_libcamera_spec(source) else {
+            anyhow::bail!(
+                "invalid libcamera camera spec {source:?}; expected libcamera:<camera name>"
+            );
+        };
+        return Ok(SourceElement::Element(libcamera_source_element(name)));
     }
     Ok(SourceElement::Element(source.to_string()))
 }
@@ -511,9 +519,113 @@ pub(super) fn libcamera_negotiation_hint(detail: &str) -> Option<&'static str> {
     )
 }
 
+pub(super) fn libcamera_camera_missing(detail: &str) -> bool {
+    detail
+        .to_ascii_lowercase()
+        .contains("could not find a camera")
+}
+
+pub(super) fn libcamera_missing_hint(detail: &str) -> Option<&'static str> {
+    libcamera_camera_missing(detail).then_some(
+        ". libcamera does not list a camera while another program is using it, so close other \
+         camera apps or check that the camera is connected",
+    )
+}
+
+fn libcamera_eventually_lists(mut lists: impl FnMut(&[String]) -> bool) -> bool {
+    for attempt in 1..=PRIVILEGED_BUSY_ATTEMPTS {
+        if lists(libcamera_camera_names().as_slice()) {
+            return true;
+        }
+        if attempt < PRIVILEGED_BUSY_ATTEMPTS {
+            std::thread::sleep(PRIVILEGED_BUSY_RETRY_DELAY);
+        }
+    }
+    false
+}
+
 pub(super) fn libcamera_source_element(camera_name: &str) -> String {
     let escaped = camera_name.replace('\\', "\\\\").replace('"', "\\\"");
     format!("libcamerasrc camera-name=\"{escaped}\"")
+}
+
+/// Prefix that names a libcamera camera directly, e.g. `libcamera:\_SB_.PC00.LNK0` for an Intel
+/// IPU6/IPU7 MIPI sensor whose `/dev/video*` nodes are raw capture nodes only libcamera can drive.
+pub(super) const LIBCAMERA_SOURCE_PREFIX: &str = "libcamera:";
+
+pub fn parse_libcamera_spec(source: &str) -> Option<&str> {
+    source
+        .trim()
+        .strip_prefix(LIBCAMERA_SOURCE_PREFIX)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+}
+
+pub(super) const PIPEWIRE_LIBCAMERA_NODE_PREFIX: &str = "libcamera_input.";
+
+pub(super) fn pipewire_libcamera_target(source: &str) -> Option<String> {
+    let V4l2Fallback::SameNode(target) = v4l2_fallback_for(source.trim()) else {
+        return None;
+    };
+    target
+        .starts_with(PIPEWIRE_LIBCAMERA_NODE_PREFIX)
+        .then_some(target)
+}
+
+/// Mirrors WirePlumber's Lua `gsub`, which turns each byte outside `[A-Za-z0-9_.-]` into `_`.
+pub(super) fn wireplumber_sanitize(name: &str) -> String {
+    name.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.') {
+                b as char
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+pub(super) fn libcamera_camera_for_target<'a>(
+    target: &str,
+    cameras: &'a [String],
+) -> Option<&'a str> {
+    let id = target.strip_prefix(PIPEWIRE_LIBCAMERA_NODE_PREFIX)?;
+    let find = |id: &str| {
+        cameras
+            .iter()
+            .find(|camera| wireplumber_sanitize(camera) == id)
+            .map(String::as_str)
+    };
+    find(id).or_else(|| without_dedup_suffix(id).and_then(find))
+}
+
+/// Accepts the `libcamera_input.<id>` target the GUI saves as well as `libcamera:<name>`. The
+/// daemon opens that camera with its own libcamera and never reads from the PipeWire session.
+pub(super) fn libcamera_camera_for_source(source: &str) -> Option<String> {
+    if let Some(name) = parse_libcamera_spec(source) {
+        return Some(name.to_string());
+    }
+    let target = pipewire_libcamera_target(source)?;
+    libcamera_camera_for_target(&target, &libcamera_camera_names()).map(str::to_string)
+}
+
+pub fn libcamera_camera_names() -> Vec<String> {
+    if gstreamer::init().is_err() {
+        return Vec::new();
+    }
+    // Probe the provider directly: in a session with PipeWire, a DeviceMonitor hides
+    // libcameraprovider behind pipewiredeviceprovider and reports only pipewiresrc devices.
+    let Some(provider) = gstreamer::DeviceProviderFactory::by_name("libcameraprovider") else {
+        return Vec::new();
+    };
+    provider
+        .devices()
+        .iter()
+        .filter_map(|device| {
+            let element = device.create_element(None).ok()?;
+            element.property::<Option<String>>("camera-name")
+        })
+        .collect()
 }
 
 pub(super) const V4L2_BY_PATH_DIR: &str = "/dev/v4l/by-path";
@@ -572,6 +684,14 @@ pub(super) fn pipewire_target_nodes(target: &str) -> Option<Vec<String>> {
 
 pub fn camera_disconnected(source: &str, want_color: bool) -> bool {
     let source = source.trim();
+    if let Some(name) = parse_libcamera_spec(source) {
+        return !libcamera_eventually_lists(|cameras| cameras.iter().any(|camera| camera == name));
+    }
+    if let Some(target) = pipewire_libcamera_target(source) {
+        return !libcamera_eventually_lists(|cameras| {
+            libcamera_camera_for_target(&target, cameras).is_some()
+        });
+    }
     if let V4l2Fallback::SameNode(target) = v4l2_fallback_for(source) {
         return pipewire_target_nodes(&target).is_some_and(|nodes| nodes.is_empty());
     }
@@ -695,6 +815,84 @@ mod tests {
         );
         assert_eq!(select_physical_node(nodes(), |_| false), None);
         assert_eq!(select_physical_node(Vec::new(), |_| true), None);
+    }
+
+    #[test]
+    fn libcamera_specs_name_a_camera() {
+        assert_eq!(
+            parse_libcamera_spec("libcamera:\\_SB_.PC00.LNK0"),
+            Some("\\_SB_.PC00.LNK0")
+        );
+        assert_eq!(parse_libcamera_spec("  libcamera: cam1 "), Some("cam1"));
+        assert_eq!(parse_libcamera_spec("libcamera:"), None);
+        assert_eq!(parse_libcamera_spec("/dev/video0"), None);
+    }
+
+    #[test]
+    fn pipewire_libcamera_targets_map_back_to_their_camera() {
+        let cameras = vec![
+            "\\_SB_.PC00.LNK0".to_string(),
+            "\\_SB_.PC00.LNK1".to_string(),
+        ];
+        assert_eq!(
+            libcamera_camera_for_target("libcamera_input.__SB_.PC00.LNK1", &cameras),
+            Some("\\_SB_.PC00.LNK1")
+        );
+        assert_eq!(
+            libcamera_camera_for_target("libcamera_input.nope", &cameras),
+            None
+        );
+        assert_eq!(
+            libcamera_camera_for_target("v4l2_input.pci-0000_00_14.0", &cameras),
+            None
+        );
+        assert_eq!(
+            libcamera_camera_for_target("libcamera_input.__SB_.PC00.LNK1.2", &cameras),
+            Some("\\_SB_.PC00.LNK1")
+        );
+        assert_eq!(
+            wireplumber_sanitize("/base/i2c@1:cam 0"),
+            "_base_i2c_1_cam_0"
+        );
+        assert_eq!(wireplumber_sanitize("caméra"), "cam__ra");
+    }
+
+    #[test]
+    fn a_camera_libcamera_stops_listing_counts_as_missing() {
+        let detail = "Could not find a camera named '\\_SB_.LNK1'.: \
+                      libcamera::CameraMananger::get() returned nullptr";
+        assert!(libcamera_camera_missing(detail));
+        assert!(libcamera_missing_hint(detail).is_some());
+        assert!(libcamera_camera_missing(
+            "Could not find a camera for \"pipewiresrc target-object=libcamera_input.x\" in libcamera"
+        ));
+        assert!(!libcamera_camera_missing(
+            "Internal data stream error: not-negotiated"
+        ));
+        assert!(libcamera_missing_hint("not-negotiated").is_none());
+    }
+
+    #[test]
+    fn only_pipewire_libcamera_targets_are_libcamera_targets() {
+        assert_eq!(
+            pipewire_libcamera_target("pipewiresrc target-object=libcamera_input.__SB_.LNK0"),
+            Some("libcamera_input.__SB_.LNK0".to_string())
+        );
+        assert_eq!(
+            pipewire_libcamera_target("pipewiresrc target-object=v4l2_input.pci-0000_00_14.0"),
+            None
+        );
+        assert_eq!(pipewire_libcamera_target("libcamera:\\_SB_.LNK0"), None);
+        assert_eq!(pipewire_libcamera_target("pipewiresrc"), None);
+    }
+
+    #[test]
+    fn libcamera_specs_classify_as_libcamerasrc() {
+        assert_eq!(
+            classify_source("libcamera:\\_SB_.PC00.LNK0", false).unwrap(),
+            SourceElement::Element("libcamerasrc camera-name=\"\\\\_SB_.PC00.LNK0\"".into())
+        );
+        assert!(classify_source("libcamera:", true).is_err());
     }
 
     #[test]

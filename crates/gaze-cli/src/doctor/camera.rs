@@ -159,6 +159,8 @@ pub(super) fn check_cameras(report: &mut Report, config: Option<&Config>) {
                         "RGB camera",
                         format!("resolves the color node for USB {vid:04x}:{pid:04x} at runtime"),
                     );
+                } else if let Some(name) = gaze_vision::camera::parse_libcamera_spec(rgb) {
+                    check_libcamera_camera(report, "RGB camera", "cameras.rgb", name);
                 } else if rgb.starts_with("/dev/video") {
                     match fs::metadata(rgb) {
                         Ok(metadata) if metadata.file_type().is_char_device() => {
@@ -232,6 +234,8 @@ pub(super) fn check_cameras(report: &mut Report, config: Option<&Config>) {
             "IR camera",
             format!("resolves the IR node for USB {vid:04x}:{pid:04x} at runtime"),
         );
+    } else if let Some(name) = gaze_vision::camera::parse_libcamera_spec(ir) {
+        check_libcamera_camera(report, "IR camera", "cameras.ir", name);
     } else {
         report.warning(
             "IR camera",
@@ -242,6 +246,24 @@ pub(super) fn check_cameras(report: &mut Report, config: Option<&Config>) {
 
     if config.cameras.emitter_enabled {
         check_i2c_emitter(report, ir);
+    }
+}
+
+fn check_libcamera_camera(report: &mut Report, check: &'static str, key: &str, name: &str) {
+    if gaze_vision::camera::libcamera_camera_names()
+        .iter()
+        .any(|camera| camera == name)
+    {
+        report.pass(check, format!("libcamera lists {name}"));
+    } else {
+        report.error(
+            check,
+            format!("libcamera does not list a camera named {name:?}"),
+            format!(
+                "Close other programs using the camera, install the libcamera GStreamer plugin, \
+                 or set {key} to a name from `cam --list`."
+            ),
+        );
     }
 }
 
