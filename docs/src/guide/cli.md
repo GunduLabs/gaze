@@ -201,8 +201,8 @@ for your own account. Root PAM callers clear it after a successful non-face logi
 
 A face login supplies no password, so the GNOME login keyring normally stays
 locked. `gaze keyring` stores the account password in a root-only TPM-protected
-record that `pam_gaze.so` replays to `pam_gnome_keyring` after a successful face
-and liveness check:
+record that `pam_gaze.so` replays to `pam_gnome_keyring` or `pam_oo7` after a
+successful face and liveness check:
 
 ```bash
 gaze keyring                    # enroll or replace the credential
