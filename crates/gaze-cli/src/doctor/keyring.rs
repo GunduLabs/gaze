@@ -111,8 +111,7 @@ pub(super) fn gdm_face_stack_passes_the_token(contents: &str) -> bool {
             .filter(|option| matches!(*option, "preauth" | "authfail" | "authsucc"))
             .eq([mode])
     };
-    let handoff = auth
-        .iter()
+    auth.iter()
         .enumerate()
         .any(|(index, &&(_, control, module, options))| {
             if module != "pam_gaze.so"
@@ -158,37 +157,52 @@ pub(super) fn gdm_face_stack_passes_the_token(contents: &str) -> bool {
                 return false;
             };
             // Permit rows may follow the landing point, but must not change the jump's length.
-            let keyring = after_gate
+            let hooks: Vec<_> = after_gate
                 .iter()
-                .find(|entry| !(entry.1 == "required" && entry.2 == "pam_permit.so"));
-            keyring.is_some_and(|entry| {
-                entry.1 == "optional"
-                    && entry.2 == "pam_gnome_keyring.so"
-                    && entry
-                        .3
-                        .split_ascii_whitespace()
-                        .any(|option| option == "use_authtok")
-                    && !entry
-                        .3
-                        .split_ascii_whitespace()
-                        .any(|option| option == "auto_start" || option.starts_with("only_if="))
-            })
-        });
-    handoff && starts_keyring_session(&entries)
+                .take_while(|entry| {
+                    (entry.1 == "required" && entry.2 == "pam_permit.so")
+                        || matches!(entry.2, "pam_gnome_keyring.so" | "pam_oo7.so")
+                })
+                .filter(|entry| entry.2 != "pam_permit.so")
+                .collect();
+            !hooks.is_empty()
+                && hooks.iter().all(|entry| {
+                    keyring_auth_hook(entry) && starts_keyring_session(&entries, entry.2)
+                })
+        })
 }
 
-pub(super) fn starts_keyring_session(entries: &[(&str, &str, &str, &str)]) -> bool {
-    entries.iter().any(|&(kind, control, module, options)| {
-        kind == "session"
-            && matches!(control, "optional" | "required")
-            && module == "pam_gnome_keyring.so"
-            && options
-                .split_ascii_whitespace()
-                .any(|option| option == "auto_start")
-            && !options
-                .split_ascii_whitespace()
-                .any(|option| option.starts_with("only_if="))
-    })
+/// pam_oo7 ignores its auth arguments and always reads PAM_AUTHTOK.
+fn keyring_auth_hook(&(_, control, module, options): &(&str, &str, &str, &str)) -> bool {
+    control == "optional"
+        && match module {
+            "pam_gnome_keyring.so" => {
+                options
+                    .split_ascii_whitespace()
+                    .any(|option| option == "use_authtok")
+                    && !options
+                        .split_ascii_whitespace()
+                        .any(|option| option == "auto_start" || option.starts_with("only_if="))
+            }
+            "pam_oo7.so" => true,
+            _ => false,
+        }
+}
+
+pub(super) fn starts_keyring_session(entries: &[(&str, &str, &str, &str)], module: &str) -> bool {
+    entries
+        .iter()
+        .any(|&(kind, control, session_module, options)| {
+            kind == "session"
+                && matches!(control, "optional" | "required")
+                && session_module == module
+                && options
+                    .split_ascii_whitespace()
+                    .any(|option| option == "auto_start")
+                && !options
+                    .split_ascii_whitespace()
+                    .any(|option| option.starts_with("only_if="))
+        })
 }
 
 /// greetd's keyring hook must follow Gaze without a face match jumping over it.
@@ -196,25 +210,20 @@ pub(super) fn starts_keyring_session(entries: &[(&str, &str, &str, &str)]) -> bo
 pub(super) fn greetd_stack_passes_the_token(contents: &str) -> bool {
     let entries: Vec<_> = contents.lines().filter_map(pam_entry).collect();
     let auth: Vec<_> = entries.iter().filter(|entry| entry.0 == "auth").collect();
-    let Some(keyring) = auth.iter().position(|entry| {
-        entry.1 == "optional"
-            && entry.2 == "pam_gnome_keyring.so"
-            && entry
-                .3
-                .split_ascii_whitespace()
-                .any(|option| option == "use_authtok")
-    }) else {
-        return false;
-    };
-    let before = &auth[..keyring];
-    let reaches_gaze = before
-        .iter()
-        .any(|entry| entry.2 == "pam_gaze.so" || matches!(entry.1, "substack" | "include"));
-    let skips_keyring = before.iter().enumerate().any(|(index, entry)| {
-        entry.2 == "pam_gaze.so"
-            && success_skip(entry.1).is_some_and(|skip| skip >= keyring - index)
-    });
-    reaches_gaze && !skips_keyring && starts_keyring_session(&entries)
+    auth.iter().enumerate().any(|(keyring, entry)| {
+        if !keyring_auth_hook(entry) || !starts_keyring_session(&entries, entry.2) {
+            return false;
+        }
+        let before = &auth[..keyring];
+        let reaches_gaze = before
+            .iter()
+            .any(|entry| entry.2 == "pam_gaze.so" || matches!(entry.1, "substack" | "include"));
+        let skips_keyring = before.iter().enumerate().any(|(index, entry)| {
+            entry.2 == "pam_gaze.so"
+                && success_skip(entry.1).is_some_and(|skip| skip >= keyring - index)
+        });
+        reaches_gaze && !skips_keyring
+    })
 }
 
 /// How many lines a successful match skips, with `usize::MAX` for the controls that end the
@@ -293,8 +302,9 @@ pub(super) fn check_keyring(report: &mut Report, username: &str, config: Option<
         report.error(
             "Keyring",
             format!("{GREETD_PAM_FILE} does not hand the keyring the authentication token"),
-            "Add `use_authtok` to the existing `auth optional pam_gnome_keyring.so` line and \
-             keep `session optional pam_gnome_keyring.so auto_start`. The keyring line must come \
+            "Add `use_authtok` to the existing `auth optional pam_gnome_keyring.so` line, or on \
+             oo7 systems keep `auth optional pam_oo7.so`, and keep the matching \
+             `session optional ... auto_start` line. The keyring line must come \
              after system-auth, and no pam_gaze.so line above it may end the auth section on a \
              match (`sufficient` or `[success=done ...]`). This file belongs to the distribution, \
              so Gaze does not edit it.",
@@ -317,9 +327,11 @@ pub(super) fn check_keyring(report: &mut Report, username: &str, config: Option<
                      or restore the packaged faillock preauth/authfail/authsucc gates. Gaze uses \
                      `[success=2 auth_err=ignore default=1]`, followed by \
                      `auth [default=die] pam_faillock.so authfail`, `auth requisite pam_deny.so`, \
-                     `auth required pam_faillock.so authsucc`, and \
-                     `auth optional pam_gnome_keyring.so use_authtok`, plus \
-                     `session optional pam_gnome_keyring.so auto_start`."
+                     `auth required pam_faillock.so authsucc`, then \
+                     `-auth optional pam_gnome_keyring.so use_authtok` and \
+                     `-auth optional pam_oo7.so`, plus \
+                     `-session optional pam_gnome_keyring.so auto_start` and \
+                     `-session optional pam_oo7.so auto_start`."
                 ),
             );
             return;
@@ -627,8 +639,54 @@ mod tests {
             let contents = std::fs::read_to_string(&path).expect(template);
             assert!(
                 gdm_face_stack_passes_the_token(&contents),
-                "{template} must hand the token to pam_gnome_keyring"
+                "{template} must hand the token to the keyring"
             );
+        }
+    }
+
+    #[test]
+    fn oo7_keyring_hooks_are_accepted_alongside_or_instead_of_gnome_keyring() {
+        let both = "auth [success=1 default=ignore] pam_gaze.so\n\
+            auth requisite pam_deny.so\n\
+            auth required pam_permit.so\n\
+            -auth optional pam_gnome_keyring.so use_authtok\n\
+            -auth optional pam_oo7.so\n\
+            auth include postlogin\n\
+            -session optional pam_gnome_keyring.so auto_start\n\
+            -session optional pam_oo7.so auto_start\n";
+        assert!(gdm_face_stack_passes_the_token(both));
+        let oo7_only = both
+            .replace("-auth optional pam_gnome_keyring.so use_authtok\n", "")
+            .replace("-session optional pam_gnome_keyring.so auto_start\n", "");
+        assert!(gdm_face_stack_passes_the_token(&oo7_only));
+        assert!(gdm_face_stack_passes_the_token(
+            &oo7_only.replace("pam_oo7.so\n", "pam_oo7.so use_authtok\n")
+        ));
+        for broken in [
+            both.replace("-session optional pam_oo7.so auto_start\n", ""),
+            both.replace("pam_oo7.so auto_start", "pam_oo7.so"),
+            both.replace("-auth optional pam_oo7.so", "-auth required pam_oo7.so"),
+            both.replace("use_authtok", ""),
+            oo7_only.replace("pam_oo7.so auto_start", "pam_gnome_keyring.so auto_start"),
+        ] {
+            assert!(!gdm_face_stack_passes_the_token(&broken), "{broken}");
+        }
+
+        let greetd = "auth substack system-auth\n\
+            -auth optional pam_oo7.so\n\
+            -session optional pam_oo7.so auto_start\n";
+        assert!(greetd_stack_passes_the_token(greetd));
+        assert!(greetd_stack_passes_the_token(&format!(
+            "auth optional pam_gnome_keyring.so\n{greetd}"
+        )));
+        for broken in [
+            greetd.replace("pam_oo7.so auto_start", "pam_gnome_keyring.so auto_start"),
+            format!(
+                "-auth optional pam_oo7.so\n{}",
+                greetd.replace("-auth optional pam_oo7.so\n", "")
+            ),
+        ] {
+            assert!(!greetd_stack_passes_the_token(&broken), "{broken}");
         }
     }
 

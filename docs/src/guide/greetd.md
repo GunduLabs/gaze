@@ -70,6 +70,11 @@ auth       optional    pam_gnome_keyring.so use_authtok
 Keep the existing `session optional pam_gnome_keyring.so auto_start` line. Gaze
 does not edit this file for you because it belongs to the distribution.
 
+If your distribution ships oo7 (Fedora 45 and later), the file has
+`auth optional pam_oo7.so` and `session optional pam_oo7.so auto_start` in
+place of the GNOME Keyring lines. Leave them as they are: `pam_oo7` always
+reads the token, so it needs no `use_authtok`.
+
 Unlike `gdm-face`, greetd uses one stack for both face and password logins, so
 there is no `pam_deny` gate. The keyring line only has to come after
 `system-auth`. A face match hands it the stored password, a typed password

@@ -30,15 +30,16 @@ faillock="pam_faillock.so dir=$test_dir/tallies deny=2 unlock_time=0 even_deny_r
 
 render_stack() {
     local template=$1 result=$2 token=$3 keyring=$4 drop_keyring=
-    if [ "$keyring" = removed ]; then drop_keyring='/pam_gnome_keyring\.so/d'; fi
+    if [ "$keyring" = removed ]; then drop_keyring='/pam_gnome_keyring\.so/d;/pam_oo7\.so/d'; fi
     # Keep the shipped controls and real faillock/deny modules; isolate tally files.
-    sed -n '/^auth/p' "$template" |
+    sed -n '/^-\{0,1\}auth/p' "$template" |
         sed -e "${drop_keyring:-/^\$/d}" \
             -e "s|pam_env.so|$test_dir/mock.so gaze 25 absent|" \
             -e '/[[:space:]]include[[:space:]]/d' \
             -e "s|pam_gaze.so|$test_dir/mock.so gaze $result $token|" \
             -e "s|pam_faillock.so|$faillock|" \
             -e "s|pam_gnome_keyring.so.*|$test_dir/mock.so keyring $test_dir/called $token|" \
+            -e "s|pam_oo7.so.*|$test_dir/mock.so keyring $test_dir/called-oo7 $token|" \
         > "$test_dir/gdm-face"
 }
 
@@ -46,14 +47,15 @@ printf '%s\n' "auth required $faillock preauth" \
     'auth required pam_permit.so' 'session required pam_permit.so' > "$test_dir/lockout-probe"
 
 for template in "$repo"/packaging/pam/gdm-face{,.arch,.deb,.suse}; do
-    auth_keyring=$(sed -n '/^auth.*pam_gnome_keyring\.so/p' "$template")
+    auth_keyring=$(sed -n '/^-\{0,1\}auth.*pam_gnome_keyring\.so/p' "$template")
     test "$auth_keyring" = "${auth_keyring//auto_start/}"
     case "$auth_keyring" in *use_authtok*) ;; *) exit 1 ;; esac
+    grep -q '^-\{0,1\}auth.*pam_oo7\.so' "$template"
     for result in 0 7 9 25; do
         for token in token absent; do
             for keyring in present removed; do
                 marker="$test_dir/called"
-                rm -f -- "$marker"
+                rm -f -- "$marker" "$test_dir/called-oo7"
                 rm -f -- "$test_dir/tallies/"*
                 render_stack "$template" "$result" "$token" "$keyring"
                 expected=failure
@@ -61,8 +63,10 @@ for template in "$repo"/packaging/pam/gdm-face{,.arch,.deb,.suse}; do
                 "$test_dir/driver" "$test_dir" "$expected"
                 if [ "$expected" = success ] && [ "$keyring" = present ]; then
                     test "$(< "$marker")" = valid
+                    test "$(< "$test_dir/called-oo7")" = valid
                 else
                     test ! -e "$marker"
+                    test ! -e "$test_dir/called-oo7"
                 fi
             done
         done

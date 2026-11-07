@@ -152,12 +152,16 @@ auth    required   pam_env.so
 auth    [success=1 default=ignore] pam_gaze.so
 auth    requisite  pam_deny.so
 auth    required   pam_permit.so
-auth    optional   pam_gnome_keyring.so use_authtok
+-auth   optional   pam_gnome_keyring.so use_authtok
+-auth   optional   pam_oo7.so
 
-session optional   pam_gnome_keyring.so auto_start
+-session optional  pam_gnome_keyring.so auto_start
+-session optional  pam_oo7.so auto_start
 ```
 
-The auth hook saves the token; the `session` hook starts and unlocks the keyring. This only works with `pam_gaze.so` in its default sequential mode; the
+The auth hook saves the token; the `session` hook starts and unlocks the keyring.
+Fedora 45 and later replace GNOME Keyring with oo7, so the stack carries both
+modules. The leading `-` skips whichever one is not installed. This only works with `pam_gaze.so` in its default sequential mode; the
 `simultaneous` option does not supply the token.
 
 Gaze sets `PAM_AUTHTOK` only after face and liveness authentication succeeds. If

@@ -11,7 +11,8 @@ auth        [default=die]                                pam_faillock.so authfai
 auth        requisite                                    pam_deny.so
 auth        required                                     pam_faillock.so authsucc
 auth        required                                     pam_permit.so
-auth        optional                                     pam_gnome_keyring.so use_authtok
+-auth       optional                                     pam_gnome_keyring.so use_authtok
+-auth       optional                                     pam_oo7.so
 
 account     required                                     pam_nologin.so
 account     include                                      common-account
@@ -22,4 +23,5 @@ password    required                                     pam_deny.so
 # session; without it GDM cannot complete a face-authenticated login.
 session     required                                     pam_loginuid.so
 session     include                                      common-session
-session     optional                                     pam_gnome_keyring.so auto_start
+-session    optional                                     pam_gnome_keyring.so auto_start
+-session    optional                                     pam_oo7.so auto_start
