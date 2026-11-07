@@ -28,7 +28,7 @@ got a detail wrong, [let us know](https://github.com/GunduLabs/gaze/issues).
 | Architecture | Root daemon + system DBus | Subprocess per auth (no daemon) | Daemon + DBus | Daemon + DBus |
 | Model reload per auth | No (warm daemon) | Yes (cold each time) | No (warm daemon) | No (warm daemon) |
 | Templates at rest | TPM-sealed, account-bound encryption by default; explicit opt-out | Plaintext encodings | SQLite store | Local store |
-| Keyring unlock after a face login | Yes, optional TPM-sealed credential replayed to `pam_gnome_keyring` | No | No | No |
+| Keyring unlock after a face login | Yes, optional TPM-sealed credential replayed to `pam_gnome_keyring` or `pam_oo7` | No | No | No |
 | Model integrity | SHA-256 verified on download | Bundled | SHA-256 pinned | Bundled |
 | Interfaces | CLI (with TUI) + GTK GUI + GNOME/Cinnamon extensions + KDE System Settings | CLI only | CLI + TUI enrollment | GUI (Tauri) + CLI |
 | Desktop integration | GNOME, Cinnamon and KDE Plasma lock screens, Hyprland/hyprlock, LightDM, console/TTY login | PAM only | PAM only | PAM + polkit |

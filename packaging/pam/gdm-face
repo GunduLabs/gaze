@@ -11,7 +11,8 @@ auth        [default=die]                                pam_faillock.so authfai
 auth        requisite                                    pam_deny.so
 auth        required                                     pam_faillock.so authsucc
 auth        required                                     pam_permit.so
-auth        optional                                     pam_gnome_keyring.so use_authtok
+-auth       optional                                     pam_gnome_keyring.so use_authtok
+-auth       optional                                     pam_oo7.so
 auth        include                                      postlogin
 
 account     required                                     pam_nologin.so
@@ -22,4 +23,5 @@ password    required                                     pam_deny.so
 session     required                                     pam_loginuid.so
 session     include                                      system-auth
 session     include                                      postlogin
-session     optional                                     pam_gnome_keyring.so auto_start
+-session    optional                                     pam_gnome_keyring.so auto_start
+-session    optional                                     pam_oo7.so auto_start
