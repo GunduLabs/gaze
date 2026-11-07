@@ -964,7 +964,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-cli"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -984,7 +984,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-core"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -1001,7 +1001,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-gui"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -1019,7 +1019,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-security"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1033,7 +1033,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-vision"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "gaze-core",
@@ -1050,7 +1050,7 @@ dependencies = [
 
 [[package]]
 name = "gazed"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2284,7 +2284,7 @@ dependencies = [
 
 [[package]]
 name = "pam-gaze"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -2299,7 +2299,7 @@ dependencies = [
 
 [[package]]
 name = "pam-gaze-grosshack"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "futures",
