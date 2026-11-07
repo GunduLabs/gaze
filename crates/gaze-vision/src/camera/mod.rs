@@ -115,14 +115,21 @@ fn device_is_busy(detail: &str) -> bool {
 fn retry_while_busy<T>(
     node: &str,
     delay: std::time::Duration,
+    open: impl FnMut() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    retry_while(node, delay, device_is_busy, open)
+}
+
+fn retry_while<T>(
+    node: &str,
+    delay: std::time::Duration,
+    retryable: impl Fn(&str) -> bool,
     mut open: impl FnMut() -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
     let mut attempt = 1;
     loop {
         match open() {
-            Err(err)
-                if attempt < PRIVILEGED_BUSY_ATTEMPTS && device_is_busy(&format!("{err:#}")) =>
-            {
+            Err(err) if attempt < PRIVILEGED_BUSY_ATTEMPTS && retryable(&format!("{err:#}")) => {
                 warn!(
                     attempt,
                     ?delay,
@@ -417,7 +424,10 @@ impl Camera {
         mut open: impl FnMut(Option<(u32, u32)>) -> anyhow::Result<Self>,
     ) -> anyhow::Result<Self> {
         match (open(frame_size), frame_size) {
-            (Err(err), Some((width, height))) if !device_is_busy(&format!("{err:#}")) => {
+            (Err(err), Some((width, height)))
+                if !device_is_busy(&format!("{err:#}"))
+                    && !libcamera_camera_missing(&format!("{err:#}")) =>
+            {
                 warn!(
                     "IR frame size {width}x{height} failed for {camera_source} ({err:#}); \
                      falling back to auto-negotiation"
@@ -437,23 +447,10 @@ impl Camera {
         // A `libcamera:<name>` source names a camera only libcamera can drive (Intel IPU6/IPU7
         // MIPI sensors). The daemon runs libcamera itself, exactly as the `primary` fallback
         // does, so no user-session PipeWire is involved and no injected frames can reach it.
-        if let Some(name) = libcamera_camera_for_source(camera_source) {
-            let src_element = libcamera_source_element(&name);
-            return Self::open_with_frame_size_fallback(camera_source, frame_size, |size| {
-                retry_while_busy(&name, PRIVILEGED_BUSY_RETRY_DELAY, || {
-                    Self::open_source_element(&src_element, camera_source, false, None, size)
-                })
-            })
-            .map_err(|err| {
-                let detail = format!("{err:#}");
-                let hint = libcamera_negotiation_hint(&detail).unwrap_or_default();
-                anyhow::anyhow!("libcamera capture of {camera_source:?} failed: {detail}{hint}")
-            });
-        }
-        if let Some(target) = pipewire_libcamera_target(camera_source) {
-            anyhow::bail!(
-                "camera {camera_source:?} is not connected: no libcamera camera matches {target}"
-            );
+        if parse_libcamera_spec(camera_source).is_some()
+            || pipewire_libcamera_target(camera_source).is_some()
+        {
+            return Self::open_libcamera_source(camera_source, frame_size);
         }
         let Some(node) = resolve_privileged_node(camera_source, want_color) else {
             let err = if camera_disconnected(camera_source, want_color) {
@@ -482,6 +479,36 @@ impl Camera {
             })
         })
         .or_else(|err| Self::open_libcamera_fallback(camera_source, want_color, Some(&node), err))
+    }
+
+    fn open_libcamera_source(
+        camera_source: &str,
+        frame_size: Option<(u32, u32)>,
+    ) -> anyhow::Result<Self> {
+        let retryable = |detail: &str| device_is_busy(detail) || libcamera_camera_missing(detail);
+        Self::open_with_frame_size_fallback(camera_source, frame_size, |size| {
+            retry_while(
+                camera_source,
+                PRIVILEGED_BUSY_RETRY_DELAY,
+                retryable,
+                || {
+                    let name = libcamera_camera_for_source(camera_source).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Could not find a camera for {camera_source:?} in libcamera"
+                        )
+                    })?;
+                    let src_element = libcamera_source_element(&name);
+                    Self::open_source_element(&src_element, camera_source, false, None, size)
+                },
+            )
+        })
+        .map_err(|err| {
+            let detail = format!("{err:#}");
+            let hint = libcamera_negotiation_hint(&detail)
+                .or_else(|| libcamera_missing_hint(&detail))
+                .unwrap_or_default();
+            anyhow::anyhow!("libcamera capture of {camera_source:?} failed: {detail}{hint}")
+        })
     }
 
     fn open_libcamera_fallback(

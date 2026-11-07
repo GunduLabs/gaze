@@ -260,7 +260,8 @@ fn check_libcamera_camera(report: &mut Report, check: &'static str, key: &str, n
             check,
             format!("libcamera does not list a camera named {name:?}"),
             format!(
-                "Install the libcamera GStreamer plugin, or set {key} to a name from `cam --list`."
+                "Close other programs using the camera, install the libcamera GStreamer plugin, \
+                 or set {key} to a name from `cam --list`."
             ),
         );
     }

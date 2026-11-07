@@ -519,6 +519,31 @@ pub(super) fn libcamera_negotiation_hint(detail: &str) -> Option<&'static str> {
     )
 }
 
+pub(super) fn libcamera_camera_missing(detail: &str) -> bool {
+    detail
+        .to_ascii_lowercase()
+        .contains("could not find a camera")
+}
+
+pub(super) fn libcamera_missing_hint(detail: &str) -> Option<&'static str> {
+    libcamera_camera_missing(detail).then_some(
+        ". libcamera does not list a camera while another program is using it, so close other \
+         camera apps or check that the camera is connected",
+    )
+}
+
+fn libcamera_eventually_lists(mut lists: impl FnMut(&[String]) -> bool) -> bool {
+    for attempt in 1..=PRIVILEGED_BUSY_ATTEMPTS {
+        if lists(libcamera_camera_names().as_slice()) {
+            return true;
+        }
+        if attempt < PRIVILEGED_BUSY_ATTEMPTS {
+            std::thread::sleep(PRIVILEGED_BUSY_RETRY_DELAY);
+        }
+    }
+    false
+}
+
 pub(super) fn libcamera_source_element(camera_name: &str) -> String {
     let escaped = camera_name.replace('\\', "\\\\").replace('"', "\\\"");
     format!("libcamerasrc camera-name=\"{escaped}\"")
@@ -660,10 +685,12 @@ pub(super) fn pipewire_target_nodes(target: &str) -> Option<Vec<String>> {
 pub fn camera_disconnected(source: &str, want_color: bool) -> bool {
     let source = source.trim();
     if let Some(name) = parse_libcamera_spec(source) {
-        return !libcamera_camera_names().iter().any(|camera| camera == name);
+        return !libcamera_eventually_lists(|cameras| cameras.iter().any(|camera| camera == name));
     }
     if let Some(target) = pipewire_libcamera_target(source) {
-        return libcamera_camera_for_target(&target, &libcamera_camera_names()).is_none();
+        return !libcamera_eventually_lists(|cameras| {
+            libcamera_camera_for_target(&target, cameras).is_some()
+        });
     }
     if let V4l2Fallback::SameNode(target) = v4l2_fallback_for(source) {
         return pipewire_target_nodes(&target).is_some_and(|nodes| nodes.is_empty());
@@ -828,6 +855,21 @@ mod tests {
             "_base_i2c_1_cam_0"
         );
         assert_eq!(wireplumber_sanitize("caméra"), "cam__ra");
+    }
+
+    #[test]
+    fn a_camera_libcamera_stops_listing_counts_as_missing() {
+        let detail = "Could not find a camera named '\\_SB_.LNK1'.: \
+                      libcamera::CameraMananger::get() returned nullptr";
+        assert!(libcamera_camera_missing(detail));
+        assert!(libcamera_missing_hint(detail).is_some());
+        assert!(libcamera_camera_missing(
+            "Could not find a camera for \"pipewiresrc target-object=libcamera_input.x\" in libcamera"
+        ));
+        assert!(!libcamera_camera_missing(
+            "Internal data stream error: not-negotiated"
+        ));
+        assert!(libcamera_missing_hint("not-negotiated").is_none());
     }
 
     #[test]
