@@ -492,13 +492,13 @@ fn acl_grants_named_write(node: &str) -> bool {
         return false;
     };
     let name = c"system.posix_acl_access".as_ptr();
-    let size = unsafe { libc::lgetxattr(path.as_ptr(), name, std::ptr::null_mut(), 0) };
+    let size = unsafe { libc::getxattr(path.as_ptr(), name, std::ptr::null_mut(), 0) };
     if size <= 4 {
         return false;
     }
     let mut buffer = vec![0u8; size as usize];
     let read = unsafe {
-        libc::lgetxattr(
+        libc::getxattr(
             path.as_ptr(),
             name,
             buffer.as_mut_ptr().cast(),
@@ -510,17 +510,24 @@ fn acl_grants_named_write(node: &str) -> bool {
 
 /// POSIX ACL xattr payload: a 4-byte header then 8-byte entries of tag, permissions, id.
 /// Write to a named `ACL_USER` (0x02) or `ACL_GROUP` (0x08) entry grants write beyond the
-/// owning user and group.
+/// owning user and group; named entries are limited by the `ACL_MASK` (0x10) entry.
 fn acl_xattr_grants_named_write(xattr: &[u8]) -> bool {
     const ACL_USER: u16 = 0x02;
     const ACL_GROUP: u16 = 0x08;
+    const ACL_MASK: u16 = 0x10;
     let Some(entries) = xattr.get(4..) else {
         return false;
     };
-    entries.as_chunks::<8>().0.iter().any(|entry| {
+    let entries = entries.as_chunks::<8>().0;
+    let mask = entries
+        .iter()
+        .find(|entry| u16::from_le_bytes([entry[0], entry[1]]) == ACL_MASK)
+        .map(|entry| u16::from_le_bytes([entry[2], entry[3]]));
+    entries.iter().any(|entry| {
         let tag = u16::from_le_bytes([entry[0], entry[1]]);
         let perm = u16::from_le_bytes([entry[2], entry[3]]);
-        matches!(tag, ACL_USER | ACL_GROUP) && perm & 0x2 != 0
+        let effective = mask.map_or(perm, |mask| perm & mask);
+        matches!(tag, ACL_USER | ACL_GROUP) && effective & 0x2 != 0
     })
 }
 
@@ -1636,6 +1643,17 @@ mod tests {
             entry(0x01, 0x6),
             entry(0x08, 0x2),
             entry(0x10, 0x6),
+        ])));
+        // Named entries are limited by the mask.
+        assert!(!acl_xattr_grants_named_write(&blob(&[
+            entry(0x01, 0x6),
+            entry(0x02, 0x6),
+            entry(0x10, 0x4),
+        ])));
+        // Without a mask entry, named permissions apply directly.
+        assert!(acl_xattr_grants_named_write(&blob(&[
+            entry(0x01, 0x6),
+            entry(0x02, 0x2),
         ])));
         assert!(!acl_xattr_grants_named_write(&blob(&[
             entry(0x02, 0x5),
