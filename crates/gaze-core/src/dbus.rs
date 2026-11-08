@@ -219,6 +219,8 @@ impl From<DbusCameraConfig> for CameraConfig {
             ir: cameras.ir,
             ir_frame_width: None,
             ir_frame_height: None,
+            ir_source_marker: None,
+            ir_source_driver: None,
             emitter_enabled: cameras.emitter_enabled,
             dark_luma_threshold: cameras.dark_luma_threshold,
             parallel_capture: cameras.parallel_capture,

@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
-use gaze_core::config::{CameraConfig, CameraSources, DEFAULT_RGB_CAMERA};
+use gaze_core::config::{BridgeSource, CameraConfig, CameraSources, DEFAULT_RGB_CAMERA};
 use gaze_core::ir::devices::{camera_function_of, find_device, usb_ids_of};
 
 use super::*;
@@ -384,6 +385,142 @@ fn has_physical_bus_ancestor(path: &std::path::Path) -> bool {
                 Some("pci" | "usb")
             )
         })
+    })
+}
+
+/// Gates opening `node` for privileged capture. Physical nodes always pass. A virtual node
+/// (for example a v4l2loopback fed by a userspace bridge for an IPU6 sensor) passes only when
+/// `bridge` — the operator-declared `cameras.ir_source_marker`/`ir_source_driver` — proves
+/// which physical camera feeds it.
+pub(super) fn check_trusted_node(
+    node: &str,
+    bridge: Option<BridgeSource<'_>>,
+) -> anyhow::Result<()> {
+    if is_physical_node(node) {
+        return Ok(());
+    }
+    let Some(bridge) = bridge else {
+        anyhow::bail!("refusing {node}: not a physical PCI/USB camera (virtual or loopback?)")
+    };
+    let source =
+        check_bridge_marker(&bridge).map_err(|err| anyhow::anyhow!("refusing {node}: {err:#}"))?;
+    if node_grants_untrusted_write(node) {
+        warn!(
+            "trusted bridge node {node} is writable by unprivileged users; recorded footage \
+             could be replayed into it — restrict the node (for example drop the uaccess tag \
+             and use root:video 0660 permissions)"
+        );
+    }
+    info!(
+        "{node} is virtual; bridge marker {} vouches for physical source {source}",
+        bridge.marker
+    );
+    Ok(())
+}
+
+/// Validates the provenance `bridge` declares for a virtual capture node: the marker must be a
+/// root-owned regular file that only root can write, naming a physical `/dev/video*` node that
+/// is bound to `bridge.source_driver` when a driver is pinned. Returns the source node.
+pub fn check_bridge_marker(bridge: &BridgeSource<'_>) -> anyhow::Result<String> {
+    let source = bridge_marker_source(bridge.marker)?;
+    if !is_physical_node(&source) {
+        anyhow::bail!(
+            "bridge marker {} names {source}, which is not a physical camera",
+            bridge.marker
+        );
+    }
+    if let Some(expected) = bridge.source_driver {
+        let actual = node_driver(&source);
+        if actual.as_deref() != Some(expected) {
+            anyhow::bail!(
+                "bridge source {source} is bound to {}, expected {expected}",
+                actual.as_deref().unwrap_or("no driver")
+            );
+        }
+    }
+    Ok(source)
+}
+
+/// Reads `marker` and returns the `/dev/video*` node it names. The marker is a trust anchor:
+/// it must be a regular file owned by root that group and others cannot write, so only a
+/// privileged bridge service can create it.
+fn bridge_marker_source(marker: &str) -> anyhow::Result<String> {
+    let metadata = std::fs::metadata(marker).map_err(|e| {
+        anyhow::anyhow!("cannot stat bridge marker {marker}: {e}; is the bridge running?")
+    })?;
+    if !metadata.is_file() || metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
+        anyhow::bail!(
+            "bridge marker {marker} must be a regular file owned by root and writable only by \
+             its owner"
+        );
+    }
+    let content = std::fs::read_to_string(marker)
+        .map_err(|e| anyhow::anyhow!("cannot read bridge marker {marker}: {e}"))?;
+    let source = content.lines().next().unwrap_or_default().trim();
+    if video_node_index(source).is_none() {
+        anyhow::bail!("bridge marker {marker} names {source:?}, which is not a /dev/video* node");
+    }
+    if !std::fs::metadata(source).is_ok_and(|m| m.file_type().is_char_device()) {
+        anyhow::bail!("bridge marker {marker} names {source}, which is not present");
+    }
+    Ok(source.to_string())
+}
+
+/// Driver bound to the node's device, read from the sysfs `driver` link.
+fn node_driver(node: &str) -> Option<String> {
+    let name = node.strip_prefix("/dev/")?;
+    std::fs::read_link(format!("/sys/class/video4linux/{name}/device/driver"))
+        .ok()
+        .and_then(|link| {
+            link.file_name()
+                .and_then(|name| name.to_str().map(str::to_string))
+        })
+}
+
+/// True when `node` can be written by processes other than root or members of its group — the
+/// replay vector a trusted bridge node must not have: anyone able to feed the node could pass
+/// recorded footage off as the real sensor.
+pub fn node_grants_untrusted_write(node: &str) -> bool {
+    std::fs::metadata(node)
+        .is_ok_and(|metadata| metadata.mode() & 0o002 != 0 || acl_grants_named_write(node))
+}
+
+/// True when the node's POSIX ACL grants write to a named user or group (for example the
+/// `uaccess` entry udev adds for the seat user).
+fn acl_grants_named_write(node: &str) -> bool {
+    let Ok(path) = std::ffi::CString::new(node) else {
+        return false;
+    };
+    let name = c"system.posix_acl_access".as_ptr();
+    let size = unsafe { libc::lgetxattr(path.as_ptr(), name, std::ptr::null_mut(), 0) };
+    if size <= 4 {
+        return false;
+    }
+    let mut buffer = vec![0u8; size as usize];
+    let read = unsafe {
+        libc::lgetxattr(
+            path.as_ptr(),
+            name,
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+        )
+    };
+    read > 4 && acl_xattr_grants_named_write(&buffer[..read as usize])
+}
+
+/// POSIX ACL xattr payload: a 4-byte header then 8-byte entries of tag, permissions, id.
+/// Write to a named `ACL_USER` (0x02) or `ACL_GROUP` (0x08) entry grants write beyond the
+/// owning user and group.
+fn acl_xattr_grants_named_write(xattr: &[u8]) -> bool {
+    const ACL_USER: u16 = 0x02;
+    const ACL_GROUP: u16 = 0x08;
+    let Some(entries) = xattr.get(4..) else {
+        return false;
+    };
+    entries.as_chunks::<8>().0.iter().any(|entry| {
+        let tag = u16::from_le_bytes([entry[0], entry[1]]);
+        let perm = u16::from_le_bytes([entry[2], entry[3]]);
+        matches!(tag, ACL_USER | ACL_GROUP) && perm & 0x2 != 0
     })
 }
 
@@ -938,6 +1075,8 @@ mod tests {
             ir: String::new(),
             ir_frame_width: None,
             ir_frame_height: None,
+            ir_source_marker: None,
+            ir_source_driver: None,
             emitter_enabled: false,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
@@ -988,6 +1127,8 @@ mod tests {
             ir: ir.to_string(),
             ir_frame_width: None,
             ir_frame_height: None,
+            ir_source_marker: None,
+            ir_source_driver: None,
             emitter_enabled: false,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
@@ -1090,6 +1231,8 @@ mod tests {
             ir: "/dev/video2".to_string(),
             ir_frame_width: None,
             ir_frame_height: None,
+            ir_source_marker: None,
+            ir_source_driver: None,
             emitter_enabled: true,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
@@ -1108,6 +1251,8 @@ mod tests {
             ir: "/dev/video2".to_string(),
             ir_frame_width: None,
             ir_frame_height: None,
+            ir_source_marker: None,
+            ir_source_driver: None,
             emitter_enabled: true,
             dark_luma_threshold: 30,
             parallel_capture: "never".to_string(),
@@ -1255,6 +1400,8 @@ mod tests {
             ir: "pipewiresrc target-object=device-name".to_string(),
             ir_frame_width: None,
             ir_frame_height: None,
+            ir_source_marker: None,
+            ir_source_driver: None,
             emitter_enabled: true,
             dark_luma_threshold: 30,
             parallel_capture: "auto".to_string(),
@@ -1392,5 +1539,109 @@ mod tests {
             libcamera_source_element("a \"b\""),
             "libcamerasrc camera-name=\"a \\\"b\\\"\""
         );
+    }
+
+    #[test]
+    fn a_virtual_node_without_a_bridge_marker_stays_refused() {
+        let missing = "/dev/video-gaze-test-missing";
+        let err = check_trusted_node(missing, None).unwrap_err();
+        assert!(
+            err.to_string().contains("not a physical PCI/USB camera"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn a_bridge_marker_must_be_root_owned_owner_writable_and_name_a_video_node() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "gaze-bridge-marker-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let marker = root.join("marker");
+        let marker = marker.to_str().unwrap();
+        // Content checks only run for a marker that passes the root-ownership gate, which a
+        // test file only does when the suite itself runs as root.
+        let as_root = unsafe { libc::geteuid() } == 0;
+
+        std::fs::write(marker, "not-a-node\n").unwrap();
+        std::fs::set_permissions(marker, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let err = bridge_marker_source(marker).unwrap_err();
+        let expected = if as_root {
+            "not a /dev/video* node"
+        } else {
+            "writable only"
+        };
+        assert!(
+            err.to_string().contains(expected),
+            "unexpected error: {err:#}"
+        );
+
+        if as_root {
+            std::fs::write(marker, "/dev/video9999\n").unwrap();
+            let err = bridge_marker_source(marker).unwrap_err();
+            assert!(
+                err.to_string().contains("not present"),
+                "unexpected error: {err:#}"
+            );
+        }
+
+        std::fs::set_permissions(marker, std::fs::Permissions::from_mode(0o666)).unwrap();
+        let err = bridge_marker_source(marker).unwrap_err();
+        assert!(
+            err.to_string().contains("writable only"),
+            "unexpected error: {err:#}"
+        );
+
+        assert!(bridge_marker_source(&root.join("missing").to_string_lossy()).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn acl_write_detection_covers_named_entries_only() {
+        fn entry(tag: u16, perm: u16) -> [u8; 8] {
+            let mut entry = [0u8; 8];
+            entry[0..2].copy_from_slice(&tag.to_le_bytes());
+            entry[2..4].copy_from_slice(&perm.to_le_bytes());
+            entry[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+            entry
+        }
+        let blob = |entries: &[[u8; 8]]| {
+            let mut blob = vec![2u8, 0, 0, 0];
+            for entry in entries {
+                blob.extend_from_slice(entry);
+            }
+            blob
+        };
+        // Owning user, owning group, mask, and other entries mirror the mode bits and
+        // are not untrusted access.
+        assert!(!acl_xattr_grants_named_write(&blob(&[
+            entry(0x01, 0x6),
+            entry(0x04, 0x6),
+            entry(0x10, 0x6),
+            entry(0x20, 0x4),
+        ])));
+        // A named user or group with write (for example the uaccess seat user) is.
+        assert!(acl_xattr_grants_named_write(&blob(&[
+            entry(0x01, 0x6),
+            entry(0x02, 0x6),
+            entry(0x10, 0x6),
+        ])));
+        assert!(acl_xattr_grants_named_write(&blob(&[
+            entry(0x01, 0x6),
+            entry(0x08, 0x2),
+            entry(0x10, 0x6),
+        ])));
+        assert!(!acl_xattr_grants_named_write(&blob(&[
+            entry(0x02, 0x5),
+            entry(0x10, 0x6),
+        ])));
+        assert!(!acl_xattr_grants_named_write(&[2, 0, 0, 0]));
+        assert!(!acl_xattr_grants_named_write(&[2, 0, 0]));
     }
 }

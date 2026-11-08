@@ -200,7 +200,7 @@ pub(super) fn check_cameras(report: &mut Report, config: Option<&Config>) {
     if ir.starts_with("/dev/video") {
         match fs::metadata(ir) {
             Ok(metadata) if metadata.file_type().is_char_device() => {
-                report.pass("IR camera", format!("{ir} is a character device"));
+                check_ir_node(report, &config.cameras, ir);
             }
             Ok(_) => report.error(
                 "IR camera",
@@ -246,6 +246,48 @@ pub(super) fn check_cameras(report: &mut Report, config: Option<&Config>) {
 
     if config.cameras.emitter_enabled {
         check_i2c_emitter(report, ir);
+    }
+}
+
+fn check_ir_node(report: &mut Report, cameras: &gaze_core::config::CameraConfig, node: &str) {
+    if gaze_vision::camera::is_physical_node(node) {
+        report.pass("IR camera", format!("{node} is a character device"));
+        return;
+    }
+    let Some(bridge) = cameras.ir_bridge_source() else {
+        report.error(
+            "IR camera",
+            format!("{node} is a virtual camera, which authentication refuses to open"),
+            "If a privileged userspace bridge feeds this node, set cameras.ir_source_marker to \
+             the root-owned marker file naming its physical /dev/video* source (optionally \
+             pinning it with cameras.ir_source_driver), or point cameras.ir at the physical \
+             node.",
+        );
+        return;
+    };
+    match gaze_vision::camera::check_bridge_marker(&bridge) {
+        Ok(source) => {
+            report.pass(
+                "IR camera",
+                format!(
+                    "bridge marker {} vouches for physical source {source}",
+                    bridge.marker
+                ),
+            );
+            if gaze_vision::camera::node_grants_untrusted_write(node) {
+                report.warning(
+                    "IR camera",
+                    format!("{node} can be written by unprivileged users"),
+                    "Recorded footage could be replayed into the bridge node. Restrict its \
+                     permissions (drop the uaccess tag, root:video 0660).",
+                );
+            }
+        }
+        Err(err) => report.error(
+            "IR camera",
+            format!("bridge provenance for {node} failed: {err:#}"),
+            "Make sure the bridge service is running and wrote the configured marker.",
+        ),
     }
 }
 
