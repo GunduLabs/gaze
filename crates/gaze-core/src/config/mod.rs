@@ -522,18 +522,7 @@ impl CameraConfig {
                 PARALLEL_CAPTURE_OPTIONS
             );
         }
-        match (&self.ir_source_marker, &self.ir_source_driver) {
-            (None, Some(_)) => {
-                anyhow::bail!("cameras.ir_source_driver requires cameras.ir_source_marker")
-            }
-            (Some(marker), _) if !Path::new(marker).is_absolute() => {
-                anyhow::bail!("cameras.ir_source_marker must be an absolute path, got {marker:?}")
-            }
-            (_, Some(driver)) if driver.trim().is_empty() => {
-                anyhow::bail!("cameras.ir_source_driver must not be empty")
-            }
-            _ => {}
-        }
+        self.validate_ir_bridge_source()?;
         match (self.ir_frame_width, self.ir_frame_height) {
             (None, None) => {}
             (Some(_), None) | (None, Some(_)) => anyhow::bail!(
@@ -558,7 +547,26 @@ impl CameraConfig {
             .then_some((width, height))
     }
 
+    pub fn validate_ir_bridge_source(&self) -> anyhow::Result<()> {
+        match (&self.ir_source_marker, &self.ir_source_driver) {
+            (None, Some(_)) => {
+                anyhow::bail!("cameras.ir_source_driver requires cameras.ir_source_marker")
+            }
+            (Some(marker), _) if !Path::new(marker).is_absolute() => {
+                anyhow::bail!("cameras.ir_source_marker must be an absolute path, got {marker:?}")
+            }
+            (_, Some(driver)) if driver.is_empty() || driver.trim() != driver => {
+                anyhow::bail!(
+                    "cameras.ir_source_driver must be a driver name without surrounding \
+                     whitespace, got {driver:?}"
+                )
+            }
+            _ => Ok(()),
+        }
+    }
+
     pub fn ir_bridge_source(&self) -> Option<BridgeSource<'_>> {
+        self.validate_ir_bridge_source().ok()?;
         self.ir_source_marker.as_deref().map(|marker| BridgeSource {
             marker,
             source_driver: self.ir_source_driver.as_deref(),
@@ -568,8 +576,9 @@ impl CameraConfig {
     /// Copies the file-only bridge provenance keys from `current`. D-Bus config
     /// updates cannot carry them; without this a GUI save would clear them.
     pub fn inherit_ir_bridge_source(&mut self, current: &CameraConfig) {
-        self.ir_source_marker.clone_from(&current.ir_source_marker);
-        self.ir_source_driver.clone_from(&current.ir_source_driver);
+        let valid = current.validate_ir_bridge_source().is_ok();
+        self.ir_source_marker = current.ir_source_marker.clone().filter(|_| valid);
+        self.ir_source_driver = current.ir_source_driver.clone().filter(|_| valid);
     }
 
     pub fn set_ir_frame_size(&mut self, size: Option<(u32, u32)>) {
@@ -2665,6 +2674,7 @@ level = "low""#,
             (None, Some("ipu3-cio2")),
             (Some("relative/path"), None),
             (Some("/run/marker"), Some("  ")),
+            (Some("/run/marker"), Some("ipu3-cio2 ")),
         ] {
             let cameras = CameraConfig {
                 ir_source_marker: marker.map(str::to_string),
@@ -2672,7 +2682,28 @@ level = "low""#,
                 ..CameraConfig::default()
             };
             assert!(cameras.validate().is_err(), "{marker:?} / {driver:?}");
+            assert!(cameras.ir_bridge_source().is_none(), "{marker:?} / {driver:?}");
+
+            let mut requested = CameraConfig::default();
+            requested.inherit_ir_bridge_source(&cameras);
+            requested.validate().unwrap();
+            assert!(requested.ir_source_marker.is_none());
+            assert!(requested.ir_source_driver.is_none());
         }
+    }
+
+    #[test]
+    fn inherit_ir_bridge_source_keeps_a_valid_pair() {
+        let current = CameraConfig {
+            ir_source_marker: Some("/run/surface_ir_bridge_dev".to_string()),
+            ir_source_driver: Some("ipu3-cio2".to_string()),
+            ..CameraConfig::default()
+        };
+        let mut requested = CameraConfig::default();
+        requested.inherit_ir_bridge_source(&current);
+
+        assert_eq!(requested.ir_source_marker, current.ir_source_marker);
+        assert_eq!(requested.ir_source_driver, current.ir_source_driver);
     }
 
     #[test]

@@ -5,7 +5,8 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
 use gaze_core::config::{BridgeSource, CameraConfig, CameraSources, DEFAULT_RGB_CAMERA};
-use gaze_core::ir::devices::{camera_function_of, find_device, usb_ids_of};
+use gaze_core::ir::bridge::read_bridge_marker;
+use gaze_core::ir::devices::{camera_function_of, find_device, usb_ids_of, video_driver};
 
 use super::*;
 
@@ -402,13 +403,13 @@ pub(super) fn check_trusted_node(
     let Some(bridge) = bridge else {
         anyhow::bail!("refusing {node}: not a physical PCI/USB camera (virtual or loopback?)")
     };
-    let source =
-        check_bridge_marker(&bridge).map_err(|err| anyhow::anyhow!("refusing {node}: {err:#}"))?;
+    let source = check_bridge_marker(node, &bridge)
+        .map_err(|err| anyhow::anyhow!("refusing {node}: {err:#}"))?;
     if node_grants_untrusted_write(node) {
-        warn!(
-            "trusted bridge node {node} is writable by unprivileged users; recorded footage \
-             could be replayed into it — restrict the node (for example drop the uaccess tag \
-             and use root:video 0660 permissions)"
+        anyhow::bail!(
+            "refusing {node}: it is writable by unprivileged users, so recorded footage could be \
+             replayed into it; restrict the node (for example drop the uaccess tag and use \
+             root:video 0660 permissions)"
         );
     }
     info!(
@@ -418,11 +419,17 @@ pub(super) fn check_trusted_node(
     Ok(())
 }
 
-/// Validates the provenance `bridge` declares for a virtual capture node: the marker must be a
-/// root-owned regular file that only root can write, naming a physical `/dev/video*` node that
-/// is bound to `bridge.source_driver` when a driver is pinned. Returns the source node.
-pub fn check_bridge_marker(bridge: &BridgeSource<'_>) -> anyhow::Result<String> {
-    let source = bridge_marker_source(bridge.marker)?;
+/// Validates the provenance `bridge` declares for the virtual capture `node`: the marker must
+/// name a physical `/dev/video*` node that is bound to `bridge.source_driver` when a driver is
+/// pinned. Returns the source node.
+pub fn check_bridge_marker(node: &str, bridge: &BridgeSource<'_>) -> anyhow::Result<String> {
+    let marker = read_bridge_marker(bridge.marker)?;
+    if let Some(sink) = &marker.sink
+        && !same_char_device(sink, node)
+    {
+        anyhow::bail!("bridge marker {} feeds {sink}, not {node}", bridge.marker);
+    }
+    let source = marker.source;
     if !is_physical_node(&source) {
         anyhow::bail!(
             "bridge marker {} names {source}, which is not a physical camera",
@@ -430,7 +437,7 @@ pub fn check_bridge_marker(bridge: &BridgeSource<'_>) -> anyhow::Result<String> 
         );
     }
     if let Some(expected) = bridge.source_driver {
-        let actual = node_driver(&source);
+        let actual = video_driver(&source);
         if actual.as_deref() != Some(expected) {
             anyhow::bail!(
                 "bridge source {source} is bound to {}, expected {expected}",
@@ -441,48 +448,24 @@ pub fn check_bridge_marker(bridge: &BridgeSource<'_>) -> anyhow::Result<String> 
     Ok(source)
 }
 
-/// Reads `marker` and returns the `/dev/video*` node it names. The marker is a trust anchor:
-/// it must be a regular file owned by root that group and others cannot write, so only a
-/// privileged bridge service can create it.
-fn bridge_marker_source(marker: &str) -> anyhow::Result<String> {
-    let metadata = std::fs::metadata(marker).map_err(|e| {
-        anyhow::anyhow!("cannot stat bridge marker {marker}: {e}; is the bridge running?")
-    })?;
-    if !metadata.is_file() || metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
-        anyhow::bail!(
-            "bridge marker {marker} must be a regular file owned by root and writable only by \
-             its owner"
-        );
+fn same_char_device(a: &str, b: &str) -> bool {
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(a), Ok(b)) => {
+            a.file_type().is_char_device() && b.file_type().is_char_device() && a.rdev() == b.rdev()
+        }
+        _ => false,
     }
-    let content = std::fs::read_to_string(marker)
-        .map_err(|e| anyhow::anyhow!("cannot read bridge marker {marker}: {e}"))?;
-    let source = content.lines().next().unwrap_or_default().trim();
-    if video_node_index(source).is_none() {
-        anyhow::bail!("bridge marker {marker} names {source:?}, which is not a /dev/video* node");
-    }
-    if !std::fs::metadata(source).is_ok_and(|m| m.file_type().is_char_device()) {
-        anyhow::bail!("bridge marker {marker} names {source}, which is not present");
-    }
-    Ok(source.to_string())
-}
-
-/// Driver bound to the node's device, read from the sysfs `driver` link.
-fn node_driver(node: &str) -> Option<String> {
-    let name = node.strip_prefix("/dev/")?;
-    std::fs::read_link(format!("/sys/class/video4linux/{name}/device/driver"))
-        .ok()
-        .and_then(|link| {
-            link.file_name()
-                .and_then(|name| name.to_str().map(str::to_string))
-        })
 }
 
 /// True when `node` can be written by processes other than root or members of its group — the
 /// replay vector a trusted bridge node must not have: anyone able to feed the node could pass
 /// recorded footage off as the real sensor.
 pub fn node_grants_untrusted_write(node: &str) -> bool {
-    std::fs::metadata(node)
-        .is_ok_and(|metadata| metadata.mode() & 0o002 != 0 || acl_grants_named_write(node))
+    std::fs::metadata(node).is_ok_and(|metadata| {
+        metadata.mode() & 0o002 != 0
+            || (metadata.uid() != 0 && metadata.mode() & 0o200 != 0)
+            || acl_grants_named_write(node)
+    })
 }
 
 /// True when the node's POSIX ACL grants write to a named user or group (for example the
@@ -1556,57 +1539,6 @@ mod tests {
             err.to_string().contains("not a physical PCI/USB camera"),
             "unexpected error: {err:#}"
         );
-    }
-
-    #[test]
-    fn a_bridge_marker_must_be_root_owned_owner_writable_and_name_a_video_node() {
-        use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
-            "gaze-bridge-marker-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        let marker = root.join("marker");
-        let marker = marker.to_str().unwrap();
-        // Content checks only run for a marker that passes the root-ownership gate, which a
-        // test file only does when the suite itself runs as root.
-        let as_root = unsafe { libc::geteuid() } == 0;
-
-        std::fs::write(marker, "not-a-node\n").unwrap();
-        std::fs::set_permissions(marker, std::fs::Permissions::from_mode(0o600)).unwrap();
-        let err = bridge_marker_source(marker).unwrap_err();
-        let expected = if as_root {
-            "not a /dev/video* node"
-        } else {
-            "writable only"
-        };
-        assert!(
-            err.to_string().contains(expected),
-            "unexpected error: {err:#}"
-        );
-
-        if as_root {
-            std::fs::write(marker, "/dev/video9999\n").unwrap();
-            let err = bridge_marker_source(marker).unwrap_err();
-            assert!(
-                err.to_string().contains("not present"),
-                "unexpected error: {err:#}"
-            );
-        }
-
-        std::fs::set_permissions(marker, std::fs::Permissions::from_mode(0o666)).unwrap();
-        let err = bridge_marker_source(marker).unwrap_err();
-        assert!(
-            err.to_string().contains("writable only"),
-            "unexpected error: {err:#}"
-        );
-
-        assert!(bridge_marker_source(&root.join("missing").to_string_lossy()).is_err());
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

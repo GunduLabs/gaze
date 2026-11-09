@@ -383,17 +383,21 @@ ir_source_marker = "/run/surface_ir_bridge_dev"
 # ir_source_driver = "ipu3-cio2"   # optional: pin the source's bound driver
 ```
 
-- `ir_source_marker` is a file the privileged bridge writes, containing the
-  `/dev/video*` path of the physical node it relays. It must be a regular file
-  owned by root that only root can write — only a privileged bridge can create
-  it, which is what makes it a trust anchor. These keys can only be set in the
-  config file.
+- `ir_source_marker` is a file the privileged bridge writes. Its first line is
+  the `/dev/video*` path of the physical node it relays. It must be a regular
+  file owned by root that only root can write, and every directory above it must
+  be owned by root and not writable by other users. Only a privileged bridge can
+  create it, which is what makes it a trust anchor. These keys can only be set
+  in the config file.
+- An optional second line names the virtual node the bridge feeds. When it is
+  present, it must be the same device as `cameras.ir`, which stops a stale or
+  unrelated marker from vouching for a different node.
 - The named source must itself be a physical PCI/USB camera, and when
   `ir_source_driver` is set it must also be bound to that driver.
 - The virtual node must not be writable by unprivileged users: anyone who can
-  feed it could replay recorded footage as authentication. Drop the `uaccess`
-  udev tag and keep `root:video` `0660` permissions (Gaze warns when the node
-  grants write beyond the owner and its group).
+  feed it could replay recorded footage as authentication. Gaze refuses the node
+  when a user other than root, or anyone outside its group, can write to it.
+  Drop the `uaccess` udev tag and keep `root:video` `0660` permissions.
 
 This setting is only available in the config file, not in the GUI.
 

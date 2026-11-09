@@ -53,7 +53,7 @@ pub fn usb_ids_of(node: &str) -> Option<(u16, u16)> {
 }
 
 pub fn camera_bus(node: &str) -> CameraBus {
-    match read_driver_basename(node) {
+    match video_driver(node) {
         Some(driver) => bus_of_driver(&driver),
         None => CameraBus::Other,
     }
@@ -74,7 +74,7 @@ fn read_modalias(node: &str) -> Option<String> {
     fs::read_to_string(format!("{}/modalias", sysfs_device_dir(node)?)).ok()
 }
 
-fn read_driver_basename(node: &str) -> Option<String> {
+pub fn video_driver(node: &str) -> Option<String> {
     let link = fs::read_link(format!("{}/driver", sysfs_device_dir(node)?)).ok()?;
     Some(link.file_name()?.to_str()?.to_string())
 }

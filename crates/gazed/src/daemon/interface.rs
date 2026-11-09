@@ -1237,9 +1237,6 @@ impl AuthDaemon {
             new_config
                 .cameras
                 .set_ir_frame_size(current.cameras.ir_frame_size());
-            new_config
-                .cameras
-                .inherit_ir_bridge_source(&current.cameras);
             new_config.cameras.auto_rotate = current.cameras.auto_rotate;
             // A legacy client cannot see or clear the flag, so treat it as turning the feature
             // off rather than rejecting every later write with an error it cannot act on.
@@ -1269,7 +1266,6 @@ impl AuthDaemon {
             config
                 .cameras
                 .set_ir_frame_size(current.cameras.ir_frame_size());
-            config.cameras.inherit_ir_bridge_source(&current.cameras);
             config.cameras.auto_rotate = current.cameras.auto_rotate;
             // This older client cannot clear a KWallet opt-in when removing prerequisites.
             if config.storage.validate_keyring(&config.liveness).is_err() {
@@ -1301,7 +1297,6 @@ impl AuthDaemon {
             config
                 .cameras
                 .set_ir_frame_size(current.cameras.ir_frame_size());
-            config.cameras.inherit_ir_bridge_source(&current.cameras);
             config.cameras.auto_rotate = current.cameras.auto_rotate;
             Ok(config)
         })

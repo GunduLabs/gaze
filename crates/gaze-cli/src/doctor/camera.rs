@@ -270,6 +270,14 @@ fn check_ir_node(
         );
         return;
     }
+    if let Err(err) = cameras.validate_ir_bridge_source() {
+        report.error(
+            "IR camera",
+            format!("{node} is virtual and its bridge provenance is invalid: {err:#}"),
+            "Fix cameras.ir_source_marker and cameras.ir_source_driver in the configuration file.",
+        );
+        return;
+    }
     let Some(bridge) = cameras.ir_bridge_source() else {
         report.error(
             "IR camera",
@@ -296,24 +304,20 @@ fn check_ir_node(
         );
         return;
     }
-    match gaze_vision::camera::check_bridge_marker(&bridge) {
-        Ok(source) => {
-            report.pass(
-                "IR camera",
-                format!(
-                    "bridge marker {} vouches for physical source {source}",
-                    bridge.marker
-                ),
-            );
-            if gaze_vision::camera::node_grants_untrusted_write(node) {
-                report.warning(
-                    "IR camera",
-                    format!("{node} can be written by unprivileged users"),
-                    "Recorded footage could be replayed into the bridge node. Restrict its \
-                     permissions (drop the uaccess tag, root:video 0660).",
-                );
-            }
-        }
+    match gaze_vision::camera::check_bridge_marker(node, &bridge) {
+        Ok(_) if gaze_vision::camera::node_grants_untrusted_write(node) => report.error(
+            "IR camera",
+            format!("{node} can be written by unprivileged users, so authentication refuses it"),
+            "Recorded footage could be replayed into the bridge node. Restrict its \
+             permissions (drop the uaccess tag, root:video 0660).",
+        ),
+        Ok(source) => report.pass(
+            "IR camera",
+            format!(
+                "bridge marker {} vouches for physical source {source}",
+                bridge.marker
+            ),
+        ),
         Err(err) => report.error(
             "IR camera",
             format!("bridge provenance for {node} failed: {err:#}"),
