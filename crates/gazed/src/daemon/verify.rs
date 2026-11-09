@@ -950,7 +950,11 @@ impl AuthDaemon {
                             let _ = tx.blocking_send(VerifyMsg::Diagnostic(message.to_owned()));
                         }
 
-                        let mut cam = match Camera::open_ir_privileged(&ir_device_clone, config_clone.cameras.ir_frame_size()) {
+                        let mut cam = match Camera::open_ir_privileged(
+                            &ir_device_clone,
+                            config_clone.cameras.ir_frame_size(),
+                            config_clone.cameras.ir_bridge_source(),
+                        ) {
                             Ok(c) => c,
                             Err(e) => {
                                 let _ = tx.blocking_send(VerifyMsg::Unavailable(Spectrum::Ir, format!("IR Camera open error: {e}")));

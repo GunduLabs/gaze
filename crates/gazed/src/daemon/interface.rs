@@ -638,7 +638,11 @@ impl AuthDaemon {
                                 &CameraKind::Ir { source: ir_device_clone.clone(), node: ir_node_clone.clone() },
                                 emitter_enabled
                             );
-                            let mut cam = match Camera::open_ir_privileged(&ir_device_clone, config_clone.cameras.ir_frame_size()) {
+                            let mut cam = match Camera::open_ir_privileged(
+                                &ir_device_clone,
+                                config_clone.cameras.ir_frame_size(),
+                                config_clone.cameras.ir_bridge_source(),
+                            ) {
                                 Ok(c) => c,
                                 Err(e) => {
                                     dead_streams += 1;
@@ -715,7 +719,11 @@ impl AuthDaemon {
                         emitter_enabled
                     );
 
-                    let mut cam = match Camera::open_ir_privileged(&ir_device_clone, config_clone.cameras.ir_frame_size()) {
+                    let mut cam = match Camera::open_ir_privileged(
+                        &ir_device_clone,
+                        config_clone.cameras.ir_frame_size(),
+                        config_clone.cameras.ir_bridge_source(),
+                    ) {
                         Ok(c) => c,
                         Err(e) => {
                             let _ = tx.blocking_send(EnrollMsg::Error(format!("IR Camera open error: {e}")));

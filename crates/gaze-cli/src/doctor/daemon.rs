@@ -283,10 +283,11 @@ pub(super) async fn check_daemon(
     username: &str,
     proxy: Option<&GazeProxy<'static>>,
     config: Option<&Config>,
+    config_from_file: bool,
     benchmark: bool,
 ) {
     let Some(proxy) = proxy else {
-        check_cameras(report, config);
+        check_cameras(report, config, config_from_file);
         return;
     };
 
@@ -311,7 +312,7 @@ pub(super) async fn check_daemon(
             "Restart gazed and inspect its journal.",
         ),
     }
-    check_cameras(report, config);
+    check_cameras(report, config, config_from_file);
 
     match tokio::time::timeout(DAEMON_TIMEOUT, proxy.list_faces(username)).await {
         Ok(Ok(faces)) if faces.is_empty() => report.warning(

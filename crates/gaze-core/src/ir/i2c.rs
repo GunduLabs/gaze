@@ -216,16 +216,10 @@ fn resolve_bus(profile: &I2cIrProfile) -> Result<String, String> {
     }
 
     if let (Some(marker), Some(driver)) = (profile.source_marker, profile.source_driver) {
-        let source = std::fs::read_to_string(marker).map_err(|e| {
-            format!("cannot read bridge marker {marker}: {e}; is the IR bridge running?")
-        })?;
-        let source = source.trim();
-        if !source.starts_with("/dev/video") || !is_char_device(source) {
-            return Err(format!(
-                "bridge marker {marker} names {source:?}, which is not a video device"
-            ));
-        }
-        let actual = video_driver(source);
+        let source = super::bridge::read_bridge_marker(marker)
+            .map_err(|e| format!("{e:#}"))?
+            .source;
+        let actual = super::devices::video_driver(&source);
         if actual.as_deref() != Some(driver) {
             return Err(format!(
                 "bridge source {source} is bound to {}, expected {driver}",
@@ -284,11 +278,6 @@ fn video_sysfs_path(node: &str, attribute: &str) -> String {
         .and_then(|part| part.to_str())
         .unwrap_or_default();
     format!("/sys/class/video4linux/{name}/{attribute}")
-}
-
-fn video_driver(node: &str) -> Option<String> {
-    let link = std::fs::read_link(video_sysfs_path(node, "device/driver")).ok()?;
-    Some(link.file_name()?.to_str()?.to_string())
 }
 
 #[cfg(test)]

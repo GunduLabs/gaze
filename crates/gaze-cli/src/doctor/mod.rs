@@ -282,6 +282,7 @@ pub async fn run(username: &str, benchmark: bool, output: Output) -> anyhow::Res
         username,
         daemon.as_ref().map(|daemon| &daemon.proxy),
         config,
+        file_config.is_some(),
         benchmark,
     )
     .await;
