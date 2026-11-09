@@ -16,6 +16,7 @@
   pam,
   pipewire,
   tpm2-tss,
+  zstd,
 }:
 
 let
