@@ -62,6 +62,7 @@ rustPlatform.buildRustPackage {
     openssl
     pam
     tpm2-tss
+    zstd
   ];
 
   # Two invocations keep gaze-vision's `detection` feature out of the clients.
