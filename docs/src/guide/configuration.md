@@ -368,6 +368,39 @@ ir_frame_height = 340
 - The daemon must be at least as new as the GUI or CLI that sets the override.
   An older daemon rejects it and leaves the rest of the configuration unchanged.
 
+### Virtual IR nodes (userspace bridges)
+
+Authentication only opens camera nodes backed by physical hardware (a PCI or USB
+device in sysfs). A userspace bridge that relays a sensor into a virtual node —
+for example a v4l2loopback device for an IPU6 IR sensor — cannot prove that on
+its own, so the daemon refuses it for privileged capture. Declare the bridge's
+provenance instead:
+
+```toml
+[cameras]
+ir = "/dev/video42"
+ir_source_marker = "/run/surface_ir_bridge_dev"
+# ir_source_driver = "ipu3-cio2"   # optional: pin the source's bound driver
+```
+
+- `ir_source_marker` is a file the privileged bridge writes. Its first line is
+  the `/dev/video*` path of the physical node it relays. It must be a regular
+  file owned by root that only root can write, and every directory above it must
+  be owned by root and not writable by other users. Only a privileged bridge can
+  create it, which is what makes it a trust anchor. These keys can only be set
+  in the config file.
+- An optional second line names the virtual node the bridge feeds. When it is
+  present, it must be the same device as `cameras.ir`, which stops a stale or
+  unrelated marker from vouching for a different node.
+- The named source must itself be a physical PCI/USB camera, and when
+  `ir_source_driver` is set it must also be bound to that driver.
+- The virtual node must not be writable by unprivileged users: anyone who can
+  feed it could replay recorded footage as authentication. Gaze refuses the node
+  when a user other than root, or anyone outside its group, can write to it.
+  Drop the `uaccess` udev tag and keep `root:video` `0660` permissions.
+
+This setting is only available in the config file, not in the GUI.
+
 ### Parallel RGB + IR capture
 
 By default, verification captures the two cameras one at a time (RGB, then IR). Capturing sequentially rather than concurrently lets single-function webcams that cannot stream their RGB and IR sensors at once (for example the Logitech BRIO 4K, `046d:085e`) still use hybrid authentication, at the cost of latency: with `hybrid_policy = "and"` both spectra always run, so the two capture phases add up.
@@ -411,7 +444,7 @@ Gaze resolves the underlying `/dev/video*` node from the PipeWire camera, matche
 Non-USB emitters driven over I2C use the reviewed profiles in `crates/gaze-core/ir-profiles/i2c/`, which are compiled into Gaze and never read from user configuration. The only one today is the Surface Pro 4 OV7251 sensor. It needs:
 
 - The `i2c-dev` kernel module loaded, so the sensor's `/dev/i2c-*` bus exists. To load it at every boot, run `echo i2c-dev | sudo tee /etc/modules-load.d/i2c-dev.conf`.
-- A userspace bridge that relays the IPU3/CIO2 IR stream into a v4l2loopback device at `/dev/video42` named `Surface IR Camera`, and writes the path of the CIO2 source node to `/run/surface_ir_bridge_dev`. Point `cameras.ir` at `/dev/video42`.
+- A userspace bridge that relays the IPU3/CIO2 IR stream into a v4l2loopback device at `/dev/video42` named `Surface IR Camera`, and writes the path of the CIO2 source node to `/run/surface_ir_bridge_dev`. Point `cameras.ir` at `/dev/video42` and set `cameras.ir_source_marker` to `/run/surface_ir_bridge_dev` — the same marker doubles as capture provenance for the virtual node (see [Virtual IR nodes](#virtual-ir-nodes-userspace-bridges)).
 - The `ov7251` driver bound to `i2c-INT347E:00`.
 
 Gaze uses the I2C bus on the adapter where the sensor is bound. Before writing,

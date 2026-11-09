@@ -98,7 +98,7 @@ pub(super) fn check_gstreamer_plugins(report: &mut Report) -> bool {
     }
 }
 
-pub(super) fn check_cameras(report: &mut Report, config: Option<&Config>) {
+pub(super) fn check_cameras(report: &mut Report, config: Option<&Config>, config_from_file: bool) {
     if !check_gstreamer_plugins(report) {
         return;
     }
@@ -200,7 +200,7 @@ pub(super) fn check_cameras(report: &mut Report, config: Option<&Config>) {
     if ir.starts_with("/dev/video") {
         match fs::metadata(ir) {
             Ok(metadata) if metadata.file_type().is_char_device() => {
-                report.pass("IR camera", format!("{ir} is a character device"));
+                check_ir_node(report, &config.cameras, ir, config_from_file);
             }
             Ok(_) => report.error(
                 "IR camera",
@@ -246,6 +246,83 @@ pub(super) fn check_cameras(report: &mut Report, config: Option<&Config>) {
 
     if config.cameras.emitter_enabled {
         check_i2c_emitter(report, ir);
+    }
+}
+
+fn check_ir_node(
+    report: &mut Report,
+    cameras: &gaze_core::config::CameraConfig,
+    node: &str,
+    config_from_file: bool,
+) {
+    if gaze_vision::camera::is_physical_node(node) {
+        report.pass("IR camera", format!("{node} is a character device"));
+        return;
+    }
+    if !config_from_file {
+        // The daemon's D-Bus config cannot carry the file-only provenance keys, so their
+        // absence proves nothing when the config file itself was unreadable.
+        report.warning(
+            "IR camera",
+            format!("{node} is virtual and its bridge provenance cannot be verified"),
+            "The configuration file could not be read; run `sudo gaze doctor` to check \
+             cameras.ir_source_marker.",
+        );
+        return;
+    }
+    if let Err(err) = cameras.validate_ir_bridge_source() {
+        report.error(
+            "IR camera",
+            format!("{node} is virtual and its bridge provenance is invalid: {err:#}"),
+            "Fix cameras.ir_source_marker and cameras.ir_source_driver in the configuration file.",
+        );
+        return;
+    }
+    let Some(bridge) = cameras.ir_bridge_source() else {
+        report.error(
+            "IR camera",
+            format!("{node} is a virtual camera, which authentication refuses to open"),
+            "If a privileged userspace bridge feeds this node, set cameras.ir_source_marker to \
+             the root-owned marker file naming its physical /dev/video* source (optionally \
+             pinning it with cameras.ir_source_driver), or point cameras.ir at the physical \
+             node.",
+        );
+        return;
+    };
+    if let Err(err) = fs::File::open(bridge.marker)
+        && err.kind() == std::io::ErrorKind::PermissionDenied
+    {
+        // A root-owned 0600 marker satisfies the trust rules but cannot be
+        // verified by an unprivileged doctor.
+        report.warning(
+            "IR camera",
+            format!(
+                "bridge marker {} is not readable by this user",
+                bridge.marker
+            ),
+            "Run `sudo gaze doctor` to verify the bridge provenance.",
+        );
+        return;
+    }
+    match gaze_vision::camera::check_bridge_marker(node, &bridge) {
+        Ok(_) if gaze_vision::camera::node_grants_untrusted_write(node) => report.error(
+            "IR camera",
+            format!("{node} can be written by unprivileged users, so authentication refuses it"),
+            "Recorded footage could be replayed into the bridge node. Restrict its \
+             permissions (drop the uaccess tag, root:video 0660).",
+        ),
+        Ok(source) => report.pass(
+            "IR camera",
+            format!(
+                "bridge marker {} vouches for physical source {source}",
+                bridge.marker
+            ),
+        ),
+        Err(err) => report.error(
+            "IR camera",
+            format!("bridge provenance for {node} failed: {err:#}"),
+            "Make sure the bridge service is running and wrote the configured marker.",
+        ),
     }
 }
 

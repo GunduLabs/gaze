@@ -408,14 +408,15 @@ impl Camera {
     }
 
     pub fn open_privileged(camera_source: &str) -> anyhow::Result<Self> {
-        Self::open_privileged_kind(camera_source, true, None)
+        Self::open_privileged_kind(camera_source, true, None, None)
     }
 
     pub fn open_ir_privileged(
         camera_source: &str,
         frame_size: Option<(u32, u32)>,
+        bridge: Option<gaze_core::config::BridgeSource<'_>>,
     ) -> anyhow::Result<Self> {
-        Self::open_privileged_kind(camera_source, false, frame_size)
+        Self::open_privileged_kind(camera_source, false, frame_size, bridge)
     }
 
     fn open_with_frame_size_fallback(
@@ -442,6 +443,7 @@ impl Camera {
         camera_source: &str,
         want_color: bool,
         frame_size: Option<(u32, u32)>,
+        bridge: Option<gaze_core::config::BridgeSource<'_>>,
     ) -> anyhow::Result<Self> {
         gstreamer::init()?;
         // A `libcamera:<name>` source names a camera only libcamera can drive (Intel IPU6/IPU7
@@ -463,12 +465,9 @@ impl Camera {
             };
             return Self::open_libcamera_fallback(camera_source, want_color, None, err);
         };
-        if !is_physical_node(&node) {
+        if let Err(err) = check_trusted_node(&node, bridge) {
             // libcamera only enumerates media-controller devices, so it can reach a real MIPI
             // sensor (IPU6 behind v4l2-relayd) but never a loopback node.
-            let err = anyhow::anyhow!(
-                "refusing {node}: not a physical PCI/USB camera (virtual or loopback?)"
-            );
             return Self::open_libcamera_fallback(camera_source, want_color, None, err);
         }
         let force_ir_yuy2 = node_requires_forced_ir_yuy2(&node, want_color);
@@ -1325,7 +1324,7 @@ mod tests {
             "unexpected error: {err:#}"
         );
         assert!(Camera::open_privileged("").is_err());
-        assert!(Camera::open_ir_privileged("v4l2src device=/dev/video0", None).is_err());
+        assert!(Camera::open_ir_privileged("v4l2src device=/dev/video0", None, None).is_err());
     }
 
     #[test]
