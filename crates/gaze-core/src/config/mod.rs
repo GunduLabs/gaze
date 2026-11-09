@@ -2682,7 +2682,10 @@ level = "low""#,
                 ..CameraConfig::default()
             };
             assert!(cameras.validate().is_err(), "{marker:?} / {driver:?}");
-            assert!(cameras.ir_bridge_source().is_none(), "{marker:?} / {driver:?}");
+            assert!(
+                cameras.ir_bridge_source().is_none(),
+                "{marker:?} / {driver:?}"
+            );
 
             let mut requested = CameraConfig::default();
             requested.inherit_ir_bridge_source(&cameras);

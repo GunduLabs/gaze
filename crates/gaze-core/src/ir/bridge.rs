@@ -111,7 +111,8 @@ mod tests {
         std::fs::set_permissions(marker, std::fs::Permissions::from_mode(0o600)).unwrap();
         let err = read_bridge_marker(marker).unwrap_err();
         assert!(
-            err.to_string().contains(&untrusted("not a /dev/video* node")),
+            err.to_string()
+                .contains(&untrusted("not a /dev/video* node")),
             "unexpected error: {err:#}"
         );
 

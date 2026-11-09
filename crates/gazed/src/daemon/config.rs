@@ -313,9 +313,7 @@ impl AuthDaemon {
                     requested.duress = current.duress.clone();
                     requested.liveness.ir_model = current.liveness.ir_model;
                     requested.liveness.ir_threshold = current.liveness.ir_threshold;
-                    requested
-                        .cameras
-                        .inherit_ir_bridge_source(&current.cameras);
+                    requested.cameras.inherit_ir_bridge_source(&current.cameras);
                     requested
                         .security
                         .validate()
