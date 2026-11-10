@@ -648,6 +648,7 @@ _verify-package format:
     load gaze-omarchy
     want_files /usr/bin/gaze-omarchy /etc/pam.d/gaze-omarchy-face \
         /usr/share/gaze/omarchy/Service.qml /usr/share/gaze/omarchy/LockView.qml \
+        /usr/share/gaze/omarchy/FingerprintModel.js \
         /usr/share/gaze/omarchy/manifest.json /usr/share/gaze/omarchy/upstream-lock.json \
         /usr/share/gaze/omarchy/THIRD_PARTY_NOTICES.md
     want_config /etc/pam.d/gaze-omarchy-face
