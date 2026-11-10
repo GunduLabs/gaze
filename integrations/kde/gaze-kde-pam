@@ -352,11 +352,12 @@ insert_block() {
 		return 1
 	fi
 
-	tmp=$(mktemp)
-	trap 'rm -f "$tmp"' EXIT
+	tmpdir=$(mktemp -d) || return 1
+	trap 'rm -rf "$tmpdir"' EXIT
+	tmp="$tmpdir/pam"
 
-	managed_block "$(gaze_control "$1")" "$1" >"$tmp.block"
-	awk -v position="$position" -v blockfile="$tmp.block" '
+	managed_block "$(gaze_control "$1")" "$1" >"$tmpdir/block"
+	awk -v position="$position" -v blockfile="$tmpdir/block" '
 		function emit() {
 			while ((getline line < blockfile) > 0) {
 				print line
@@ -384,7 +385,7 @@ insert_block() {
 	fi
 	status=0
 	write_back "$target" "$tmp" || status=1
-	rm -f "$tmp" "$tmp.block"
+	rm -rf "$tmpdir"
 	trap - EXIT
 	return "$status"
 }
