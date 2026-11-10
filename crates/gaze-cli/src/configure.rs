@@ -400,11 +400,7 @@ pub async fn run_config_wizard(
             .default(false)
             .interact()?
     {
-        keyring::enroll(
-            &get_current_user(),
-            &config,
-            gaze_security::keyring::Backend::Gnome,
-        )?;
+        enroll_keyring(&config, gaze_security::keyring::Backend::Gnome)?;
     }
 
     if config.storage.unlock_kwallet
@@ -413,13 +409,28 @@ pub async fn run_config_wizard(
             .default(false)
             .interact()?
     {
-        keyring::enroll(
-            &get_current_user(),
-            &config,
-            gaze_security::keyring::Backend::KWallet,
-        )?;
+        enroll_keyring(&config, gaze_security::keyring::Backend::KWallet)?;
     }
 
+    Ok(())
+}
+
+// The wizard runs unprivileged, but storing a credential needs root, which `gaze keyring` obtains.
+fn enroll_keyring(config: &Config, backend: gaze_security::keyring::Backend) -> anyhow::Result<()> {
+    if crate::is_root() {
+        return keyring::enroll(&get_current_user(), config, backend);
+    }
+    let mut command = std::process::Command::new(std::env::current_exe()?);
+    command.arg("keyring");
+    if backend == gaze_security::keyring::Backend::KWallet {
+        command.arg("--kwallet");
+    }
+    let status = command.status()?;
+    anyhow::ensure!(
+        status.success(),
+        "{} password enrollment did not complete",
+        backend.name()
+    );
     Ok(())
 }
 

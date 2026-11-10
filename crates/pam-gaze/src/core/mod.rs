@@ -58,8 +58,6 @@ pub const PAM_ESTABLISH_CRED: c_int = 0x0002;
 pub const PAM_DELETE_CRED: c_int = 0x0004;
 pub const PAM_REINITIALIZE_CRED: c_int = 0x0008;
 pub const PAM_REFRESH_CRED: c_int = 0x0010;
-pub const PAM_DATA_REPLACE: c_int = 0x2000_0000;
-pub const PAM_DATA_SILENT: c_int = 0x4000_0000;
 
 pub fn caller_wants_silence(flags: c_int) -> bool {
     flags & PAM_SILENT != 0
@@ -331,8 +329,17 @@ pub fn setcred_follows_authentication(flags: c_int) -> bool {
         && flags & (PAM_ESTABLISH_CRED | PAM_REINITIALIZE_CRED | PAM_REFRESH_CRED) != 0
 }
 
-pub fn pam_end_reports_success(status: c_int) -> bool {
-    status & PAM_DATA_REPLACE == 0 && status & !PAM_DATA_SILENT == PAM_SUCCESS
+// A non-null token must point to readable PAM-owned memory.
+pub(crate) unsafe fn existing_token_has_password(token: *const c_char) -> bool {
+    !token.is_null() && unsafe { *token } != 0
+}
+
+// Fingerprint and other password-free modules leave no token, so only a typed password clears.
+// Linux-PAM hides PAM_AUTHTOK from the application, which rules out a pam_end cleanup check.
+unsafe fn password_was_entered(pamh: PamHandle) -> bool {
+    let mut token: *const c_void = ptr::null();
+    let rc = unsafe { pam_get_item(pamh, PAM_AUTHTOK, &mut token) };
+    rc == PAM_SUCCESS && unsafe { existing_token_has_password(token.cast()) }
 }
 
 pub fn clear_duress_lockout(username: &str) {
@@ -360,16 +367,9 @@ pub fn clear_duress_lockout(username: &str) {
     rt.shutdown_timeout(DURESS_CLEAR_TIMEOUT);
 }
 
-unsafe extern "C" fn clear_duress_on_pam_end(_pamh: PamHandle, data: *mut c_void, status: c_int) {
-    if data.is_null() {
-        return;
-    }
-    let username = unsafe { Box::from_raw(data as *mut String) };
-    if pam_end_reports_success(status) {
-        guard_pam_entry(|| {
-            clear_duress_lockout(&username);
-            PAM_SUCCESS
-        });
+unsafe extern "C" fn free_duress_username(_pamh: PamHandle, data: *mut c_void, _status: c_int) {
+    if !data.is_null() {
+        drop(unsafe { Box::from_raw(data as *mut String) });
     }
 }
 
@@ -387,7 +387,7 @@ pub unsafe fn track_duress_clear(pamh: PamHandle, face_result: c_int) {
             pamh,
             DURESS_CLEAR_DATA_KEY.as_ptr(),
             boxed as *mut c_void,
-            Some(clear_duress_on_pam_end),
+            Some(free_duress_username),
         )
     };
     if rc != PAM_SUCCESS {
@@ -403,6 +403,9 @@ pub unsafe fn clear_duress_after_credentials(pamh: PamHandle, flags: c_int) {
     if unsafe { pam_get_data(pamh, DURESS_CLEAR_DATA_KEY.as_ptr(), &mut data) } != PAM_SUCCESS
         || data.is_null()
     {
+        return;
+    }
+    if !unsafe { password_was_entered(pamh) } {
         return;
     }
     let username = unsafe { &*(data as *const String) }.clone();
@@ -1591,15 +1594,6 @@ mod tests {
             PAM_DELETE_CRED | PAM_ESTABLISH_CRED
         ));
         assert!(!setcred_follows_authentication(0));
-    }
-
-    #[test]
-    fn only_a_successful_pam_end_clears_duress() {
-        assert!(pam_end_reports_success(PAM_SUCCESS));
-        assert!(pam_end_reports_success(PAM_SUCCESS | PAM_DATA_SILENT));
-        assert!(!pam_end_reports_success(PAM_AUTH_ERR));
-        assert!(!pam_end_reports_success(PAM_AUTH_ERR | PAM_DATA_SILENT));
-        assert!(!pam_end_reports_success(PAM_SUCCESS | PAM_DATA_REPLACE));
     }
 
     #[test]
