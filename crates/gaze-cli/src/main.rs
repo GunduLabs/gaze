@@ -198,7 +198,14 @@ fn interactive_terminal() -> bool {
     std::io::stdout().is_terminal() && std::io::stdin().is_terminal()
 }
 
-async fn run_busy<F, T>(title: &str, message: String, tone: Tone, future: F) -> anyhow::Result<T>
+// A write already sent to the daemon still happens, so only reads may be abandoned.
+async fn run_busy<F, T>(
+    title: &str,
+    message: String,
+    tone: Tone,
+    cancellable: bool,
+    future: F,
+) -> anyhow::Result<T>
 where
     F: Future<Output = T>,
 {
@@ -215,9 +222,12 @@ where
             title,
             message: &message,
             tone,
+            cancellable,
             tick,
         })?;
-        if let Some(TuiAction::Cancel) = tui::poll_action()? {
+        if let Some(TuiAction::Cancel) = tui::poll_action()?
+            && cancellable
+        {
             drop(terminal);
             anyhow::bail!("cancelled");
         }
