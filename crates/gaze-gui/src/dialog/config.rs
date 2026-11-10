@@ -1362,6 +1362,8 @@ pub fn show_config_dialog(
         update_locked_state,
         #[strong]
         proxy_cell,
+        #[strong]
+        overlay,
         move |_| {
             // Already unlocked, so the button is offering the other thing the banner can be
             // about: a configuration that could not be read.
@@ -1376,6 +1378,8 @@ pub fn show_config_dialog(
                 update_locked_state,
                 #[strong]
                 proxy_cell,
+                #[strong]
+                overlay,
                 async move {
                     let result =
                         async { shared_proxy(&proxy_cell).await?.authorize_settings().await }.await;
@@ -1383,6 +1387,10 @@ pub fn show_config_dialog(
                     update_locked_state();
                     if let Err(e) = result {
                         eprintln!("gaze-gui: settings authorization failed: {e}");
+                        overlay.add_toast(libadwaita::Toast::new(&format!(
+                            "Settings stay locked: {}",
+                            gaze_core::dbus::dbus_error_message(&e)
+                        )));
                     }
                 }
             ));
