@@ -367,8 +367,9 @@ pub(super) fn device_video_node(device: &gstreamer::Device) -> Option<String> {
     path.starts_with("/dev/video").then_some(path)
 }
 
-/// True when the node has a PCI or USB device ancestor. USB controllers can themselves
-/// live on the platform bus, so the sysfs path need not start with a PCI root.
+/// True when the node has a PCI or USB device ancestor, or a platform device that firmware
+/// (device tree or ACPI) describes, like SoC ISPs. Test drivers such as vivid register
+/// platform devices too, but nothing in firmware vouches for them.
 pub fn is_physical_node(node: &str) -> bool {
     if video_node_index(node).is_none() {
         return false;
@@ -380,12 +381,16 @@ pub fn is_physical_node(node: &str) -> bool {
 
 fn has_physical_bus_ancestor(path: &std::path::Path) -> bool {
     path.ancestors().any(|ancestor| {
-        std::fs::canonicalize(ancestor.join("subsystem")).is_ok_and(|bus| {
-            matches!(
-                bus.file_name().and_then(|name| name.to_str()),
-                Some("pci" | "usb")
-            )
-        })
+        let Ok(bus) = std::fs::canonicalize(ancestor.join("subsystem")) else {
+            return false;
+        };
+        match bus.file_name().and_then(|name| name.to_str()) {
+            Some("pci" | "usb") => true,
+            Some("platform") => {
+                ancestor.join("of_node").exists() || ancestor.join("firmware_node").exists()
+            }
+            _ => false,
+        }
     })
 }
 
@@ -401,7 +406,7 @@ pub(super) fn check_trusted_node(
         return Ok(());
     }
     let Some(bridge) = bridge else {
-        anyhow::bail!("refusing {node}: not a physical PCI/USB camera (virtual or loopback?)")
+        anyhow::bail!("refusing {node}: not a physical camera (virtual or loopback?)")
     };
     let source = check_bridge_marker(node, &bridge)
         .map_err(|err| anyhow::anyhow!("refusing {node}: {err:#}"))?;
@@ -915,10 +920,18 @@ mod tests {
             ("devices/pci0000:00/0000:00:14.0", "pci", true),
             ("devices/platform/soc/usb1/1-1/1-1:1.0", "usb", true),
             ("devices/platform/vivid.0", "platform", false),
+            ("devices/platform/soc/22a000000.isp", "platform", true),
+            ("devices/platform/INT3472:00", "platform", true),
         ] {
             let device = root.join(device);
             std::fs::create_dir_all(device.join("video4linux/video0")).unwrap();
             symlink(root.join("bus").join(bus), device.join("subsystem")).unwrap();
+            if device.ends_with("22a000000.isp") {
+                std::fs::create_dir_all(device.join("of_node")).unwrap();
+            }
+            if device.ends_with("INT3472:00") {
+                std::fs::create_dir_all(device.join("firmware_node")).unwrap();
+            }
             assert_eq!(has_physical_bus_ancestor(&device), expected);
             assert_eq!(
                 has_physical_bus_ancestor(&device.join("video4linux/video0")),
@@ -1536,7 +1549,7 @@ mod tests {
         let missing = "/dev/video-gaze-test-missing";
         let err = check_trusted_node(missing, None).unwrap_err();
         assert!(
-            err.to_string().contains("not a physical PCI/USB camera"),
+            err.to_string().contains("not a physical camera"),
             "unexpected error: {err:#}"
         );
     }
