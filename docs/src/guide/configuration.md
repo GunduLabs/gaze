@@ -325,8 +325,10 @@ during enrollment, then combines their results during verification according to
 the configured `hybrid_policy`.
 
 If the configured IR camera is not connected, for example a USB IR camera on an
-undocked laptop, Gaze enrolls and verifies with the RGB camera alone. The `and`
-policy is the exception: it keeps requiring both cameras and fails instead.
+undocked laptop, Gaze enrolls with the RGB camera alone unless the policy is
+`and`. Verification only continues with RGB alone under `or`. Every other policy
+fails face authentication and falls back to your password, so unplugging the IR
+camera is never weaker than covering its lens.
 
 ### IR only
 

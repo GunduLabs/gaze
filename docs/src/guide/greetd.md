@@ -46,7 +46,7 @@ Turn on template encryption, liveness and GNOME Keyring unlock in
 `gaze config`, then enroll the password:
 
 ```bash
-sudo gaze config
+gaze config
 sudo systemctl restart gazed
 gaze keyring
 ```
