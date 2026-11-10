@@ -488,6 +488,7 @@ impl AuthDaemon {
                     "Face authentication for {} is locked after a duress signal until a password login",
                     username
                 );
+                let _ = Self::verify_diagnostic(&ctxt, DURESS_LOCKED_DIAGNOSTIC).await;
                 let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
                 return;
             }
@@ -515,6 +516,7 @@ impl AuthDaemon {
 
             if !run_rgb && !run_ir {
                 error!("No matching templates or cameras configured for auth");
+                let _ = Self::verify_diagnostic(&ctxt, "No enrolled face matches a configured camera. Enroll a face, or check the cameras in `gaze config`.").await;
                 // Idle rather than no-face: nothing a retry could change.
                 let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
                 return;
@@ -531,6 +533,10 @@ impl AuthDaemon {
                     username,
                     if has_rgb_templates { "IR" } else { "RGB" }
                 );
+                let _ = Self::verify_diagnostic(&ctxt, &format!(
+                    "The \"and\" policy needs both cameras, but no {} captures are enrolled. Run `gaze refine-face` to add them.",
+                    if has_rgb_templates { "IR" } else { "RGB" }
+                )).await;
                 let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
                 return;
             }
@@ -552,6 +558,7 @@ impl AuthDaemon {
                     }
                     SleepHold::LidClosed => {
                         warn!("Laptop lid is closed, aborting face auth");
+                        let _ = Self::verify_diagnostic(&ctxt, LID_CLOSED_DIAGNOSTIC).await;
                         let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
                         return;
                     }
@@ -604,6 +611,9 @@ impl AuthDaemon {
                     }
                     Err(reason) => {
                         info!(?reason, "VerifyStart: camera lease refused");
+                        if reason == CameraLeaseError::AccessDenied {
+                            let _ = Self::verify_diagnostic(&ctxt, "The camera cannot be used right now: the lid is closed or another session holds the seat.").await;
+                        }
                         let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
                         return;
                     }
@@ -611,6 +621,9 @@ impl AuthDaemon {
                 if duress_lockout.is_locked(&username)
                     || rx.try_recv() != Err(oneshot::error::TryRecvError::Empty)
                 {
+                    if duress_lockout.is_locked(&username) {
+                        let _ = Self::verify_diagnostic(&ctxt, DURESS_LOCKED_DIAGNOSTIC).await;
+                    }
                     let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
                     return;
                 }
