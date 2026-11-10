@@ -7,9 +7,13 @@ The `gaze-omarchy` package integrates Gaze with Omarchy's Quickshell lock screen
 It provides separate face, password and fingerprint PAM conversations. A face
 failure leaves the screen locked and password input available throughout the scan.
 
-Gaze supports Omarchy **4.0.2 and 4.0.3**. Enablement checks the shell files
+Gaze supports Omarchy **4.5.0**. Enablement checks the shell files
 for compatibility. Earlier Omarchy releases using hyprlock should follow the
 [Hyprland guide](/guide/hyprland).
+
+Omarchy 4.0.x is no longer supported. If the Gaze lock is enabled there, update
+Omarchy before updating `gaze-omarchy`, or run `gaze-omarchy disable` first. The
+plugin files target 4.5.0 and do not load on an older shell.
 
 ## Install and enable
 

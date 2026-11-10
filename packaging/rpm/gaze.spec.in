@@ -255,7 +255,7 @@ install -Dpm 0644 integrations/cinnamon/settings-schema.json %{buildroot}%{_data
 install -Dpm 0755 integrations/omarchy/gaze-omarchy %{buildroot}%{_bindir}/gaze-omarchy
 install -Dpm 0644 packaging/pam/gaze-omarchy-face %{buildroot}%{_sysconfdir}/pam.d/gaze-omarchy-face
 mkdir -p %{buildroot}%{_datadir}/gaze/omarchy
-install -pm 0644 integrations/omarchy/*.qml integrations/omarchy/*.json integrations/omarchy/THIRD_PARTY_NOTICES.md %{buildroot}%{_datadir}/gaze/omarchy/
+install -pm 0644 integrations/omarchy/*.qml integrations/omarchy/*.js integrations/omarchy/*.json integrations/omarchy/THIRD_PARTY_NOTICES.md %{buildroot}%{_datadir}/gaze/omarchy/
 
 install -Dpm 0755 integrations/kde/gaze-kde-pam %{buildroot}%{_bindir}/gaze-kde-pam
 DESTDIR=%{buildroot} cmake --install kcm-build

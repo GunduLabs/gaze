@@ -248,7 +248,7 @@ For other PAM-based desktops, use the base `gaze` package's PAM modules and see 
 
 ### Omarchy Quickshell lock
 
-Use the [Omarchy guide](/guide/omarchy). The `gaze-omarchy` package provides independent face, password and fingerprint PAM conversations. After installation, run `gaze-omarchy enable` without sudo from your unlocked desktop. It supports Omarchy 4.0.2/4.0.3 and checks the shell files before enablement.
+Use the [Omarchy guide](/guide/omarchy). The `gaze-omarchy` package provides independent face, password and fingerprint PAM conversations. After installation, run `gaze-omarchy enable` without sudo from your unlocked desktop. It supports Omarchy 4.5.0 and checks the shell files before enablement.
 
 ### Enable face unlock for hyprlock
 

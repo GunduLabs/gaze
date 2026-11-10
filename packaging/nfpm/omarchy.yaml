@@ -27,6 +27,10 @@ contents:
     dst: "/usr/share/gaze/omarchy/LockView.qml"
     file_info:
       mode: 0644
+  - src: "integrations/omarchy/FingerprintModel.js"
+    dst: "/usr/share/gaze/omarchy/FingerprintModel.js"
+    file_info:
+      mode: 0644
   - src: "integrations/omarchy/manifest.json"
     dst: "/usr/share/gaze/omarchy/manifest.json"
     file_info:

@@ -99,12 +99,12 @@ unlocked_status() {
 
 enable_plugin() {
 	unlocked_status
-	compatible || fail 'This Omarchy version needs review. Supported baselines: 4.0.2 and 4.0.3.'
+	compatible || fail 'This Omarchy version needs review. Supported baseline: 4.5.0.'
 	pam_ready || fail 'Reinstall gaze-omarchy: its dedicated face PAM service is missing or modified.'
-	catalog=$(run omarchy-plugin-catalog) || fail 'Cannot query the Omarchy plugin catalog.'
-	printf '%s\n' "$catalog" | jq -e 'type == "array"' >/dev/null || fail 'Invalid plugin catalog.'
+	catalog=$(run omarchy plugin list --json) || fail 'Cannot query the Omarchy plugin list.'
+	printf '%s\n' "$catalog" | jq -e 'type == "array"' >/dev/null || fail 'Invalid plugin list.'
 	if printf '%s\n' "$catalog" | jq -e --arg id "$PLUGIN_ID" \
-		'any(.[]; .enabled == true and (.clonedFrom // .omarchy.clonedFrom) == "omarchy.lock" and .id != $id)' >/dev/null; then
+		'any(.[]; .enabled == true and .clonedFrom == "omarchy.lock" and .id != $id)' >/dev/null; then
 		fail 'Disable your other custom lock plugin before enabling Gaze.'
 	fi
 	if [ -e "$PLUGIN_LINK" ] || [ -L "$PLUGIN_LINK" ]; then
@@ -161,10 +161,10 @@ doctor() {
 	pam_ready || issue 'Dedicated face PAM is missing, modified or untrusted; reinstall gaze-omarchy.'
 	enrolled || issue 'No enrollment or daemon unavailable; run gaze add-face default and gaze test.'
 	owns_link || issue 'Plugin is not installed for this user; run gaze-omarchy enable while unlocked.'
-	catalog=$(run omarchy-plugin-catalog 2>/dev/null) || catalog=
+	catalog=$(run omarchy plugin list --json 2>/dev/null) || catalog=
 	printf '%s\n' "$catalog" | jq -e --arg id "$PLUGIN_ID" \
 		'any(.[]; .id == $id and .enabled == true)' >/dev/null 2>&1 ||
-		issue 'Gaze plugin is disabled or the catalog is unavailable; run gaze-omarchy enable while unlocked.'
+		issue 'Gaze plugin is disabled or the plugin list is unavailable; run gaze-omarchy enable while unlocked.'
 	status=$(run omarchy-shell lock status 2>/dev/null) || status=
 	expected=$(jq -er '.version' "$SOURCE/manifest.json") || expected=
 	printf '%s\n' "$status" | jq -e --arg id "$PLUGIN_ID" --arg version "$expected" \

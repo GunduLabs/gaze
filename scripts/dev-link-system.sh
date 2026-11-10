@@ -82,7 +82,7 @@ OMARCHY_HELPER_DST=/usr/bin/gaze-omarchy
 OMARCHY_PAM_SRC="$REPO/packaging/pam/gaze-omarchy-face"
 OMARCHY_PAM_DST=/etc/pam.d/gaze-omarchy-face
 OMARCHY_PLUGIN_DIR=/usr/share/gaze/omarchy
-OMARCHY_PLUGIN_FILES="Service.qml LockView.qml manifest.json upstream-lock.json THIRD_PARTY_NOTICES.md"
+OMARCHY_PLUGIN_FILES="Service.qml LockView.qml FingerprintModel.js manifest.json upstream-lock.json THIRD_PARTY_NOTICES.md"
 
 artifact() {
     printf '%s/%s' "$TARGET" "$1"
