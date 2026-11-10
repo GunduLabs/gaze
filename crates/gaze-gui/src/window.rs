@@ -4,8 +4,8 @@
 use crate::dialog::capture;
 use crate::dialog::config::show_config_dialog;
 use gaze_core::dbus::{
-    DaemonState, GazeProxy, connect_gaze, dbus_error_message, dbus_is_file_not_found,
-    dbus_is_not_activatable, gazed_unit_state_on, load_config_from_daemon,
+    CaptureStatus, DaemonState, GazeProxy, connect_gaze, dbus_error_message,
+    dbus_is_file_not_found, dbus_is_not_activatable, gazed_unit_state_on, load_config_from_daemon,
 };
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -40,6 +40,24 @@ fn load_auth_highlight_css() {
             );
         }
     });
+}
+
+const DIAGNOSTIC_GRACE: Duration = Duration::from_millis(50);
+
+fn test_failure_text(rgb: CaptureStatus, ir: CaptureStatus) -> &'static str {
+    let seen = |status| matches!(status, CaptureStatus::Ready | CaptureStatus::Usable);
+    let idle = |status| matches!(status, CaptureStatus::Unused | CaptureStatus::NoFace);
+    if rgb == CaptureStatus::Unused && ir == CaptureStatus::Unused {
+        "Face authentication could not run"
+    } else if seen(rgb) || seen(ir) {
+        "Face not recognized"
+    } else if rgb == CaptureStatus::TooDark || ir == CaptureStatus::TooDark {
+        "Too dark for face authentication"
+    } else if idle(rgb) && idle(ir) {
+        "No face detected"
+    } else {
+        "Move your face into the frame and try again"
+    }
 }
 
 fn toast_overlay(window: &libadwaita::ApplicationWindow) -> Option<libadwaita::ToastOverlay> {
@@ -319,6 +337,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         }
                     };
 
+                    let mut diagnostics = proxy.receive_verify_diagnostic().await.ok();
+
                     if proxy.verify_start("any").await.is_err() {
                         add_toast(&window, "Daemon error starting verification");
                         let _ = proxy.release().await;
@@ -328,6 +348,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
                     let mut text = "Face not recognized".to_string();
                     let mut matched_face: Option<String> = None;
+                    let mut refused = false;
 
                     // Without a deadline of its own the button stays stuck for as long as the
                     // daemon withholds a verdict.
@@ -346,7 +367,10 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         .find(|(_, _, _, rgb_p, _, _, ir_p)| *rgb_p || *ir_p)
                                         .map(|(n, _, _, _, _, _, _)| n.clone());
                                 } else {
-                                    text = "Face not recognized".to_string();
+                                    let (rgb, ir) = (*args.rgb_status(), *args.ir_status());
+                                    refused =
+                                        rgb == CaptureStatus::Unused && ir == CaptureStatus::Unused;
+                                    text = test_failure_text(rgb, ir).to_string();
                                 }
                                 break;
                             }
@@ -355,6 +379,19 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 let _ = proxy.verify_stop().await;
                                 text = "No face seen before the test timed out".to_string();
                                 break;
+                            }
+                        }
+                    }
+
+                    // The daemon explains a refusal on a separate stream, just before the verdict.
+                    if refused && let Some(stream) = diagnostics.as_mut() {
+                        let grace = glib::timeout_future(DIAGNOSTIC_GRACE);
+                        let mut grace = std::pin::pin!(grace);
+                        while let futures::future::Either::Left((Some(signal), _)) =
+                            futures::future::select(stream.next(), grace.as_mut()).await
+                        {
+                            if let Ok(args) = signal.args() {
+                                text = args.message().to_string();
                             }
                         }
                     }
