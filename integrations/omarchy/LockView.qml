@@ -290,7 +290,7 @@ Item {
       width: root.fieldWidth
       visible: root.faceStatusText.length > 0
       text: root.faceStatusText
-      color: root.faceMessageIsError && !root.faceAuthenticating && !root.faceConfirming ? Color.lock.textError : Color.lock.placeholder
+      color: root.faceMessageIsError && !root.faceAuthenticating && !root.faceConfirming ? Commons.Color.lock.textError : Commons.Color.lock.placeholder
       font.family: Style.font.family
       font.pixelSize: Style.font.body
       horizontalAlignment: Text.AlignHCenter
