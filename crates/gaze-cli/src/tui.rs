@@ -74,6 +74,7 @@ pub struct BusyScreen<'a> {
     pub title: &'a str,
     pub message: &'a str,
     pub tone: Tone,
+    pub cancellable: bool,
     pub tick: u64,
 }
 
@@ -235,9 +236,13 @@ fn render_busy(frame: &mut Frame<'_>, screen: &BusyScreen<'_>) {
 
     render_pulse(frame, chunks[1], screen.tick, screen.tone, "working");
 
-    let controls = Paragraph::new("Ctrl+C or q to cancel")
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Center);
+    let controls = Paragraph::new(if screen.cancellable {
+        "Ctrl+C or q to cancel"
+    } else {
+        ""
+    })
+    .style(Style::default().fg(Color::DarkGray))
+    .alignment(Alignment::Center);
     frame.render_widget(controls, chunks[2]);
 }
 
