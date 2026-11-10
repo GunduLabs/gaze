@@ -486,11 +486,6 @@ fn log_keyring_failure(
     };
 }
 
-// A non-null token must point to readable PAM-owned memory.
-unsafe fn existing_token_has_password(token: *const c_char) -> bool {
-    !token.is_null() && unsafe { *token } != 0
-}
-
 const PROMPT_RETIRE_TIMEOUT: Duration = Duration::from_secs(2);
 const PROMPT_SIGNAL_INTERVAL: Duration = Duration::from_millis(50);
 
