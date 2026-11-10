@@ -265,6 +265,7 @@ Item {
     // is not intuitive that it signals a broken reader — so the words carry the
     // explanation and the icon only reinforces it.
     Text {
+      id: fingerprintNotice
       objectName: "fingerprintUnavailableNotice"
       textFormat: Text.PlainText
       anchors.top: inputField.bottom
@@ -282,7 +283,8 @@ Item {
     Text {
       objectName: "faceStatus"
       textFormat: Text.PlainText
-      anchors.top: inputField.bottom
+      // Both messages sit under the field, so the face line drops below the notice.
+      anchors.top: fingerprintNotice.visible ? fingerprintNotice.bottom : inputField.bottom
       anchors.topMargin: 16
       anchors.horizontalCenter: inputField.horizontalCenter
       width: root.fieldWidth
