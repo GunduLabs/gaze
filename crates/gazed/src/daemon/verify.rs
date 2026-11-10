@@ -139,6 +139,11 @@ pub(super) fn rgb_continues_without_ir(policy: &str, run_rgb: bool) -> bool {
     run_rgb && policy != "and"
 }
 
+// Unplugging IR must not be weaker than covering it, which fails every policy but `or`.
+pub(super) fn rgb_verifies_without_ir(policy: &str, run_rgb: bool) -> bool {
+    run_rgb && policy == "or"
+}
+
 pub(super) fn auth_streams(
     rgb_device: &str,
     ir_device: &str,
@@ -616,7 +621,7 @@ impl AuthDaemon {
                 }
                 let mut run_rgb = run_rgb;
                 let mut run_ir = run_ir;
-                if run_ir && rgb_continues_without_ir(&hybrid_policy, run_rgb) {
+                if run_ir && rgb_verifies_without_ir(&hybrid_policy, run_rgb) {
                     let source = ir_device.clone();
                     let disconnected = tokio::task::spawn_blocking(move || {
                         gaze_vision::camera::camera_disconnected(&source, false)
@@ -1360,7 +1365,7 @@ impl AuthDaemon {
                                 }
                                 VerifyMsg::Unavailable(Spectrum::Ir, reason)
                                     if run_ir
-                                        && rgb_continues_without_ir(&hybrid_policy, run_rgb)
+                                        && rgb_verifies_without_ir(&hybrid_policy, run_rgb)
                                         && !rgb_phase_done.load(std::sync::atomic::Ordering::Relaxed) =>
                                 {
                                     warn!("VerifyStart: {reason}; continuing with RGB only");
@@ -1751,21 +1756,30 @@ mod tests {
     }
 
     #[test]
-    fn a_disconnected_ir_camera_hands_auth_to_rgb_unless_both_are_required() {
+    fn a_disconnected_ir_camera_still_enrolls_rgb_unless_both_are_required() {
         for policy in ["or", "fallback_on_dark", "default"] {
             assert!(rgb_continues_without_ir(policy, true), "{policy}");
-            assert!(hybrid_auth_passed(
-                policy,
-                true,
-                false,
-                true,
-                CaptureStatus::Ready,
-                true,
-                false
-            ));
         }
         assert!(!rgb_continues_without_ir("and", true));
         assert!(!rgb_continues_without_ir("fallback_on_dark", false));
+    }
+
+    #[test]
+    fn a_disconnected_ir_camera_hands_verify_to_rgb_only_under_or() {
+        assert!(rgb_verifies_without_ir("or", true));
+        assert!(hybrid_auth_passed(
+            "or",
+            true,
+            false,
+            true,
+            CaptureStatus::Ready,
+            true,
+            false
+        ));
+        for policy in ["fallback_on_dark", "default", "", "and"] {
+            assert!(!rgb_verifies_without_ir(policy, true), "{policy}");
+        }
+        assert!(!rgb_verifies_without_ir("or", false));
     }
 
     #[test]
