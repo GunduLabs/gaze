@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::fs;
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -25,13 +27,7 @@ pub fn dconf_read_with_profile(
     config_home: Option<&Path>,
     key: &str,
 ) -> Option<String> {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let profile = std::env::temp_dir().join(format!(
-        "gaze-{tag}-{}-{}.profile",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
-    fs::write(&profile, profile_body).ok()?;
+    let profile = write_private_profile(tag, profile_body)?;
     let mut command = Command::new("dconf");
     command.arg("read").arg(key).env("DCONF_PROFILE", &profile);
     if let Some(home) = config_home {
@@ -41,6 +37,35 @@ pub fn dconf_read_with_profile(
     let _ = fs::remove_file(&profile);
     let output = output.ok().filter(|output| output.status.success())?;
     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+// Root shares /tmp outside gazed's PrivateTmp, so never follow a planted path.
+fn write_private_profile(tag: &str, body: &str) -> Option<PathBuf> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    for _ in 0..16 {
+        let path = std::env::temp_dir().join(format!(
+            "gaze-{tag}-{}-{}.profile",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path);
+        match file {
+            Ok(mut file) => {
+                if file.write_all(body.as_bytes()).is_err() {
+                    let _ = fs::remove_file(&path);
+                    return None;
+                }
+                return Some(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return None,
+        }
+    }
+    None
 }
 
 pub fn gdm_system_dconf_read(key: &str) -> Option<String> {
