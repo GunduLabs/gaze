@@ -377,6 +377,10 @@ async fn handle_enroll(
 ) -> anyhow::Result<()> {
     let term = Term::stdout();
 
+    // The password prompt must finish before the capture screen takes over the terminal.
+    if let Err(err) = proxy.authorize_enrollment().await {
+        exit_with_error(&describe_dbus_error(proxy, "Enrollment was not authorized", &err).await);
+    }
     if let Err(err) = proxy.claim(user).await {
         exit_with_error(&describe_dbus_error(proxy, "Failed to claim device", &err).await);
     }
@@ -904,6 +908,17 @@ async fn run() -> anyhow::Result<()> {
                 }
                 None if show => print!("{}", config_show_text(&config)?),
                 None => {
+                    // Asking up front keeps a refused password from discarding every answer.
+                    if let Err(err) = proxy.authorize_settings().await {
+                        exit_with_error(
+                            &describe_dbus_error(
+                                &proxy,
+                                "Changing settings was not authorized",
+                                &err,
+                            )
+                            .await,
+                        );
+                    }
                     run_config_wizard(&Term::stdout(), &proxy, config, keyring_supported).await?
                 }
             }
