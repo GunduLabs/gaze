@@ -438,7 +438,13 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
         async move {
             let Ok(proxy) = connect_gaze().await else {
                 tracing::error!("Failed to connect to Gaze daemon");
-                status_page.set_description(Some("Failed to connect to Gaze daemon"));
+                let state = match zbus::Connection::system().await {
+                    Ok(connection) => gazed_unit_state_on(&connection).await.ok(),
+                    Err(_) => None,
+                };
+                let (title, description, _) = daemon_state_text(state);
+                status_page.set_title(title);
+                status_page.set_description(Some(description));
                 return;
             };
 

@@ -161,6 +161,19 @@ fn capture_tone(status: CaptureStatus) -> Tone {
     }
 }
 
+fn capture_result_label(status: CaptureStatus) -> &'static str {
+    match status {
+        CaptureStatus::Unused => "not used",
+        CaptureStatus::NoFace => "no face seen",
+        CaptureStatus::TooDark => "too dark",
+        CaptureStatus::Clipped => "face cut off",
+        CaptureStatus::NotCentered => "face off center",
+        CaptureStatus::TooFar => "too far",
+        CaptureStatus::TooClose => "too close",
+        CaptureStatus::Ready | CaptureStatus::Usable => "face seen",
+    }
+}
+
 async fn describe_dbus_error(proxy: &GazeProxy<'_>, context: &str, err: &zbus::Error) -> String {
     if dbus_is_not_activatable(err) {
         let (problem, fix) = daemon_unavailable_hint(proxy.inner().connection()).await;
@@ -678,7 +691,7 @@ async fn handle_test(proxy: &GazeProxy<'_>, user: &str, silent: bool) -> anyhow:
 
     let mut authenticated = false;
     if let Some((result, faces, rgb_status, ir_status)) = verify_result {
-        if !silent {
+        if !silent && !faces.is_empty() {
             println!(
                 "\n{:<20} {:>10} {:>8} {:>8} {:>10} {:>8} {:>8}",
                 style("Face").bold(),
@@ -713,12 +726,13 @@ async fn handle_test(proxy: &GazeProxy<'_>, user: &str, silent: bool) -> anyhow:
                 );
             }
             println!();
-
+        }
+        if !silent {
             println!(
                 "{} RGB: {} | IR: {}",
                 style("Status:").bold(),
-                style(format!("{:?}", rgb_status)).cyan(),
-                style(format!("{:?}", ir_status)).cyan()
+                style(capture_result_label(rgb_status)).cyan(),
+                style(capture_result_label(ir_status)).cyan()
             );
             println!();
         }
