@@ -362,6 +362,19 @@ pub async fn run_config_wizard(
         .default(config.storage.encrypt_templates)
         .interact()?;
 
+    let keyring_prerequisites = config.storage.encrypt_templates && config.liveness.enabled;
+    for (was_on, name) in [
+        (config.storage.unlock_gnome_keyring, "GNOME Keyring"),
+        (config.storage.unlock_kwallet, "KWallet"),
+    ] {
+        if was_on && !keyring_prerequisites {
+            term.write_line(&format!(
+                "{} Turning off {name} unlock: it needs both template encryption and liveness",
+                style("!").yellow().bold()
+            ))?;
+        }
+    }
+
     config.storage.unlock_gnome_keyring =
         if keyring_supported.gnome && config.storage.encrypt_templates && config.liveness.enabled {
             Confirm::with_theme(&theme)
