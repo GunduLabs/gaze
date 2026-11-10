@@ -296,22 +296,24 @@ pub async fn run_config_wizard(
     }
 
     config.enrollment.max_templates = Input::with_theme(&theme)
-        .with_prompt("Max templates (sets of captures)")
+        .with_prompt("Max templates (sets of captures, 0 for no limit)")
         .default(config.enrollment.max_templates)
         .interact_text()?;
 
     let min_face_size_ratio: f64 = Input::with_theme(&theme)
         .with_prompt("Minimum enrollment face size ratio (0.10 - 0.75; lower allows more distance)")
         .default(config.enrollment.min_face_size_ratio)
+        .validate_with(|value: &f64| {
+            if (MIN_ENROLLMENT_FACE_SIZE_RATIO..=MAX_ENROLLMENT_FACE_SIZE_RATIO).contains(value) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "must be between {MIN_ENROLLMENT_FACE_SIZE_RATIO} and {MAX_ENROLLMENT_FACE_SIZE_RATIO}"
+                ))
+            }
+        })
         .interact_text()?;
-    config.enrollment.min_face_size_ratio = if min_face_size_ratio.is_finite() {
-        min_face_size_ratio.clamp(
-            MIN_ENROLLMENT_FACE_SIZE_RATIO,
-            MAX_ENROLLMENT_FACE_SIZE_RATIO,
-        )
-    } else {
-        config.enrollment.effective_min_face_size_ratio() as f64
-    };
+    config.enrollment.min_face_size_ratio = min_face_size_ratio;
 
     config.liveness.enabled = Confirm::with_theme(&theme)
         .with_prompt("Enable liveness anti-spoofing")
