@@ -398,8 +398,11 @@ pub fn show_capture_dialog(
                         start_failed(&format!("Could not claim camera: {err}. Try again."));
                         return;
                     }
-                    if proxy.enroll_start(&face_name).await.is_err() {
-                        start_failed("Daemon failed to start enrollment. Try again.");
+                    if let Err(err) = proxy.enroll_start(&face_name).await {
+                        start_failed(&format!(
+                            "Could not start enrollment: {}",
+                            gaze_core::dbus::dbus_error_message(&err)
+                        ));
                         let _ = proxy.release().await;
                         return;
                     }

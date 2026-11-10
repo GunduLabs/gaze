@@ -483,6 +483,10 @@ impl AuthDaemon {
                 }
             };
 
+            if duress_cfg.enabled && eye_state_arc.lock().await.is_none() {
+                let _ = Self::verify_diagnostic(&ctxt, DURESS_MODEL_MISSING_DIAGNOSTIC).await;
+            }
+
             if duress_locked {
                 info!(
                     "Face authentication for {} is locked after a duress signal until a password login",
