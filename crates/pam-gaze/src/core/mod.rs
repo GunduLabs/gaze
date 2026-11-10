@@ -338,8 +338,8 @@ pub(crate) unsafe fn existing_token_has_password(token: *const c_char) -> bool {
 // Linux-PAM hides PAM_AUTHTOK from the application, which rules out a pam_end cleanup check.
 unsafe fn password_was_entered(pamh: PamHandle) -> bool {
     let mut token: *const c_void = ptr::null();
-    unsafe { pam_get_item(pamh, PAM_AUTHTOK, &mut token) } == PAM_SUCCESS
-        && unsafe { existing_token_has_password(token.cast()) }
+    let rc = unsafe { pam_get_item(pamh, PAM_AUTHTOK, &mut token) };
+    rc == PAM_SUCCESS && unsafe { existing_token_has_password(token.cast()) }
 }
 
 pub fn clear_duress_lockout(username: &str) {
