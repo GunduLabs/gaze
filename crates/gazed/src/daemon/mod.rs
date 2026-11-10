@@ -59,6 +59,7 @@ const GDM_DCONF_OVERRIDE_CONTENT: &str =
     "[org/gnome/shell/extensions/gaze]\nenable-face-authentication=true\n";
 const CLAIM_TIMEOUT_SECS: u64 = 300;
 const VERIFY_TOO_DARK_TIMEOUT: Duration = Duration::from_secs(1);
+const DURESS_MODEL_MISSING_DIAGNOSTIC: &str = "Duress detection is on, but its eye model could not load, so closed eyes will not lock face authentication. Check `journalctl -u gazed`.";
 const LIVENESS_GATE_DIAGNOSTIC: &str = "Face matched, but the liveness check did not pass. Move slightly and try again, or lower liveness.threshold.";
 const VERIFY_NO_FACE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Bounds a face that stays badly framed: it refreshes the no-face deadline without ever
