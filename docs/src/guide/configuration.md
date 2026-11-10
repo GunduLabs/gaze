@@ -372,8 +372,9 @@ ir_frame_height = 340
 
 ### Virtual IR nodes (userspace bridges)
 
-Authentication only opens camera nodes backed by physical hardware (a PCI or USB
-device in sysfs). A userspace bridge that relays a sensor into a virtual node —
+Authentication only opens camera nodes backed by physical hardware: a PCI or USB
+device in sysfs, or a platform device that the device tree or ACPI describes,
+such as the Apple Silicon ISP. A userspace bridge that relays a sensor into a virtual node —
 for example a v4l2loopback device for an IPU6 IR sensor — cannot prove that on
 its own, so the daemon refuses it for privileged capture. Declare the bridge's
 provenance instead:
@@ -394,7 +395,7 @@ ir_source_marker = "/run/surface_ir_bridge_dev"
 - An optional second line names the virtual node the bridge feeds. When it is
   present, it must be the same device as `cameras.ir`, which stops a stale or
   unrelated marker from vouching for a different node.
-- The named source must itself be a physical PCI/USB camera, and when
+- The named source must itself be a physical camera, and when
   `ir_source_driver` is set it must also be bound to that driver.
 - The virtual node must not be writable by unprivileged users: anyone who can
   feed it could replay recorded footage as authentication. Gaze refuses the node
