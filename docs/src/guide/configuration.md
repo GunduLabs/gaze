@@ -404,6 +404,51 @@ ir_source_marker = "/run/surface_ir_bridge_dev"
 
 This setting is only available in the config file, not in the GUI.
 
+### Nonphysical RGB cameras (opt-in)
+
+The same physical-node rule governs the RGB camera: automatic selection
+(`rgb = "primary"`) picks the first node that sysfs backs with real hardware, and
+privileged capture refuses a virtual one. If your RGB frames reach a V4L2 node
+through a relay you cannot declare provenance for, you can opt in explicitly:
+
+```toml
+[cameras]
+allow_nonphysical_rgb = true
+```
+
+- Automatic selection then picks the first camera node, virtual or not. A source
+  that names a node directly (`rgb = "/dev/videoN"`) also opens virtual nodes.
+- A virtual node must still not be writable by unprivileged users, exactly like a
+  bridged IR node, so recorded footage cannot be replayed into it. Keep it
+  `root:video` `0660`. Be aware that systemd's `uaccess` machinery tags every
+  V4L2 node and grants the logged-in user a write ACL this rule refuses; since
+  systemd 247 a `TAG-="uaccess"` udev rule cannot remove the tag (the udev
+  database keeps it), so holding this line means excluding the node from
+  `/usr/lib/udev/rules.d/70-uaccess.rules`, for example by shadowing that file
+  with a copy in `/etc/udev/rules.d/` whose `SUBSYSTEM=="video4linux"` line skips
+  the node.
+- If that fight is not worth it to you, a second key accepts a user-writable
+  node:
+
+```toml
+[cameras]
+allow_nonphysical_rgb = true
+allow_untrusted_rgb_writers = true
+```
+
+  Anything running as your user can then feed the node recorded footage, so
+  treat the camera as no more trustworthy than your login session. The key
+  requires `cameras.allow_nonphysical_rgb` and never relaxes a bridged IR
+  node's writer check.
+- The opt-in applies to the RGB camera only. IR capture keeps the physical or
+  bridge-marker requirement.
+- Treat all of this as a security trade-off: anything able to feed the node can
+  present frames as yours. Prefer `usb:VVVV:PPPP`, a fixed node, or a bridge
+  marker where possible.
+
+Both keys live only in `/etc/gaze/config.toml`. The GUI and `gaze config` leave
+them untouched; restart with `sudo systemctl restart gazed` after editing.
+
 ### Parallel RGB + IR capture
 
 By default, verification captures the two cameras one at a time (RGB, then IR). Capturing sequentially rather than concurrently lets single-function webcams that cannot stream their RGB and IR sensors at once (for example the Logitech BRIO 4K, `046d:085e`) still use hybrid authentication, at the cost of latency: with `hybrid_policy = "and"` both spectra always run, so the two capture phases add up.

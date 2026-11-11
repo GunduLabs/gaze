@@ -465,6 +465,10 @@ pub struct CameraConfig {
     #[serde(default = "default_rgb_device")]
     pub rgb: CameraSources,
     #[serde(default)]
+    pub allow_nonphysical_rgb: bool,
+    #[serde(default)]
+    pub allow_untrusted_rgb_writers: bool,
+    #[serde(default)]
     pub ir: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ir_frame_width: Option<u32>,
@@ -497,6 +501,18 @@ pub struct BridgeSource<'a> {
     pub source_driver: Option<&'a str>,
 }
 
+/// The file-only `cameras.allow_nonphysical_rgb` opt-in and its companion
+/// `cameras.allow_untrusted_rgb_writers`. `enabled` lets privileged RGB capture open a
+/// virtual (for example v4l2loopback) node; `allow_untrusted_writers` additionally accepts a
+/// node unprivileged users can write. systemd's `uaccess` machinery tags every V4L2 node and
+/// grants the logged-in user a write ACL that the writer gate refuses, so on desktops that
+/// key records accepting a node the session can feed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NonphysicalRgbOptIn {
+    pub enabled: bool,
+    pub allow_untrusted_writers: bool,
+}
+
 fn default_rgb_device() -> CameraSources {
     DEFAULT_RGB_CAMERA.into()
 }
@@ -523,6 +539,11 @@ impl CameraConfig {
             );
         }
         self.validate_ir_bridge_source()?;
+        if self.allow_untrusted_rgb_writers && !self.allow_nonphysical_rgb {
+            anyhow::bail!(
+                "cameras.allow_untrusted_rgb_writers requires cameras.allow_nonphysical_rgb"
+            );
+        }
         match (self.ir_frame_width, self.ir_frame_height) {
             (None, None) => {}
             (Some(_), None) | (None, Some(_)) => anyhow::bail!(
@@ -571,6 +592,16 @@ impl CameraConfig {
             marker,
             source_driver: self.ir_source_driver.as_deref(),
         })
+    }
+
+    /// The nonphysical RGB opt-in, from the file-only keys. An invalid combination (the
+    /// untrusted-writer key without the nonphysical key) reads back with the writer
+    /// half disabled.
+    pub fn nonphysical_rgb_opt_in(&self) -> NonphysicalRgbOptIn {
+        NonphysicalRgbOptIn {
+            enabled: self.allow_nonphysical_rgb,
+            allow_untrusted_writers: self.allow_untrusted_rgb_writers && self.allow_nonphysical_rgb,
+        }
     }
 
     /// Copies the file-only bridge provenance keys from `current`. D-Bus config
@@ -854,6 +885,8 @@ impl Default for CameraConfig {
     fn default() -> Self {
         Self {
             rgb: default_rgb_device(),
+            allow_nonphysical_rgb: false,
+            allow_untrusted_rgb_writers: false,
             ir: String::new(),
             emitter_enabled: false,
             dark_luma_threshold: default_dark_luma_threshold(),
@@ -874,9 +907,11 @@ const OPTIONAL_CONFIG_KEYS: [(&str, &str); 4] = [
     ("cameras", "ir_source_driver"),
 ];
 
-const FILE_ONLY_CONFIG_KEYS: [&str; 4] = [
+const FILE_ONLY_CONFIG_KEYS: [&str; 6] = [
     "liveness.ir_model",
     "liveness.ir_threshold",
+    "cameras.allow_nonphysical_rgb",
+    "cameras.allow_untrusted_rgb_writers",
     "cameras.ir_source_marker",
     "cameras.ir_source_driver",
 ];
@@ -1423,6 +1458,16 @@ mod tests {
         assert!(config.to_toml().unwrap().contains("[duress]"));
         assert!(config.with_key("liveness.ir_model", "true").is_err());
         assert!(config.with_key("liveness.ir_threshold", "0.6").is_err());
+        assert!(
+            config
+                .with_key("cameras.allow_nonphysical_rgb", "true")
+                .is_err()
+        );
+        assert!(
+            config
+                .with_key("cameras.allow_untrusted_rgb_writers", "true")
+                .is_err()
+        );
         for (key, value) in [
             ("duress.enabled", "true"),
             ("duress.closed_threshold", "0.8"),
@@ -1538,6 +1583,26 @@ mod tests {
             cameras.validate().unwrap();
             assert_eq!(cameras.parallel_capture(), mode);
         }
+    }
+
+    #[test]
+    fn untrusted_rgb_writers_requires_the_nonphysical_opt_in() {
+        let mut cameras = CameraConfig {
+            allow_untrusted_rgb_writers: true,
+            ..CameraConfig::default()
+        };
+        assert!(cameras.validate().is_err());
+        assert!(!cameras.nonphysical_rgb_opt_in().allow_untrusted_writers);
+
+        cameras.allow_nonphysical_rgb = true;
+        cameras.validate().unwrap();
+        assert_eq!(
+            cameras.nonphysical_rgb_opt_in(),
+            NonphysicalRgbOptIn {
+                enabled: true,
+                allow_untrusted_writers: true,
+            }
+        );
     }
 
     #[test]
@@ -2007,6 +2072,8 @@ mod tests {
             security: SecurityLevel::high(),
             cameras: CameraConfig {
                 rgb: "primary".into(),
+                allow_nonphysical_rgb: true,
+                allow_untrusted_rgb_writers: true,
                 ir: "pipewiresrc target-object=some-ir-camera".to_string(),
                 emitter_enabled: true,
                 dark_luma_threshold: 55,
@@ -2061,6 +2128,8 @@ mod tests {
             SecurityLevel::high().recognizer()
         );
         assert_eq!(loaded.cameras.rgb, "primary".into());
+        assert!(loaded.cameras.allow_nonphysical_rgb);
+        assert!(loaded.cameras.allow_untrusted_rgb_writers);
         assert_eq!(
             loaded.cameras.ir,
             "pipewiresrc target-object=some-ir-camera"

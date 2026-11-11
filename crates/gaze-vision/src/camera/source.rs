@@ -397,30 +397,51 @@ fn has_physical_bus_ancestor(path: &std::path::Path) -> bool {
 /// Gates opening `node` for privileged capture. Physical nodes always pass. A virtual node
 /// (for example a v4l2loopback fed by a userspace bridge for an IPU6 sensor) passes only when
 /// `bridge` — the operator-declared `cameras.ir_source_marker`/`ir_source_driver` — proves
-/// which physical camera feeds it.
+/// which physical camera feeds it, or when `allow_nonphysical` records an explicit opt-in.
+/// Both flags are per-open permissions the caller already scoped: RGB opens pass the
+/// `cameras.allow_nonphysical_rgb`/`cameras.allow_untrusted_rgb_writers` values, IR opens
+/// always pass `false`.
 pub(super) fn check_trusted_node(
     node: &str,
     bridge: Option<BridgeSource<'_>>,
+    allow_nonphysical: bool,
+    allow_untrusted_writers: bool,
 ) -> anyhow::Result<()> {
     if is_physical_node(node) {
         return Ok(());
     }
-    let Some(bridge) = bridge else {
-        anyhow::bail!("refusing {node}: not a physical camera (virtual or loopback?)")
-    };
-    let source = check_bridge_marker(node, &bridge)
-        .map_err(|err| anyhow::anyhow!("refusing {node}: {err:#}"))?;
-    if node_grants_untrusted_write(node) {
+    // The writer opt-in only ever accompanies the nonphysical opt-in.
+    let skip_writer_gate = allow_nonphysical && allow_untrusted_writers;
+    if allow_nonphysical {
+        if skip_writer_gate {
+            info!(
+                "{node} is virtual; cameras.allow_nonphysical_rgb and \
+                 cameras.allow_untrusted_rgb_writers vouch for it, accepting its untrusted \
+                 writers"
+            );
+        } else {
+            info!("{node} is virtual; cameras.allow_nonphysical_rgb vouches for it");
+        }
+    } else {
+        let Some(bridge) = bridge else {
+            anyhow::bail!("refusing {node}: not a physical camera (virtual or loopback?)")
+        };
+        let source = check_bridge_marker(node, &bridge)
+            .map_err(|err| anyhow::anyhow!("refusing {node}: {err:#}"))?;
+        info!(
+            "{node} is virtual; bridge marker {} vouches for physical source {source}",
+            bridge.marker
+        );
+    }
+    // Every virtual node must refuse unprivileged writers unless the operator accepted them:
+    // anyone able to feed the node could pass recorded footage off as the real sensor.
+    if !skip_writer_gate && node_grants_untrusted_write(node) {
         anyhow::bail!(
             "refusing {node}: it is writable by unprivileged users, so recorded footage could be \
              replayed into it; restrict the node (for example drop the uaccess tag and use \
-             root:video 0660 permissions)"
+             root:video 0660 permissions) or set cameras.allow_untrusted_rgb_writers"
         );
     }
-    info!(
-        "{node} is virtual; bridge marker {} vouches for physical source {source}",
-        bridge.marker
-    );
     Ok(())
 }
 
@@ -526,17 +547,32 @@ fn select_physical_node(
     nodes.into_iter().find(|node| is_physical(node))
 }
 
-fn first_physical_v4l2_node(want_color: bool) -> Option<String> {
-    select_physical_node(v4l2_nodes_with_color(want_color), is_physical_node)
+/// Picks the node for `primary`-style automatic selection: the first physical node, or any
+/// node when the open carries the nonphysical opt-in, which the caller already scoped — IR
+/// selection always keeps the physical requirement.
+fn pick_v4l2_node(want_color: bool, allow_nonphysical: bool) -> Option<String> {
+    if allow_nonphysical {
+        first_v4l2_node(want_color)
+    } else {
+        select_physical_node(v4l2_nodes_with_color(want_color), is_physical_node)
+    }
 }
 
-pub fn resolve_privileged_node(source: &str, want_color: bool) -> Option<String> {
+/// Resolves a privileged source string to its backing `/dev/video*` node. `allow_nonphysical`
+/// is the per-open opt-in the caller already scoped — RGB opens pass the
+/// `cameras.allow_nonphysical_rgb` value, IR opens pass `false` — so automatic selection
+/// picks a virtual node only for opted-in RGB capture.
+pub fn resolve_privileged_node(
+    source: &str,
+    want_color: bool,
+    allow_nonphysical: bool,
+) -> Option<String> {
     let source = source.trim();
     if source.is_empty() {
         return None;
     }
     if source == DEFAULT_RGB_CAMERA {
-        return first_physical_v4l2_node(want_color);
+        return pick_v4l2_node(want_color, allow_nonphysical);
     }
     if let Some((vid, pid)) = parse_usb_spec(source) {
         return resolve_usb_video_node(vid, pid, want_color);
@@ -548,7 +584,7 @@ pub fn resolve_privileged_node(source: &str, want_color: bool) -> Option<String>
         return is_node.then(|| source.to_string());
     }
     match v4l2_fallback_for(source) {
-        V4l2Fallback::AnyDevice => first_physical_v4l2_node(want_color),
+        V4l2Fallback::AnyDevice => pick_v4l2_node(want_color, allow_nonphysical),
         V4l2Fallback::SameNode(target) => node_from_pipewire_target(&target, want_color),
         V4l2Fallback::None => None,
     }
@@ -814,7 +850,9 @@ pub(super) fn pipewire_target_nodes(target: &str) -> Option<Vec<String>> {
     Some(nodes)
 }
 
-pub fn camera_disconnected(source: &str, want_color: bool) -> bool {
+/// True when `source` names a camera the system no longer enumerates. `allow_nonphysical` is
+/// the per-open opt-in the caller already scoped, mirroring `resolve_privileged_node`.
+pub fn camera_disconnected(source: &str, want_color: bool, allow_nonphysical: bool) -> bool {
     let source = source.trim();
     if let Some(name) = parse_libcamera_spec(source) {
         return !libcamera_eventually_lists(|cameras| cameras.iter().any(|camera| camera == name));
@@ -828,12 +866,12 @@ pub fn camera_disconnected(source: &str, want_color: bool) -> bool {
         return pipewire_target_nodes(&target).is_some_and(|nodes| nodes.is_empty());
     }
     if source.starts_with("/dev/video") {
-        return resolve_privileged_node(source, want_color)
+        return resolve_privileged_node(source, want_color, allow_nonphysical)
             .is_some_and(|node| !std::path::Path::new(&node).exists());
     }
     let names_device =
         source == DEFAULT_RGB_CAMERA || source == "pipewiresrc" || parse_usb_spec(source).is_some();
-    names_device && resolve_privileged_node(source, want_color).is_none()
+    names_device && resolve_privileged_node(source, want_color, allow_nonphysical).is_none()
 }
 
 /// Resolves a pinned PipeWire target to its V4L2 node. A device may link several nodes, including
@@ -1075,6 +1113,8 @@ mod tests {
     fn configured_sources_leave_ir_empty_when_no_ir_configured() {
         let cameras = CameraConfig {
             rgb: "primary".into(),
+            allow_nonphysical_rgb: false,
+            allow_untrusted_rgb_writers: false,
             ir: String::new(),
             ir_frame_width: None,
             ir_frame_height: None,
@@ -1127,6 +1167,8 @@ mod tests {
     fn cameras_with(rgb: &str, ir: &str) -> CameraConfig {
         CameraConfig {
             rgb: rgb.into(),
+            allow_nonphysical_rgb: false,
+            allow_untrusted_rgb_writers: false,
             ir: ir.to_string(),
             ir_frame_width: None,
             ir_frame_height: None,
@@ -1231,6 +1273,8 @@ mod tests {
     fn configured_sources_resolve_an_ir_device_node() {
         let cameras = CameraConfig {
             rgb: "primary".into(),
+            allow_nonphysical_rgb: false,
+            allow_untrusted_rgb_writers: false,
             ir: "/dev/video2".to_string(),
             ir_frame_width: None,
             ir_frame_height: None,
@@ -1251,6 +1295,8 @@ mod tests {
     fn preferred_capture_source_falls_back_to_ir_when_rgb_is_unset() {
         let cameras = CameraConfig {
             rgb: "".into(),
+            allow_nonphysical_rgb: false,
+            allow_untrusted_rgb_writers: false,
             ir: "/dev/video2".to_string(),
             ir_frame_width: None,
             ir_frame_height: None,
@@ -1400,6 +1446,8 @@ mod tests {
     fn configured_sources_leave_the_node_empty_for_a_pipewire_ir_source() {
         let cameras = CameraConfig {
             rgb: "primary".into(),
+            allow_nonphysical_rgb: false,
+            allow_untrusted_rgb_writers: false,
             ir: "pipewiresrc target-object=device-name".to_string(),
             ir_frame_width: None,
             ir_frame_height: None,
@@ -1422,11 +1470,11 @@ mod tests {
     #[test]
     fn privileged_capture_keeps_canonical_kernel_nodes() {
         assert_eq!(
-            resolve_privileged_node("/dev/video0", true),
+            resolve_privileged_node("/dev/video0", true, false),
             Some("/dev/video0".to_string())
         );
         assert_eq!(
-            resolve_privileged_node("  /dev/video2  ", false),
+            resolve_privileged_node("  /dev/video2  ", false, false),
             Some("/dev/video2".to_string())
         );
     }
@@ -1447,7 +1495,7 @@ mod tests {
             "pipewiresrc target-object=",
         ] {
             assert_eq!(
-                resolve_privileged_node(source, true),
+                resolve_privileged_node(source, true, false),
                 None,
                 "{source:?} must not resolve for privileged capture"
             );
@@ -1456,9 +1504,10 @@ mod tests {
 
     #[test]
     fn only_unplugged_v4l2_cameras_count_as_disconnected() {
-        assert!(camera_disconnected("/dev/video9999", false));
+        assert!(camera_disconnected("/dev/video9999", false, false));
         assert!(camera_disconnected(
             "pipewiresrc target-object=v4l2_input.pci-0000_ff_1f.7-usb-0_9.9.9_1.0.3",
+            false,
             false
         ));
         for source in [
@@ -1468,7 +1517,7 @@ mod tests {
             "/dev/videofoo",
             "",
         ] {
-            assert!(!camera_disconnected(source, false), "{source:?}");
+            assert!(!camera_disconnected(source, false, false), "{source:?}");
         }
     }
 
@@ -1547,11 +1596,18 @@ mod tests {
     #[test]
     fn a_virtual_node_without_a_bridge_marker_stays_refused() {
         let missing = "/dev/video-gaze-test-missing";
-        let err = check_trusted_node(missing, None).unwrap_err();
+        let err = check_trusted_node(missing, None, false, false).unwrap_err();
         assert!(
             err.to_string().contains("not a physical camera"),
             "unexpected error: {err:#}"
         );
+    }
+
+    #[test]
+    fn the_nonphysical_opt_in_accepts_a_virtual_node_without_a_bridge() {
+        let missing = "/dev/video-gaze-test-missing";
+        check_trusted_node(missing, None, true, false)
+            .expect("the operator opt-in vouches for the virtual node");
     }
 
     #[test]
