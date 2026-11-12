@@ -404,6 +404,39 @@ ir_source_marker = "/run/surface_ir_bridge_dev"
 
 This setting is only available in the config file, not in the GUI.
 
+### Nonphysical RGB cameras (opt-in)
+
+Privileged RGB capture also refuses virtual nodes such as v4l2loopback. If your
+RGB frames reach a V4L2 node through a relay with no bridge marker, opt in:
+
+```toml
+[cameras]
+allow_nonphysical_rgb = true
+```
+
+`rgb = "primary"` still prefers a physical camera and falls back to the first
+virtual node only when there is none. IR capture is not affected.
+
+The node must still refuse unprivileged writers, as with a bridged IR node.
+Members of the node's group count as trusted, so `root:video` `0660` is only
+safe if you trust everyone in `video`. systemd's `70-uaccess.rules` grants the seat user a
+write ACL on every V4L2 node, and a later `TAG-="uaccess"` rule does not remove
+it; shadow that file in `/etc/udev/rules.d/` to skip the node. To accept the
+user-writable node instead:
+
+```toml
+[cameras]
+allow_nonphysical_rgb = true
+allow_untrusted_rgb_writers = true
+```
+
+With this set, any process running as the seat user can feed the camera
+recorded footage and pass face authentication. `gaze doctor` and the daemon log
+warn while it is on.
+
+Both keys live only in `/etc/gaze/config.toml`. The GUI and `gaze config` leave
+them untouched; restart with `sudo systemctl restart gazed` after editing.
+
 ### Parallel RGB + IR capture
 
 By default, verification captures the two cameras one at a time (RGB, then IR). Capturing sequentially rather than concurrently lets single-function webcams that cannot stream their RGB and IR sensors at once (for example the Logitech BRIO 4K, `046d:085e`) still use hybrid authentication, at the cost of latency: with `hybrid_policy = "and"` both spectra always run, so the two capture phases add up.

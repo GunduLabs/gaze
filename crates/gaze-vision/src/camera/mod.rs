@@ -395,8 +395,11 @@ impl Camera {
         open_ordered(sources, Self::open)
     }
 
-    pub fn open_rgb_privileged(sources: &gaze_core::config::CameraSources) -> anyhow::Result<Self> {
-        open_ordered(sources, Self::open_privileged)
+    pub fn open_rgb_privileged(
+        sources: &gaze_core::config::CameraSources,
+        opt_in: gaze_core::config::NonphysicalRgbOptIn,
+    ) -> anyhow::Result<Self> {
+        open_ordered(sources, |source| Self::open_privileged(source, opt_in))
     }
 
     pub fn open(camera_source: &str) -> anyhow::Result<Self> {
@@ -407,8 +410,11 @@ impl Camera {
         Self::open_kind(camera_source, false, frame_size)
     }
 
-    pub fn open_privileged(camera_source: &str) -> anyhow::Result<Self> {
-        Self::open_privileged_kind(camera_source, true, None, None)
+    pub fn open_privileged(
+        camera_source: &str,
+        opt_in: gaze_core::config::NonphysicalRgbOptIn,
+    ) -> anyhow::Result<Self> {
+        Self::open_privileged_kind(camera_source, true, None, None, opt_in)
     }
 
     pub fn open_ir_privileged(
@@ -416,7 +422,13 @@ impl Camera {
         frame_size: Option<(u32, u32)>,
         bridge: Option<gaze_core::config::BridgeSource<'_>>,
     ) -> anyhow::Result<Self> {
-        Self::open_privileged_kind(camera_source, false, frame_size, bridge)
+        Self::open_privileged_kind(
+            camera_source,
+            false,
+            frame_size,
+            bridge,
+            gaze_core::config::NonphysicalRgbOptIn::default(),
+        )
     }
 
     fn open_with_frame_size_fallback(
@@ -444,6 +456,7 @@ impl Camera {
         want_color: bool,
         frame_size: Option<(u32, u32)>,
         bridge: Option<gaze_core::config::BridgeSource<'_>>,
+        opt_in: gaze_core::config::NonphysicalRgbOptIn,
     ) -> anyhow::Result<Self> {
         gstreamer::init()?;
         // A `libcamera:<name>` source names a camera only libcamera can drive (Intel IPU6/IPU7
@@ -454,8 +467,8 @@ impl Camera {
         {
             return Self::open_libcamera_source(camera_source, frame_size);
         }
-        let Some(node) = resolve_privileged_node(camera_source, want_color) else {
-            let err = if camera_disconnected(camera_source, want_color) {
+        let Some(node) = resolve_privileged_node(camera_source, want_color, opt_in.enabled) else {
+            let err = if camera_disconnected(camera_source, want_color, opt_in.enabled) {
                 anyhow::anyhow!("camera {camera_source:?} is not connected")
             } else {
                 anyhow::anyhow!(
@@ -465,7 +478,7 @@ impl Camera {
             };
             return Self::open_libcamera_fallback(camera_source, want_color, None, err);
         };
-        if let Err(err) = check_trusted_node(&node, bridge) {
+        if let Err(err) = check_trusted_node(&node, bridge, opt_in) {
             // libcamera only enumerates media-controller devices, so it can reach a real MIPI
             // sensor (IPU6 behind v4l2-relayd) but never a loopback node.
             return Self::open_libcamera_fallback(camera_source, want_color, None, err);
@@ -1316,14 +1329,19 @@ mod tests {
 
     #[test]
     fn privileged_open_refuses_custom_pipelines_without_touching_hardware() {
-        let err = Camera::open_privileged("videotestsrc num-buffers=2")
-            .err()
-            .expect("privileged open of a custom pipeline must fail");
+        let err = Camera::open_privileged(
+            "videotestsrc num-buffers=2",
+            gaze_core::config::NonphysicalRgbOptIn::default(),
+        )
+        .err()
+        .expect("privileged open of a custom pipeline must fail");
         assert!(
             err.to_string().contains("refusing privileged capture"),
             "unexpected error: {err:#}"
         );
-        assert!(Camera::open_privileged("").is_err());
+        assert!(
+            Camera::open_privileged("", gaze_core::config::NonphysicalRgbOptIn::default()).is_err()
+        );
         assert!(Camera::open_ir_privileged("v4l2src device=/dev/video0", None, None).is_err());
     }
 

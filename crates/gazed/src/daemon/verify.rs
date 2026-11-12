@@ -641,7 +641,7 @@ impl AuthDaemon {
                 if run_ir && rgb_verifies_without_ir(&hybrid_policy, run_rgb) {
                     let source = ir_device.clone();
                     let disconnected = tokio::task::spawn_blocking(move || {
-                        gaze_vision::camera::camera_disconnected(&source, false)
+                        gaze_vision::camera::camera_disconnected(&source, false, false)
                     })
                     .await
                     .unwrap_or(false);
@@ -708,7 +708,10 @@ impl AuthDaemon {
                             .then(|| Instant::now() + VERIFY_SERIAL_RGB_BUDGET);
                         let mut yielded_to_ir = false;
 
-                        let mut cam = match Camera::open_rgb_privileged(&rgb_device_clone) {
+                        let mut cam = match Camera::open_rgb_privileged(
+                            &rgb_device_clone,
+                            config_clone.cameras.nonphysical_rgb_opt_in(),
+                        ) {
                             Ok(c) => c,
                             Err(e) => {
                                 let _ = tx.blocking_send(VerifyMsg::Unavailable(Spectrum::Rgb, format!("RGB Camera open error: {e}")));

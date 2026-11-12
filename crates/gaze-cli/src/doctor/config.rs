@@ -283,6 +283,29 @@ pub(super) fn config_findings(config: &Config) -> Vec<Check> {
             ),
         });
     }
+    let opt_in = config.cameras.nonphysical_rgb_opt_in();
+    if opt_in.allow_untrusted_writers {
+        findings.push(Check {
+            level: Level::Warning,
+            name: "RGB camera trust",
+            message: "cameras.allow_untrusted_rgb_writers is true, so any process that can write \
+                      the RGB node can pass face authentication"
+                .to_string(),
+            fix: Some(
+                "Remove it and restrict the node to root, or use a physical RGB camera."
+                    .to_string(),
+            ),
+        });
+    } else if opt_in.enabled {
+        findings.push(Check {
+            level: Level::Warning,
+            name: "RGB camera trust",
+            message: "cameras.allow_nonphysical_rgb is true, so a virtual RGB node is trusted for \
+                      authentication"
+                .to_string(),
+            fix: Some("Prefer usb:VVVV:PPPP or a physical /dev/videoN where possible.".to_string()),
+        });
+    }
     if !config.liveness.enabled {
         findings.push(Check {
             level: Level::Warning,
@@ -416,6 +439,26 @@ mod tests {
             messages
                 .iter()
                 .any(|message| message.contains("max_seconds"))
+        );
+    }
+
+    #[test]
+    fn config_warns_about_nonphysical_rgb_opt_ins() {
+        let trusts_rgb = |config: &Config| {
+            config_findings(config)
+                .iter()
+                .any(|check| check.name == "RGB camera trust")
+        };
+        let mut config = Config::default();
+        assert!(!trusts_rgb(&config));
+        config.cameras.allow_nonphysical_rgb = true;
+        assert!(trusts_rgb(&config));
+        config.cameras.allow_untrusted_rgb_writers = true;
+        assert!(
+            config_findings(&config)
+                .iter()
+                .any(|check| check.level == Level::Warning
+                    && check.message.contains("allow_untrusted_rgb_writers"))
         );
     }
 
