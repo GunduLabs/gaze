@@ -422,7 +422,6 @@ impl Camera {
         frame_size: Option<(u32, u32)>,
         bridge: Option<gaze_core::config::BridgeSource<'_>>,
     ) -> anyhow::Result<Self> {
-        // IR capture keeps the physical-node requirement regardless of the RGB opt-in.
         Self::open_privileged_kind(
             camera_source,
             false,
@@ -468,13 +467,8 @@ impl Camera {
         {
             return Self::open_libcamera_source(camera_source, frame_size);
         }
-        // The config keys opt into nonphysical RGB capture only; scope both halves to color
-        // opens so IR keeps the physical/bridge and untrusted-writer requirements.
-        let allow_nonphysical = opt_in.enabled && want_color;
-        let allow_untrusted_writers = allow_nonphysical && opt_in.allow_untrusted_writers;
-        let Some(node) = resolve_privileged_node(camera_source, want_color, allow_nonphysical)
-        else {
-            let err = if camera_disconnected(camera_source, want_color, allow_nonphysical) {
+        let Some(node) = resolve_privileged_node(camera_source, want_color, opt_in.enabled) else {
+            let err = if camera_disconnected(camera_source, want_color, opt_in.enabled) {
                 anyhow::anyhow!("camera {camera_source:?} is not connected")
             } else {
                 anyhow::anyhow!(
@@ -484,9 +478,7 @@ impl Camera {
             };
             return Self::open_libcamera_fallback(camera_source, want_color, None, err);
         };
-        if let Err(err) =
-            check_trusted_node(&node, bridge, allow_nonphysical, allow_untrusted_writers)
-        {
+        if let Err(err) = check_trusted_node(&node, bridge, opt_in) {
             // libcamera only enumerates media-controller devices, so it can reach a real MIPI
             // sensor (IPU6 behind v4l2-relayd) but never a loopback node.
             return Self::open_libcamera_fallback(camera_source, want_color, None, err);

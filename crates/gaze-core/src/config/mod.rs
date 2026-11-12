@@ -501,12 +501,6 @@ pub struct BridgeSource<'a> {
     pub source_driver: Option<&'a str>,
 }
 
-/// The file-only `cameras.allow_nonphysical_rgb` opt-in and its companion
-/// `cameras.allow_untrusted_rgb_writers`. `enabled` lets privileged RGB capture open a
-/// virtual (for example v4l2loopback) node; `allow_untrusted_writers` additionally accepts a
-/// node unprivileged users can write. systemd's `uaccess` machinery tags every V4L2 node and
-/// grants the logged-in user a write ACL that the writer gate refuses, so on desktops that
-/// key records accepting a node the session can feed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NonphysicalRgbOptIn {
     pub enabled: bool,
@@ -594,9 +588,7 @@ impl CameraConfig {
         })
     }
 
-    /// The nonphysical RGB opt-in, from the file-only keys. An invalid combination (the
-    /// untrusted-writer key without the nonphysical key) reads back with the writer
-    /// half disabled.
+    /// Loading only warns on an invalid pair, so the writer key is masked here.
     pub fn nonphysical_rgb_opt_in(&self) -> NonphysicalRgbOptIn {
         NonphysicalRgbOptIn {
             enabled: self.allow_nonphysical_rgb,
@@ -610,6 +602,12 @@ impl CameraConfig {
         let valid = current.validate_ir_bridge_source().is_ok();
         self.ir_source_marker = current.ir_source_marker.clone().filter(|_| valid);
         self.ir_source_driver = current.ir_source_driver.clone().filter(|_| valid);
+    }
+
+    pub fn inherit_nonphysical_rgb(&mut self, current: &CameraConfig) {
+        let opt_in = current.nonphysical_rgb_opt_in();
+        self.allow_nonphysical_rgb = opt_in.enabled;
+        self.allow_untrusted_rgb_writers = opt_in.allow_untrusted_writers;
     }
 
     pub fn set_ir_frame_size(&mut self, size: Option<(u32, u32)>) {
@@ -2776,6 +2774,28 @@ level = "low""#,
 
         assert_eq!(requested.ir_source_marker, current.ir_source_marker);
         assert_eq!(requested.ir_source_driver, current.ir_source_driver);
+    }
+
+    #[test]
+    fn inherit_nonphysical_rgb_drops_an_invalid_pair() {
+        let invalid = CameraConfig {
+            allow_untrusted_rgb_writers: true,
+            ..CameraConfig::default()
+        };
+        let mut requested = CameraConfig::default();
+        requested.inherit_nonphysical_rgb(&invalid);
+        requested.validate().unwrap();
+        assert!(!requested.allow_nonphysical_rgb);
+        assert!(!requested.allow_untrusted_rgb_writers);
+
+        let valid = CameraConfig {
+            allow_nonphysical_rgb: true,
+            allow_untrusted_rgb_writers: true,
+            ..CameraConfig::default()
+        };
+        requested.inherit_nonphysical_rgb(&valid);
+        assert!(requested.allow_nonphysical_rgb);
+        assert!(requested.allow_untrusted_rgb_writers);
     }
 
     #[test]

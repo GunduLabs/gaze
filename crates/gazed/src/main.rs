@@ -93,6 +93,13 @@ fn main() -> anyhow::Result<()> {
     );
     Config::migrate_file(CONFIG_PATH);
     let config = Config::load()?;
+    let rgb_opt_in = config.cameras.nonphysical_rgb_opt_in();
+    if rgb_opt_in.allow_untrusted_writers {
+        warn!(
+            "cameras.allow_untrusted_rgb_writers is set: any process that can write the RGB \
+             node can feed it frames and pass face authentication"
+        );
+    }
     let _store_lock = UserDatabase::lock_store(std::path::Path::new(USERS_DIR))?;
     if let Some(warning) = gaze_security::storage::encryption_warning(
         gaze_security::storage::disk_encryption_for_paths(&[

@@ -4,7 +4,9 @@
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
-use gaze_core::config::{BridgeSource, CameraConfig, CameraSources, DEFAULT_RGB_CAMERA};
+use gaze_core::config::{
+    BridgeSource, CameraConfig, CameraSources, DEFAULT_RGB_CAMERA, NonphysicalRgbOptIn,
+};
 use gaze_core::ir::bridge::read_bridge_marker;
 use gaze_core::ir::devices::{camera_function_of, find_device, usb_ids_of, video_driver};
 
@@ -397,51 +399,37 @@ fn has_physical_bus_ancestor(path: &std::path::Path) -> bool {
 /// Gates opening `node` for privileged capture. Physical nodes always pass. A virtual node
 /// (for example a v4l2loopback fed by a userspace bridge for an IPU6 sensor) passes only when
 /// `bridge` — the operator-declared `cameras.ir_source_marker`/`ir_source_driver` — proves
-/// which physical camera feeds it, or when `allow_nonphysical` records an explicit opt-in.
-/// Both flags are per-open permissions the caller already scoped: RGB opens pass the
-/// `cameras.allow_nonphysical_rgb`/`cameras.allow_untrusted_rgb_writers` values, IR opens
-/// always pass `false`.
+/// which physical camera feeds it, or the RGB-only `opt_in` vouches for it.
 pub(super) fn check_trusted_node(
     node: &str,
     bridge: Option<BridgeSource<'_>>,
-    allow_nonphysical: bool,
-    allow_untrusted_writers: bool,
+    opt_in: NonphysicalRgbOptIn,
 ) -> anyhow::Result<()> {
     if is_physical_node(node) {
         return Ok(());
     }
-    // The writer opt-in only ever accompanies the nonphysical opt-in.
-    let skip_writer_gate = allow_nonphysical && allow_untrusted_writers;
-    if allow_nonphysical {
-        if skip_writer_gate {
-            info!(
-                "{node} is virtual; cameras.allow_nonphysical_rgb and \
-                 cameras.allow_untrusted_rgb_writers vouch for it, accepting its untrusted \
-                 writers"
-            );
-        } else {
-            info!("{node} is virtual; cameras.allow_nonphysical_rgb vouches for it");
-        }
+    let voucher = if opt_in.enabled {
+        "cameras.allow_nonphysical_rgb vouches for it".to_string()
     } else {
         let Some(bridge) = bridge else {
             anyhow::bail!("refusing {node}: not a physical camera (virtual or loopback?)")
         };
         let source = check_bridge_marker(node, &bridge)
             .map_err(|err| anyhow::anyhow!("refusing {node}: {err:#}"))?;
-        info!(
-            "{node} is virtual; bridge marker {} vouches for physical source {source}",
+        format!(
+            "bridge marker {} vouches for physical source {source}",
             bridge.marker
-        );
-    }
-    // Every virtual node must refuse unprivileged writers unless the operator accepted them:
-    // anyone able to feed the node could pass recorded footage off as the real sensor.
-    if !skip_writer_gate && node_grants_untrusted_write(node) {
+        )
+    };
+    // Anyone able to feed a virtual node could pass recorded footage off as the real sensor.
+    if !opt_in.allow_untrusted_writers && node_grants_untrusted_write(node) {
         anyhow::bail!(
             "refusing {node}: it is writable by unprivileged users, so recorded footage could be \
              replayed into it; restrict the node (for example drop the uaccess tag and use \
              root:video 0660 permissions) or set cameras.allow_untrusted_rgb_writers"
         );
     }
+    info!("{node} is virtual; {voucher}");
     Ok(())
 }
 
@@ -543,25 +531,24 @@ fn acl_xattr_grants_named_write(xattr: &[u8]) -> bool {
 fn select_physical_node(
     nodes: impl IntoIterator<Item = String>,
     mut is_physical: impl FnMut(&str) -> bool,
+    allow_nonphysical: bool,
 ) -> Option<String> {
-    nodes.into_iter().find(|node| is_physical(node))
+    let nodes: Vec<String> = nodes.into_iter().collect();
+    let first = nodes.first().cloned();
+    nodes
+        .into_iter()
+        .find(|node| is_physical(node))
+        .or(first.filter(|_| allow_nonphysical))
 }
 
-/// Picks the node for `primary`-style automatic selection: the first physical node, or any
-/// node when the open carries the nonphysical opt-in, which the caller already scoped — IR
-/// selection always keeps the physical requirement.
 fn pick_v4l2_node(want_color: bool, allow_nonphysical: bool) -> Option<String> {
-    if allow_nonphysical {
-        first_v4l2_node(want_color)
-    } else {
-        select_physical_node(v4l2_nodes_with_color(want_color), is_physical_node)
-    }
+    select_physical_node(
+        v4l2_nodes_with_color(want_color),
+        is_physical_node,
+        allow_nonphysical,
+    )
 }
 
-/// Resolves a privileged source string to its backing `/dev/video*` node. `allow_nonphysical`
-/// is the per-open opt-in the caller already scoped — RGB opens pass the
-/// `cameras.allow_nonphysical_rgb` value, IR opens pass `false` — so automatic selection
-/// picks a virtual node only for opted-in RGB capture.
 pub fn resolve_privileged_node(
     source: &str,
     want_color: bool,
@@ -850,8 +837,6 @@ pub(super) fn pipewire_target_nodes(target: &str) -> Option<Vec<String>> {
     Some(nodes)
 }
 
-/// True when `source` names a camera the system no longer enumerates. `allow_nonphysical` is
-/// the per-open opt-in the caller already scoped, mirroring `resolve_privileged_node`.
 pub fn camera_disconnected(source: &str, want_color: bool, allow_nonphysical: bool) -> bool {
     let source = source.trim();
     if let Some(name) = parse_libcamera_spec(source) {
@@ -988,11 +973,25 @@ mod tests {
     fn automatic_selection_skips_virtual_nodes_and_preserves_order() {
         let nodes = || ["/dev/video0", "/dev/video2", "/dev/video4"].map(String::from);
         assert_eq!(
-            select_physical_node(nodes(), |node| node != "/dev/video0"),
+            select_physical_node(nodes(), |node| node != "/dev/video0", false),
             Some("/dev/video2".to_string())
         );
-        assert_eq!(select_physical_node(nodes(), |_| false), None);
-        assert_eq!(select_physical_node(Vec::new(), |_| true), None);
+        assert_eq!(select_physical_node(nodes(), |_| false, false), None);
+        assert_eq!(select_physical_node(Vec::new(), |_| true, false), None);
+    }
+
+    #[test]
+    fn the_nonphysical_opt_in_still_prefers_a_physical_node() {
+        let nodes = || ["/dev/video0", "/dev/video2", "/dev/video4"].map(String::from);
+        assert_eq!(
+            select_physical_node(nodes(), |node| node == "/dev/video4", true),
+            Some("/dev/video4".to_string())
+        );
+        assert_eq!(
+            select_physical_node(nodes(), |_| false, true),
+            Some("/dev/video0".to_string())
+        );
+        assert_eq!(select_physical_node(Vec::new(), |_| false, true), None);
     }
 
     #[test]
@@ -1596,7 +1595,7 @@ mod tests {
     #[test]
     fn a_virtual_node_without_a_bridge_marker_stays_refused() {
         let missing = "/dev/video-gaze-test-missing";
-        let err = check_trusted_node(missing, None, false, false).unwrap_err();
+        let err = check_trusted_node(missing, None, NonphysicalRgbOptIn::default()).unwrap_err();
         assert!(
             err.to_string().contains("not a physical camera"),
             "unexpected error: {err:#}"
@@ -1604,10 +1603,33 @@ mod tests {
     }
 
     #[test]
-    fn the_nonphysical_opt_in_accepts_a_virtual_node_without_a_bridge() {
-        let missing = "/dev/video-gaze-test-missing";
-        check_trusted_node(missing, None, true, false)
-            .expect("the operator opt-in vouches for the virtual node");
+    fn the_nonphysical_opt_in_gates_untrusted_writers_separately() {
+        use std::os::unix::fs::PermissionsExt;
+        let path =
+            std::env::temp_dir().join(format!("gaze-test-writable-node-{}", std::process::id()));
+        std::fs::write(&path, b"").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap();
+        let node = path.to_str().unwrap();
+        let nonphysical = NonphysicalRgbOptIn {
+            enabled: true,
+            allow_untrusted_writers: false,
+        };
+        let refused = check_trusted_node(node, None, nonphysical);
+        let accepted = check_trusted_node(
+            node,
+            None,
+            NonphysicalRgbOptIn {
+                enabled: true,
+                allow_untrusted_writers: true,
+            },
+        );
+        std::fs::remove_file(&path).unwrap();
+        let err = refused.unwrap_err();
+        assert!(
+            err.to_string().contains("writable by unprivileged users"),
+            "unexpected error: {err:#}"
+        );
+        accepted.expect("the writer opt-in accepts a world-writable virtual node");
     }
 
     #[test]
