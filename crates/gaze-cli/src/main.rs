@@ -392,6 +392,8 @@ enum ConfigAction {
     Set { key: String, value: String },
 }
 
+const ENROLLMENT_DEADLINE: Duration = Duration::from_secs(240);
+
 async fn handle_enroll(
     proxy: &GazeProxy<'_>,
     user: &str,
@@ -435,6 +437,12 @@ async fn handle_enroll(
     let mut is_cancelled = false;
     let mut is_completed = false;
     let mut is_failed = false;
+    let mut timed_out = false;
+    let deadline = tokio::time::Instant::now() + ENROLLMENT_DEADLINE;
+    let bus = zbus::fdo::DBusProxy::new(proxy.inner().connection())
+        .await
+        .ok();
+    let mut owner_check = tokio::time::interval(Duration::from_secs(1));
     loop {
         terminal.draw_enroll(&EnrollScreen {
             user,
@@ -499,6 +507,24 @@ async fn handle_enroll(
                     current_capture_tone = capture_tone(status);
                 }
             }
+            _ = tokio::time::sleep_until(deadline) => {
+                current_enroll_msg = "Enrollment timed out".to_string();
+                timed_out = true;
+                is_failed = true;
+                break;
+            }
+            _ = owner_check.tick() => {
+                if let Some(bus) = &bus
+                    && !bus
+                        .name_has_owner(proxy.inner().destination().clone())
+                        .await
+                        .unwrap_or(false)
+                {
+                    current_enroll_msg = "Lost contact with the Gaze daemon".to_string();
+                    is_failed = true;
+                    break;
+                }
+            }
             _ = tokio::time::sleep(Duration::from_millis(80)) => {
                 tick = tick.wrapping_add(1);
             }
@@ -507,7 +533,7 @@ async fn handle_enroll(
 
     drop(terminal);
 
-    if is_cancelled {
+    if is_cancelled || timed_out {
         let _ = proxy.enroll_stop().await;
     }
     let _ = proxy.release().await;
