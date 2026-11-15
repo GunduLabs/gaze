@@ -132,6 +132,14 @@ fn show_daemon_pending_toast(window: &libadwaita::ApplicationWindow) {
     add_toast(window, "Connecting to the Gaze daemon…");
 }
 
+fn enrollment_auth_error_text(err: &zbus::Error) -> String {
+    if err.to_string().contains("AccessDenied") {
+        "Enrollment was not authorized".to_string()
+    } else {
+        format!("Could not start enrollment: {}", dbus_error_message(err))
+    }
+}
+
 thread_local! {
     static CAPTURE_STARTING: Cell<bool> = const { Cell::new(false) };
 }
@@ -176,7 +184,7 @@ async fn begin_face_capture(
     {
         futures::future::Either::Left((Ok(()), _)) => true,
         futures::future::Either::Left((Err(err), _)) => {
-            add_toast(window, format!("Face enrollment: {err}"));
+            add_toast(window, enrollment_auth_error_text(&err));
             return;
         }
         futures::future::Either::Right(_) => false,
@@ -196,7 +204,7 @@ async fn begin_face_capture(
 
     if !authorization_done && let Err(err) = authorization.await {
         feed.stop();
-        add_toast(window, format!("Face enrollment: {err}"));
+        add_toast(window, enrollment_auth_error_text(&err));
         return;
     }
     capture::show_capture_dialog(
