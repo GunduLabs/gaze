@@ -297,8 +297,8 @@ KCM.SimpleKCM {
                 key: "liveness.threshold"
                 realFrom: 0.1
                 realTo: 1.0
-                realStep: 0.05
-                decimals: 2
+                realStep: 0.01
+                decimals: 3
             }
         }
         SettingRow {
