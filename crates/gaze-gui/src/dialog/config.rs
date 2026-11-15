@@ -411,9 +411,52 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
     );
 }
 
+thread_local! {
+    static CAMERA_SCAN_RUNNING: Cell<bool> = const { Cell::new(false) };
+}
+
 pub fn show_config_dialog(
     parent: &libadwaita::ApplicationWindow,
     overlay: &libadwaita::ToastOverlay,
+) {
+    if CAMERA_SCAN_RUNNING.replace(true) {
+        return;
+    }
+    glib::MainContext::default().spawn_local(glib::clone!(
+        #[weak]
+        parent,
+        #[weak]
+        overlay,
+        async move {
+            let scan = gtk4::gio::spawn_blocking(|| {
+                let cameras = gaze_vision::camera::rgb_choices().unwrap_or_else(|_| {
+                    vec![
+                        ("Primary camera".to_string(), DEFAULT_RGB_CAMERA.to_string()),
+                        (
+                            gaze_vision::camera::RGB_NONE_DISPLAY_NAME.to_string(),
+                            String::new(),
+                        ),
+                    ]
+                });
+                (cameras, gaze_vision::camera::ir_choices())
+            })
+            .await;
+            CAMERA_SCAN_RUNNING.set(false);
+            match scan {
+                Ok((cameras, ir_options)) => {
+                    build_config_dialog(&parent, &overlay, cameras, ir_options);
+                }
+                Err(_) => tracing::error!("Listing cameras for the settings dialog failed"),
+            }
+        }
+    ));
+}
+
+fn build_config_dialog(
+    parent: &libadwaita::ApplicationWindow,
+    overlay: &libadwaita::ToastOverlay,
+    cameras: Vec<(String, String)>,
+    ir_options: Vec<(String, String)>,
 ) {
     let config = Rc::new(RefCell::new(Config::default()));
 
@@ -516,15 +559,6 @@ pub fn show_config_dialog(
     inference_device_row.set_model(Some(&inference_device_model));
     hardware_group.add(&inference_device_row);
 
-    let cameras = gaze_vision::camera::rgb_choices().unwrap_or_else(|_| {
-        vec![
-            ("Primary camera".to_string(), DEFAULT_RGB_CAMERA.to_string()),
-            (
-                gaze_vision::camera::RGB_NONE_DISPLAY_NAME.to_string(),
-                String::new(),
-            ),
-        ]
-    });
     let cam_names = cameras.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
 
     let camera_row = libadwaita::ComboRow::new();
@@ -534,7 +568,6 @@ pub fn show_config_dialog(
     camera_row.set_model(Some(&cam_model));
     hardware_group.add(&camera_row);
 
-    let ir_options = gaze_vision::camera::ir_choices();
     let ir_names = ir_options
         .iter()
         .map(|(n, _)| n.clone())
