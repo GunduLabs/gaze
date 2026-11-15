@@ -56,7 +56,7 @@ KCM.SimpleKCM {
             Layout.fillWidth: true
             visible: ["suggested", "restarting", "done"].includes(kcm.settings.restartState)
             type: kcm.settings.restartState === "done" ? Kirigami.MessageType.Positive : Kirigami.MessageType.Information
-            text: kcm.settings.restartState === "suggested" ? i18n("Settings saved. Restart the Gaze service to apply them.")
+            text: kcm.settings.restartState === "suggested" ? i18n("Settings saved. Restart the Gaze service to use the new inference provider.")
                 : kcm.settings.restartState === "restarting" ? i18n("Restarting the Gaze service…")
                 : i18n("Gaze service restarted")
             actions: [
@@ -222,8 +222,10 @@ KCM.SimpleKCM {
                 enabled: kcm.settings.editable
                 checked: Number(values["cameras.ir_frame_width"]) > 0
                 onToggled: {
-                    kcm.settings.set("cameras.ir_frame_width", checked ? 640 : 0);
-                    kcm.settings.set("cameras.ir_frame_height", checked ? 480 : 0);
+                    const on = checked;
+                    kcm.settings.set("cameras.ir_frame_width", on ? 640 : 0);
+                    kcm.settings.set("cameras.ir_frame_height", on ? 480 : 0);
+                    checked = Qt.binding(() => Number(page.values["cameras.ir_frame_width"]) > 0);
                 }
             }
         }
@@ -295,8 +297,8 @@ KCM.SimpleKCM {
                 key: "liveness.threshold"
                 realFrom: 0.1
                 realTo: 1.0
-                realStep: 0.05
-                decimals: 2
+                realStep: 0.01
+                decimals: 3
             }
         }
         SettingRow {
