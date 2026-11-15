@@ -306,6 +306,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 prev.dismiss();
             }
             btn.set_sensitive(false);
+            let progress_toast = add_toast(&window, "Look at the camera…");
+            progress_toast.set_timeout(0);
+            *last_toast.borrow_mut() = Some(progress_toast);
             glib::MainContext::default().spawn_local(glib::clone!(
                 #[weak]
                 window,
@@ -322,17 +325,24 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 async move {
                     use futures::StreamExt;
 
-                    if proxy.claim(&username).await.is_err() {
-                        add_toast(&window, "Failed to claim device");
+                    let finish = |text: &str| {
+                        if let Some(prev) = last_toast.borrow_mut().take() {
+                            prev.dismiss();
+                        }
+                        let toast = add_toast(&window, text);
+                        *last_toast.borrow_mut() = Some(toast);
                         btn.set_sensitive(true);
+                    };
+
+                    if proxy.claim(&username).await.is_err() {
+                        finish("Failed to claim device");
                         return;
                     }
                     let mut stream = match proxy.receive_verify_status().await {
                         Ok(stream) => stream,
                         Err(_) => {
-                            add_toast(&window, "Daemon error starting verification");
                             let _ = proxy.release().await;
-                            btn.set_sensitive(true);
+                            finish("Daemon error starting verification");
                             return;
                         }
                     };
@@ -340,9 +350,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                     let mut diagnostics = proxy.receive_verify_diagnostic().await.ok();
 
                     if proxy.verify_start("any").await.is_err() {
-                        add_toast(&window, "Daemon error starting verification");
                         let _ = proxy.release().await;
-                        btn.set_sensitive(true);
+                        finish("Daemon error starting verification");
                         return;
                     }
 
@@ -374,7 +383,10 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 }
                                 break;
                             }
-                            futures::future::Either::Left((None, _)) => break,
+                            futures::future::Either::Left((None, _)) => {
+                                text = "Lost contact with the Gaze daemon".to_string();
+                                break;
+                            }
                             futures::future::Either::Right(_) => {
                                 let _ = proxy.verify_stop().await;
                                 text = "No face seen before the test timed out".to_string();
@@ -421,9 +433,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         }
                     }
 
-                    let toast = add_toast(&window, &text);
-                    *last_toast.borrow_mut() = Some(toast);
-                    btn.set_sensitive(true);
+                    finish(&text);
                 }
             ));
         }
@@ -723,6 +733,16 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                 }
                                             ));
 
+                                            entry.connect_activate(glib::clone!(
+                                                #[weak]
+                                                rename_confirm_btn,
+                                                move |_| {
+                                                    if rename_confirm_btn.is_sensitive() {
+                                                        rename_confirm_btn.emit_clicked();
+                                                    }
+                                                }
+                                            ));
+
                                             cancel_btn.connect_clicked(glib::clone!(
                                                 #[weak]
                                                 popover,
@@ -799,6 +819,14 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                     popover.popdown();
                                                 }
                                             ));
+
+                                            popover.connect_closed(|popover| {
+                                                glib::idle_add_local_once(glib::clone!(
+                                                    #[weak]
+                                                    popover,
+                                                    move || popover.unparent()
+                                                ));
+                                            });
 
                                             popover.popup();
                                         }
