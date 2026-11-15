@@ -402,6 +402,7 @@ pub fn show_capture_dialog(
                         return;
                     }
 
+                    let mut retryable = false;
                     let preview_grace = glib::timeout_future(PREVIEW_GRACE);
                     let mut preview_grace_elapsed = false;
                     let deadline = glib::timeout_future(ENROLLMENT_DEADLINE);
@@ -451,6 +452,7 @@ pub fn show_capture_dialog(
                                     if matches!(raw_msg, EnrollPrompt::DbFailed | EnrollPrompt::CameraFailed | EnrollPrompt::Cancelled) {
                                         prompt_label.set_text(raw_msg.as_ref());
                                         stop_btn.set_visible(false);
+                                        retryable = true;
                                         break;
                                     }
 
@@ -471,6 +473,7 @@ pub fn show_capture_dialog(
                                     if is_done {
                                         prompt_label.set_text("Enrollment finished without saving.");
                                         stop_btn.set_visible(false);
+                                        retryable = true;
                                         break;
                                     }
                                 }
@@ -502,6 +505,14 @@ pub fn show_capture_dialog(
                     feed.stop();
                     let _ = proxy.enroll_stop().await;
                     let _ = proxy.release().await;
+                    if retryable {
+                        progress.set_visible(false);
+                        progress.set_fraction(0.0);
+                        progress_label.set_visible(false);
+                        progress_label.set_text("");
+                        start_btn.set_label("Try Again");
+                        start_btn.set_visible(true);
+                    }
                 }
             );
             glib::MainContext::default().spawn_local(async move {
