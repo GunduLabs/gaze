@@ -52,7 +52,7 @@ runs:
         fi
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
       with:
         components: ${{ inputs.components }}
 
@@ -65,10 +65,18 @@ runs:
       shell: bash
       run: echo "ORT_CACHE_DIR=${{ inputs.ort-cache-dir }}" >> "$GITHUB_ENV"
 
+    - name: Identify runner OS
+      id: os
+      if: inputs.cache-key != ''
+      shell: bash
+      run: |
+        . /etc/os-release
+        echo "id=$ID-$VERSION_ID" >> "$GITHUB_OUTPUT"
+
     - name: Restore Rust cache
       if: inputs.cache-key != ''
       uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
-        shared-key: ${{ inputs.cache-key }}
+        shared-key: ${{ inputs.cache-key }}-${{ steps.os.outputs.id }}
         cache-on-failure: true
         cache-directories: ${{ inputs.ort-cache-dir }}
