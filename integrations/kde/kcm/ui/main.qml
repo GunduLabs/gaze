@@ -295,7 +295,7 @@ KCM.ScrollViewKCM {
                     visible: kcm.enrollState === "running"
                     icon.name: "dialog-cancel"
                     text: i18n("Cancel")
-                    onClicked: enrollDialog.close()
+                    onClicked: cancelEnrollDialog.open()
                 }
                 QQC2.Button {
                     visible: kcm.enrollState === "done" || kcm.enrollState === "failed"
@@ -306,6 +306,28 @@ KCM.ScrollViewKCM {
                 }
             }
         }
+    }
+
+    Kirigami.PromptDialog {
+        id: cancelEnrollDialog
+        title: i18n("Cancel Enrollment?")
+        subtitle: i18n("This will discard any partial captures.")
+        standardButtons: Kirigami.Dialog.NoButton
+        customFooterActions: [
+            Kirigami.Action {
+                text: i18n("Resume")
+                icon.name: "media-playback-start"
+                onTriggered: cancelEnrollDialog.close()
+            },
+            Kirigami.Action {
+                text: i18n("Discard")
+                icon.name: "edit-delete"
+                onTriggered: {
+                    cancelEnrollDialog.close();
+                    enrollDialog.close();
+                }
+            }
+        ]
     }
 
     Kirigami.PromptDialog {
