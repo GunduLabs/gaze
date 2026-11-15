@@ -3,7 +3,13 @@
 
 # Configuration
 
-Gaze is configured with `/etc/gaze/config.toml`.
+Gaze is configured with `/etc/gaze/config.toml`. For first-time setup, run `gaze setup`; configuration tuning is optional.
+
+`gaze config` opens a section menu. Edit only the sections you need, then choose **Review and save**. You can revisit sections or discard the draft. Failed saves leave the draft available for correction. In the GUI, **Everyday** contains camera and lock-screen settings; **Advanced** contains hardware and numerical tuning. GUI changes save automatically after unlocking.
+
+Changing the recognition model, including Medium → High security, requires re-enrollment of existing profiles. Existing captures remain on disk but cannot match with the new model. Use `gaze refine-face default` or **Improve this face**, then test.
+
+Acceleration changes may need `sudo systemctl restart gazed` to load the selected vendor runtime. Verify the effective provider with `gaze doctor --benchmark`; a saved preference can still use CPU fallback.
 
 The defaults work for many setups. Common adjustments include choosing a camera
 source or changing the security level.
@@ -16,7 +22,7 @@ the running daemon keeps its applied configuration if the file is edited or remo
 
 ::: tip Editing config requires admin privileges
 The daemon requires authorization before saving changes. `gaze config` prompts
-for your password through `sudo`, while `gaze config --show` is read-only and
+for your password through PolicyKit, while `gaze config --show` is read-only and
 needs no privileges. The GUI asks for authorization through PolicyKit and uses
 your desktop's password dialog, so make sure the `polkit` package is installed.
 :::
@@ -823,7 +829,7 @@ The duress table lives only in `/etc/gaze/config.toml`. The GUI and `gaze config
 Limits to be aware of:
 
 - Close your eye before the camera sees you. Any matched frame with both eyes open unlocks as usual.
-- Another non-face login method, such as a fingerprint, also clears the lock.
+- Fingerprint and other password-free logins do not clear the lock; use the password or `gaze duress --clear` as described above.
 - The classifier works on RGB and IR frames, but it is not perfect. Test it with `gaze test` before relying on it: a held wink should end in a lockout, and `gaze duress --clear` resets it. Running `gazed` with `RUST_LOG=debug` logs the per-eye scores.
 
 ## Recommended tuning workflow

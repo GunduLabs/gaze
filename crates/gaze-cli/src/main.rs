@@ -7,6 +7,7 @@ mod faces;
 mod keyring;
 mod polkit;
 mod selinux;
+mod setup;
 mod tui;
 mod uninstall;
 
@@ -74,7 +75,8 @@ fn command_requires_root(command: &Commands) -> Option<&'static str> {
         Commands::RenameFace { .. } => Some("rename-face"),
         Commands::ClearUser { .. } => Some("clear-user"),
         Commands::Keyring { .. } => Some("keyring"),
-        Commands::AddFace { .. }
+        Commands::Setup
+        | Commands::AddFace { .. }
         | Commands::RefineFace { .. }
         | Commands::Config { .. }
         | Commands::Test { .. }
@@ -88,7 +90,7 @@ fn command_requires_root(command: &Commands) -> Option<&'static str> {
 // Root skips polkit, and polkit is what refuses a face match for these, so sudo must not front them.
 fn command_needs_password_authorization(command: &Commands) -> bool {
     match command {
-        Commands::AddFace { .. } | Commands::RefineFace { .. } => true,
+        Commands::Setup | Commands::AddFace { .. } | Commands::RefineFace { .. } => true,
         Commands::Config { show, action } => match action {
             Some(ConfigAction::Get { .. }) => false,
             Some(ConfigAction::Set { .. }) => true,
@@ -266,6 +268,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Check your camera, enroll, test recognition, and check desktop integration
+    Setup,
     /// Test face verification without granting privileges or testing PAM
     #[command(
         visible_alias = "auth",
@@ -278,7 +282,7 @@ enum Commands {
             short,
             long,
             conflicts_with = "silent",
-            help = "Accepted for compatibility; detailed metrics are shown by default"
+            help = "Show recognition metrics and diagnostic details"
         )]
         verbose: bool,
         #[arg(
@@ -360,6 +364,12 @@ enum Commands {
     },
     /// Check the Gaze installation for configuration and runtime issues
     Doctor {
+        #[arg(
+            short,
+            long,
+            help = "Show successful and disabled checks as well as problems"
+        )]
+        verbose: bool,
         #[arg(short, long, help = "Check enrollments for this user")]
         user: Option<String>,
         #[arg(
@@ -551,6 +561,7 @@ async fn handle_enroll(
             style(user).green(),
             style(face).green()
         ))?;
+        term.write_line("Next: run gaze test, then gaze doctor to check desktop integration.")?;
     } else if is_failed {
         Term::stderr().write_line(&format!(
             "{} Enrollment failed: {}",
@@ -562,7 +573,12 @@ async fn handle_enroll(
     Ok(())
 }
 
-async fn handle_test(proxy: &GazeProxy<'_>, user: &str, silent: bool) -> anyhow::Result<()> {
+async fn handle_test(
+    proxy: &GazeProxy<'_>,
+    user: &str,
+    silent: bool,
+    verbose: bool,
+) -> anyhow::Result<()> {
     let term = Term::stdout();
 
     let has_faces = match proxy.list_faces(user).await {
@@ -579,7 +595,7 @@ async fn handle_test(proxy: &GazeProxy<'_>, user: &str, silent: bool) -> anyhow:
                 "{} No faces enrolled for {}. Run {} to enroll a face.",
                 style("i").cyan().bold(),
                 style(user).bold(),
-                style("gaze add-face <name>").bold()
+                style("gaze add-face default").bold()
             ))?;
         }
         std::process::exit(1);
@@ -597,7 +613,7 @@ async fn handle_test(proxy: &GazeProxy<'_>, user: &str, silent: bool) -> anyhow:
     let mut status_stream = proxy.receive_verify_status().await?;
     let mut capture_stream = proxy.receive_face_status().await?;
     let mut diagnostic_stream = proxy.receive_verify_diagnostic().await?;
-    let mut terminal = if !silent {
+    let mut terminal = if !silent && interactive_terminal() {
         match TuiTerminal::new() {
             Ok(terminal) => Some(terminal),
             Err(err) => {
@@ -710,7 +726,7 @@ async fn handle_test(proxy: &GazeProxy<'_>, user: &str, silent: bool) -> anyhow:
         std::process::exit(1);
     }
 
-    if !silent {
+    if !silent && verbose {
         for message in &diagnostics {
             println!("{message}");
         }
@@ -721,7 +737,7 @@ async fn handle_test(proxy: &GazeProxy<'_>, user: &str, silent: bool) -> anyhow:
 
     let mut authenticated = false;
     if let Some((result, faces, rgb_status, ir_status)) = verify_result {
-        if !silent && !faces.is_empty() {
+        if !silent && verbose && !faces.is_empty() {
             println!(
                 "\n{:<20} {:>10} {:>8} {:>8} {:>10} {:>8} {:>8}",
                 style("Face").bold(),
@@ -736,28 +752,48 @@ async fn handle_test(proxy: &GazeProxy<'_>, user: &str, silent: bool) -> anyhow:
             for (name, rgb_sim, rgb_pct, rgb_passed, ir_sim, ir_pct, ir_passed) in &faces {
                 let rgb_check = if *rgb_passed {
                     style("✓").green()
+                } else if rgb_status == CaptureStatus::Unused {
+                    style("N/A").dim()
                 } else {
                     style("✗").red()
                 };
                 let ir_check = if *ir_passed {
                     style("✓").green()
+                } else if ir_status == CaptureStatus::Unused {
+                    style("N/A").dim()
                 } else {
                     style("✗").red()
                 };
                 println!(
-                    "{:<20} {:>10.4} {:>7.1}% {:>8} {:>10.4} {:>7.1}% {:>8}",
+                    "{:<20} {:>10} {:>8} {:>8} {:>10} {:>8} {:>8}",
                     style(name).cyan(),
-                    rgb_sim,
-                    rgb_pct,
+                    if rgb_status == CaptureStatus::Unused {
+                        "N/A".into()
+                    } else {
+                        format!("{rgb_sim:.4}")
+                    },
+                    if rgb_status == CaptureStatus::Unused {
+                        "N/A".into()
+                    } else {
+                        format!("{rgb_pct:.1}%")
+                    },
                     rgb_check,
-                    ir_sim,
-                    ir_pct,
+                    if ir_status == CaptureStatus::Unused {
+                        "N/A".into()
+                    } else {
+                        format!("{ir_sim:.4}")
+                    },
+                    if ir_status == CaptureStatus::Unused {
+                        "N/A".into()
+                    } else {
+                        format!("{ir_pct:.1}%")
+                    },
                     ir_check
                 );
             }
             println!();
         }
-        if !silent {
+        if !silent && verbose {
             println!(
                 "{} RGB: {} | IR: {}",
                 style("Status:").bold(),
@@ -783,12 +819,11 @@ async fn handle_test(proxy: &GazeProxy<'_>, user: &str, silent: bool) -> anyhow:
                         };
                         (n.clone(), pct)
                     });
-                if let Some((face, pct)) = matched {
+                if let Some((face, _pct)) = matched {
                     term.write_line(&format!(
-                        "{} Face verification passed: {} ({:.1}%, {}ms)",
+                        "{} Face recognized: {} ({}ms)",
                         style("✓").green().bold(),
                         style(&face).green().bold(),
-                        pct,
                         start.elapsed().as_millis()
                     ))?;
                 } else {
@@ -803,7 +838,20 @@ async fn handle_test(proxy: &GazeProxy<'_>, user: &str, silent: bool) -> anyhow:
         }
     }
 
+    if authenticated && !silent && !verbose {
+        println!(
+            "Recognition passed. Run gaze doctor to check lock screen and login integration; use --verbose for metrics."
+        );
+    }
     if !authenticated && !silent {
+        if !verbose {
+            if let Some(message) = diagnostics.last() {
+                eprintln!("{message}");
+            }
+            eprintln!(
+                "Try again with your face centered and well lit. Use gaze test --verbose for details or gaze doctor for setup issues."
+            );
+        }
         let err_term = Term::stderr();
         err_term.write_line(&format!(
             "{} Face verification failed ({}ms)",
@@ -871,6 +919,7 @@ async fn run() -> anyhow::Result<()> {
             dry_run,
         } => return handle_uninstall(*yes, *keep_data, *dry_run),
         Commands::Doctor {
+            verbose,
             user,
             benchmark,
             json,
@@ -881,6 +930,8 @@ async fn run() -> anyhow::Result<()> {
                 doctor::Output::Json
             } else if *report {
                 doctor::Output::Report
+            } else if *verbose || *benchmark {
+                doctor::Output::Full
             } else {
                 doctor::Output::Human
             };
@@ -908,12 +959,19 @@ async fn run() -> anyhow::Result<()> {
     };
 
     match cli.command {
+        Commands::Setup => setup::run(&proxy).await?,
         Commands::Test {
             user,
-            verbose: _,
+            verbose,
             silent,
         } => {
-            let result = handle_test(&proxy, &user.unwrap_or_else(get_current_user), silent).await;
+            let result = handle_test(
+                &proxy,
+                &user.unwrap_or_else(get_current_user),
+                silent,
+                verbose,
+            )
+            .await;
             if silent && result.is_err() {
                 std::process::exit(1);
             }
@@ -962,6 +1020,7 @@ async fn run() -> anyhow::Result<()> {
                         apply_config_to_daemon(&proxy, &updated).await
                     };
                     saved.map_err(|e| anyhow::anyhow!("Failed to save configuration: {e}"))?;
+                    configure::print_apply_notes(&config, &updated);
                     println!("{key} = {}", updated.get_key(&key)?);
                 }
                 None if show => print!("{}", config_show_text(&config)?),
@@ -1065,6 +1124,7 @@ mod tests {
             cli.command,
             Commands::Doctor {
                 user: Some(ref user),
+                verbose: false,
                 benchmark: false,
                 json: false,
                 report: false,

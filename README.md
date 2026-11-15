@@ -33,14 +33,7 @@ The installer sets up the Gaze daemon, CLI, and GUI. On openSUSE Tumbleweed (x86
 
 It chooses desktop integration based on your session: GNOME gets the GNOME Shell extension, Cinnamon gets `gaze-cinnamon-extension`, KDE Plasma gets `gaze-kde`, and Quickshell Omarchy gets `gaze-omarchy`. On other desktops, the installer skips desktop extensions rather than pulling in GNOME Shell.
 
-If you installed the GNOME extension manually, or the installer could not enable it automatically, reboot first so GNOME Shell can scan the new extension. Then, from your GNOME session, run:
-
-```bash
-gnome-extensions enable gaze@gundulabs.com
-gsettings set org.gnome.shell.extensions.gaze enable-face-authentication true
-```
-
-> If you run `gnome-extensions enable` before rebooting, it reports `Extension "gaze@gundulabs.com" does not exist`. GNOME Shell scans extension directories only when a session starts and drops IDs it has not scanned. As a result, enabling the extension before reboot can appear to work but disappear at your next logout. To avoid this, reboot before running the commands above. `gaze doctor` can detect the issue and prints the same steps.
+Follow the installer's final status. If a reboot is requested, reboot before running `gaze setup`. Manual desktop activation is covered in the [installation guide](https://gaze.gundulabs.com/guide/installation).
 
 <details>
 <summary>Manual install (Debian/Ubuntu, Fedora/openSUSE RPM systems, Arch/Manjaro/CachyOS)</summary>
@@ -158,24 +151,15 @@ See the [Nix & NixOS guide](https://gaze.gundulabs.com/guide/nixos) for module o
 
 </details>
 
-After installing Gaze by any method, reboot once to apply all system-level changes.
-
-```bash
-sudo reboot
-```
+Reboot when requested by the installer, after staging OSTree packages, or to activate a newly installed GNOME extension.
 
 ## Quick start
 
 ```bash
-# Enroll your face
-gaze add-face default
-
-# Test authentication
-gaze test
-
-# Or use the GUI
-gaze-gui
+gaze setup  # check camera, enroll, test, and check desktop integration
 ```
+
+Or open `gaze-gui` and follow the setup checklist. Defaults are ready to use; open `gaze config` only when you want to change a setting.
 
 ## How it works
 
@@ -230,7 +214,7 @@ enabled = true
 threshold = 0.8
 
 [storage]
-encrypt_templates = false   # seal face templates to the TPM
+encrypt_templates = true    # requires a usable TPM 2.0
 unlock_kwallet = false # optional TPM-backed KDE wallet unlock
 unlock_gnome_keyring = false # unlock the GNOME keyring after a GDM or greetd face login
 ```
@@ -249,18 +233,21 @@ See the [configuration guide](https://gaze.gundulabs.com/guide/configuration) fo
 ```
 gaze add-face <name>         Enroll a new face
 gaze refine-face <name>      Add samples to an existing enrollment
-gaze test                    Test face verification with detailed metrics
+gaze setup                   Guided first-run setup
+gaze test                    Test face recognition
+gaze test --verbose          Include detailed metrics
 gaze test --silent           Test silently (exit code only)
 gaze list-faces              List enrolled faces
 gaze rename-face <old> <new> Rename a face
 gaze remove-face <name>      Remove a face
 gaze clear-user              Remove all face data for current user
-gaze config                  Interactive configuration editor
+gaze config                  Settings menu with review and save
 gaze config --show           Print current config and exit
 gaze keyring                 Enroll optional TPM-backed GNOME Keyring unlock
 gaze keyring --forget        Remove the stored GNOME Keyring credential
 gaze keyring --kwallet       Enroll optional TPM-backed KDE KWallet unlock
-gaze doctor                  Check config, daemon, cameras, enrollments, PAM, and TPM
+gaze doctor                  Show actionable setup problems
+gaze doctor --verbose        Show every diagnostic check
 gaze doctor --benchmark      Also measure detector/recognizer/liveness inference speed
 gaze uninstall               Completely remove Gaze (packages, PAM, config, models, data)
 gaze uninstall -y            Skip confirmation prompt

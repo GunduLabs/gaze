@@ -6,7 +6,7 @@
 The `gaze` command lets you enroll and manage faces, test authentication,
 and check your installation.
 
-All commands talk to the running `gazed` daemon over DBus.
+Enrollment, recognition, setup, and settings talk to the running `gazed` daemon over DBus. `gaze doctor` can diagnose a daemon that is down.
 
 ## Commands that need privileges
 
@@ -81,6 +81,8 @@ It writes a `gaze-report-<time>.txt` file to the current directory (or the tempo
 
 This asks the running `gazed` daemon to run each loaded model (detector, RGB/IR recognizers, and liveness if enabled) a few times on synthetic input and reports average, p95, and minimum latency plus FPS for each. It does not need a face in frame and does not touch the camera.
 
+`gaze doctor` shows errors and warnings first. Add `--verbose` to include successful checks and instructions for optional features. `--benchmark` includes full results.
+
 ## Test face verification
 
 ```bash
@@ -96,11 +98,11 @@ gaze test -s          # run silently and report the result via exit code (short 
 gaze test --silent    # same
 ```
 
-`gaze auth` remains a compatibility alias. `-v` / `--verbose` is still accepted but is redundant; detailed metrics are shown by default. Explicit `--verbose` and `--silent` remain mutually exclusive.
+`gaze auth` remains a compatibility alias. Use `-v` / `--verbose` for detailed metrics; normal output is concise. `--verbose` and `--silent` are mutually exclusive.
 
 Result meanings:
 
-- `✓ Face verification passed: <face> (XX.X%, XXXms)`: pass: matched face name, score percentage, and elapsed time
+- `✓ Face recognized: <face> (XXXms)`: matched face name and elapsed time; `--verbose` adds the score table
 - `✗ Face verification failed (XXXms)`: no face passed the current threshold or liveness check
 
 By default, a per-face table is printed before the result showing the per-spectrum (RGB and IR) similarity score, match percentage, and pass/fail for each enrolled face.
@@ -232,13 +234,17 @@ gaze uninstall --keep-data  # preserve enrolled faces in /var/lib/gaze
 gaze uninstall --dry-run    # preview the plan, run nothing
 ```
 
-Removes the installed packages, repository config, GNOME/GDM lock and login settings, PAM/authselect integration, SELinux policy, the model cache (`/var/cache/gaze`), the system config (`/etc/gaze`), and (unless `--keep-data` is set) enrolled face data (`/var/lib/gaze`). Each step is best-effort and uses `sudo`, so you'll be prompted for your password.
+Removes the installed packages, repository config, GNOME/GDM lock and login settings, PAM/authselect integration, SELinux policy, the model cache (`/var/cache/gaze`), the system config (`/etc/gaze`), and (unless `--keep-data` is set) enrolled face data (`/var/lib/gaze`). Steps use `sudo`, so you may be prompted for your password. Failed steps are reported as incomplete removal; package-removal failures stop before configuration or face data is deleted.
 
 See the [uninstallation guide](/guide/uninstallation) if you'd rather run the steps manually.
 
+## Guided setup
+
+Run `gaze setup` to check your camera, enroll, test recognition, and check desktop integration. Follow any reboot instruction from the installer first.
+
 ## Interactive configuration
 
-Use the interactive wizard to edit daemon config through DBus:
+Choose a settings section, review the changes, and save through DBus:
 
 ```bash
 gaze config

@@ -11,7 +11,6 @@ set -e
 PKG_BASE_URL="https://packages.gundulabs.com"
 HYPRLAND_DOCS_URL="https://gaze.gundulabs.com/guide/hyprland"
 KDE_DOCS_URL="https://gaze.gundulabs.com/guide/kde"
-OMARCHY_DOCS_URL="https://gaze.gundulabs.com/guide/omarchy"
 PAM_DOCS_URL="https://gaze.gundulabs.com/guide/pam"
 PAM_SUDO_OPTOUT="/etc/gaze/pam-sudo.optout"
 REPO_KEY_FPR="505AC1C71AFEDBD5555235F6CB4FA24E5C1C7C98"
@@ -19,6 +18,10 @@ PAM_OPTOUT="/etc/gaze/pam.optout"
 AUTO_YES=0
 NO_PAM=0
 PROBLEMS=""
+DESKTOP_STATUS="Not configured; see gaze doctor after setup"
+HYPRLOCK_STATUS="not configured"
+PLAINTEXT_TEMPLATES=0
+REBOOT_REQUIRED=0
 
 ESC="$(printf '\033')"
 if [ -t 1 ] && [ "${TERM:-}" != "dumb" ] && [ -z "${NO_COLOR:-}" ]; then
@@ -57,6 +60,7 @@ Usage:
 Options:
   -y, --yes                  Use detected defaults without prompting
       --no-pam               Install without adding Gaze to any PAM stack
+      --plaintext-templates  Fresh installs only: store faces without TPM encryption
   -h, --help                 Show this help
 
 The GNOME extension package is installed only when a GNOME desktop session is
@@ -72,6 +76,7 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
     -y | --yes) AUTO_YES=1 ;;
     --no-pam) NO_PAM=1 ;;
+    --plaintext-templates) PLAINTEXT_TEMPLATES=1 ;;
     -h | --help)
         usage
         exit 0
@@ -163,7 +168,7 @@ print_manual_gnome_enable() {
 }
 
 print_manual_cinnamon_enable() {
-    cmd "gsettings set org.cinnamon enabled-extensions \"['gaze@gundulabs.com']\""
+    say "Open System Settings → Extensions and enable Gaze. Existing extensions will be preserved."
 }
 
 configure_hyprlock_conf() {
@@ -190,6 +195,7 @@ auth {
     }
 }
 EOF
+        HYPRLOCK_STATUS="configured"
         ok "Created $conf with auth.pam.module = hyprlock-gaze."
         return 0
     fi
@@ -198,6 +204,7 @@ EOF
         current_pam="$(grep -E '^\s*module\s*=' "$conf" | head -1 | sed 's/.*=\s*//;s/\s*$//')"
         case "$current_pam" in
         hyprlock-gaze | hyprlock-gaze-simultaneous)
+            HYPRLOCK_STATUS="configured"
             ok "hyprlock.conf already uses $current_pam."
             return 0
             ;;
@@ -222,6 +229,7 @@ EOF
             }
             { print }
         ' "$conf.gaze-backup" >"$conf"
+        HYPRLOCK_STATUS="configured"
         ok "Added module = hyprlock-gaze to existing pam {} block in $conf."
     elif grep -qE '^\s*auth\s*\{' "$conf"; then
         awk '
@@ -236,10 +244,12 @@ EOF
             }
             { print }
         ' "$conf.gaze-backup" >"$conf"
+        HYPRLOCK_STATUS="configured"
         ok "Added pam { module = hyprlock-gaze } to existing auth {} block in $conf."
     else
         rm -f "$conf.gaze-backup"
         printf '\nauth {\n    pam {\n        module = hyprlock-gaze\n    }\n}\n' >>"$conf"
+        HYPRLOCK_STATUS="configured"
         ok "Appended auth { pam { module = hyprlock-gaze } } to $conf."
         return 0
     fi
@@ -346,7 +356,7 @@ EOF
 
 enable_gnome_extension() {
     if [ "$(id -u)" -eq 0 ]; then
-        warn "Running as root; not changing per-user GNOME extension settings."
+        problem "GNOME activation requires your desktop user; enable Gaze in Extensions after reboot."
         say "For GNOME lock screen face unlock, reboot, then run as your desktop user:"
         print_manual_gnome_enable
         return 0
@@ -364,10 +374,9 @@ enable_gnome_extension() {
     # Shell does not scan newly installed system extensions until it restarts, so
     # `gnome-extensions enable` usually fails here and gsettings writes dconf directly.
     if command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions enable "$EXT_ID" >/dev/null 2>&1 && _gsettings_enable_face_auth; then
-        ok "Enabled GNOME lock screen face unlock for this user."
+        DESKTOP_STATUS="GNOME lock screen: enabled"
     elif _gsettings_add_extension "$EXT_ID" && _gsettings_enable_face_auth; then
-        ok "Registered GNOME lock screen face unlock via dconf; a reboot will activate it."
-        say "${DIM}Note: 'gnome-extensions enable $EXT_ID' before that reboot reports \"Extension does not exist\"; the dconf entry just written makes that step unnecessary.${RESET}"
+        DESKTOP_STATUS="GNOME lock screen: pending reboot"
     else
         warn "Could not enable the GNOME extension automatically."
         say "Reboot, then from your GNOME session run:"
@@ -375,15 +384,16 @@ enable_gnome_extension() {
     fi
 
     if arm_gnome_first_login_enable; then
-        say "${DIM}GNOME Shell forgets extensions it has not scanned yet, so a logout before the${RESET}"
-        say "${DIM}first reboot can undo the step above. A one-shot autostart entry re-applies it${RESET}"
-        say "${DIM}at your next GNOME login and then deletes itself.${RESET}"
+        DESKTOP_STATUS="GNOME lock screen: pending reboot"
+        REBOOT_REQUIRED=1
+    else
+        problem "Could not schedule GNOME extension activation; enable Gaze in Extensions after reboot."
     fi
 }
 
 enable_cinnamon_extension() {
     if [ "$(id -u)" -eq 0 ]; then
-        warn "Running as root; not changing per-user Cinnamon extension settings."
+        problem "Cinnamon activation requires your desktop user; enable Gaze in System Settings → Extensions."
         say "For Cinnamon lock screen and PolKit elevation confirmation, run as your desktop user:"
         print_manual_cinnamon_enable
         return 0
@@ -398,30 +408,34 @@ enable_cinnamon_extension() {
 
     ext_id="gaze@gundulabs.com"
     if ! command -v gsettings >/dev/null 2>&1; then
-        warn "Could not enable the Cinnamon extension automatically (gsettings not found)."
+        problem "Could not enable the Cinnamon extension automatically (gsettings not found)."
         print_manual_cinnamon_enable
         return 0
     fi
 
-    current=$(gsettings get org.cinnamon enabled-extensions 2>/dev/null) || current=""
+    if ! current=$(gsettings get org.cinnamon enabled-extensions 2>/dev/null); then
+        problem "Could not read Cinnamon extension settings; existing extensions were left unchanged."
+        print_manual_cinnamon_enable
+        return 0
+    fi
     case "$current" in
     *"$ext_id"*)
-        ok "Cinnamon extension is already enabled."
+        DESKTOP_STATUS="Cinnamon extension: enabled"
         ;;
     "@as []" | "[]" | "")
         if gsettings set org.cinnamon enabled-extensions "['$ext_id']" 2>/dev/null; then
-            ok "Enabled Cinnamon Gaze extension."
+            DESKTOP_STATUS="Cinnamon extension: enabled; restart Cinnamon to activate"
         else
-            warn "Could not enable the Cinnamon extension automatically."
+            problem "Could not enable the Cinnamon extension automatically."
             print_manual_cinnamon_enable
         fi
         ;;
     *)
         new_list=$(printf '%s' "$current" | sed "s/]$/, '$ext_id']/")
         if gsettings set org.cinnamon enabled-extensions "$new_list" 2>/dev/null; then
-            ok "Enabled Cinnamon Gaze extension."
+            DESKTOP_STATUS="Cinnamon extension: enabled; restart Cinnamon to activate"
         else
-            warn "Could not enable the Cinnamon extension automatically."
+            problem "Could not enable the Cinnamon extension automatically."
             print_manual_cinnamon_enable
         fi
         ;;
@@ -433,10 +447,7 @@ explain_desktop_extension_skipped() {
         return 0
     fi
 
-    say "GNOME or Cinnamon desktop session not detected; skipping desktop extension packages."
-    say "CLI, GUI, and PAM modules are still installed."
-    say "For other desktop/login integration, see:"
-    link "$PAM_DOCS_URL"
+    DESKTOP_STATUS="Desktop integration: manual setup required ($PAM_DOCS_URL)"
 }
 
 explain_gnome_extension_skipped() {
@@ -458,7 +469,7 @@ install_kde_packages() {
     fi
     KDE_PACKAGES_INSTALLED=0
     echo ""
-    warn "Could not install the KDE Plasma packages ($KDE_PKGS)."
+    problem "Could not install KDE lock screen integration ($KDE_PKGS)."
     say "  The rest of Gaze is installed and working; only the KDE lock screen"
     say "  integration is missing. This is expected if your distribution's Gaze"
     say "  packages predate the KDE package. Retry once it is available:"
@@ -494,20 +505,17 @@ enable_kde() {
     if [ "${KDE_PACKAGES_INSTALLED:-0}" -ne 1 ]; then
         return 0
     fi
-    ok "KDE Plasma lock screen face unlock: enabled by gaze-kde"
-    say "  ${DIM}Face auth runs in the slot KScreenLocker starts for biometrics, alongside${RESET}"
-    say "  ${DIM}the password field, so a match unlocks without pressing a key.${RESET}"
-    say "  ${DIM}Lock your screen and look at the camera to try it.${RESET}"
-    say "  ${DIM}Find Gaze in System Settings, or run gaze-gui.${RESET}"
-    say "  ${DIM}The login greeter is off by default: sudo gaze-kde-pam enable-login${RESET}"
-    link "$KDE_DOCS_URL"
+    DESKTOP_STATUS="KDE lock screen: package installed; verify with gaze doctor"
+
 }
 
 enable_omarchy() {
     if [ "$(id -u)" -eq 0 ]; then
-        warn "Run gaze-omarchy enable as your desktop user after installation."
+        problem "Run gaze-omarchy enable as your desktop user after installation."
     elif ! gaze-omarchy enable; then
-        warn "Omarchy integration needs attention; run gaze-omarchy doctor, then gaze-omarchy enable while unlocked."
+        problem "Omarchy integration needs attention; run gaze-omarchy doctor, then gaze-omarchy enable while unlocked."
+    else
+        DESKTOP_STATUS="Omarchy lock screen: enabled"
     fi
 }
 
@@ -832,7 +840,7 @@ daemon_on_bus() {
 wait_for_daemon_bus() {
     command -v busctl >/dev/null 2>&1 || return 0
     daemon_on_bus && return 0
-    say "  ${DIM}Waiting for the daemon to download its face models (up to 3 minutes)...${RESET}"
+    say "Preparing face recognition (first start may download models; up to 3 minutes)…"
     waited=0
     while [ "$waited" -lt 180 ]; do
         sleep 3
@@ -841,9 +849,16 @@ wait_for_daemon_bus() {
             ok "The Gaze daemon is ready."
             return 0
         fi
-        [ "$(systemctl is-active gazed 2>/dev/null || true)" = "active" ] || break
+        case "$(systemctl is-active gazed 2>/dev/null || true)" in
+        active | activating | reloading) ;;
+        *)
+            problem "Gaze stopped during preparation. Run gaze doctor; see journalctl -u gazed -n 50."
+            return 0
+            ;;
+        esac
+        [ $((waited % 15)) -ne 0 ] || say "  Still preparing… ${waited}s elapsed"
     done
-    warn "The Gaze daemon is still starting; gaze and gaze-gui work once 'gaze doctor' reports it ready."
+    problem "Preparation did not finish within 3 minutes. Run gaze doctor before enrolling."
 }
 
 verify_install() {
@@ -1164,7 +1179,26 @@ elif is_arch; then
     plan "Enable the Gaze daemon"
 fi
 
+# A missing TPM must not strand a fresh install before settings can be opened.
+if [ "$PLAINTEXT_TEMPLATES" -eq 1 ]; then
+    [ ! -e /etc/gaze/config.toml ] && [ ! -d /var/lib/gaze/users ] ||
+        die "--plaintext-templates is only for a fresh installation. Manage existing encryption in gaze config."
+    warn "Face templates will be stored without TPM encryption (readable by root)."
+elif [ ! -e /dev/tpmrm0 ] && [ ! -e /dev/tpm0 ] && [ ! -d /var/lib/gaze/users ] &&
+    ! grep -qE '^[[:space:]]*encrypt_templates[[:space:]]*=[[:space:]]*false' /etc/gaze/config.toml 2>/dev/null; then
+    fail "No TPM was detected. Enable TPM 2.0 in firmware before installing."
+    say "To explicitly accept unencrypted face storage on a fresh install:"
+    cmd "curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --plaintext-templates"
+    exit 1
+fi
+
 prompt_continue
+
+if [ "$PLAINTEXT_TEMPLATES" -eq 1 ]; then
+    $SUDO mkdir -p /etc/gaze
+    printf '[storage]\nencrypt_templates = false\n' | $SUDO tee /etc/gaze/config.toml >/dev/null
+    $SUDO chmod 644 /etc/gaze/config.toml
+fi
 
 # ── clean up old repo files ──────────────────────────────────────────────────
 if is_deb; then
@@ -1318,7 +1352,8 @@ EOF
         if [ "$RPM_TOOL" = "rpm-ostree" ]; then
             install_kde_packages ostree_install $KDE_PKGS
             if [ "${KDE_PACKAGES_INSTALLED:-0}" -eq 1 ] && [ "$OSTREE_LAST_PENDING" -eq 1 ] && [ "$OSTREE_PENDING" -eq 0 ]; then
-                warn "gaze-kde was layered for the next boot; reboot to get KDE lock screen face unlock."
+                REBOOT_REQUIRED=1
+                DESKTOP_STATUS="KDE lock screen: pending reboot"
             fi
         elif [ "$RPM_TOOL" = "zypper" ]; then
             install_kde_packages $SUDO zypper --non-interactive install $KDE_PKGS </dev/null
@@ -1422,60 +1457,17 @@ else
     printf '%s\n' "$PROBLEMS"
 fi
 
-NEXT_STEP=0
-next_step() {
-    NEXT_STEP=$((NEXT_STEP + 1))
-    printf '  %s. %s%-22s%s %s%s%s\n' "$NEXT_STEP" "$BOLD" "$1" "$RESET" "$DIM" "$2" "$RESET"
-}
-
-title "Next steps"
-if [ "${OSTREE_PENDING:-0}" -eq 1 ]; then
-    next_step "Reboot" "rpm-ostree applies the packages; the daemon and PAM finish at boot"
-fi
-if [ -n "$PROBLEMS" ]; then
-    next_step "gaze doctor" "diagnose the steps above"
-fi
-next_step "gaze config" "configure your camera and security settings"
-next_step "gaze add-face <name>" "enroll your face (or use gaze-gui for a window)"
-next_step "gaze test" "test it in the terminal"
-if want_gnome_extension_package && [ "${OSTREE_PENDING:-0}" -eq 0 ]; then
-    next_step "Reboot" "GNOME Shell and GDM only pick up the new extension at startup"
-elif want_cinnamon_extension_package; then
-    next_step "Restart Cinnamon" "Press Alt+F2, type r, and press Enter to reload Cinnamon"
-elif is_omarchy_session; then
-    next_step "gaze-omarchy doctor" "check Omarchy lock integration after enrollment"
-fi
-say ""
-title "Try it"
-say "  ${BOLD}gaze-gui${RESET}               ${DIM}enroll faces and change settings in a window${RESET}"
-if want_gnome_extension_package || want_cinnamon_extension_package || is_kde_session || is_omarchy_session || want_hyprlock_setup; then
-    say "  ${BOLD}Lock your screen${RESET}       ${DIM}then look at the camera${RESET}"
-fi
-say ""
-title "Desktop integration"
-if want_gnome_extension_package; then
-    ok "GNOME lock screen face unlock: enabled after reboot"
-    say "  GDM login face authentication: off"
-elif want_cinnamon_extension_package; then
-    ok "Cinnamon extension: enabled for this user"
-elif is_omarchy_session; then
-    say "  Run gaze-omarchy doctor to check lock integration."
-    link "$OMARCHY_DOCS_URL"
-elif is_kde_session; then
-    if [ "${KDE_PACKAGES_INSTALLED:-0}" -eq 1 ]; then
-        ok "KDE Plasma lock screen face unlock: gaze-kde installed"
-        say "  ${DIM}Login greeter stays off until you enable it:${RESET}"
-    else
-        warn "KDE Plasma lock screen face unlock: gaze-kde not installed"
-        say "  ${DIM}Install it to get hands-free lock screen face unlock:${RESET}"
-    fi
-    link "$KDE_DOCS_URL"
-else
-    say "  Desktop extension skipped (GNOME/Cinnamon desktop not detected); see the PAM guide:"
-    link "$PAM_DOCS_URL"
-fi
+say "  $DESKTOP_STATUS"
 if want_hyprlock_setup; then
-    ok "hyprlock: configured (auth.pam.module = hyprlock-gaze)"
+    say "  hyprlock: $HYPRLOCK_STATUS"
 fi
 say ""
+if [ "${OSTREE_PENDING:-0}" -eq 1 ] || [ "$REBOOT_REQUIRED" -eq 1 ]; then
+    say "Next: reboot, then run gaze setup as your desktop user."
+elif [ -n "$PROBLEMS" ]; then
+    say "Next: run gaze doctor to resolve the issues above, then gaze setup."
+else
+    say "Next: run gaze setup (or open gaze-gui) to check your camera and enroll."
+fi
+say "Help: https://gaze.gundulabs.com/guide/getting-started"
 }

@@ -9,6 +9,7 @@ import org.kde.kcmutils as KCM
 
 KCM.SimpleKCM {
     id: page
+    property bool advanced: false
 
     readonly property var values: kcm.settings.values
     readonly property bool custom: values["security.level"] === "custom"
@@ -28,6 +29,11 @@ KCM.SimpleKCM {
     title: i18n("Settings")
 
     actions: [
+        Kirigami.Action {
+            text: page.advanced ? i18n("Everyday settings") : i18n("Advanced settings")
+            icon.name: "configure"
+            onTriggered: page.advanced = !page.advanced
+        },
         Kirigami.Action {
             text: i18n("Restart Service")
             icon.name: "view-refresh"
@@ -84,7 +90,7 @@ KCM.SimpleKCM {
         SectionHeader { text: i18n("Security") }
         SettingRow {
             title: i18n("Security level")
-            hint: i18n("Adjust the balance between speed and security")
+            hint: i18n("Medium is recommended. Changing the recognition model requires new captures for existing profiles")
             OptionCombo {
                 key: "security.level"
                 options: [
@@ -98,7 +104,7 @@ KCM.SimpleKCM {
         }
         SettingRow {
             title: i18n("Detector level")
-            visible: page.custom
+            visible: page.advanced && (page.custom)
             OptionCombo {
                 key: "security.detector"
                 options: page.levels
@@ -106,7 +112,7 @@ KCM.SimpleKCM {
         }
         SettingRow {
             title: i18n("Recognizer level")
-            visible: page.custom
+            visible: page.advanced && (page.custom)
             OptionCombo {
                 key: "security.recognizer"
                 options: page.levels
@@ -114,7 +120,7 @@ KCM.SimpleKCM {
         }
         SettingRow {
             title: i18n("RGB recognizer threshold")
-            visible: page.custom
+            visible: page.advanced && (page.custom)
             hint: i18n("Minimum RGB similarity for a match")
             NumberField {
                 key: "security.rgb_threshold"
@@ -126,7 +132,7 @@ KCM.SimpleKCM {
         }
         SettingRow {
             title: i18n("IR recognizer threshold")
-            visible: page.custom
+            visible: page.advanced && (page.custom)
             hint: i18n("Minimum IR similarity for a match")
             NumberField {
                 key: "security.ir_threshold"
@@ -138,7 +144,7 @@ KCM.SimpleKCM {
         }
         SettingRow {
             title: i18n("Hybrid combining policy")
-            visible: page.custom
+            visible: page.advanced && (page.custom)
             hint: i18n("Combining policy when both RGB and IR cameras are active")
             OptionCombo {
                 key: "security.hybrid_policy"
@@ -153,6 +159,7 @@ KCM.SimpleKCM {
 
         SectionHeader { text: i18n("Hardware") }
         SettingRow {
+            visible: page.advanced
             title: i18n("Inference execution provider")
             hint: i18n("CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI")
             OptionCombo {
@@ -167,7 +174,7 @@ KCM.SimpleKCM {
         }
         SettingRow {
             title: i18n("OpenVINO inference device")
-            visible: values["inference.execution_provider"] === "openvino"
+            visible: page.advanced && (values["inference.execution_provider"] === "openvino")
             hint: i18n("The Intel device used for all ONNX models")
             OptionCombo {
                 key: "inference.device"
@@ -195,6 +202,7 @@ KCM.SimpleKCM {
             }
         }
         SettingRow {
+            visible: page.advanced
             title: i18n("IR frame size override")
             hint: i18n("Force one resolution if the IR feed is green or corrupted on auto")
             QQC2.Label {
@@ -230,11 +238,13 @@ KCM.SimpleKCM {
             }
         }
         SwitchRow {
+            visible: page.advanced
             title: i18n("Force IR emitter")
             key: "cameras.emitter_enabled"
             hint: i18n("Override emitter control, only if the IR emitter stays off on its own")
         }
         SettingRow {
+            visible: page.advanced
             title: i18n("Parallel RGB + IR capture")
             hint: i18n("Faster hybrid authentication, but some webcams cannot stream both sensors at once")
             OptionCombo {
@@ -247,6 +257,7 @@ KCM.SimpleKCM {
             }
         }
         SettingRow {
+            visible: page.advanced
             title: i18n("Darkness cutoff")
             hint: i18n("Reject frames below this mean brightness (0–255)")
             NumberField {
@@ -258,8 +269,9 @@ KCM.SimpleKCM {
             }
         }
 
-        SectionHeader { text: i18n("Enrollment") }
+        SectionHeader { visible: page.advanced; text: i18n("Enrollment") }
         SettingRow {
+            visible: page.advanced
             title: i18n("Maximum templates")
             hint: i18n("Number of capture sets stored per face")
             NumberField {
@@ -271,6 +283,7 @@ KCM.SimpleKCM {
             }
         }
         SettingRow {
+            visible: page.advanced
             title: i18n("Minimum face size ratio")
             hint: i18n("Smallest accepted face during enrollment; lower allows more distance")
             NumberField {
@@ -287,11 +300,11 @@ KCM.SimpleKCM {
             title: i18n("Enable liveness spoof prevention")
             key: "liveness.enabled"
             allowed: !page.walletOn
-            hint: i18n("Analyze face depth/reflectance to prevent photo spoofing")
+            hint: i18n("Check camera images and natural movement for signs of a photo or screen")
         }
         SettingRow {
             title: i18n("Liveness threshold")
-            visible: page.livenessOn
+            visible: page.advanced && (page.livenessOn)
             hint: i18n("Minimum spoof prevention confidence")
             NumberField {
                 key: "liveness.threshold"
@@ -303,7 +316,7 @@ KCM.SimpleKCM {
         }
         SettingRow {
             title: i18n("Maximum liveness duration")
-            visible: page.livenessOn
+            visible: page.advanced && (page.livenessOn)
             hint: i18n("Maximum seconds analyzed for liveness verification")
             NumberField {
                 key: "liveness.max_seconds"
@@ -316,16 +329,19 @@ KCM.SimpleKCM {
 
         SectionHeader { text: i18n("Authentication") }
         SwitchRow {
+            visible: page.advanced
             title: i18n("Abort if SSH")
             key: "auth.abort_if_ssh"
             hint: i18n("Prevent authentication over SSH connections")
         }
         SwitchRow {
+            visible: page.advanced
             title: i18n("Abort if lid closed")
             key: "auth.abort_if_lid_closed"
             hint: i18n("Prevent authentication when the laptop lid is closed")
         }
         SwitchRow {
+            visible: page.advanced
             title: i18n("Require a suspend first")
             key: "auth.abort_before_first_resume"
             hint: i18n("Prevent authentication until the system has suspended and resumed once")
@@ -333,7 +349,7 @@ KCM.SimpleKCM {
         SwitchRow {
             title: i18n("Require confirmation on lock screen")
             key: "auth.require_confirmation_lock_screen"
-            hint: i18n("Require pressing Enter or clicking OK to authorize after face matches on the lock screen or login screen")
+            hint: i18n("On KDE lock/login screens this requires your password instead of face unlock. Confirmation after a match is available on other supported surfaces")
         }
         SwitchRow {
             title: i18n("Require confirmation for elevated authentication")
@@ -341,6 +357,7 @@ KCM.SimpleKCM {
             hint: i18n("Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts")
         }
         SettingRow {
+            visible: page.advanced
             title: i18n("Resume grace period (ms)")
             hint: i18n("Delay face authentication on wake from suspend")
             NumberField {
@@ -353,7 +370,7 @@ KCM.SimpleKCM {
         }
         SettingRow {
             title: i18n("Start delay (ms)")
-            hint: i18n("Delay before face authentication starts")
+            hint: i18n("Use 3000–5000 ms to give yourself time to step away after locking")
             NumberField {
                 key: "auth.start_delay_ms"
                 realFrom: 0
@@ -375,20 +392,23 @@ KCM.SimpleKCM {
             }
         }
 
-        SectionHeader { text: i18n("Storage") }
+        SectionHeader { visible: page.advanced; text: i18n("Storage") }
         SwitchRow {
+            visible: page.advanced
             title: i18n("Encrypt face templates")
             key: "storage.encrypt_templates"
             allowed: !page.walletOn
             hint: i18n("Encrypt face templates at rest with a TPM-sealed key")
         }
         SwitchRow {
+            visible: page.advanced
             title: i18n("Unlock GNOME Keyring")
             key: "storage.unlock_gnome_keyring"
             allowed: (page.keyringOn || page.walletReady)
             hint: i18n("Use an enrolled password after liveness-protected GDM or greetd face login")
         }
         SwitchRow {
+            visible: page.advanced
             title: i18n("Unlock KWallet")
             key: "storage.unlock_kwallet"
             allowed: (page.kwalletOn || page.walletReady)

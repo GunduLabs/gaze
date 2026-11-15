@@ -1024,6 +1024,20 @@ impl AuthDaemon {
             .map_err(Self::map_user_db_error)
     }
 
+    async fn credential_status(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        username: String,
+    ) -> fdo::Result<(bool, bool)> {
+        Self::ensure_user_query_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        use gaze_security::keyring::{Backend, credential_present};
+        let gnome = credential_present(Backend::Gnome, &username)
+            .map_err(|e| fdo::Error::Failed(e.to_string()))?;
+        let kwallet = credential_present(Backend::KWallet, &username)
+            .map_err(|e| fdo::Error::Failed(e.to_string()))?;
+        Ok((gnome, kwallet))
+    }
+
     async fn is_camera_available(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<bool> {
         let caller_uid = Self::caller_uid(&header).await?;
         Ok(Self::seat_camera_available(caller_uid, caller_uid).await)

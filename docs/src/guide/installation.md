@@ -11,7 +11,17 @@ distributions (including image-based OSTree systems such as Silverblue, Kinoite,
 and Bazzite), Arch Linux, and Arch-compatible AUR distributions such as Manjaro
 and CachyOS. openSUSE Tumbleweed is supported on x86_64.
 
-## CPU requirement
+## Hardware requirements
+
+Default face storage requires a usable **TPM 2.0**. The one-line installer stops before installing on a fresh machine without a detected TPM. Enable TPM in firmware, or explicitly accept unencrypted face storage with:
+
+```bash
+curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --plaintext-templates
+```
+
+This flag is only for fresh installations. Existing encryption is managed in Settings. A detected but unusable TPM can still prevent startup; `gaze doctor` and the daemon log explain recovery.
+
+### CPU requirement
 
 On x86_64, the `gazed` daemon requires **AVX2** (Intel Haswell and newer, roughly 2013 onward; AMD Excavator and newer, roughly 2015 onward). The ONNX Runtime it links issues AVX2 instructions during startup, so on an older CPU the daemon exits immediately rather than running degraded.
 
@@ -280,11 +290,15 @@ GNOME/hyprlock integration, and home-manager usage.
 
 ## Restart after install
 
-After installing Gaze by any method, reboot once to apply all system-level changes.
+Reboot if packages were staged by OSTree or a new GNOME extension needs activation. The one-line installer reports this at the end. On Cinnamon, restart the desktop when requested; other installations can usually continue immediately.
 
 ```bash
 sudo reboot
 ```
+
+## Continue setup
+
+Run `gaze setup` as your desktop user to check the camera, enroll, test, and check desktop integration. You can also follow the checklist in `gaze-gui`. Advanced configuration is optional.
 
 ## Verify installation
 
