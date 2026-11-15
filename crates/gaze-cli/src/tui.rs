@@ -435,7 +435,11 @@ fn render_enroll(frame: &mut Frame<'_>, screen: &EnrollScreen<'_>) {
         .block(Block::default().borders(Borders::ALL).title("Progress"))
         .gauge_style(Style::default().fg(Color::Cyan).bg(Color::Black))
         .ratio(ratio)
-        .label(format!("{progress}/{max}"));
+        .label(if screen.max == 0 {
+            String::new()
+        } else {
+            format!("{progress}/{max}")
+        });
     frame.render_widget(gauge, chunks[3]);
 
     let controls = Paragraph::new("Ctrl+C or q to cancel")
