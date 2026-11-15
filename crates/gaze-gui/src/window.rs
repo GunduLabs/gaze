@@ -710,6 +710,16 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                 }
                                             ));
 
+                                            entry.connect_activate(glib::clone!(
+                                                #[weak]
+                                                rename_confirm_btn,
+                                                move |_| {
+                                                    if rename_confirm_btn.is_sensitive() {
+                                                        rename_confirm_btn.emit_clicked();
+                                                    }
+                                                }
+                                            ));
+
                                             cancel_btn.connect_clicked(glib::clone!(
                                                 #[weak]
                                                 popover,
@@ -786,6 +796,14 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                     popover.popdown();
                                                 }
                                             ));
+
+                                            popover.connect_closed(|popover| {
+                                                glib::idle_add_local_once(glib::clone!(
+                                                    #[weak]
+                                                    popover,
+                                                    move || popover.unparent()
+                                                ));
+                                            });
 
                                             popover.popup();
                                         }
