@@ -238,7 +238,7 @@ where
             cancellable,
             tick,
         })?;
-        if let Some(TuiAction::Cancel) = tui::poll_action()?
+        if let Some(TuiAction::Cancel | TuiAction::Interrupt) = tui::poll_action()?
             && cancellable
         {
             drop(terminal);
@@ -637,7 +637,7 @@ async fn handle_test(proxy: &GazeProxy<'_>, user: &str, silent: bool) -> anyhow:
                 tick,
             })?;
 
-            if let Some(TuiAction::Cancel) = tui::poll_action()? {
+            if let Some(TuiAction::Cancel | TuiAction::Interrupt) = tui::poll_action()? {
                 cancelled = true;
                 break;
             }
@@ -896,7 +896,15 @@ async fn run() -> anyhow::Result<()> {
     let proxy = match connect_gaze().await {
         Ok(proxy) => proxy,
         Err(_) if silent_auth => std::process::exit(1),
-        Err(e) => return Err(e.into()),
+        Err(e) => {
+            let daemon_missing =
+                dbus_is_not_activatable(&e) || e.to_string().contains("NameHasNoOwner");
+            if daemon_missing && let Ok(connection) = zbus::Connection::system().await {
+                let (problem, fix) = daemon_unavailable_hint(&connection).await;
+                exit_with_error(&format!("Cannot reach the Gaze daemon: {problem}\n  {fix}"));
+            }
+            return Err(e.into());
+        }
     };
 
     match cli.command {
