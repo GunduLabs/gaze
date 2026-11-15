@@ -45,7 +45,7 @@ public:
     QString preview() const { return m_preview; }
     QString testState() const { return m_testState; }
 
-    Q_INVOKABLE void refresh();
+    Q_INVOKABLE void refresh(bool keepError = false);
     Q_INVOKABLE void renameFace(const QString &oldName, const QString &newName);
     Q_INVOKABLE void deleteFace(const QString &name);
     Q_INVOKABLE bool hasFace(const QString &name) const;

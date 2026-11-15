@@ -109,9 +109,9 @@ void GazeKcm::call(const QString &method, const QVariantList &args, GazeBus::Rep
     GazeBus::callGaze(this, method, args, std::move(done));
 }
 
-void GazeKcm::refresh()
+void GazeKcm::refresh(bool keepError)
 {
-    call(QStringLiteral("ListFaces"), {m_user}, [this](const QDBusMessage &reply) {
+    call(QStringLiteral("ListFaces"), {m_user}, [this, keepError](const QDBusMessage &reply) {
         if (reply.type() == QDBusMessage::ErrorMessage) {
             // A user without a profile yet is an empty list, not a failure.
             const bool noProfile = reply.errorName() == QLatin1String("org.freedesktop.DBus.Error.FileNotFound");
@@ -131,15 +131,18 @@ void GazeKcm::refresh()
         }
         list.endArray();
         m_faces.setFaces(std::move(faces));
-        setError(QString());
+        if (!keepError) {
+            setError(QString());
+        }
     });
 }
 
 void GazeKcm::callFaceMethod(const QString &method, const QVariantList &args)
 {
     call(method, args, [this](const QDBusMessage &reply) {
-        setError(reply.type() == QDBusMessage::ErrorMessage ? reply.errorMessage() : QString());
-        refresh();
+        const bool failed = reply.type() == QDBusMessage::ErrorMessage;
+        setError(failed ? reply.errorMessage() : QString());
+        refresh(failed);
     });
 }
 
