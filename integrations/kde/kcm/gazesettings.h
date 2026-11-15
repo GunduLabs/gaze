@@ -79,6 +79,7 @@ private:
     QString m_restartState = QStringLiteral("idle");
     bool m_restarting = false;
     bool m_restartWanted = false;
+    bool m_restartNeeded = false;
     bool m_applying = false;
     bool m_applyAgain = false;
     QString m_error;
