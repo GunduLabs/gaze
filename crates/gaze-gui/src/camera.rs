@@ -102,11 +102,14 @@ pub struct CameraFeed {
     frame_aspect: Rc<Cell<f64>>,
     aspect_frame: gtk4::AspectFrame,
     timer: Rc<RefCell<Option<glib::SourceId>>>,
+    error_label: gtk4::Label,
+    open_error: RefCell<Option<mpsc::Receiver<String>>>,
 }
 
 impl CameraFeed {
     pub fn new(device: &gaze_core::config::CameraSources) -> anyhow::Result<Self> {
         let (tx, rx) = mpsc::sync_channel::<FrameData>(1);
+        let (error_tx, error_rx) = mpsc::channel::<String>();
         let device = device.clone();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_clone = stop_flag.clone();
@@ -116,6 +119,7 @@ impl CameraFeed {
                 Ok(c) => c,
                 Err(err) => {
                     error!(%err, "Camera open failed");
+                    let _ = error_tx.send(err.to_string());
                     return;
                 }
             };
@@ -146,14 +150,20 @@ impl CameraFeed {
             }
         });
 
-        Ok(Self::assemble(Some(rx), Some(thread_handle), stop_flag))
+        Ok(Self::assemble(
+            Some(rx),
+            Some(error_rx),
+            Some(thread_handle),
+            stop_flag,
+        ))
     }
     pub fn new_guidance_only() -> Self {
-        Self::assemble(None, None, Arc::new(AtomicBool::new(false)))
+        Self::assemble(None, None, None, Arc::new(AtomicBool::new(false)))
     }
 
     fn assemble(
         rx: Option<mpsc::Receiver<FrameData>>,
+        open_error: Option<mpsc::Receiver<String>>,
         thread_handle: Option<thread::JoinHandle<()>>,
         stop_flag: Arc<AtomicBool>,
     ) -> Self {
@@ -232,6 +242,17 @@ impl CameraFeed {
         });
         overlay.add_overlay(&guide);
 
+        let error_label = gtk4::Label::new(None);
+        error_label.set_wrap(true);
+        error_label.set_justify(gtk4::Justification::Center);
+        error_label.set_halign(gtk4::Align::Center);
+        error_label.set_valign(gtk4::Align::Center);
+        error_label.set_margin_start(24);
+        error_label.set_margin_end(24);
+        error_label.add_css_class("error");
+        error_label.set_visible(false);
+        overlay.add_overlay(&error_label);
+
         let aspect_frame = gtk4::AspectFrame::new(0.5, 0.5, 4.0 / 3.0, false);
         aspect_frame.set_child(Some(&overlay));
 
@@ -247,6 +268,8 @@ impl CameraFeed {
             frame_aspect,
             aspect_frame,
             timer: Rc::new(RefCell::new(None)),
+            error_label,
+            open_error: RefCell::new(open_error),
         }
     }
 
@@ -291,6 +314,7 @@ impl CameraFeed {
         let Some(rx) = self.rx.borrow_mut().take() else {
             return;
         };
+        let open_error = self.open_error.borrow_mut().take();
 
         let source = glib::timeout_add_local(
             std::time::Duration::from_millis(33),
@@ -305,6 +329,10 @@ impl CameraFeed {
                 self.aspect_frame,
                 #[strong(rename_to = timer)]
                 self.timer,
+                #[strong(rename_to = error_label)]
+                self.error_label,
+                #[strong(rename_to = guide)]
+                self.guide,
                 move || {
                     let mut newest = None;
                     let mut ended = false;
@@ -332,6 +360,12 @@ impl CameraFeed {
                         *latest_frame.borrow_mut() = Some(frame.mat);
                     }
                     if ended {
+                        if let Some(Ok(message)) = open_error.as_ref().map(|rx| rx.try_recv()) {
+                            error_label
+                                .set_text(&format!("The camera could not be opened: {message}"));
+                            error_label.set_visible(true);
+                            guide.set_visible(false);
+                        }
                         let _ = timer.borrow_mut().take();
                         return glib::ControlFlow::Break;
                     }
@@ -359,6 +393,8 @@ impl CameraFeed {
         );
         self.picture.set_paintable(Some(&texture));
         self.picture.set_visible(true);
+        self.error_label.set_visible(false);
+        self.guide.set_visible(true);
     }
 
     pub fn hide_frame(&self) {
