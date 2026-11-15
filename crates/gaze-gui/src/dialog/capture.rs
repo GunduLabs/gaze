@@ -180,6 +180,14 @@ pub fn show_capture_dialog(
     start_btn.set_halign(gtk4::Align::Center);
     start_btn.set_sensitive(is_refine);
     body.append(&start_btn);
+    let done_btn = gtk4::Button::with_label("Done — test recognition next");
+    done_btn.set_visible(false);
+    body.append(&done_btn);
+    done_btn.connect_clicked(glib::clone!(
+        #[weak]
+        dialog,
+        move |_| dialog.close()
+    ));
 
     if let Some(entry) = face_name_entry.as_ref() {
         let start_btn_for_validation = start_btn.clone();
@@ -313,6 +321,8 @@ pub fn show_capture_dialog(
     }
 
     start_btn.connect_clicked(glib::clone!(
+        #[weak]
+        done_btn,
         #[strong]
         username,
         #[strong]
@@ -329,8 +339,6 @@ pub fn show_capture_dialog(
         proxy,
         #[strong]
         resolved_face,
-        #[weak]
-        dialog,
         #[strong]
         on_done,
         #[strong]
@@ -359,6 +367,8 @@ pub fn show_capture_dialog(
             *enrollment_task.borrow_mut() = Some(abort);
 
             let task = glib::clone!(
+                #[weak]
+                done_btn,
                 #[weak(rename_to = start_btn)]
                 btn,
                 #[strong]
@@ -375,8 +385,6 @@ pub fn show_capture_dialog(
                 progress_label,
                 #[weak]
                 prompt_label,
-                #[weak]
-                dialog,
                 #[weak]
                 stop_btn,
                 #[strong]
@@ -484,15 +492,11 @@ pub fn show_capture_dialog(
 
                                     if is_done && raw_msg == EnrollPrompt::Completed {
                                         enrollment_completed.set(true);
-                                        prompt_label.set_text("Enrollment complete");
+                                        prompt_label.set_text("Face saved. Use Test in the main window, then check desktop integration.");
+                                        prompt_label.set_wrap(true);
+                                        done_btn.set_visible(true);
                                         stop_btn.set_visible(false);
                                         on_done();
-                                        glib::timeout_add_local_once(
-                                            std::time::Duration::from_millis(1500),
-                                            glib::clone!(#[weak] dialog, move || {
-                                                dialog.close();
-                                            })
-                                        );
                                         break;
                                     }
 

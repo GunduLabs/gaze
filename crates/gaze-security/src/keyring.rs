@@ -308,6 +308,12 @@ fn remove_record(dir: &Path, uid: u32) -> anyhow::Result<()> {
     }
 }
 
+/// Reports only whether a credential record exists; this does not unseal or validate it.
+pub fn credential_present(backend: Backend, username: &str) -> anyhow::Result<bool> {
+    let uid = Account::uid(username)?;
+    Ok(record_path(Path::new(backend.store_dir()), uid).try_exists()?)
+}
+
 pub fn enroll(username: &str, password: &[u8]) -> anyhow::Result<()> {
     enroll_for(Backend::Gnome, username, password)
 }

@@ -74,8 +74,31 @@ fn add_toast(window: &libadwaita::ApplicationWindow, text: impl AsRef<str>) -> l
     toast
 }
 
+pub(crate) fn show_error(window: &libadwaita::ApplicationWindow, title: &str, detail: &str) {
+    let dialog = libadwaita::MessageDialog::builder()
+        .transient_for(window)
+        .heading(title)
+        .body(detail)
+        .build();
+    let copy = gtk4::Label::new(Some(detail));
+    copy.set_selectable(true);
+    copy.set_wrap(true);
+    dialog.set_body("");
+    dialog.set_extra_child(Some(&copy));
+    dialog.add_response("close", "Close");
+    dialog.set_close_response("close");
+    dialog.present();
+}
+
 fn add_dbus_error_toast(window: &libadwaita::ApplicationWindow, prefix: &str, err: &zbus::Error) {
-    add_toast(window, format!("{}: {}", prefix, dbus_error_message(err)));
+    show_error(
+        window,
+        prefix,
+        &format!(
+            "{}\nRun gaze doctor for recovery steps.",
+            dbus_error_message(err)
+        ),
+    );
 }
 
 async fn confirm_face_removal(window: &libadwaita::ApplicationWindow, face_name: &str) -> bool {
@@ -94,9 +117,9 @@ async fn confirm_face_removal(window: &libadwaita::ApplicationWindow, face_name:
 
 fn daemon_state_command(state: Option<DaemonState>) -> Option<&'static str> {
     match state {
-        Some(DaemonState::Failed) => {
-            Some("journalctl -u gazed -n 50\nsudo systemctl restart gazed")
-        }
+        Some(DaemonState::Failed) => Some(
+            "gaze doctor\njournalctl -u gazed -n 50\nFor TPM recovery: sudoedit /etc/gaze/config.toml\nThen: sudo systemctl restart gazed",
+        ),
         Some(DaemonState::Disabled) => Some("sudo systemctl enable --now gazed"),
         Some(DaemonState::Stopped) => Some("sudo systemctl start gazed"),
         Some(DaemonState::NotInstalled | DaemonState::Starting) | None => None,
@@ -128,7 +151,7 @@ fn daemon_state_text(state: Option<DaemonState>) -> (&'static str, &'static str,
     match state {
         Some(DaemonState::Failed) => (
             "Daemon Failed",
-            "The Gaze daemon stopped with an error. Check its log, then restart it:",
+            "Gaze could not start. Run gaze doctor. On a new install, check that TPM 2.0 is enabled; settings cannot be changed here until the service starts.",
             Duration::from_secs(10),
         ),
         Some(DaemonState::Disabled) => (
@@ -210,7 +233,11 @@ async fn begin_face_capture(
     {
         futures::future::Either::Left((Ok(()), _)) => true,
         futures::future::Either::Left((Err(err), _)) => {
-            add_toast(window, enrollment_auth_error_text(&err));
+            show_error(
+                window,
+                "Could not start enrollment",
+                &enrollment_auth_error_text(&err),
+            );
             return;
         }
         futures::future::Either::Right(_) => false,
@@ -223,14 +250,24 @@ async fn begin_face_capture(
     let feed = match capture::prepare_camera_feed(&camera) {
         Ok(feed) => feed,
         Err(err) => {
-            add_toast(window, format!("Failed to start camera: {err}"));
+            show_error(
+                window,
+                "Could not start camera",
+                &format!(
+                    "{err}\nClose other camera apps, check the privacy shutter, or choose another camera in Settings."
+                ),
+            );
             return;
         }
     };
 
     if !authorization_done && let Err(err) = authorization.await {
         feed.stop();
-        add_toast(window, enrollment_auth_error_text(&err));
+        show_error(
+            window,
+            "Could not start enrollment",
+            &enrollment_auth_error_text(&err),
+        );
         return;
     }
     capture::show_capture_dialog(
@@ -254,6 +291,15 @@ async fn begin_face_capture(
 
 /// Returns green when the profile has captures for this spectrum, amber when a camera is
 /// configured but the profile has no captures, and unlit when no camera is configured.
+fn spectrum_badge_text(spectrum: &str, enrolled: bool, configured: bool) -> String {
+    let status = match (enrolled, configured) {
+        (true, _) => "ready",
+        (false, true) => "needs captures",
+        (false, false) => "unused",
+    };
+    format!("{spectrum}: {status}")
+}
+
 fn spectrum_badge_class(enrolled: bool, configured: bool) -> &'static str {
     match (enrolled, configured) {
         (true, _) => "badge-success",
@@ -280,13 +326,13 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     let title = libadwaita::WindowTitle::new("Gaze", &format!("User: {username}"));
     header.set_title_widget(Some(&title));
 
-    let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
+    let add_btn = gtk4::Button::with_label("Enroll");
     add_btn.set_tooltip_text(Some("Enroll a new face"));
 
-    let test_btn = gtk4::Button::from_icon_name("media-playback-start-symbolic");
+    let test_btn = gtk4::Button::with_label("Test");
     test_btn.set_tooltip_text(Some("Test face authentication"));
 
-    let config_btn = gtk4::Button::from_icon_name("emblem-system-symbolic");
+    let config_btn = gtk4::Button::with_label("Settings");
     config_btn.set_tooltip_text(Some("Configure Gaze"));
 
     header.pack_end(&add_btn);
@@ -316,6 +362,16 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     face_list.set_selection_mode(gtk4::SelectionMode::None);
     face_group.add(&face_list);
 
+    let setup_group = libadwaita::PreferencesGroup::new();
+    setup_group.set_title("Setup checklist");
+    setup_group.set_description(Some("1. Choose your camera in Settings and check its enrollment preview.\n2. Enroll a face.\n3. Test recognition.\n4. Check desktop integration before trying screen unlock."));
+    let integration_btn = gtk4::Button::with_label("Check desktop integration");
+    setup_group.add(&integration_btn);
+    content.append(&setup_group);
+    let test_result = gtk4::Label::new(Some("Recognition has not been tested in this session."));
+    test_result.set_wrap(true);
+    test_result.set_selectable(true);
+    content.append(&test_result);
     content.append(&face_group);
 
     let status_page = libadwaita::StatusPage::new();
@@ -347,6 +403,19 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     window.set_content(Some(&toast_overlay));
     window.present();
 
+    integration_btn.connect_clicked(glib::clone!(#[weak] window, move |button| {
+        button.set_sensitive(false);
+        glib::MainContext::default().spawn_local(glib::clone!(#[weak] window, #[weak] button, async move {
+            let result = gtk4::gio::spawn_blocking(|| std::process::Command::new("gaze").arg("doctor").env("NO_COLOR", "1").output()).await;
+            button.set_sensitive(true);
+            let text = match result {
+                Ok(Ok(output)) => format!("{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)),
+                _ => "Run gaze doctor in a terminal on your Linux host to check desktop integration. If the installer requested a reboot, do that before testing screen unlock. Login and keyring unlock are optional, separate settings.".into(),
+            };
+            show_error(&window, "Desktop setup checks", &text);
+        }));
+    }));
+
     config_btn.connect_clicked(glib::clone!(
         #[weak]
         window,
@@ -365,6 +434,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     let last_toast: Rc<RefCell<Option<libadwaita::Toast>>> = Rc::new(RefCell::new(None));
 
     test_btn.connect_clicked(glib::clone!(
+        #[strong]
+        test_result,
         #[weak]
         window,
         #[strong]
@@ -390,6 +461,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
             progress_toast.set_timeout(0);
             *last_toast.borrow_mut() = Some(progress_toast);
             glib::MainContext::default().spawn_local(glib::clone!(
+                #[strong]
+                test_result,
                 #[weak]
                 window,
                 #[strong]
@@ -408,6 +481,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                     use futures::StreamExt;
 
                     let finish = |text: &str| {
+                        test_result.set_text(text);
                         if let Some(prev) = last_toast.borrow_mut().take() {
                             prev.dismiss();
                         }
@@ -423,7 +497,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 f();
                             }
                         } else {
-                            finish("Failed to claim device");
+                            finish(&format!("Could not access the camera: {}. Close other camera apps and retry; run gaze doctor if it persists.", dbus_error_message(&err)));
                         }
                         return;
                     }
@@ -431,7 +505,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         Ok(stream) => stream,
                         Err(_) => {
                             let _ = proxy.release().await;
-                            finish("Daemon error starting verification");
+                            finish("Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled.");
                             return;
                         }
                     };
@@ -440,11 +514,10 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
                     if proxy.verify_start("any").await.is_err() {
                         let _ = proxy.release().await;
-                        finish("Daemon error starting verification");
+                        finish("Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled.");
                         return;
                     }
 
-                    let mut text = "Face not recognized".to_string();
                     let mut matched_face: Option<String> = None;
                     let mut refused = false;
 
@@ -452,37 +525,34 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                     // daemon withholds a verdict.
                     let deadline = glib::timeout_future(gaze_core::dbus::VERIFY_CLIENT_TIMEOUT);
                     let mut deadline = std::pin::pin!(deadline);
-                    loop {
+                    let mut text = loop {
                         match futures::future::select(stream.next(), deadline.as_mut()).await {
                             futures::future::Either::Left((Some(signal), _)) => {
                                 let Ok(args) = signal.args() else { continue };
                                 let res = *args.result();
                                 if res == gaze_core::dbus::VerifyResult::VerifyMatch {
-                                    text = "Face recognized".to_string();
                                     let faces = args.faces();
                                     matched_face = faces
                                         .iter()
                                         .find(|(_, _, _, rgb_p, _, _, ir_p)| *rgb_p || *ir_p)
                                         .map(|(n, _, _, _, _, _, _)| n.clone());
+                                    break "Face recognized. Next: check desktop integration before trying screen unlock.".to_string();
                                 } else {
                                     let (rgb, ir) = (*args.rgb_status(), *args.ir_status());
                                     refused =
                                         rgb == CaptureStatus::Unused && ir == CaptureStatus::Unused;
-                                    text = test_failure_text(rgb, ir).to_string();
+                                    break test_failure_text(rgb, ir).to_string();
                                 }
-                                break;
                             }
                             futures::future::Either::Left((None, _)) => {
-                                text = "Lost contact with the Gaze daemon".to_string();
-                                break;
+                                break "Lost contact with the Gaze daemon".to_string();
                             }
                             futures::future::Either::Right(_) => {
                                 let _ = proxy.verify_stop().await;
-                                text = "No face seen before the test timed out".to_string();
-                                break;
+                                break "Recognition timed out without a result. Retry, or run gaze doctor to check the camera and service".to_string();
                             }
                         }
-                    }
+                    };
 
                     // The daemon explains a refusal on a separate stream, just before the verdict.
                     if refused && let Some(stream) = diagnostics.as_mut() {
@@ -722,7 +792,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
                             if faces.is_empty() {
                                 status_page.set_title("No Faces Enrolled");
-                                status_page.set_description(Some("Enroll a face to get started"));
+                                status_page.set_description(Some("Choose your camera in Settings, then enroll a face. The capture window lets you check the camera before starting."));
                                 status_page.set_child(Some(&enroll_action));
                                 set_status_action_visible(&status_page, true);
                                 status_page.set_visible(true);
@@ -750,14 +820,14 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         if count == 1 { "" } else { "s" }
                                     ));
 
-                                    let rgb_badge = gtk4::Label::new(Some("RGB"));
+                                    let rgb_badge = gtk4::Label::new(Some(&spectrum_badge_text("RGB", has_rgb, rgb_configured)));
                                     rgb_badge.set_valign(gtk4::Align::Center);
                                     rgb_badge.add_css_class(spectrum_badge_class(
                                         has_rgb,
                                         rgb_configured,
                                     ));
 
-                                    let ir_badge = gtk4::Label::new(Some("IR"));
+                                    let ir_badge = gtk4::Label::new(Some(&spectrum_badge_text("IR", has_ir, ir_configured)));
                                     ir_badge.set_valign(gtk4::Align::Center);
                                     ir_badge
                                         .add_css_class(spectrum_badge_class(has_ir, ir_configured));

@@ -8,7 +8,7 @@
 this app. See the [KDE Plasma guide](/guide/kde#system-settings).
 :::
 
-Use `gaze-gui` to enroll your face, test recognition, and adjust Gaze settings.
+Use `gaze-gui` to enroll your face, test recognition, and adjust Gaze settings. Follow the setup checklist in the main window: camera preview, enrollment, recognition test, then desktop integration checks. Test results stay visible until the next test.
 
 Launch it:
 
@@ -25,7 +25,11 @@ gaze-gui
 
 ## Configuration dialog
 
-Open the config dialog from the header-bar settings button.
+Open **Settings** from the header bar. **Everyday** contains camera, recognition, and lock-screen options; **Advanced** contains model, storage, and numerical tuning. Changes save automatically after unlocking, with progress and a persistent result above the settings.
+
+Switching recognition models requires confirmation and new captures for existing faces. After changing it, use **Improve this face** for each profile, then **Test**.
+
+Keyring switches show whether a password record exists. **Set up password…** provides the enrollment command and verification steps; storing a password and enabling login integration are both needed. A stored record alone is not a successful login test.
 
 The dialog mirrors `/etc/gaze/config.toml`. It opens locked: select **Unlock…**
 to authorize with polkit. After that, each change is written through the daemon

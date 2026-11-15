@@ -118,6 +118,7 @@ fn set_inference_device_row_visible(
 }
 
 type SharedProxy = Rc<RefCell<Option<Rc<GazeProxy<'static>>>>>;
+type ReloadCallback = Rc<dyn Fn()>;
 
 async fn shared_proxy(cell: &SharedProxy) -> zbus::Result<Rc<GazeProxy<'static>>> {
     if let Some(proxy) = cell.borrow().clone() {
@@ -422,7 +423,25 @@ pub fn show_config_dialog(
     if CAMERA_SCAN_RUNNING.replace(true) {
         return;
     }
+    let window = libadwaita::Window::builder()
+        .transient_for(parent)
+        .modal(true)
+        .title("Settings")
+        .default_width(600)
+        .default_height(700)
+        .build();
+    let loading = libadwaita::StatusPage::builder()
+        .title("Finding cameras…")
+        .description("Settings will appear when the camera scan finishes.")
+        .build();
+    let toolbar = libadwaita::ToolbarView::new();
+    toolbar.add_top_bar(&libadwaita::HeaderBar::new());
+    toolbar.set_content(Some(&loading));
+    window.set_content(Some(&toolbar));
+    window.present();
     glib::MainContext::default().spawn_local(glib::clone!(
+        #[strong]
+        window,
         #[weak]
         parent,
         #[weak]
@@ -442,31 +461,29 @@ pub fn show_config_dialog(
             })
             .await;
             CAMERA_SCAN_RUNNING.set(false);
+            if !window.is_visible() {
+                return;
+            }
             match scan {
                 Ok((cameras, ir_options)) => {
-                    build_config_dialog(&parent, &overlay, cameras, ir_options);
+                    build_config_dialog(window, &overlay, cameras, ir_options);
                 }
-                Err(_) => tracing::error!("Listing cameras for the settings dialog failed"),
+                Err(_) => {
+                    window.close();
+                    crate::window::show_error(&parent, "Could not list cameras", "Close other camera applications and try Settings again. Run gaze doctor if the problem continues.");
+                }
             }
         }
     ));
 }
 
 fn build_config_dialog(
-    parent: &libadwaita::ApplicationWindow,
+    window: libadwaita::Window,
     overlay: &libadwaita::ToastOverlay,
     cameras: Vec<(String, String)>,
     ir_options: Vec<(String, String)>,
 ) {
     let config = Rc::new(RefCell::new(Config::default()));
-
-    let window = libadwaita::Window::builder()
-        .transient_for(parent)
-        .modal(true)
-        .title("Settings")
-        .default_width(600)
-        .default_height(700)
-        .build();
 
     let parent_overlay = overlay.clone();
     let overlay = libadwaita::ToastOverlay::new();
@@ -484,7 +501,20 @@ fn build_config_dialog(
         .build();
 
     let page = libadwaita::PreferencesPage::new();
-    scrolled.set_child(Some(&page));
+    let basic_page = libadwaita::PreferencesPage::new();
+    let pages = gtk4::Stack::new();
+    pages.add_titled(&basic_page, Some("everyday"), "Everyday");
+    pages.add_titled(&page, Some("advanced"), "Advanced");
+    let switcher = gtk4::StackSwitcher::new();
+    switcher.set_stack(Some(&pages));
+    header_bar.set_title_widget(Some(&switcher));
+    scrolled.set_child(Some(&pages));
+    let save_status = gtk4::Label::new(Some("Changes save automatically after unlocking."));
+    save_status.set_wrap(true);
+    save_status.set_selectable(true);
+    save_status.set_margin_start(12);
+    save_status.set_margin_end(12);
+    toolbar_view.add_top_bar(&save_status);
     toolbar_view.set_content(Some(&scrolled));
     overlay.set_child(Some(&toolbar_view));
     window.set_content(Some(&overlay));
@@ -498,7 +528,7 @@ fn build_config_dialog(
 
     let level_row = libadwaita::ComboRow::new();
     level_row.set_title("Security level");
-    level_row.set_subtitle("Adjust the balance between speed and security");
+    level_row.set_subtitle("Medium is recommended. Changing the recognition model requires re-enrolling existing profiles. Custom controls are in Advanced");
     let level_model = gtk4::StringList::new(&SECURITY_LEVEL_LABELS);
     level_row.set_model(Some(&level_model));
     security_group.add(&level_row);
@@ -651,7 +681,8 @@ fn build_config_dialog(
 
     let liveness_enabled_row = libadwaita::ActionRow::new();
     liveness_enabled_row.set_title("Enable liveness spoof prevention");
-    liveness_enabled_row.set_subtitle("Analyze face depth/reflectance to prevent photo spoofing");
+    liveness_enabled_row
+        .set_subtitle("Check camera images and natural movement for signs of a photo or screen");
     let liveness_enabled_switch = gtk4::Switch::new();
     liveness_enabled_switch.set_valign(gtk4::Align::Center);
     liveness_enabled_row.add_suffix(&liveness_enabled_switch);
@@ -671,7 +702,8 @@ fn build_config_dialog(
         libadwaita::SpinRow::with_range(MIN_LIVENESS_MAX_SECONDS, MAX_LIVENESS_MAX_SECONDS, 0.1);
     liveness_max_seconds_row.set_digits(1);
     liveness_max_seconds_row.set_title("Maximum liveness duration");
-    liveness_max_seconds_row.set_subtitle("Maximum seconds analyzed for liveness verification");
+    liveness_max_seconds_row
+        .set_subtitle("Usable face time per camera before falling back to your password");
     liveness_group.add(&liveness_max_seconds_row);
 
     let auth_group = libadwaita::PreferencesGroup::new();
@@ -705,9 +737,7 @@ fn build_config_dialog(
 
     let require_confirm_lock_screen_row = libadwaita::ActionRow::new();
     require_confirm_lock_screen_row.set_title("Require confirmation on lock screen");
-    require_confirm_lock_screen_row.set_subtitle(
-        "Require pressing Enter or clicking OK to authorize after face matches on the lock screen or login screen",
-    );
+    require_confirm_lock_screen_row.set_subtitle("Confirm after matching where supported. On KDE lock/login screens this uses your password instead of face unlock");
     let require_confirm_lock_screen_switch = gtk4::Switch::new();
     require_confirm_lock_screen_switch.set_valign(gtk4::Align::Center);
     require_confirm_lock_screen_row.add_suffix(&require_confirm_lock_screen_switch);
@@ -732,7 +762,9 @@ fn build_config_dialog(
     let start_delay_row = libadwaita::SpinRow::with_range(0.0, 10000.0, 500.0);
     start_delay_row.set_digits(0);
     start_delay_row.set_title("Start delay (ms)");
-    start_delay_row.set_subtitle("Delay before face authentication starts");
+    start_delay_row.set_subtitle(
+        "Use 3000–5000 ms on KDE or hyprlock to give yourself time to step away after locking",
+    );
     auth_group.add(&start_delay_row);
 
     let start_delay_scope_row = libadwaita::ComboRow::new();
@@ -781,6 +813,39 @@ fn build_config_dialog(
     unlock_kwallet_row.add_suffix(&unlock_kwallet_switch);
     storage_group.add(&unlock_kwallet_row);
 
+    for (row, switch, command) in [
+        (
+            &unlock_gnome_keyring_row,
+            &unlock_gnome_keyring_switch,
+            "gaze keyring",
+        ),
+        (
+            &unlock_kwallet_row,
+            &unlock_kwallet_switch,
+            "gaze keyring --kwallet",
+        ),
+    ] {
+        let setup = gtk4::Button::with_label("Set up password…");
+        setup.set_valign(gtk4::Align::Center);
+        switch
+            .bind_property("active", &setup, "sensitive")
+            .sync_create()
+            .build();
+        row.add_suffix(&setup);
+        setup.connect_clicked(glib::clone!(#[weak] window, move |_| {
+            let dialog = libadwaita::MessageDialog::builder().transient_for(&window)
+                .heading("Finish password unlock setup")
+                .body("The switch enables this feature. Enroll your password from a terminal as your desktop user; then check your login integration. Passwords stay on this machine, protected by the TPM.").build();
+            let steps = gtk4::Label::new(Some(&format!("1. Wait for Settings to show Saved.\n2. Run: {command}\n3. Run: gaze doctor\n4. Reopen Settings to refresh password status.")));
+            steps.set_wrap(true);
+            steps.set_selectable(true);
+            dialog.set_extra_child(Some(&steps));
+            dialog.add_response("close", "Close");
+            dialog.set_close_response("close");
+            dialog.present();
+        }));
+    }
+
     liveness_enabled_switch.connect_active_notify(glib::clone!(
         #[weak]
         liveness_threshold_row,
@@ -827,16 +892,73 @@ fn build_config_dialog(
     let camera_touched = Rc::new(Cell::new(false));
     let ir_touched = Rc::new(Cell::new(false));
     let proxy_cell: SharedProxy = Rc::new(RefCell::new(None));
-    let reload_after_error: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let basic_cameras = libadwaita::PreferencesGroup::new();
+    basic_cameras.set_title("Cameras");
+    basic_cameras.set_description(Some(
+        "Choose a camera, then use Enroll a Face to preview and check it.",
+    ));
+    for row in [&camera_row, &ir_row] {
+        hardware_group.remove(row);
+        basic_cameras.add(row);
+    }
+    basic_page.add(&basic_cameras);
+    let basic_security = libadwaita::PreferencesGroup::new();
+    basic_security.set_title("Recognition");
+    security_group.remove(&level_row);
+    basic_security.add(&level_row);
+    liveness_group.remove(&liveness_enabled_row);
+    basic_security.add(&liveness_enabled_row);
+    basic_page.add(&basic_security);
+    let basic_auth = libadwaita::PreferencesGroup::new();
+    basic_auth.set_title("Lock screen and password prompts");
+    for row in [
+        &require_confirm_lock_screen_row,
+        &require_confirm_elevation_row,
+    ] {
+        auth_group.remove(row);
+        basic_auth.add(row);
+    }
+    auth_group.remove(&start_delay_row);
+    basic_auth.add(&start_delay_row);
+    auth_group.remove(&start_delay_scope_row);
+    basic_auth.add(&start_delay_scope_row);
+    basic_page.add(&basic_auth);
+
+    let reload_after_error: Rc<RefCell<Option<ReloadCallback>>> = Rc::new(RefCell::new(None));
     let apply_queue = new_apply_queue(
         Rc::new({
+            let save_status = save_status.clone();
+            let window = window.downgrade();
             let proxy_cell = proxy_cell.clone();
             let keyring_supported = keyring_supported.clone();
             move |cfg: Config| {
+                let save_status = save_status.clone();
+                let window = window.clone();
                 let proxy_cell = proxy_cell.clone();
                 let keyring_supported = keyring_supported.clone();
                 Box::pin(async move {
+                    save_status.set_text(
+                        "Preparing and saving settings… Model downloads may take a few minutes.",
+                    );
                     let proxy = shared_proxy(&proxy_cell).await?;
+                    let before = gaze_core::dbus::load_config_from_daemon(&proxy).await?;
+                    if before.security.recognizer() != cfg.security.recognizer() {
+                        let Some(window) = window.upgrade() else {
+                            anyhow::bail!(
+                                "Recognition model change cancelled; reopen Settings to confirm"
+                            );
+                        };
+                        let dialog = libadwaita::MessageDialog::builder().transient_for(&window)
+                            .heading("Re-enroll faces after this change?")
+                            .body("Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face to capture new samples for every profile you use.").build();
+                        dialog.add_response("cancel", "Keep current model");
+                        dialog.add_response("change", "Change model");
+                        dialog.set_default_response(Some("cancel"));
+                        dialog.set_close_response("cancel");
+                        if dialog.choose_future().await != "change" {
+                            anyhow::bail!("Model change cancelled. Current settings restored");
+                        }
+                    }
                     let result = if keyring_supported.get() {
                         apply_config_with_keyring_to_daemon(&proxy, &cfg).await
                     } else {
@@ -847,16 +969,31 @@ fn build_config_dialog(
                         // restarted would fail every later write too, silently losing each edit.
                         *proxy_cell.borrow_mut() = None;
                     }
+                    if result.is_ok() {
+                        let message = if before.inference.execution_provider
+                            != cfg.inference.execution_provider
+                            || before.inference.device != cfg.inference.device
+                        {
+                            "Saved. Restart gazed, then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active."
+                        } else if before.security.recognizer() != cfg.security.recognizer() {
+                            "Saved. Use Improve this face on each existing profile to re-enroll, then test recognition."
+                        } else {
+                            "Saved. Changes are active."
+                        };
+                        save_status.set_text(message);
+                    }
                     result
                 }) as ConfigWriteFuture
             }
         }),
         Rc::new({
+            let save_status = save_status.clone();
             let overlay = overlay.clone();
             let parent_overlay = parent_overlay.clone();
             let window = window.downgrade();
             let reload_after_error = reload_after_error.clone();
             move |message: String| {
+                save_status.set_text(&message);
                 let toast = libadwaita::Toast::new(&message);
                 if window.upgrade().is_some_and(|w| w.is_visible()) {
                     overlay.add_toast(toast);
@@ -1374,6 +1511,17 @@ fn build_config_dialog(
                             keyring_supported.set(supported.gnome || supported.kwallet);
                             unlock_gnome_keyring_row.set_visible(supported.gnome);
                             unlock_kwallet_row.set_visible(supported.kwallet);
+                            if let Ok(proxy) = shared_proxy(&proxy_cell).await {
+                                let user = std::env::var("USER").unwrap_or_default();
+                                let status = proxy.credential_status(&user).await.ok();
+                                for (row, present, command) in [
+                                    (&unlock_gnome_keyring_row, status.map(|s| s.0), "gaze keyring"),
+                                    (&unlock_kwallet_row, status.map(|s| s.1), "gaze keyring --kwallet"),
+                                ] {
+                                    let state = match present { Some(true) => "Password stored", Some(false) => "Password not enrolled", None => "Password status unavailable" };
+                                    row.set_subtitle(&format!("{state}. After enabling, run {command} in a terminal to enroll or replace it. Run gaze doctor to check login integration. Requires liveness and encryption."));
+                                }
+                            }
                             populate_config_rows(
                                 &cfg,
                                 &rows,

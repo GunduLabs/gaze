@@ -31,9 +31,12 @@ fn spectrum_badge_state(enrolled: bool, configured: bool) -> SpectrumBadge {
 fn spectrum_badge(label: &str, enrolled: bool, configured: bool) -> String {
     let badge = format!("[{label}]");
     match spectrum_badge_state(enrolled, configured) {
-        SpectrumBadge::Enrolled => style(badge).green().bold().to_string(),
-        SpectrumBadge::Missing => style(badge).yellow().bold().to_string(),
-        SpectrumBadge::Unused => style(badge).dim().to_string(),
+        SpectrumBadge::Enrolled => style(format!("{badge} ready")).green().bold().to_string(),
+        SpectrumBadge::Missing => style(format!("{badge} needs captures"))
+            .yellow()
+            .bold()
+            .to_string(),
+        SpectrumBadge::Unused => style(format!("{badge} unused")).dim().to_string(),
     }
 }
 
