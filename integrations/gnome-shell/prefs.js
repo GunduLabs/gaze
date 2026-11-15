@@ -10,6 +10,7 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 
 const GAZE_DBUS_NAME = 'com.gundulabs.Gaze';
 const GAZE_OBJECT_PATH = '/com/gundulabs/Gaze';
+const PROMPT_TIMEOUT_MS = 120000;
 
 const MAX_TRIES_KEY = 'max-face-tries';
 const FACE_AUTH_KEY = 'enable-face-authentication';
@@ -20,7 +21,7 @@ function callGaze(method, params) {
     return new Promise((resolve, reject) => {
         conn.call(
             GAZE_DBUS_NAME, GAZE_OBJECT_PATH, GAZE_DBUS_NAME, method, params,
-            null, Gio.DBusCallFlags.ALLOW_INTERACTIVE_AUTHORIZATION, -1, null,
+            null, Gio.DBusCallFlags.ALLOW_INTERACTIVE_AUTHORIZATION, PROMPT_TIMEOUT_MS, null,
             (_src, res) => {
                 try {
                     resolve(conn.call_finish(res));
