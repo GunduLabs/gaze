@@ -258,7 +258,8 @@ void GazeKcm::onEnrollStatus(const QDBusMessage &message)
         const bool saved = id == QLatin1String("completed");
         finishEnroll(saved ? QStringLiteral("done") : QStringLiteral("failed"), saved ? enrollPrompt(id) : i18n("Enrollment finished without saving."));
     } else {
-        m_prompt = enrollPrompt(id);
+        const double remaining = args.at(5).toDouble();
+        m_prompt = remaining > 0 ? i18n("%1 [%2s]", enrollPrompt(id), QString::number(remaining, 'f', 1)) : enrollPrompt(id);
         Q_EMIT enrollChanged();
     }
 }
