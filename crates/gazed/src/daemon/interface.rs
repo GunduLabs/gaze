@@ -344,7 +344,7 @@ impl AuthDaemon {
 
             if !run_rgb && !run_ir {
                 error!("No cameras configured for enrollment");
-                let _ = Self::enroll_status(&ctxt, &face_name, 0, 5, true, EnrollPrompt::Cancelled, -1.0).await;
+                let _ = Self::enroll_status(&ctxt, &face_name, 0, 5, true, EnrollPrompt::CameraFailed, -1.0).await;
                 return;
             }
 

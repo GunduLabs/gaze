@@ -78,7 +78,7 @@ KCM.ScrollViewKCM {
                 case "running": return i18n("Look at the camera…");
                 case "success": return i18n("Face recognized");
                 case "timeout": return i18n("No face seen before the test timed out");
-                default: return i18n("Face not recognized");
+                default: return kcm.testMessage.length > 0 ? kcm.testMessage : i18n("Face not recognized");
             }
         }
     }
