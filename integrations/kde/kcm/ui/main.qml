@@ -13,6 +13,10 @@ KCM.ScrollViewKCM {
     readonly property bool enrolling: kcm.enrollState === "running"
     readonly property bool testing: kcm.testState === "running"
 
+    function spectrumConfigured(key) {
+        return !kcm.settings.loaded || String(kcm.settings.values[key] ?? "").trim().length > 0;
+    }
+
     title: i18n("Enrolled Faces")
     implicitWidth: Kirigami.Units.gridUnit * 36
     implicitHeight: Kirigami.Units.gridUnit * 30
@@ -74,7 +78,7 @@ KCM.ScrollViewKCM {
                 case "running": return i18n("Look at the camera…");
                 case "success": return i18n("Face recognized");
                 case "timeout": return i18n("No face seen before the test timed out");
-                default: return i18n("Face not recognized");
+                default: return kcm.testMessage.length > 0 ? kcm.testMessage : i18n("Face not recognized");
             }
         }
     }
@@ -120,19 +124,21 @@ KCM.ScrollViewKCM {
                 }
                 Repeater {
                     model: [
-                        { label: i18n("RGB"), on: row.rgb },
-                        { label: i18n("IR"), on: row.ir }
+                        { label: i18n("RGB"), on: row.rgb, missing: !row.rgb && root.spectrumConfigured("cameras.rgb") },
+                        { label: i18n("IR"), on: row.ir, missing: !row.ir && root.spectrumConfigured("cameras.ir") }
                     ]
                     delegate: QQC2.Label {
                         required property var modelData
                         text: modelData.label
                         font.pointSize: Kirigami.Theme.smallFont.pointSize
                         font.bold: modelData.on
-                        color: modelData.on ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.disabledTextColor
+                        color: modelData.on || modelData.missing ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.disabledTextColor
                         padding: Kirigami.Units.smallSpacing
                         background: Rectangle {
                             radius: Kirigami.Units.cornerRadius
-                            color: modelData.on ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.alternateBackgroundColor
+                            color: modelData.on ? Kirigami.Theme.positiveTextColor
+                                : modelData.missing ? Kirigami.Theme.neutralTextColor
+                                : Kirigami.Theme.alternateBackgroundColor
                         }
                     }
                 }
