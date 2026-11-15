@@ -47,6 +47,21 @@ QString hintText(const QString &id)
     if (id == QLatin1String("ready") || id == QLatin1String("usable")) return i18n("Hold still...");
     return {};
 }
+
+QString testFailureText(const QString &rgb, const QString &ir)
+{
+    const auto seen = [](const QString &status) {
+        return status == QLatin1String("ready") || status == QLatin1String("usable");
+    };
+    const auto idle = [](const QString &status) {
+        return status == QLatin1String("unused") || status == QLatin1String("no-face");
+    };
+    if (rgb == QLatin1String("unused") && ir == QLatin1String("unused")) return i18n("Face authentication could not run");
+    if (seen(rgb) || seen(ir)) return i18n("Face not recognized");
+    if (rgb == QLatin1String("too-dark") || ir == QLatin1String("too-dark")) return i18n("Too dark for face authentication");
+    if (idle(rgb) && idle(ir)) return i18n("No face detected");
+    return i18n("Move your face into the frame and try again");
+}
 }
 
 GazeKcm::GazeKcm(QObject *parent, const KPluginMetaData &data)
@@ -61,6 +76,7 @@ GazeKcm::GazeKcm(QObject *parent, const KPluginMetaData &data)
     bus.connect(GazeBus::Service, GazeBus::Path, GazeBus::Service, QStringLiteral("FaceStatus"), this, SLOT(onFaceStatus(QDBusMessage)));
     bus.connect(GazeBus::Service, GazeBus::Path, GazeBus::Service, QStringLiteral("PreviewFrame"), this, SLOT(onPreviewFrame(QDBusMessage)));
     bus.connect(GazeBus::Service, GazeBus::Path, GazeBus::Service, QStringLiteral("VerifyStatus"), this, SLOT(onVerifyStatus(QDBusMessage)));
+    bus.connect(GazeBus::Service, GazeBus::Path, GazeBus::Service, QStringLiteral("VerifyDiagnostic"), this, SLOT(onVerifyDiagnostic(QDBusMessage)));
 
     m_testTimeout.setSingleShot(true);
     m_testTimeout.setInterval(TestTimeoutMs);
@@ -109,9 +125,9 @@ void GazeKcm::call(const QString &method, const QVariantList &args, GazeBus::Rep
     GazeBus::callGaze(this, method, args, std::move(done));
 }
 
-void GazeKcm::refresh()
+void GazeKcm::refresh(bool keepError)
 {
-    call(QStringLiteral("ListFaces"), {m_user}, [this](const QDBusMessage &reply) {
+    call(QStringLiteral("ListFaces"), {m_user}, [this, keepError](const QDBusMessage &reply) {
         if (reply.type() == QDBusMessage::ErrorMessage) {
             // A user without a profile yet is an empty list, not a failure.
             const bool noProfile = reply.errorName() == QLatin1String("org.freedesktop.DBus.Error.FileNotFound");
@@ -131,15 +147,18 @@ void GazeKcm::refresh()
         }
         list.endArray();
         m_faces.setFaces(std::move(faces));
-        setError(QString());
+        if (!keepError) {
+            setError(QString());
+        }
     });
 }
 
 void GazeKcm::callFaceMethod(const QString &method, const QVariantList &args)
 {
     call(method, args, [this](const QDBusMessage &reply) {
-        setError(reply.type() == QDBusMessage::ErrorMessage ? reply.errorMessage() : QString());
-        refresh();
+        const bool failed = reply.type() == QDBusMessage::ErrorMessage;
+        setError(failed ? reply.errorMessage() : QString());
+        refresh(failed);
     });
 }
 
@@ -282,10 +301,11 @@ void GazeKcm::onPreviewFrame(const QDBusMessage &message)
     Q_EMIT previewChanged();
 }
 
-void GazeKcm::finishTest(const QString &state)
+void GazeKcm::finishTest(const QString &state, const QString &message)
 {
     m_testTimeout.stop();
     m_testState = state;
+    m_testMessage = message;
     m_testReset.start();
     Q_EMIT testChanged();
     release();
@@ -297,6 +317,8 @@ void GazeKcm::testFace()
         return;
     }
     m_testReset.stop();
+    m_testMessage.clear();
+    m_testDiagnostic.clear();
     m_testState = QStringLiteral("running");
     Q_EMIT testChanged();
     claimAnd(
@@ -317,8 +339,23 @@ void GazeKcm::onVerifyStatus(const QDBusMessage &message)
     if (m_testState != QLatin1String("running") || message.arguments().isEmpty()) {
         return;
     }
-    const bool matched = message.arguments().at(0).toString() == QLatin1String("verify-match");
-    finishTest(matched ? QStringLiteral("success") : QStringLiteral("failed"));
+    const QVariantList args = message.arguments();
+    if (args.at(0).toString() == QLatin1String("verify-match")) {
+        finishTest(QStringLiteral("success"));
+        return;
+    }
+    const QString rgb = args.value(2).toString();
+    const QString ir = args.value(3).toString();
+    const bool refused = rgb == QLatin1String("unused") && ir == QLatin1String("unused");
+    finishTest(QStringLiteral("failed"), refused && !m_testDiagnostic.isEmpty() ? m_testDiagnostic : testFailureText(rgb, ir));
+}
+
+void GazeKcm::onVerifyDiagnostic(const QDBusMessage &message)
+{
+    if (m_testState != QLatin1String("running") || message.arguments().isEmpty()) {
+        return;
+    }
+    m_testDiagnostic = message.arguments().at(0).toString();
 }
 
 QVariantList GazeKcm::cameraSources() const
