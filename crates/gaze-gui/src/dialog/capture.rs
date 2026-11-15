@@ -200,8 +200,6 @@ pub fn show_capture_dialog(
         proxy,
         #[strong]
         feed,
-        #[strong]
-        on_done,
         #[weak]
         stop_btn,
         move |parent: gtk4::Window| {
@@ -223,8 +221,6 @@ pub fn show_capture_dialog(
                     #[strong]
                     feed,
                     #[strong]
-                    on_done,
-                    #[strong]
                     enrollment_task,
                     #[weak]
                     parent,
@@ -245,7 +241,6 @@ pub fn show_capture_dialog(
                                 }
                             ));
                             feed.stop();
-                            on_done();
                             parent.close();
                         }
                         c.close();
