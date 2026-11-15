@@ -182,6 +182,7 @@ export default class GazePreferences extends ExtensionPreferences {
             callGaze('SetGdmFaceAuth', new GLib.Variant('(b)', [desired]))
                 .then(() => {
                     gdmRequestInFlight = false;
+                    gdmRow.set_subtitle('');
                     gdmRow.set_sensitive(true);
                     if (typeof window.add_toast === 'function') {
                         const message = desired
