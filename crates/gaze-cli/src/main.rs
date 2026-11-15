@@ -238,7 +238,7 @@ where
             cancellable,
             tick,
         })?;
-        if let Some(TuiAction::Cancel) = tui::poll_action()?
+        if let Some(TuiAction::Cancel | TuiAction::Interrupt) = tui::poll_action()?
             && cancellable
         {
             drop(terminal);
@@ -611,7 +611,7 @@ async fn handle_test(proxy: &GazeProxy<'_>, user: &str, silent: bool) -> anyhow:
                 tick,
             })?;
 
-            if let Some(TuiAction::Cancel) = tui::poll_action()? {
+            if let Some(TuiAction::Cancel | TuiAction::Interrupt) = tui::poll_action()? {
                 cancelled = true;
                 break;
             }
