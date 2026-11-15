@@ -4,7 +4,7 @@
   "workspaces": {
     "": {
       "devDependencies": {
-        "@viteplus/versions": "2.3.0",
+        "@viteplus/versions": "3.0.0",
         "esbuild": "0.28.2",
         "typescript": "7.0.2",
         "vitepress": "2.0.0-alpha.21",
@@ -198,7 +198,7 @@
 
     "@vitejs/plugin-vue": ["@vitejs/plugin-vue@6.0.10", "", { "dependencies": { "@rolldown/pluginutils": "^1.0.1" }, "peerDependencies": { "vite": "^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0", "vue": "^3.2.25 || ^3.6.0-rc.10" } }, "sha512-b80aUQh3n+qEzzZm5oQp3rT2QImeCx58K6eFl/RkJ3d65KW0kTuv5lNsLRVAjbW9YRUpo/wzmvzMgV34bTAItA=="],
 
-    "@viteplus/versions": ["@viteplus/versions@2.3.0", "", { "dependencies": { "@remotex-labs/xansi": "^1.3.7", "@remotex-labs/xinject": "^1.0.0" }, "peerDependencies": { "vitepress": "^1.6.4 || ^2.0.0-0" }, "optionalPeers": ["vitepress"] }, "sha512-UHFZYvPyrUwEjOI06g+pmT3agRXt37AtCNsmgz/FVwzz/prK0kXdmenmDuwhxlD8nSOHurGEzuHYhSyZN60PCg=="],
+    "@viteplus/versions": ["@viteplus/versions@3.0.0", "", { "dependencies": { "@remotex-labs/xansi": "^1.3.7", "@remotex-labs/xinject": "^1.0.0" }, "peerDependencies": { "vitepress": "^1.6.4 || ^2.0.0-0" }, "optionalPeers": ["vitepress"] }, "sha512-90IKvxQo67owIT/g/eQVtdmM+VTU5prl0KMsLZTxDebA7ARF/WemiI+MpL38y9jQlvPzXmIULXVQ5Zb37Ost4w=="],
 
     "@vue/compiler-core": ["@vue/compiler-core@3.5.45", "", { "dependencies": { "@babel/parser": "^7.29.12", "@vue/shared": "3.5.45", "entities": "^7.0.1", "estree-walker": "^2.0.2", "source-map-js": "^1.2.2" } }, "sha512-XGHJrM6ufZARAc/w+tyOswStw9tdKiqCKBScI4gGaNxD+aaGu/HQWgKJ+JItjRLPqenQ7iE7G8AJC7T5ew1p+g=="],
 
