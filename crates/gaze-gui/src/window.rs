@@ -349,6 +349,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
         username,
         #[strong]
         last_toast,
+        #[strong]
+        refresh,
         move |btn| {
             let Some(proxy) = proxy_cell.borrow().clone() else {
                 show_daemon_pending_toast(&window);
@@ -374,6 +376,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 face_list_weak,
                 #[strong]
                 last_toast,
+                #[strong]
+                refresh,
                 async move {
                     use futures::StreamExt;
 
@@ -386,8 +390,15 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         btn.set_sensitive(true);
                     };
 
-                    if proxy.claim(&username).await.is_err() {
-                        finish("Failed to claim device");
+                    if let Err(err) = proxy.claim(&username).await {
+                        if dbus_is_not_activatable(&err) {
+                            finish("Reconnecting to the Gaze daemon…");
+                            if let Some(f) = refresh.borrow().as_ref() {
+                                f();
+                            }
+                        } else {
+                            finish("Failed to claim device");
+                        }
                         return;
                     }
                     let mut stream = match proxy.receive_verify_status().await {
@@ -535,20 +546,29 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
         #[strong]
         refresh,
         async move {
-            let Ok(proxy) = connect_gaze().await else {
-                tracing::error!("Failed to connect to Gaze daemon");
-                let state = match zbus::Connection::system().await {
-                    Ok(connection) => gazed_unit_state_on(&connection).await.ok(),
-                    Err(_) => None,
-                };
-                let (title, description, _) = daemon_state_text(state);
-                status_page.set_title(title);
-                status_page.set_description(Some(description));
-                return;
+            let proxy = loop {
+                match connect_gaze().await {
+                    Ok(proxy) => break Rc::new(proxy),
+                    Err(err) => {
+                        tracing::warn!(%err, "Gaze daemon is not reachable yet");
+                        if !gaze_core::cpu::supports_inference() {
+                            status_page.set_title("Unsupported CPU");
+                            status_page
+                                .set_description(Some(gaze_core::cpu::UNSUPPORTED_CPU_MESSAGE));
+                            return;
+                        }
+                        let state = match zbus::Connection::system().await {
+                            Ok(connection) => gazed_unit_state_on(&connection).await.ok(),
+                            Err(_) => None,
+                        };
+                        let (title, description, retry) = daemon_state_text(state);
+                        status_page.set_title(title);
+                        status_page.set_description(Some(description));
+                        glib::timeout_future(retry).await;
+                    }
+                }
             };
-
-            let proxy = Rc::new(proxy);
-            *proxy_cell.borrow_mut() = Some(proxy.clone());
+            *proxy_cell.borrow_mut() = Some(proxy);
             let refresh_generation = Rc::new(Cell::new(0u64));
 
             *refresh.borrow_mut() = Some(Rc::new(glib::clone!(
@@ -563,7 +583,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 #[strong]
                 refresh,
                 #[strong]
-                proxy,
+                proxy_cell,
                 #[strong]
                 refresh_generation,
                 move || {
@@ -579,10 +599,13 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         #[strong]
                         refresh,
                         #[strong]
-                        proxy,
+                        proxy_cell,
                         #[strong]
                         refresh_generation,
                         async move {
+                            let Some(proxy) = proxy_cell.borrow().clone() else {
+                                return;
+                            };
                             let generation = refresh_generation.get().wrapping_add(1);
                             refresh_generation.set(generation);
                             let faces = match proxy.list_faces(&username).await {
@@ -604,6 +627,13 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         face_list.set_visible(false);
                                         return;
                                     } else if dbus_is_not_activatable(&err) {
+                                        if let Ok(fresh) = connect_gaze().await {
+                                            *proxy_cell.borrow_mut() = Some(Rc::new(fresh));
+                                            if let Some(f) = refresh.borrow().as_ref() {
+                                                f();
+                                            }
+                                            return;
+                                        }
                                         let state = gazed_unit_state_on(proxy.inner().connection())
                                             .await
                                             .ok();
