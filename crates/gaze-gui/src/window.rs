@@ -678,6 +678,15 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                             entry.set_text(&face_name);
                                             body.append(&entry);
 
+                                            let name_hint = gtk4::Label::new(Some(
+                                                "A face with this name already exists",
+                                            ));
+                                            name_hint.add_css_class("caption");
+                                            name_hint.add_css_class("error");
+                                            name_hint.set_halign(gtk4::Align::Start);
+                                            name_hint.set_visible(false);
+                                            body.append(&name_hint);
+
                                             let button_row =
                                                 gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
                                             button_row.set_halign(gtk4::Align::End);
@@ -697,15 +706,20 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                             entry.connect_changed(glib::clone!(
                                                 #[weak]
                                                 rename_confirm_btn,
+                                                #[weak]
+                                                name_hint,
                                                 #[strong]
                                                 face_name,
                                                 #[strong]
                                                 existing_face_names,
                                                 move |e| {
                                                     let new_name = e.text().trim().to_string();
+                                                    let taken = new_name != face_name
+                                                        && existing_face_names.contains(&new_name);
+                                                    name_hint.set_visible(taken);
                                                     let valid = !new_name.is_empty()
                                                         && new_name != face_name
-                                                        && !existing_face_names.contains(&new_name);
+                                                        && !taken;
                                                     rename_confirm_btn.set_sensitive(valid);
                                                 }
                                             ));

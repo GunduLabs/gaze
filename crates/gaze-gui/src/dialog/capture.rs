@@ -126,6 +126,12 @@ pub fn show_capture_dialog(
     let face_name_valid = Rc::new(RefCell::new(is_refine));
     let mut face_name_entry: Option<libadwaita::EntryRow> = None;
 
+    let name_hint = gtk4::Label::new(Some("A face with this name already exists"));
+    name_hint.add_css_class("caption");
+    name_hint.add_css_class("error");
+    name_hint.set_halign(gtk4::Align::Start);
+    name_hint.set_visible(false);
+
     if !is_refine {
         let entry = libadwaita::EntryRow::new();
         entry.set_title("Face name");
@@ -133,6 +139,7 @@ pub fn show_capture_dialog(
         let group = libadwaita::PreferencesGroup::new();
         group.add(&entry);
         body.append(&group);
+        body.append(&name_hint);
         face_name_entry = Some(entry.clone());
 
         let rf = resolved_face.clone();
@@ -174,13 +181,16 @@ pub fn show_capture_dialog(
     start_btn.set_sensitive(is_refine);
     body.append(&start_btn);
 
-    if let Some(entry) = face_name_entry {
+    if let Some(entry) = face_name_entry.as_ref() {
         let start_btn_for_validation = start_btn.clone();
         let existing_face_names = existing_face_names.clone();
         let face_name_valid = face_name_valid.clone();
+        let name_hint = name_hint.clone();
         entry.connect_changed(move |e| {
             let name = e.text().trim().to_string();
-            let valid = !name.is_empty() && !existing_face_names.borrow().contains(&name);
+            let taken = existing_face_names.borrow().contains(&name);
+            name_hint.set_visible(taken);
+            let valid = !name.is_empty() && !taken;
             *face_name_valid.borrow_mut() = valid;
             start_btn_for_validation.set_sensitive(valid);
         });
@@ -275,6 +285,10 @@ pub fn show_capture_dialog(
             existing_face_names,
             #[strong]
             face_name_valid,
+            #[strong]
+            face_name_entry,
+            #[strong]
+            name_hint,
             async move {
                 if let Ok(faces) = proxy.list_faces(&username).await {
                     let mut names = existing_face_names.borrow_mut();
@@ -282,9 +296,21 @@ pub fn show_capture_dialog(
                     names.extend(faces.into_iter().map(|(name, _, _, _)| name));
                 }
 
-                let current_name = resolved_face.borrow().trim().to_string();
-                let valid = !current_name.is_empty()
-                    && !existing_face_names.borrow().contains(&current_name);
+                let mut current_name = resolved_face.borrow().trim().to_string();
+                let default_taken = current_name == "default"
+                    && existing_face_names.borrow().contains(&current_name);
+                if default_taken {
+                    let free = (2..)
+                        .map(|n| format!("face-{n}"))
+                        .find(|candidate| !existing_face_names.borrow().contains(candidate));
+                    if let (Some(free), Some(entry)) = (free, face_name_entry.as_ref()) {
+                        entry.set_text(&free);
+                        current_name = free;
+                    }
+                }
+                let taken = existing_face_names.borrow().contains(&current_name);
+                name_hint.set_visible(taken);
+                let valid = !current_name.is_empty() && !taken;
                 *face_name_valid.borrow_mut() = valid;
                 start_btn.set_sensitive(valid);
             }
