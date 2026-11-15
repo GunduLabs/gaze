@@ -142,16 +142,32 @@ export default class GazePreferences extends ExtensionPreferences {
             suppressGdmNotify = false;
         };
 
-        callGaze('GetGdmFaceAuth', null)
-            .then(result => {
-                const [enabled] = result.deepUnpack();
-                setGdmRow(enabled);
-                gdmRow.set_sensitive(true);
-            })
-            .catch(error => {
-                logError(error, '[gaze] Failed to read GDM face auth state');
+        const loadGdmState = () => {
+            callGaze('GetGdmFaceAuth', null)
+                .then(result => {
+                    const [enabled] = result.deepUnpack();
+                    setGdmRow(enabled);
+                    gdmRow.set_subtitle('');
+                    gdmRow.set_sensitive(true);
+                })
+                .catch(error => {
+                    logError(error, '[gaze] Failed to read GDM face auth state');
+                    gdmRow.set_subtitle('Gaze daemon unavailable.');
+                });
+        };
+
+        const daemonWatch = Gio.bus_watch_name(
+            Gio.BusType.SYSTEM, GAZE_DBUS_NAME, Gio.BusNameWatcherFlags.NONE,
+            loadGdmState,
+            () => {
+                gdmRow.set_sensitive(false);
                 gdmRow.set_subtitle('Gaze daemon unavailable.');
-            });
+            }
+        );
+        window.connect('close-request', () => {
+            Gio.bus_unwatch_name(daemonWatch);
+            return false;
+        });
 
         const notifyGdmFailure = (error, desired) => {
             const accessDenied =
