@@ -1413,7 +1413,7 @@ if [ -n "$PROBLEMS" ]; then
     next_step "gaze doctor" "diagnose the steps above"
 fi
 next_step "gaze config" "configure your camera and security settings"
-next_step "gaze add-face <name>" "enroll your face"
+next_step "gaze add-face <name>" "enroll your face (or use gaze-gui for a window)"
 next_step "gaze test" "test it in the terminal"
 if want_gnome_extension_package && [ "${OSTREE_PENDING:-0}" -eq 0 ]; then
     next_step "Reboot" "GNOME Shell and GDM only pick up the new extension at startup"
@@ -1424,7 +1424,7 @@ elif is_omarchy_session; then
 fi
 say ""
 title "Try it"
-say "  ${BOLD}gaze-gui${RESET}               ${DIM}open the settings app${RESET}"
+say "  ${BOLD}gaze-gui${RESET}               ${DIM}enroll faces and change settings in a window${RESET}"
 if want_gnome_extension_package || want_cinnamon_extension_package || is_kde_session || is_omarchy_session || want_hyprlock_setup; then
     say "  ${BOLD}Lock your screen${RESET}       ${DIM}then look at the camera${RESET}"
 fi
