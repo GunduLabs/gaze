@@ -92,6 +92,32 @@ async fn confirm_face_removal(window: &libadwaita::ApplicationWindow, face_name:
     dialog.choose_future().await == "remove"
 }
 
+fn daemon_state_command(state: Option<DaemonState>) -> Option<&'static str> {
+    match state {
+        Some(DaemonState::Failed) => {
+            Some("journalctl -u gazed -n 50\nsudo systemctl restart gazed")
+        }
+        Some(DaemonState::Disabled) => Some("sudo systemctl enable --now gazed"),
+        Some(DaemonState::Stopped) => Some("sudo systemctl start gazed"),
+        Some(DaemonState::NotInstalled | DaemonState::Starting) | None => None,
+    }
+}
+
+fn show_daemon_state(status_page: &libadwaita::StatusPage, state: Option<DaemonState>) -> Duration {
+    let (title, description, retry) = daemon_state_text(state);
+    status_page.set_title(title);
+    status_page.set_description(Some(description));
+    let command = daemon_state_command(state).map(|text| {
+        let label = gtk4::Label::new(Some(text));
+        label.set_selectable(true);
+        label.set_justify(gtk4::Justification::Center);
+        label.add_css_class("monospace");
+        label
+    });
+    status_page.set_child(command.as_ref());
+    retry
+}
+
 fn set_status_action_visible(status_page: &libadwaita::StatusPage, visible: bool) {
     if let Some(action) = status_page.child() {
         action.set_visible(visible);
@@ -102,17 +128,17 @@ fn daemon_state_text(state: Option<DaemonState>) -> (&'static str, &'static str,
     match state {
         Some(DaemonState::Failed) => (
             "Daemon Failed",
-            "The Gaze daemon stopped with an error. Check `journalctl -u gazed -n 50`, then run `sudo systemctl restart gazed`.",
+            "The Gaze daemon stopped with an error. Check its log, then restart it:",
             Duration::from_secs(10),
         ),
         Some(DaemonState::Disabled) => (
             "Daemon Disabled",
-            "The Gaze daemon is turned off. Turn it on with `sudo systemctl enable --now gazed`.",
+            "The Gaze daemon is turned off. Turn it on with:",
             Duration::from_secs(10),
         ),
         Some(DaemonState::Stopped) => (
             "Daemon Stopped",
-            "The Gaze daemon is not running. Start it with `sudo systemctl start gazed`.",
+            "The Gaze daemon is not running. Start it with:",
             Duration::from_secs(10),
         ),
         Some(DaemonState::NotInstalled) => (
@@ -540,6 +566,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
         #[weak]
         status_page,
         #[strong]
+        enroll_action,
+        #[strong]
         username,
         #[strong]
         proxy_cell,
@@ -577,6 +605,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 #[weak]
                 status_page,
                 #[strong]
+                enroll_action,
+                #[strong]
                 username,
                 #[weak]
                 window,
@@ -592,6 +622,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         face_list,
                         #[weak]
                         status_page,
+                        #[strong]
+                        enroll_action,
                         #[strong]
                         username,
                         #[weak]
@@ -637,10 +669,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         let state = gazed_unit_state_on(proxy.inner().connection())
                                             .await
                                             .ok();
-                                        let (title, description, retry) = daemon_state_text(state);
-                                        status_page.set_title(title);
-                                        status_page.set_description(Some(description));
-                                        set_status_action_visible(&status_page, false);
+                                        let retry = show_daemon_state(&status_page, state);
                                         status_page.set_visible(true);
                                         face_list.set_visible(false);
                                         glib::timeout_add_local_once(
@@ -694,6 +723,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                             if faces.is_empty() {
                                 status_page.set_title("No Faces Enrolled");
                                 status_page.set_description(Some("Enroll a face to get started"));
+                                status_page.set_child(Some(&enroll_action));
                                 set_status_action_visible(&status_page, true);
                                 status_page.set_visible(true);
                                 face_list.set_visible(false);
