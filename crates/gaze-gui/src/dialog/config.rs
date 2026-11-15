@@ -311,7 +311,7 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
         .set_selected(cfg.inference.device_index());
     if cfg.inference.is_representable() {
         rows.inference_execution_provider
-            .set_subtitle("CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI");
+            .set_subtitle("CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI. Restart the Gaze daemon after changing this");
     } else {
         rows.inference_execution_provider.set_subtitle(&format!(
             "Configured as {}/{}, which this build cannot show",
@@ -468,6 +468,9 @@ fn build_config_dialog(
         .default_height(700)
         .build();
 
+    let parent_overlay = overlay.clone();
+    let overlay = libadwaita::ToastOverlay::new();
+
     let toolbar_view = libadwaita::ToolbarView::new();
     let header_bar = libadwaita::HeaderBar::new();
     toolbar_view.add_top_bar(&header_bar);
@@ -483,7 +486,8 @@ fn build_config_dialog(
     let page = libadwaita::PreferencesPage::new();
     scrolled.set_child(Some(&page));
     toolbar_view.set_content(Some(&scrolled));
-    window.set_content(Some(&toolbar_view));
+    overlay.set_child(Some(&toolbar_view));
+    window.set_content(Some(&overlay));
 
     scrolled.set_sensitive(false);
     banner.set_revealed(true);
@@ -542,7 +546,7 @@ fn build_config_dialog(
     let inference_execution_provider_row = libadwaita::ComboRow::new();
     inference_execution_provider_row.set_title("Inference execution provider");
     inference_execution_provider_row
-        .set_subtitle("CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI");
+        .set_subtitle("CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI. Restart the Gaze daemon after changing this");
     let inference_execution_provider_model =
         gtk4::StringList::new(&INFERENCE_EXECUTION_PROVIDER_LABELS);
     inference_execution_provider_row.set_model(Some(&inference_execution_provider_model));
@@ -762,7 +766,7 @@ fn build_config_dialog(
     unlock_gnome_keyring_row.set_visible(false);
     unlock_gnome_keyring_row.set_title("Unlock GNOME Keyring");
     unlock_gnome_keyring_row
-        .set_subtitle("Use an enrolled password after liveness-protected GDM or greetd face login");
+        .set_subtitle("Use an enrolled password after liveness-protected GDM or greetd face login. Needs liveness and template encryption, and keeps both on while enabled");
     let unlock_gnome_keyring_switch = gtk4::Switch::new();
     unlock_gnome_keyring_switch.set_valign(gtk4::Align::Center);
     unlock_gnome_keyring_row.add_suffix(&unlock_gnome_keyring_switch);
@@ -771,7 +775,7 @@ fn build_config_dialog(
     let unlock_kwallet_row = libadwaita::ActionRow::new();
     unlock_kwallet_row.set_visible(false);
     unlock_kwallet_row.set_title("Unlock KWallet");
-    unlock_kwallet_row.set_subtitle("Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet");
+    unlock_kwallet_row.set_subtitle("Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet. Needs liveness and template encryption, and keeps both on while enabled");
     let unlock_kwallet_switch = gtk4::Switch::new();
     unlock_kwallet_switch.set_valign(gtk4::Align::Center);
     unlock_kwallet_row.add_suffix(&unlock_kwallet_switch);
@@ -823,6 +827,7 @@ fn build_config_dialog(
     let camera_touched = Rc::new(Cell::new(false));
     let ir_touched = Rc::new(Cell::new(false));
     let proxy_cell: SharedProxy = Rc::new(RefCell::new(None));
+    let reload_after_error: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
     let apply_queue = new_apply_queue(
         Rc::new({
             let proxy_cell = proxy_cell.clone();
@@ -848,8 +853,20 @@ fn build_config_dialog(
         }),
         Rc::new({
             let overlay = overlay.clone();
+            let parent_overlay = parent_overlay.clone();
+            let window = window.downgrade();
+            let reload_after_error = reload_after_error.clone();
             move |message: String| {
-                overlay.add_toast(libadwaita::Toast::new(&message));
+                let toast = libadwaita::Toast::new(&message);
+                if window.upgrade().is_some_and(|w| w.is_visible()) {
+                    overlay.add_toast(toast);
+                } else {
+                    parent_overlay.add_toast(toast);
+                }
+                let reload = reload_after_error.borrow().clone();
+                if let Some(reload) = reload {
+                    reload();
+                }
             }
         }),
     );
@@ -1270,9 +1287,12 @@ fn build_config_dialog(
         rows,
         #[strong]
         apply_queue,
+        #[strong]
+        reload_after_error,
         move |win| {
             commit_focused_spin_row(win, &rows);
             flush_config_apply(&apply_queue);
+            reload_after_error.borrow_mut().take();
             glib::Propagation::Proceed
         }
     ));
@@ -1383,6 +1403,8 @@ fn build_config_dialog(
             ));
         }
     ));
+
+    *reload_after_error.borrow_mut() = Some(load_config.clone());
 
     banner.connect_button_clicked(glib::clone!(
         #[strong]
