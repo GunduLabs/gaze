@@ -118,6 +118,41 @@ export default class GazePreferences extends ExtensionPreferences {
             updateTriesRowSensitivity(val);
         });
 
+        const facesGroup = new Adw.PreferencesGroup({title: 'Enrollment'});
+        const facesRow = new Adw.ActionRow({
+            title: 'Enrolled faces',
+            subtitle: 'Checking…',
+        });
+        const openButton = new Gtk.Button({
+            label: 'Open Gaze',
+            valign: Gtk.Align.CENTER,
+        });
+        openButton.connect('clicked', () => {
+            try {
+                Gio.AppInfo.create_from_commandline(
+                    'gaze-gui', 'Gaze', Gio.AppInfoCreateFlags.NONE
+                ).launch([], null);
+            } catch (e) {
+                logError(e, '[gaze] Failed to open the Gaze app');
+                facesRow.set_subtitle('Could not open the Gaze app. Run gaze-gui from a terminal.');
+            }
+        });
+        facesRow.add_suffix(openButton);
+        facesGroup.add(facesRow);
+
+        callGaze('HasEnrolledFaces', new GLib.Variant('(s)', [GLib.get_user_name()]))
+            .then(result => {
+                const [enrolled] = result.deepUnpack();
+                facesRow.set_subtitle(enrolled
+                    ? 'A face is enrolled for this account.'
+                    : 'No face is enrolled yet, so face unlock has nothing to match. Open Gaze to enroll one.');
+            })
+            .catch(error => {
+                logError(error, '[gaze] Failed to read enrolled faces');
+                facesRow.set_subtitle('Gaze daemon unavailable.');
+            });
+
+        behaviorPage.add(facesGroup);
         behaviorPage.add(behaviorGroup);
 
         const loginGroup = new Adw.PreferencesGroup({
