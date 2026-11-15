@@ -28,6 +28,7 @@ class GazeKcm : public KQuickConfigModule
     Q_PROPERTY(QString preview READ preview NOTIFY previewChanged)
     // "idle", "running", "success", "failed" or "timeout"
     Q_PROPERTY(QString testState READ testState NOTIFY testChanged)
+    Q_PROPERTY(QString testMessage READ testMessage NOTIFY testChanged)
 
 public:
     GazeKcm(QObject *parent, const KPluginMetaData &data);
@@ -44,6 +45,7 @@ public:
     uint steps() const { return m_steps; }
     QString preview() const { return m_preview; }
     QString testState() const { return m_testState; }
+    QString testMessage() const { return m_testMessage; }
 
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void renameFace(const QString &oldName, const QString &newName);
@@ -67,12 +69,13 @@ private Q_SLOTS:
     void onFaceStatus(const QDBusMessage &message);
     void onPreviewFrame(const QDBusMessage &message);
     void onVerifyStatus(const QDBusMessage &message);
+    void onVerifyDiagnostic(const QDBusMessage &message);
 
 private:
     void call(const QString &method, const QVariantList &args, GazeBus::Reply done = {});
     void callFaceMethod(const QString &method, const QVariantList &args);
     void finishEnroll(const QString &state, const QString &prompt);
-    void finishTest(const QString &state);
+    void finishTest(const QString &state, const QString &message = {});
     void release();
     bool busy() const;
     // Claims the device for the user, runs one method, and reports the first error.
@@ -90,6 +93,8 @@ private:
     uint m_steps = 0;
     QString m_preview;
     QString m_testState = QStringLiteral("idle");
+    QString m_testMessage;
+    QString m_testDiagnostic;
     QTimer m_testTimeout;
     QTimer m_testReset;
 };
