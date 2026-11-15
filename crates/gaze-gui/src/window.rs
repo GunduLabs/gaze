@@ -11,7 +11,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -497,6 +497,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
             let proxy = Rc::new(proxy);
             *proxy_cell.borrow_mut() = Some(proxy.clone());
+            let refresh_generation = Rc::new(Cell::new(0u64));
 
             *refresh.borrow_mut() = Some(Rc::new(glib::clone!(
                 #[weak]
@@ -511,6 +512,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 refresh,
                 #[strong]
                 proxy,
+                #[strong]
+                refresh_generation,
                 move || {
                     glib::MainContext::default().spawn_local(glib::clone!(
                         #[weak]
@@ -525,7 +528,11 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         refresh,
                         #[strong]
                         proxy,
+                        #[strong]
+                        refresh_generation,
                         async move {
+                            let generation = refresh_generation.get().wrapping_add(1);
+                            refresh_generation.set(generation);
                             let faces = match proxy.list_faces(&username).await {
                                 Ok(faces) => faces,
                                 Err(err) => {
@@ -572,6 +579,23 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 }
                             };
 
+                            // A spectrum with no camera configured is not a gap
+                            // in the profile, so its badge reads unlit, not failed.
+                            let (rgb_configured, ir_configured) = if faces.is_empty() {
+                                (true, true)
+                            } else {
+                                match load_config_from_daemon(&proxy).await {
+                                    Ok(cfg) => (
+                                        !cfg.cameras.rgb.is_empty(),
+                                        !cfg.cameras.ir.trim().is_empty(),
+                                    ),
+                                    Err(_) => (true, true),
+                                }
+                            };
+                            if refresh_generation.get() != generation {
+                                return;
+                            }
+
                             while let Some(child) = face_list.first_child() {
                                 face_list.remove(&child);
                             }
@@ -584,17 +608,6 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                             } else {
                                 status_page.set_visible(false);
                                 face_list.set_visible(true);
-
-                                // A spectrum with no camera configured is not a gap
-                                // in the profile, so its badge reads unlit, not failed.
-                                let (rgb_configured, ir_configured) =
-                                    match load_config_from_daemon(&proxy).await {
-                                        Ok(cfg) => (
-                                            !cfg.cameras.rgb.is_empty(),
-                                            !cfg.cameras.ir.trim().is_empty(),
-                                        ),
-                                        Err(_) => (true, true),
-                                    };
 
                                 let existing_face_names: Rc<std::collections::HashSet<String>> =
                                     Rc::new(
