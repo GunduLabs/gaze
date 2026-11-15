@@ -425,6 +425,9 @@ pub fn show_config_dialog(
         .default_height(700)
         .build();
 
+    let parent_overlay = overlay.clone();
+    let overlay = libadwaita::ToastOverlay::new();
+
     let toolbar_view = libadwaita::ToolbarView::new();
     let header_bar = libadwaita::HeaderBar::new();
     toolbar_view.add_top_bar(&header_bar);
@@ -440,7 +443,8 @@ pub fn show_config_dialog(
     let page = libadwaita::PreferencesPage::new();
     scrolled.set_child(Some(&page));
     toolbar_view.set_content(Some(&scrolled));
-    window.set_content(Some(&toolbar_view));
+    overlay.set_child(Some(&toolbar_view));
+    window.set_content(Some(&overlay));
 
     scrolled.set_sensitive(false);
     banner.set_revealed(true);
@@ -790,6 +794,7 @@ pub fn show_config_dialog(
     let camera_touched = Rc::new(Cell::new(false));
     let ir_touched = Rc::new(Cell::new(false));
     let proxy_cell: SharedProxy = Rc::new(RefCell::new(None));
+    let reload_after_error: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
     let apply_queue = new_apply_queue(
         Rc::new({
             let proxy_cell = proxy_cell.clone();
@@ -815,8 +820,20 @@ pub fn show_config_dialog(
         }),
         Rc::new({
             let overlay = overlay.clone();
+            let parent_overlay = parent_overlay.clone();
+            let window = window.downgrade();
+            let reload_after_error = reload_after_error.clone();
             move |message: String| {
-                overlay.add_toast(libadwaita::Toast::new(&message));
+                let toast = libadwaita::Toast::new(&message);
+                if window.upgrade().is_some_and(|w| w.is_visible()) {
+                    overlay.add_toast(toast);
+                } else {
+                    parent_overlay.add_toast(toast);
+                }
+                let reload = reload_after_error.borrow().clone();
+                if let Some(reload) = reload {
+                    reload();
+                }
             }
         }),
     );
@@ -1237,9 +1254,12 @@ pub fn show_config_dialog(
         rows,
         #[strong]
         apply_queue,
+        #[strong]
+        reload_after_error,
         move |win| {
             commit_focused_spin_row(win, &rows);
             flush_config_apply(&apply_queue);
+            reload_after_error.borrow_mut().take();
             glib::Propagation::Proceed
         }
     ));
@@ -1350,6 +1370,8 @@ pub fn show_config_dialog(
             ));
         }
     ));
+
+    *reload_after_error.borrow_mut() = Some(load_config.clone());
 
     banner.connect_button_clicked(glib::clone!(
         #[strong]
