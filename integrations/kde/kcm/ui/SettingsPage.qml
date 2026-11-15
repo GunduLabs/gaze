@@ -222,8 +222,10 @@ KCM.SimpleKCM {
                 enabled: kcm.settings.editable
                 checked: Number(values["cameras.ir_frame_width"]) > 0
                 onToggled: {
-                    kcm.settings.set("cameras.ir_frame_width", checked ? 640 : 0);
-                    kcm.settings.set("cameras.ir_frame_height", checked ? 480 : 0);
+                    const on = checked;
+                    kcm.settings.set("cameras.ir_frame_width", on ? 640 : 0);
+                    kcm.settings.set("cameras.ir_frame_height", on ? 480 : 0);
+                    checked = Qt.binding(() => Number(page.values["cameras.ir_frame_width"]) > 0);
                 }
             }
         }
