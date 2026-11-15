@@ -170,7 +170,7 @@ void GazeSettings::load()
 {
     GazeBus::call(this, GazeBus::Service, GazeBus::Path, QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"), {GazeBus::Service, QStringLiteral("Config")}, [this](const QDBusMessage &reply) {
         if (reply.type() == QDBusMessage::ErrorMessage) {
-            setError(reply.errorMessage());
+            setError(GazeBus::errorText(reply));
             return;
         }
         const QDBusArgument top = reply.arguments().value(0).value<QDBusVariant>().variant().value<QDBusArgument>();
