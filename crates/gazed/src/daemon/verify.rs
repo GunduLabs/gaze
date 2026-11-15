@@ -520,7 +520,7 @@ impl AuthDaemon {
 
             if !run_rgb && !run_ir {
                 error!("No matching templates or cameras configured for auth");
-                let _ = Self::verify_diagnostic(&ctxt, "No enrolled face matches a configured camera. Enroll a face, or check the cameras in `gaze config`.").await;
+                let _ = Self::verify_diagnostic(&ctxt, "No enrolled face matches a configured camera. Enroll a face, or check the camera settings.").await;
                 // Idle rather than no-face: nothing a retry could change.
                 let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
                 return;

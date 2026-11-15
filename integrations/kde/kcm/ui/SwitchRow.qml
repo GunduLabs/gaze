@@ -14,6 +14,9 @@ SettingRow {
     QQC2.Switch {
         enabled: kcm.settings.editable && row.allowed
         checked: kcm.settings.values[row.key] === true
-        onToggled: kcm.settings.set(row.key, checked)
+        onToggled: {
+            kcm.settings.set(row.key, checked);
+            checked = Qt.binding(() => kcm.settings.values[row.key] === true);
+        }
     }
 }

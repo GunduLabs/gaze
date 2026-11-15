@@ -238,7 +238,7 @@ where
             cancellable,
             tick,
         })?;
-        if let Some(TuiAction::Cancel) = tui::poll_action()?
+        if let Some(TuiAction::Cancel | TuiAction::Interrupt) = tui::poll_action()?
             && cancellable
         {
             drop(terminal);
@@ -392,6 +392,8 @@ enum ConfigAction {
     Set { key: String, value: String },
 }
 
+const ENROLLMENT_DEADLINE: Duration = Duration::from_secs(240);
+
 async fn handle_enroll(
     proxy: &GazeProxy<'_>,
     user: &str,
@@ -427,7 +429,7 @@ async fn handle_enroll(
     let mut current_capture_msg = "Waiting for face...".to_string();
     let mut current_capture_tone = Tone::Info;
     let mut current_progress = 0_u32;
-    let mut current_max = 100_u32;
+    let mut current_max = 0_u32;
     let mut current_time_remaining = None;
     let mut confirm_cancel = false;
     let mut tick = 0_u64;
@@ -435,6 +437,12 @@ async fn handle_enroll(
     let mut is_cancelled = false;
     let mut is_completed = false;
     let mut is_failed = false;
+    let mut timed_out = false;
+    let deadline = tokio::time::Instant::now() + ENROLLMENT_DEADLINE;
+    let bus = zbus::fdo::DBusProxy::new(proxy.inner().connection())
+        .await
+        .ok();
+    let mut owner_check = tokio::time::interval(Duration::from_secs(1));
     loop {
         terminal.draw_enroll(&EnrollScreen {
             user,
@@ -499,6 +507,24 @@ async fn handle_enroll(
                     current_capture_tone = capture_tone(status);
                 }
             }
+            _ = tokio::time::sleep_until(deadline) => {
+                current_enroll_msg = "Enrollment timed out".to_string();
+                timed_out = true;
+                is_failed = true;
+                break;
+            }
+            _ = owner_check.tick() => {
+                if let Some(bus) = &bus
+                    && !bus
+                        .name_has_owner(proxy.inner().destination().clone())
+                        .await
+                        .unwrap_or(false)
+                {
+                    current_enroll_msg = "Lost contact with the Gaze daemon".to_string();
+                    is_failed = true;
+                    break;
+                }
+            }
             _ = tokio::time::sleep(Duration::from_millis(80)) => {
                 tick = tick.wrapping_add(1);
             }
@@ -507,7 +533,7 @@ async fn handle_enroll(
 
     drop(terminal);
 
-    if is_cancelled {
+    if is_cancelled || timed_out {
         let _ = proxy.enroll_stop().await;
     }
     let _ = proxy.release().await;
@@ -611,7 +637,7 @@ async fn handle_test(proxy: &GazeProxy<'_>, user: &str, silent: bool) -> anyhow:
                 tick,
             })?;
 
-            if let Some(TuiAction::Cancel) = tui::poll_action()? {
+            if let Some(TuiAction::Cancel | TuiAction::Interrupt) = tui::poll_action()? {
                 cancelled = true;
                 break;
             }
@@ -870,7 +896,15 @@ async fn run() -> anyhow::Result<()> {
     let proxy = match connect_gaze().await {
         Ok(proxy) => proxy,
         Err(_) if silent_auth => std::process::exit(1),
-        Err(e) => return Err(e.into()),
+        Err(e) => {
+            let daemon_missing =
+                dbus_is_not_activatable(&e) || e.to_string().contains("NameHasNoOwner");
+            if daemon_missing && let Ok(connection) = zbus::Connection::system().await {
+                let (problem, fix) = daemon_unavailable_hint(&connection).await;
+                exit_with_error(&format!("Cannot reach the Gaze daemon: {problem}\n  {fix}"));
+            }
+            return Err(e.into());
+        }
     };
 
     match cli.command {
