@@ -23,6 +23,8 @@ inline constexpr int PromptTimeoutMs = 120000;
 // The reply reaches done on the owner's thread, and is dropped if the owner is gone.
 void call(QObject *owner, const QString &service, const QString &path, const QString &interface, const QString &method, const QVariantList &args, Reply done = {}, int timeoutMs = PromptTimeoutMs);
 
+QString errorText(const QDBusMessage &reply);
+
 // The same call on the Gaze daemon.
 void callGaze(QObject *owner, const QString &method, const QVariantList &args, Reply done = {});
 

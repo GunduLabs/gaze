@@ -44,6 +44,7 @@ impl Tone {
 
 pub enum TuiAction {
     Cancel,
+    Interrupt,
     Confirm,
     Decline,
 }
@@ -56,8 +57,9 @@ pub enum ConfirmStep {
 
 pub fn apply_cancel_action(confirm_cancel: &mut bool, action: Option<TuiAction>) -> ConfirmStep {
     match action {
+        Some(TuiAction::Interrupt) if *confirm_cancel => return ConfirmStep::CancelConfirmed,
         Some(TuiAction::Cancel) if *confirm_cancel => *confirm_cancel = false,
-        Some(TuiAction::Cancel) => *confirm_cancel = true,
+        Some(TuiAction::Cancel | TuiAction::Interrupt) => *confirm_cancel = true,
         Some(TuiAction::Confirm) if *confirm_cancel => return ConfirmStep::CancelConfirmed,
         Some(TuiAction::Decline) if *confirm_cancel => *confirm_cancel = false,
         _ => {}
@@ -180,7 +182,10 @@ pub fn poll_action() -> anyhow::Result<Option<TuiAction>> {
 
         let is_ctrl_c = key.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C'));
-        if is_ctrl_c || matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
+        if is_ctrl_c {
+            return Ok(Some(TuiAction::Interrupt));
+        }
+        if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
             return Ok(Some(TuiAction::Cancel));
         }
 
@@ -430,7 +435,11 @@ fn render_enroll(frame: &mut Frame<'_>, screen: &EnrollScreen<'_>) {
         .block(Block::default().borders(Borders::ALL).title("Progress"))
         .gauge_style(Style::default().fg(Color::Cyan).bg(Color::Black))
         .ratio(ratio)
-        .label(format!("{progress}/{max}"));
+        .label(if screen.max == 0 {
+            String::new()
+        } else {
+            format!("{progress}/{max}")
+        });
     frame.render_widget(gauge, chunks[3]);
 
     let controls = Paragraph::new("Ctrl+C or q to cancel")
@@ -472,7 +481,7 @@ fn render_cancel_popup(frame: &mut Frame<'_>, area: Rect) {
         Line::from(""),
         Line::from(vec![
             Span::styled(
-                "Y",
+                "Y/Ctrl+C",
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
             Span::raw(": discard    "),
@@ -571,6 +580,20 @@ mod tests {
             ConfirmStep::CancelConfirmed
         );
         assert!(armed);
+    }
+
+    #[test]
+    fn a_second_interrupt_cancels_the_operation() {
+        let mut armed = false;
+        assert_eq!(
+            apply_cancel_action(&mut armed, Some(TuiAction::Interrupt)),
+            ConfirmStep::Continue
+        );
+        assert!(armed);
+        assert_eq!(
+            apply_cancel_action(&mut armed, Some(TuiAction::Interrupt)),
+            ConfirmStep::CancelConfirmed
+        );
     }
 
     #[test]
