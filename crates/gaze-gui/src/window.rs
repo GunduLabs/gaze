@@ -11,7 +11,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -92,6 +92,12 @@ async fn confirm_face_removal(window: &libadwaita::ApplicationWindow, face_name:
     dialog.choose_future().await == "remove"
 }
 
+fn set_status_action_visible(status_page: &libadwaita::StatusPage, visible: bool) {
+    if let Some(action) = status_page.child() {
+        action.set_visible(visible);
+    }
+}
+
 fn daemon_state_text(state: Option<DaemonState>) -> (&'static str, &'static str, Duration) {
     match state {
         Some(DaemonState::Failed) => (
@@ -126,6 +132,28 @@ fn show_daemon_pending_toast(window: &libadwaita::ApplicationWindow) {
     add_toast(window, "Connecting to the Gaze daemon…");
 }
 
+thread_local! {
+    static CAPTURE_STARTING: Cell<bool> = const { Cell::new(false) };
+}
+
+struct CaptureStartGuard;
+
+impl CaptureStartGuard {
+    fn acquire() -> Option<Self> {
+        if CAPTURE_STARTING.replace(true) {
+            None
+        } else {
+            Some(Self)
+        }
+    }
+}
+
+impl Drop for CaptureStartGuard {
+    fn drop(&mut self) {
+        CAPTURE_STARTING.set(false);
+    }
+}
+
 async fn begin_face_capture(
     window: &libadwaita::ApplicationWindow,
     username: &str,
@@ -133,6 +161,10 @@ async fn begin_face_capture(
     proxy: &Rc<GazeProxy<'static>>,
     refresh: &Rc<RefCell<Option<RefreshCb>>>,
 ) {
+    let Some(_starting) = CaptureStartGuard::acquire() else {
+        return;
+    };
+
     // Start the Polkit request first. If it needs interaction, give the agent a moment to
     // present its prompt, then warm the camera while the user authenticates.
     let mut authorization = Box::pin(proxy.authorize_enrollment());
@@ -254,9 +286,21 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
     let status_page = libadwaita::StatusPage::new();
     status_page.set_icon_name(Some("contact-new-symbolic"));
-    status_page.set_title("No Faces Enrolled");
+    status_page.set_title("Connecting…");
     status_page.set_description(Some("Loading from the Gaze daemon…"));
     status_page.set_visible(true);
+
+    let enroll_action = gtk4::Button::with_label("Enroll a Face");
+    enroll_action.add_css_class("pill");
+    enroll_action.add_css_class("suggested-action");
+    enroll_action.set_halign(gtk4::Align::Center);
+    enroll_action.set_visible(false);
+    enroll_action.connect_clicked(glib::clone!(
+        #[weak]
+        add_btn,
+        move |_| add_btn.emit_clicked()
+    ));
+    status_page.set_child(Some(&enroll_action));
     face_list.set_visible(false);
     content.append(&status_page);
 
@@ -297,6 +341,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
         username,
         #[strong]
         last_toast,
+        #[strong]
+        refresh,
         move |btn| {
             let Some(proxy) = proxy_cell.borrow().clone() else {
                 show_daemon_pending_toast(&window);
@@ -306,6 +352,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 prev.dismiss();
             }
             btn.set_sensitive(false);
+            let progress_toast = add_toast(&window, "Look at the camera…");
+            progress_toast.set_timeout(0);
+            *last_toast.borrow_mut() = Some(progress_toast);
             glib::MainContext::default().spawn_local(glib::clone!(
                 #[weak]
                 window,
@@ -319,20 +368,36 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 face_list_weak,
                 #[strong]
                 last_toast,
+                #[strong]
+                refresh,
                 async move {
                     use futures::StreamExt;
 
-                    if proxy.claim(&username).await.is_err() {
-                        add_toast(&window, "Failed to claim device");
+                    let finish = |text: &str| {
+                        if let Some(prev) = last_toast.borrow_mut().take() {
+                            prev.dismiss();
+                        }
+                        let toast = add_toast(&window, text);
+                        *last_toast.borrow_mut() = Some(toast);
                         btn.set_sensitive(true);
+                    };
+
+                    if let Err(err) = proxy.claim(&username).await {
+                        if dbus_is_not_activatable(&err) {
+                            finish("Reconnecting to the Gaze daemon…");
+                            if let Some(f) = refresh.borrow().as_ref() {
+                                f();
+                            }
+                        } else {
+                            finish("Failed to claim device");
+                        }
                         return;
                     }
                     let mut stream = match proxy.receive_verify_status().await {
                         Ok(stream) => stream,
                         Err(_) => {
-                            add_toast(&window, "Daemon error starting verification");
                             let _ = proxy.release().await;
-                            btn.set_sensitive(true);
+                            finish("Daemon error starting verification");
                             return;
                         }
                     };
@@ -340,9 +405,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                     let mut diagnostics = proxy.receive_verify_diagnostic().await.ok();
 
                     if proxy.verify_start("any").await.is_err() {
-                        add_toast(&window, "Daemon error starting verification");
                         let _ = proxy.release().await;
-                        btn.set_sensitive(true);
+                        finish("Daemon error starting verification");
                         return;
                     }
 
@@ -374,7 +438,10 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 }
                                 break;
                             }
-                            futures::future::Either::Left((None, _)) => break,
+                            futures::future::Either::Left((None, _)) => {
+                                text = "Lost contact with the Gaze daemon".to_string();
+                                break;
+                            }
                             futures::future::Either::Right(_) => {
                                 let _ = proxy.verify_stop().await;
                                 text = "No face seen before the test timed out".to_string();
@@ -421,9 +488,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         }
                     }
 
-                    let toast = add_toast(&window, &text);
-                    *last_toast.borrow_mut() = Some(toast);
-                    btn.set_sensitive(true);
+                    finish(&text);
                 }
             ));
         }
@@ -473,20 +538,30 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
         #[strong]
         refresh,
         async move {
-            let Ok(proxy) = connect_gaze().await else {
-                tracing::error!("Failed to connect to Gaze daemon");
-                let state = match zbus::Connection::system().await {
-                    Ok(connection) => gazed_unit_state_on(&connection).await.ok(),
-                    Err(_) => None,
-                };
-                let (title, description, _) = daemon_state_text(state);
-                status_page.set_title(title);
-                status_page.set_description(Some(description));
-                return;
+            let proxy = loop {
+                match connect_gaze().await {
+                    Ok(proxy) => break Rc::new(proxy),
+                    Err(err) => {
+                        tracing::warn!(%err, "Gaze daemon is not reachable yet");
+                        if !gaze_core::cpu::supports_inference() {
+                            status_page.set_title("Unsupported CPU");
+                            status_page
+                                .set_description(Some(gaze_core::cpu::UNSUPPORTED_CPU_MESSAGE));
+                            return;
+                        }
+                        let state = match zbus::Connection::system().await {
+                            Ok(connection) => gazed_unit_state_on(&connection).await.ok(),
+                            Err(_) => None,
+                        };
+                        let (title, description, retry) = daemon_state_text(state);
+                        status_page.set_title(title);
+                        status_page.set_description(Some(description));
+                        glib::timeout_future(retry).await;
+                    }
+                }
             };
-
-            let proxy = Rc::new(proxy);
-            *proxy_cell.borrow_mut() = Some(proxy.clone());
+            *proxy_cell.borrow_mut() = Some(proxy);
+            let refresh_generation = Rc::new(Cell::new(0u64));
 
             *refresh.borrow_mut() = Some(Rc::new(glib::clone!(
                 #[weak]
@@ -500,7 +575,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 #[strong]
                 refresh,
                 #[strong]
-                proxy,
+                proxy_cell,
+                #[strong]
+                refresh_generation,
                 move || {
                     glib::MainContext::default().spawn_local(glib::clone!(
                         #[weak]
@@ -514,8 +591,15 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         #[strong]
                         refresh,
                         #[strong]
-                        proxy,
+                        proxy_cell,
+                        #[strong]
+                        refresh_generation,
                         async move {
+                            let Some(proxy) = proxy_cell.borrow().clone() else {
+                                return;
+                            };
+                            let generation = refresh_generation.get().wrapping_add(1);
+                            refresh_generation.set(generation);
                             let faces = match proxy.list_faces(&username).await {
                                 Ok(faces) => faces,
                                 Err(err) => {
@@ -530,16 +614,25 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         status_page.set_description(Some(
                                             gaze_core::cpu::UNSUPPORTED_CPU_MESSAGE,
                                         ));
+                                        set_status_action_visible(&status_page, false);
                                         status_page.set_visible(true);
                                         face_list.set_visible(false);
                                         return;
                                     } else if dbus_is_not_activatable(&err) {
+                                        if let Ok(fresh) = connect_gaze().await {
+                                            *proxy_cell.borrow_mut() = Some(Rc::new(fresh));
+                                            if let Some(f) = refresh.borrow().as_ref() {
+                                                f();
+                                            }
+                                            return;
+                                        }
                                         let state = gazed_unit_state_on(proxy.inner().connection())
                                             .await
                                             .ok();
                                         let (title, description, retry) = daemon_state_text(state);
                                         status_page.set_title(title);
                                         status_page.set_description(Some(description));
+                                        set_status_action_visible(&status_page, false);
                                         status_page.set_visible(true);
                                         face_list.set_visible(false);
                                         glib::timeout_add_local_once(
@@ -556,11 +649,35 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         );
                                         return;
                                     } else {
-                                        add_dbus_error_toast(&window, "Failed to load faces", &err);
-                                        Vec::new()
+                                        status_page.set_title("Could Not Load Faces");
+                                        status_page.set_description(Some(
+                                            glib::markup_escape_text(&dbus_error_message(&err))
+                                                .as_str(),
+                                        ));
+                                        set_status_action_visible(&status_page, false);
+                                        status_page.set_visible(true);
+                                        face_list.set_visible(false);
+                                        return;
                                     }
                                 }
                             };
+
+                            // A spectrum with no camera configured is not a gap
+                            // in the profile, so its badge reads unlit, not failed.
+                            let (rgb_configured, ir_configured) = if faces.is_empty() {
+                                (true, true)
+                            } else {
+                                match load_config_from_daemon(&proxy).await {
+                                    Ok(cfg) => (
+                                        !cfg.cameras.rgb.is_empty(),
+                                        !cfg.cameras.ir.trim().is_empty(),
+                                    ),
+                                    Err(_) => (true, true),
+                                }
+                            };
+                            if refresh_generation.get() != generation {
+                                return;
+                            }
 
                             while let Some(child) = face_list.first_child() {
                                 face_list.remove(&child);
@@ -569,22 +686,12 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                             if faces.is_empty() {
                                 status_page.set_title("No Faces Enrolled");
                                 status_page.set_description(Some("Enroll a face to get started"));
+                                set_status_action_visible(&status_page, true);
                                 status_page.set_visible(true);
                                 face_list.set_visible(false);
                             } else {
                                 status_page.set_visible(false);
                                 face_list.set_visible(true);
-
-                                // A spectrum with no camera configured is not a gap
-                                // in the profile, so its badge reads unlit, not failed.
-                                let (rgb_configured, ir_configured) =
-                                    match load_config_from_daemon(&proxy).await {
-                                        Ok(cfg) => (
-                                            !cfg.cameras.rgb.is_empty(),
-                                            !cfg.cameras.ir.trim().is_empty(),
-                                        ),
-                                        Err(_) => (true, true),
-                                    };
 
                                 let existing_face_names: Rc<std::collections::HashSet<String>> =
                                     Rc::new(
@@ -678,6 +785,15 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                             entry.set_text(&face_name);
                                             body.append(&entry);
 
+                                            let name_hint = gtk4::Label::new(Some(
+                                                "A face with this name already exists",
+                                            ));
+                                            name_hint.add_css_class("caption");
+                                            name_hint.add_css_class("error");
+                                            name_hint.set_halign(gtk4::Align::Start);
+                                            name_hint.set_visible(false);
+                                            body.append(&name_hint);
+
                                             let button_row =
                                                 gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
                                             button_row.set_halign(gtk4::Align::End);
@@ -697,16 +813,31 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                             entry.connect_changed(glib::clone!(
                                                 #[weak]
                                                 rename_confirm_btn,
+                                                #[weak]
+                                                name_hint,
                                                 #[strong]
                                                 face_name,
                                                 #[strong]
                                                 existing_face_names,
                                                 move |e| {
                                                     let new_name = e.text().trim().to_string();
+                                                    let taken = new_name != face_name
+                                                        && existing_face_names.contains(&new_name);
+                                                    name_hint.set_visible(taken);
                                                     let valid = !new_name.is_empty()
                                                         && new_name != face_name
-                                                        && !existing_face_names.contains(&new_name);
+                                                        && !taken;
                                                     rename_confirm_btn.set_sensitive(valid);
+                                                }
+                                            ));
+
+                                            entry.connect_activate(glib::clone!(
+                                                #[weak]
+                                                rename_confirm_btn,
+                                                move |_| {
+                                                    if rename_confirm_btn.is_sensitive() {
+                                                        rename_confirm_btn.emit_clicked();
+                                                    }
                                                 }
                                             ));
 
@@ -786,6 +917,14 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                     popover.popdown();
                                                 }
                                             ));
+
+                                            popover.connect_closed(|popover| {
+                                                glib::idle_add_local_once(glib::clone!(
+                                                    #[weak]
+                                                    popover,
+                                                    move || popover.unparent()
+                                                ));
+                                            });
 
                                             popover.popup();
                                         }
