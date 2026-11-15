@@ -824,6 +824,28 @@ enable_gazed() {
     fi
 }
 
+daemon_on_bus() {
+    busctl --system call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+        NameHasOwner s com.gundulabs.Gaze 2>/dev/null | grep -q true
+}
+
+wait_for_daemon_bus() {
+    command -v busctl >/dev/null 2>&1 || return 0
+    daemon_on_bus && return 0
+    say "  ${DIM}Waiting for the daemon to download its face models (up to 3 minutes)...${RESET}"
+    waited=0
+    while [ "$waited" -lt 180 ]; do
+        sleep 3
+        waited=$((waited + 3))
+        if daemon_on_bus; then
+            ok "The Gaze daemon is ready."
+            return 0
+        fi
+        [ "$(systemctl is-active gazed 2>/dev/null || true)" = "active" ] || break
+    done
+    warn "The Gaze daemon is still starting; gaze and gaze-gui work once 'gaze doctor' reports it ready."
+}
+
 verify_install() {
     [ "${OSTREE_PENDING:-0}" -eq 1 ] && return 0
     if [ -d /run/systemd/system ]; then
@@ -831,6 +853,7 @@ verify_install() {
         state="$(systemctl is-active gazed 2>/dev/null || true)"
         if [ "$state" = "active" ]; then
             ok "The Gaze daemon is running."
+            wait_for_daemon_bus
         else
             problem "The Gaze daemon is ${state:-not running}; see: journalctl -u gazed -n 50"
         fi
