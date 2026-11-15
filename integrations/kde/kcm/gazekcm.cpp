@@ -7,6 +7,7 @@
 #include <KPluginFactory>
 #include <QDBusArgument>
 #include <QDBusConnection>
+#include <QDBusServiceWatcher>
 #include <QDir>
 #include <QFile>
 #include <algorithm>
@@ -80,6 +81,12 @@ GazeKcm::GazeKcm(QObject *parent, const KPluginMetaData &data)
         Q_EMIT testChanged();
     });
 
+    auto *watcher = new QDBusServiceWatcher(QString(GazeBus::Service), bus, QDBusServiceWatcher::WatchForRegistration, this);
+    connect(watcher, &QDBusServiceWatcher::serviceRegistered, this, [this] {
+        refresh();
+        m_settings.load();
+    });
+
     refresh();
     m_settings.load();
 }
@@ -116,7 +123,7 @@ void GazeKcm::refresh()
             // A user without a profile yet is an empty list, not a failure.
             const bool noProfile = reply.errorName() == QLatin1String("org.freedesktop.DBus.Error.FileNotFound");
             m_faces.setFaces({});
-            setError(noProfile ? QString() : reply.errorMessage());
+            setError(noProfile ? QString() : GazeBus::errorText(reply));
             return;
         }
         QList<Face> faces;
