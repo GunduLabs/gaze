@@ -56,7 +56,7 @@ KCM.SimpleKCM {
             Layout.fillWidth: true
             visible: ["suggested", "restarting", "done"].includes(kcm.settings.restartState)
             type: kcm.settings.restartState === "done" ? Kirigami.MessageType.Positive : Kirigami.MessageType.Information
-            text: kcm.settings.restartState === "suggested" ? i18n("Settings saved. Restart the Gaze service to apply them.")
+            text: kcm.settings.restartState === "suggested" ? i18n("Settings saved. Restart the Gaze service to use the new inference provider.")
                 : kcm.settings.restartState === "restarting" ? i18n("Restarting the Gaze service…")
                 : i18n("Gaze service restarted")
             actions: [

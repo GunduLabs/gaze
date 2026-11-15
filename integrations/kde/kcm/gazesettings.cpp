@@ -296,6 +296,7 @@ void GazeSettings::setRestartState(const QString &state)
 void GazeSettings::sendRestart()
 {
     m_restartWanted = false;
+    m_restartNeeded = false;
     setRestartState(QStringLiteral("restarting"));
     m_restarting = true;
     GazeBus::call(this, QStringLiteral("org.freedesktop.systemd1"), QStringLiteral("/org/freedesktop/systemd1"), QStringLiteral("org.freedesktop.systemd1.Manager"), QStringLiteral("RestartUnit"), {QStringLiteral("gazed.service"), QStringLiteral("replace")}, [this](const QDBusMessage &reply) {
@@ -356,6 +357,7 @@ void GazeSettings::set(const QString &key, const QVariant &value)
         }
     } else if (key == QLatin1String("inference.execution_provider")) {
         coupleInferenceDevice(value.toString());
+        m_restartNeeded = true;
     }
     m_values.insert(key, value);
     Q_EMIT valuesChanged();
@@ -461,7 +463,7 @@ void GazeSettings::apply()
         call(QStringLiteral("SetConfigWithWallets"), {QVariant::fromValue(QDBusVariant(QVariant::fromValue(config))), gnome, kwallet}, [this, failed, finished](const QDBusMessage &r) {
             if (!failed(r)) {
                 setError(QString());
-                if (!m_restartWanted) {
+                if (!m_restartWanted && m_restartNeeded) {
                     setRestartState(QStringLiteral("suggested"));
                 }
                 finished();
