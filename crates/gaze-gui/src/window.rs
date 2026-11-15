@@ -92,6 +92,12 @@ async fn confirm_face_removal(window: &libadwaita::ApplicationWindow, face_name:
     dialog.choose_future().await == "remove"
 }
 
+fn set_status_action_visible(status_page: &libadwaita::StatusPage, visible: bool) {
+    if let Some(action) = status_page.child() {
+        action.set_visible(visible);
+    }
+}
+
 fn daemon_state_text(state: Option<DaemonState>) -> (&'static str, &'static str, Duration) {
     match state {
         Some(DaemonState::Failed) => (
@@ -280,9 +286,21 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
     let status_page = libadwaita::StatusPage::new();
     status_page.set_icon_name(Some("contact-new-symbolic"));
-    status_page.set_title("No Faces Enrolled");
+    status_page.set_title("Connecting…");
     status_page.set_description(Some("Loading from the Gaze daemon…"));
     status_page.set_visible(true);
+
+    let enroll_action = gtk4::Button::with_label("Enroll a Face");
+    enroll_action.add_css_class("pill");
+    enroll_action.add_css_class("suggested-action");
+    enroll_action.set_halign(gtk4::Align::Center);
+    enroll_action.set_visible(false);
+    enroll_action.connect_clicked(glib::clone!(
+        #[weak]
+        add_btn,
+        move |_| add_btn.emit_clicked()
+    ));
+    status_page.set_child(Some(&enroll_action));
     face_list.set_visible(false);
     content.append(&status_page);
 
@@ -573,6 +591,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         status_page.set_description(Some(
                                             gaze_core::cpu::UNSUPPORTED_CPU_MESSAGE,
                                         ));
+                                        set_status_action_visible(&status_page, false);
                                         status_page.set_visible(true);
                                         face_list.set_visible(false);
                                         return;
@@ -583,6 +602,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         let (title, description, retry) = daemon_state_text(state);
                                         status_page.set_title(title);
                                         status_page.set_description(Some(description));
+                                        set_status_action_visible(&status_page, false);
                                         status_page.set_visible(true);
                                         face_list.set_visible(false);
                                         glib::timeout_add_local_once(
@@ -599,8 +619,15 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         );
                                         return;
                                     } else {
-                                        add_dbus_error_toast(&window, "Failed to load faces", &err);
-                                        Vec::new()
+                                        status_page.set_title("Could Not Load Faces");
+                                        status_page.set_description(Some(
+                                            glib::markup_escape_text(&dbus_error_message(&err))
+                                                .as_str(),
+                                        ));
+                                        set_status_action_visible(&status_page, false);
+                                        status_page.set_visible(true);
+                                        face_list.set_visible(false);
+                                        return;
                                     }
                                 }
                             };
@@ -629,6 +656,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                             if faces.is_empty() {
                                 status_page.set_title("No Faces Enrolled");
                                 status_page.set_description(Some("Enroll a face to get started"));
+                                set_status_action_visible(&status_page, true);
                                 status_page.set_visible(true);
                                 face_list.set_visible(false);
                             } else {
