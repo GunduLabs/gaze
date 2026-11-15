@@ -11,7 +11,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -126,6 +126,28 @@ fn show_daemon_pending_toast(window: &libadwaita::ApplicationWindow) {
     add_toast(window, "Connecting to the Gaze daemon…");
 }
 
+thread_local! {
+    static CAPTURE_STARTING: Cell<bool> = const { Cell::new(false) };
+}
+
+struct CaptureStartGuard;
+
+impl CaptureStartGuard {
+    fn acquire() -> Option<Self> {
+        if CAPTURE_STARTING.replace(true) {
+            None
+        } else {
+            Some(Self)
+        }
+    }
+}
+
+impl Drop for CaptureStartGuard {
+    fn drop(&mut self) {
+        CAPTURE_STARTING.set(false);
+    }
+}
+
 async fn begin_face_capture(
     window: &libadwaita::ApplicationWindow,
     username: &str,
@@ -133,6 +155,10 @@ async fn begin_face_capture(
     proxy: &Rc<GazeProxy<'static>>,
     refresh: &Rc<RefCell<Option<RefreshCb>>>,
 ) {
+    let Some(_starting) = CaptureStartGuard::acquire() else {
+        return;
+    };
+
     // Start the Polkit request first. If it needs interaction, give the agent a moment to
     // present its prompt, then warm the camera while the user authenticates.
     let mut authorization = Box::pin(proxy.authorize_enrollment());
