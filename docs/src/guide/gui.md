@@ -27,8 +27,9 @@ gaze-gui
 
 Open the config dialog from the header-bar settings button.
 
-The dialog mirrors `/etc/gaze/config.toml`, grouped the same way. Saving writes
-the file through the daemon, so it needs a polkit authorization.
+The dialog mirrors `/etc/gaze/config.toml`. It opens locked: select **Unlock…**
+to authorize with polkit. After that, each change is written through the daemon
+as you make it. There is no save button.
 
 That authorization always takes your password, as does changing your faces, so a
 face match can't change Gaze itself. The polkit dialog tells you this and waits
@@ -37,7 +38,8 @@ for the password.
 **Security**
 
 - Security level (`low`, `medium`, `high`, `maximum`, or `custom`)
-- For `custom`: detector level, recognizer level, RGB and IR similarity thresholds
+- For `custom`: detector level, recognizer level, RGB and IR similarity thresholds,
+  and the hybrid combining policy used when both RGB and IR are enrolled
 
 **Hardware**
 
@@ -47,9 +49,8 @@ for the password.
 The standard build exposes all providers. Install the vendor runtime and drivers
 using [Hardware Acceleration](/guide/acceleration), then restart the daemon after changing its provider.
 
-**Cameras**
-
 - RGB camera source, IR camera source, and Force IR Emitter
+- IR frame size override, for an IR feed that is green or corrupted on auto
 - Parallel RGB + IR Capture, which decides whether hybrid verification reads both
   sensors at once. Some webcams cannot, so the default captures them one at a time
 - Darkness cutoff, the dark-frame rejection threshold
@@ -63,7 +64,7 @@ using [Hardware Acceleration](/guide/acceleration), then restart the daemon afte
 
 - Enable liveness spoof prevention, liveness threshold, liveness max seconds
 
-**Auth**
+**Authentication**
 
 - Abort if SSH, abort if lid closed
 - Require a suspend first, which refuses face authentication until the machine has suspended
@@ -71,7 +72,6 @@ using [Hardware Acceleration](/guide/acceleration), then restart the daemon afte
 - Require confirmation on lock screen, require confirmation for elevated auth
 - Resume grace period and start delay, both in milliseconds
 - Start delay applies to, either every face authentication or screen lockers only
-- Hybrid combining policy, used when both RGB and IR are enrolled
 
 **Storage**
 

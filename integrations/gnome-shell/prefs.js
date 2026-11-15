@@ -10,6 +10,7 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 
 const GAZE_DBUS_NAME = 'com.gundulabs.Gaze';
 const GAZE_OBJECT_PATH = '/com/gundulabs/Gaze';
+const PROMPT_TIMEOUT_MS = 120000;
 
 const MAX_TRIES_KEY = 'max-face-tries';
 const FACE_AUTH_KEY = 'enable-face-authentication';
@@ -20,7 +21,7 @@ function callGaze(method, params) {
     return new Promise((resolve, reject) => {
         conn.call(
             GAZE_DBUS_NAME, GAZE_OBJECT_PATH, GAZE_DBUS_NAME, method, params,
-            null, Gio.DBusCallFlags.ALLOW_INTERACTIVE_AUTHORIZATION, -1, null,
+            null, Gio.DBusCallFlags.ALLOW_INTERACTIVE_AUTHORIZATION, PROMPT_TIMEOUT_MS, null,
             (_src, res) => {
                 try {
                     resolve(conn.call_finish(res));
@@ -118,6 +119,41 @@ export default class GazePreferences extends ExtensionPreferences {
             updateTriesRowSensitivity(val);
         });
 
+        const facesGroup = new Adw.PreferencesGroup({title: 'Enrollment'});
+        const facesRow = new Adw.ActionRow({
+            title: 'Enrolled faces',
+            subtitle: 'Checking…',
+        });
+        const openButton = new Gtk.Button({
+            label: 'Open Gaze',
+            valign: Gtk.Align.CENTER,
+        });
+        openButton.connect('clicked', () => {
+            try {
+                Gio.AppInfo.create_from_commandline(
+                    'gaze-gui', 'Gaze', Gio.AppInfoCreateFlags.NONE
+                ).launch([], null);
+            } catch (e) {
+                logError(e, '[gaze] Failed to open the Gaze app');
+                facesRow.set_subtitle('Could not open the Gaze app. Run gaze-gui from a terminal.');
+            }
+        });
+        facesRow.add_suffix(openButton);
+        facesGroup.add(facesRow);
+
+        callGaze('HasEnrolledFaces', new GLib.Variant('(s)', [GLib.get_user_name()]))
+            .then(result => {
+                const [enrolled] = result.deepUnpack();
+                facesRow.set_subtitle(enrolled
+                    ? 'A face is enrolled for this account.'
+                    : 'No face is enrolled yet, so face unlock has nothing to match. Open Gaze to enroll one.');
+            })
+            .catch(error => {
+                logError(error, '[gaze] Failed to read enrolled faces');
+                facesRow.set_subtitle('Gaze daemon unavailable.');
+            });
+
+        behaviorPage.add(facesGroup);
         behaviorPage.add(behaviorGroup);
 
         const loginGroup = new Adw.PreferencesGroup({
@@ -142,16 +178,32 @@ export default class GazePreferences extends ExtensionPreferences {
             suppressGdmNotify = false;
         };
 
-        callGaze('GetGdmFaceAuth', null)
-            .then(result => {
-                const [enabled] = result.deepUnpack();
-                setGdmRow(enabled);
-                gdmRow.set_sensitive(true);
-            })
-            .catch(error => {
-                logError(error, '[gaze] Failed to read GDM face auth state');
+        const loadGdmState = () => {
+            callGaze('GetGdmFaceAuth', null)
+                .then(result => {
+                    const [enabled] = result.deepUnpack();
+                    setGdmRow(enabled);
+                    gdmRow.set_subtitle('');
+                    gdmRow.set_sensitive(true);
+                })
+                .catch(error => {
+                    logError(error, '[gaze] Failed to read GDM face auth state');
+                    gdmRow.set_subtitle('Gaze daemon unavailable.');
+                });
+        };
+
+        const daemonWatch = Gio.bus_watch_name(
+            Gio.BusType.SYSTEM, GAZE_DBUS_NAME, Gio.BusNameWatcherFlags.NONE,
+            loadGdmState,
+            () => {
+                gdmRow.set_sensitive(false);
                 gdmRow.set_subtitle('Gaze daemon unavailable.');
-            });
+            }
+        );
+        window.connect('close-request', () => {
+            Gio.bus_unwatch_name(daemonWatch);
+            return false;
+        });
 
         const notifyGdmFailure = (error, desired) => {
             const accessDenied =
@@ -182,6 +234,7 @@ export default class GazePreferences extends ExtensionPreferences {
             callGaze('SetGdmFaceAuth', new GLib.Variant('(b)', [desired]))
                 .then(() => {
                     gdmRequestInFlight = false;
+                    gdmRow.set_subtitle('');
                     gdmRow.set_sensitive(true);
                     if (typeof window.add_toast === 'function') {
                         const message = desired
