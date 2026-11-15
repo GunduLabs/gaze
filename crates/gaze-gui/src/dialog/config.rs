@@ -311,7 +311,7 @@ fn populate_config_rows(cfg: &Config, rows: &ConfigRows, choices: CameraChoices<
         .set_selected(cfg.inference.device_index());
     if cfg.inference.is_representable() {
         rows.inference_execution_provider
-            .set_subtitle("CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI");
+            .set_subtitle("CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI. Restart the Gaze daemon after changing this");
     } else {
         rows.inference_execution_provider.set_subtitle(&format!(
             "Configured as {}/{}, which this build cannot show",
@@ -503,7 +503,7 @@ pub fn show_config_dialog(
     let inference_execution_provider_row = libadwaita::ComboRow::new();
     inference_execution_provider_row.set_title("Inference execution provider");
     inference_execution_provider_row
-        .set_subtitle("CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI");
+        .set_subtitle("CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI. Restart the Gaze daemon after changing this");
     let inference_execution_provider_model =
         gtk4::StringList::new(&INFERENCE_EXECUTION_PROVIDER_LABELS);
     inference_execution_provider_row.set_model(Some(&inference_execution_provider_model));
@@ -733,7 +733,7 @@ pub fn show_config_dialog(
     unlock_gnome_keyring_row.set_visible(false);
     unlock_gnome_keyring_row.set_title("Unlock GNOME Keyring");
     unlock_gnome_keyring_row
-        .set_subtitle("Use an enrolled password after liveness-protected GDM or greetd face login");
+        .set_subtitle("Use an enrolled password after liveness-protected GDM or greetd face login. Needs liveness and template encryption, and keeps both on while enabled");
     let unlock_gnome_keyring_switch = gtk4::Switch::new();
     unlock_gnome_keyring_switch.set_valign(gtk4::Align::Center);
     unlock_gnome_keyring_row.add_suffix(&unlock_gnome_keyring_switch);
@@ -742,7 +742,7 @@ pub fn show_config_dialog(
     let unlock_kwallet_row = libadwaita::ActionRow::new();
     unlock_kwallet_row.set_visible(false);
     unlock_kwallet_row.set_title("Unlock KWallet");
-    unlock_kwallet_row.set_subtitle("Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet");
+    unlock_kwallet_row.set_subtitle("Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet. Needs liveness and template encryption, and keeps both on while enabled");
     let unlock_kwallet_switch = gtk4::Switch::new();
     unlock_kwallet_switch.set_valign(gtk4::Align::Center);
     unlock_kwallet_row.add_suffix(&unlock_kwallet_switch);
