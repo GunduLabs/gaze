@@ -427,7 +427,7 @@ async fn handle_enroll(
     let mut current_capture_msg = "Waiting for face...".to_string();
     let mut current_capture_tone = Tone::Info;
     let mut current_progress = 0_u32;
-    let mut current_max = 100_u32;
+    let mut current_max = 0_u32;
     let mut current_time_remaining = None;
     let mut confirm_cancel = false;
     let mut tick = 0_u64;
