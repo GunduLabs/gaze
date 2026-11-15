@@ -445,7 +445,7 @@ pub fn dbus_is_file_not_found(err: &zbus::Error) -> bool {
 
 pub fn dbus_is_not_activatable(err: &zbus::Error) -> bool {
     let s = err.to_string();
-    s.contains("not activatable") || s.contains("ServiceUnknown")
+    s.contains("not activatable") || s.contains("ServiceUnknown") || s.contains("NameHasNoOwner")
 }
 
 pub fn dbus_is_unknown_method(err: &zbus::Error) -> bool {
