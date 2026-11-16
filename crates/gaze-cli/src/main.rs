@@ -298,6 +298,12 @@ enum Commands {
         user: Option<String>,
         #[arg(help = "The name of the face to enroll")]
         face: String,
+        #[arg(
+            long,
+            default_value_t = 0,
+            help = "Capture with this camera system: 0 for [cameras], 1 for the first [[cameras.fallback]]"
+        )]
+        camera: u32,
     },
     /// Add captures to improve recognition of an enrolled face
     RefineFace {
@@ -305,6 +311,12 @@ enum Commands {
         user: Option<String>,
         #[arg(help = "The name of the face to refine", add = ArgValueCompleter::new(face_completer))]
         face: String,
+        #[arg(
+            long,
+            default_value_t = 0,
+            help = "Capture with this camera system: 0 for [cameras], 1 for the first [[cameras.fallback]]"
+        )]
+        camera: u32,
     },
     /// List the faces enrolled for a user
     ListFaces {
@@ -408,6 +420,7 @@ async fn handle_enroll(
     proxy: &GazeProxy<'_>,
     user: &str,
     face: &str,
+    camera_system: u32,
     is_refine: bool,
 ) -> anyhow::Result<()> {
     let term = Term::stdout();
@@ -429,7 +442,12 @@ async fn handle_enroll(
             return Err(err);
         }
     };
-    if let Err(err) = proxy.enroll_start(face).await {
+    let started = if camera_system == 0 {
+        proxy.enroll_start(face).await
+    } else {
+        proxy.enroll_start_on(face, camera_system).await
+    };
+    if let Err(err) = started {
         drop(terminal);
         let _ = proxy.release().await;
         exit_with_error(&describe_dbus_error(proxy, "Failed to start enrollment", &err).await);
@@ -641,7 +659,9 @@ async fn handle_test(
     let mut timed_out = false;
     let mut verify_result = None;
     let mut diagnostics = Vec::new();
-    let deadline = tokio::time::Instant::now() + gaze_core::dbus::VERIFY_CLIENT_TIMEOUT;
+    let cameras = Config::load().unwrap_or_default().cameras;
+    let deadline =
+        tokio::time::Instant::now() + gaze_core::dbus::verify_client_timeout(&cameras);
 
     loop {
         if let Some(ref mut terminal) = terminal {
@@ -977,11 +997,13 @@ async fn run() -> anyhow::Result<()> {
             }
             result?;
         }
-        Commands::AddFace { user, face } => {
-            handle_enroll(&proxy, &user.unwrap_or_else(get_current_user), &face, false).await?;
+        Commands::AddFace { user, face, camera } => {
+            handle_enroll(&proxy, &user.unwrap_or_else(get_current_user), &face, camera, false)
+                .await?;
         }
-        Commands::RefineFace { user, face } => {
-            handle_enroll(&proxy, &user.unwrap_or_else(get_current_user), &face, true).await?;
+        Commands::RefineFace { user, face, camera } => {
+            handle_enroll(&proxy, &user.unwrap_or_else(get_current_user), &face, camera, true)
+                .await?;
         }
         Commands::ListFaces { user, json } => {
             handle_list_faces(&proxy, &user.unwrap_or_else(get_current_user), json).await?;

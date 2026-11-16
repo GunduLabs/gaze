@@ -33,6 +33,13 @@ async fn wait_for_daemon_loss(proxy: &GazeProxy<'_>) {
     }
 }
 
+fn camera_system_label(index: usize) -> String {
+    match index {
+        0 => "Main cameras".to_string(),
+        index => format!("Fallback cameras {index}"),
+    }
+}
+
 pub struct CameraSetup {
     pub device: CameraSources,
     pub is_ir: bool,
@@ -147,6 +154,42 @@ pub fn show_capture_dialog(
             let name = e.text().trim().to_string();
             *rf.borrow_mut() = name.clone();
         });
+    }
+
+    let selected_system = Rc::new(Cell::new(0u32));
+    let camera_systems = gaze_core::config::Config::load()
+        .map(|config| config.cameras.systems().len())
+        .unwrap_or(1);
+    let mut system_row: Option<libadwaita::ComboRow> = None;
+    if camera_systems > 1 {
+        let labels = (0..camera_systems)
+            .map(camera_system_label)
+            .collect::<Vec<_>>();
+        let model = gtk4::StringList::new(&labels.iter().map(String::as_str).collect::<Vec<_>>());
+        let row = libadwaita::ComboRow::new();
+        row.set_title("Camera");
+        row.set_model(Some(&model));
+        let group = libadwaita::PreferencesGroup::new();
+        group.add(&row);
+        body.append(&group);
+        row.connect_selected_notify(glib::clone!(
+            #[strong]
+            selected_system,
+            #[strong]
+            feed,
+            #[strong]
+            camera_mode,
+            move |row| {
+                selected_system.set(row.selected());
+                feed.stop();
+                feed.hide_frame();
+                camera_mode.set_text(&format!(
+                    "{} · preview starts when capture does",
+                    camera_system_label(row.selected() as usize)
+                ));
+            }
+        ));
+        system_row = Some(row);
     }
 
     let cam_widget = build_camera_widget(&feed);
@@ -324,6 +367,10 @@ pub fn show_capture_dialog(
         #[weak]
         done_btn,
         #[strong]
+        selected_system,
+        #[strong]
+        system_row,
+        #[strong]
         username,
         #[strong]
         enrollment_task,
@@ -363,6 +410,10 @@ pub fn show_capture_dialog(
 
             let preview_live = Rc::new(Cell::new(false));
             let face_name = resolved_face.borrow().clone();
+            let camera_system = selected_system.get();
+            if let Some(row) = system_row.as_ref() {
+                row.set_sensitive(false);
+            }
             let (abort, registration) = futures::future::AbortHandle::new_pair();
             *enrollment_task.borrow_mut() = Some(abort);
 
@@ -379,6 +430,8 @@ pub fn show_capture_dialog(
                 camera_mode,
                 #[strong]
                 preview_live,
+                #[strong]
+                system_row,
                 #[weak]
                 progress,
                 #[weak]
@@ -401,6 +454,9 @@ pub fn show_capture_dialog(
                         progress.set_visible(false);
                         progress_label.set_visible(false);
                         camera_mode.set_text(camera_kind);
+                        if let Some(row) = system_row.as_ref() {
+                            row.set_sensitive(true);
+                        }
                     };
                     let mut enroll_stream = match proxy.receive_enroll_status().await {
                         Ok(s) => s,
@@ -427,7 +483,12 @@ pub fn show_capture_dialog(
                         start_failed(&format!("Could not claim camera: {err}. Try again."));
                         return;
                     }
-                    if let Err(err) = proxy.enroll_start(&face_name).await {
+                    let started = if camera_system == 0 {
+                        proxy.enroll_start(&face_name).await
+                    } else {
+                        proxy.enroll_start_on(&face_name, camera_system).await
+                    };
+                    if let Err(err) = started {
                         start_failed(&format!(
                             "Could not start enrollment: {}",
                             gaze_core::dbus::dbus_error_message(&err)
@@ -604,6 +665,12 @@ pub fn show_capture_dialog(
 mod tests {
     use super::*;
     use gaze_core::config::CameraConfig;
+
+    #[test]
+    fn camera_systems_are_labelled_main_then_by_fallback_order() {
+        assert_eq!(camera_system_label(0), "Main cameras");
+        assert_eq!(camera_system_label(2), "Fallback cameras 2");
+    }
 
     #[test]
     fn fallback_is_the_default_rgb_camera() {
