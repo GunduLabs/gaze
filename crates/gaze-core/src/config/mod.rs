@@ -494,7 +494,10 @@ pub struct CameraConfig {
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct CameraSystem {
-    #[serde(default = "no_camera_sources", skip_serializing_if = "CameraSources::is_empty")]
+    #[serde(
+        default = "no_camera_sources",
+        skip_serializing_if = "CameraSources::is_empty"
+    )]
     pub rgb: CameraSources,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ir: String,
@@ -592,7 +595,10 @@ impl CameraConfig {
         }
         for (index, system) in self.fallback.iter().enumerate() {
             if system.is_empty() {
-                anyhow::bail!("cameras.fallback entry {} sets neither rgb nor ir", index + 1);
+                anyhow::bail!(
+                    "cameras.fallback entry {} sets neither rgb nor ir",
+                    index + 1
+                );
             }
         }
         for (index, system) in self.systems().iter().enumerate().skip(1) {
@@ -628,7 +634,9 @@ impl CameraConfig {
     }
 
     pub fn has_ir(&self) -> bool {
-        self.systems().iter().any(|system| !system.ir.trim().is_empty())
+        self.systems()
+            .iter()
+            .any(|system| !system.ir.trim().is_empty())
     }
 
     pub fn fallback_budget(&self) -> std::time::Duration {
@@ -1422,8 +1430,14 @@ fn merge_array_of_tables(
     key: &str,
     desired: &[toml_edit::Table],
 ) -> bool {
-    if !target.get(key).is_some_and(toml_edit::Item::is_array_of_tables) {
-        target.insert(key, toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new()));
+    if !target
+        .get(key)
+        .is_some_and(toml_edit::Item::is_array_of_tables)
+    {
+        target.insert(
+            key,
+            toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new()),
+        );
     }
     let Some(tables) = target
         .get_mut(key)
@@ -1606,9 +1620,10 @@ mod tests {
 
     #[test]
     fn a_fallback_entry_does_not_borrow_the_primary_cameras() {
-        let config: Config =
-            toml_edit::de::from_str("[cameras]\nir = \"/dev/video2\"\n[[cameras.fallback]]\nir = \"/dev/video6\"\n")
-                .unwrap();
+        let config: Config = toml_edit::de::from_str(
+            "[cameras]\nir = \"/dev/video2\"\n[[cameras.fallback]]\nir = \"/dev/video6\"\n",
+        )
+        .unwrap();
         let systems = config.cameras.systems();
         assert_eq!(systems[0].rgb, DEFAULT_RGB_CAMERA.into());
         assert!(systems[1].rgb.is_empty());
@@ -1696,7 +1711,10 @@ mod tests {
         config.save_to(path.to_str().unwrap()).unwrap();
         let saved = std::fs::read_to_string(&path).unwrap();
         assert!(saved.contains("[[cameras.fallback]]"), "{saved}");
-        assert!(saved.contains("# rear cameras when the screen is flipped"), "{saved}");
+        assert!(
+            saved.contains("# rear cameras when the screen is flipped"),
+            "{saved}"
+        );
         assert!(saved.contains("# rear"), "{saved}");
         let loaded = Config::load_from(path.to_str().unwrap()).unwrap();
         assert_eq!(loaded.cameras.fallback, config.cameras.fallback);
@@ -1706,7 +1724,13 @@ mod tests {
         config.save_to(path.to_str().unwrap()).unwrap();
         let saved = std::fs::read_to_string(&path).unwrap();
         assert!(!saved.contains("fallback"), "{saved}");
-        assert!(Config::load_from(path.to_str().unwrap()).unwrap().cameras.fallback.is_empty());
+        assert!(
+            Config::load_from(path.to_str().unwrap())
+                .unwrap()
+                .cameras
+                .fallback
+                .is_empty()
+        );
     }
 
     #[test]

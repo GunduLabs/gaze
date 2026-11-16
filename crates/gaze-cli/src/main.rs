@@ -660,8 +660,7 @@ async fn handle_test(
     let mut verify_result = None;
     let mut diagnostics = Vec::new();
     let cameras = Config::load().unwrap_or_default().cameras;
-    let deadline =
-        tokio::time::Instant::now() + gaze_core::dbus::verify_client_timeout(&cameras);
+    let deadline = tokio::time::Instant::now() + gaze_core::dbus::verify_client_timeout(&cameras);
 
     loop {
         if let Some(ref mut terminal) = terminal {
@@ -998,12 +997,24 @@ async fn run() -> anyhow::Result<()> {
             result?;
         }
         Commands::AddFace { user, face, camera } => {
-            handle_enroll(&proxy, &user.unwrap_or_else(get_current_user), &face, camera, false)
-                .await?;
+            handle_enroll(
+                &proxy,
+                &user.unwrap_or_else(get_current_user),
+                &face,
+                camera,
+                false,
+            )
+            .await?;
         }
         Commands::RefineFace { user, face, camera } => {
-            handle_enroll(&proxy, &user.unwrap_or_else(get_current_user), &face, camera, true)
-                .await?;
+            handle_enroll(
+                &proxy,
+                &user.unwrap_or_else(get_current_user),
+                &face,
+                camera,
+                true,
+            )
+            .await?;
         }
         Commands::ListFaces { user, json } => {
             handle_list_faces(&proxy, &user.unwrap_or_else(get_current_user), json).await?;

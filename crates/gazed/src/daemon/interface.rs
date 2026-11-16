@@ -318,7 +318,12 @@ impl AuthDaemon {
         let detector_arc = sessions.rgb.detector;
         let recognizer_rgb_arc = sessions.rgb.recognizer;
         let ir_models = sessions.ir;
-        let Some(cameras) = config.cameras.systems().into_iter().nth(camera_system as usize) else {
+        let Some(cameras) = config
+            .cameras
+            .systems()
+            .into_iter()
+            .nth(camera_system as usize)
+        else {
             return Err(fdo::Error::InvalidArgs(format!(
                 "camera system {camera_system} is not configured"
             )));

@@ -127,11 +127,7 @@ fn check_camera_system(
     config_from_file: bool,
 ) {
     let rgb = system.rgb.first();
-    if matches!(
-        system.rgb,
-        gaze_core::config::CameraSources::Ordered(_)
-    ) && !rgb.is_empty()
-    {
+    if matches!(system.rgb, gaze_core::config::CameraSources::Ordered(_)) && !rgb.is_empty() {
         report.pass(
             rgb_name,
             format!(

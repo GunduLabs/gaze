@@ -1790,10 +1790,22 @@ mod tests {
     fn only_a_missing_face_moves_on_to_the_next_camera_system() {
         use super::{VerifyGiveUp, falls_back_to_next_system};
 
-        assert!(falls_back_to_next_system(true, false, Some(VerifyGiveUp::NoFace)));
+        assert!(falls_back_to_next_system(
+            true,
+            false,
+            Some(VerifyGiveUp::NoFace)
+        ));
         assert!(falls_back_to_next_system(true, false, None));
-        assert!(!falls_back_to_next_system(true, false, Some(VerifyGiveUp::NoUsableFrame)));
-        assert!(!falls_back_to_next_system(false, false, Some(VerifyGiveUp::NoFace)));
+        assert!(!falls_back_to_next_system(
+            true,
+            false,
+            Some(VerifyGiveUp::NoUsableFrame)
+        ));
+        assert!(!falls_back_to_next_system(
+            false,
+            false,
+            Some(VerifyGiveUp::NoFace)
+        ));
         assert!(!falls_back_to_next_system(false, false, None));
     }
 
@@ -1801,7 +1813,11 @@ mod tests {
     fn a_face_seen_on_one_camera_system_never_earns_a_second_attempt() {
         use super::{VerifyGiveUp, falls_back_to_next_system};
 
-        assert!(!falls_back_to_next_system(true, true, Some(VerifyGiveUp::NoFace)));
+        assert!(!falls_back_to_next_system(
+            true,
+            true,
+            Some(VerifyGiveUp::NoFace)
+        ));
         assert!(!falls_back_to_next_system(true, true, None));
     }
 

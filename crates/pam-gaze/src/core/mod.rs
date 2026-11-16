@@ -1268,7 +1268,10 @@ mod tests {
         let cameras = gaze_core::config::CameraConfig::default();
         let base = std::time::Duration::from_secs(CAMERA_AUTH_TIMEOUT_SECS);
 
-        assert_eq!(camera_auth_timeout(&auth, &cameras, Some("hyprlock-gaze")), base);
+        assert_eq!(
+            camera_auth_timeout(&auth, &cameras, Some("hyprlock-gaze")),
+            base
+        );
 
         auth.start_delay_ms = 5000;
         assert_eq!(
