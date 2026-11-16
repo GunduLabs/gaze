@@ -932,7 +932,19 @@ impl AuthDaemon {
                                     completed_steps_atomic.store(completed_steps as u32, std::sync::atomic::Ordering::Relaxed);
 
                                     let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, false, EnrollPrompt::Captured, 0.0).await;
-                                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                    // Hold the "Captured" prompt briefly, but keep the live preview
+                                    // flowing: this loop is the only preview forwarder, so a plain
+                                    // sleep froze the picture for half a second at every step.
+                                    let pause = tokio::time::sleep(std::time::Duration::from_millis(500));
+                                    tokio::pin!(pause);
+                                    loop {
+                                        tokio::select! {
+                                            _ = &mut pause => break,
+                                            Some(jpeg) = preview_rx.recv() => {
+                                                let _ = Self::preview_frame(&ctxt, &jpeg).await;
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             EnrollMsg::Error(e) => {
