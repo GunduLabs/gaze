@@ -138,7 +138,6 @@ pub fn estimate_head_pose(kps: &ndarray::Array3<f32>) -> Option<(f32, f32)> {
     (yaw.is_finite() && pitch.is_finite()).then_some((yaw, pitch))
 }
 
-/// Returns true when landmark-derived yaw and pitch indicate the user is facing the camera.
 pub fn is_front_facing(yaw: f32, pitch: f32) -> bool {
     yaw.is_finite() && pitch.is_finite() && yaw.abs() < 0.18 && (0.2..0.8).contains(&pitch)
 }

@@ -51,6 +51,7 @@ pub(super) enum VerifyMsg {
     Success(Spectrum, ndarray::Array1<f32>),
     Duress(Spectrum),
     DuressHeld(Spectrum, f64),
+    AttentionBlocked(Spectrum, bool),
     Unavailable(Spectrum, String),
     Error(String),
 }
@@ -276,6 +277,25 @@ pub fn load_ir_liveness(
 }
 
 pub(super) const ATTENTION_CLOSED_THRESHOLD: f32 = 0.5;
+// One frame of eye state is too noisy to trust with glasses or distance; a run of
+// attentive frames keeps a single misread closed eye from unlocking.
+pub(super) const ATTENTION_REQUIRED_FRAMES: u32 = 3;
+
+#[derive(Default)]
+pub(super) struct AttentionTracker {
+    streak: u32,
+}
+
+impl AttentionTracker {
+    pub(super) fn observe(&mut self, attentive: bool) -> bool {
+        self.streak = if attentive {
+            self.streak.saturating_add(1)
+        } else {
+            0
+        };
+        self.streak >= ATTENTION_REQUIRED_FRAMES
+    }
+}
 
 pub(super) fn eye_closed_probabilities(
     eye_state: &Mutex<Option<EyeStateClassifier>>,
@@ -297,19 +317,15 @@ pub(super) fn eye_closed_probabilities(
     Ok(probabilities)
 }
 
-pub(super) fn attention_satisfied_with_eye_state(
+pub(super) fn frame_is_attentive(
     eye_state: &Mutex<Option<EyeStateClassifier>>,
     data: &FaceData,
     known_eye_probabilities: Option<[f32; 2]>,
 ) -> anyhow::Result<bool> {
-    let Some((yaw, pitch)) = gaze_vision::face::estimate_head_pose(&data.kpss) else {
-        tracing::debug!("Attention check rejected frame: missing head pose");
-        return Ok(false);
-    };
-    if !gaze_vision::face::is_front_facing(yaw, pitch) {
+    if !gaze_vision::face::is_front_facing(data.yaw, data.pitch) {
         tracing::debug!(
-            yaw,
-            pitch,
+            yaw = data.yaw,
+            pitch = data.pitch,
             "Attention check rejected frame: not front-facing"
         );
         return Ok(false);
@@ -327,14 +343,6 @@ pub(super) fn attention_satisfied_with_eye_state(
         return Ok(false);
     }
     Ok(true)
-}
-
-#[cfg(test)]
-pub(super) fn attention_satisfied(
-    eye_state: &Mutex<Option<EyeStateClassifier>>,
-    data: &FaceData,
-) -> anyhow::Result<bool> {
-    attention_satisfied_with_eye_state(eye_state, data, None)
 }
 
 /// One row per enrolled face, holding (name, rgb_sim, rgb_pct, rgb_passed, ir_sim, ir_pct,
@@ -529,10 +537,16 @@ impl AuthDaemon {
                 let _ = Self::verify_diagnostic(&ctxt, DURESS_MODEL_MISSING_DIAGNOSTIC).await;
             }
             if require_attention && eye_state_arc.lock().await.is_none() {
-                let msg = "Attention check is enabled but the eye-state model is unavailable";
-                error!("{msg}");
-                let _ = Self::verify_diagnostic(&ctxt, msg).await;
-                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), CaptureStatus::Unused, CaptureStatus::Unused).await;
+                error!("The attention check is enabled but the eye-state model is unavailable");
+                let _ = Self::verify_diagnostic(&ctxt, ATTENTION_MODEL_MISSING_DIAGNOSTIC).await;
+                let _ = Self::verify_status(
+                    &ctxt,
+                    VerifyResult::VerifyNoMatch,
+                    Vec::new(),
+                    CaptureStatus::Unused,
+                    CaptureStatus::Unused,
+                )
+                .await;
                 return;
             }
 
@@ -782,6 +796,8 @@ impl AuthDaemon {
                         let mut live_scores: Vec<f32> = Vec::new();
                         let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
                         let mut duress = DuressTracker::new(duress_hold);
+                        let mut attention = AttentionTracker::default();
+                        let mut attention_blocked = false;
 
                         while let Some(frame) = cam.next_interruptible(&stop_clone) {
                             if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
@@ -903,6 +919,7 @@ impl AuthDaemon {
                                             return;
                                         }
                                         if closed {
+                                            attention.observe(false);
                                             if status_sent {
                                                 let _ = tx.blocking_send(VerifyMsg::DuressHeld(Spectrum::Rgb, cam.fps()));
                                             }
@@ -911,13 +928,21 @@ impl AuthDaemon {
                                     }
 
                                     if require_attention {
-                                        match attention_satisfied_with_eye_state(&eye_state_arc, &data, eye_probabilities) {
-                                            Ok(true) => {}
-                                            Ok(false) => continue,
+                                        let attentive = match frame_is_attentive(&eye_state_arc, &data, eye_probabilities) {
+                                            Ok(attentive) => attentive,
                                             Err(e) => {
                                                 let _ = tx.blocking_send(VerifyMsg::Error(format!("Attention check failed: {e}")));
                                                 return;
                                             }
+                                        };
+                                        let passed = attention.observe(attentive);
+                                        let blocked = !passed && (attention_blocked || !attentive);
+                                        if blocked != attention_blocked {
+                                            attention_blocked = blocked;
+                                            let _ = tx.blocking_send(VerifyMsg::AttentionBlocked(Spectrum::Rgb, blocked));
+                                        }
+                                        if !passed {
+                                            continue;
                                         }
                                     }
 
@@ -1063,6 +1088,8 @@ impl AuthDaemon {
                         let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
                         let mut ir_live_scores: Vec<f32> = Vec::new();
                         let mut duress = DuressTracker::new(duress_hold);
+                        let mut attention = AttentionTracker::default();
+                        let mut attention_blocked = false;
 
                         while let Some(frame) = cam.next_interruptible(&stop_clone) {
                             if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1157,6 +1184,7 @@ impl AuthDaemon {
                                             return;
                                         }
                                         if closed {
+                                            attention.observe(false);
                                             if status_sent {
                                                 let _ = tx.blocking_send(VerifyMsg::DuressHeld(Spectrum::Ir, cam.fps()));
                                             }
@@ -1165,13 +1193,21 @@ impl AuthDaemon {
                                     }
 
                                     if require_attention {
-                                        match attention_satisfied_with_eye_state(&eye_state_arc, &data, eye_probabilities) {
-                                            Ok(true) => {}
-                                            Ok(false) => continue,
+                                        let attentive = match frame_is_attentive(&eye_state_arc, &data, eye_probabilities) {
+                                            Ok(attentive) => attentive,
                                             Err(e) => {
                                                 let _ = tx.blocking_send(VerifyMsg::Error(format!("Attention check failed: {e}")));
                                                 return;
                                             }
+                                        };
+                                        let passed = attention.observe(attentive);
+                                        let blocked = !passed && (attention_blocked || !attentive);
+                                        if blocked != attention_blocked {
+                                            attention_blocked = blocked;
+                                            let _ = tx.blocking_send(VerifyMsg::AttentionBlocked(Spectrum::Ir, blocked));
+                                        }
+                                        if !passed {
+                                            continue;
                                         }
                                     }
 
@@ -1255,6 +1291,9 @@ impl AuthDaemon {
                 let mut last_face_at = Instant::now();
                 let mut last_usable_at = Instant::now();
                 let mut frame_budget = VerifyFrameBudget::default();
+                let mut rgb_attention_blocked = false;
+                let mut ir_attention_blocked = false;
+                let mut attention_hinted = false;
 
                 let mut rgb_success_embed = None;
                 let mut ir_success_embed = None;
@@ -1379,7 +1418,12 @@ impl AuthDaemon {
                                                 .any(|face| face.3 || face.6);
                                             info!(matched, "VerifyStart: frame budget spent");
                                             if matched {
-                                                let _ = Self::verify_diagnostic(&ctxt, LIVENESS_GATE_DIAGNOSTIC).await;
+                                                let diagnostic = if rgb_attention_blocked || ir_attention_blocked {
+                                                    ATTENTION_GATE_DIAGNOSTIC
+                                                } else {
+                                                    LIVENESS_GATE_DIAGNOSTIC
+                                                };
+                                                let _ = Self::verify_diagnostic(&ctxt, diagnostic).await;
                                             }
                                             let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, final_scores, rgb_status, ir_status).await;
                                             break;
@@ -1450,6 +1494,16 @@ impl AuthDaemon {
                                 }
                                 VerifyMsg::DuressHeld(spectrum, fps) => {
                                     frame_budget.duress_frame_held(spectrum, duress_cfg.effective_hold_frames(fps));
+                                }
+                                VerifyMsg::AttentionBlocked(spectrum, blocked) => {
+                                    match spectrum {
+                                        Spectrum::Rgb => rgb_attention_blocked = blocked,
+                                        Spectrum::Ir => ir_attention_blocked = blocked,
+                                    }
+                                    if blocked && !attention_hinted {
+                                        attention_hinted = true;
+                                        let _ = Self::verify_diagnostic(&ctxt, ATTENTION_HELD_DIAGNOSTIC).await;
+                                    }
                                 }
                                 VerifyMsg::Unavailable(Spectrum::Rgb, reason)
                                     if run_rgb && ir_continues_without_rgb(&hybrid_policy, run_ir) =>
@@ -1534,13 +1588,13 @@ mod tests {
         assert!(budget.frame_spent(Spectrum::Rgb, 2));
     }
 
-    fn test_face_data(kpss: ndarray::Array3<f32>, yaw: f32, pitch: f32) -> FaceData {
+    fn test_face_data(yaw: f32, pitch: f32) -> FaceData {
         FaceData {
             embedding: ndarray::Array1::zeros(0),
             liveness_frame: None,
             frame_size: (300, 300),
             bbox: [0.0, 0.0, 300.0, 300.0],
-            kpss,
+            kpss: ndarray::Array3::zeros((1, 5, 2)),
             yaw,
             pitch,
         }
@@ -1549,46 +1603,32 @@ mod tests {
     #[test]
     fn attention_check_rejects_turned_head_and_fails_closed_without_eye_state() {
         let empty_eye_state: Mutex<Option<EyeStateClassifier>> = Mutex::new(None);
-        let turned_kps = ndarray::Array3::from_shape_vec(
-            (1, 5, 2),
-            vec![
-                100.0, 100.0, // left eye
-                200.0, 100.0, // right eye
-                190.0, 140.0, // nose shifted right (yaw = 0.40)
-                120.0, 180.0, // left mouth
-                180.0, 180.0, // right mouth
-            ],
-        )
-        .unwrap();
-        let turned = test_face_data(turned_kps, 0.40, 0.5);
-        assert!(!attention_satisfied(&empty_eye_state, &turned).unwrap());
+        let turned = test_face_data(0.40, 0.5);
+        assert!(!frame_is_attentive(&empty_eye_state, &turned, None).unwrap());
+        let unknown_pose = test_face_data(f32::NAN, f32::NAN);
+        assert!(!frame_is_attentive(&empty_eye_state, &unknown_pose, None).unwrap());
 
-        let straight_kps = ndarray::Array3::from_shape_vec(
-            (1, 5, 2),
-            vec![
-                100.0, 100.0, // left eye
-                200.0, 100.0, // right eye
-                150.0, 140.0, // centered nose (yaw = 0.0, pitch = 0.5)
-                120.0, 180.0, // left mouth
-                180.0, 180.0, // right mouth
-            ],
-        )
-        .unwrap();
-        let straight = test_face_data(straight_kps, 0.0, 0.5);
-        assert!(attention_satisfied(&empty_eye_state, &straight).is_err());
-        assert!(
-            attention_satisfied_with_eye_state(&empty_eye_state, &straight, Some([0.1, 0.2]))
-                .unwrap()
-        );
+        let straight = test_face_data(0.0, 0.5);
+        assert!(frame_is_attentive(&empty_eye_state, &straight, None).is_err());
+        assert!(frame_is_attentive(&empty_eye_state, &straight, Some([0.1, 0.2])).unwrap());
         // Rejects moderate closed-eye probabilities (>= 0.5) even below the 0.9 duress threshold.
-        assert!(
-            !attention_satisfied_with_eye_state(&empty_eye_state, &straight, Some([0.65, 0.2]))
-                .unwrap()
-        );
-        assert!(
-            !attention_satisfied_with_eye_state(&empty_eye_state, &straight, Some([0.95, 0.1]))
-                .unwrap()
-        );
+        assert!(!frame_is_attentive(&empty_eye_state, &straight, Some([0.65, 0.2])).unwrap());
+        assert!(!frame_is_attentive(&empty_eye_state, &straight, Some([0.95, 0.1])).unwrap());
+    }
+
+    #[test]
+    fn attention_needs_consecutive_attentive_frames() {
+        let mut attention = AttentionTracker::default();
+        for _ in 1..ATTENTION_REQUIRED_FRAMES {
+            assert!(!attention.observe(true));
+        }
+        assert!(!attention.observe(false));
+        for _ in 1..ATTENTION_REQUIRED_FRAMES {
+            assert!(!attention.observe(true));
+        }
+        assert!(attention.observe(true));
+        assert!(attention.observe(true));
+        assert!(!attention.observe(false));
     }
 
     #[test]
