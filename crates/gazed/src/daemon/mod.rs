@@ -63,7 +63,8 @@ const DURESS_LOCKED_DIAGNOSTIC: &str = "Face authentication is locked after a du
 const LID_CLOSED_DIAGNOSTIC: &str = "The laptop lid is closed, so face authentication was skipped.";
 const DURESS_MODEL_MISSING_DIAGNOSTIC: &str = "Duress detection is on, but its eye model could not load, so closed eyes will not lock face authentication. Check `journalctl -u gazed`.";
 const ATTENTION_MODEL_MISSING_DIAGNOSTIC: &str = "The attention check is on, but its eye model could not load, so face authentication is off until it does. Check `journalctl -u gazed`.";
-const ATTENTION_HELD_DIAGNOSTIC: &str = "Face matched. Look at the camera with your eyes open to continue.";
+const ATTENTION_HELD_DIAGNOSTIC: &str =
+    "Face matched. Look at the camera with your eyes open to continue.";
 const ATTENTION_GATE_DIAGNOSTIC: &str = "Face matched, but you were not facing the camera with your eyes open. Look at the screen and try again, or turn off auth.require_attention.";
 const LIVENESS_GATE_DIAGNOSTIC: &str = "Face matched, but the liveness check did not pass. Move slightly and try again, or lower liveness.threshold.";
 const VERIFY_NO_FACE_TIMEOUT: Duration = Duration::from_secs(5);
