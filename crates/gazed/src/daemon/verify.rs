@@ -1069,8 +1069,6 @@ impl AuthDaemon {
                     let ir_liveness_arc = ir_liveness_arc.clone();
                     let ir_device_clone = ir_device.clone();
                     let ir_node_clone = ir_node.clone();
-                    let emitter_enabled = emitter_enabled;
-                    let serial_capture = serial_capture;
                     let rgb_phase_done_clone = rgb_phase_done.clone();
                     let orientation_clone = orientation.clone();
                     let eye_state_arc = eye_state_arc.clone();
