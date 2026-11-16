@@ -839,12 +839,15 @@ impl AuthDaemon {
 
             let mut last_sent_prompt = None;
             let mut aborted = false;
+            let mut hold_until: Option<tokio::time::Instant> = None;
 
-            while completed_steps < max_steps as usize {
-                let prompt = prompts[completed_steps];
-                if last_sent_prompt != Some(prompt) {
-                    let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, false, prompt, 0.0).await;
-                    last_sent_prompt = Some(prompt);
+            while completed_steps < max_steps as usize || hold_until.is_some() {
+                if hold_until.is_none() {
+                    let prompt = prompts[completed_steps];
+                    if last_sent_prompt != Some(prompt) {
+                        let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, false, prompt, 0.0).await;
+                        last_sent_prompt = Some(prompt);
+                    }
                 }
 
                 tokio::select! {
@@ -858,7 +861,10 @@ impl AuthDaemon {
                     Some(jpeg) = preview_rx.recv() => {
                         let _ = Self::preview_frame(&ctxt, &jpeg).await;
                     }
-                    msg_opt = enroll_rx.recv() => {
+                    _ = tokio::time::sleep_until(hold_until.unwrap_or_else(tokio::time::Instant::now)), if hold_until.is_some() => {
+                        hold_until = None;
+                    }
+                    msg_opt = enroll_rx.recv(), if hold_until.is_none() => {
                         let Some(msg) = msg_opt else {
                             warn!("EnrollStart: all capture threads exited before enrollment finished");
                             let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, true, EnrollPrompt::CameraFailed, -1.0).await;
@@ -932,7 +938,7 @@ impl AuthDaemon {
                                     completed_steps_atomic.store(completed_steps as u32, std::sync::atomic::Ordering::Relaxed);
 
                                     let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, false, EnrollPrompt::Captured, 0.0).await;
-                                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                    hold_until = Some(tokio::time::Instant::now() + Duration::from_millis(500));
                                 }
                             }
                             EnrollMsg::Error(e) => {
@@ -953,7 +959,7 @@ impl AuthDaemon {
             let state = claim_state.lock().await;
             if !aborted && claim_has_epoch(&state, claim.epoch) {
                 let mut db = db_arc.lock().await;
-                // Stop/replacement may arrive during the pause after the last capture.
+                // Stop/replacement may arrive between the loop exiting and this lock.
                 let saved = if rx.try_recv() == Err(oneshot::error::TryRecvError::Empty) {
                     let now_secs = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
