@@ -197,7 +197,7 @@ async fn run(mut config: Config) -> anyhow::Result<()> {
         None
     };
 
-    let eye_state = if config.duress.enabled {
+    let eye_state = if config.duress.enabled || config.auth.require_attention {
         match daemon::load_eye_state(&config.inference) {
             Ok(classifier) => Some(classifier),
             Err(e) => {

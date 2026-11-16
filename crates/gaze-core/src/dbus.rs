@@ -120,6 +120,7 @@ impl From<DbusAuthConfig> for AuthConfig {
             abort_before_first_resume: auth.abort_before_first_resume,
             require_confirmation_lock_screen: auth.require_confirmation_lock_screen,
             require_confirmation_elevation: auth.require_confirmation_elevation,
+            require_attention: false,
             resume_grace_ms: auth.resume_grace_ms,
             start_delay_ms: auth.start_delay_ms,
             start_delay_scope: auth.start_delay_scope,

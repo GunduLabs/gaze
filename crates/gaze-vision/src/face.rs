@@ -138,6 +138,10 @@ pub fn estimate_head_pose(kps: &ndarray::Array3<f32>) -> Option<(f32, f32)> {
     (yaw.is_finite() && pitch.is_finite()).then_some((yaw, pitch))
 }
 
+pub fn is_front_facing(yaw: f32, pitch: f32) -> bool {
+    yaw.is_finite() && pitch.is_finite() && yaw.abs() < 0.18 && (0.2..0.8).contains(&pitch)
+}
+
 #[derive(Default)]
 pub struct EnrollmentPoseStability {
     samples: std::collections::VecDeque<(f32, f32)>,
@@ -315,7 +319,7 @@ pub fn enrollment_pose_matches(
     }
 
     match prompt {
-        EnrollPrompt::LookStraight => yaw.abs() < 0.18 && (0.2..0.8).contains(&pitch),
+        EnrollPrompt::LookStraight => is_front_facing(yaw, pitch),
         EnrollPrompt::LookUp => {
             baseline.is_some_and(|(_, base_pitch)| pitch < base_pitch - ENROLL_VERTICAL_POSE_DELTA)
         }

@@ -51,6 +51,7 @@ pub(super) enum VerifyMsg {
     Success(Spectrum, ndarray::Array1<f32>),
     Duress(Spectrum),
     DuressHeld(Spectrum, f64),
+    AttentionBlocked(Spectrum, bool),
     Unavailable(Spectrum, String),
     Error(String),
 }
@@ -275,11 +276,31 @@ pub fn load_ir_liveness(
     IrLivenessDetector::new_with_inference(&path, inference)
 }
 
-pub(super) fn eyes_closed_in_frame(
+pub(super) const ATTENTION_CLOSED_THRESHOLD: f32 = 0.5;
+// One frame of eye state is too noisy to trust with glasses or distance; a run of
+// attentive frames keeps a single misread closed eye from unlocking.
+pub(super) const ATTENTION_REQUIRED_FRAMES: u32 = 3;
+
+#[derive(Default)]
+pub(super) struct AttentionTracker {
+    streak: u32,
+}
+
+impl AttentionTracker {
+    pub(super) fn observe(&mut self, attentive: bool) -> bool {
+        self.streak = if attentive {
+            self.streak.saturating_add(1)
+        } else {
+            0
+        };
+        self.streak >= ATTENTION_REQUIRED_FRAMES
+    }
+}
+
+pub(super) fn eye_closed_probabilities(
     eye_state: &Mutex<Option<EyeStateClassifier>>,
     data: &FaceData,
-    threshold: f32,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<[f32; 2]> {
     let frame = data
         .liveness_frame
         .as_ref()
@@ -289,11 +310,39 @@ pub(super) fn eyes_closed_in_frame(
     let rgb = mat_to_rgb(frame)?;
     let mut guard = eye_state.blocking_lock();
     let classifier = guard.as_mut().ok_or_else(|| {
-        anyhow::anyhow!("duress detection is enabled but the eye-state model is unavailable")
+        anyhow::anyhow!("eye-state check is enabled but the eye-state model is unavailable")
     })?;
     let probabilities = classifier.closed_probabilities(&rgb, [eyes[0], eyes[1]])?;
-    tracing::debug!(?probabilities, threshold, "Duress eye state");
-    Ok(crate::duress::any_eye_closed(probabilities, threshold))
+    tracing::debug!(?probabilities, "Eye state probabilities");
+    Ok(probabilities)
+}
+
+pub(super) fn frame_is_attentive(
+    eye_state: &Mutex<Option<EyeStateClassifier>>,
+    data: &FaceData,
+    known_eye_probabilities: Option<[f32; 2]>,
+) -> anyhow::Result<bool> {
+    if !gaze_vision::face::is_front_facing(data.yaw, data.pitch) {
+        tracing::debug!(
+            yaw = data.yaw,
+            pitch = data.pitch,
+            "Attention check rejected frame: not front-facing"
+        );
+        return Ok(false);
+    }
+    let probabilities = match known_eye_probabilities {
+        Some(probabilities) => probabilities,
+        None => eye_closed_probabilities(eye_state, data)?,
+    };
+    if crate::duress::any_eye_closed(probabilities, ATTENTION_CLOSED_THRESHOLD) {
+        tracing::debug!(
+            ?probabilities,
+            threshold = ATTENTION_CLOSED_THRESHOLD,
+            "Attention check rejected frame: eyes closed"
+        );
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 /// One row per enrolled face, holding (name, rgb_sim, rgb_pct, rgb_passed, ir_sim, ir_pct,
@@ -428,8 +477,9 @@ impl AuthDaemon {
         )?;
         let hybrid_policy = config.security.hybrid_policy().to_string();
         let duress_cfg = config.duress.clone();
+        let require_attention = config.auth.require_attention;
         // D-Bus handlers run on zbus's runtime, so model retries must use the stored Tokio handle.
-        if duress_cfg.enabled && self.eye_state.lock().await.is_none() {
+        if (duress_cfg.enabled || require_attention) && self.eye_state.lock().await.is_none() {
             let inference = config.inference.clone();
             let loading = self
                 .rt_handle
@@ -485,6 +535,19 @@ impl AuthDaemon {
 
             if duress_cfg.enabled && eye_state_arc.lock().await.is_none() {
                 let _ = Self::verify_diagnostic(&ctxt, DURESS_MODEL_MISSING_DIAGNOSTIC).await;
+            }
+            if require_attention && eye_state_arc.lock().await.is_none() {
+                error!("The attention check is enabled but the eye-state model is unavailable");
+                let _ = Self::verify_diagnostic(&ctxt, ATTENTION_MODEL_MISSING_DIAGNOSTIC).await;
+                let _ = Self::verify_status(
+                    &ctxt,
+                    VerifyResult::VerifyNoMatch,
+                    Vec::new(),
+                    CaptureStatus::Unused,
+                    CaptureStatus::Unused,
+                )
+                .await;
+                return;
             }
 
             if duress_locked {
@@ -689,6 +752,7 @@ impl AuthDaemon {
                     let orientation_clone = orientation.clone();
                     let eye_state_arc = eye_state_arc.clone();
                     let duress_enabled = duress_cfg.enabled;
+                    let require_attention = require_attention;
                     let duress_threshold = duress_cfg.effective_closed_threshold();
                     let duress_hold = duress_cfg.effective_hold();
 
@@ -732,6 +796,8 @@ impl AuthDaemon {
                         let mut live_scores: Vec<f32> = Vec::new();
                         let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
                         let mut duress = DuressTracker::new(duress_hold);
+                        let mut attention = AttentionTracker::default();
+                        let mut attention_blocked = false;
 
                         while let Some(frame) = cam.next_interruptible(&stop_clone) {
                             if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
@@ -774,7 +840,7 @@ impl AuthDaemon {
                             let frame = checker.orient(frame);
                             let (status, embed_opt) = {
                                 let mut recognizer = recognizer_rgb_arc.blocking_lock();
-                                match process_frame_sync(&mut checker, &mut recognizer, &frame, liveness_enabled || duress_enabled) {
+                                match process_frame_sync(&mut checker, &mut recognizer, &frame, liveness_enabled || duress_enabled || require_attention) {
                                     Ok(res) => res,
                                     Err(error) => {
                                         let message = format!("RGB inference failed: {error:#}");
@@ -837,22 +903,45 @@ impl AuthDaemon {
 
                                 let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
                                 if matched {
+                                    let mut eye_probabilities = None;
                                     if duress_enabled {
-                                        let closed = match eyes_closed_in_frame(&eye_state_arc, &data, duress_threshold) {
-                                            Ok(closed) => closed,
+                                        let probabilities = match eye_closed_probabilities(&eye_state_arc, &data) {
+                                            Ok(probabilities) => probabilities,
                                             Err(e) => {
                                                 let _ = tx.blocking_send(VerifyMsg::Error(format!("Duress check failed: {e}")));
                                                 return;
                                             }
                                         };
+                                        eye_probabilities = Some(probabilities);
+                                        let closed = crate::duress::any_eye_closed(probabilities, duress_threshold);
                                         if duress.observe(closed, Instant::now()) {
                                             let _ = tx.blocking_send(VerifyMsg::Duress(Spectrum::Rgb));
                                             return;
                                         }
                                         if closed {
+                                            attention.observe(false);
                                             if status_sent {
                                                 let _ = tx.blocking_send(VerifyMsg::DuressHeld(Spectrum::Rgb, cam.fps()));
                                             }
+                                            continue;
+                                        }
+                                    }
+
+                                    if require_attention {
+                                        let attentive = match frame_is_attentive(&eye_state_arc, &data, eye_probabilities) {
+                                            Ok(attentive) => attentive,
+                                            Err(e) => {
+                                                let _ = tx.blocking_send(VerifyMsg::Error(format!("Attention check failed: {e}")));
+                                                return;
+                                            }
+                                        };
+                                        let passed = attention.observe(attentive);
+                                        let blocked = !passed && (attention_blocked || !attentive);
+                                        if blocked != attention_blocked {
+                                            attention_blocked = blocked;
+                                            let _ = tx.blocking_send(VerifyMsg::AttentionBlocked(Spectrum::Rgb, blocked));
+                                        }
+                                        if !passed {
                                             continue;
                                         }
                                     }
@@ -943,6 +1032,7 @@ impl AuthDaemon {
                     let orientation_clone = orientation.clone();
                     let eye_state_arc = eye_state_arc.clone();
                     let duress_enabled = duress_cfg.enabled;
+                    let require_attention = require_attention;
                     let duress_threshold = duress_cfg.effective_closed_threshold();
                     let duress_hold = duress_cfg.effective_hold();
 
@@ -998,6 +1088,8 @@ impl AuthDaemon {
                         let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
                         let mut ir_live_scores: Vec<f32> = Vec::new();
                         let mut duress = DuressTracker::new(duress_hold);
+                        let mut attention = AttentionTracker::default();
+                        let mut attention_blocked = false;
 
                         while let Some(frame) = cam.next_interruptible(&stop_clone) {
                             if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1042,7 +1134,7 @@ impl AuthDaemon {
                             let frame = checker.orient(frame);
                             let (status, embed_opt) = {
                                 let mut recognizer = recognizer_ir_arc.blocking_lock();
-                                match process_frame_sync(&mut checker, &mut recognizer, &frame, ir_model || duress_enabled) {
+                                match process_frame_sync(&mut checker, &mut recognizer, &frame, ir_model || duress_enabled || require_attention) {
                                     Ok(res) => res,
                                     Err(error) => {
                                         let message = format!("IR inference failed: {error:#}");
@@ -1076,22 +1168,45 @@ impl AuthDaemon {
 
                                 let matched = scores.iter().any(|(_, _, _, passed, _)| *passed);
                                 if matched {
+                                    let mut eye_probabilities = None;
                                     if duress_enabled {
-                                        let closed = match eyes_closed_in_frame(&eye_state_arc, &data, duress_threshold) {
-                                            Ok(closed) => closed,
+                                        let probabilities = match eye_closed_probabilities(&eye_state_arc, &data) {
+                                            Ok(probabilities) => probabilities,
                                             Err(e) => {
                                                 let _ = tx.blocking_send(VerifyMsg::Error(format!("Duress check failed: {e}")));
                                                 return;
                                             }
                                         };
+                                        eye_probabilities = Some(probabilities);
+                                        let closed = crate::duress::any_eye_closed(probabilities, duress_threshold);
                                         if duress.observe(closed, Instant::now()) {
                                             let _ = tx.blocking_send(VerifyMsg::Duress(Spectrum::Ir));
                                             return;
                                         }
                                         if closed {
+                                            attention.observe(false);
                                             if status_sent {
                                                 let _ = tx.blocking_send(VerifyMsg::DuressHeld(Spectrum::Ir, cam.fps()));
                                             }
+                                            continue;
+                                        }
+                                    }
+
+                                    if require_attention {
+                                        let attentive = match frame_is_attentive(&eye_state_arc, &data, eye_probabilities) {
+                                            Ok(attentive) => attentive,
+                                            Err(e) => {
+                                                let _ = tx.blocking_send(VerifyMsg::Error(format!("Attention check failed: {e}")));
+                                                return;
+                                            }
+                                        };
+                                        let passed = attention.observe(attentive);
+                                        let blocked = !passed && (attention_blocked || !attentive);
+                                        if blocked != attention_blocked {
+                                            attention_blocked = blocked;
+                                            let _ = tx.blocking_send(VerifyMsg::AttentionBlocked(Spectrum::Ir, blocked));
+                                        }
+                                        if !passed {
                                             continue;
                                         }
                                     }
@@ -1176,6 +1291,9 @@ impl AuthDaemon {
                 let mut last_face_at = Instant::now();
                 let mut last_usable_at = Instant::now();
                 let mut frame_budget = VerifyFrameBudget::default();
+                let mut rgb_attention_blocked = false;
+                let mut ir_attention_blocked = false;
+                let mut attention_hinted = false;
 
                 let mut rgb_success_embed = None;
                 let mut ir_success_embed = None;
@@ -1300,7 +1418,12 @@ impl AuthDaemon {
                                                 .any(|face| face.3 || face.6);
                                             info!(matched, "VerifyStart: frame budget spent");
                                             if matched {
-                                                let _ = Self::verify_diagnostic(&ctxt, LIVENESS_GATE_DIAGNOSTIC).await;
+                                                let diagnostic = if rgb_attention_blocked || ir_attention_blocked {
+                                                    ATTENTION_GATE_DIAGNOSTIC
+                                                } else {
+                                                    LIVENESS_GATE_DIAGNOSTIC
+                                                };
+                                                let _ = Self::verify_diagnostic(&ctxt, diagnostic).await;
                                             }
                                             let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, final_scores, rgb_status, ir_status).await;
                                             break;
@@ -1371,6 +1494,16 @@ impl AuthDaemon {
                                 }
                                 VerifyMsg::DuressHeld(spectrum, fps) => {
                                     frame_budget.duress_frame_held(spectrum, duress_cfg.effective_hold_frames(fps));
+                                }
+                                VerifyMsg::AttentionBlocked(spectrum, blocked) => {
+                                    match spectrum {
+                                        Spectrum::Rgb => rgb_attention_blocked = blocked,
+                                        Spectrum::Ir => ir_attention_blocked = blocked,
+                                    }
+                                    if blocked && !attention_hinted {
+                                        attention_hinted = true;
+                                        let _ = Self::verify_diagnostic(&ctxt, ATTENTION_HELD_DIAGNOSTIC).await;
+                                    }
                                 }
                                 VerifyMsg::Unavailable(Spectrum::Rgb, reason)
                                     if run_rgb && ir_continues_without_rgb(&hybrid_policy, run_ir) =>
@@ -1453,6 +1586,49 @@ mod tests {
         budget.duress_frame_held(Spectrum::Rgb, 10);
         assert!(!budget.frame_spent(Spectrum::Rgb, 2));
         assert!(budget.frame_spent(Spectrum::Rgb, 2));
+    }
+
+    fn test_face_data(yaw: f32, pitch: f32) -> FaceData {
+        FaceData {
+            embedding: ndarray::Array1::zeros(0),
+            liveness_frame: None,
+            frame_size: (300, 300),
+            bbox: [0.0, 0.0, 300.0, 300.0],
+            kpss: ndarray::Array3::zeros((1, 5, 2)),
+            yaw,
+            pitch,
+        }
+    }
+
+    #[test]
+    fn attention_check_rejects_turned_head_and_fails_closed_without_eye_state() {
+        let empty_eye_state: Mutex<Option<EyeStateClassifier>> = Mutex::new(None);
+        let turned = test_face_data(0.40, 0.5);
+        assert!(!frame_is_attentive(&empty_eye_state, &turned, None).unwrap());
+        let unknown_pose = test_face_data(f32::NAN, f32::NAN);
+        assert!(!frame_is_attentive(&empty_eye_state, &unknown_pose, None).unwrap());
+
+        let straight = test_face_data(0.0, 0.5);
+        assert!(frame_is_attentive(&empty_eye_state, &straight, None).is_err());
+        assert!(frame_is_attentive(&empty_eye_state, &straight, Some([0.1, 0.2])).unwrap());
+        // Rejects moderate closed-eye probabilities (>= 0.5) even below the 0.9 duress threshold.
+        assert!(!frame_is_attentive(&empty_eye_state, &straight, Some([0.65, 0.2])).unwrap());
+        assert!(!frame_is_attentive(&empty_eye_state, &straight, Some([0.95, 0.1])).unwrap());
+    }
+
+    #[test]
+    fn attention_needs_consecutive_attentive_frames() {
+        let mut attention = AttentionTracker::default();
+        for _ in 1..ATTENTION_REQUIRED_FRAMES {
+            assert!(!attention.observe(true));
+        }
+        assert!(!attention.observe(false));
+        for _ in 1..ATTENTION_REQUIRED_FRAMES {
+            assert!(!attention.observe(true));
+        }
+        assert!(attention.observe(true));
+        assert!(attention.observe(true));
+        assert!(!attention.observe(false));
     }
 
     #[test]

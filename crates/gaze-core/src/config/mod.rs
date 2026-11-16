@@ -683,6 +683,7 @@ pub struct AuthConfig {
     pub abort_before_first_resume: bool,
     pub require_confirmation_lock_screen: bool,
     pub require_confirmation_elevation: bool,
+    pub require_attention: bool,
     pub resume_grace_ms: u64,
     pub start_delay_ms: u64,
     pub start_delay_scope: String,
@@ -702,6 +703,8 @@ struct AuthConfigFile {
     require_confirmation_lock_screen: Option<bool>,
     #[serde(default)]
     require_confirmation_elevation: Option<bool>,
+    #[serde(default = "default_false")]
+    require_attention: bool,
     #[serde(default = "default_resume_grace_ms")]
     resume_grace_ms: u64,
     #[serde(default = "default_start_delay_ms")]
@@ -726,6 +729,7 @@ impl<'de> Deserialize<'de> for AuthConfig {
                 .require_confirmation_lock_screen
                 .unwrap_or(legacy),
             require_confirmation_elevation: file.require_confirmation_elevation.unwrap_or(legacy),
+            require_attention: file.require_attention,
             resume_grace_ms: file.resume_grace_ms,
             start_delay_ms: file.start_delay_ms,
             start_delay_scope: file.start_delay_scope,
@@ -872,6 +876,7 @@ impl Default for AuthConfig {
             abort_before_first_resume: false,
             require_confirmation_lock_screen: false,
             require_confirmation_elevation: false,
+            require_attention: false,
             resume_grace_ms: default_resume_grace_ms(),
             start_delay_ms: default_start_delay_ms(),
             start_delay_scope: default_start_delay_scope(),
@@ -2088,6 +2093,7 @@ mod tests {
                 abort_before_first_resume: true,
                 require_confirmation_lock_screen: true,
                 require_confirmation_elevation: true,
+                require_attention: false,
                 resume_grace_ms: 3000,
                 start_delay_ms: 1500,
                 start_delay_scope: "screen_lock".to_string(),
@@ -2260,6 +2266,7 @@ mod tests {
         assert!(!config.auth.abort_before_first_resume);
         assert!(!config.auth.require_confirmation_lock_screen);
         assert!(!config.auth.require_confirmation_elevation);
+        assert!(!config.auth.require_attention);
         assert_eq!(config.auth.start_delay_ms, 0);
         assert_eq!(config.enrollment.max_templates, 2);
         assert_eq!(
