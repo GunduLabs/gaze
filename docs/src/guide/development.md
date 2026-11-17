@@ -30,7 +30,7 @@ GStreamer, GTK4, ONNX Runtime, tpm2-tss) already wired up. See the [Nix & NixOS 
 just docker build-rust
 ```
 
-Any recipe also runs inside a container that mirrors CI, so the host needs nothing but Docker.
+The container provides Linux dependencies for Rust builds, Flatpak builds, and Debian packages; the host needs `just` and Docker.
 See [Building without a Linux host](#building-without-a-linux-host-docker).
 
 ### Distro packages
@@ -107,6 +107,43 @@ sudo pacman -S base-devel pkgconf clang llvm \
 `libtss2-dev`/`tpm2-tss-devel`/`tpm2-tss`/`tpm2-0-tss-devel` and `libssl-dev`/`openssl-devel`/`openssl`/`libopenssl-devel` back the
 `tss-esapi` and `openssl-sys` crates (the daemon seals the face-template key to the TPM);
 `gettext-base`/`gettext`/`envsubst` provides `envsubst`, which the `package` recipe below needs.
+
+### Additional dependencies for package builds
+
+`just package` also builds the Plasma 6 System Settings page by default, which needs CMake,
+Extra CMake Modules, Qt 6 Core/DBus/Quick, and KDE Frameworks 6 CoreAddons/I18n/KCMUtils/Kirigami.
+Install these development packages in addition to the libraries above:
+
+::: code-group
+
+```bash [Debian/Ubuntu (except Ubuntu 24.04)]
+sudo apt install cmake extra-cmake-modules qt6-base-dev qt6-declarative-dev \
+  libkf6coreaddons-dev libkf6i18n-dev libkf6kcmutils-dev libkirigami-dev
+```
+
+```bash [Fedora/RHEL]
+sudo dnf install cmake extra-cmake-modules qt6-qtbase-devel qt6-qtdeclarative-devel \
+  kf6-kcoreaddons-devel kf6-ki18n-devel kf6-kcmutils-devel kf6-kirigami-devel
+```
+
+```bash [openSUSE Tumbleweed]
+sudo zypper install --no-recommends cmake kf6-extra-cmake-modules \
+  qt6-base-devel qt6-declarative-devel kf6-kcoreaddons-devel kf6-ki18n-devel \
+  kf6-kcmutils-devel kf6-kirigami-devel
+```
+
+```bash [Arch Linux / Manjaro]
+sudo pacman -S cmake extra-cmake-modules qt6-base qt6-declarative \
+  kcoreaddons ki18n kcmutils kirigami
+```
+
+:::
+
+Ubuntu 24.04 does not have these Plasma 6 build dependencies in the release environment.
+For a `deb` package there, set `GAZE_KCM=legacy` to stage the older System Settings entry;
+that mode is also available for Arch packages. RPM packages always build the Plasma 6 page.
+The Nix development shell is set up for Rust builds and checks, not this packaging toolchain;
+use the Docker workflow below or install the distribution-specific dependencies above.
 
 Both OpenCV 4 and 5 work. On distros that ship OpenCV 5 (such as Arch Linux),
 the `just` recipes automatically point the `opencv` crate at the `opencv5`
@@ -501,11 +538,14 @@ Set `FLATPAK_GPG_SIGN=<key-id>` to sign the repo/bundle; leave it unset for loca
 
 ## Building without a Linux host (Docker)
 
-macOS and Windows can't run any of the recipes above natively. `just docker <target>` runs
-the same `just` target inside a disposable Ubuntu container that mirrors the CI toolchain
-(`packaging/docker/Dockerfile.build`), so this works for `build-rust`, `build-flatpak`,
-`package <deb|rpm|archlinux>`, and so on, with no local Rust/OpenCV/Flatpak setup needed on
-the host:
+`just docker <target>` runs a target inside the Ubuntu build environment defined in
+`packaging/docker/Dockerfile.build`. Use it on macOS or Windows for Rust builds,
+Flatpak builds, and Debian packaging, with no local Rust/OpenCV/Flatpak setup:
+
+RPM packaging requires a Fedora or openSUSE environment with an RPM package database
+for dependency resolution. Build Arch packages in an Arch environment with the libraries
+that the target system provides. The Ubuntu image does not include Bun for `build-docs`;
+follow [Building the docs](#building-the-docs) on the host.
 
 ```bash
 just docker build-rust
@@ -515,7 +555,7 @@ just docker package deb
 
 Requirements on the host:
 
-- Docker (or a Docker-compatible runtime; Colima works on macOS).
+- `just` and Docker (or a Docker-compatible runtime; Colima works on macOS). `just` runs on the host to invoke the Docker recipe.
 - The container runs `--privileged`, which `flatpak-builder`'s ostree backend needs.
 
 Notes:

@@ -11,10 +11,10 @@ hero:
   actions:
     - theme: brand
       text: Get started
-      link: /guide/getting-started
+      link: /main/guide/getting-started
     - theme: alt
       text: Install
-      link: /guide/installation
+      link: /main/guide/installation
     - theme: alt
       text: GitHub
       link: https://github.com/GunduLabs/gaze
@@ -22,27 +22,27 @@ hero:
 features:
   - title: Quick setup
     details: Install Gaze, start the daemon, enroll your face, and try authentication from the terminal.
-    link: /guide/getting-started
+    link: /main/guide/getting-started
     linkText: Start setup
   - title: Desktop login
     details: Set up face unlock for GNOME, KDE Plasma, or Hyprland's hyprlock, or use Gaze with a PAM-based login manager such as SDDM.
-    link: /guide/gnome
+    link: /main/guide/gnome
     linkText: Configure desktop auth
   - title: PAM integration
     details: Use your face for sudo and other programs that authenticate through PAM.
-    link: /guide/pam
+    link: /main/guide/pam
     linkText: Read the PAM guide
   - title: CLI and GUI tools
     details: Add or remove faces, test recognition, and change settings from the terminal or GTK app.
-    link: /guide/cli
+    link: /main/guide/cli
     linkText: See the CLI
   - title: Local-first
     details: Face templates stay on your machine. The daemon performs recognition locally and communicates with the CLI, GUI, and PAM module over DBus.
-    link: /guide/how-it-works
+    link: /main/guide/how-it-works
     linkText: How it works
   - title: Troubleshooting
     details: Fix camera selection, daemon startup, DBus permissions, PAM lockouts, and model issues.
-    link: /guide/troubleshooting
+    link: /main/guide/troubleshooting
     linkText: Debug issues
 ---
 

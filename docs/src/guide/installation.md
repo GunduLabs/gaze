@@ -31,10 +31,11 @@ Check before installing:
 grep -qw avx2 /proc/cpuinfo && echo "AVX2 present" || echo "AVX2 missing"
 ```
 
-Gaze's inference runtime needs AVX2 on x86_64. If your CPU does not support it,
+Gaze's inference runtime needs AVX2 on x86_64; this requirement does not apply to
+arm64. If an x86_64 CPU does not support AVX2,
 the one-line installer stops before making system changes; package installs leave
 `gazed` stopped, though the CLI and PAM modules are still installed. `gaze doctor`
-reports the limitation as well. Face authentication requires a CPU with AVX2;
+reports the limitation as well. Face authentication on x86_64 requires AVX2;
 see [troubleshooting](./troubleshooting) for details.
 
 ## Path A: one-line installer (recommended)
@@ -43,12 +44,14 @@ see [troubleshooting](./troubleshooting) for details.
 curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 ```
 
-The installer adds:
+The installer installs the daemon, CLI, and GUI, then selects desktop packages
+based on the detected session:
 
-- the Gaze daemon and CLI
-- `gaze-gui`
-- the GNOME Shell extension package only when a GNOME desktop session is detected
-- the Cinnamon extension package only when a Cinnamon desktop session is detected
+- GNOME: `gaze-gnome-extension`
+- Cinnamon: `gaze-cinnamon-extension`
+- KDE Plasma: `gaze-kde`
+- Quickshell Omarchy: `gaze-omarchy`
+- Hyprland with hyprlock: `gaze-hyprlock`
 
 The installer also configures package updates where needed and enables the `gazed` daemon. When supported, it enables lock screen face unlock or PolKit confirmation for your current user.
 
@@ -79,7 +82,7 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh -s -- --no-pam
 
 The installer runs as your normal user and asks for `sudo` when it needs it. As root it runs without `sudo`, except on Arch, where AUR helpers refuse to build as root. At the end it checks that the daemon is running and that a PAM service uses Gaze, and lists anything that needs attention instead of reporting success.
 
-On image-based Fedora (Silverblue, Kinoite, Bazzite), packages that cannot be applied live take effect after a reboot. The installer stages the daemon and the authselect profile so both finish on that boot.
+On image-based Fedora (Silverblue, Kinoite, Bazzite), packages that cannot be applied live take effect after a reboot. The installer stages daemon startup for that boot. When PAM setup is enabled and the active authselect profile is compatible, it also stages selection of the Gaze profile; otherwise, follow its manual PAM configuration notice.
 
 ## Path B: manual package install
 
@@ -178,6 +181,26 @@ yay -S --needed gaze-bin gaze-gui-bin
 ```
 
 :::
+
+### Enable PAM on Fedora-compatible systems
+
+The Fedora RPM packages install Gaze's authselect profile, but a manual package
+install does not select it. After installing with DNF or Copr, inspect the
+active profile with `sudo authselect current`, then follow the [Fedora PAM
+instructions](/guide/pam#fedora-and-compatible-rpm-systems) if your existing
+authentication setup can use the Gaze profile.
+
+Selecting the Gaze profile with `--force` replaces the active profile and its
+feature selection. Review the current profile and features first; keep and
+re-enable any features you rely on. Do not switch from an `sssd` or other
+custom authentication profile blindly, since that can change how accounts
+authenticate. Preserve that backend and configure PAM deliberately instead.
+
+For Silverblue, Bazzite, Kinoite, and other OSTree systems, reboot after
+`rpm-ostree install` so the layered packages and authselect profile are present,
+then configure PAM as described above.
+
+### Enable PAM on openSUSE
 
 The openSUSE RPM ships a `pam-config` definition and enables Gaze for `sudo`,
 GDM, and other services that include `common-auth` in its post-install script.

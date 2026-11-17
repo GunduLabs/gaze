@@ -4,6 +4,7 @@
 import { defineVersionedConfig } from "@viteplus/versions";
 import { createHighlighter } from "shiki";
 import fs from "node:fs";
+import path from "node:path";
 
 const INSTALL_CMD = "curl -fsSL https://gaze.gundulabs.com/install.sh | sh";
 
@@ -41,6 +42,16 @@ export default defineVersionedConfig({
         },
       },
     ],
+  },
+  buildEnd(siteConfig) {
+    const currentGuide = path.join(siteConfig.outDir, "main", "guide");
+    const legacyGuide = path.join(siteConfig.outDir, "guide");
+    fs.mkdirSync(legacyGuide, { recursive: true });
+    for (const filename of fs.readdirSync(currentGuide).filter((name) => name.endsWith(".html"))) {
+      const destination = path.join(legacyGuide, filename);
+      const target = `${siteConfig.base ?? "/"}main/guide/${filename}`;
+      fs.writeFileSync(destination, `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${target}"><link rel="canonical" href="${target}"><title>Page moved</title></head><body><script>location.replace(${JSON.stringify(target)} + location.search + location.hash)</script><a href="${target}">Continue to the current guide</a></body></html>\n`);
+    }
   },
   ignoreDeadLinks: false,
   title: "Gaze",

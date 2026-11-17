@@ -37,7 +37,7 @@ At a high level, authentication works as follows:
 5. Gaze compares the embedding with your enrolled profiles. If both RGB and IR cameras are active, it combines their results according to the configured hybrid policy. Depending on that policy, either or both cameras must match, or Gaze can fall back to IR when the scene is dark.
 6. If liveness checks are enabled, MiniFASNet-V2 checks the face crop for spoofing. On the IR camera path, Gaze instead checks for eye movement across frames, plus the FLIR IR anti-spoof model when `liveness.ir_model` is on.
 
-Authentication succeeds when the best similarity and liveness scores both meet their configured thresholds.
+Authentication succeeds when the configured similarity, hybrid-camera, and enabled liveness rules pass.
 
 ## One authentication attempt
 
@@ -119,9 +119,13 @@ while the attempt is held ends it as usual.
     the recognition model produces an embedding, and the embedding is compared against your
     enrolled templates. An embedding is only computed for a `Usable` frame, so a frame that is
     dark or badly framed costs a detection and nothing more.
-11. **Liveness.** On a match, the anti-spoof model scores the face crop, and an eye-motion check
-    runs across frames. Both must pass. A face that matches but fails liveness reports
-    `Face matched, but the liveness check did not pass`.
+11. **RGB liveness.** When liveness is enabled, the anti-spoof model scores matching face
+    crops. It passes when one score meets `liveness.threshold`, or the five strongest
+    finite scores average at least 85% of that threshold. Eye-motion analysis also
+    rejects a sequence confirmed static by at least two usable frame pairs. A face
+    that matches but fails liveness reports
+    `Face matched, but the liveness check did not pass`. The IR path requires positive
+    eye-motion evidence and, when enabled, its separate IR anti-spoof model.
 12. **IR.** By default (`cameras.parallel_capture = "never"`) the IR phase waits for RGB to
     release the camera, then engages the emitter if one is configured. Windows Hello emitters
     strobe, so the IR path tolerates a run of dark frames and only reports darkness after 8

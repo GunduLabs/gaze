@@ -129,7 +129,7 @@ compatible; use Gaze for `sudo`, polkit and the lock screen instead.
 Remove Gaze from the shared stack, or keep it for elevation only:
 
 ```bash
-sudo pam-auth-update --disable gaze gaze-simultaneous
+sudo pam-auth-update --disable gaze gaze-simultaneous gaze-retry
 ```
 
 On openSUSE Tumbleweed, use `pam-config` instead:

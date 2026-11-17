@@ -40,6 +40,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgtk-4-dev \
         libadwaita-1-dev \
         libssl-dev \
+        cmake \
+        extra-cmake-modules \
+        qt6-base-dev \
+        qt6-declarative-dev \
+        libkf6coreaddons-dev \
+        libkf6i18n-dev \
+        libkf6kcmutils-dev \
+        libkirigami-dev \
         gnupg \
         devscripts \
         gettext-base \

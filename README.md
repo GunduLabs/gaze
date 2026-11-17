@@ -31,7 +31,7 @@ curl -fsSL https://gaze.gundulabs.com/install.sh | sh
 
 The installer sets up the Gaze daemon, CLI, and GUI. On openSUSE Tumbleweed (x86_64), it uses the native `zypper` package manager and Gaze's Tumbleweed-specific RPM repository.
 
-It chooses desktop integration based on your session: GNOME gets the GNOME Shell extension, Cinnamon gets `gaze-cinnamon-extension`, KDE Plasma gets `gaze-kde`, and Quickshell Omarchy gets `gaze-omarchy`. On other desktops, the installer skips desktop extensions rather than pulling in GNOME Shell.
+It chooses desktop integration based on your session: GNOME gets the GNOME Shell extension, Cinnamon gets `gaze-cinnamon-extension`, KDE Plasma gets `gaze-kde`, Quickshell Omarchy gets `gaze-omarchy`, and Hyprland with hyprlock gets `gaze-hyprlock`. On other desktops, the installer skips desktop-specific packages rather than pulling in GNOME Shell.
 
 Follow the installer's final status. If a reboot is requested, reboot before running `gaze setup`. Manual desktop activation is covered in the [installation guide](https://gaze.gundulabs.com/guide/installation).
 
@@ -92,6 +92,14 @@ sudo dnf install dnf-plugins-core
 sudo dnf copr enable gundulabs/gaze
 sudo dnf install gaze gaze-gui
 ```
+
+Manual Fedora package installs do not select Gaze's authselect profile. Check
+the active profile first with `sudo authselect current`, then follow the
+[Fedora PAM instructions](https://gaze.gundulabs.com/guide/pam#fedora-and-compatible-rpm-systems).
+Selecting Gaze with `--force` replaces the active profile and feature
+selection, so preserve features you rely on and do not switch from `sssd` or a
+custom authentication profile blindly. On OSTree systems, reboot after
+`rpm-ostree install` before configuring PAM.
 
 **openSUSE Tumbleweed (x86_64)**
 
@@ -258,7 +266,7 @@ up, down, left, and right movements relative to that pose.
 
 ## Building from source
 
-**Dependencies:** Rust 1.85+, [`just` 1.51+](https://github.com/casey/just), [`nfpm`](https://nfpm.goreleaser.com)
+**Dependencies:** Rust 1.92+, [`just` 1.51+](https://github.com/casey/just), [`nfpm`](https://nfpm.goreleaser.com)
 
 ```bash
 # Ubuntu/Debian
@@ -269,7 +277,13 @@ sudo apt install build-essential pkg-config clang libclang-dev \
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
   gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire \
   gettext-base
+```
 
+For `just package`, install the additional KDE build dependencies listed in the
+[development guide](https://gaze.gundulabs.com/guide/development#additional-dependencies-for-package-builds).
+Ubuntu 24.04 uses `GAZE_KCM=legacy` for `deb` packages.
+
+```bash
 # Build
 just build-rust
 
