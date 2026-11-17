@@ -20,7 +20,7 @@ different desktop, you can leave it disabled.
 >
 > Cinnamon's PolKit prompts normally won't let you confirm with an empty password field. When Gaze asks for confirmation, the extension hides that field and focuses the **Authenticate** button. On the unified lock screen, it adds a **Confirm Face Unlock** button.
 >
-> If the extension is **inactive/disabled** under Cinnamon while either toggle is set, Gaze's PAM modules will **safely bypass confirmation** (returning success instantly upon face match) to prevent empty input hangs and user lockouts.
+> If the extension is **inactive/disabled** while either toggle is set, confirmation remains required. The extension provides the graphical confirmation controls for Cinnamon PolKit prompts and supported lock screens. Without it, graphical confirmation may not complete, so use the password prompt or turn off the corresponding confirmation setting in `/etc/gaze/config.toml` and restart `gazed` if you do not want confirmation.
 
 ## Should I enable it?
 

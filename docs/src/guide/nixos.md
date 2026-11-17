@@ -357,4 +357,6 @@ nix develop
 
 The shell provides the Rust toolchain and all native build inputs (OpenCV,
 GStreamer, GTK4, ONNX Runtime, tpm2-tss) with `GAZE_CPU_ORT_PATH` pointing
-`gazed` at the Nix ONNX Runtime, so `cargo build` works out of the box.
+`gazed` at the Nix ONNX Runtime. Build the workspace with `just build-rust`, which keeps
+the daemon and client builds separate as described in the
+[development guide](/guide/development#build-and-test-rust-components).

@@ -345,7 +345,7 @@ The handoff follows [KWallet PAM's auth/session implementation](https://github.c
 
 ## Managing it by hand
 
-`gaze-kde-pam` is the same helper the package's install and removal scripts call:
+Use `gaze-kde-pam` to manage Gaze's KDE PAM integration:
 
 ```bash
 sudo gaze-kde-pam enable         # lock screen

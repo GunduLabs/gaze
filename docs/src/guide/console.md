@@ -141,7 +141,7 @@ On Debian and Ubuntu, drop Gaze from the shared stack and re-add it only where
 you want it:
 
 ```bash
-sudo pam-auth-update --disable gaze gaze-simultaneous
+sudo pam-auth-update --disable gaze gaze-simultaneous gaze-retry
 ```
 
 Then follow

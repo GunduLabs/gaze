@@ -21,7 +21,8 @@ and will be removed; it does nothing that `pam_gaze.so simultaneous` does not.
 In sequential mode (the default), Gaze tries face authentication first and then
 falls back to the password prompt. With the `simultaneous` option (for example,
 `pam_gaze.so simultaneous`), face authentication and the password prompt run at
-the same time. The `retry` option (for example, `pam_gaze.so retry`) adds a
+the same time for interactive terminal prompts and PolKit. For other services,
+such as LightDM, Gaze scans first and then offers the password prompt. The `retry` option (for example, `pam_gaze.so retry`) adds a
 second Gaze entry *below* the password module, giving face authentication one
 more chance after a rejected password. See
 [Retry after a rejected password](#retry-after-a-rejected-password).
@@ -474,9 +475,9 @@ auth    sufficient    pam_unix.so try_first_pass nullok
 auth    sufficient    pam_gaze.so retry
 ```
 
-The first line still gives you face-or-password. The third line is what catches
-a typo: the password is rejected, and Gaze looks once more instead of failing
-the attempt outright.
+The first line still gives you face-or-password. If you submit a mistyped
+password before the first scan reaches a verdict, the third line gives Gaze
+another look. A completed face mismatch suppresses that retry, as described below.
 
 The password module must not be `required`. Once a `required` module has
 failed, PAM fails the whole stack whatever a later `sufficient` line returns,

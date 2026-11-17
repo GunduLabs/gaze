@@ -140,25 +140,26 @@ sudo systemctl disable gazed
 ::: code-group
 
 ```bash [Debian/Ubuntu]
-sudo apt remove --purge gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde
+sudo apt remove --purge gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde gaze-omarchy
 sudo apt autoremove
 ```
 
 ```bash [Fedora and compatible]
-sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde
+sudo dnf remove gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde gaze-omarchy
 ```
 
 ```bash [openSUSE Tumbleweed]
-sudo zypper remove gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde
+sudo zypper remove gaze gaze-gui gaze-gnome-extension gaze-cinnamon-extension gaze-hyprlock gaze-kde gaze-omarchy
 ```
 
 ```bash [Arch Linux / Manjaro]
+# Remove debug split packages first; they can depend on the main packages.
+pacman -Q | awk '/^gaze-.*-debug /{print $1}' | xargs -r sudo pacman -Rns --noconfirm
 # Drop any name that isn't installed; -Rns errors out on an unknown package.
-sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin gaze-hyprlock-bin gaze-kde-bin
+sudo pacman -Rns gaze-bin gaze-gui-bin gaze-gnome-extension-bin gaze-hyprlock-bin gaze-kde-bin gaze-omarchy-bin
 # If you installed the Cinnamon extension, remove it too (check the exact name with `pacman -Qs gaze`):
 sudo pacman -Rns gaze-cinnamon-extension-bin
-# AUR builds may also have installed -debug split packages:
-pacman -Q | awk '/^gaze.*-debug /{print $1}' | xargs -r sudo pacman -Rns --noconfirm
+# For a source-built Omarchy integration, remove gaze-omarchy instead of gaze-omarchy-bin.
 ```
 
 ```bash [Flatpak (GUI only)]
@@ -197,6 +198,8 @@ sudo dnf makecache
 ```
 
 ```bash [Arch Linux / Manjaro]
+# Remove debug split packages first; they can depend on the main packages.
+pacman -Q | awk '/^gaze-.*-debug /{print $1}' | xargs -r sudo pacman -Rns --noconfirm
 # AUR installs do not add a Gundu Labs pacman repo.
 # Only run this if you previously configured the old pacman repo.
 sudo sed -i '/^\[gaze\]/,/^$/d' /etc/pacman.conf
