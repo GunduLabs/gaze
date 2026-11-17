@@ -170,10 +170,12 @@ pub(super) fn config_findings(config: &Config) -> Vec<Check> {
         );
     }
     if let Err(err) = config.cameras.validate() {
-        error(
-            err.to_string(),
-            "Use never, auto, or always for cameras.parallel_capture.",
-        );
+        let fix = if format!("{err:#}").contains("cameras.fallback") {
+            "Give each [[cameras.fallback]] entry its own rgb or ir camera, with at most three entries."
+        } else {
+            "Use never, auto, or always for cameras.parallel_capture."
+        };
+        error(format!("{err:#}"), fix);
     }
     if let Err(err) = config.inference.validate() {
         let fix = "Use cpu/cpu, auto/npu, openvino/cpu, openvino/gpu, openvino/npu, or vitis/npu in [inference].";
@@ -188,7 +190,8 @@ pub(super) fn config_findings(config: &Config) -> Vec<Check> {
             "Set cameras.rgb to \"primary\" or configure an IR camera.",
         );
     }
-    for rgb in rgb.iter() {
+    let systems = config.cameras.systems();
+    for rgb in systems.iter().flat_map(|system| system.rgb.iter()) {
         if let Some(index) = rgb.strip_prefix("/dev/video") {
             if index.is_empty() || !index.chars().all(|c| c.is_ascii_digit()) {
                 error(
@@ -269,7 +272,20 @@ pub(super) fn config_findings(config: &Config) -> Vec<Check> {
             fix: Some("Configure cameras.ir or disable emitter_enabled.".to_string()),
         });
     }
-    if config.cameras.parallel_capture() == "always" && !ir.is_empty() {
+    for (index, system) in config.cameras.fallback.iter().enumerate() {
+        if system.emitter_enabled && system.ir.trim().is_empty() {
+            findings.push(Check {
+                level: Level::Warning,
+                name: "IR emitter",
+                message: format!(
+                    "cameras.fallback entry {} sets emitter_enabled but no ir camera",
+                    index + 1
+                ),
+                fix: Some("Set ir in that entry or disable its emitter_enabled.".to_string()),
+            });
+        }
+    }
+    if config.cameras.parallel_capture() == "always" && config.cameras.has_ir() {
         findings.push(Check {
             level: Level::Warning,
             name: "Parallel capture",
@@ -325,7 +341,7 @@ pub(super) fn config_findings(config: &Config) -> Vec<Check> {
                 .to_string(),
             fix: Some("Enable [liveness] or remove ir_model.".to_string()),
         });
-    } else if config.liveness.ir_model && ir.is_empty() {
+    } else if config.liveness.ir_model && !config.cameras.has_ir() {
         findings.push(Check {
             level: Level::Warning,
             name: "IR anti-spoof model",

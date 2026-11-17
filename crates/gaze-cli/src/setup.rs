@@ -145,7 +145,7 @@ pub async fn run(proxy: &GazeProxy<'_>) -> anyhow::Result<()> {
                 }
             })
             .interact_text()?;
-        crate::handle_enroll(proxy, &user, name.trim(), false).await?;
+        crate::handle_enroll(proxy, &user, name.trim(), 0, false).await?;
     }
     crate::handle_test(proxy, &user, false, false).await?;
     println!("Checking desktop integration…");

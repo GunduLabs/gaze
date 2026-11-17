@@ -316,6 +316,7 @@ impl AuthDaemon {
                     requested.liveness.ir_threshold = current.liveness.ir_threshold;
                     requested.cameras.inherit_nonphysical_rgb(&current.cameras);
                     requested.cameras.inherit_ir_bridge_source(&current.cameras);
+                    requested.cameras.inherit_fallback(&current.cameras);
                     requested
                         .security
                         .validate()

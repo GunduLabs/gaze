@@ -57,6 +57,14 @@ dark_luma_threshold = 20
 # Turn camera frames upright on 2-in-1s held in portrait or upside down, using the
 # auto-rotate sensor (iio-sensor-proxy). Has no effect on machines without one.
 auto_rotate = true
+# More RGB and IR pairs (e.g. the rear cameras on a convertible), tried in order when
+# the cameras above see no face. Each entry sets its own cameras; nothing above is
+# inherited except dark_luma_threshold, parallel_capture, and auto_rotate. Up to three.
+# Enroll on each with `gaze add-face <name> --camera 1`.
+# [[cameras.fallback]]
+# rgb = "usb:045e:0991"
+# ir = "/dev/video6"
+# emitter_enabled = true
 
 [auth]
 abort_if_ssh = true
