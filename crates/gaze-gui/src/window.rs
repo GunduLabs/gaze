@@ -523,7 +523,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
                     // Without a deadline of its own the button stays stuck for as long as the
                     // daemon withholds a verdict.
-                    let deadline = glib::timeout_future(gaze_core::dbus::VERIFY_CLIENT_TIMEOUT);
+                    let cameras = gaze_core::config::Config::load().unwrap_or_default().cameras;
+                    let deadline =
+                        glib::timeout_future(gaze_core::dbus::verify_client_timeout(&cameras));
                     let mut deadline = std::pin::pin!(deadline);
                     let mut text = loop {
                         match futures::future::select(stream.next(), deadline.as_mut()).await {

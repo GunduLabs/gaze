@@ -81,6 +81,21 @@ impl VerifyGiveUp {
     }
 }
 
+pub(super) fn falls_back_to_next_system(
+    has_fallback: bool,
+    face_seen: bool,
+    give_up: Option<VerifyGiveUp>,
+) -> bool {
+    has_fallback && !face_seen && matches!(give_up, None | Some(VerifyGiveUp::NoFace))
+}
+
+struct VerifySystem {
+    cameras: gaze_core::config::CameraConfig,
+    sources: gaze_vision::camera::ConfiguredCameraSources,
+    run_rgb: bool,
+    run_ir: bool,
+}
+
 /// Bound both missing faces and unusable frames: `Clipped` and `Ready` refresh only
 /// the face deadline, so framing problems cannot keep verification alive forever.
 pub(super) fn verify_give_up(since_face: Duration, since_usable: Duration) -> Option<VerifyGiveUp> {
@@ -463,12 +478,15 @@ impl AuthDaemon {
             "Face auth requested"
         );
         let abort_if_lid_closed = config.auth.abort_if_lid_closed;
-        let sources = resolve_configured_sources(&config.cameras);
-        let rgb_device = sources.rgb;
-        let ir_device = sources.ir;
-        let ir_node = sources.ir_node;
-        let emitter_enabled = config.cameras.emitter_enabled;
-        let serial_capture = sources.serial_capture;
+        let camera_systems = config
+            .cameras
+            .systems()
+            .into_iter()
+            .map(|cameras| {
+                let sources = resolve_configured_sources(&cameras);
+                (cameras, sources)
+            })
+            .collect::<Vec<_>>();
         let liveness_cfg = config.liveness.clone();
         validate_keyring_verification(
             require_keyring,
@@ -574,14 +592,30 @@ impl AuthDaemon {
             }
             drop(db);
 
-            let (run_rgb, run_ir) = auth_streams(
-                rgb_device.first(),
-                &ir_device,
-                has_rgb_templates,
-                has_ir_templates,
-            );
+            let mut any_streams = false;
+            let mut systems = Vec::new();
+            for (index, (cameras, sources)) in camera_systems.into_iter().enumerate() {
+                let (run_rgb, run_ir) = auth_streams(
+                    sources.rgb.first(),
+                    &sources.ir,
+                    has_rgb_templates,
+                    has_ir_templates,
+                );
+                if !run_rgb && !run_ir {
+                    continue;
+                }
+                any_streams = true;
+                if and_policy_unsatisfiable(&hybrid_policy, sources.rgb.first(), &sources.ir, run_rgb, run_ir) {
+                    warn!(
+                        camera_system = index,
+                        "Hybrid policy \"and\" cannot be met on this camera system; skipping it"
+                    );
+                    continue;
+                }
+                systems.push(VerifySystem { cameras, sources, run_rgb, run_ir });
+            }
 
-            if !run_rgb && !run_ir {
+            if !any_streams {
                 error!("No matching templates or cameras configured for auth");
                 let _ = Self::verify_diagnostic(&ctxt, "No enrolled face matches a configured camera. Enroll a face, or check the camera settings.").await;
                 // Idle rather than no-face: nothing a retry could change.
@@ -589,10 +623,8 @@ impl AuthDaemon {
                 return;
             }
 
-            if and_policy_unsatisfiable(&hybrid_policy, rgb_device.first(), &ir_device, run_rgb, run_ir) {
+            if systems.is_empty() {
                 error!(
-                    run_rgb,
-                    run_ir,
                     has_rgb_templates,
                     has_ir_templates,
                     "Hybrid policy \"and\" requires both spectra but {} has no {} templates; \
@@ -611,6 +643,7 @@ impl AuthDaemon {
             let mut delay = delay;
             let mut lid_wait = lid_wait;
             let mut held = false;
+            let mut system_index = 0usize;
             loop {
                 match hold_for_sleep(&mut sleeping, &mut rx, lid_wait).await {
                     SleepHold::Awake => {}
@@ -699,8 +732,17 @@ impl AuthDaemon {
                     delay = Duration::from_millis(config.auth.resume_grace_ms);
                     continue;
                 }
-                let mut run_rgb = run_rgb;
-                let mut run_ir = run_ir;
+                let system = &systems[system_index];
+                let has_fallback = system_index + 1 < systems.len();
+                let rgb_device = system.sources.rgb.clone();
+                let ir_device = system.sources.ir.clone();
+                let ir_node = system.sources.ir_node.clone();
+                let serial_capture = system.sources.serial_capture;
+                let emitter_enabled = system.cameras.emitter_enabled;
+                let mut system_config: Config = (*config).clone();
+                system_config.cameras = system.cameras.clone();
+                let mut run_rgb = system.run_rgb;
+                let mut run_ir = system.run_ir;
                 if run_ir && rgb_verifies_without_ir(&hybrid_policy, run_rgb) {
                     let source = ir_device.clone();
                     let disconnected = tokio::task::spawn_blocking(move || {
@@ -724,6 +766,7 @@ impl AuthDaemon {
                     run_rgb = run_rgb,
                     run_ir = run_ir,
                     serial_capture = serial_capture,
+                    camera_system = system_index,
                     "VerifyStart: sensing faces for user {}",
                     username
                 );
@@ -739,7 +782,7 @@ impl AuthDaemon {
                     let stop_clone = stop_flag.clone();
                     let tx = result_tx.clone();
                     let detector_arc = detector_arc.clone();
-                    let config_clone = config.clone();
+                    let config_clone = system_config.clone();
                     let recognizer_rgb_arc = recognizer_rgb_arc.clone();
                     let liveness_arc = liveness_arc.clone();
                     let db_arc = db_arc.clone();
@@ -1016,7 +1059,7 @@ impl AuthDaemon {
                     let stop_clone = stop_flag.clone();
                     let tx = result_tx.clone();
                     let detector_arc = ir_models.detector;
-                    let config_clone = config.clone();
+                    let config_clone = system_config.clone();
                     let recognizer_ir_arc = ir_models.recognizer;
                     let db_arc = db_arc.clone();
                     let username_clone = username.clone();
@@ -1026,8 +1069,6 @@ impl AuthDaemon {
                     let ir_liveness_arc = ir_liveness_arc.clone();
                     let ir_device_clone = ir_device.clone();
                     let ir_node_clone = ir_node.clone();
-                    let emitter_enabled = emitter_enabled;
-                    let serial_capture = serial_capture;
                     let rgb_phase_done_clone = rgb_phase_done.clone();
                     let orientation_clone = orientation.clone();
                     let eye_state_arc = eye_state_arc.clone();
@@ -1284,6 +1325,8 @@ impl AuthDaemon {
 
                 let mut last_emitted_status: Option<CaptureStatus> = None;
                 let mut suspended = false;
+                let mut fallback_reason: Option<String> = None;
+                let mut face_seen = false;
                 let mut rgb_status = CaptureStatus::Unused;
                 let mut ir_status = CaptureStatus::Unused;
                 let mut rgb_attempted = false;
@@ -1364,7 +1407,11 @@ impl AuthDaemon {
                             if let Some(give_up) = verify_give_up(last_face_at.elapsed(), last_usable_at.elapsed()) {
                                 info!("VerifyStart: {}", give_up.reason());
                                 stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                if falls_back_to_next_system(has_fallback, face_seen, Some(give_up)) {
+                                    fallback_reason = Some("No face found".to_string());
+                                } else {
+                                    let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                }
                                 break;
                             }
                         }
@@ -1406,6 +1453,7 @@ impl AuthDaemon {
 
                                     if status.indicates_face() {
                                         last_face_at = Instant::now();
+                                        face_seen = true;
                                     }
 
                                     if has_face {
@@ -1452,7 +1500,11 @@ impl AuthDaemon {
                                                 VERIFY_TOO_DARK_TIMEOUT.as_millis()
                                             );
                                             stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                            let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                            if falls_back_to_next_system(has_fallback, face_seen, None) {
+                                                fallback_reason = Some("The camera image is too dark".to_string());
+                                            } else {
+                                                let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                            }
                                             break;
                                         }
                                     } else {
@@ -1462,7 +1514,11 @@ impl AuthDaemon {
                                     if let Some(give_up) = verify_give_up(last_face_at.elapsed(), last_usable_at.elapsed()) {
                                         info!("VerifyStart: {}", give_up.reason());
                                         stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                                        let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                        if falls_back_to_next_system(has_fallback, face_seen, Some(give_up)) {
+                                            fallback_reason = Some("No face found".to_string());
+                                        } else {
+                                            let _ = Self::verify_status(&ctxt, VerifyResult::VerifyNoMatch, Vec::new(), rgb_status, ir_status).await;
+                                        }
                                         break;
                                     }
 
@@ -1529,6 +1585,14 @@ impl AuthDaemon {
                                         break;
                                     }
                                 }
+                                VerifyMsg::Unavailable(_, reason)
+                                    if falls_back_to_next_system(has_fallback, face_seen, None) =>
+                                {
+                                    warn!("VerifyStart: {reason}");
+                                    stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                                    fallback_reason = Some(reason);
+                                    break;
+                                }
                                 VerifyMsg::Error(e) | VerifyMsg::Unavailable(_, e) => {
                                     error!("VerifyStart loop error: {e}");
                                     stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1557,9 +1621,17 @@ impl AuthDaemon {
                 })
                 .await;
 
+                if let Some(reason) = fallback_reason {
+                    system_index += 1;
+                    info!(camera_system = system_index, "VerifyStart: {reason}; trying the next camera system");
+                    let _ = Self::verify_diagnostic(&ctxt, &format!("{reason}; trying the next camera")).await;
+                    delay = Duration::ZERO;
+                    continue;
+                }
                 if !suspended {
                     break;
                 }
+                system_index = 0;
                 held = true;
                 delay = Duration::from_millis(config.auth.resume_grace_ms);
             }
@@ -1710,6 +1782,51 @@ mod tests {
         assert!(VERIFY_WATCHDOG_POLL < VERIFY_TOO_DARK_TIMEOUT);
         assert!(VERIFY_WATCHDOG_POLL < VERIFY_NO_USABLE_TIMEOUT);
         assert!(!VERIFY_WATCHDOG_POLL.is_zero());
+    }
+
+    #[test]
+    fn only_a_missing_face_moves_on_to_the_next_camera_system() {
+        use super::{VerifyGiveUp, falls_back_to_next_system};
+
+        assert!(falls_back_to_next_system(
+            true,
+            false,
+            Some(VerifyGiveUp::NoFace)
+        ));
+        assert!(falls_back_to_next_system(true, false, None));
+        assert!(!falls_back_to_next_system(
+            true,
+            false,
+            Some(VerifyGiveUp::NoUsableFrame)
+        ));
+        assert!(!falls_back_to_next_system(
+            false,
+            false,
+            Some(VerifyGiveUp::NoFace)
+        ));
+        assert!(!falls_back_to_next_system(false, false, None));
+    }
+
+    #[test]
+    fn a_face_seen_on_one_camera_system_never_earns_a_second_attempt() {
+        use super::{VerifyGiveUp, falls_back_to_next_system};
+
+        assert!(!falls_back_to_next_system(
+            true,
+            true,
+            Some(VerifyGiveUp::NoFace)
+        ));
+        assert!(!falls_back_to_next_system(true, true, None));
+    }
+
+    #[test]
+    fn a_camera_system_gives_up_on_a_missing_face_within_its_client_budget() {
+        use super::{VERIFY_NO_FACE_TIMEOUT, VERIFY_SERIAL_RGB_BUDGET};
+
+        assert!(
+            VERIFY_SERIAL_RGB_BUDGET + VERIFY_NO_FACE_TIMEOUT
+                < gaze_core::config::CAMERA_FALLBACK_BUDGET
+        );
     }
 
     #[test]

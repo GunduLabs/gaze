@@ -228,6 +228,7 @@ impl From<DbusCameraConfig> for CameraConfig {
             dark_luma_threshold: cameras.dark_luma_threshold,
             parallel_capture: cameras.parallel_capture,
             auto_rotate: true,
+            fallback: Vec::new(),
         }
     }
 }
@@ -556,6 +557,10 @@ pub async fn gazed_unit_state_on(connection: &zbus::Connection) -> anyhow::Resul
 /// Verification client deadline; the daemon expires first.
 /// Reaching this deadline means it stopped answering, not that it rejected a face.
 pub const VERIFY_CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+pub fn verify_client_timeout(cameras: &CameraConfig) -> std::time::Duration {
+    VERIFY_CLIENT_TIMEOUT + cameras.fallback_budget()
+}
 
 pub async fn connect_gaze() -> zbus::Result<GazeProxy<'static>> {
     // PAM hosts must never interpret caller-controlled bus addresses, including unixexec.
@@ -981,6 +986,7 @@ pub trait Gaze {
     ) -> zbus::Result<()>;
 
     async fn enroll_start(&self, face_name: &str) -> zbus::Result<()>;
+    async fn enroll_start_on(&self, face_name: &str, camera_system: u32) -> zbus::Result<()>;
     async fn enroll_stop(&self) -> zbus::Result<()>;
 
     async fn list_faces(&self, username: &str) -> zbus::Result<Vec<(String, u32, bool, bool)>>;

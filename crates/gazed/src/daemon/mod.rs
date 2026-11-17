@@ -455,7 +455,7 @@ pub struct ModelSessions {
 }
 
 fn ir_models_needed(config: &Config) -> bool {
-    !config.cameras.ir.trim().is_empty()
+    config.cameras.has_ir()
 }
 
 impl ModelSessions {
@@ -571,6 +571,18 @@ mod tests {
             config.cameras.ir = source.into();
             assert!(ir_models_needed(&config));
         }
+
+        config.cameras.ir = String::new();
+        config.cameras.fallback = vec![gaze_core::config::CameraSystem {
+            rgb: "usb:045e:0991".into(),
+            ir: "/dev/video6".into(),
+            ir_frame_width: None,
+            ir_frame_height: None,
+            emitter_enabled: false,
+            ir_source_marker: None,
+            ir_source_driver: None,
+        }];
+        assert!(ir_models_needed(&config));
     }
 
     #[test]

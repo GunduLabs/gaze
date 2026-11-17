@@ -291,6 +291,16 @@ impl AuthDaemon {
         #[zbus(header)] header: Header<'_>,
         face_name: String,
     ) -> fdo::Result<()> {
+        self.enroll_start_on(ctxt, header, face_name, 0).await
+    }
+
+    async fn enroll_start_on(
+        &self,
+        #[zbus(signal_emitter)] ctxt: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        face_name: String,
+        camera_system: u32,
+    ) -> fdo::Result<()> {
         let claim = self.check_claim(&header).await?;
         let username = claim.username.clone();
         Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
@@ -308,11 +318,23 @@ impl AuthDaemon {
         let detector_arc = sessions.rgb.detector;
         let recognizer_rgb_arc = sessions.rgb.recognizer;
         let ir_models = sessions.ir;
-        let sources = resolve_configured_sources(&config.cameras);
+        let Some(cameras) = config
+            .cameras
+            .systems()
+            .into_iter()
+            .nth(camera_system as usize)
+        else {
+            return Err(fdo::Error::InvalidArgs(format!(
+                "camera system {camera_system} is not configured"
+            )));
+        };
+        let sources = resolve_configured_sources(&cameras);
         let rgb_device = sources.rgb;
         let ir_device = sources.ir;
         let ir_node = sources.ir_node;
-        let emitter_enabled = config.cameras.emitter_enabled;
+        let emitter_enabled = cameras.emitter_enabled;
+        let mut system_config: Config = (*config).clone();
+        system_config.cameras = cameras;
         let conn = ctxt.connection().clone();
         let path = ctxt.path().to_owned();
         let claim_state = self.claim_state.clone();
@@ -394,7 +416,7 @@ impl AuthDaemon {
                 let stop_clone = stop_flag.clone();
                 let tx = enroll_tx.clone();
                 let detector_arc = detector_arc.clone();
-                let config_clone = config.clone();
+                let config_clone = system_config.clone();
                 let recognizer_rgb_arc = recognizer_rgb_arc.clone();
                 let completed_steps_clone = completed_steps_atomic.clone();
                 let rgb_device_clone = rgb_device.clone();
@@ -602,7 +624,7 @@ impl AuthDaemon {
                 let stop_clone = stop_flag.clone();
                 let tx = enroll_tx.clone();
                 let detector_arc = ir_models.detector;
-                let config_clone = config.clone();
+                let config_clone = system_config.clone();
                 let recognizer_ir_arc = ir_models.recognizer;
                 let completed_steps_clone = completed_steps_atomic.clone();
                 let ir_device_clone = ir_device.clone();

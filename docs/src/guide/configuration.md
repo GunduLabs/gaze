@@ -253,7 +253,8 @@ camera outside your list. The list is retried on each new capture, so docking
 and undocking do not require editing the config or restarting `gazed`.
 
 Fallback is only for opening the camera: dark frames, no face, a non-match, or a
-liveness failure do not switch to another source. Existing single-string values
+liveness failure do not switch to another source. To move on when a camera sees
+no face, use [multiple camera systems](#multiple-camera-systems). Existing single-string values
 keep their behavior. An empty list (like `rgb = ""`) disables RGB; omitting the
 key still defaults to `"primary"`.
 
@@ -268,6 +269,58 @@ For lid-closed use, also set `abort_if_lid_closed = false` in `[auth]`; camera
 fallback does not override that authentication policy. `primary` still means
 the first color node, not necessarily the built-in camera; pin the fallback
 explicitly if you need a particular device.
+
+### Multiple camera systems
+
+Convertible laptops such as the Surface Book have a front and a rear camera,
+each with its own RGB and IR sensor. List the extra pairs as
+`[[cameras.fallback]]` entries after the `[cameras]` keys:
+
+```toml
+[cameras]
+rgb = "usb:045e:0990"   # front
+ir = "/dev/video2"
+emitter_enabled = true
+
+[[cameras.fallback]]
+rgb = "usb:045e:0991"   # rear
+ir = "/dev/video6"
+emitter_enabled = true
+```
+
+Authentication starts with the `[cameras]` pair. If it never sees a face, only
+dark frames, or cannot be opened, Gaze releases it and tries the next entry, in
+order. Once a camera system has seen a face, Gaze does not move on: a non-match,
+a liveness failure, or a face that stays badly framed ends the attempt as before,
+so a fallback never gives an impostor extra tries.
+
+- Each entry sets its own `rgb` (a single source or an ordered list), `ir`,
+  `emitter_enabled`, `ir_frame_width`/`ir_frame_height`, and
+  `ir_source_marker`/`ir_source_driver`. None of these are copied from
+  `[cameras]`, so a front RGB camera is never paired with a rear IR camera.
+  Leave `rgb` out for an IR-only entry.
+- `dark_luma_threshold`, `parallel_capture`, `auto_rotate`, and the nonphysical
+  RGB opt-ins come from `[cameras]` and apply to every entry.
+- An entry needs at least one of `rgb` or `ir`. Up to three entries are tried.
+- Each entry adds up to 10 seconds before a scan gives up, and PAM, `gaze test`,
+  and the GUI wait that much longer. A face found on the first pair is matched as
+  quickly as before.
+
+Different sensors can produce different images, especially in IR. Enroll a face
+on each camera system so every one has its own templates:
+
+```bash
+gaze add-face front
+gaze add-face rear --camera 1   # 1 is the first [[cameras.fallback]] entry
+```
+
+`gaze refine-face` takes `--camera` too, and the GUI's Add Face dialog shows a
+Camera choice when fallback systems are configured. Faces from all camera
+systems are matched together, so either camera can unlock.
+
+Fallback systems can only be set in `/etc/gaze/config.toml`. `gaze config set`
+cannot change them, and saving settings from the GUI keeps them. Restart `gazed`
+after editing them. `gaze doctor` checks every camera system.
 
 ### Dark-frame rejection
 

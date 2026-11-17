@@ -256,7 +256,7 @@ unsafe fn do_authenticate_sequential(pamh: PamHandle, flags: c_int, options: Pam
         let prompt_line =
             unsafe { announce_prompt(pamh, service.as_deref(), silent, prompt, is_internal) };
 
-        let budget = camera_auth_timeout(&config.auth, service.as_deref());
+        let budget = camera_auth_timeout(&config.auth, &config.cameras, service.as_deref());
 
         let tell = |text: &str| {
             unsafe { report_outcome(pamh, service.as_deref(), silent, text, is_internal) };
@@ -817,7 +817,7 @@ unsafe fn do_authenticate_simultaneous(
             &proxy,
             &username,
             service.as_deref(),
-            camera_auth_timeout(&auth, service.as_deref()),
+            camera_auth_timeout(&auth, &config.cameras, service.as_deref()),
             require_keyring,
         ));
         if bio != Some(AuthOutcome::Match) {
@@ -849,7 +849,7 @@ unsafe fn do_authenticate_simultaneous(
         &proxy,
         &username,
         service.as_deref(),
-        camera_auth_timeout(&auth, service.as_deref()),
+        camera_auth_timeout(&auth, &config.cameras, service.as_deref()),
         require_keyring,
     );
     let password_fut = notify.notified();
