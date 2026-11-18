@@ -211,10 +211,9 @@
       matchStrings: [
         '(?:^|\\n)ort_version[ \\t]*:=[ \\t]*env\\("ORT_VERSION",[ \\t]*"(?<currentValue>\\d+\\.\\d+\\.\\d+)"\\)',
       ],
-      depNameTemplate: 'microsoft/onnxruntime',
-      datasourceTemplate: 'github-releases',
+      depNameTemplate: 'Microsoft.ML.OnnxRuntime',
+      datasourceTemplate: 'nuget',
       versioningTemplate: 'semver',
-      extractVersionTemplate: '^v?(?<version>\\d+\\.\\d+\\.\\d+)$',
     },
   ],
 }

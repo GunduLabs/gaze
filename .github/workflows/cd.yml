@@ -489,6 +489,7 @@ jobs:
             git \
             ca-certificates \
             curl \
+            unzip \
             tar \
             gzip \
             zstd \
