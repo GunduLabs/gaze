@@ -2,37 +2,57 @@
 # SPDX-FileCopyrightText: 2026 Gundu Labs
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Download an ONNX Runtime release archive to DEST, accepting only a pinned SHA256.
-# The library is loaded by a root daemon, so an unverified archive is never kept.
+# Repack ONNX Runtime from Microsoft's NuGet package into DEST, laid out like the upstream
+# release tarball. The library is loaded by a root daemon, so only a pinned SHA256 is accepted.
 set -euo pipefail
 version=${1:?ONNX Runtime version is required}
 ort_arch=${2:?ONNX Runtime architecture (x64 or aarch64) is required}
 dest=${3:?destination path is required}
-case "$version-$ort_arch" in
-    1.32.0-x64) sha256=bb169b7e374731730d2ae406fb39de7be4b315f413a9132efe896261c31bb503 ;;
-    1.32.0-aarch64) sha256=81a46251dd90da4122f4b9ceb4433f836fbc79ee1eddffca7c09033af81a1939 ;;
-    1.31.1-x64) sha256=c849e36a1ef3e22d4ff217b9d1ce4a3cf5b9467b975610913ae959ad5b16bdc9 ;;
-    1.31.1-aarch64) sha256=5317505e2da99be65f8e2775ba3c2afd6d2961fd78aba1bd8f56159f48820c78 ;;
-    1.31.0-x64) sha256=cc5c72baf5ae5c8238a6841f0897227be2d02826b9cf98eaf02fdefaeeb03a57 ;;
-    1.31.0-aarch64) sha256=c5b8b3cca31f3d643a3b313b8f42e2d0f16a4fcefd02cda343d97bd5306afaab ;;
-    *) sha256=${ORT_SHA256:-} ;;
+case "$ort_arch" in
+    x64) rid=linux-x64 ;;
+    aarch64) rid=linux-arm64 ;;
+    *) echo "Unsupported ONNX Runtime architecture: $ort_arch" >&2; exit 1 ;;
 esac
-if [ -z "$sha256" ]; then
-    echo "No pinned SHA256 for ONNX Runtime $version ($ort_arch); add it to $0 or set ORT_SHA256" >&2
+case "$version" in
+    1.32.0) nupkg_sha256=a9150bc2992cbbb6722070da9910e1ffa989a8bfc67bdd5bb8e745ca755641db ;;
+    *) nupkg_sha256=${ORT_NUPKG_SHA256:-} ;;
+esac
+case "$version-$ort_arch" in
+    1.32.0-x64) lib_sha256=4213d6d8c42ac4754865849cb139d31fc39127db6a326babf90bbc81a6eb52fc ;;
+    1.32.0-aarch64) lib_sha256=fd1db07c49cb1ad11370ef4393a405eef959fa9622fb5b2880f85d025757e719 ;;
+    *) lib_sha256= ;;
+esac
+if [ -z "$nupkg_sha256" ]; then
+    echo "No pinned SHA256 for the ONNX Runtime $version NuGet package; add it to $0 or set ORT_NUPKG_SHA256" >&2
     exit 1
 fi
-verified() { echo "$sha256  $1" | sha256sum --check --status; }
-if [ -f "$dest" ] && verified "$dest"; then
+name="onnxruntime-linux-$ort_arch-$version"
+lib="libonnxruntime.so.$version"
+lib_matches() { [ -n "$lib_sha256" ] && [ "$(sha256sum | cut -d' ' -f1)" = "$lib_sha256" ]; }
+if [ -f "$dest" ] && tar -xzOf "$dest" "$name/lib/$lib" 2>/dev/null | lib_matches; then
     exit 0
 fi
 mkdir -p "$(dirname "$dest")"
-download=$(mktemp "$dest.XXXXXX")
-trap 'rm -f "$download"' EXIT
+work=$(mktemp -d)
+archive=$(mktemp "$dest.XXXXXX")
+trap 'rm -rf "$work" "$archive"' EXIT
 curl --fail --location --retry 3 \
-    "https://github.com/microsoft/onnxruntime/releases/download/v$version/onnxruntime-linux-$ort_arch-$version.tgz" \
-    -o "$download"
-if ! verified "$download"; then
-    echo "ONNX Runtime $version ($ort_arch) does not match its pinned SHA256" >&2
+    "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/$version/microsoft.ml.onnxruntime.$version.nupkg" \
+    -o "$work/ort.nupkg"
+if ! echo "$nupkg_sha256  $work/ort.nupkg" | sha256sum --check --status; then
+    echo "ONNX Runtime $version NuGet package does not match its pinned SHA256" >&2
     exit 1
 fi
-mv "$download" "$dest"
+mkdir -p "$work/$name/lib"
+unzip -qj "$work/ort.nupkg" LICENSE ThirdPartyNotices.txt -d "$work/$name"
+unzip -qj "$work/ort.nupkg" "runtimes/$rid/native/libonnxruntime.so" -d "$work/$name/lib"
+mv "$work/$name/lib/libonnxruntime.so" "$work/$name/lib/$lib"
+if [ -n "$lib_sha256" ] && ! lib_matches < "$work/$name/lib/$lib"; then
+    echo "ONNX Runtime $version ($ort_arch) library does not match its pinned SHA256" >&2
+    exit 1
+fi
+chmod 0644 "$work/$name/LICENSE" "$work/$name/ThirdPartyNotices.txt" "$work/$name/lib/$lib"
+ln -s "$lib" "$work/$name/lib/libonnxruntime.so.1"
+ln -s libonnxruntime.so.1 "$work/$name/lib/libonnxruntime.so"
+tar --owner=0 --group=0 --numeric-owner -czf "$archive" -C "$work" "$name"
+mv "$archive" "$dest"

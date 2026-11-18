@@ -63,6 +63,7 @@
             rustfmt
             rust-analyzer
             just
+            unzip
           ];
           env = {
             GAZE_CPU_ORT_PATH = "${pkgs.lib.getLib pkgs.onnxruntime}/lib/libonnxruntime.so";
