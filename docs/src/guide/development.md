@@ -576,6 +576,51 @@ Notes:
   user/group when the container runs as root (native Docker); on uid-mapping backends like
   Colima's sshfs, files already belong to you and are left alone.
 
+### Arch and Omarchy repository snapshots
+
+On x86_64 Linux, build Arch packages in an Arch container:
+
+```bash
+just arch build-rust
+VERSION=0.5.2 just arch package archlinux
+```
+
+The image defaults to the current Arch mirror. Omarchy stable can carry an older
+OpenCV than current Arch and the AUR binary packages. Select its mirror for every
+build and check against that snapshot instead:
+
+```bash
+export GAZE_ARCH_MIRROR=https://stable-mirror.omarchy.org
+export GAZE_CONTAINER_ENGINE=podman # optional; defaults to docker
+just arch build-rust
+just arch test
+VERSION=0.5.2 just arch package archlinux
+```
+
+Use the version of the source you checked out. `just arch` builds the environment
+automatically and runs the same recipes as a native build. The container needs no
+privileged access, camera, host D-Bus or PAM mounts. It uses the legacy KDE settings
+entry so Omarchy builds do not need the Plasma development packages. The image is
+currently x86_64 only; an ARM build needs a native ARM base image, repositories and
+ONNX Runtime, rather than overriding the package architecture.
+
+The container synchronizes its whole package set to the selected mirror, including
+downgrades when the snapshot predates the base image. Cargo target volumes are
+separate for each mirror and image identity, and from Ubuntu builds. Rebuilding the
+image after a library update therefore starts a fresh target cache. Packages land in `dist/packages`;
+use a separate checkout or move those artifacts before switching mirrors. An image
+is cached; rebuild it with the runtime's `build --no-cache` option when a moving
+mirror changes. `GAZE_ARCH_IMAGE` overrides the local image tag.
+
+Packaging keeps the OpenCV version bounds derived from the linked binaries. A build
+against 5.0 must continue to require `opencv>=5.0` and `opencv<5.1`; removing the cap
+or symlinking the 5.1 library to the 5.0 name does not make it compatible. Rebuild
+again when the target snapshot crosses that ABI boundary. Test the package install
+and password fallback in a disposable system before replacing a live login setup.
+The raw Arch release package names also differ from the AUR wrappers; see
+[Gaze disappears after an AUR helper upgrade](/guide/troubleshooting#gaze-disappears-after-an-aur-helper-upgrade-arch-linux)
+before installing locally built packages on a system managed by an AUR helper.
+
 ## Cleaning build artifacts
 
 ```bash

@@ -922,3 +922,36 @@ docker target *args: docker-image
         -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
         {{ quote(docker_image) }} \
         {{ target }} {{ args }}
+
+# ── native Arch container (including derivative repository snapshots) ─────────
+
+arch_engine := env("GAZE_CONTAINER_ENGINE", "docker")
+arch_image := env("GAZE_ARCH_IMAGE", "gaze-build-arch:local")
+arch_mirror := env("GAZE_ARCH_MIRROR", "https://geo.mirror.pkgbuild.com")
+
+# Build the x86_64 Arch environment against the selected repository mirror
+[group("docker")]
+arch-image:
+    {{ quote(arch_engine) }} build --build-arg {{ quote("ARCH_MIRROR=" + arch_mirror) }} -t {{ quote(arch_image) }} -f packaging/docker/Dockerfile.arch packaging/docker
+
+# Run a native Arch target, e.g. `just arch package archlinux`
+[group("docker")]
+[positional-arguments]
+arch target *args: arch-image
+    #!/usr/bin/env bash
+    set -euo pipefail
+    image_id=$({{ quote(arch_engine) }} image inspect --format {{ quote("{{.Id}}") }} {{ quote(arch_image) }})
+    cache_key=$(printf '%s\n%s' {{ quote(arch_mirror) }} "$image_id" | sha256sum | cut -c1-16)
+    owner=()
+    # Container root maps to the host user under rootless Podman. Passing the
+    # host uid to entrypoint.sh there would chown artifacts to a subordinate uid.
+    if [ "$(basename {{ quote(arch_engine) }})" != podman ]; then
+        owner=(-e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)")
+    fi
+    {{ quote(arch_engine) }} run --rm \
+        -v {{ quote(justfile_directory() + ":/work") }} \
+        -v gaze-arch-cargo-registry:/root/.cargo/registry \
+        -v gaze-arch-cargo-git:/root/.cargo/git \
+        -v "gaze-arch-target-$cache_key:/work/target" \
+        -e CARGO_BUILD_JOBS -e RUSTFLAGS -e VERSION -e PACKAGE_RELEASE \
+        "${owner[@]}" "$image_id" "$@"

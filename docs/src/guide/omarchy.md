@@ -85,6 +85,14 @@ depend on hardware, enrollment and policy.
 
 ## Updates and diagnosis
 
+Omarchy stable's delayed repository snapshot can have an older OpenCV than the
+current AUR Gaze binaries. If an update cannot satisfy an OpenCV version bound,
+check `pacman -Si opencv` and `pacman -Qi gaze-bin gaze-gui-bin` before changing
+packages. A supported Omarchy version does not guarantee that current Arch binary
+packages match its library snapshot. Keep the working pair until compatible
+packages are available, or [rebuild against the stable mirror](/guide/development#arch-and-omarchy-repository-snapshots).
+Keep OpenCV's dependency bounds intact and use Omarchy's normal system update path.
+
 ```bash
 gaze doctor
 gaze-omarchy doctor
