@@ -922,3 +922,110 @@ docker target *args: docker-image
         -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
         {{ quote(docker_image) }} \
         {{ target }} {{ args }}
+
+# ── native Arch container (including derivative repository snapshots) ─────────
+
+arch_engine := env("GAZE_CONTAINER_ENGINE", "docker")
+arch_mirror := env("GAZE_ARCH_MIRROR", "https://geo.mirror.pkgbuild.com")
+# One image per mirror, so switching mirrors keeps each one's package sync and target cache.
+arch_image := env("GAZE_ARCH_IMAGE", "gaze-build-arch:" + replace_regex(sha256(arch_mirror), '^(.{12}).*$', '$1'))
+arch_repo := replace_regex(arch_image, ':[^:/]*$', '')
+arch_sync_fmt := '{{ index .Config.Labels "com.gundulabs.gaze.arch-sync" }}'
+arch_mirror_fmt := '{{ index .Config.Labels "com.gundulabs.gaze.arch-mirror" }}'
+# `just arch` warns once the image's package sync is this many days old.
+arch_stale_days := "7"
+
+# Build the x86_64 Arch environment against the selected mirror; `just arch-refresh` re-syncs it
+[group("docker")]
+arch-image: (_arch-build "keep")
+
+# Re-sync the Arch image with its mirror and remove the image and target cache it replaces
+[group("docker")]
+arch-refresh:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    engine={{ quote(arch_engine) }}
+    image={{ quote(arch_image) }}
+    old=$("$engine" image inspect --format {{ quote("{{.Id}}") }} "$image" 2>/dev/null || true)
+    {{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} _arch-build new
+    new=$("$engine" image inspect --format {{ quote("{{.Id}}") }} "$image")
+    if [ -n "$old" ] && [ "$old" != "$new" ]; then
+        old_key=${old#sha256:}
+        "$engine" volume rm "gaze-arch-target-${old_key:0:16}" >/dev/null 2>&1 || true
+        "$engine" image rm "$old" >/dev/null 2>&1 || true
+    fi
+
+# Remove Arch target-cache volumes that no tagged Arch image uses
+[group("docker")]
+arch-clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    engine={{ quote(arch_engine) }}
+    keep=" "
+    for id in $("$engine" images --no-trunc --format {{ quote("{{.ID}}") }} {{ quote(arch_repo) }}); do
+        id=${id#sha256:}
+        keep+="gaze-arch-target-${id:0:16} "
+    done
+    for volume in $("$engine" volume ls -q); do
+        case $volume in gaze-arch-target-*) ;; *) continue ;; esac
+        case $keep in *" $volume "*) continue ;; esac
+        if "$engine" volume rm "$volume" >/dev/null; then
+            echo "removed $volume"
+        else
+            echo "kept $volume (in use)"
+        fi
+    done
+
+# `keep` reuses the image's sync stamp so the cached package layer stays valid; `new` re-syncs.
+[private]
+_arch-build sync:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    engine={{ quote(arch_engine) }}
+    image={{ quote(arch_image) }}
+    mirror={{ quote(arch_mirror) }}
+    stamp=$(date -u +%s)
+    if [ {{ quote(sync) }} = keep ]; then
+        # An image synced against another mirror (a shared GAZE_ARCH_IMAGE) gets a new stamp.
+        old_mirror=$("$engine" image inspect --format {{ quote(arch_mirror_fmt) }} "$image" 2>/dev/null || true)
+        old_stamp=$("$engine" image inspect --format {{ quote(arch_sync_fmt) }} "$image" 2>/dev/null || true)
+        if [ "$old_mirror" = "$mirror" ] && [[ $old_stamp =~ ^[0-9]+$ ]]; then
+            stamp=$old_stamp
+        fi
+    fi
+    "$engine" build --build-arg "ARCH_MIRROR=$mirror" --build-arg "ARCH_SYNC=$stamp" \
+        -t "$image" -f packaging/docker/Dockerfile.arch packaging/docker
+
+# Run a native Arch target, e.g. `just arch package archlinux`
+[group("docker")]
+[positional-arguments]
+arch target *args: arch-image
+    #!/usr/bin/env bash
+    set -euo pipefail
+    engine={{ quote(arch_engine) }}
+    image={{ quote(arch_image) }}
+    if [ -n "${ARCH:-}" ] && [ "$ARCH" != x86_64 ]; then
+        echo "arch: the Arch image builds x86_64 only, got ARCH=$ARCH" >&2
+        exit 1
+    fi
+    image_id=$("$engine" image inspect --format {{ quote("{{.Id}}") }} "$image")
+    key=${image_id#sha256:}
+    stamp=$("$engine" image inspect --format {{ quote(arch_sync_fmt) }} "$image")
+    if [[ $stamp =~ ^[0-9]+$ ]]; then
+        age=$(( ($(date -u +%s) - stamp) / 86400 ))
+        if [ "$age" -ge {{ arch_stale_days }} ]; then
+            echo "arch: packages were synced with {{ arch_mirror }} $age days ago; run 'just arch-refresh' to update them" >&2
+        fi
+    fi
+    # label=disable lets the container read the checkout on SELinux hosts without
+    # relabelling it, as --privileged does for the Ubuntu recipe. entrypoint.sh skips
+    # the HOST_UID chown when container root is not host root (rootless engines).
+    "$engine" run --rm --security-opt label=disable \
+        -v {{ quote(justfile_directory() + ":/work") }} \
+        -v gaze-arch-cargo-registry:/root/.cargo/registry \
+        -v gaze-arch-cargo-git:/root/.cargo/git \
+        -v "gaze-arch-target-${key:0:16}:/work/target" \
+        -e CARGO_BUILD_JOBS -e RUSTFLAGS -e VERSION -e PACKAGE_RELEASE \
+        -e GAZE_GUI -e GAZE_KCM -e ORT_VERSION \
+        -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+        "$image_id" "$@"
