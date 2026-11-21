@@ -8,16 +8,24 @@ FROM docker.io/library/archlinux:base
 ARG ARCH_MIRROR=https://geo.mirror.pkgbuild.com
 ARG JUST_VERSION=1.59.0
 ARG NFPM_VERSION=2.49.0
+# `just arch-refresh` changes this stamp to re-sync the packages instead of reusing the
+# cached layer. The labels let `just arch` report how old the sync is.
+ARG ARCH_SYNC=0
+LABEL com.gundulabs.gaze.arch-sync="${ARCH_SYNC}" \
+      com.gundulabs.gaze.arch-mirror="${ARCH_MIRROR}"
 
 # A snapshot can be older than the base image. Downgrade the whole container to
 # that repository state before installing its headers and libraries.
 RUN test "$(uname -m)" = x86_64 \
+    && echo "Syncing with ${ARCH_MIRROR} (stamp ${ARCH_SYNC})" \
     && printf 'Server = %s/$repo/os/$arch\n' "${ARCH_MIRROR%/}" > /etc/pacman.d/mirrorlist \
     && pacman -Syyuu --noconfirm \
     && pacman -S --needed --noconfirm \
         base-devel git ca-certificates curl unzip clang llvm openmp opencv \
         v4l-utils pam tpm2-tss gtk4 libadwaita gstreamer gst-plugins-base \
-        gst-plugins-good gst-plugin-pipewire openssl pkgconf gettext nodejs
+        gst-plugins-good gst-plugin-pipewire openssl pkgconf gettext nodejs \
+        cmake extra-cmake-modules qt6-base qt6-declarative kcoreaddons ki18n \
+        kcmutils kirigami
 
 RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
         | sh -s -- -y --default-toolchain stable --profile minimal --component rustfmt,clippy
@@ -45,8 +53,7 @@ ENV LLVM_CONFIG_PATH=/usr/bin/llvm-config \
     LIBCLANG_PATH=/usr/lib \
     CLANG_PATH=/usr/bin/clang \
     CXX=/usr/bin/clang++ \
-    CC=/usr/bin/clang \
-    GAZE_KCM=legacy
+    CC=/usr/bin/clang
 
 COPY entrypoint.sh /usr/local/bin/gaze-build-entry
 RUN chmod +x /usr/local/bin/gaze-build-entry

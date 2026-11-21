@@ -598,19 +598,29 @@ VERSION=0.5.2 just arch package archlinux
 ```
 
 Use the version of the source you checked out. `just arch` builds the environment
-automatically and runs the same recipes as a native build. The container needs no
-privileged access, camera, host D-Bus or PAM mounts. It uses the legacy KDE settings
-entry so Omarchy builds do not need the Plasma development packages. The image is
-currently x86_64 only; an ARM build needs a native ARM base image, repositories and
-ONNX Runtime, rather than overriding the package architecture.
+automatically and runs the same recipes as a native build. It passes `GAZE_GUI`,
+`GAZE_KCM`, `ORT_VERSION`, `VERSION`, `PACKAGE_RELEASE`, `CARGO_BUILD_JOBS` and
+`RUSTFLAGS` through to the container. The container needs no privileged access, camera,
+host D-Bus or PAM mounts, and it runs with SELinux labelling disabled so the checkout
+does not need relabelling. Like the release packages, it builds the Plasma 6 settings
+page; set `GAZE_KCM=legacy` for the System Settings entry that opens `gaze-gui`. The
+image is currently x86_64 only, and `just arch` rejects any other `ARCH`. An ARM build
+needs a native ARM base image, repositories and ONNX Runtime, rather than overriding
+the package architecture.
+
+Artifacts land in `dist/` re-owned to your host user. Under rootless Podman or rootless
+Docker, including a `docker` command provided by podman-docker, container root already
+is your user, so files are left as they are.
 
 The container synchronizes its whole package set to the selected mirror, including
-downgrades when the snapshot predates the base image. Cargo target volumes are
-separate for each mirror and image identity, and from Ubuntu builds. Rebuilding the
-image after a library update therefore starts a fresh target cache. Packages land in `dist/packages`;
-use a separate checkout or move those artifacts before switching mirrors. An image
-is cached; rebuild it with the runtime's `build --no-cache` option when a moving
-mirror changes. `GAZE_ARCH_IMAGE` overrides the local image tag.
+downgrades when the snapshot predates the base image. Each mirror gets its own image
+(`GAZE_ARCH_IMAGE` overrides the tag), and the package sync is cached. `just arch`
+warns when that sync is more than a week old; run `just arch-refresh` to re-sync with
+the mirror. Cargo target volumes are separate for each image and from Ubuntu builds,
+so a refreshed image starts a fresh target cache. `just arch-refresh` removes the image
+and target volume it replaces, and `just arch-clean` removes target volumes that no
+current Arch image uses. Packages land in `dist/packages`; use a separate checkout or
+move those artifacts before switching mirrors.
 
 Packaging keeps the OpenCV version bounds derived from the linked binaries. A build
 against 5.0 must continue to require `opencv>=5.0` and `opencv<5.1`; removing the cap
