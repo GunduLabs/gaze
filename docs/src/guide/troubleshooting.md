@@ -439,7 +439,9 @@ sudo reboot
 
 GDM writes the file again with its own defaults. The path is under `/var/lib/gdm3`
 on Debian and Ubuntu, and a multi-seat machine has one directory per seat.
-`gaze doctor` reports this as **GDM login face authentication** and names the exact file.
+`sudo gaze doctor` reports this as **GDM login face authentication** and names the
+exact file. Run it with `sudo`: on Fedora and similar distributions GDM's database is
+not readable otherwise, and doctor only warns that it could not check.
 
 #### GDM never scans on Fedora or SELinux-enabled systems
 

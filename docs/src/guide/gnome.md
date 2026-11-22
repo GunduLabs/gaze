@@ -249,7 +249,9 @@ sudo rm -f /var/lib/gdm/seat0/config/dconf/user
 
 GDM writes the file again with its own defaults. On Debian and Ubuntu the path is
 under `/var/lib/gdm3`, and a machine with more than one seat has one directory per
-seat. `gaze doctor` reports this and names the file for you.
+seat. `sudo gaze doctor` reports this and names the file for you, whether Gaze or
+something else turned face login on. Without `sudo` it cannot open GDM's database on
+distributions such as Fedora and says so instead.
 
 ## Verify GNOME flow
 
