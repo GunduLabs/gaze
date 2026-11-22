@@ -76,14 +76,25 @@ pub(super) fn extensions_include(value: &str, uuid: &str) -> bool {
         .any(|entry| entry.trim().trim_matches(|c| c == '\'' || c == '"') == uuid)
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub(super) enum GdmGreeterReadiness {
     Ready,
     ProfileMissingSystemDb(String),
     CompiledDbMissing,
-    ExtensionNotEnabled,
+    /// `Some` names the greeter db holding the key, `None` means a `system-db` layer set it.
+    ExtensionNotEnabled(Option<PathBuf>),
     /// `Some` names the greeter db holding the key, `None` means a `system-db` layer set it.
     ExtensionsDisabled(Option<PathBuf>),
+    /// Nothing visible is wrong, but a greeter db that outranks it all could not be opened.
+    NeedsRoot,
     Unverifiable(String),
+}
+
+/// One greeter's resolved value for a key. `source` is set when the greeter's own db holds it.
+#[derive(Debug)]
+pub(super) struct GreeterValue {
+    pub(super) source: Option<PathBuf>,
+    pub(super) value: String,
 }
 
 fn read_profile(path: &str) -> Option<std::io::Result<String>> {
@@ -93,8 +104,85 @@ fn read_profile(path: &str) -> Option<std::io::Result<String>> {
     }
 }
 
-pub(super) fn gdm_greeter_readiness() -> GdmGreeterReadiness {
-    let mut found = false;
+/// Resolves `key` through the greeter's real profile once per greeter db. GDM 49+ keeps one
+/// per seat beside the older `~/.config` one, and which the running greeter uses cannot be told
+/// from here, so reading only the first db holding the key can pass while the live one is off.
+fn greeter_values(profile: &str, dirs: &[PathBuf], key: &str) -> Option<Vec<GreeterValue>> {
+    if dirs.is_empty() {
+        // Drop `user-db` so dconf does not fall back to the invoking user's own db.
+        let system: String = profile
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("user-db:"))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        let value = dconf_read_with_profile("gdm-greeter", &system, None, key)?;
+        return Some(vec![GreeterValue {
+            source: None,
+            value,
+        }]);
+    }
+    dirs.iter()
+        .map(|dir| {
+            let value = dconf_read_with_profile("gdm-greeter", profile, Some(dir), key)?;
+            let source = gdm_user_db_read(dir, key).map(|_| dir.join("dconf/user"));
+            Some(GreeterValue { source, value })
+        })
+        .collect()
+}
+
+/// Whether a greeter db may exist that this run cannot open: Fedora keeps `/var/lib/gdm`
+/// private to the greeter, so an unprivileged run sees no greeter db at all.
+fn greeter_dbs_hidden() -> bool {
+    let denied = |dir: PathBuf| {
+        fs::metadata(dir.join("dconf/user"))
+            .is_err_and(|err| err.kind() == std::io::ErrorKind::PermissionDenied)
+    };
+    GDM_HOME_DIRS
+        .iter()
+        .map(Path::new)
+        .filter(|home| home.exists())
+        .any(|home| match fs::read_dir(home) {
+            Err(err) => err.kind() == std::io::ErrorKind::PermissionDenied,
+            Ok(entries) => {
+                denied(home.join(".config"))
+                    || entries
+                        .flatten()
+                        .any(|entry| denied(entry.path().join("config")))
+            }
+        })
+}
+
+pub(super) fn classify_greeter(
+    enabled: &[GreeterValue],
+    disabled: &[GreeterValue],
+    dbs_hidden: bool,
+) -> GdmGreeterReadiness {
+    if let Some(found) = enabled
+        .iter()
+        .find(|found| !extensions_include(&found.value, GNOME_EXTENSION_ID))
+    {
+        return GdmGreeterReadiness::ExtensionNotEnabled(found.source.clone());
+    }
+
+    // Checked after the list because it overrides it: gnome-shell stops its whole extension
+    // system, so the greeter loads nothing however the extension is enabled.
+    if let Some(found) = disabled
+        .iter()
+        .find(|found| dconf_bool(&found.value) == Some(true))
+    {
+        return GdmGreeterReadiness::ExtensionsDisabled(found.source.clone());
+    }
+
+    if dbs_hidden {
+        return GdmGreeterReadiness::NeedsRoot;
+    }
+    GdmGreeterReadiness::Ready
+}
+
+/// `gaze_override` adds the checks that only matter for `GDM_FACE_OVERRIDE_PATH`: a system that
+/// enables face login itself may layer its dbs differently (NixOS uses `file-db`).
+pub(super) fn gdm_greeter_readiness(gaze_override: bool) -> GdmGreeterReadiness {
+    let mut profiles = Vec::new();
     for name in GDM_GREETER_DCONF_PROFILES {
         let path = format!("{DCONF_PROFILE_DIR}/{name}");
         let vendor = format!("{VENDOR_DCONF_PROFILE_DIR}/{name}");
@@ -107,43 +195,37 @@ pub(super) fn gdm_greeter_readiness() -> GdmGreeterReadiness {
                 ));
             }
         };
-        if !profile_reads_system_db(&contents, GDM_DCONF_PROFILE) {
+        if gaze_override && !profile_reads_system_db(&contents, GDM_DCONF_PROFILE) {
             return GdmGreeterReadiness::ProfileMissingSystemDb(path);
         }
-        found = true;
+        profiles.push(contents);
     }
-    if !found {
+    if profiles.is_empty() {
         return GdmGreeterReadiness::Unverifiable(format!(
             "no GDM dconf profile under {DCONF_PROFILE_DIR} or {VENDOR_DCONF_PROFILE_DIR}"
         ));
     }
 
-    if !Path::new(GDM_COMPILED_DB_PATH).exists() {
+    if gaze_override && !Path::new(GDM_COMPILED_DB_PATH).exists() {
         return GdmGreeterReadiness::CompiledDbMissing;
     }
 
-    match gdm_greeter_dconf_read(GDM_ENABLED_EXTENSIONS_KEY) {
-        Some(value) if extensions_include(&value, GNOME_EXTENSION_ID) => {}
-        Some(_) => return GdmGreeterReadiness::ExtensionNotEnabled,
-        None => {
+    let dirs = gdm_greeter_config_dirs();
+    let dbs_hidden = greeter_dbs_hidden();
+    for profile in &profiles {
+        let (Some(enabled), Some(disabled)) = (
+            greeter_values(profile, &dirs, GDM_ENABLED_EXTENSIONS_KEY),
+            greeter_values(profile, &dirs, GDM_DISABLE_EXTENSIONS_KEY),
+        ) else {
             return GdmGreeterReadiness::Unverifiable(
                 "`dconf read` against the GDM database failed".to_string(),
             );
+        };
+        match classify_greeter(&enabled, &disabled, dbs_hidden) {
+            GdmGreeterReadiness::Ready => {}
+            other => return other,
         }
     }
-
-    // Checked after the list because it overrides it: gnome-shell stops its whole extension
-    // system, so the greeter loads nothing however the extension is enabled.
-    if gdm_greeter_dconf_read(GDM_DISABLE_EXTENSIONS_KEY)
-        .as_deref()
-        .and_then(dconf_bool)
-        == Some(true)
-    {
-        return GdmGreeterReadiness::ExtensionsDisabled(gdm_greeter_dconf_source(
-            GDM_DISABLE_EXTENSIONS_KEY,
-        ));
-    }
-
     GdmGreeterReadiness::Ready
 }
 
@@ -218,6 +300,68 @@ mod tests {
                 "{broken:?} must not count as reading system-db:gdm"
             );
         }
+    }
+
+    fn resolved(values: &[(Option<&str>, &str)]) -> Vec<GreeterValue> {
+        values
+            .iter()
+            .map(|(source, value)| GreeterValue {
+                source: source.map(PathBuf::from),
+                value: value.to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_greeter_db_is_checked_not_just_the_first() {
+        let enabled = resolved(&[
+            (None, "['gaze@gundulabs.com']"),
+            (None, "['gaze@gundulabs.com']"),
+        ]);
+        // #1024: the legacy ~/.config db sorts first and is fine; the seat db GDM 49+ uses is not.
+        let disabled = resolved(&[
+            (Some("/var/lib/gdm/.config/dconf/user"), "false"),
+            (Some("/var/lib/gdm/seat0/config/dconf/user"), "true"),
+        ]);
+        assert_eq!(
+            classify_greeter(&enabled, &disabled, false),
+            GdmGreeterReadiness::ExtensionsDisabled(Some(PathBuf::from(
+                "/var/lib/gdm/seat0/config/dconf/user"
+            )))
+        );
+
+        let enabled = resolved(&[
+            (None, "['gaze@gundulabs.com']"),
+            (Some("/var/lib/gdm/seat0/config/dconf/user"), "@as []"),
+        ]);
+        let disabled = resolved(&[(None, "false"), (None, "false")]);
+        assert_eq!(
+            classify_greeter(&enabled, &disabled, false),
+            GdmGreeterReadiness::ExtensionNotEnabled(Some(PathBuf::from(
+                "/var/lib/gdm/seat0/config/dconf/user"
+            )))
+        );
+    }
+
+    #[test]
+    fn a_greeter_db_that_cannot_be_read_holds_back_a_pass() {
+        let enabled = resolved(&[(None, "['gaze@gundulabs.com']")]);
+        let fine = resolved(&[(None, "false")]);
+        assert_eq!(
+            classify_greeter(&enabled, &fine, false),
+            GdmGreeterReadiness::Ready
+        );
+        assert_eq!(
+            classify_greeter(&enabled, &fine, true),
+            GdmGreeterReadiness::NeedsRoot
+        );
+
+        // What the system layers already get wrong is reported without root.
+        let off = resolved(&[(None, "true")]);
+        assert_eq!(
+            classify_greeter(&enabled, &off, true),
+            GdmGreeterReadiness::ExtensionsDisabled(None)
+        );
     }
 
     #[test]
