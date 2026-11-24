@@ -101,15 +101,15 @@ pub fn show_capture_dialog(
             .as_ref(),
     );
 
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    let content = libadwaita::ToolbarView::new();
     let header = libadwaita::HeaderBar::new();
-    content.append(&header);
+    content.add_top_bar(&header);
 
     let body = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    body.set_margin_start(16);
-    body.set_margin_end(16);
-    body.set_margin_top(16);
-    body.set_margin_bottom(16);
+    body.set_margin_start(18);
+    body.set_margin_end(18);
+    body.set_margin_top(12);
+    body.set_margin_bottom(18);
 
     let camera_kind = if is_ir {
         "Infrared camera"
@@ -200,10 +200,14 @@ pub fn show_capture_dialog(
     let cam_frame = gtk4::Frame::new(None);
     cam_frame.set_child(Some(&cam_widget));
     cam_frame.set_vexpand(true);
+    cam_frame.add_css_class("camera-frame");
+    cam_frame.set_overflow(gtk4::Overflow::Hidden);
     body.append(&cam_frame);
 
     let prompt_label = gtk4::Label::new(None);
-    prompt_label.add_css_class("title-4");
+    prompt_label.add_css_class("title-3");
+    prompt_label.set_wrap(true);
+    prompt_label.set_justify(gtk4::Justification::Center);
     prompt_label.set_visible(false);
     body.append(&prompt_label);
 
@@ -224,6 +228,9 @@ pub fn show_capture_dialog(
     start_btn.set_sensitive(is_refine);
     body.append(&start_btn);
     let done_btn = gtk4::Button::with_label("Done — test recognition next");
+    done_btn.add_css_class("suggested-action");
+    done_btn.add_css_class("pill");
+    done_btn.set_halign(gtk4::Align::Center);
     done_btn.set_visible(false);
     body.append(&done_btn);
     done_btn.connect_clicked(glib::clone!(
@@ -312,7 +319,7 @@ pub fn show_capture_dialog(
         }
     ));
 
-    content.append(&body);
+    content.set_content(Some(&body));
     dialog.set_content(Some(&content));
 
     let username = username.to_string();

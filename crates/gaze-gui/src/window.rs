@@ -90,6 +90,104 @@ pub(crate) fn show_error(window: &libadwaita::ApplicationWindow, title: &str, de
     dialog.present();
 }
 
+/// Shows long, read-only command output (such as `gaze doctor`) in a scrollable monospace view.
+fn show_report(window: &libadwaita::ApplicationWindow, title: &str, text: &str) {
+    let dialog = libadwaita::MessageDialog::builder()
+        .transient_for(window)
+        .heading(title)
+        .default_width(560)
+        .build();
+    let view = gtk4::TextView::new();
+    view.set_editable(false);
+    view.set_cursor_visible(false);
+    view.set_monospace(true);
+    view.set_wrap_mode(gtk4::WrapMode::WordChar);
+    view.add_css_class("card");
+    view.add_css_class("report-text");
+    view.buffer().set_text(text.trim());
+    let scroll = gtk4::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .min_content_height(320)
+        .max_content_height(480)
+        .propagate_natural_height(true)
+        .child(&view)
+        .build();
+    dialog.set_extra_child(Some(&scroll));
+    dialog.add_response("close", "Close");
+    dialog.set_close_response("close");
+    dialog.present();
+}
+
+/// One step of the setup checklist: a numbered marker that turns into a check mark once the
+/// step is known to be done in this session.
+#[derive(Clone)]
+struct SetupStep {
+    row: libadwaita::ActionRow,
+    marker: gtk4::Label,
+    number: u32,
+}
+
+impl SetupStep {
+    fn new(number: u32, title: &str, subtitle: &str) -> Self {
+        let row = libadwaita::ActionRow::builder()
+            .title(title)
+            .subtitle(subtitle)
+            .activatable(true)
+            .build();
+        let marker = gtk4::Label::new(Some(&number.to_string()));
+        marker.add_css_class("step-marker");
+        marker.set_valign(gtk4::Align::Center);
+        row.add_prefix(&marker);
+        row.add_suffix(&gtk4::Image::from_icon_name("go-next-symbolic"));
+        Self {
+            row,
+            marker,
+            number,
+        }
+    }
+
+    fn set_done(&self, done: bool) {
+        set_step_marker(&self.marker, self.number, done);
+    }
+}
+
+fn set_step_marker(marker: &gtk4::Label, number: u32, done: bool) {
+    if done {
+        marker.set_text("\u{2713}");
+        marker.add_css_class("done");
+    } else {
+        marker.set_text(&number.to_string());
+        marker.remove_css_class("done");
+    }
+}
+
+/// Visual state of the recognition test row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TestOutcome {
+    Running,
+    Matched,
+    Failed,
+}
+
+fn test_outcome_icon(outcome: TestOutcome) -> (&'static str, Option<&'static str>) {
+    match outcome {
+        TestOutcome::Running => ("camera-web-symbolic", None),
+        TestOutcome::Matched => ("emblem-ok-symbolic", Some("success")),
+        TestOutcome::Failed => ("dialog-warning-symbolic", Some("warning")),
+    }
+}
+
+fn set_test_outcome(icon: &gtk4::Image, outcome: TestOutcome) {
+    let (name, class) = test_outcome_icon(outcome);
+    icon.set_icon_name(Some(name));
+    for class in ["success", "warning"] {
+        icon.remove_css_class(class);
+    }
+    if let Some(class) = class {
+        icon.add_css_class(class);
+    }
+}
+
 fn add_dbus_error_toast(window: &libadwaita::ApplicationWindow, prefix: &str, err: &zbus::Error) {
     show_error(
         window,
@@ -316,69 +414,122 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     let window = libadwaita::ApplicationWindow::builder()
         .application(app)
         .title("Gaze")
-        .default_width(460)
-        .default_height(500)
+        .default_width(560)
+        .default_height(680)
+        .width_request(360)
         .build();
 
-    let main_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    let toolbar = libadwaita::ToolbarView::new();
 
     let header = libadwaita::HeaderBar::new();
-    let title = libadwaita::WindowTitle::new("Gaze", &format!("User: {username}"));
+    let title = libadwaita::WindowTitle::new("Gaze", &username);
     header.set_title_widget(Some(&title));
 
-    let add_btn = gtk4::Button::with_label("Enroll");
+    let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_btn.set_tooltip_text(Some("Enroll a new face"));
 
-    let test_btn = gtk4::Button::with_label("Test");
-    test_btn.set_tooltip_text(Some("Test face authentication"));
+    let config_btn = gtk4::Button::from_icon_name("emblem-system-symbolic");
+    config_btn.set_tooltip_text(Some("Settings"));
 
-    let config_btn = gtk4::Button::with_label("Settings");
-    config_btn.set_tooltip_text(Some("Configure Gaze"));
-
-    header.pack_end(&add_btn);
-    header.pack_end(&test_btn);
+    header.pack_start(&add_btn);
     header.pack_end(&config_btn);
-
-    main_box.append(&header);
+    toolbar.add_top_bar(&header);
 
     let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_hscrollbar_policy(gtk4::PolicyType::Never);
     scroll.set_vexpand(true);
 
     let clamp = libadwaita::Clamp::new();
-    clamp.set_maximum_size(600);
+    clamp.set_maximum_size(640);
+    clamp.set_tightening_threshold(480);
 
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
-    content.set_margin_start(16);
-    content.set_margin_end(16);
-    content.set_margin_top(16);
-    content.set_margin_bottom(16);
-
-    let face_group = libadwaita::PreferencesGroup::new();
-    face_group.set_title("Enrolled Faces");
-    face_group.set_description(Some(&format!("Faces enrolled for {username}")));
-
-    let face_list = gtk4::ListBox::new();
-    face_list.add_css_class("boxed-list");
-    face_list.set_selection_mode(gtk4::SelectionMode::None);
-    face_group.add(&face_list);
-
-    let setup_group = libadwaita::PreferencesGroup::new();
-    setup_group.set_title("Setup checklist");
-    setup_group.set_description(Some("1. Choose your camera in Settings and check its enrollment preview.\n2. Enroll a face.\n3. Test recognition.\n4. Check desktop integration before trying screen unlock."));
-    let integration_btn = gtk4::Button::with_label("Check desktop integration");
-    setup_group.add(&integration_btn);
-    content.append(&setup_group);
-    let test_result = gtk4::Label::new(Some("Recognition has not been tested in this session."));
-    test_result.set_wrap(true);
-    test_result.set_selectable(true);
-    content.append(&test_result);
-    content.append(&face_group);
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 24);
+    content.set_margin_start(12);
+    content.set_margin_end(12);
+    content.set_margin_top(24);
+    content.set_margin_bottom(24);
 
     let status_page = libadwaita::StatusPage::new();
     status_page.set_icon_name(Some("contact-new-symbolic"));
     status_page.set_title("Connecting…");
     status_page.set_description(Some("Loading from the Gaze daemon…"));
+    status_page.add_css_class("compact");
     status_page.set_visible(true);
+
+    let face_group = libadwaita::PreferencesGroup::new();
+    face_group.set_title("Enrolled Faces");
+    face_group.set_description(Some(
+        "Rename a face, add captures to improve it, or remove it.",
+    ));
+
+    let face_list = gtk4::ListBox::new();
+    face_list.add_css_class("boxed-list");
+    face_list.set_selection_mode(gtk4::SelectionMode::None);
+    face_group.add(&face_list);
+    // The group has nothing to show while the status page explains why the list is empty.
+    face_list
+        .bind_property("visible", &face_group, "visible")
+        .sync_create()
+        .build();
+
+    let test_group = libadwaita::PreferencesGroup::new();
+    test_group.set_title("Recognition");
+    let test_row = libadwaita::ActionRow::builder()
+        .title("Test recognition")
+        .subtitle("Not tested in this session yet.")
+        .subtitle_selectable(true)
+        .use_markup(false)
+        .build();
+    let test_icon = gtk4::Image::from_icon_name("camera-web-symbolic");
+    test_icon.set_icon_size(gtk4::IconSize::Large);
+    test_row.add_prefix(&test_icon);
+    let test_btn = gtk4::Button::with_label("Test");
+    test_btn.set_tooltip_text(Some(
+        "Look at the camera and check that Gaze recognizes you",
+    ));
+    test_btn.set_valign(gtk4::Align::Center);
+    test_btn.add_css_class("suggested-action");
+    test_btn.add_css_class("pill");
+    test_row.add_suffix(&test_btn);
+    test_group.add(&test_row);
+
+    let setup_group = libadwaita::PreferencesGroup::new();
+    setup_group.set_title("Setup Checklist");
+    setup_group.set_description(Some(
+        "Work through these once before using face unlock on your desktop.",
+    ));
+    let step_camera = SetupStep::new(
+        1,
+        "Choose your camera",
+        "Pick the camera in Settings, then check it in the enrollment preview",
+    );
+    let step_enroll = SetupStep::new(2, "Enroll a face", "Capture your face from a few angles");
+    let step_test = SetupStep::new(3, "Test recognition", "Confirm that Gaze recognizes you");
+    let step_integration = SetupStep::new(
+        4,
+        "Check desktop integration",
+        "Run gaze doctor before trying screen unlock",
+    );
+    for step in [&step_camera, &step_enroll, &step_test, &step_integration] {
+        setup_group.add(&step.row);
+    }
+    // The face list is shown only once the daemon reports at least one enrolled face, which
+    // also means a working camera was chosen.
+    face_list.connect_visible_notify(glib::clone!(
+        #[strong]
+        step_camera,
+        #[strong]
+        step_enroll,
+        move |list| {
+            step_camera.set_done(list.is_visible());
+            step_enroll.set_done(list.is_visible());
+        }
+    ));
+
+    content.append(&status_page);
+    content.append(&face_group);
+    content.append(&test_group);
+    content.append(&setup_group);
 
     let enroll_action = gtk4::Button::with_label("Enroll a Face");
     enroll_action.add_css_class("pill");
@@ -392,27 +543,55 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     ));
     status_page.set_child(Some(&enroll_action));
     face_list.set_visible(false);
-    content.append(&status_page);
 
     clamp.set_child(Some(&content));
     scroll.set_child(Some(&clamp));
-    main_box.append(&scroll);
+    toolbar.set_content(Some(&scroll));
 
     let toast_overlay = libadwaita::ToastOverlay::new();
-    toast_overlay.set_child(Some(&main_box));
+    toast_overlay.set_child(Some(&toolbar));
     window.set_content(Some(&toast_overlay));
     window.present();
 
-    integration_btn.connect_clicked(glib::clone!(#[weak] window, move |button| {
-        button.set_sensitive(false);
-        glib::MainContext::default().spawn_local(glib::clone!(#[weak] window, #[weak] button, async move {
+    step_camera.row.connect_activated(glib::clone!(
+        #[weak]
+        config_btn,
+        move |_| config_btn.emit_clicked()
+    ));
+    step_enroll.row.connect_activated(glib::clone!(
+        #[weak]
+        add_btn,
+        move |_| add_btn.emit_clicked()
+    ));
+    step_test.row.connect_activated(glib::clone!(
+        #[weak]
+        test_btn,
+        move |_| {
+            if test_btn.is_sensitive() {
+                test_btn.emit_clicked();
+            }
+        }
+    ));
+    let integration_marker = step_integration.marker.clone();
+    let integration_number = step_integration.number;
+    step_integration.row.connect_activated(glib::clone!(#[weak] window, #[weak] integration_marker, move |row| {
+        row.set_sensitive(false);
+        let subtitle = row.subtitle();
+        row.set_subtitle("Running gaze doctor…");
+        glib::MainContext::default().spawn_local(glib::clone!(#[weak] window, #[weak] row, #[weak] integration_marker, async move {
             let result = gtk4::gio::spawn_blocking(|| std::process::Command::new("gaze").arg("doctor").env("NO_COLOR", "1").output()).await;
-            button.set_sensitive(true);
+            row.set_sensitive(true);
+            if let Some(subtitle) = subtitle {
+                row.set_subtitle(&subtitle);
+            }
+            if let Ok(Ok(output)) = &result {
+                set_step_marker(&integration_marker, integration_number, output.status.success());
+            }
             let text = match result {
                 Ok(Ok(output)) => format!("{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)),
                 _ => "Run gaze doctor in a terminal on your Linux host to check desktop integration. If the installer requested a reboot, do that before testing screen unlock. Login and keyring unlock are optional, separate settings.".into(),
             };
-            show_error(&window, "Desktop setup checks", &text);
+            show_report(&window, "Desktop setup checks", &text);
         }));
     }));
 
@@ -434,8 +613,12 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     let last_toast: Rc<RefCell<Option<libadwaita::Toast>>> = Rc::new(RefCell::new(None));
 
     test_btn.connect_clicked(glib::clone!(
-        #[strong]
-        test_result,
+        #[weak]
+        test_row,
+        #[weak]
+        test_icon,
+        #[weak(rename_to = test_marker)]
+        step_test.marker,
         #[weak]
         window,
         #[strong]
@@ -457,12 +640,18 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 prev.dismiss();
             }
             btn.set_sensitive(false);
+            test_row.set_subtitle("Look at the camera…");
+            set_test_outcome(&test_icon, TestOutcome::Running);
             let progress_toast = add_toast(&window, "Look at the camera…");
             progress_toast.set_timeout(0);
             *last_toast.borrow_mut() = Some(progress_toast);
             glib::MainContext::default().spawn_local(glib::clone!(
-                #[strong]
-                test_result,
+                #[weak]
+                test_row,
+                #[weak]
+                test_icon,
+                #[weak]
+                test_marker,
                 #[weak]
                 window,
                 #[strong]
@@ -480,8 +669,12 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 async move {
                     use futures::StreamExt;
 
-                    let finish = |text: &str| {
-                        test_result.set_text(text);
+                    let finish = |text: &str, outcome: TestOutcome| {
+                        test_row.set_subtitle(text);
+                        set_test_outcome(&test_icon, outcome);
+                        if outcome == TestOutcome::Matched {
+                            set_step_marker(&test_marker, 3, true);
+                        }
                         if let Some(prev) = last_toast.borrow_mut().take() {
                             prev.dismiss();
                         }
@@ -492,12 +685,12 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
                     if let Err(err) = proxy.claim(&username).await {
                         if dbus_is_not_activatable(&err) {
-                            finish("Reconnecting to the Gaze daemon…");
+                            finish("Reconnecting to the Gaze daemon…", TestOutcome::Failed);
                             if let Some(f) = refresh.borrow().as_ref() {
                                 f();
                             }
                         } else {
-                            finish(&format!("Could not access the camera: {}. Close other camera apps and retry; run gaze doctor if it persists.", dbus_error_message(&err)));
+                            finish(&format!("Could not access the camera: {}. Close other camera apps and retry; run gaze doctor if it persists.", dbus_error_message(&err)), TestOutcome::Failed);
                         }
                         return;
                     }
@@ -505,7 +698,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         Ok(stream) => stream,
                         Err(_) => {
                             let _ = proxy.release().await;
-                            finish("Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled.");
+                            finish("Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled.", TestOutcome::Failed);
                             return;
                         }
                     };
@@ -514,7 +707,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
                     if proxy.verify_start("any").await.is_err() {
                         let _ = proxy.release().await;
-                        finish("Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled.");
+                        finish("Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled.", TestOutcome::Failed);
                         return;
                     }
 
@@ -571,6 +764,11 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
                     let _ = proxy.release().await;
 
+                    let outcome = if matched_face.is_some() {
+                        TestOutcome::Matched
+                    } else {
+                        TestOutcome::Failed
+                    };
                     if let Some(face_name) = matched_face {
                         let list = face_list_weak;
                         let mut child = list.first_child();
@@ -594,7 +792,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         }
                     }
 
-                    finish(&text);
+                    finish(&text, outcome);
                 }
             ));
         }
@@ -815,12 +1013,16 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
                                 for (face_name, count, has_rgb, has_ir) in faces {
                                     let row = libadwaita::ActionRow::new();
+                                    row.set_use_markup(false);
                                     row.set_title(&face_name);
                                     row.set_subtitle(&format!(
                                         "{} capture{}",
                                         count,
                                         if count == 1 { "" } else { "s" }
                                     ));
+                                    let avatar =
+                                        libadwaita::Avatar::new(36, Some(&face_name), true);
+                                    row.add_prefix(&avatar);
 
                                     let rgb_badge = gtk4::Label::new(Some(&spectrum_badge_text("RGB", has_rgb, rgb_configured)));
                                     rgb_badge.set_valign(gtk4::Align::Center);
@@ -1148,5 +1350,18 @@ mod tests {
         assert_eq!(spectrum_badge_class(true, false), "badge-success");
         assert_eq!(spectrum_badge_class(false, true), "badge-warning");
         assert_eq!(spectrum_badge_class(false, false), "badge-muted");
+    }
+
+    #[test]
+    fn test_outcome_icons_only_mark_a_match_as_success() {
+        assert_eq!(
+            test_outcome_icon(TestOutcome::Matched),
+            ("emblem-ok-symbolic", Some("success"))
+        );
+        assert_eq!(
+            test_outcome_icon(TestOutcome::Failed),
+            ("dialog-warning-symbolic", Some("warning"))
+        );
+        assert_eq!(test_outcome_icon(TestOutcome::Running).1, None);
     }
 }

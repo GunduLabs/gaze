@@ -502,19 +502,36 @@ fn build_config_dialog(
 
     let page = libadwaita::PreferencesPage::new();
     let basic_page = libadwaita::PreferencesPage::new();
-    let pages = gtk4::Stack::new();
-    pages.add_titled(&basic_page, Some("everyday"), "Everyday");
-    pages.add_titled(&page, Some("advanced"), "Advanced");
-    let switcher = gtk4::StackSwitcher::new();
-    switcher.set_stack(Some(&pages));
+    let pages = libadwaita::ViewStack::new();
+    pages.add_titled_with_icon(
+        &basic_page,
+        Some("everyday"),
+        "Everyday",
+        "emblem-default-symbolic",
+    );
+    pages.add_titled_with_icon(
+        &page,
+        Some("advanced"),
+        "Advanced",
+        "applications-engineering-symbolic",
+    );
+    let switcher = libadwaita::ViewSwitcher::builder()
+        .stack(&pages)
+        .policy(libadwaita::ViewSwitcherPolicy::Wide)
+        .build();
     header_bar.set_title_widget(Some(&switcher));
     scrolled.set_child(Some(&pages));
     let save_status = gtk4::Label::new(Some("Changes save automatically after unlocking."));
     save_status.set_wrap(true);
     save_status.set_selectable(true);
+    save_status.set_xalign(0.0);
+    save_status.add_css_class("caption");
+    save_status.add_css_class("dim-label");
     save_status.set_margin_start(12);
     save_status.set_margin_end(12);
-    toolbar_view.add_top_bar(&save_status);
+    save_status.set_margin_top(6);
+    save_status.set_margin_bottom(6);
+    toolbar_view.add_bottom_bar(&save_status);
     toolbar_view.set_content(Some(&scrolled));
     overlay.set_child(Some(&toolbar_view));
     window.set_content(Some(&overlay));

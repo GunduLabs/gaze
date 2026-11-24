@@ -8,7 +8,7 @@
 this app. See the [KDE Plasma guide](/guide/kde#system-settings).
 :::
 
-Use `gaze-gui` to enroll your face, test recognition, and adjust Gaze settings. Follow the setup checklist in the main window: camera preview, enrollment, recognition test, then desktop integration checks. Test results stay visible until the next test.
+Use `gaze-gui` to enroll your face, test recognition, and adjust Gaze settings. The main window lists your enrolled faces, a **Recognition** test, and a **Setup Checklist**: choose a camera, enroll a face, test recognition, then check desktop integration. Select a checklist step to open it; each step shows a check mark once it is done in this session. The last test result stays visible until the next test.
 
 Launch it:
 
@@ -16,16 +16,16 @@ Launch it:
 gaze-gui
 ```
 
-- **Enroll a face:** Follow the camera prompts. If both RGB and IR cameras are configured, Gaze captures from both.
+- **Enroll a face:** Select **+** in the header bar and follow the camera prompts. If both RGB and IR cameras are configured, Gaze captures from both.
 - **View profiles:** The main window lists enrolled faces, their total template counts, and `RGB` and `IR` badges. A badge is green when the profile has captures for that spectrum, amber when a camera is configured but the profile has no captures, and grey when no camera is configured. An RGB-only machine therefore shows a green `RGB` badge and a grey `IR` badge; grey does not indicate a failure.
 - **Improve a face:** Select its improve icon to capture additional samples or add a missing spectrum. For example, you can add IR captures to an RGB-only face after configuring an IR camera.
-- **Test authentication:** Run a face scan to check whether Gaze recognizes you.
+- **Test authentication:** Select **Test** in the **Recognition** section to run a face scan and check whether Gaze recognizes you.
 - **Remove faces:** Delete individual faces.
 - **Change daemon settings:** Adjust the security level, cameras, liveness settings, and hybrid policy.
 
 ## Configuration dialog
 
-Open **Settings** from the header bar. **Everyday** contains camera, recognition, and lock-screen options; **Advanced** contains model, storage, and numerical tuning. Changes save automatically after unlocking, with progress and a persistent result above the settings.
+Open **Settings** with the gear button in the header bar. **Everyday** contains camera, recognition, and lock-screen options; **Advanced** contains model, storage, and numerical tuning. Changes save automatically after unlocking, with progress and a persistent result below the settings.
 
 Switching recognition models requires confirmation and new captures for existing faces. After changing it, use **Improve this face** for each profile, then **Test**.
 
