@@ -3,6 +3,7 @@
 
 mod camera;
 mod dialog;
+mod i18n;
 mod window;
 
 use gtk4::prelude::*;

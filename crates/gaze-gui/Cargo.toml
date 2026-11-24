@@ -23,6 +23,7 @@ gaze-core.workspace = true
 gaze-vision.workspace = true
 gtk4 = { workspace = true, features = ["gnome_46"] }
 libadwaita = { workspace = true, features = ["v1_4"] }
+pangocairo.workspace = true
 zbus.workspace = true
 anyhow.workspace = true
 opencv = { workspace = true, features = ["imgproc"] }

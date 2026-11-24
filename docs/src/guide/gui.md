@@ -87,6 +87,26 @@ using [Hardware Acceleration](/guide/acceleration), then restart the daemon afte
   [what it changes about your security](/guide/gnome#what-this-changes-about-your-security)
   first.
 
+## Language
+
+`gaze-gui` follows your desktop language. It currently ships English and
+Simplified Chinese (`zh_CN`); any other language falls back to English. To pick
+a language for this app only, set `GAZE_GUI_LANG`:
+
+```bash
+GAZE_GUI_LANG=zh_CN gaze-gui
+```
+
+`GAZE_GUI_LANG=en` forces English. Messages that come from the daemon or from
+`gaze doctor` stay in English.
+
+Translations live in `crates/gaze-gui/po/` as standard gettext `.po` files and
+are built into the binary, so no extra package is needed. To add a language,
+copy `zh_CN.po` to `<language>.po`, translate each `msgstr`, keep every
+`{placeholder}` unchanged, and add the file to `CATALOGS` in
+`crates/gaze-gui/src/i18n.rs`. `cargo test -p gaze-gui` checks that every catalog
+parses, keeps its placeholders, and contains no strings the GUI no longer uses.
+
 ## Common tasks
 
 1. Enroll a profile named `default`.

@@ -3,6 +3,7 @@
 
 use crate::dialog::capture;
 use crate::dialog::config::show_config_dialog;
+use crate::i18n::{tr, trf};
 use gaze_core::dbus::{
     CaptureStatus, DaemonState, GazeProxy, connect_gaze, dbus_error_message,
     dbus_is_file_not_found, dbus_is_not_activatable, gazed_unit_state_on, load_config_from_daemon,
@@ -48,15 +49,15 @@ fn test_failure_text(rgb: CaptureStatus, ir: CaptureStatus) -> &'static str {
     let seen = |status| matches!(status, CaptureStatus::Ready | CaptureStatus::Usable);
     let idle = |status| matches!(status, CaptureStatus::Unused | CaptureStatus::NoFace);
     if rgb == CaptureStatus::Unused && ir == CaptureStatus::Unused {
-        "Face authentication could not run"
+        tr("Face authentication could not run")
     } else if seen(rgb) || seen(ir) {
-        "Face not recognized"
+        tr("Face not recognized")
     } else if rgb == CaptureStatus::TooDark || ir == CaptureStatus::TooDark {
-        "Too dark for face authentication"
+        tr("Too dark for face authentication")
     } else if idle(rgb) && idle(ir) {
-        "No face detected"
+        tr("No face detected")
     } else {
-        "Move your face into the frame and try again"
+        tr("Move your face into the frame and try again")
     }
 }
 
@@ -85,7 +86,7 @@ pub(crate) fn show_error(window: &libadwaita::ApplicationWindow, title: &str, de
     copy.set_wrap(true);
     dialog.set_body("");
     dialog.set_extra_child(Some(&copy));
-    dialog.add_response("close", "Close");
+    dialog.add_response("close", tr("Close"));
     dialog.set_close_response("close");
     dialog.present();
 }
@@ -113,7 +114,7 @@ fn show_report(window: &libadwaita::ApplicationWindow, title: &str, text: &str) 
         .child(&view)
         .build();
     dialog.set_extra_child(Some(&scroll));
-    dialog.add_response("close", "Close");
+    dialog.add_response("close", tr("Close"));
     dialog.set_close_response("close");
     dialog.present();
 }
@@ -193,20 +194,23 @@ fn add_dbus_error_toast(window: &libadwaita::ApplicationWindow, prefix: &str, er
         window,
         prefix,
         &format!(
-            "{}\nRun gaze doctor for recovery steps.",
-            dbus_error_message(err)
+            "{}\n{}",
+            dbus_error_message(err),
+            tr("Run gaze doctor for recovery steps.")
         ),
     );
 }
 
 async fn confirm_face_removal(window: &libadwaita::ApplicationWindow, face_name: &str) -> bool {
     let dialog = libadwaita::MessageDialog::builder()
-        .heading(format!("Remove \u{201c}{face_name}\u{201d}?"))
-        .body("Gaze will stop recognizing this face. You can enroll it again later.")
+        .heading(trf("Remove “{name}”?", &[("name", face_name)]))
+        .body(tr(
+            "Gaze will stop recognizing this face. You can enroll it again later.",
+        ))
         .transient_for(window)
         .build();
-    dialog.add_response("cancel", "Cancel");
-    dialog.add_response("remove", "Remove");
+    dialog.add_response("cancel", tr("Cancel"));
+    dialog.add_response("remove", tr("Remove"));
     dialog.set_response_appearance("remove", libadwaita::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("cancel"));
     dialog.set_close_response("cancel");
@@ -248,42 +252,49 @@ fn set_status_action_visible(status_page: &libadwaita::StatusPage, visible: bool
 fn daemon_state_text(state: Option<DaemonState>) -> (&'static str, &'static str, Duration) {
     match state {
         Some(DaemonState::Failed) => (
-            "Daemon Failed",
-            "Gaze could not start. Run gaze doctor. On a new install, check that TPM 2.0 is enabled; settings cannot be changed here until the service starts.",
+            tr("Daemon Failed"),
+            tr(
+                "Gaze could not start. Run gaze doctor. On a new install, check that TPM 2.0 is enabled; settings cannot be changed here until the service starts.",
+            ),
             Duration::from_secs(10),
         ),
         Some(DaemonState::Disabled) => (
-            "Daemon Disabled",
-            "The Gaze daemon is turned off. Turn it on with:",
+            tr("Daemon Disabled"),
+            tr("The Gaze daemon is turned off. Turn it on with:"),
             Duration::from_secs(10),
         ),
         Some(DaemonState::Stopped) => (
-            "Daemon Stopped",
-            "The Gaze daemon is not running. Start it with:",
+            tr("Daemon Stopped"),
+            tr("The Gaze daemon is not running. Start it with:"),
             Duration::from_secs(10),
         ),
         Some(DaemonState::NotInstalled) => (
-            "Daemon Not Installed",
-            "The gazed service is missing. Install the gaze package for your distribution.",
+            tr("Daemon Not Installed"),
+            tr("The gazed service is missing. Install the gaze package for your distribution."),
             Duration::from_secs(10),
         ),
         Some(DaemonState::Starting) | None => (
-            "Daemon Starting",
-            "The Gaze daemon is starting up. Its first start downloads face models, which can take a few minutes.",
+            tr("Daemon Starting"),
+            tr(
+                "The Gaze daemon is starting up. Its first start downloads face models, which can take a few minutes.",
+            ),
             Duration::from_secs(3),
         ),
     }
 }
 
 fn show_daemon_pending_toast(window: &libadwaita::ApplicationWindow) {
-    add_toast(window, "Connecting to the Gaze daemon…");
+    add_toast(window, tr("Connecting to the Gaze daemon…"));
 }
 
 fn enrollment_auth_error_text(err: &zbus::Error) -> String {
     if err.to_string().contains("AccessDenied") {
-        "Enrollment was not authorized".to_string()
+        tr("Enrollment was not authorized").to_string()
     } else {
-        format!("Could not start enrollment: {}", dbus_error_message(err))
+        trf(
+            "Could not start enrollment: {error}",
+            &[("error", &dbus_error_message(err))],
+        )
     }
 }
 
@@ -333,7 +344,7 @@ async fn begin_face_capture(
         futures::future::Either::Left((Err(err), _)) => {
             show_error(
                 window,
-                "Could not start enrollment",
+                tr("Could not start enrollment"),
                 &enrollment_auth_error_text(&err),
             );
             return;
@@ -350,9 +361,12 @@ async fn begin_face_capture(
         Err(err) => {
             show_error(
                 window,
-                "Could not start camera",
+                tr("Could not start camera"),
                 &format!(
-                    "{err}\nClose other camera apps, check the privacy shutter, or choose another camera in Settings."
+                    "{err}\n{}",
+                    tr(
+                        "Close other camera apps, check the privacy shutter, or choose another camera in Settings."
+                    )
                 ),
             );
             return;
@@ -363,7 +377,7 @@ async fn begin_face_capture(
         feed.stop();
         show_error(
             window,
-            "Could not start enrollment",
+            tr("Could not start enrollment"),
             &enrollment_auth_error_text(&err),
         );
         return;
@@ -391,9 +405,9 @@ async fn begin_face_capture(
 /// configured but the profile has no captures, and unlit when no camera is configured.
 fn spectrum_badge_text(spectrum: &str, enrolled: bool, configured: bool) -> String {
     let status = match (enrolled, configured) {
-        (true, _) => "ready",
-        (false, true) => "needs captures",
-        (false, false) => "unused",
+        (true, _) => tr("ready"),
+        (false, true) => tr("needs captures"),
+        (false, false) => tr("unused"),
     };
     format!("{spectrum}: {status}")
 }
@@ -413,7 +427,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
     let window = libadwaita::ApplicationWindow::builder()
         .application(app)
-        .title("Gaze")
+        .title(tr("Gaze"))
         .default_width(560)
         .default_height(680)
         .width_request(360)
@@ -426,10 +440,10 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     header.set_title_widget(Some(&title));
 
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_btn.set_tooltip_text(Some("Enroll a new face"));
+    add_btn.set_tooltip_text(Some(tr("Enroll a new face")));
 
     let config_btn = gtk4::Button::from_icon_name("emblem-system-symbolic");
-    config_btn.set_tooltip_text(Some("Settings"));
+    config_btn.set_tooltip_text(Some(tr("Settings")));
 
     header.pack_start(&add_btn);
     header.pack_end(&config_btn);
@@ -451,16 +465,16 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
     let status_page = libadwaita::StatusPage::new();
     status_page.set_icon_name(Some("contact-new-symbolic"));
-    status_page.set_title("Connecting…");
-    status_page.set_description(Some("Loading from the Gaze daemon…"));
+    status_page.set_title(tr("Connecting…"));
+    status_page.set_description(Some(tr("Loading from the Gaze daemon…")));
     status_page.add_css_class("compact");
     status_page.set_visible(true);
 
     let face_group = libadwaita::PreferencesGroup::new();
-    face_group.set_title("Enrolled Faces");
-    face_group.set_description(Some(
+    face_group.set_title(tr("Enrolled Faces"));
+    face_group.set_description(Some(tr(
         "Rename a face, add captures to improve it, or remove it.",
-    ));
+    )));
 
     let face_list = gtk4::ListBox::new();
     face_list.add_css_class("boxed-list");
@@ -473,20 +487,20 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
         .build();
 
     let test_group = libadwaita::PreferencesGroup::new();
-    test_group.set_title("Recognition");
+    test_group.set_title(tr("Recognition"));
     let test_row = libadwaita::ActionRow::builder()
-        .title("Test recognition")
-        .subtitle("Not tested in this session yet.")
+        .title(tr("Test recognition"))
+        .subtitle(tr("Not tested in this session yet."))
         .subtitle_selectable(true)
         .use_markup(false)
         .build();
     let test_icon = gtk4::Image::from_icon_name("camera-web-symbolic");
     test_icon.set_icon_size(gtk4::IconSize::Large);
     test_row.add_prefix(&test_icon);
-    let test_btn = gtk4::Button::with_label("Test");
-    test_btn.set_tooltip_text(Some(
+    let test_btn = gtk4::Button::with_label(tr("Test"));
+    test_btn.set_tooltip_text(Some(tr(
         "Look at the camera and check that Gaze recognizes you",
-    ));
+    )));
     test_btn.set_valign(gtk4::Align::Center);
     test_btn.add_css_class("suggested-action");
     test_btn.add_css_class("pill");
@@ -494,21 +508,29 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     test_group.add(&test_row);
 
     let setup_group = libadwaita::PreferencesGroup::new();
-    setup_group.set_title("Setup Checklist");
-    setup_group.set_description(Some(
+    setup_group.set_title(tr("Setup Checklist"));
+    setup_group.set_description(Some(tr(
         "Work through these once before using face unlock on your desktop.",
-    ));
+    )));
     let step_camera = SetupStep::new(
         1,
-        "Choose your camera",
-        "Pick the camera in Settings, then check it in the enrollment preview",
+        tr("Choose your camera"),
+        tr("Pick the camera in Settings, then check it in the enrollment preview"),
     );
-    let step_enroll = SetupStep::new(2, "Enroll a face", "Capture your face from a few angles");
-    let step_test = SetupStep::new(3, "Test recognition", "Confirm that Gaze recognizes you");
+    let step_enroll = SetupStep::new(
+        2,
+        tr("Enroll a face"),
+        tr("Capture your face from a few angles"),
+    );
+    let step_test = SetupStep::new(
+        3,
+        tr("Test recognition"),
+        tr("Confirm that Gaze recognizes you"),
+    );
     let step_integration = SetupStep::new(
         4,
-        "Check desktop integration",
-        "Run gaze doctor before trying screen unlock",
+        tr("Check desktop integration"),
+        tr("Run gaze doctor before trying screen unlock"),
     );
     for step in [&step_camera, &step_enroll, &step_test, &step_integration] {
         setup_group.add(&step.row);
@@ -531,7 +553,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     content.append(&test_group);
     content.append(&setup_group);
 
-    let enroll_action = gtk4::Button::with_label("Enroll a Face");
+    let enroll_action = gtk4::Button::with_label(tr("Enroll a Face"));
     enroll_action.add_css_class("pill");
     enroll_action.add_css_class("suggested-action");
     enroll_action.set_halign(gtk4::Align::Center);
@@ -577,7 +599,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     step_integration.row.connect_activated(glib::clone!(#[weak] window, #[weak] integration_marker, move |row| {
         row.set_sensitive(false);
         let subtitle = row.subtitle();
-        row.set_subtitle("Running gaze doctor…");
+        row.set_subtitle(tr("Running gaze doctor…"));
         glib::MainContext::default().spawn_local(glib::clone!(#[weak] window, #[weak] row, #[weak] integration_marker, async move {
             let result = gtk4::gio::spawn_blocking(|| std::process::Command::new("gaze").arg("doctor").env("NO_COLOR", "1").output()).await;
             row.set_sensitive(true);
@@ -589,9 +611,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
             }
             let text = match result {
                 Ok(Ok(output)) => format!("{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)),
-                _ => "Run gaze doctor in a terminal on your Linux host to check desktop integration. If the installer requested a reboot, do that before testing screen unlock. Login and keyring unlock are optional, separate settings.".into(),
+                _ => tr("Run gaze doctor in a terminal on your Linux host to check desktop integration. If the installer requested a reboot, do that before testing screen unlock. Login and keyring unlock are optional, separate settings.").into(),
             };
-            show_report(&window, "Desktop setup checks", &text);
+            show_report(&window, tr("Desktop setup checks"), &text);
         }));
     }));
 
@@ -640,9 +662,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                 prev.dismiss();
             }
             btn.set_sensitive(false);
-            test_row.set_subtitle("Look at the camera…");
+            test_row.set_subtitle(tr("Look at the camera…"));
             set_test_outcome(&test_icon, TestOutcome::Running);
-            let progress_toast = add_toast(&window, "Look at the camera…");
+            let progress_toast = add_toast(&window, tr("Look at the camera…"));
             progress_toast.set_timeout(0);
             *last_toast.borrow_mut() = Some(progress_toast);
             glib::MainContext::default().spawn_local(glib::clone!(
@@ -685,12 +707,12 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
                     if let Err(err) = proxy.claim(&username).await {
                         if dbus_is_not_activatable(&err) {
-                            finish("Reconnecting to the Gaze daemon…", TestOutcome::Failed);
+                            finish(tr("Reconnecting to the Gaze daemon…"), TestOutcome::Failed);
                             if let Some(f) = refresh.borrow().as_ref() {
                                 f();
                             }
                         } else {
-                            finish(&format!("Could not access the camera: {}. Close other camera apps and retry; run gaze doctor if it persists.", dbus_error_message(&err)), TestOutcome::Failed);
+                            finish(&trf("Could not access the camera: {error}. Close other camera apps and retry; run gaze doctor if it persists.", &[("error", &dbus_error_message(&err))]), TestOutcome::Failed);
                         }
                         return;
                     }
@@ -698,7 +720,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                         Ok(stream) => stream,
                         Err(_) => {
                             let _ = proxy.release().await;
-                            finish("Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled.", TestOutcome::Failed);
+                            finish(tr("Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled."), TestOutcome::Failed);
                             return;
                         }
                     };
@@ -707,7 +729,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
 
                     if proxy.verify_start("any").await.is_err() {
                         let _ = proxy.release().await;
-                        finish("Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled.", TestOutcome::Failed);
+                        finish(tr("Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled."), TestOutcome::Failed);
                         return;
                     }
 
@@ -731,7 +753,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         .iter()
                                         .find(|(_, _, _, rgb_p, _, _, ir_p)| *rgb_p || *ir_p)
                                         .map(|(n, _, _, _, _, _, _)| n.clone());
-                                    break "Face recognized. Next: check desktop integration before trying screen unlock.".to_string();
+                                    break tr("Face recognized. Next: check desktop integration before trying screen unlock.").to_string();
                                 } else {
                                     let (rgb, ir) = (*args.rgb_status(), *args.ir_status());
                                     refused =
@@ -740,11 +762,11 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                 }
                             }
                             futures::future::Either::Left((None, _)) => {
-                                break "Lost contact with the Gaze daemon".to_string();
+                                break tr("Lost contact with the Gaze daemon").to_string();
                             }
                             futures::future::Either::Right(_) => {
                                 let _ = proxy.verify_stop().await;
-                                break "Recognition timed out without a result. Retry, or run gaze doctor to check the camera and service".to_string();
+                                break tr("Recognition timed out without a result. Retry, or run gaze doctor to check the camera and service").to_string();
                             }
                         }
                     };
@@ -850,7 +872,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                     Err(err) => {
                         tracing::warn!(%err, "Gaze daemon is not reachable yet");
                         if !gaze_core::cpu::supports_inference() {
-                            status_page.set_title("Unsupported CPU");
+                            status_page.set_title(tr("Unsupported CPU"));
                             status_page
                                 .set_description(Some(gaze_core::cpu::UNSUPPORTED_CPU_MESSAGE));
                             return;
@@ -920,7 +942,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                     {
                                         // This CPU cannot run `gazed`, so retrying the request will not
                                         // help.
-                                        status_page.set_title("Unsupported CPU");
+                                        status_page.set_title(tr("Unsupported CPU"));
                                         status_page.set_description(Some(
                                             gaze_core::cpu::UNSUPPORTED_CPU_MESSAGE,
                                         ));
@@ -956,7 +978,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                         );
                                         return;
                                     } else {
-                                        status_page.set_title("Could Not Load Faces");
+                                        status_page.set_title(tr("Could Not Load Faces"));
                                         status_page.set_description(Some(
                                             glib::markup_escape_text(&dbus_error_message(&err))
                                                 .as_str(),
@@ -991,8 +1013,8 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                             }
 
                             if faces.is_empty() {
-                                status_page.set_title("No Faces Enrolled");
-                                status_page.set_description(Some("Choose your camera in Settings, then enroll a face. The capture window lets you check the camera before starting."));
+                                status_page.set_title(tr("No Faces Enrolled"));
+                                status_page.set_description(Some(tr("Choose your camera in Settings, then enroll a face. The capture window lets you check the camera before starting.")));
                                 status_page.set_child(Some(&enroll_action));
                                 set_status_action_visible(&status_page, true);
                                 status_page.set_visible(true);
@@ -1015,11 +1037,11 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                     let row = libadwaita::ActionRow::new();
                                     row.set_use_markup(false);
                                     row.set_title(&face_name);
-                                    row.set_subtitle(&format!(
-                                        "{} capture{}",
-                                        count,
-                                        if count == 1 { "" } else { "s" }
-                                    ));
+                                    row.set_subtitle(&if count == 1 {
+                                        tr("1 capture").to_string()
+                                    } else {
+                                        trf("{count} captures", &[("count", &count.to_string())])
+                                    });
                                     let avatar =
                                         libadwaita::Avatar::new(36, Some(&face_name), true);
                                     row.add_prefix(&avatar);
@@ -1048,15 +1070,15 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                     let rename_btn =
                                         gtk4::Button::from_icon_name("document-edit-symbolic");
                                     rename_btn.add_css_class("flat");
-                                    rename_btn.set_tooltip_text(Some("Rename"));
+                                    rename_btn.set_tooltip_text(Some(tr("Rename")));
                                     let refine_btn =
                                         gtk4::Button::from_icon_name("camera-photo-symbolic");
                                     refine_btn.add_css_class("flat");
-                                    refine_btn.set_tooltip_text(Some("Improve this face"));
+                                    refine_btn.set_tooltip_text(Some(tr("Improve this face")));
                                     let delete_btn =
                                         gtk4::Button::from_icon_name("user-trash-symbolic");
                                     delete_btn.add_css_class("flat");
-                                    delete_btn.set_tooltip_text(Some("Delete"));
+                                    delete_btn.set_tooltip_text(Some(tr("Delete")));
 
                                     btn_box.append(&rename_btn);
                                     btn_box.append(&refine_btn);
@@ -1093,12 +1115,12 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                             body.set_margin_bottom(10);
 
                                             let entry = gtk4::Entry::new();
-                                            entry.set_placeholder_text(Some("New face name"));
+                                            entry.set_placeholder_text(Some(tr("New face name")));
                                             entry.set_text(&face_name);
                                             body.append(&entry);
 
                                             let name_hint = gtk4::Label::new(Some(
-                                                "A face with this name already exists",
+                                                tr("A face with this name already exists"),
                                             ));
                                             name_hint.add_css_class("caption");
                                             name_hint.add_css_class("error");
@@ -1110,9 +1132,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                 gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
                                             button_row.set_halign(gtk4::Align::End);
 
-                                            let cancel_btn = gtk4::Button::with_label("Cancel");
+                                            let cancel_btn = gtk4::Button::with_label(tr("Cancel"));
                                             let rename_confirm_btn =
-                                                gtk4::Button::with_label("Rename");
+                                                gtk4::Button::with_label(tr("Rename"));
                                             rename_confirm_btn.add_css_class("suggested-action");
                                             rename_confirm_btn.set_sensitive(false);
 
@@ -1206,7 +1228,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                                 {
                                                                     add_dbus_error_toast(
                                                                         &window,
-                                                                        "Failed to rename face",
+                                                                        tr("Failed to rename face"),
                                                                         &err,
                                                                     );
                                                                 } else {
@@ -1216,9 +1238,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                                         f();
                                                                     }
 
-                                                                    let text = format!(
-                                                                        "Renamed '{}' to '{}'",
-                                                                        face_name, new_name
+                                                                    let text = trf(
+                                                                        "Renamed “{old}” to “{new}”",
+                                                                        &[("old", &face_name), ("new", &new_name)],
                                                                     );
                                                                     add_toast(&window, text);
                                                                 }
@@ -1313,7 +1335,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                                     {
                                                         add_dbus_error_toast(
                                                             &window,
-                                                            "Failed to remove face",
+                                                            tr("Failed to remove face"),
                                                             &err,
                                                         );
                                                     }

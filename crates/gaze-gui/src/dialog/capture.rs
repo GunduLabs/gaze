@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::camera::{CameraFeed, build_camera_widget};
+use crate::i18n::{tr, trf};
 use futures::StreamExt;
 use gaze_core::config::{CameraConfig, CameraSources, DEFAULT_RGB_CAMERA};
 use gaze_core::dbus::{EnrollPrompt, GazeProxy};
@@ -35,8 +36,8 @@ async fn wait_for_daemon_loss(proxy: &GazeProxy<'_>) {
 
 fn camera_system_label(index: usize) -> String {
     match index {
-        0 => "Main cameras".to_string(),
-        index => format!("Fallback cameras {index}"),
+        0 => tr("Main cameras").to_string(),
+        index => trf("Fallback cameras {index}", &[("index", &index.to_string())]),
     }
 }
 
@@ -88,8 +89,8 @@ pub fn show_capture_dialog(
 
     let dialog = libadwaita::Window::new();
     let title = match face_name {
-        Some(name) => format!("Improve “{name}”"),
-        None => "Add Face".to_string(),
+        Some(name) => trf("Improve “{name}”", &[("name", name)]),
+        None => tr("Add Face").to_string(),
     };
     dialog.set_title(Some(&title));
     dialog.set_default_size(500, if is_refine { 450 } else { 530 });
@@ -112,12 +113,12 @@ pub fn show_capture_dialog(
     body.set_margin_bottom(18);
 
     let camera_kind = if is_ir {
-        "Infrared camera"
+        tr("Infrared camera")
     } else {
-        "RGB camera"
+        tr("RGB camera")
     };
     let camera_mode = gtk4::Label::new(Some(if is_ir {
-        "Infrared camera · preview starts when capture does"
+        tr("Infrared camera · preview starts when capture does")
     } else {
         camera_kind
     }));
@@ -133,7 +134,7 @@ pub fn show_capture_dialog(
     let face_name_valid = Rc::new(RefCell::new(is_refine));
     let mut face_name_entry: Option<libadwaita::EntryRow> = None;
 
-    let name_hint = gtk4::Label::new(Some("A face with this name already exists"));
+    let name_hint = gtk4::Label::new(Some(tr("A face with this name already exists")));
     name_hint.add_css_class("caption");
     name_hint.add_css_class("error");
     name_hint.set_halign(gtk4::Align::Start);
@@ -141,7 +142,7 @@ pub fn show_capture_dialog(
 
     if !is_refine {
         let entry = libadwaita::EntryRow::new();
-        entry.set_title("Face name");
+        entry.set_title(tr("Face name"));
         entry.set_text("default");
         let group = libadwaita::PreferencesGroup::new();
         group.add(&entry);
@@ -167,7 +168,7 @@ pub fn show_capture_dialog(
             .collect::<Vec<_>>();
         let model = gtk4::StringList::new(&labels.iter().map(String::as_str).collect::<Vec<_>>());
         let row = libadwaita::ComboRow::new();
-        row.set_title("Camera");
+        row.set_title(tr("Camera"));
         row.set_model(Some(&model));
         let group = libadwaita::PreferencesGroup::new();
         group.add(&row);
@@ -183,9 +184,9 @@ pub fn show_capture_dialog(
                 selected_system.set(row.selected());
                 feed.stop();
                 feed.hide_frame();
-                camera_mode.set_text(&format!(
-                    "{} · preview starts when capture does",
-                    camera_system_label(row.selected() as usize)
+                camera_mode.set_text(&trf(
+                    "{camera} · preview starts when capture does",
+                    &[("camera", &camera_system_label(row.selected() as usize))],
                 ));
             }
         ));
@@ -221,13 +222,13 @@ pub fn show_capture_dialog(
     progress.set_visible(false);
     body.append(&progress);
 
-    let start_btn = gtk4::Button::with_label("Start Capture");
+    let start_btn = gtk4::Button::with_label(tr("Start Capture"));
     start_btn.add_css_class("suggested-action");
     start_btn.add_css_class("pill");
     start_btn.set_halign(gtk4::Align::Center);
     start_btn.set_sensitive(is_refine);
     body.append(&start_btn);
-    let done_btn = gtk4::Button::with_label("Done — test recognition next");
+    let done_btn = gtk4::Button::with_label(tr("Done — test recognition next"));
     done_btn.add_css_class("suggested-action");
     done_btn.add_css_class("pill");
     done_btn.set_halign(gtk4::Align::Center);
@@ -254,7 +255,7 @@ pub fn show_capture_dialog(
         });
     }
 
-    let stop_btn = gtk4::Button::with_label("Cancel");
+    let stop_btn = gtk4::Button::with_label(tr("Cancel"));
     stop_btn.add_css_class("destructive-action");
     stop_btn.add_css_class("pill");
     stop_btn.set_halign(gtk4::Align::Center);
@@ -272,13 +273,13 @@ pub fn show_capture_dialog(
         stop_btn,
         move |parent: gtk4::Window| {
             let confirm = libadwaita::MessageDialog::builder()
-                .heading("Cancel Enrollment?")
-                .body("This will discard any partial captures.")
+                .heading(tr("Cancel Enrollment?"))
+                .body(tr("This will discard any partial captures."))
                 .transient_for(&parent)
                 .build();
 
-            confirm.add_response("resume", "Resume");
-            confirm.add_response("discard", "Discard");
+            confirm.add_response("resume", tr("Resume"));
+            confirm.add_response("discard", tr("Discard"));
             confirm.set_response_appearance("discard", libadwaita::ResponseAppearance::Destructive);
 
             confirm.connect_response(
@@ -406,14 +407,14 @@ pub fn show_capture_dialog(
             // before starting enrollment.
             feed.stop_and_wait();
             feed.hide_frame();
-            camera_mode.set_text(&format!("{camera_kind} · starting capture"));
+            camera_mode.set_text(&trf("{camera} · starting capture", &[("camera", camera_kind)]));
 
             btn.set_visible(false);
             stop_btn.set_visible(true);
             prompt_label.set_visible(true);
             progress_label.set_visible(true);
             progress.set_visible(true);
-            prompt_label.set_text("Starting enrollment…");
+            prompt_label.set_text(tr("Starting enrollment…"));
 
             let preview_live = Rc::new(Cell::new(false));
             let face_name = resolved_face.borrow().clone();
@@ -468,7 +469,7 @@ pub fn show_capture_dialog(
                     let mut enroll_stream = match proxy.receive_enroll_status().await {
                         Ok(s) => s,
                         Err(_) => {
-                            start_failed("Failed to connect to enrollment stream. Try again.");
+                            start_failed(tr("Failed to connect to enrollment stream. Try again."));
                             let _ = proxy.release().await;
                             return;
                         }
@@ -477,7 +478,7 @@ pub fn show_capture_dialog(
                     let mut capture_stream = match proxy.receive_face_status().await {
                         Ok(s) => s,
                         Err(_) => {
-                            start_failed("Failed to connect to capture stream. Try again.");
+                            start_failed(tr("Failed to connect to capture stream. Try again."));
                             let _ = proxy.release().await;
                             return;
                         }
@@ -487,7 +488,7 @@ pub fn show_capture_dialog(
 
                     // Claim only when capture starts, not while the name-entry dialog is idle.
                     if let Err(err) = proxy.claim(&username).await {
-                        start_failed(&format!("Could not claim camera: {err}. Try again."));
+                        start_failed(&trf("Could not claim camera: {error}. Try again.", &[("error", &err.to_string())]));
                         return;
                     }
                     let started = if camera_system == 0 {
@@ -496,9 +497,9 @@ pub fn show_capture_dialog(
                         proxy.enroll_start_on(&face_name, camera_system).await
                     };
                     if let Err(err) = started {
-                        start_failed(&format!(
-                            "Could not start enrollment: {}",
-                            gaze_core::dbus::dbus_error_message(&err)
+                        start_failed(&trf(
+                            "Could not start enrollment: {error}",
+                            &[("error", &gaze_core::dbus::dbus_error_message(&err))],
                         ));
                         let _ = proxy.release().await;
                         return;
@@ -516,17 +517,18 @@ pub fn show_capture_dialog(
                                 preview_grace_elapsed = true;
                                 if !preview_live.get() {
                                     feed.set_active(true);
-                                    camera_mode.set_text(&format!(
-                                        "{camera_kind} · live preview unavailable, look at the camera"
+                                    camera_mode.set_text(&trf(
+                                        "{camera} · live preview unavailable, look at the camera",
+                                        &[("camera", camera_kind)],
                                     ));
                                 }
                             }
                             _ = &mut deadline => {
-                                prompt_label.set_text("Enrollment timed out. Close this window and try again.");
+                                prompt_label.set_text(tr("Enrollment timed out. Close this window and try again."));
                                 break;
                             }
                             _ = &mut owner_lost => {
-                                prompt_label.set_text("Lost contact with the Gaze daemon. Close this window and try again.");
+                                prompt_label.set_text(tr("Lost contact with the Gaze daemon. Close this window and try again."));
                                 break;
                             }
                             Some(signal) = enroll_stream.next() => {
@@ -537,7 +539,7 @@ pub fn show_capture_dialog(
                                     let time_remaining = *args.time_remaining();
                                     let is_done = *args.is_done();
 
-                                    let display_msg = raw_msg.to_string();
+                                    let display_msg = tr(raw_msg.as_ref()).to_string();
 
                                     if time_remaining > 0.0 {
                                         prompt_label.set_text(&format!("{} [{:.1}s]", display_msg, time_remaining));
@@ -552,7 +554,7 @@ pub fn show_capture_dialog(
                                     }
 
                                     if matches!(raw_msg, EnrollPrompt::DbFailed | EnrollPrompt::CameraFailed | EnrollPrompt::Cancelled) {
-                                        prompt_label.set_text(raw_msg.as_ref());
+                                        prompt_label.set_text(tr(raw_msg.as_ref()));
                                         stop_btn.set_visible(false);
                                         retryable = true;
                                         break;
@@ -560,7 +562,7 @@ pub fn show_capture_dialog(
 
                                     if is_done && raw_msg == EnrollPrompt::Completed {
                                         enrollment_completed.set(true);
-                                        prompt_label.set_text("Face saved. Use Test in the main window, then check desktop integration.");
+                                        prompt_label.set_text(tr("Face saved. Use Test in the main window, then check desktop integration."));
                                         prompt_label.set_wrap(true);
                                         done_btn.set_visible(true);
                                         stop_btn.set_visible(false);
@@ -569,7 +571,7 @@ pub fn show_capture_dialog(
                                     }
 
                                     if is_done {
-                                        prompt_label.set_text("Enrollment finished without saving.");
+                                        prompt_label.set_text(tr("Enrollment finished without saving."));
                                         stop_btn.set_visible(false);
                                         retryable = true;
                                         break;
@@ -592,7 +594,7 @@ pub fn show_capture_dialog(
                                 }
                             }
                             else => {
-                                prompt_label.set_text("Lost contact with the Gaze daemon.");
+                                prompt_label.set_text(tr("Lost contact with the Gaze daemon."));
                                 stop_btn.set_visible(false);
                                 break;
                             }
@@ -608,7 +610,7 @@ pub fn show_capture_dialog(
                         progress.set_fraction(0.0);
                         progress_label.set_visible(false);
                         progress_label.set_text("");
-                        start_btn.set_label("Try Again");
+                        start_btn.set_label(tr("Try Again"));
                         start_btn.set_visible(true);
                     }
                 }
