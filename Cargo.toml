@@ -31,7 +31,7 @@ gaze-security = { path = "crates/gaze-security" }
 gaze-vision = { path = "crates/gaze-vision", default-features = false }
 
 aes-gcm = "0.11.1"
-anyhow = "1.0.104"
+anyhow = "1.0.105"
 clap = "4.6.9"
 clap_complete = "4.6.12"
 console = "0.16.6"
@@ -75,4 +75,4 @@ ureq = "3.5.2"
 uuid = "1.29.3"
 zbus = "6.5.0"
 zeroize = "1.9.2"
-zip = "9.8.1"
+zip = "9.8.2"
