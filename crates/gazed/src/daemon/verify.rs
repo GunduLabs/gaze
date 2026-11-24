@@ -207,6 +207,7 @@ pub(super) fn process_frame_sync(
 
         let aligned = align_face(&mat_rgb, &kpss, 0)?;
         let embedding = recognizer.get_embedding(&aligned)?;
+        let sharpness = face_sharpness(&aligned);
 
         let Some((x1, y1, x2, y2)) = res.bbox else {
             return Ok((status, None));
@@ -226,6 +227,7 @@ pub(super) fn process_frame_sync(
                 kpss,
                 yaw: res.yaw,
                 pitch: res.pitch,
+                sharpness,
             }),
         ))
     } else {
@@ -896,7 +898,7 @@ impl AuthDaemon {
                             if checker.take_rotation_changed() {
                                 landmark_seq.clear();
                             }
-                            tracing::debug!("Processed RGB frame: status={:?}, embedding_extracted={}", status, embed_opt.is_some());
+                            tracing::debug!("Processed RGB frame: status={:?}, embedding_extracted={}, sharpness={:?}", status, embed_opt.is_some(), embed_opt.as_ref().map(|data| data.sharpness));
 
                             if let Some(luma) = checker.rgb_face_luma() {
                                 let frame_kind = face_warmup.classify_mean_luma(luma.mean);
@@ -1669,6 +1671,7 @@ mod tests {
             kpss: ndarray::Array3::zeros((1, 5, 2)),
             yaw,
             pitch,
+            sharpness: 0.0,
         }
     }
 
@@ -1954,6 +1957,7 @@ mod tests {
             kpss: ndarray::Array3::zeros((1, 5, 2)),
             yaw: 0.0,
             pitch: 0.0,
+            sharpness: 0.0,
         };
 
         let crop = crop_liveness_face(&data).unwrap();

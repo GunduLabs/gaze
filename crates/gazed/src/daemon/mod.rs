@@ -22,6 +22,7 @@ use crate::duress::{DuressLockout, DuressTracker, EyeStateClassifier};
 use crate::liveness::{IrLivenessDetector, LivenessDetector};
 use crate::orientation::OrientationWatch;
 use crate::preview::PreviewStream;
+use crate::quality::{SharpestCapture, face_sharpness};
 use crate::recognize::FaceRecognizer;
 use crate::users::{UserDatabase, UserDbError};
 use gaze_core::config::{CONFIG_PATH, Config};
@@ -306,6 +307,8 @@ pub struct FaceData {
     pub kpss: ndarray::Array3<f32>,
     pub yaw: f32,
     pub pitch: f32,
+    /// Focus measure of the aligned crop. Only comparable between frames of one capture.
+    pub sharpness: f32,
 }
 
 struct EmitterGuard {
