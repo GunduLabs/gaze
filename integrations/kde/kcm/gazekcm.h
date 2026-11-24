@@ -87,6 +87,7 @@ private:
     FaceModel m_faces;
     GazeSettings m_settings;
     QString m_enrollState = QStringLiteral("idle");
+    quint64 m_enrollAttempt = 0;
     QString m_prompt;
     QString m_faceHint;
     uint m_progress = 0;

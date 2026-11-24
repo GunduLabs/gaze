@@ -249,7 +249,24 @@ void GazeKcm::startEnroll(const QString &name)
     Q_EMIT enrollChanged();
     Q_EMIT previewChanged();
 
-    claimAnd(QStringLiteral("EnrollStart"), {name}, [this](const QString &error) { finishEnroll(QStringLiteral("failed"), error); });
+    const quint64 attempt = ++m_enrollAttempt;
+    const auto active = [this, attempt] {
+        return m_enrollAttempt == attempt && m_enrollState == QLatin1String("running");
+    };
+    call(QStringLiteral("AuthorizeEnrollment"), {}, [this, name, active](const QDBusMessage &reply) {
+        if (!active()) {
+            return;
+        }
+        if (reply.type() == QDBusMessage::ErrorMessage) {
+            finishEnroll(QStringLiteral("failed"), GazeBus::errorText(reply));
+            return;
+        }
+        claimAnd(QStringLiteral("EnrollStart"), {name}, [this, active](const QString &error) {
+            if (active()) {
+                finishEnroll(QStringLiteral("failed"), error);
+            }
+        });
+    });
 }
 
 void GazeKcm::stopEnroll()
