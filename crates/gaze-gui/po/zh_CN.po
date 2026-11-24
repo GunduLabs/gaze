@@ -368,6 +368,12 @@ msgstr "摄像头扫描完成后将显示设置。"
 msgid "Primary camera"
 msgstr "主摄像头"
 
+msgid "None"
+msgstr "无"
+
+msgid "None (IR only)"
+msgstr "无（仅红外）"
+
 msgid "Could not list cameras"
 msgstr "无法列出摄像头"
 

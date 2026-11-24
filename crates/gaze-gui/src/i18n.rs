@@ -336,6 +336,7 @@ mod tests {
             include_str!("dialog/config.rs"),
             include_str!("../../gaze-core/src/config/mod.rs"),
             include_str!("../../gaze-core/src/dbus.rs"),
+            include_str!("../../gaze-vision/src/camera/mod.rs"),
         ]
         .concat();
         for (name, po) in CATALOGS {

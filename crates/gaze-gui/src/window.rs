@@ -173,7 +173,7 @@ enum TestOutcome {
 fn test_outcome_icon(outcome: TestOutcome) -> (&'static str, Option<&'static str>) {
     match outcome {
         TestOutcome::Running => ("camera-web-symbolic", None),
-        TestOutcome::Matched => ("emblem-ok-symbolic", Some("success")),
+        TestOutcome::Matched => ("object-select-symbolic", Some("success")),
         TestOutcome::Failed => ("dialog-warning-symbolic", Some("warning")),
     }
 }
@@ -228,7 +228,89 @@ fn daemon_state_command(state: Option<DaemonState>) -> Option<&'static str> {
     }
 }
 
-fn show_daemon_state(status_page: &libadwaita::StatusPage, state: Option<DaemonState>) -> Duration {
+/// The empty and error state shown above the lists, built like `AdwStatusPage`.
+///
+/// `AdwStatusPage` wraps its content in its own scrolled window, which measures its natural
+/// height without the width it will get. Inside this window's scrolled content that clipped a
+/// wrapped description, so this plain box is used instead and simply grows with its text.
+#[derive(Clone)]
+struct StatusView {
+    root: gtk4::Box,
+    image: gtk4::Image,
+    title: gtk4::Label,
+    description: gtk4::Label,
+    slot: libadwaita::Bin,
+}
+
+impl StatusView {
+    fn new() -> Self {
+        let root = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+        root.set_margin_top(12);
+        root.set_margin_bottom(12);
+        let image = gtk4::Image::new();
+        image.set_pixel_size(96);
+        image.add_css_class("dim-label");
+        let title = gtk4::Label::new(None);
+        title.add_css_class("title-2");
+        title.set_wrap(true);
+        title.set_justify(gtk4::Justification::Center);
+        let description = gtk4::Label::new(None);
+        description.set_wrap(true);
+        description.set_use_markup(true);
+        description.set_justify(gtk4::Justification::Center);
+        let slot = libadwaita::Bin::new();
+        slot.set_halign(gtk4::Align::Center);
+        slot.set_margin_top(12);
+        for widget in [
+            image.upcast_ref::<gtk4::Widget>(),
+            title.upcast_ref(),
+            description.upcast_ref(),
+            slot.upcast_ref(),
+        ] {
+            root.append(widget);
+        }
+        Self {
+            root,
+            image,
+            title,
+            description,
+            slot,
+        }
+    }
+
+    fn set_icon_name(&self, icon: Option<&str>) {
+        self.image.set_icon_name(icon);
+    }
+
+    fn set_title(&self, title: &str) {
+        self.title.set_text(title);
+    }
+
+    fn set_description(&self, description: Option<&str>) {
+        self.description.set_markup(description.unwrap_or_default());
+        self.description
+            .set_visible(description.is_some_and(|d| !d.is_empty()));
+    }
+
+    fn set_child(&self, child: Option<&impl IsA<gtk4::Widget>>) {
+        self.slot.set_child(child);
+        self.slot
+            .set_visible(child.is_some_and(|child| child.as_ref().is_visible()));
+    }
+
+    fn set_action_visible(&self, visible: bool) {
+        if let Some(action) = self.slot.child() {
+            action.set_visible(visible);
+            self.slot.set_visible(visible);
+        }
+    }
+
+    fn set_visible(&self, visible: bool) {
+        self.root.set_visible(visible);
+    }
+}
+
+fn show_daemon_state(status_page: &StatusView, state: Option<DaemonState>) -> Duration {
     let (title, description, retry) = daemon_state_text(state);
     status_page.set_title(title);
     status_page.set_description(Some(description));
@@ -243,10 +325,8 @@ fn show_daemon_state(status_page: &libadwaita::StatusPage, state: Option<DaemonS
     retry
 }
 
-fn set_status_action_visible(status_page: &libadwaita::StatusPage, visible: bool) {
-    if let Some(action) = status_page.child() {
-        action.set_visible(visible);
-    }
+fn set_status_action_visible(status_page: &StatusView, visible: bool) {
+    status_page.set_action_visible(visible);
 }
 
 fn daemon_state_text(state: Option<DaemonState>) -> (&'static str, &'static str, Duration) {
@@ -442,7 +522,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_btn.set_tooltip_text(Some(tr("Enroll a new face")));
 
-    let config_btn = gtk4::Button::from_icon_name("emblem-system-symbolic");
+    let config_btn = gtk4::Button::from_icon_name("preferences-system-symbolic");
     config_btn.set_tooltip_text(Some(tr("Settings")));
 
     header.pack_start(&add_btn);
@@ -463,12 +543,10 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
     content.set_margin_top(24);
     content.set_margin_bottom(24);
 
-    let status_page = libadwaita::StatusPage::new();
+    let status_page = StatusView::new();
     status_page.set_icon_name(Some("contact-new-symbolic"));
     status_page.set_title(tr("Connecting…"));
     status_page.set_description(Some(tr("Loading from the Gaze daemon…")));
-    status_page.add_css_class("compact");
-    status_page.set_visible(true);
 
     let face_group = libadwaita::PreferencesGroup::new();
     face_group.set_title(tr("Enrolled Faces"));
@@ -548,7 +626,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
         }
     ));
 
-    content.append(&status_page);
+    content.append(&status_page.root);
     content.append(&face_group);
     content.append(&test_group);
     content.append(&setup_group);
@@ -855,7 +933,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
         window,
         #[weak]
         face_list,
-        #[weak]
+        #[strong]
         status_page,
         #[strong]
         enroll_action,
@@ -894,7 +972,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
             *refresh.borrow_mut() = Some(Rc::new(glib::clone!(
                 #[weak]
                 face_list,
-                #[weak]
+                #[strong]
                 status_page,
                 #[strong]
                 enroll_action,
@@ -912,7 +990,7 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                     glib::MainContext::default().spawn_local(glib::clone!(
                         #[weak]
                         face_list,
-                        #[weak]
+                        #[strong]
                         status_page,
                         #[strong]
                         enroll_action,
@@ -1378,7 +1456,7 @@ mod tests {
     fn test_outcome_icons_only_mark_a_match_as_success() {
         assert_eq!(
             test_outcome_icon(TestOutcome::Matched),
-            ("emblem-ok-symbolic", Some("success"))
+            ("object-select-symbolic", Some("success"))
         );
         assert_eq!(
             test_outcome_icon(TestOutcome::Failed),

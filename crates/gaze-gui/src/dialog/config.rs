@@ -515,7 +515,7 @@ fn build_config_dialog(
         &basic_page,
         Some("everyday"),
         tr("Everyday"),
-        "emblem-default-symbolic",
+        "user-home-symbolic",
     );
     pages.add_titled_with_icon(
         &page,
@@ -618,8 +618,7 @@ fn build_config_dialog(
 
     let camera_row = libadwaita::ComboRow::new();
     camera_row.set_title(tr("RGB camera source"));
-    let cam_model =
-        gtk4::StringList::new(&cam_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+    let cam_model = gtk4::StringList::new(&cam_names.iter().map(|s| tr(s)).collect::<Vec<_>>());
     camera_row.set_model(Some(&cam_model));
     hardware_group.add(&camera_row);
 
@@ -630,7 +629,9 @@ fn build_config_dialog(
 
     let ir_row = libadwaita::ComboRow::new();
     ir_row.set_title(tr("IR camera source"));
-    let ir_model = gtk4::StringList::new(&ir_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+    // Device names pass through unchanged; only the fixed "Primary camera" and "None" entries
+    // have translations.
+    let ir_model = gtk4::StringList::new(&ir_names.iter().map(|s| tr(s)).collect::<Vec<_>>());
     ir_row.set_model(Some(&ir_model));
     hardware_group.add(&ir_row);
 
