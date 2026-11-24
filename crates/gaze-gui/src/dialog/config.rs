@@ -507,7 +507,7 @@ fn build_config_dialog(
         &basic_page,
         Some("everyday"),
         "Everyday",
-        "emblem-default-symbolic",
+        "user-home-symbolic",
     );
     pages.add_titled_with_icon(
         &page,
