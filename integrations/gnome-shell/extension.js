@@ -944,7 +944,7 @@ export default class GazeFaceAuthExtension extends Extension {
           return;
         }
 
-        let hintText = "Password";
+        let hintText = safeGettext("Password");
         if (request) {
           const trimmed = request.trim();
           if (
@@ -1330,7 +1330,12 @@ export default class GazeFaceAuthExtension extends Extension {
 
                 if (FACE_STATUS_UPDATES.has(text)) {
                   emitFilterMessages(this, serviceName, MESSAGE_TYPE.HINT);
-                  emitQueueMessage(this, serviceName, text, MESSAGE_TYPE.HINT);
+                  emitQueueMessage(
+                    this,
+                    serviceName,
+                    safeGettext(text),
+                    MESSAGE_TYPE.HINT,
+                  );
                   return;
                 }
               }
@@ -1649,16 +1654,16 @@ export default class GazeFaceAuthExtension extends Extension {
 
           if (faceActive && fpActive) {
             return this._fingerprintReaderType === 2
-              ? "(or look at the camera or swipe finger)"
-              : "(or look at the camera or place finger on reader)";
+              ? safeGettext("(or look at the camera or swipe finger)")
+              : safeGettext("(or look at the camera or place finger on reader)");
           }
 
-          if (faceActive) return "(or look at the camera)";
+          if (faceActive) return safeGettext(FACE_HINT_TEXT);
 
           if (fpActive) {
             return this._fingerprintReaderType === 2
-              ? "(or swipe finger across reader)"
-              : "(or place finger on reader)";
+              ? safeGettext("(or swipe finger across reader)")
+              : safeGettext("(or place finger on reader)");
           }
 
           return null;
@@ -1735,7 +1740,11 @@ export default class GazeFaceAuthExtension extends Extension {
 
               if (FACE_STATUS_UPDATES.has(text)) {
                 this._filterServiceMessages(serviceName, MESSAGE_TYPE.HINT);
-                this._queueMessage(serviceName, text, MESSAGE_TYPE.HINT);
+                this._queueMessage(
+                  serviceName,
+                  safeGettext(text),
+                  MESSAGE_TYPE.HINT,
+                );
                 return;
               }
             }

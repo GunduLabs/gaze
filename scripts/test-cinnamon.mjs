@@ -221,6 +221,7 @@ async function environment(version, options = {}) {
         }),
         ui: namespace(ui),
         misc: namespace({util: {wiggle() {}}}),
+        gettext: {bindtextdomain() {}, dgettext: (_domain, text) => text},
         signals: {
             addSignalMethods(proto) {
                 for (const name of ['connect', 'disconnect', 'emit'])

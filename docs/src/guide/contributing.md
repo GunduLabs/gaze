@@ -77,6 +77,13 @@ If you changed the `Justfile`, also run:
 just --fmt --check
 ```
 
+If you changed a translation, or text in a desktop, metainfo, polkit, or KCM metadata file, also run:
+
+```bash
+just sync-translations
+just check-translations
+```
+
 If you changed packaging files, scripts, systemd units, DBus policy, PAM integration, or GNOME extension packaging, build at least the affected package format:
 
 ```bash
@@ -94,6 +101,26 @@ just check-pam-link
 `just build-rust` and every package build run this check already, so a failure
 there means a dependency reached `pam_gaze.so` that must not be in it. See
 [the warning in the development guide](/guide/development#build-and-test-rust-components).
+
+## Translations
+
+The graphical surfaces are translated with gettext `.po` files. The CLI, the daemon, PAM prompts, and these docs stay in English.
+
+| Surface | Catalogs |
+| --- | --- |
+| KDE System Settings page | `integrations/kde/kcm/po/<lang>/kcm_gaze.po` |
+| GNOME Shell extension and preferences | `integrations/gnome-shell/po/<lang>.po` |
+| Cinnamon extension and settings | `integrations/cinnamon/po/<lang>.po` |
+| Launchers, app store metadata, polkit prompts | `packaging/po/<lang>.po` |
+
+- To fix a translation, edit its `msgstr`. Keep every `{placeholder}`, `%1`, command, and product name unchanged.
+- Entries marked `#, fuzzy` or left empty are not shipped; users see the English text instead.
+- When you reword English text, update the matching `msgid` in each catalog, or that string falls back to English.
+- To add a language, add one catalog per surface. No build file lists languages.
+- `packaging/po` is copied into the launchers, metainfo, polkit policy, and KCM metadata by `just sync-translations`. Commit its output and do not edit the translated lines by hand.
+- Never translate `GAZE_*` codes or text that PAM clients match on, such as `Face Verified. Press Enter to confirm.`
+
+Start wording from GNOME, KDE, or Android in that language so Gaze matches the rest of the desktop. The existing catalogs were drafted with an AI tool against those projects, so corrections from native speakers are welcome.
 
 ## Tests
 

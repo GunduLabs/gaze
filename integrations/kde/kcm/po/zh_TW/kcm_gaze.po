@@ -1,0 +1,503 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: zh_TW\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "The Gaze daemon is not running yet. Its first start downloads face models, which can take a few minutes. This page updates when it is ready."
+msgstr "Gaze 服務尚未執行。首次啟動時會下載臉部模型，可能需要幾分鐘。服務就緒後，此頁面會自動更新。"
+
+msgid "Face the camera"
+msgstr "請正對相機"
+
+msgid "Tilt your face slightly up"
+msgstr "請將臉稍微抬高"
+
+msgid "Tilt your face slightly down"
+msgstr "請將臉稍微朝下"
+
+msgid "Turn your face slightly left"
+msgstr "請將臉稍微轉向左邊"
+
+msgid "Turn your face slightly right"
+msgstr "請將臉稍微轉向右邊"
+
+msgid "Captured"
+msgstr "已擷取"
+
+msgid "Enrollment complete"
+msgstr "註冊完成"
+
+msgid "Enrollment cancelled"
+msgstr "註冊已取消"
+
+msgid "Database error during enrollment"
+msgstr "註冊時發生資料庫錯誤"
+
+msgid "Camera error during enrollment"
+msgstr "註冊時發生相機錯誤"
+
+msgid "Please look at the camera..."
+msgstr "請看著相機…"
+
+msgid "Need more light..."
+msgstr "需要更多光線…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "臉部超出畫面，請後退…"
+
+msgid "Please center your face..."
+msgstr "請將臉部置中…"
+
+msgid "Please come closer..."
+msgstr "請靠近一點…"
+
+msgid "Please back up..."
+msgstr "請後退一點…"
+
+msgid "Hold still..."
+msgstr "請保持不動…"
+
+msgid "Face authentication could not run"
+msgstr "無法執行臉部驗證"
+
+msgid "Face not recognized"
+msgstr "無法辨識臉部"
+
+msgid "Too dark for face authentication"
+msgstr "光線太暗，無法進行臉部驗證"
+
+msgid "No face detected"
+msgstr "未偵測到臉部"
+
+msgid "Move your face into the frame and try again"
+msgstr "請將臉部移入畫面中，然後再試一次"
+
+msgid "Starting enrollment…"
+msgstr "正在開始註冊…"
+
+msgid "Enrollment finished without saving."
+msgstr "註冊已結束，但未儲存。"
+
+msgid "%1 [%2s]"
+msgstr "%1 [%2s]"
+
+msgid "Could not restart the Gaze service (%1)"
+msgstr "無法重新啟動 Gaze 服務 (%1)"
+
+msgid "The Gaze service did not start again after the restart"
+msgstr "重新啟動後，Gaze 服務未再次啟動"
+
+msgid "Re-enroll faces after this change?"
+msgstr "變更後要重新註冊臉部嗎？"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face for each profile, then test recognition."
+msgstr "現有的擷取無法與新的辨識模型比對。它們會保留在磁碟上。儲存後，請對每個設定檔使用「改善此臉部」，然後測試辨識。"
+
+msgid "Standard"
+msgstr "標準"
+
+msgid "Accurate"
+msgstr "精確"
+
+msgid "Settings"
+msgstr "設定"
+
+msgid "Everyday settings"
+msgstr "一般設定"
+
+msgid "Advanced settings"
+msgstr "進階設定"
+
+msgid "Restart Service"
+msgstr "重新啟動服務"
+
+msgid "Settings are locked"
+msgstr "設定已鎖定"
+
+msgid "Unlock…"
+msgstr "解鎖…"
+
+msgid "Settings saved. Restart the Gaze service to use the new inference provider."
+msgstr "設定已儲存。請重新啟動 Gaze 服務以使用新的推論提供者。"
+
+msgid "Restarting the Gaze service…"
+msgstr "正在重新啟動 Gaze 服務…"
+
+msgid "Gaze service restarted"
+msgstr "Gaze 服務已重新啟動"
+
+msgid "Restarting the Gaze service failed"
+msgstr "重新啟動 Gaze 服務失敗"
+
+msgid "Security"
+msgstr "安全性"
+
+msgid "Security level"
+msgstr "安全等級"
+
+msgid "Medium is recommended. Changing the recognition model requires new captures for existing profiles"
+msgstr "建議使用「中」。變更辨識模型後，現有的設定檔需要重新擷取"
+
+msgid "Low"
+msgstr "低"
+
+msgid "Medium"
+msgstr "中"
+
+msgid "High"
+msgstr "高"
+
+msgid "Maximum"
+msgstr "最高"
+
+msgid "Custom"
+msgstr "自訂"
+
+msgid "Detector level"
+msgstr "偵測器等級"
+
+msgid "Recognizer level"
+msgstr "辨識器等級"
+
+msgid "RGB recognizer threshold"
+msgstr "RGB 辨識閾值"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "視為相符的最低 RGB 相似度"
+
+msgid "IR recognizer threshold"
+msgstr "IR 辨識閾值"
+
+msgid "Minimum IR similarity for a match"
+msgstr "視為相符的最低 IR 相似度"
+
+msgid "Hybrid combining policy"
+msgstr "混合組合原則"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "RGB 與 IR 相機同時啟用時的組合原則"
+
+msgid "Default"
+msgstr "預設"
+
+msgid "Or"
+msgstr "或"
+
+msgid "Fallback on dark"
+msgstr "黑暗時改用備用"
+
+msgid "And"
+msgstr "且"
+
+msgid "Hardware"
+msgstr "硬體"
+
+msgid "Inference execution provider"
+msgstr "推論執行提供者"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI"
+msgstr "CPU、自動 NPU、Intel OpenVINO 或 AMD Ryzen AI"
+
+msgid "CPU"
+msgstr "CPU"
+
+msgid "Automatic (NPU)"
+msgstr "自動（NPU）"
+
+msgid "Intel OpenVINO"
+msgstr "Intel OpenVINO"
+
+msgid "AMD Ryzen AI"
+msgstr "AMD Ryzen AI"
+
+msgid "OpenVINO inference device"
+msgstr "OpenVINO 推論裝置"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "所有 ONNX 模型使用的 Intel 裝置"
+
+msgid "GPU"
+msgstr "GPU"
+
+msgid "NPU"
+msgstr "NPU"
+
+msgid "RGB camera source"
+msgstr "RGB 相機來源"
+
+msgid "Primary camera"
+msgstr "主要相機"
+
+msgid "None (IR only)"
+msgstr "無（僅 IR）"
+
+msgid "IR camera source"
+msgstr "IR 相機來源"
+
+msgid "None"
+msgstr "無"
+
+msgid "IR frame size override"
+msgstr "覆寫 IR 影格大小"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "若自動模式下 IR 畫面呈綠色或損毀，則強制使用單一解析度"
+
+msgid "Width"
+msgstr "寬度"
+
+msgid "Height"
+msgstr "高度"
+
+msgid "Force IR emitter"
+msgstr "強制開啟 IR 發射器"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "覆寫發射器控制，僅在 IR 發射器無法自行開啟時使用"
+
+msgid "Parallel RGB + IR capture"
+msgstr "同時擷取 RGB + IR"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "混合驗證速度更快，但部分網路攝影機無法同時串流兩個感測器"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "永不（先擷取 RGB，再擷取 IR）"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "自動（相機支援時同時擷取）"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "一律（同時擷取 RGB 與 IR）"
+
+msgid "Darkness cutoff"
+msgstr "黑暗臨界值"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "拒絕平均亮度低於此值的影格 (0–255)"
+
+msgid "Enrollment"
+msgstr "註冊"
+
+msgid "Maximum templates"
+msgstr "範本數量上限"
+
+msgid "Number of capture sets stored per face"
+msgstr "每個臉部儲存的擷取組數"
+
+msgid "Minimum face size ratio"
+msgstr "最小臉部大小比例"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "註冊時可接受的最小臉部；數值越低，可保持的距離越遠"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "活體偵測防偽"
+
+msgid "Enable liveness spoof prevention"
+msgstr "啟用活體偵測防偽"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "檢查相機影像與自然動作，找出照片或螢幕的跡象"
+
+msgid "Liveness threshold"
+msgstr "活體偵測閾值"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "防偽的最低信賴度"
+
+msgid "Maximum liveness duration"
+msgstr "活體偵測最長時間"
+
+msgid "Maximum seconds analyzed for liveness verification"
+msgstr "活體偵測分析的最長秒數"
+
+msgid "Authentication"
+msgstr "驗證"
+
+msgid "Abort if SSH"
+msgstr "使用 SSH 時中止"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "禁止透過 SSH 連線進行驗證"
+
+msgid "Abort if lid closed"
+msgstr "上蓋闔上時中止"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "筆記型電腦上蓋闔上時禁止驗證"
+
+msgid "Require a suspend first"
+msgstr "需先暫停一次"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "在系統暫停並恢復過一次之前，禁止驗證"
+
+msgid "Require confirmation on lock screen"
+msgstr "鎖定畫面需要確認"
+
+msgid "On KDE lock/login screens this requires your password instead of face unlock. Confirmation after a match is available on other supported surfaces"
+msgstr "在 KDE 鎖定/登入畫面上，這會要求密碼而非臉部解鎖。其他支援的地方可在比對相符後確認"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "提升權限的驗證需要確認"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "在 sudo、polkit 和類似提示中，臉部相符後需按 Enter 或點選「確定」才能授權"
+
+msgid "Resume grace period (ms)"
+msgstr "恢復後的寬限時間（毫秒）"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "從暫停狀態喚醒時延後臉部驗證"
+
+msgid "Start delay (ms)"
+msgstr "開始延遲（毫秒）"
+
+msgid "Use 3000–5000 ms to give yourself time to step away after locking"
+msgstr "請使用 3000–5000 毫秒，讓您在鎖定後有時間離開"
+
+msgid "Start delay applies to"
+msgstr "開始延遲套用於"
+
+msgid "Which prompts wait for the start delay"
+msgstr "哪些提示需等待開始延遲"
+
+msgid "All face authentication (including sudo)"
+msgstr "所有臉部驗證（包含 sudo）"
+
+msgid "Screen lockers only"
+msgstr "僅螢幕鎖定"
+
+msgid "Storage"
+msgstr "儲存"
+
+msgid "Encrypt face templates"
+msgstr "加密臉部範本"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "使用 TPM 密封的金鑰加密儲存的臉部範本"
+
+msgid "Unlock GNOME Keyring"
+msgstr "解鎖 GNOME Keyring"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login"
+msgstr "在受活體偵測保護的 GDM 或 greetd 臉部登入後使用已註冊的密碼"
+
+msgid "Unlock KWallet"
+msgstr "解鎖 KWallet"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet"
+msgstr "在受活體偵測保護的 KDE 登入後使用已註冊的密碼；請以 gaze keyring --kwallet 註冊"
+
+msgid "Enrolled Faces"
+msgstr "已註冊的臉部"
+
+msgid "Configure"
+msgstr "設定"
+
+msgid "Configure Gaze"
+msgstr "設定 Gaze"
+
+msgid "Test"
+msgstr "測試"
+
+msgid "Test face authentication"
+msgstr "測試臉部驗證"
+
+msgid "Add Face…"
+msgstr "新增臉部…"
+
+msgid "Enroll a new face"
+msgstr "註冊新臉部"
+
+msgid "Faces enrolled for %1"
+msgstr "已為 %1 註冊的臉部"
+
+msgid "Look at the camera…"
+msgstr "請看著相機…"
+
+msgid "Face recognized"
+msgstr "已辨識臉部"
+
+msgid "No face seen before the test timed out"
+msgstr "測試逾時前未看到臉部"
+
+msgid "No Faces Enrolled"
+msgstr "尚未註冊臉部"
+
+msgid "Enroll a face to get started"
+msgstr "請先註冊臉部"
+
+msgid "%1 capture"
+msgid_plural "%1 captures"
+msgstr[0] "%1 次擷取"
+
+msgid "RGB"
+msgstr "RGB"
+
+msgid "IR"
+msgstr "IR"
+
+msgid "Rename"
+msgstr "重新命名"
+
+msgid "Improve this face"
+msgstr "改善此臉部"
+
+msgid "Delete"
+msgstr "刪除"
+
+msgid "Improve “%1”"
+msgstr "改善「%1」"
+
+msgid "Add Face"
+msgstr "新增臉部"
+
+msgid "Face name"
+msgstr "臉部名稱"
+
+msgid "A face with this name already exists"
+msgstr "已有相同名稱的臉部"
+
+msgid "Look at the camera and follow the prompts to add more captures to “%1”."
+msgstr "請看著相機並依照提示，為「%1」新增更多擷取。"
+
+msgid "Look at the camera and follow the prompts. Keep your face centered and well lit."
+msgstr "請看著相機並依照提示操作。請將臉部置中並保持光線充足。"
+
+msgid "Start Capture"
+msgstr "開始擷取"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Done"
+msgstr "完成"
+
+msgid "Cancel Enrollment?"
+msgstr "要取消註冊嗎？"
+
+msgid "This will discard any partial captures."
+msgstr "這會捨棄所有未完成的擷取。"
+
+msgid "Resume"
+msgstr "繼續"
+
+msgid "Discard"
+msgstr "捨棄"
+
+msgid "Delete Face"
+msgstr "刪除臉部"
+
+msgid "Delete “%1”? You can add it again later."
+msgstr "要刪除「%1」嗎？您之後可以重新新增。"
+
+msgid "Rename Face"
+msgstr "重新命名臉部"

@@ -6,6 +6,7 @@ const GLib = imports.gi.GLib;
 const St = imports.gi.St;
 const Clutter = imports.gi.Clutter;
 const Pango = imports.gi.Pango;
+const Gettext = imports.gettext;
 const Main = imports.ui.main;
 
 const GAZE_DBUS_INTERFACE = `
@@ -54,9 +55,23 @@ const GAZE_MSG_PASSWORD_REQUIRED = "GAZE_MSG_PASSWORD_REQUIRED";
 
 const CINNAMON_PAM_SERVICES = ["polkit-1", "cinnamon"];
 
+const TEXT_DOMAIN = "gaze@gundulabs.com";
+
+const bindTranslations = (metadata) => {
+  if (!metadata?.path) return;
+  // <prefix>/share/cinnamon/extensions/<uuid> keeps its catalogs in <prefix>/share/locale.
+  let dataDir = metadata.path;
+  for (let i = 0; i < 3; i++) dataDir = GLib.path_get_dirname(dataDir);
+  try {
+    Gettext.bindtextdomain(TEXT_DOMAIN, `${dataDir}/locale`);
+  } catch (e) {}
+};
+
 const safeGettext = (str) => {
   if (!str) return str;
   try {
+    const translated = Gettext.dgettext(TEXT_DOMAIN, str);
+    if (translated && translated !== str) return translated;
     if (typeof _ === "function") return _(str) || str;
   } catch (e) {}
   return str;
@@ -271,7 +286,7 @@ const ensureUnlockConfirmButton = (unlockDialog, extension) => {
   const button = new St.Button({
     style_class: "button modal-dialog-button default",
     style: "padding: 9px 24px; border-radius: 12px;",
-    label: "Confirm Face Unlock",
+    label: safeGettext("Confirm Face Unlock"),
     can_focus: true,
     reactive: true,
     x_align: Clutter.ActorAlign.FILL,
@@ -681,7 +696,7 @@ class GazeCinnamonExtension {
             return;
           }
 
-          let hintText = "Password";
+          let hintText = safeGettext("Password");
           if (request) {
             if (
               trimmed?.startsWith("GAZE_MSG_") ||
@@ -1033,6 +1048,7 @@ class GazeCinnamonExtension {
 let extensionInstance = null;
 
 function init(metadata) {
+  bindTranslations(metadata);
   extensionInstance = new GazeCinnamonExtension(metadata);
 }
 

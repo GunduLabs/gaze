@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Clear a Gaze duress lockout"
+msgstr "Gaze-Nötigungssperre aufheben"
+
+msgid "Authentication is required to re-enable face authentication after a duress signal."
+msgstr "Zum erneuten Aktivieren der Gesichtsauthentifizierung nach einem Nötigungssignal ist eine Authentifizierung erforderlich."
+
+msgid "Manage face enrollments for Gaze"
+msgstr "Gesichtsregistrierungen für Gaze verwalten"
+
+msgid "Authentication is required to manage Gaze face enrollments."
+msgstr "Zum Verwalten der Gaze-Gesichtsregistrierungen ist eine Authentifizierung erforderlich."
+
+msgid "Manage daemon configuration for Gaze"
+msgstr "Daemon-Konfiguration für Gaze verwalten"
+
+msgid "Authentication is required to change Gaze daemon configuration."
+msgstr "Zum Ändern der Konfiguration des Gaze-Daemons ist eine Authentifizierung erforderlich."
+
+msgid "Manage GDM login authentication for Gaze"
+msgstr "GDM-Anmeldeauthentifizierung für Gaze verwalten"
+
+msgid "Authentication is required to change Gaze face authentication at the GDM login screen."
+msgstr "Zum Ändern der Gaze-Gesichtsauthentifizierung auf dem GDM-Anmeldebildschirm ist eine Authentifizierung erforderlich."
+
+msgid "Enroll faces and configure facial authentication"
+msgstr "Gesichter registrieren und Gesichtsauthentifizierung einrichten"
+
+msgid "face;auth;login;biometric;"
+msgstr "Gesicht;Gesichtserkennung;Entsperrung;Authentifizierung;Anmeldung;biometrisch;"
+
+msgid "Enroll and manage faces, test face authentication, and adjust every Gaze setting."
+msgstr "Gesichter registrieren und verwalten, die Gesichtsauthentifizierung testen und alle Einstellungen von Gaze anpassen."
+
+msgid "Facial authentication"
+msgstr "Gesichtsauthentifizierung"
+
+msgid "Gaze Settings"
+msgstr "Gaze-Einstellungen"

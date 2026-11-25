@@ -1,0 +1,505 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "The Gaze daemon is not running yet. Its first start downloads face models, which can take a few minutes. This page updates when it is ready."
+msgstr "Служба Gaze ещё не запущена. При первом запуске загружаются модели распознавания лиц, это может занять несколько минут. Страница обновится, когда служба будет готова."
+
+msgid "Face the camera"
+msgstr "Смотрите прямо в камеру"
+
+msgid "Tilt your face slightly up"
+msgstr "Слегка поднимите лицо вверх"
+
+msgid "Tilt your face slightly down"
+msgstr "Слегка опустите лицо вниз"
+
+msgid "Turn your face slightly left"
+msgstr "Слегка поверните лицо влево"
+
+msgid "Turn your face slightly right"
+msgstr "Слегка поверните лицо вправо"
+
+msgid "Captured"
+msgstr "Снято"
+
+msgid "Enrollment complete"
+msgstr "Регистрация завершена"
+
+msgid "Enrollment cancelled"
+msgstr "Регистрация отменена"
+
+msgid "Database error during enrollment"
+msgstr "Ошибка базы данных при регистрации"
+
+msgid "Camera error during enrollment"
+msgstr "Ошибка камеры при регистрации"
+
+msgid "Please look at the camera..."
+msgstr "Смотрите в камеру…"
+
+msgid "Need more light..."
+msgstr "Нужно больше света…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "Лицо обрезано. Отодвиньтесь…"
+
+msgid "Please center your face..."
+msgstr "Поместите лицо по центру…"
+
+msgid "Please come closer..."
+msgstr "Подойдите ближе…"
+
+msgid "Please back up..."
+msgstr "Отодвиньтесь…"
+
+msgid "Hold still..."
+msgstr "Не двигайтесь…"
+
+msgid "Face authentication could not run"
+msgstr "Не удалось выполнить аутентификацию по лицу"
+
+msgid "Face not recognized"
+msgstr "Лицо не распознано"
+
+msgid "Too dark for face authentication"
+msgstr "Слишком темно для аутентификации по лицу"
+
+msgid "No face detected"
+msgstr "Лицо не обнаружено"
+
+msgid "Move your face into the frame and try again"
+msgstr "Поместите лицо в кадр и повторите попытку"
+
+msgid "Starting enrollment…"
+msgstr "Начинается регистрация…"
+
+msgid "Enrollment finished without saving."
+msgstr "Регистрация завершилась без сохранения."
+
+msgid "%1 [%2s]"
+msgstr "%1 [%2s]"
+
+msgid "Could not restart the Gaze service (%1)"
+msgstr "Не удалось перезапустить службу Gaze (%1)"
+
+msgid "The Gaze service did not start again after the restart"
+msgstr "Служба Gaze не запустилась после перезапуска"
+
+msgid "Re-enroll faces after this change?"
+msgstr "Зарегистрировать лица заново после этого изменения?"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face for each profile, then test recognition."
+msgstr "Существующие снимки несовместимы с новой моделью распознавания. Они останутся на диске. После сохранения используйте «Улучшить это лицо» для каждого профиля, затем проверьте распознавание."
+
+msgid "Standard"
+msgstr "Стандартный"
+
+msgid "Accurate"
+msgstr "Точный"
+
+msgid "Settings"
+msgstr "Настройки"
+
+msgid "Everyday settings"
+msgstr "Основные настройки"
+
+msgid "Advanced settings"
+msgstr "Дополнительные настройки"
+
+msgid "Restart Service"
+msgstr "Перезапустить службу"
+
+msgid "Settings are locked"
+msgstr "Настройки заблокированы"
+
+msgid "Unlock…"
+msgstr "Разблокировать…"
+
+msgid "Settings saved. Restart the Gaze service to use the new inference provider."
+msgstr "Настройки сохранены. Перезапустите службу Gaze, чтобы использовать нового поставщика инференса."
+
+msgid "Restarting the Gaze service…"
+msgstr "Перезапуск службы Gaze…"
+
+msgid "Gaze service restarted"
+msgstr "Служба Gaze перезапущена"
+
+msgid "Restarting the Gaze service failed"
+msgstr "Не удалось перезапустить службу Gaze"
+
+msgid "Security"
+msgstr "Безопасность"
+
+msgid "Security level"
+msgstr "Уровень безопасности"
+
+msgid "Medium is recommended. Changing the recognition model requires new captures for existing profiles"
+msgstr "Рекомендуется «Средний». После смены модели распознавания для существующих профилей нужны новые снимки"
+
+msgid "Low"
+msgstr "Низкий"
+
+msgid "Medium"
+msgstr "Средний"
+
+msgid "High"
+msgstr "Высокий"
+
+msgid "Maximum"
+msgstr "Максимальный"
+
+msgid "Custom"
+msgstr "Свой"
+
+msgid "Detector level"
+msgstr "Уровень детектора"
+
+msgid "Recognizer level"
+msgstr "Уровень распознавания"
+
+msgid "RGB recognizer threshold"
+msgstr "Порог распознавания RGB"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "Минимальное сходство RGB для совпадения"
+
+msgid "IR recognizer threshold"
+msgstr "Порог распознавания IR"
+
+msgid "Minimum IR similarity for a match"
+msgstr "Минимальное сходство IR для совпадения"
+
+msgid "Hybrid combining policy"
+msgstr "Правило гибридного объединения"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "Правило объединения, когда активны обе камеры, RGB и IR"
+
+msgid "Default"
+msgstr "По умолчанию"
+
+msgid "Or"
+msgstr "Или"
+
+msgid "Fallback on dark"
+msgstr "Резерв в темноте"
+
+msgid "And"
+msgstr "И"
+
+msgid "Hardware"
+msgstr "Оборудование"
+
+msgid "Inference execution provider"
+msgstr "Поставщик выполнения инференса"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI"
+msgstr "Процессор, автоматический выбор NPU, Intel OpenVINO или AMD Ryzen AI"
+
+msgid "CPU"
+msgstr "CPU"
+
+msgid "Automatic (NPU)"
+msgstr "Автоматически (NPU)"
+
+msgid "Intel OpenVINO"
+msgstr "Intel OpenVINO"
+
+msgid "AMD Ryzen AI"
+msgstr "AMD Ryzen AI"
+
+msgid "OpenVINO inference device"
+msgstr "Устройство инференса OpenVINO"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "Устройство Intel, используемое для всех моделей ONNX"
+
+msgid "GPU"
+msgstr "GPU"
+
+msgid "NPU"
+msgstr "NPU"
+
+msgid "RGB camera source"
+msgstr "Источник RGB-камеры"
+
+msgid "Primary camera"
+msgstr "Основная камера"
+
+msgid "None (IR only)"
+msgstr "Нет (только IR)"
+
+msgid "IR camera source"
+msgstr "Источник IR-камеры"
+
+msgid "None"
+msgstr "Нет"
+
+msgid "IR frame size override"
+msgstr "Задать размер кадра IR"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "Принудительно использовать одно разрешение, если изображение IR в автоматическом режиме зелёное или искажённое"
+
+msgid "Width"
+msgstr "Ширина"
+
+msgid "Height"
+msgstr "Высота"
+
+msgid "Force IR emitter"
+msgstr "Принудительно включать IR-излучатель"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "Переопределить управление излучателем, только если IR-излучатель не включается сам"
+
+msgid "Parallel RGB + IR capture"
+msgstr "Параллельная съёмка RGB + IR"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "Гибридная аутентификация быстрее, но некоторые веб-камеры не могут передавать данные с обоих датчиков одновременно"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "Никогда (сначала RGB, затем IR)"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "Автоматически (параллельно, если камера позволяет)"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "Всегда (RGB и IR одновременно)"
+
+msgid "Darkness cutoff"
+msgstr "Порог темноты"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "Отклонять кадры со средней яркостью ниже этого значения (0–255)"
+
+msgid "Enrollment"
+msgstr "Регистрация"
+
+msgid "Maximum templates"
+msgstr "Максимум шаблонов"
+
+msgid "Number of capture sets stored per face"
+msgstr "Количество наборов снимков, хранимых для каждого лица"
+
+msgid "Minimum face size ratio"
+msgstr "Минимальный относительный размер лица"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "Наименьшее допустимое лицо при регистрации; меньшее значение позволяет находиться дальше"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "Проверка живости (защита от подмены)"
+
+msgid "Enable liveness spoof prevention"
+msgstr "Включить защиту от подмены по признакам живости"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "Проверять изображения камеры и естественные движения на признаки фотографии или экрана"
+
+msgid "Liveness threshold"
+msgstr "Порог проверки живости"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "Минимальная достоверность защиты от подмены"
+
+msgid "Maximum liveness duration"
+msgstr "Максимальная длительность проверки живости"
+
+msgid "Maximum seconds analyzed for liveness verification"
+msgstr "Максимум секунд, анализируемых при проверке живости"
+
+msgid "Authentication"
+msgstr "Аутентификация"
+
+msgid "Abort if SSH"
+msgstr "Прерывать при SSH"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "Запрещать аутентификацию через соединения SSH"
+
+msgid "Abort if lid closed"
+msgstr "Прерывать при закрытой крышке"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "Запрещать аутентификацию, когда крышка ноутбука закрыта"
+
+msgid "Require a suspend first"
+msgstr "Сначала требовать переход в ждущий режим"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "Запрещать аутентификацию, пока система хотя бы один раз не перейдёт в ждущий режим и не выйдет из него"
+
+msgid "Require confirmation on lock screen"
+msgstr "Требовать подтверждение на экране блокировки"
+
+msgid "On KDE lock/login screens this requires your password instead of face unlock. Confirmation after a match is available on other supported surfaces"
+msgstr "На экранах блокировки и входа KDE вместо разблокировки по лицу требуется пароль. В других поддерживаемых местах доступно подтверждение после совпадения"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "Требовать подтверждение для аутентификации с повышенными правами"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "Требовать нажатия Enter или кнопки OK для авторизации после совпадения лица в sudo, polkit и подобных запросах"
+
+msgid "Resume grace period (ms)"
+msgstr "Задержка после пробуждения (мс)"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "Откладывать аутентификацию по лицу при выходе из ждущего режима"
+
+msgid "Start delay (ms)"
+msgstr "Задержка перед началом (мс)"
+
+msgid "Use 3000–5000 ms to give yourself time to step away after locking"
+msgstr "Используйте 3000–5000 мс, чтобы успеть отойти после блокировки"
+
+msgid "Start delay applies to"
+msgstr "Задержка перед началом применяется к"
+
+msgid "Which prompts wait for the start delay"
+msgstr "Какие запросы ожидают задержку перед началом"
+
+msgid "All face authentication (including sudo)"
+msgstr "Вся аутентификация по лицу (включая sudo)"
+
+msgid "Screen lockers only"
+msgstr "Только блокировщики экрана"
+
+msgid "Storage"
+msgstr "Хранение"
+
+msgid "Encrypt face templates"
+msgstr "Шифровать шаблоны лиц"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "Шифровать хранимые шаблоны лиц ключом, запечатанным в TPM"
+
+msgid "Unlock GNOME Keyring"
+msgstr "Разблокировать GNOME Keyring"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login"
+msgstr "Использовать зарегистрированный пароль после входа по лицу в GDM или greetd, защищённого проверкой живости"
+
+msgid "Unlock KWallet"
+msgstr "Разблокировать KWallet"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet"
+msgstr "Использовать зарегистрированный пароль после входа в KDE, защищённого проверкой живости; зарегистрируйте его командой gaze keyring --kwallet"
+
+msgid "Enrolled Faces"
+msgstr "Зарегистрированные лица"
+
+msgid "Configure"
+msgstr "Настроить"
+
+msgid "Configure Gaze"
+msgstr "Настроить Gaze"
+
+msgid "Test"
+msgstr "Проверить"
+
+msgid "Test face authentication"
+msgstr "Проверить аутентификацию по лицу"
+
+msgid "Add Face…"
+msgstr "Добавить лицо…"
+
+msgid "Enroll a new face"
+msgstr "Зарегистрировать новое лицо"
+
+msgid "Faces enrolled for %1"
+msgstr "Лица, зарегистрированные для %1"
+
+msgid "Look at the camera…"
+msgstr "Смотрите в камеру…"
+
+msgid "Face recognized"
+msgstr "Лицо распознано"
+
+msgid "No face seen before the test timed out"
+msgstr "До окончания проверки лицо не обнаружено"
+
+msgid "No Faces Enrolled"
+msgstr "Нет зарегистрированных лиц"
+
+msgid "Enroll a face to get started"
+msgstr "Зарегистрируйте лицо, чтобы начать"
+
+msgid "%1 capture"
+msgid_plural "%1 captures"
+msgstr[0] "%1 снимок"
+msgstr[1] "%1 снимка"
+msgstr[2] "%1 снимков"
+
+msgid "RGB"
+msgstr "RGB"
+
+msgid "IR"
+msgstr "IR"
+
+msgid "Rename"
+msgstr "Переименовать"
+
+msgid "Improve this face"
+msgstr "Улучшить это лицо"
+
+msgid "Delete"
+msgstr "Удалить"
+
+msgid "Improve “%1”"
+msgstr "Улучшить «%1»"
+
+msgid "Add Face"
+msgstr "Добавить лицо"
+
+msgid "Face name"
+msgstr "Имя лица"
+
+msgid "A face with this name already exists"
+msgstr "Лицо с таким именем уже существует"
+
+msgid "Look at the camera and follow the prompts to add more captures to “%1”."
+msgstr "Смотрите в камеру и следуйте подсказкам, чтобы добавить снимки для «%1»."
+
+msgid "Look at the camera and follow the prompts. Keep your face centered and well lit."
+msgstr "Смотрите в камеру и следуйте подсказкам. Держите лицо по центру и при хорошем освещении."
+
+msgid "Start Capture"
+msgstr "Начать съёмку"
+
+msgid "Cancel"
+msgstr "Отмена"
+
+msgid "Done"
+msgstr "Готово"
+
+msgid "Cancel Enrollment?"
+msgstr "Отменить регистрацию?"
+
+msgid "This will discard any partial captures."
+msgstr "Незавершённые снимки будут удалены."
+
+msgid "Resume"
+msgstr "Продолжить"
+
+msgid "Discard"
+msgstr "Удалить"
+
+msgid "Delete Face"
+msgstr "Удалить лицо"
+
+msgid "Delete “%1”? You can add it again later."
+msgstr "Удалить «%1»? Позже его можно будет добавить снова."
+
+msgid "Rename Face"
+msgstr "Переименовать лицо"

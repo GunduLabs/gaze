@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: vi\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Clear a Gaze duress lockout"
+msgstr "Gỡ khóa Gaze do bị ép buộc"
+
+msgid "Authentication is required to re-enable face authentication after a duress signal."
+msgstr "Cần xác thực để bật lại xác thực khuôn mặt sau tín hiệu bị ép buộc."
+
+msgid "Manage face enrollments for Gaze"
+msgstr "Quản lý các khuôn mặt đã đăng ký trong Gaze"
+
+msgid "Authentication is required to manage Gaze face enrollments."
+msgstr "Cần xác thực để quản lý các khuôn mặt đã đăng ký trong Gaze."
+
+msgid "Manage daemon configuration for Gaze"
+msgstr "Quản lý cấu hình dịch vụ Gaze"
+
+msgid "Authentication is required to change Gaze daemon configuration."
+msgstr "Cần xác thực để thay đổi cấu hình dịch vụ Gaze."
+
+msgid "Manage GDM login authentication for Gaze"
+msgstr "Quản lý xác thực đăng nhập GDM cho Gaze"
+
+msgid "Authentication is required to change Gaze face authentication at the GDM login screen."
+msgstr "Cần xác thực để thay đổi xác thực khuôn mặt của Gaze trên màn hình đăng nhập GDM."
+
+msgid "Enroll faces and configure facial authentication"
+msgstr "Đăng ký khuôn mặt và cấu hình xác thực khuôn mặt"
+
+msgid "face;auth;login;biometric;"
+msgstr "khuôn mặt;mở khóa;xác thực;đăng nhập;sinh trắc học;"
+
+msgid "Enroll and manage faces, test face authentication, and adjust every Gaze setting."
+msgstr "Đăng ký và quản lý khuôn mặt, kiểm tra xác thực khuôn mặt và điều chỉnh mọi cài đặt của Gaze."
+
+msgid "Facial authentication"
+msgstr "Xác thực khuôn mặt"
+
+msgid "Gaze Settings"
+msgstr "Cài đặt Gaze"

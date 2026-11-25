@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: pt_BR\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+msgid "Clear a Gaze duress lockout"
+msgstr "Remover o bloqueio por coação do Gaze"
+
+msgid "Authentication is required to re-enable face authentication after a duress signal."
+msgstr "É necessária autenticação para reativar a autenticação facial após um sinal de coação."
+
+msgid "Manage face enrollments for Gaze"
+msgstr "Gerenciar os rostos registrados no Gaze"
+
+msgid "Authentication is required to manage Gaze face enrollments."
+msgstr "É necessária autenticação para gerenciar os rostos registrados no Gaze."
+
+msgid "Manage daemon configuration for Gaze"
+msgstr "Gerenciar a configuração do serviço do Gaze"
+
+msgid "Authentication is required to change Gaze daemon configuration."
+msgstr "É necessária autenticação para alterar a configuração do serviço do Gaze."
+
+msgid "Manage GDM login authentication for Gaze"
+msgstr "Gerenciar a autenticação de login do GDM para o Gaze"
+
+msgid "Authentication is required to change Gaze face authentication at the GDM login screen."
+msgstr "É necessária autenticação para alterar a autenticação facial do Gaze na tela de login do GDM."
+
+msgid "Enroll faces and configure facial authentication"
+msgstr "Registre rostos e configure a autenticação facial"
+
+msgid "face;auth;login;biometric;"
+msgstr "rosto;facial;desbloqueio;autenticação;login;biometria;"
+
+msgid "Enroll and manage faces, test face authentication, and adjust every Gaze setting."
+msgstr "Registre e gerencie rostos, teste a autenticação facial e ajuste todas as configurações do Gaze."
+
+msgid "Facial authentication"
+msgstr "Autenticação facial"
+
+msgid "Gaze Settings"
+msgstr "Configurações do Gaze"

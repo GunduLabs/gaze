@@ -1,0 +1,161 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Strings shared with gaze-gui come from Gloridust's zh_CN translation (#1039).
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Enrollment"
+msgstr "录入"
+
+msgid "Behavior"
+msgstr "行为"
+
+msgid "Face authentication"
+msgstr "人脸认证"
+
+msgid "Face authentication for unlocking this session. This does not affect the GDM login screen (see below). Settings are stored in your current dconf profile."
+msgstr "用于解锁此会话的人脸认证。不影响 GDM 登录界面（见下文）。设置保存在当前的 dconf 配置中。"
+
+msgid "Enable face authentication (lock screen)"
+msgstr "启用人脸认证（锁屏）"
+
+msgid "Face retry mode"
+msgstr "人脸重试模式"
+
+msgid "Disabled"
+msgstr "禁用"
+
+msgid "Fixed tries"
+msgstr "固定次数"
+
+msgid "Infinite"
+msgstr "无限次"
+
+msgid "Maximum face tries"
+msgstr "人脸尝试次数上限"
+
+msgid "Enrolled faces"
+msgstr "已录入的人脸"
+
+msgid "Checking…"
+msgstr "正在检查…"
+
+msgid "Open Gaze"
+msgstr "打开 Gaze"
+
+msgid "Could not open the Gaze app. Run gaze-gui from a terminal."
+msgstr "无法打开 Gaze 应用。请在终端中运行 gaze-gui。"
+
+msgid "A face is enrolled for this account."
+msgstr "此账户已录入人脸。"
+
+msgid "No face is enrolled yet, so face unlock has nothing to match. Open Gaze to enroll one."
+msgstr "尚未录入人脸，因此人脸解锁没有可匹配的数据。请打开 Gaze 进行录入。"
+
+msgid "Gaze daemon unavailable."
+msgstr "Gaze 守护进程不可用。"
+
+msgid "GDM login screen"
+msgstr "GDM 登录界面"
+
+msgid "Enable face authentication at the GDM login screen. Requires administrator authorization. Note: GNOME keyring is normally unlocked by your password, so logging in with face only may leave it locked."
+msgstr "在 GDM 登录界面启用人脸认证。需要管理员授权。注意：GNOME 密钥环通常由密码解锁，因此仅用人脸登录可能会使其保持锁定。"
+
+msgid "Enable face authentication at GDM login"
+msgstr "在 GDM 登录时启用人脸认证"
+
+msgid "Administrator authorization is required to enable face authentication at the GDM login screen."
+msgstr "在 GDM 登录界面启用人脸认证需要管理员授权。"
+
+msgid "Administrator authorization is required to disable face authentication at the GDM login screen."
+msgstr "在 GDM 登录界面禁用人脸认证需要管理员授权。"
+
+msgid "Could not update GDM login face authentication: {error}"
+msgstr "无法更新 GDM 登录人脸认证：{error}"
+
+msgid "Face auth enabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "已在 GDM 登录界面启用人脸认证。请重启 GDM（或重启系统）以生效。"
+
+msgid "Face auth disabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "已在 GDM 登录界面禁用人脸认证。请重启 GDM（或重启系统）以生效。"
+
+msgid "Face not recognized. Please enter your password."
+msgstr "未能识别人脸。请输入密码。"
+
+msgid "Face not detected. Please enter your password."
+msgstr "未检测到人脸。请输入密码。"
+
+msgid "Too dark for face authentication. Please enter your password."
+msgstr "光线太暗，无法进行人脸认证。请输入密码。"
+
+msgid "Face authentication timed out. Please enter your password."
+msgstr "人脸认证超时。请输入密码。"
+
+msgid "Face authentication unavailable. Please enter your password."
+msgstr "人脸认证不可用。请输入密码。"
+
+msgid "Changing Gaze's settings or faces needs your password."
+msgstr "更改 Gaze 的设置或人脸需要你的密码。"
+
+msgid "Sorry, face authentication did not work. Please try again."
+msgstr "抱歉，人脸认证未成功。请重试。"
+
+msgid "You reached the maximum face authentication attempts, please try another method"
+msgstr "已达到人脸认证次数上限，请尝试其他方式"
+
+msgid "(or look at the camera)"
+msgstr "（或看向摄像头）"
+
+msgid "(or look at the camera or swipe finger)"
+msgstr "（或看向摄像头或划动手指）"
+
+msgid "(or look at the camera or place finger on reader)"
+msgstr "（或看向摄像头或将手指置于指纹读取器上）"
+
+msgid "(or swipe finger across reader)"
+msgstr "（或将手指划过指纹读取器）"
+
+msgid "(or place finger on reader)"
+msgstr "（或将手指置于指纹读取器上）"
+
+msgid "Password"
+msgstr "密码"
+
+msgid "Face verified. Press Enter or click Authenticate to confirm."
+msgstr "人脸已验证。按 Enter 或点击“认证”确认。"
+
+msgid "Face authentication failed"
+msgstr "人脸认证失败"
+
+msgid "Confirm Face Unlock"
+msgstr "确认人脸解锁"
+
+msgid "Failed to show confirmation prompt"
+msgstr "无法显示确认提示"
+
+msgid "Please look at the camera..."
+msgstr "请看向摄像头…"
+
+msgid "Need more light..."
+msgstr "需要更多光线…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "人脸超出画面，请后退…"
+
+msgid "Please center your face..."
+msgstr "请将脸部居中…"
+
+msgid "Please come closer..."
+msgstr "请靠近一些…"
+
+msgid "Please back up..."
+msgstr "请后退一些…"
+
+msgid "Hold still..."
+msgstr "请保持不动…"
