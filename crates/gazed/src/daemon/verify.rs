@@ -56,8 +56,21 @@ pub(super) enum VerifyMsg {
     Error(String),
 }
 
-pub(super) fn should_yield_rgb_to_ir(policy: &str, run_ir: bool, status: CaptureStatus) -> bool {
-    run_ir && !matches!(policy, "or" | "and") && matches!(status, CaptureStatus::TooDark)
+pub(super) fn should_yield_rgb_to_ir(
+    policy: &str,
+    run_ir: bool,
+    serial_capture: bool,
+    rgb_was_lit: bool,
+    status: CaptureStatus,
+) -> bool {
+    if !run_ir || status != CaptureStatus::TooDark {
+        return false;
+    }
+    match policy {
+        "and" => false,
+        "or" => serial_capture && !rgb_was_lit,
+        _ => true,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -835,6 +848,7 @@ impl AuthDaemon {
                         // is still underexposed. Give face exposure its own bounded warmup.
                         let mut face_warmup = RgbWarmupGate::new(config_clone.cameras.dark_luma_threshold);
                         let mut logged_dark_stream = false;
+                        let mut rgb_was_lit = false;
                         let mut logged_rgb_luma_statuses = Vec::new();
                         let mut live_scores: Vec<f32> = Vec::new();
                         let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
@@ -856,7 +870,7 @@ impl AuthDaemon {
                             }
 
                             match warmup.classify_with_luma(&frame) {
-                                (RgbFrameKind::Lit, _) => {}
+                                (RgbFrameKind::Lit, _) => rgb_was_lit = true,
                                 (RgbFrameKind::WarmupDark, _) => continue,
                                 (RgbFrameKind::SettledDark, luma) => {
                                     if !logged_dark_stream {
@@ -925,7 +939,7 @@ impl AuthDaemon {
                             let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
                             let status_sent = tx.try_send(VerifyMsg::Status(Spectrum::Rgb, status, latest_embed, cam.fps())).is_ok();
 
-                            if should_yield_rgb_to_ir(&hybrid_policy_clone, run_ir, status) {
+                            if should_yield_rgb_to_ir(&hybrid_policy_clone, run_ir, serial_capture, rgb_was_lit, status) {
                                 yielded_to_ir = true;
                                 break;
                             }
@@ -2037,6 +2051,8 @@ mod tests {
         assert!(should_yield_rgb_to_ir(
             "fallback_on_dark",
             true,
+            false,
+            false,
             CaptureStatus::TooDark
         ));
         assert!(hybrid_auth_passed(
@@ -2217,20 +2233,37 @@ mod tests {
     #[test]
     fn hybrid_fallback_yields_settled_dark_rgb_to_ir() {
         for policy in ["fallback_on_dark", "default", ""] {
-            assert!(should_yield_rgb_to_ir(policy, true, CaptureStatus::TooDark));
+            for (serial, lit) in [(true, true), (true, false), (false, true), (false, false)] {
+                assert!(
+                    should_yield_rgb_to_ir(policy, true, serial, lit, CaptureStatus::TooDark),
+                    "{policy} {serial} {lit}"
+                );
+            }
         }
-        assert!(!should_yield_rgb_to_ir(
-            "fallback_on_dark",
-            false,
-            CaptureStatus::TooDark
-        ));
-        assert!(!should_yield_rgb_to_ir(
-            "fallback_on_dark",
-            true,
-            CaptureStatus::NoFace
-        ));
-        assert!(!should_yield_rgb_to_ir("or", true, CaptureStatus::TooDark));
-        assert!(!should_yield_rgb_to_ir("and", true, CaptureStatus::TooDark));
+        for policy in ["fallback_on_dark", "or", "and"] {
+            assert!(
+                !should_yield_rgb_to_ir(policy, false, true, false, CaptureStatus::TooDark),
+                "{policy}"
+            );
+            assert!(
+                !should_yield_rgb_to_ir(policy, true, true, false, CaptureStatus::NoFace),
+                "{policy}"
+            );
+        }
+        for (serial, lit) in [(true, true), (true, false), (false, true), (false, false)] {
+            assert!(
+                !should_yield_rgb_to_ir("and", true, serial, lit, CaptureStatus::TooDark),
+                "{serial} {lit}"
+            );
+        }
+    }
+
+    #[test]
+    fn or_policy_yields_only_a_serial_rgb_camera_that_was_never_lit() {
+        let dark = CaptureStatus::TooDark;
+        assert!(should_yield_rgb_to_ir("or", true, true, false, dark));
+        assert!(!should_yield_rgb_to_ir("or", true, true, true, dark));
+        assert!(!should_yield_rgb_to_ir("or", true, false, false, dark));
     }
 
     #[test]
