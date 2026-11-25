@@ -15,6 +15,7 @@ homepage: "https://gaze.gundulabs.com"
 license: "GPL-3.0-or-later"
 
 contents:
+${LOCALE_CONTENTS}
   - src: "integrations/gnome-shell/metadata.json"
     dst: "/usr/share/gnome-shell/extensions/gaze@gundulabs.com/metadata.json"
     file_info:

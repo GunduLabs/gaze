@@ -67,6 +67,7 @@ BuildRequires:  gstreamer-plugins-base
 BuildRequires:  gstreamer-plugins-good
 BuildRequires:  gstreamer-plugin-pipewire
 BuildRequires:  libopenssl-devel
+BuildRequires:  gettext-tools
 BuildRequires:  cmake
 BuildRequires:  kf6-extra-cmake-modules
 BuildRequires:  qt6-base-devel
@@ -88,6 +89,7 @@ BuildRequires:  gstreamer1-plugins-base
 BuildRequires:  gstreamer1-plugins-good
 BuildRequires:  pipewire-gstreamer
 BuildRequires:  openssl-devel
+BuildRequires:  gettext
 BuildRequires:  cmake
 BuildRequires:  extra-cmake-modules
 BuildRequires:  qt6-qtbase-devel
@@ -237,6 +239,7 @@ install -Dpm 0644 packaging/gui/com.gundulabs.Gaze.metainfo.xml %{buildroot}%{_d
 install -Dpm 0644 integrations/gnome-shell/metadata.json %{buildroot}%{_datadir}/gnome-shell/extensions/%{extension_uuid}/metadata.json
 install -Dpm 0644 integrations/gnome-shell/extension.js %{buildroot}%{_datadir}/gnome-shell/extensions/%{extension_uuid}/extension.js
 install -Dpm 0644 integrations/gnome-shell/prefs.js %{buildroot}%{_datadir}/gnome-shell/extensions/%{extension_uuid}/prefs.js
+bash scripts/build-locales.sh integrations/gnome-shell/po %{buildroot}%{_datadir}/gnome-shell/extensions/%{extension_uuid}/locale
 install -Dpm 0644 packaging/config/org.gnome.shell.extensions.gaze.gschema.xml %{buildroot}%{_datadir}/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml
 install -Dpm 0644 packaging/gdm/00-gaze-defaults %{buildroot}%{_sysconfdir}/dconf/db/gdm.d/00-gaze-defaults
 install -Dpm 0644 packaging/gdm/profile %{buildroot}%{_datadir}/gaze/dconf-profile-gdm
@@ -251,6 +254,7 @@ install -Dpm 0644 gaze-greeter-keyring.pp %{buildroot}%{_datadir}/gaze/gaze-gree
 install -Dpm 0644 integrations/cinnamon/metadata.json %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/metadata.json
 install -Dpm 0644 integrations/cinnamon/extension.js %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/extension.js
 install -Dpm 0644 integrations/cinnamon/settings-schema.json %{buildroot}%{_datadir}/cinnamon/extensions/%{extension_uuid}/settings-schema.json
+bash scripts/build-locales.sh integrations/cinnamon/po %{buildroot}%{_datadir}/locale
 
 install -Dpm 0755 integrations/omarchy/gaze-omarchy %{buildroot}%{_bindir}/gaze-omarchy
 install -Dpm 0644 packaging/pam/gaze-omarchy-face %{buildroot}%{_sysconfdir}/pam.d/gaze-omarchy-face
@@ -355,6 +359,7 @@ ${SCRIPTLET_HYPRLOCK_POSTUN}
 %files cinnamon-extension
 %license LICENSE
 %{_datadir}/cinnamon/extensions/%{extension_uuid}/
+%{_datadir}/locale/*/LC_MESSAGES/%{extension_uuid}.mo
 
 %files hyprlock
 %license LICENSE
@@ -374,6 +379,7 @@ ${SCRIPTLET_HYPRLOCK_POSTUN}
 %{_datadir}/applications/kcm_gaze.desktop
 %{_datadir}/applications/com.gundulabs.Gaze.Settings.desktop
 %{_datadir}/icons/hicolor/scalable/apps/com.gundulabs.Gaze.Settings.svg
+%{_datadir}/locale/*/LC_MESSAGES/kcm_gaze.mo
 
 %changelog
 * ${CHANGELOG_DATE} Gundu Labs <maintainers@gundulabs.com> - ${VERSION}-${PACKAGE_RELEASE}

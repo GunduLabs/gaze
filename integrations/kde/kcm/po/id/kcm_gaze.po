@@ -1,0 +1,503 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: id\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "The Gaze daemon is not running yet. Its first start downloads face models, which can take a few minutes. This page updates when it is ready."
+msgstr "Layanan Gaze belum berjalan. Saat pertama kali dimulai, model wajah akan diunduh, yang dapat memakan waktu beberapa menit. Halaman ini akan diperbarui setelah siap."
+
+msgid "Face the camera"
+msgstr "Hadapkan wajah ke kamera"
+
+msgid "Tilt your face slightly up"
+msgstr "Miringkan wajah Anda sedikit ke atas"
+
+msgid "Tilt your face slightly down"
+msgstr "Miringkan wajah Anda sedikit ke bawah"
+
+msgid "Turn your face slightly left"
+msgstr "Putar wajah Anda sedikit ke kiri"
+
+msgid "Turn your face slightly right"
+msgstr "Putar wajah Anda sedikit ke kanan"
+
+msgid "Captured"
+msgstr "Gambar diambil"
+
+msgid "Enrollment complete"
+msgstr "Pendaftaran selesai"
+
+msgid "Enrollment cancelled"
+msgstr "Pendaftaran dibatalkan"
+
+msgid "Database error during enrollment"
+msgstr "Kesalahan basis data saat pendaftaran"
+
+msgid "Camera error during enrollment"
+msgstr "Kesalahan kamera saat pendaftaran"
+
+msgid "Please look at the camera..."
+msgstr "Silakan lihat ke kamera…"
+
+msgid "Need more light..."
+msgstr "Perlu lebih banyak cahaya…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "Wajah terpotong. Silakan mundur…"
+
+msgid "Please center your face..."
+msgstr "Posisikan wajah Anda di tengah…"
+
+msgid "Please come closer..."
+msgstr "Silakan mendekat…"
+
+msgid "Please back up..."
+msgstr "Silakan mundur…"
+
+msgid "Hold still..."
+msgstr "Jangan bergerak…"
+
+msgid "Face authentication could not run"
+msgstr "Autentikasi wajah tidak dapat dijalankan"
+
+msgid "Face not recognized"
+msgstr "Wajah tidak dikenali"
+
+msgid "Too dark for face authentication"
+msgstr "Terlalu gelap untuk autentikasi wajah"
+
+msgid "No face detected"
+msgstr "Tidak ada wajah yang terdeteksi"
+
+msgid "Move your face into the frame and try again"
+msgstr "Posisikan wajah Anda di dalam bingkai lalu coba lagi"
+
+msgid "Starting enrollment…"
+msgstr "Memulai pendaftaran…"
+
+msgid "Enrollment finished without saving."
+msgstr "Pendaftaran selesai tanpa menyimpan."
+
+msgid "%1 [%2s]"
+msgstr "%1 [%2s]"
+
+msgid "Could not restart the Gaze service (%1)"
+msgstr "Tidak dapat memulai ulang layanan Gaze (%1)"
+
+msgid "The Gaze service did not start again after the restart"
+msgstr "Layanan Gaze tidak berjalan lagi setelah dimulai ulang"
+
+msgid "Re-enroll faces after this change?"
+msgstr "Daftarkan ulang wajah setelah perubahan ini?"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face for each profile, then test recognition."
+msgstr "Hasil pengambilan gambar yang ada tidak cocok dengan model pengenalan baru. Data tetap tersimpan di disk. Setelah menyimpan, gunakan “Sempurnakan wajah ini” untuk setiap profil, lalu uji pengenalan."
+
+msgid "Standard"
+msgstr "Standar"
+
+msgid "Accurate"
+msgstr "Akurat"
+
+msgid "Settings"
+msgstr "Pengaturan"
+
+msgid "Everyday settings"
+msgstr "Pengaturan umum"
+
+msgid "Advanced settings"
+msgstr "Pengaturan lanjutan"
+
+msgid "Restart Service"
+msgstr "Mulai Ulang Layanan"
+
+msgid "Settings are locked"
+msgstr "Pengaturan terkunci"
+
+msgid "Unlock…"
+msgstr "Buka kunci…"
+
+msgid "Settings saved. Restart the Gaze service to use the new inference provider."
+msgstr "Pengaturan disimpan. Mulai ulang layanan Gaze untuk memakai penyedia inferensi yang baru."
+
+msgid "Restarting the Gaze service…"
+msgstr "Memulai ulang layanan Gaze…"
+
+msgid "Gaze service restarted"
+msgstr "Layanan Gaze dimulai ulang"
+
+msgid "Restarting the Gaze service failed"
+msgstr "Gagal memulai ulang layanan Gaze"
+
+msgid "Security"
+msgstr "Keamanan"
+
+msgid "Security level"
+msgstr "Tingkat keamanan"
+
+msgid "Medium is recommended. Changing the recognition model requires new captures for existing profiles"
+msgstr "Sedang disarankan. Mengubah model pengenalan memerlukan pengambilan gambar baru untuk profil yang ada"
+
+msgid "Low"
+msgstr "Rendah"
+
+msgid "Medium"
+msgstr "Sedang"
+
+msgid "High"
+msgstr "Tinggi"
+
+msgid "Maximum"
+msgstr "Maksimum"
+
+msgid "Custom"
+msgstr "Khusus"
+
+msgid "Detector level"
+msgstr "Tingkat pendeteksi"
+
+msgid "Recognizer level"
+msgstr "Tingkat pengenal"
+
+msgid "RGB recognizer threshold"
+msgstr "Ambang pengenal RGB"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "Kemiripan RGB minimum agar dianggap cocok"
+
+msgid "IR recognizer threshold"
+msgstr "Ambang pengenal IR"
+
+msgid "Minimum IR similarity for a match"
+msgstr "Kemiripan IR minimum agar dianggap cocok"
+
+msgid "Hybrid combining policy"
+msgstr "Kebijakan kombinasi hibrida"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "Kebijakan kombinasi saat kamera RGB dan IR sama-sama aktif"
+
+msgid "Default"
+msgstr "Bawaan"
+
+msgid "Or"
+msgstr "Atau"
+
+msgid "Fallback on dark"
+msgstr "Beralih saat gelap"
+
+msgid "And"
+msgstr "Dan"
+
+msgid "Hardware"
+msgstr "Perangkat keras"
+
+msgid "Inference execution provider"
+msgstr "Penyedia eksekusi inferensi"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI"
+msgstr "CPU, NPU otomatis, Intel OpenVINO, atau AMD Ryzen AI"
+
+msgid "CPU"
+msgstr "CPU"
+
+msgid "Automatic (NPU)"
+msgstr "Otomatis (NPU)"
+
+msgid "Intel OpenVINO"
+msgstr "Intel OpenVINO"
+
+msgid "AMD Ryzen AI"
+msgstr "AMD Ryzen AI"
+
+msgid "OpenVINO inference device"
+msgstr "Perangkat inferensi OpenVINO"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "Perangkat Intel yang dipakai untuk semua model ONNX"
+
+msgid "GPU"
+msgstr "GPU"
+
+msgid "NPU"
+msgstr "NPU"
+
+msgid "RGB camera source"
+msgstr "Sumber kamera RGB"
+
+msgid "Primary camera"
+msgstr "Kamera utama"
+
+msgid "None (IR only)"
+msgstr "Tidak ada (hanya IR)"
+
+msgid "IR camera source"
+msgstr "Sumber kamera IR"
+
+msgid "None"
+msgstr "Tidak ada"
+
+msgid "IR frame size override"
+msgstr "Paksa ukuran bingkai IR"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "Paksa satu resolusi jika gambar IR berwarna hijau atau rusak pada mode otomatis"
+
+msgid "Width"
+msgstr "Lebar"
+
+msgid "Height"
+msgstr "Tinggi"
+
+msgid "Force IR emitter"
+msgstr "Paksa pemancar IR"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "Ganti kendali pemancar, hanya jika pemancar IR tidak menyala sendiri"
+
+msgid "Parallel RGB + IR capture"
+msgstr "Pengambilan RGB + IR paralel"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "Autentikasi hibrida lebih cepat, tetapi beberapa webcam tidak dapat menjalankan kedua sensor sekaligus"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "Tidak pernah (ambil RGB, lalu IR)"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "Otomatis (paralel jika kamera mendukung)"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "Selalu (ambil RGB dan IR sekaligus)"
+
+msgid "Darkness cutoff"
+msgstr "Batas kegelapan"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "Tolak bingkai di bawah kecerahan rata-rata ini (0–255)"
+
+msgid "Enrollment"
+msgstr "Pendaftaran"
+
+msgid "Maximum templates"
+msgstr "Templat maksimum"
+
+msgid "Number of capture sets stored per face"
+msgstr "Jumlah set pengambilan gambar yang disimpan per wajah"
+
+msgid "Minimum face size ratio"
+msgstr "Rasio ukuran wajah minimum"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "Wajah terkecil yang diterima saat pendaftaran; nilai lebih rendah memungkinkan jarak lebih jauh"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "Deteksi Liveness Anti-Pemalsuan"
+
+msgid "Enable liveness spoof prevention"
+msgstr "Aktifkan pencegahan pemalsuan dengan deteksi liveness"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "Periksa gambar kamera dan gerakan alami untuk mencari tanda-tanda foto atau layar"
+
+msgid "Liveness threshold"
+msgstr "Ambang deteksi liveness"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "Keyakinan minimum pencegahan pemalsuan"
+
+msgid "Maximum liveness duration"
+msgstr "Durasi maksimum deteksi liveness"
+
+msgid "Maximum seconds analyzed for liveness verification"
+msgstr "Jumlah detik maksimum yang dianalisis untuk deteksi liveness"
+
+msgid "Authentication"
+msgstr "Autentikasi"
+
+msgid "Abort if SSH"
+msgstr "Batalkan jika SSH"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "Cegah autentikasi melalui koneksi SSH"
+
+msgid "Abort if lid closed"
+msgstr "Batalkan jika penutup tertutup"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "Cegah autentikasi saat penutup laptop tertutup"
+
+msgid "Require a suspend first"
+msgstr "Wajibkan suspensi terlebih dahulu"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "Cegah autentikasi sampai sistem pernah disuspensi dan dilanjutkan satu kali"
+
+msgid "Require confirmation on lock screen"
+msgstr "Wajibkan konfirmasi di layar kunci"
+
+msgid "On KDE lock/login screens this requires your password instead of face unlock. Confirmation after a match is available on other supported surfaces"
+msgstr "Pada layar kunci/login KDE, opsi ini mewajibkan kata sandi sebagai pengganti buka kunci wajah. Konfirmasi setelah wajah cocok tersedia di tempat lain yang didukung"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "Wajibkan konfirmasi untuk autentikasi dengan hak istimewa"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "Wajibkan menekan Enter atau mengeklik OK untuk mengizinkan setelah wajah cocok pada sudo, polkit, dan permintaan serupa"
+
+msgid "Resume grace period (ms)"
+msgstr "Masa tenggang setelah dilanjutkan (ms)"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "Tunda autentikasi wajah saat bangun dari suspensi"
+
+msgid "Start delay (ms)"
+msgstr "Penundaan awal (ms)"
+
+msgid "Use 3000–5000 ms to give yourself time to step away after locking"
+msgstr "Gunakan 3000–5000 ms agar Anda sempat menjauh setelah mengunci"
+
+msgid "Start delay applies to"
+msgstr "Penundaan awal berlaku untuk"
+
+msgid "Which prompts wait for the start delay"
+msgstr "Permintaan mana yang menunggu penundaan awal"
+
+msgid "All face authentication (including sudo)"
+msgstr "Semua autentikasi wajah (termasuk sudo)"
+
+msgid "Screen lockers only"
+msgstr "Hanya pengunci layar"
+
+msgid "Storage"
+msgstr "Penyimpanan"
+
+msgid "Encrypt face templates"
+msgstr "Enkripsi templat wajah"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "Enkripsi templat wajah yang disimpan dengan kunci yang disegel TPM"
+
+msgid "Unlock GNOME Keyring"
+msgstr "Buka kunci GNOME Keyring"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login"
+msgstr "Gunakan kata sandi terdaftar setelah login wajah GDM atau greetd yang dilindungi deteksi liveness"
+
+msgid "Unlock KWallet"
+msgstr "Buka kunci KWallet"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet"
+msgstr "Gunakan kata sandi terdaftar setelah login KDE yang dilindungi deteksi liveness; daftarkan dengan gaze keyring --kwallet"
+
+msgid "Enrolled Faces"
+msgstr "Wajah Terdaftar"
+
+msgid "Configure"
+msgstr "Konfigurasi"
+
+msgid "Configure Gaze"
+msgstr "Konfigurasi Gaze"
+
+msgid "Test"
+msgstr "Uji"
+
+msgid "Test face authentication"
+msgstr "Uji autentikasi wajah"
+
+msgid "Add Face…"
+msgstr "Tambah Wajah…"
+
+msgid "Enroll a new face"
+msgstr "Daftarkan wajah baru"
+
+msgid "Faces enrolled for %1"
+msgstr "Wajah yang terdaftar untuk %1"
+
+msgid "Look at the camera…"
+msgstr "Lihat ke kamera…"
+
+msgid "Face recognized"
+msgstr "Wajah dikenali"
+
+msgid "No face seen before the test timed out"
+msgstr "Tidak ada wajah terlihat sebelum waktu uji habis"
+
+msgid "No Faces Enrolled"
+msgstr "Belum Ada Wajah Terdaftar"
+
+msgid "Enroll a face to get started"
+msgstr "Daftarkan wajah untuk memulai"
+
+msgid "%1 capture"
+msgid_plural "%1 captures"
+msgstr[0] "%1 pengambilan gambar"
+
+msgid "RGB"
+msgstr "RGB"
+
+msgid "IR"
+msgstr "IR"
+
+msgid "Rename"
+msgstr "Ganti nama"
+
+msgid "Improve this face"
+msgstr "Sempurnakan wajah ini"
+
+msgid "Delete"
+msgstr "Hapus"
+
+msgid "Improve “%1”"
+msgstr "Sempurnakan “%1”"
+
+msgid "Add Face"
+msgstr "Tambah Wajah"
+
+msgid "Face name"
+msgstr "Nama wajah"
+
+msgid "A face with this name already exists"
+msgstr "Wajah dengan nama ini sudah ada"
+
+msgid "Look at the camera and follow the prompts to add more captures to “%1”."
+msgstr "Lihat ke kamera dan ikuti petunjuk untuk menambahkan pengambilan gambar ke “%1”."
+
+msgid "Look at the camera and follow the prompts. Keep your face centered and well lit."
+msgstr "Lihat ke kamera dan ikuti petunjuk. Jaga wajah Anda tetap di tengah dan cukup terang."
+
+msgid "Start Capture"
+msgstr "Mulai Pengambilan Gambar"
+
+msgid "Cancel"
+msgstr "Batal"
+
+msgid "Done"
+msgstr "Selesai"
+
+msgid "Cancel Enrollment?"
+msgstr "Batalkan Pendaftaran?"
+
+msgid "This will discard any partial captures."
+msgstr "Hasil pengambilan gambar yang belum lengkap akan dibuang."
+
+msgid "Resume"
+msgstr "Lanjutkan"
+
+msgid "Discard"
+msgstr "Buang"
+
+msgid "Delete Face"
+msgstr "Hapus Wajah"
+
+msgid "Delete “%1”? You can add it again later."
+msgstr "Hapus “%1”? Anda dapat menambahkannya lagi nanti."
+
+msgid "Rename Face"
+msgstr "Ganti Nama Wajah"
