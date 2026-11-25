@@ -470,6 +470,11 @@ impl Camera {
         let Some(node) = resolve_privileged_node(camera_source, want_color, opt_in.enabled) else {
             let err = if camera_disconnected(camera_source, want_color, opt_in.enabled) {
                 anyhow::anyhow!("camera {camera_source:?} is not connected")
+            } else if parse_usb_spec(camera_source).is_some() {
+                anyhow::anyhow!(
+                    "camera {camera_source:?} is connected but has no usable {} video node",
+                    if want_color { "color" } else { "IR" }
+                )
             } else {
                 anyhow::anyhow!(
                     "refusing privileged capture of {camera_source:?}: no backing /dev/video node \

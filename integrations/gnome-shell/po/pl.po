@@ -1,0 +1,160 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: pl\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Enrollment"
+msgstr "Rejestracja"
+
+msgid "Behavior"
+msgstr "Zachowanie"
+
+msgid "Face authentication"
+msgstr "Uwierzytelnianie twarzą"
+
+msgid "Face authentication for unlocking this session. This does not affect the GDM login screen (see below). Settings are stored in your current dconf profile."
+msgstr "Uwierzytelnianie twarzą do odblokowywania tej sesji. Nie wpływa na ekran logowania GDM (patrz niżej). Ustawienia są przechowywane w bieżącym profilu dconf."
+
+msgid "Enable face authentication (lock screen)"
+msgstr "Włącz uwierzytelnianie twarzą (ekran blokady)"
+
+msgid "Face retry mode"
+msgstr "Tryb ponawiania prób"
+
+msgid "Disabled"
+msgstr "Wyłączone"
+
+msgid "Fixed tries"
+msgstr "Stała liczba prób"
+
+msgid "Infinite"
+msgstr "Bez ograniczeń"
+
+msgid "Maximum face tries"
+msgstr "Maksymalna liczba prób rozpoznania twarzy"
+
+msgid "Enrolled faces"
+msgstr "Zarejestrowane twarze"
+
+msgid "Checking…"
+msgstr "Sprawdzanie…"
+
+msgid "Open Gaze"
+msgstr "Otwórz Gaze"
+
+msgid "Could not open the Gaze app. Run gaze-gui from a terminal."
+msgstr "Nie można otworzyć programu Gaze. Uruchom gaze-gui w terminalu."
+
+msgid "A face is enrolled for this account."
+msgstr "Dla tego konta zarejestrowano twarz."
+
+msgid "No face is enrolled yet, so face unlock has nothing to match. Open Gaze to enroll one."
+msgstr "Nie zarejestrowano jeszcze żadnej twarzy, więc odblokowywanie twarzą nie ma z czym porównywać. Otwórz Gaze, aby ją zarejestrować."
+
+msgid "Gaze daemon unavailable."
+msgstr "Usługa Gaze jest niedostępna."
+
+msgid "GDM login screen"
+msgstr "Ekran logowania GDM"
+
+msgid "Enable face authentication at the GDM login screen. Requires administrator authorization. Note: GNOME keyring is normally unlocked by your password, so logging in with face only may leave it locked."
+msgstr "Włącza uwierzytelnianie twarzą na ekranie logowania GDM. Wymaga autoryzacji administratora. Uwaga: baza kluczy GNOME jest zwykle odblokowywana hasłem, więc po zalogowaniu samą twarzą może pozostać zablokowana."
+
+msgid "Enable face authentication at GDM login"
+msgstr "Włącz uwierzytelnianie twarzą przy logowaniu GDM"
+
+msgid "Administrator authorization is required to enable face authentication at the GDM login screen."
+msgstr "Do włączenia uwierzytelniania twarzą na ekranie logowania GDM wymagana jest autoryzacja administratora."
+
+msgid "Administrator authorization is required to disable face authentication at the GDM login screen."
+msgstr "Do wyłączenia uwierzytelniania twarzą na ekranie logowania GDM wymagana jest autoryzacja administratora."
+
+msgid "Could not update GDM login face authentication: {error}"
+msgstr "Nie można zmienić uwierzytelniania twarzą przy logowaniu GDM: {error}"
+
+msgid "Face auth enabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "Włączono uwierzytelnianie twarzą na ekranie logowania GDM. Uruchom ponownie GDM (lub komputer), aby zmiana zaczęła obowiązywać."
+
+msgid "Face auth disabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "Wyłączono uwierzytelnianie twarzą na ekranie logowania GDM. Uruchom ponownie GDM (lub komputer), aby zmiana zaczęła obowiązywać."
+
+msgid "Face not recognized. Please enter your password."
+msgstr "Nie rozpoznano twarzy. Wprowadź hasło."
+
+msgid "Face not detected. Please enter your password."
+msgstr "Nie wykryto twarzy. Wprowadź hasło."
+
+msgid "Too dark for face authentication. Please enter your password."
+msgstr "Zbyt ciemno na uwierzytelnianie twarzą. Wprowadź hasło."
+
+msgid "Face authentication timed out. Please enter your password."
+msgstr "Upłynął limit czasu uwierzytelniania twarzą. Wprowadź hasło."
+
+msgid "Face authentication unavailable. Please enter your password."
+msgstr "Uwierzytelnianie twarzą jest niedostępne. Wprowadź hasło."
+
+msgid "Changing Gaze's settings or faces needs your password."
+msgstr "Zmiana ustawień lub twarzy Gaze wymaga hasła."
+
+msgid "Sorry, face authentication did not work. Please try again."
+msgstr "Uwierzytelnianie twarzą nie powiodło się. Spróbuj ponownie."
+
+msgid "You reached the maximum face authentication attempts, please try another method"
+msgstr "Osiągnięto maksymalną liczbę prób uwierzytelniania twarzą, spróbuj innej metody"
+
+msgid "(or look at the camera)"
+msgstr "(lub spójrz w kamerę)"
+
+msgid "(or look at the camera or swipe finger)"
+msgstr "(lub spójrz w kamerę albo przeciągnij palec)"
+
+msgid "(or look at the camera or place finger on reader)"
+msgstr "(lub spójrz w kamerę albo umieść palec na czytniku)"
+
+msgid "(or swipe finger across reader)"
+msgstr "(lub przeciągnij palec przez czytnik)"
+
+msgid "(or place finger on reader)"
+msgstr "(lub umieść palec na czytniku)"
+
+msgid "Password"
+msgstr "Hasło"
+
+msgid "Face verified. Press Enter or click Authenticate to confirm."
+msgstr "Twarz zweryfikowana. Naciśnij Enter lub kliknij „Uwierzytelnij”, aby potwierdzić."
+
+msgid "Face authentication failed"
+msgstr "Uwierzytelnianie twarzą nie powiodło się"
+
+msgid "Confirm Face Unlock"
+msgstr "Potwierdź odblokowanie twarzą"
+
+msgid "Failed to show confirmation prompt"
+msgstr "Nie można wyświetlić monitu o potwierdzenie"
+
+msgid "Please look at the camera..."
+msgstr "Spójrz w kamerę…"
+
+msgid "Need more light..."
+msgstr "Potrzeba więcej światła…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "Twarz jest ucięta. Odsuń się…"
+
+msgid "Please center your face..."
+msgstr "Ustaw twarz na środku…"
+
+msgid "Please come closer..."
+msgstr "Zbliż się…"
+
+msgid "Please back up..."
+msgstr "Odsuń się…"
+
+msgid "Hold still..."
+msgstr "Nie ruszaj się…"

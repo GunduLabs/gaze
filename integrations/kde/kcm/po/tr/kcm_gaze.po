@@ -1,0 +1,504 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: tr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "The Gaze daemon is not running yet. Its first start downloads face models, which can take a few minutes. This page updates when it is ready."
+msgstr "Gaze hizmeti henüz çalışmıyor. İlk başlatmada yüz modelleri indirilir, bu birkaç dakika sürebilir. Hizmet hazır olduğunda bu sayfa güncellenir."
+
+msgid "Face the camera"
+msgstr "Doğrudan kameraya bakın"
+
+msgid "Tilt your face slightly up"
+msgstr "Yüzünüzü hafifçe yukarı eğin"
+
+msgid "Tilt your face slightly down"
+msgstr "Yüzünüzü hafifçe aşağı eğin"
+
+msgid "Turn your face slightly left"
+msgstr "Yüzünüzü hafifçe sola çevirin"
+
+msgid "Turn your face slightly right"
+msgstr "Yüzünüzü hafifçe sağa çevirin"
+
+msgid "Captured"
+msgstr "Çekildi"
+
+msgid "Enrollment complete"
+msgstr "Kayıt tamamlandı"
+
+msgid "Enrollment cancelled"
+msgstr "Kayıt iptal edildi"
+
+msgid "Database error during enrollment"
+msgstr "Kayıt sırasında veritabanı hatası"
+
+msgid "Camera error during enrollment"
+msgstr "Kayıt sırasında kamera hatası"
+
+msgid "Please look at the camera..."
+msgstr "Lütfen kameraya bakın…"
+
+msgid "Need more light..."
+msgstr "Daha fazla ışık gerekiyor…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "Yüz kesilmiş. Lütfen geri çekilin…"
+
+msgid "Please center your face..."
+msgstr "Lütfen yüzünüzü ortalayın…"
+
+msgid "Please come closer..."
+msgstr "Lütfen yaklaşın…"
+
+msgid "Please back up..."
+msgstr "Lütfen uzaklaşın…"
+
+msgid "Hold still..."
+msgstr "Hareketsiz durun…"
+
+msgid "Face authentication could not run"
+msgstr "Yüz kimlik doğrulaması çalıştırılamadı"
+
+msgid "Face not recognized"
+msgstr "Yüz tanınmadı"
+
+msgid "Too dark for face authentication"
+msgstr "Yüz kimlik doğrulaması için çok karanlık"
+
+msgid "No face detected"
+msgstr "Yüz algılanmadı"
+
+msgid "Move your face into the frame and try again"
+msgstr "Yüzünüzü kadraja alın ve yeniden deneyin"
+
+msgid "Starting enrollment…"
+msgstr "Kayıt başlatılıyor…"
+
+msgid "Enrollment finished without saving."
+msgstr "Kayıt, kaydedilmeden sona erdi."
+
+msgid "%1 [%2s]"
+msgstr "%1 [%2s]"
+
+msgid "Could not restart the Gaze service (%1)"
+msgstr "Gaze hizmeti yeniden başlatılamadı (%1)"
+
+msgid "The Gaze service did not start again after the restart"
+msgstr "Gaze hizmeti yeniden başlatmadan sonra çalışmadı"
+
+msgid "Re-enroll faces after this change?"
+msgstr "Bu değişiklikten sonra yüzler yeniden kaydedilsin mi?"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face for each profile, then test recognition."
+msgstr "Var olan çekimler yeni tanıma modeliyle eşleşemez. Diskte kalırlar. Kaydettikten sonra her profil için “Bu yüzü iyileştir” seçeneğini kullanın, ardından tanımayı sınayın."
+
+msgid "Standard"
+msgstr "Standart"
+
+msgid "Accurate"
+msgstr "Hassas"
+
+msgid "Settings"
+msgstr "Ayarlar"
+
+msgid "Everyday settings"
+msgstr "Temel ayarlar"
+
+msgid "Advanced settings"
+msgstr "Gelişmiş ayarlar"
+
+msgid "Restart Service"
+msgstr "Hizmeti Yeniden Başlat"
+
+msgid "Settings are locked"
+msgstr "Ayarlar kilitli"
+
+msgid "Unlock…"
+msgstr "Kilidi aç…"
+
+msgid "Settings saved. Restart the Gaze service to use the new inference provider."
+msgstr "Ayarlar kaydedildi. Yeni çıkarım sağlayıcısını kullanmak için Gaze hizmetini yeniden başlatın."
+
+msgid "Restarting the Gaze service…"
+msgstr "Gaze hizmeti yeniden başlatılıyor…"
+
+msgid "Gaze service restarted"
+msgstr "Gaze hizmeti yeniden başlatıldı"
+
+msgid "Restarting the Gaze service failed"
+msgstr "Gaze hizmeti yeniden başlatılamadı"
+
+msgid "Security"
+msgstr "Güvenlik"
+
+msgid "Security level"
+msgstr "Güvenlik düzeyi"
+
+msgid "Medium is recommended. Changing the recognition model requires new captures for existing profiles"
+msgstr "Orta önerilir. Tanıma modelini değiştirmek, var olan profiller için yeni çekim gerektirir"
+
+msgid "Low"
+msgstr "Düşük"
+
+msgid "Medium"
+msgstr "Orta"
+
+msgid "High"
+msgstr "Yüksek"
+
+msgid "Maximum"
+msgstr "En yüksek"
+
+msgid "Custom"
+msgstr "Özel"
+
+msgid "Detector level"
+msgstr "Algılayıcı düzeyi"
+
+msgid "Recognizer level"
+msgstr "Tanıyıcı düzeyi"
+
+msgid "RGB recognizer threshold"
+msgstr "RGB tanıma eşiği"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "Eşleşme için en düşük RGB benzerliği"
+
+msgid "IR recognizer threshold"
+msgstr "IR tanıma eşiği"
+
+msgid "Minimum IR similarity for a match"
+msgstr "Eşleşme için en düşük IR benzerliği"
+
+msgid "Hybrid combining policy"
+msgstr "Karma birleştirme ilkesi"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "RGB ve IR kameraların ikisi de etkinken birleştirme ilkesi"
+
+msgid "Default"
+msgstr "Varsayılan"
+
+msgid "Or"
+msgstr "Veya"
+
+msgid "Fallback on dark"
+msgstr "Karanlıkta yedeğe geç"
+
+msgid "And"
+msgstr "Ve"
+
+msgid "Hardware"
+msgstr "Donanım"
+
+msgid "Inference execution provider"
+msgstr "Çıkarım yürütme sağlayıcısı"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI"
+msgstr "CPU, otomatik NPU, Intel OpenVINO veya AMD Ryzen AI"
+
+msgid "CPU"
+msgstr "CPU"
+
+msgid "Automatic (NPU)"
+msgstr "Otomatik (NPU)"
+
+msgid "Intel OpenVINO"
+msgstr "Intel OpenVINO"
+
+msgid "AMD Ryzen AI"
+msgstr "AMD Ryzen AI"
+
+msgid "OpenVINO inference device"
+msgstr "OpenVINO çıkarım aygıtı"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "Tüm ONNX modelleri için kullanılan Intel aygıtı"
+
+msgid "GPU"
+msgstr "GPU"
+
+msgid "NPU"
+msgstr "NPU"
+
+msgid "RGB camera source"
+msgstr "RGB kamera kaynağı"
+
+msgid "Primary camera"
+msgstr "Birincil kamera"
+
+msgid "None (IR only)"
+msgstr "Yok (yalnızca IR)"
+
+msgid "IR camera source"
+msgstr "IR kamera kaynağı"
+
+msgid "None"
+msgstr "Yok"
+
+msgid "IR frame size override"
+msgstr "IR kare boyutunu zorla"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "Otomatik kipte IR görüntüsü yeşil veya bozuksa tek bir çözünürlüğü zorlar"
+
+msgid "Width"
+msgstr "Genişlik"
+
+msgid "Height"
+msgstr "Yükseklik"
+
+msgid "Force IR emitter"
+msgstr "IR yayıcıyı zorla"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "Yayıcı denetimini geçersiz kılar; yalnızca IR yayıcı kendiliğinden açılmıyorsa kullanın"
+
+msgid "Parallel RGB + IR capture"
+msgstr "Koşut RGB + IR çekimi"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "Daha hızlı karma kimlik doğrulama, ancak bazı web kameraları iki algılayıcıyı aynı anda kullanamaz"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "Hiçbir zaman (önce RGB, sonra IR çek)"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "Otomatik (kamera izin verirse koşut)"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "Her zaman (RGB ve IR aynı anda çek)"
+
+msgid "Darkness cutoff"
+msgstr "Karanlık sınırı"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "Ortalama parlaklığı bu değerin altında olan kareleri reddet (0–255)"
+
+msgid "Enrollment"
+msgstr "Kayıt"
+
+msgid "Maximum templates"
+msgstr "En fazla şablon"
+
+msgid "Number of capture sets stored per face"
+msgstr "Yüz başına saklanan çekim kümesi sayısı"
+
+msgid "Minimum face size ratio"
+msgstr "En küçük yüz boyutu oranı"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "Kayıt sırasında kabul edilen en küçük yüz; düşük değer daha uzak mesafeye izin verir"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "Canlılık Testi (Sahteciliğe Karşı)"
+
+msgid "Enable liveness spoof prevention"
+msgstr "Canlılıkla sahteciliği önlemeyi etkinleştir"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "Fotoğraf veya ekran belirtileri için kamera görüntülerini ve doğal hareketi denetle"
+
+msgid "Liveness threshold"
+msgstr "Canlılık eşiği"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "Sahteciliği önlemede en düşük güven"
+
+msgid "Maximum liveness duration"
+msgstr "En uzun canlılık testi süresi"
+
+msgid "Maximum seconds analyzed for liveness verification"
+msgstr "Canlılık testi için çözümlenen en fazla saniye"
+
+msgid "Authentication"
+msgstr "Kimlik Doğrulama"
+
+msgid "Abort if SSH"
+msgstr "SSH ise iptal et"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "SSH bağlantılarında kimlik doğrulamayı engelle"
+
+msgid "Abort if lid closed"
+msgstr "Kapak kapalıysa iptal et"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "Dizüstü bilgisayarın kapağı kapalıyken kimlik doğrulamayı engelle"
+
+msgid "Require a suspend first"
+msgstr "Önce askıya almayı zorunlu kıl"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "Sistem bir kez askıya alınıp sürdürülene kadar kimlik doğrulamayı engelle"
+
+msgid "Require confirmation on lock screen"
+msgstr "Kilit ekranında onay iste"
+
+msgid "On KDE lock/login screens this requires your password instead of face unlock. Confirmation after a match is available on other supported surfaces"
+msgstr "KDE kilit/oturum açma ekranlarında bu seçenek yüzle kilit açma yerine parolanızı gerektirir. Desteklenen diğer yerlerde eşleşmeden sonra onay kullanılabilir"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "Yükseltilmiş yetkili kimlik doğrulamada onay iste"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "sudo, polkit ve benzeri isteklerde yüz eşleştikten sonra yetkilendirmek için Enter’a basmayı veya Tamam’a tıklamayı zorunlu kıl"
+
+msgid "Resume grace period (ms)"
+msgstr "Sürdürme sonrası bekleme süresi (ms)"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "Askıdan uyanınca yüz kimlik doğrulamasını geciktir"
+
+msgid "Start delay (ms)"
+msgstr "Başlangıç gecikmesi (ms)"
+
+msgid "Use 3000–5000 ms to give yourself time to step away after locking"
+msgstr "Kilitledikten sonra uzaklaşmaya zaman tanımak için 3000–5000 ms kullanın"
+
+msgid "Start delay applies to"
+msgstr "Başlangıç gecikmesinin geçerli olduğu yer"
+
+msgid "Which prompts wait for the start delay"
+msgstr "Hangi istekler başlangıç gecikmesini bekler"
+
+msgid "All face authentication (including sudo)"
+msgstr "Tüm yüz kimlik doğrulamaları (sudo dahil)"
+
+msgid "Screen lockers only"
+msgstr "Yalnızca ekran kilitleri"
+
+msgid "Storage"
+msgstr "Depolama"
+
+msgid "Encrypt face templates"
+msgstr "Yüz şablonlarını şifrele"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "Saklanan yüz şablonlarını TPM ile mühürlenmiş bir anahtarla şifrele"
+
+msgid "Unlock GNOME Keyring"
+msgstr "GNOME Keyring kilidini aç"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login"
+msgstr "Canlılık testiyle korunan GDM veya greetd yüz oturumundan sonra kayıtlı bir parola kullanır"
+
+msgid "Unlock KWallet"
+msgstr "KWallet kilidini aç"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet"
+msgstr "Canlılık testiyle korunan KDE oturumundan sonra kayıtlı bir parola kullanır; gaze keyring --kwallet ile kaydedin"
+
+msgid "Enrolled Faces"
+msgstr "Kayıtlı Yüzler"
+
+msgid "Configure"
+msgstr "Yapılandır"
+
+msgid "Configure Gaze"
+msgstr "Gaze Yapılandır"
+
+msgid "Test"
+msgstr "Sına"
+
+msgid "Test face authentication"
+msgstr "Yüz kimlik doğrulamasını sına"
+
+msgid "Add Face…"
+msgstr "Yüz Ekle…"
+
+msgid "Enroll a new face"
+msgstr "Yeni yüz kaydet"
+
+msgid "Faces enrolled for %1"
+msgstr "%1 için kayıtlı yüzler"
+
+msgid "Look at the camera…"
+msgstr "Kameraya bakın…"
+
+msgid "Face recognized"
+msgstr "Yüz tanındı"
+
+msgid "No face seen before the test timed out"
+msgstr "Sınama süresi dolmadan yüz görülmedi"
+
+msgid "No Faces Enrolled"
+msgstr "Kayıtlı Yüz Yok"
+
+msgid "Enroll a face to get started"
+msgstr "Başlamak için bir yüz kaydedin"
+
+msgid "%1 capture"
+msgid_plural "%1 captures"
+msgstr[0] "%1 çekim"
+msgstr[1] "%1 çekim"
+
+msgid "RGB"
+msgstr "RGB"
+
+msgid "IR"
+msgstr "IR"
+
+msgid "Rename"
+msgstr "Yeniden adlandır"
+
+msgid "Improve this face"
+msgstr "Bu yüzü iyileştir"
+
+msgid "Delete"
+msgstr "Sil"
+
+msgid "Improve “%1”"
+msgstr "“%1” yüzünü iyileştir"
+
+msgid "Add Face"
+msgstr "Yüz Ekle"
+
+msgid "Face name"
+msgstr "Yüz adı"
+
+msgid "A face with this name already exists"
+msgstr "Bu adda bir yüz zaten var"
+
+msgid "Look at the camera and follow the prompts to add more captures to “%1”."
+msgstr "“%1” için daha fazla çekim eklemek üzere kameraya bakın ve yönergeleri izleyin."
+
+msgid "Look at the camera and follow the prompts. Keep your face centered and well lit."
+msgstr "Kameraya bakın ve yönergeleri izleyin. Yüzünüzü ortalı ve iyi aydınlatılmış tutun."
+
+msgid "Start Capture"
+msgstr "Çekimi Başlat"
+
+msgid "Cancel"
+msgstr "İptal"
+
+msgid "Done"
+msgstr "Tamam"
+
+msgid "Cancel Enrollment?"
+msgstr "Kayıt İptal Edilsin mi?"
+
+msgid "This will discard any partial captures."
+msgstr "Tamamlanmamış çekimler silinecek."
+
+msgid "Resume"
+msgstr "Sürdür"
+
+msgid "Discard"
+msgstr "Vazgeç ve sil"
+
+msgid "Delete Face"
+msgstr "Yüzü Sil"
+
+msgid "Delete “%1”? You can add it again later."
+msgstr "“%1” silinsin mi? Daha sonra yeniden ekleyebilirsiniz."
+
+msgid "Rename Face"
+msgstr "Yüzü Yeniden Adlandır"

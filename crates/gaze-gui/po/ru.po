@@ -1,0 +1,742 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Face authentication could not run"
+msgstr "Не удалось выполнить аутентификацию по лицу"
+
+msgid "Face not recognized"
+msgstr "Лицо не распознано"
+
+msgid "Too dark for face authentication"
+msgstr "Слишком темно для аутентификации по лицу"
+
+msgid "No face detected"
+msgstr "Лицо не обнаружено"
+
+msgid "Move your face into the frame and try again"
+msgstr "Поместите лицо в кадр и повторите попытку"
+
+msgid "Close"
+msgstr "Закрыть"
+
+msgid "Remove “{name}”?"
+msgstr "Удалить «{name}»?"
+
+msgid "Gaze will stop recognizing this face. You can enroll it again later."
+msgstr "Gaze перестанет распознавать это лицо. Позже его можно будет зарегистрировать снова."
+
+msgid "Cancel"
+msgstr "Отмена"
+
+msgid "Remove"
+msgstr "Удалить"
+
+msgid "Daemon Failed"
+msgstr "Сбой службы"
+
+msgid "Gaze could not start. Run gaze doctor. On a new install, check that TPM 2.0 is enabled; settings cannot be changed here until the service starts."
+msgstr "Не удалось запустить Gaze. Выполните gaze doctor. Если это новая установка, проверьте, что TPM 2.0 включён; изменить настройки здесь можно будет только после запуска службы."
+
+msgid "Daemon Disabled"
+msgstr "Служба отключена"
+
+msgid "The Gaze daemon is turned off. Turn it on with:"
+msgstr "Служба Gaze отключена. Включите её командой:"
+
+msgid "Daemon Stopped"
+msgstr "Служба остановлена"
+
+msgid "The Gaze daemon is not running. Start it with:"
+msgstr "Служба Gaze не запущена. Запустите её командой:"
+
+msgid "Daemon Not Installed"
+msgstr "Служба не установлена"
+
+msgid "The gazed service is missing. Install the gaze package for your distribution."
+msgstr "Служба gazed отсутствует. Установите пакет gaze для вашего дистрибутива."
+
+msgid "Daemon Starting"
+msgstr "Запуск службы"
+
+msgid "The Gaze daemon is starting up. Its first start downloads face models, which can take a few minutes."
+msgstr "Служба Gaze запускается. При первом запуске загружаются модели распознавания лиц, это может занять несколько минут."
+
+msgid "Connecting to the Gaze daemon…"
+msgstr "Подключение к службе Gaze…"
+
+msgid "Enrollment was not authorized"
+msgstr "Регистрация не была разрешена"
+
+msgid "Could not start enrollment: {error}"
+msgstr "Не удалось начать регистрацию: {error}"
+
+msgid "Could not start enrollment"
+msgstr "Не удалось начать регистрацию"
+
+msgid "Could not start camera"
+msgstr "Не удалось запустить камеру"
+
+msgid "Close other camera apps, check the privacy shutter, or choose another camera in Settings."
+msgstr "Закройте другие приложения, использующие камеру, проверьте защитную шторку или выберите другую камеру в настройках."
+
+msgid "ready"
+msgstr "готово"
+
+msgid "needs captures"
+msgstr "нужны снимки"
+
+msgid "unused"
+msgstr "не используется"
+
+msgid "Enroll a new face"
+msgstr "Зарегистрировать новое лицо"
+
+msgid "Settings"
+msgstr "Настройки"
+
+msgid "Connecting…"
+msgstr "Подключение…"
+
+msgid "Loading from the Gaze daemon…"
+msgstr "Загрузка данных из службы Gaze…"
+
+msgid "Enrolled Faces"
+msgstr "Зарегистрированные лица"
+
+msgid "Rename a face, add captures to improve it, or remove it."
+msgstr "Переименуйте лицо, добавьте снимки для улучшения распознавания или удалите его."
+
+msgid "Recognition"
+msgstr "Распознавание"
+
+msgid "Test recognition"
+msgstr "Проверить распознавание"
+
+msgid "Not tested in this session yet."
+msgstr "В этом сеансе ещё не проверялось."
+
+msgid "Test"
+msgstr "Проверить"
+
+msgid "Look at the camera and check that Gaze recognizes you"
+msgstr "Посмотрите в камеру и убедитесь, что Gaze вас распознаёт"
+
+msgid "Setup Checklist"
+msgstr "Список действий по настройке"
+
+msgid "Work through these once before using face unlock on your desktop."
+msgstr "Выполните эти шаги один раз, прежде чем использовать разблокировку по лицу на рабочем столе."
+
+msgid "Choose your camera"
+msgstr "Выберите камеру"
+
+msgid "Pick the camera in Settings, then check it in the enrollment preview"
+msgstr "Выберите камеру в настройках и проверьте её в окне предпросмотра при регистрации"
+
+msgid "Enroll a face"
+msgstr "Зарегистрируйте лицо"
+
+msgid "Capture your face from a few angles"
+msgstr "Снимите лицо с нескольких ракурсов"
+
+msgid "Confirm that Gaze recognizes you"
+msgstr "Убедитесь, что Gaze вас распознаёт"
+
+msgid "Check desktop integration"
+msgstr "Проверьте интеграцию с рабочим столом"
+
+msgid "Run gaze doctor before trying screen unlock"
+msgstr "Выполните gaze doctor, прежде чем пробовать разблокировку экрана"
+
+msgid "Enroll a Face"
+msgstr "Зарегистрировать лицо"
+
+msgid "Running gaze doctor…"
+msgstr "Выполняется gaze doctor…"
+
+msgid "Run gaze doctor in a terminal on your Linux host to check desktop integration. If the installer requested a reboot, do that before testing screen unlock. Login and keyring unlock are optional, separate settings."
+msgstr "Выполните gaze doctor в терминале вашей системы Linux, чтобы проверить интеграцию с рабочим столом. Если установщик запросил перезагрузку, выполните её до проверки разблокировки экрана. Вход в систему и разблокировка связки ключей — необязательные отдельные настройки."
+
+msgid "Desktop setup checks"
+msgstr "Проверка настройки рабочего стола"
+
+msgid "Look at the camera…"
+msgstr "Смотрите в камеру…"
+
+msgid "Reconnecting to the Gaze daemon…"
+msgstr "Повторное подключение к службе Gaze…"
+
+msgid "Could not access the camera: {error}. Close other camera apps and retry; run gaze doctor if it persists."
+msgstr "Не удалось получить доступ к камере: {error}. Закройте другие приложения, использующие камеру, и повторите попытку; если проблема сохранится, выполните gaze doctor."
+
+msgid "Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled."
+msgstr "Не удалось начать распознавание. Выполните gaze doctor и убедитесь, что зарегистрирован пригодный профиль лица."
+
+msgid "Face recognized. Next: check desktop integration before trying screen unlock."
+msgstr "Лицо распознано. Теперь проверьте интеграцию с рабочим столом, прежде чем пробовать разблокировку экрана."
+
+msgid "Lost contact with the Gaze daemon"
+msgstr "Потеряна связь со службой Gaze"
+
+msgid "Recognition timed out without a result. Retry, or run gaze doctor to check the camera and service"
+msgstr "Время распознавания истекло без результата. Повторите попытку или выполните gaze doctor, чтобы проверить камеру и службу"
+
+msgid "Unsupported CPU"
+msgstr "Неподдерживаемый процессор"
+
+msgid "Could Not Load Faces"
+msgstr "Не удалось загрузить лица"
+
+msgid "No Faces Enrolled"
+msgstr "Нет зарегистрированных лиц"
+
+msgid "Choose your camera in Settings, then enroll a face. The capture window lets you check the camera before starting."
+msgstr "Выберите камеру в настройках, затем зарегистрируйте лицо. В окне съёмки можно проверить камеру перед началом."
+
+msgid "1 capture"
+msgstr "1 снимок"
+
+msgid "{count} captures"
+msgstr "Снимков: {count}"
+
+msgid "Rename"
+msgstr "Переименовать"
+
+msgid "Improve this face"
+msgstr "Улучшить это лицо"
+
+msgid "Delete"
+msgstr "Удалить"
+
+msgid "New face name"
+msgstr "Новое имя лица"
+
+msgid "A face with this name already exists"
+msgstr "Лицо с таким именем уже существует"
+
+msgid "Failed to rename face"
+msgstr "Не удалось переименовать лицо"
+
+msgid "Renamed “{old}” to “{new}”"
+msgstr "«{old}» переименовано в «{new}»"
+
+msgid "Failed to remove face"
+msgstr "Не удалось удалить лицо"
+
+msgid "Camera Not Activated"
+msgstr "Камера не включена"
+
+msgid "No Face"
+msgstr "Нет лица"
+
+msgid "Need More Light"
+msgstr "Нужно больше света"
+
+msgid "Not Centered"
+msgstr "Не по центру"
+
+msgid "Face Clipped"
+msgstr "Лицо обрезано"
+
+msgid "Come Closer"
+msgstr "Подойдите ближе"
+
+msgid "Back Up"
+msgstr "Отодвиньтесь"
+
+msgid "Ready"
+msgstr "Готово"
+
+msgid "The camera could not be opened: {error}"
+msgstr "Не удалось открыть камеру: {error}"
+
+msgid "Main cameras"
+msgstr "Основные камеры"
+
+msgid "Fallback cameras {index}"
+msgstr "Резервные камеры {index}"
+
+msgid "Improve “{name}”"
+msgstr "Улучшить «{name}»"
+
+msgid "Add Face"
+msgstr "Добавить лицо"
+
+msgid "Infrared camera"
+msgstr "Инфракрасная камера"
+
+msgid "RGB camera"
+msgstr "RGB-камера"
+
+msgid "Infrared camera · preview starts when capture does"
+msgstr "Инфракрасная камера · предпросмотр начнётся вместе со съёмкой"
+
+msgid "Face name"
+msgstr "Имя лица"
+
+msgid "Camera"
+msgstr "Камера"
+
+msgid "{camera} · preview starts when capture does"
+msgstr "{camera} · предпросмотр начнётся вместе со съёмкой"
+
+msgid "Start Capture"
+msgstr "Начать съёмку"
+
+msgid "Done — test recognition next"
+msgstr "Готово — теперь проверьте распознавание"
+
+msgid "Cancel Enrollment?"
+msgstr "Отменить регистрацию?"
+
+msgid "This will discard any partial captures."
+msgstr "Незавершённые снимки будут удалены."
+
+msgid "Resume"
+msgstr "Продолжить"
+
+msgid "Discard"
+msgstr "Удалить"
+
+msgid "{camera} · starting capture"
+msgstr "{camera} · начало съёмки"
+
+msgid "Starting enrollment…"
+msgstr "Начинается регистрация…"
+
+msgid "Failed to connect to enrollment stream. Try again."
+msgstr "Не удалось подключиться к потоку регистрации. Повторите попытку."
+
+msgid "Failed to connect to capture stream. Try again."
+msgstr "Не удалось подключиться к потоку съёмки. Повторите попытку."
+
+msgid "Could not claim camera: {error}. Try again."
+msgstr "Не удалось занять камеру: {error}. Повторите попытку."
+
+msgid "{camera} · live preview unavailable, look at the camera"
+msgstr "{camera} · предпросмотр недоступен, смотрите в камеру"
+
+msgid "Enrollment timed out. Close this window and try again."
+msgstr "Время регистрации истекло. Закройте это окно и повторите попытку."
+
+msgid "Lost contact with the Gaze daemon. Close this window and try again."
+msgstr "Потеряна связь со службой Gaze. Закройте это окно и повторите попытку."
+
+msgid "Face saved. Use Test in the main window, then check desktop integration."
+msgstr "Лицо сохранено. Нажмите «Проверить» в главном окне, затем проверьте интеграцию с рабочим столом."
+
+msgid "Enrollment finished without saving."
+msgstr "Регистрация завершилась без сохранения."
+
+msgid "Lost contact with the Gaze daemon."
+msgstr "Потеряна связь со службой Gaze."
+
+msgid "Try Again"
+msgstr "Повторить"
+
+msgid "Failed to apply config: {error}"
+msgstr "Не удалось применить конфигурацию: {error}"
+
+msgid "Configured as {source}, which this list cannot show"
+msgstr "Настроено значение {source}, которое этот список не может показать"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI. Restart the Gaze daemon after changing this"
+msgstr "Процессор, автоматический выбор NPU, Intel OpenVINO или AMD Ryzen AI. После изменения перезапустите службу Gaze"
+
+msgid "Configured as {provider}/{device}, which this build cannot show"
+msgstr "Настроено значение {provider}/{device}, которое эта сборка не может показать"
+
+msgid "Ordered fallback: {sources}. Selecting a camera replaces this list."
+msgstr "Порядок резервных камер: {sources}. Выбор камеры заменит этот список."
+
+msgid "Finding cameras…"
+msgstr "Поиск камер…"
+
+msgid "Settings will appear when the camera scan finishes."
+msgstr "Настройки появятся после завершения поиска камер."
+
+msgid "Primary camera"
+msgstr "Основная камера"
+
+msgid "None"
+msgstr "Нет"
+
+msgid "None (IR only)"
+msgstr "Нет (только IR)"
+
+msgid "Could not list cameras"
+msgstr "Не удалось получить список камер"
+
+msgid "Close other camera applications and try Settings again. Run gaze doctor if the problem continues."
+msgstr "Закройте другие приложения, использующие камеру, и снова откройте настройки. Если проблема сохранится, выполните gaze doctor."
+
+msgid "Settings are locked"
+msgstr "Настройки заблокированы"
+
+msgid "Unlock…"
+msgstr "Разблокировать…"
+
+msgid "Everyday"
+msgstr "Основные"
+
+msgid "Advanced"
+msgstr "Дополнительные"
+
+msgid "Changes save automatically after unlocking."
+msgstr "После разблокировки изменения сохраняются автоматически."
+
+msgid "Security"
+msgstr "Безопасность"
+
+msgid "Security level"
+msgstr "Уровень безопасности"
+
+msgid "Medium is recommended. Changing the recognition model requires re-enrolling existing profiles. Custom controls are in Advanced"
+msgstr "Рекомендуется «Средний». После смены модели распознавания существующие профили нужно зарегистрировать заново. Собственные настройки находятся в разделе «Дополнительные»"
+
+msgid "Detector level"
+msgstr "Уровень детектора"
+
+msgid "Recognizer level"
+msgstr "Уровень распознавания"
+
+msgid "RGB recognizer threshold"
+msgstr "Порог распознавания RGB"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "Минимальное сходство RGB для совпадения"
+
+msgid "IR recognizer threshold"
+msgstr "Порог распознавания IR"
+
+msgid "Minimum IR similarity for a match"
+msgstr "Минимальное сходство IR для совпадения"
+
+msgid "Hardware"
+msgstr "Оборудование"
+
+msgid "Inference execution provider"
+msgstr "Поставщик выполнения инференса"
+
+msgid "OpenVINO inference device"
+msgstr "Устройство инференса OpenVINO"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "Устройство Intel, используемое для всех моделей ONNX"
+
+msgid "RGB camera source"
+msgstr "Источник RGB-камеры"
+
+msgid "IR camera source"
+msgstr "Источник IR-камеры"
+
+msgid "IR frame size override"
+msgstr "Задать размер кадра IR"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "Принудительно использовать одно разрешение, если изображение IR в автоматическом режиме зелёное или искажённое"
+
+msgid "Width"
+msgstr "Ширина"
+
+msgid "Height"
+msgstr "Высота"
+
+msgid "Force IR emitter"
+msgstr "Принудительно включать IR-излучатель"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "Переопределить управление излучателем, только если IR-излучатель не включается сам"
+
+msgid "Parallel RGB + IR capture"
+msgstr "Параллельная съёмка RGB + IR"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "Гибридная аутентификация быстрее, но некоторые веб-камеры не могут передавать данные с обоих датчиков одновременно"
+
+msgid "Darkness cutoff"
+msgstr "Порог темноты"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "Отклонять кадры со средней яркостью ниже этого значения (0–255)"
+
+msgid "Enrollment"
+msgstr "Регистрация"
+
+msgid "Maximum templates"
+msgstr "Максимум шаблонов"
+
+msgid "Number of capture sets stored per face"
+msgstr "Количество наборов снимков, хранимых для каждого лица"
+
+msgid "Minimum face size ratio"
+msgstr "Минимальный относительный размер лица"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "Наименьшее допустимое лицо при регистрации; меньшее значение позволяет находиться дальше"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "Проверка живости (защита от подмены)"
+
+msgid "Enable liveness spoof prevention"
+msgstr "Включить защиту от подмены по признакам живости"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "Проверять изображения камеры и естественные движения на признаки фотографии или экрана"
+
+msgid "Liveness threshold"
+msgstr "Порог проверки живости"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "Минимальная достоверность защиты от подмены"
+
+msgid "Maximum liveness duration"
+msgstr "Максимальная длительность проверки живости"
+
+msgid "Usable face time per camera before falling back to your password"
+msgstr "Полезное время съёмки лица каждой камерой до перехода к паролю"
+
+msgid "Authentication"
+msgstr "Аутентификация"
+
+msgid "Abort if SSH"
+msgstr "Прерывать при SSH"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "Запрещать аутентификацию через соединения SSH"
+
+msgid "Abort if lid closed"
+msgstr "Прерывать при закрытой крышке"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "Запрещать аутентификацию, когда крышка ноутбука закрыта"
+
+msgid "Require a suspend first"
+msgstr "Сначала требовать переход в ждущий режим"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "Запрещать аутентификацию, пока система хотя бы один раз не перейдёт в ждущий режим и не выйдет из него"
+
+msgid "Require confirmation on lock screen"
+msgstr "Требовать подтверждение на экране блокировки"
+
+msgid "Confirm after matching where supported. On KDE lock/login screens this uses your password instead of face unlock"
+msgstr "Подтверждать после совпадения, где это поддерживается. На экранах блокировки и входа KDE вместо разблокировки по лицу используется пароль"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "Требовать подтверждение для аутентификации с повышенными правами"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "Требовать нажатия Enter или кнопки OK для авторизации после совпадения лица в sudo, polkit и подобных запросах"
+
+msgid "Resume grace period (ms)"
+msgstr "Задержка после пробуждения (мс)"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "Откладывать аутентификацию по лицу при выходе из ждущего режима"
+
+msgid "Start delay (ms)"
+msgstr "Задержка перед началом (мс)"
+
+msgid "Use 3000–5000 ms on KDE or hyprlock to give yourself time to step away after locking"
+msgstr "В KDE или hyprlock используйте 3000–5000 мс, чтобы успеть отойти после блокировки"
+
+msgid "Start delay applies to"
+msgstr "Задержка перед началом применяется к"
+
+msgid "Which prompts wait for the start delay"
+msgstr "Какие запросы ожидают задержку перед началом"
+
+msgid "Hybrid combining policy"
+msgstr "Правило гибридного объединения"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "Правило объединения, когда активны обе камеры, RGB и IR"
+
+msgid "Storage"
+msgstr "Хранение"
+
+msgid "Encrypt face templates"
+msgstr "Шифровать шаблоны лиц"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "Шифровать хранимые шаблоны лиц ключом, запечатанным в TPM"
+
+msgid "Unlock GNOME Keyring"
+msgstr "Разблокировать GNOME Keyring"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login. Needs liveness and template encryption, and keeps both on while enabled"
+msgstr "Использовать зарегистрированный пароль после входа по лицу в GDM или greetd, защищённого проверкой живости. Требует проверки живости и шифрования шаблонов и держит их включёнными, пока параметр активен"
+
+msgid "Unlock KWallet"
+msgstr "Разблокировать KWallet"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet. Needs liveness and template encryption, and keeps both on while enabled"
+msgstr "Использовать зарегистрированный пароль после входа в KDE, защищённого проверкой живости; зарегистрируйте его командой gaze keyring --kwallet. Требует проверки живости и шифрования шаблонов и держит их включёнными, пока параметр активен"
+
+msgid "Set up password…"
+msgstr "Задать пароль…"
+
+msgid "Finish password unlock setup"
+msgstr "Завершите настройку разблокировки паролем"
+
+msgid "The switch enables this feature. Enroll your password from a terminal as your desktop user; then check your login integration. Passwords stay on this machine, protected by the TPM."
+msgstr "Переключатель включает эту функцию. Зарегистрируйте пароль в терминале от имени пользователя рабочего стола, затем проверьте интеграцию со входом. Пароли остаются на этом компьютере под защитой TPM."
+
+msgid "1. Wait for Settings to show Saved.\n2. Run: {command}\n3. Run: gaze doctor\n4. Reopen Settings to refresh password status."
+msgstr "1. Дождитесь, пока в настройках появится «Сохранено».\n2. Выполните: {command}\n3. Выполните: gaze doctor\n4. Снова откройте настройки, чтобы обновить состояние пароля."
+
+msgid "Cameras"
+msgstr "Камеры"
+
+msgid "Choose a camera, then use Enroll a Face to preview and check it."
+msgstr "Выберите камеру, затем нажмите «Зарегистрировать лицо», чтобы просмотреть изображение и проверить её."
+
+msgid "Lock screen and password prompts"
+msgstr "Экран блокировки и запросы пароля"
+
+msgid "Preparing and saving settings… Model downloads may take a few minutes."
+msgstr "Подготовка и сохранение настроек… Загрузка моделей может занять несколько минут."
+
+msgid "Recognition model change cancelled; reopen Settings to confirm"
+msgstr "Смена модели распознавания отменена; снова откройте настройки, чтобы проверить"
+
+msgid "Re-enroll faces after this change?"
+msgstr "Зарегистрировать лица заново после этого изменения?"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face to capture new samples for every profile you use."
+msgstr "Существующие снимки несовместимы с новой моделью распознавания. Они останутся на диске. После сохранения используйте «Улучшить это лицо», чтобы сделать новые снимки для каждого профиля, которым вы пользуетесь."
+
+msgid "Keep current model"
+msgstr "Оставить текущую модель"
+
+msgid "Change model"
+msgstr "Сменить модель"
+
+msgid "Model change cancelled. Current settings restored"
+msgstr "Смена модели отменена. Текущие настройки восстановлены"
+
+msgid "Saved. Restart gazed, then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active."
+msgstr "Сохранено. Перезапустите gazed, затем выполните gaze doctor --benchmark, чтобы проверить ускорение; возможно, вместо него используется процессор."
+
+msgid "Saved. Use Improve this face on each existing profile to re-enroll, then test recognition."
+msgstr "Сохранено. Используйте «Улучшить это лицо» для каждого существующего профиля, чтобы зарегистрировать его заново, затем проверьте распознавание."
+
+msgid "Saved. Changes are active."
+msgstr "Сохранено. Изменения вступили в силу."
+
+msgid "Could not read the current configuration from the Gaze daemon"
+msgstr "Не удалось получить текущую конфигурацию от службы Gaze"
+
+msgid "Try again"
+msgstr "Повторить"
+
+msgid "Password stored"
+msgstr "Пароль сохранён"
+
+msgid "Password not enrolled"
+msgstr "Пароль не зарегистрирован"
+
+msgid "Password status unavailable"
+msgstr "Состояние пароля недоступно"
+
+msgid "{state}. After enabling, run {command} in a terminal to enroll or replace it. Run gaze doctor to check login integration. Requires liveness and encryption."
+msgstr "{state}. После включения выполните {command} в терминале, чтобы зарегистрировать или заменить его. Выполните gaze doctor, чтобы проверить интеграцию со входом. Требуются проверка живости и шифрование."
+
+msgid "Failed to load configuration: {error}"
+msgstr "Не удалось загрузить конфигурацию: {error}"
+
+msgid "Settings stay locked: {error}"
+msgstr "Настройки остаются заблокированными: {error}"
+
+msgid "Low"
+msgstr "Низкий"
+
+msgid "Medium"
+msgstr "Средний"
+
+msgid "High"
+msgstr "Высокий"
+
+msgid "Maximum"
+msgstr "Максимальный"
+
+msgid "Custom"
+msgstr "Свой"
+
+msgid "Standard"
+msgstr "Стандартный"
+
+msgid "Accurate"
+msgstr "Точный"
+
+msgid "Default"
+msgstr "По умолчанию"
+
+msgid "Or"
+msgstr "Или"
+
+msgid "Fallback on dark"
+msgstr "Резерв в темноте"
+
+msgid "And"
+msgstr "И"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "Никогда (сначала RGB, затем IR)"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "Автоматически (параллельно, если камера позволяет)"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "Всегда (RGB и IR одновременно)"
+
+msgid "All face authentication (including sudo)"
+msgstr "Вся аутентификация по лицу (включая sudo)"
+
+msgid "Screen lockers only"
+msgstr "Только блокировщики экрана"
+
+msgid "Automatic (NPU)"
+msgstr "Автоматически (NPU)"
+
+msgid "Face the camera"
+msgstr "Смотрите прямо в камеру"
+
+msgid "Tilt your face slightly up"
+msgstr "Слегка поднимите лицо вверх"
+
+msgid "Tilt your face slightly down"
+msgstr "Слегка опустите лицо вниз"
+
+msgid "Turn your face slightly left"
+msgstr "Слегка поверните лицо влево"
+
+msgid "Turn your face slightly right"
+msgstr "Слегка поверните лицо вправо"
+
+msgid "Database error during enrollment"
+msgstr "Ошибка базы данных при регистрации"
+
+msgid "Camera error during enrollment"
+msgstr "Ошибка камеры при регистрации"
+
+msgid "Enrollment cancelled"
+msgstr "Регистрация отменена"
+
+msgid "Captured"
+msgstr "Снято"
+
+msgid "Completed"
+msgstr "Завершено"
+
+msgid "Run gaze doctor for recovery steps."
+msgstr "Выполните gaze doctor, чтобы узнать, как восстановить работу."

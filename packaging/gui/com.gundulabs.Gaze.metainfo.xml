@@ -6,16 +6,47 @@
   <id>com.gundulabs.Gaze</id>
   <name>Gaze</name>
   <summary>Enroll faces and configure facial authentication</summary>
+  <summary xml:lang="cs">Registrace obličejů a nastavení ověřování obličejem</summary>
+  <summary xml:lang="de">Gesichter registrieren und Gesichtsauthentifizierung einrichten</summary>
+  <summary xml:lang="es">Registre rostros y configure la autenticación facial</summary>
+  <summary xml:lang="fr">Enregistrer des visages et configurer l’authentification faciale</summary>
+  <summary xml:lang="id">Daftarkan wajah dan konfigurasikan autentikasi wajah</summary>
+  <summary xml:lang="it">Registra volti e configura l’autenticazione facciale</summary>
+  <summary xml:lang="ja">顔の登録と顔認証の設定</summary>
+  <summary xml:lang="ko">얼굴을 등록하고 얼굴 인증을 설정합니다</summary>
+  <summary xml:lang="pl">Rejestracja twarzy i konfiguracja uwierzytelniania twarzą</summary>
+  <summary xml:lang="pt_BR">Registre rostos e configure a autenticação facial</summary>
+  <summary xml:lang="ru">Регистрация лиц и настройка аутентификации по лицу</summary>
+  <summary xml:lang="tr">Yüz kaydedin ve yüz kimlik doğrulamasını yapılandırın</summary>
+  <summary xml:lang="vi">Đăng ký khuôn mặt và cấu hình xác thực khuôn mặt</summary>
+  <summary xml:lang="zh_CN">录入人脸并配置人脸认证</summary>
+  <summary xml:lang="zh_TW">註冊臉部並設定臉部驗證</summary>
   <metadata_license>FSFAP</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <launchable type="desktop-id">com.gundulabs.Gaze.desktop</launchable>
   <description>
     <p>Enroll and manage faces, test face authentication, and adjust every Gaze setting.</p>
+    <p xml:lang="cs">Registrujte a spravujte obličeje, zkoušejte ověření obličejem a upravujte všechna nastavení Gaze.</p>
+    <p xml:lang="de">Gesichter registrieren und verwalten, die Gesichtsauthentifizierung testen und alle Einstellungen von Gaze anpassen.</p>
+    <p xml:lang="es">Registre y gestione rostros, pruebe la autenticación facial y ajuste toda la configuración de Gaze.</p>
+    <p xml:lang="fr">Enregistrez et gérez des visages, testez l’authentification faciale et ajustez tous les paramètres de Gaze.</p>
+    <p xml:lang="id">Daftarkan dan kelola wajah, uji autentikasi wajah, dan sesuaikan semua pengaturan Gaze.</p>
+    <p xml:lang="it">Registra e gestisci i volti, prova l’autenticazione facciale e regola tutte le impostazioni di Gaze.</p>
+    <p xml:lang="ja">顔の登録と管理、顔認証のテスト、Gaze のすべての設定の調整を行えます。</p>
+    <p xml:lang="ko">얼굴을 등록 및 관리하고, 얼굴 인증을 테스트하고, 모든 Gaze 설정을 조정합니다.</p>
+    <p xml:lang="pl">Rejestruj twarze i zarządzaj nimi, testuj uwierzytelnianie twarzą i dostosowuj wszystkie ustawienia Gaze.</p>
+    <p xml:lang="pt_BR">Registre e gerencie rostos, teste a autenticação facial e ajuste todas as configurações do Gaze.</p>
+    <p xml:lang="ru">Регистрируйте лица и управляйте ими, проверяйте аутентификацию по лицу и меняйте любые настройки Gaze.</p>
+    <p xml:lang="tr">Yüzleri kaydedin ve yönetin, yüz kimlik doğrulamasını sınayın ve tüm Gaze ayarlarını düzenleyin.</p>
+    <p xml:lang="vi">Đăng ký và quản lý khuôn mặt, kiểm tra xác thực khuôn mặt và điều chỉnh mọi cài đặt của Gaze.</p>
+    <p xml:lang="zh_CN">录入和管理人脸、测试人脸认证，并调整 Gaze 的所有设置。</p>
+    <p xml:lang="zh_TW">註冊與管理臉部、測試臉部驗證，並調整所有 Gaze 設定。</p>
   </description>
   <url type="homepage">https://gaze.gundulabs.com</url>
   <developer_name>Gundu Labs</developer_name>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5.3" date="2026-11-25"/>
     <release version="0.5.2" date="2026-11-16"/>
     <release version="0.5.1" date="2026-11-10"/>
     <release version="0.5.0" date="2026-11-07"/>

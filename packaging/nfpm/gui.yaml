@@ -15,6 +15,7 @@ homepage: "https://gaze.gundulabs.com"
 license: "GPL-3.0-or-later"
 
 contents:
+${OPENCV_CONTENTS}
   - src: "target/release/gaze-gui"
     dst: "/usr/bin/gaze-gui"
     file_info:
@@ -60,8 +61,7 @@ ${RPM_LIB_DEPENDS}
       - gaze
   archlinux:
     depends:
-      - "opencv>=${OPENCV_MIN}"
-      - "opencv<${OPENCV_NEXT}"
+${OPENCV_DEPENDS}
       - gtk4
       - libadwaita
       - gst-plugins-base

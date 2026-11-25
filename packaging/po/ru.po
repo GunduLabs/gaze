@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Clear a Gaze duress lockout"
+msgstr "Снять блокировку Gaze после сигнала принуждения"
+
+msgid "Authentication is required to re-enable face authentication after a duress signal."
+msgstr "Чтобы снова включить аутентификацию по лицу после сигнала принуждения, требуется аутентификация."
+
+msgid "Manage face enrollments for Gaze"
+msgstr "Управление лицами, зарегистрированными в Gaze"
+
+msgid "Authentication is required to manage Gaze face enrollments."
+msgstr "Для управления лицами, зарегистрированными в Gaze, требуется аутентификация."
+
+msgid "Manage daemon configuration for Gaze"
+msgstr "Управление конфигурацией службы Gaze"
+
+msgid "Authentication is required to change Gaze daemon configuration."
+msgstr "Для изменения конфигурации службы Gaze требуется аутентификация."
+
+msgid "Manage GDM login authentication for Gaze"
+msgstr "Управление аутентификацией Gaze при входе через GDM"
+
+msgid "Authentication is required to change Gaze face authentication at the GDM login screen."
+msgstr "Для изменения аутентификации Gaze по лицу на экране входа GDM требуется аутентификация."
+
+msgid "Enroll faces and configure facial authentication"
+msgstr "Регистрация лиц и настройка аутентификации по лицу"
+
+msgid "face;auth;login;biometric;"
+msgstr "лицо;разблокировка;аутентификация;вход;биометрия;"
+
+msgid "Enroll and manage faces, test face authentication, and adjust every Gaze setting."
+msgstr "Регистрируйте лица и управляйте ими, проверяйте аутентификацию по лицу и меняйте любые настройки Gaze."
+
+msgid "Facial authentication"
+msgstr "Аутентификация по лицу"
+
+msgid "Gaze Settings"
+msgstr "Настройки Gaze"

@@ -18,6 +18,7 @@ All work goes through `just` from the repo root (`just --list` shows every recip
 just build-rust        # release build of all binaries + PAM link check
 just test              # cargo test --workspace --release, plus keyring/kwallet PAM harness scripts
 just lint              # clippy --workspace --all-targets -D warnings
+just check-translations # .po catalogs and the metadata generated from them (just sync-translations applies)
 just fmt-check         # rustfmt check (just fmt applies)
 just audit             # cargo audit
 just --fmt --check     # required if the Justfile changed
@@ -40,7 +41,7 @@ Notes for direct cargo use:
 
 JS integration tests (Node 22+, downloaded upstream sources, simulated shell/PAM): `node scripts/test-gnome.mjs`, `node scripts/test-kde.mjs`, `node scripts/test-kcm.mjs`, `node scripts/test-cinnamon.mjs`.
 
-CI (`.github/workflows/ci.yml`) runs fmt, audit, lint, test, `test-openvino`, the JS integration tests, and package builds. The pre-commit hook (`just setup-hooks`) runs `fmt-check` and `lint`.
+CI (`.github/workflows/ci.yml`) runs fmt, translation checks, audit, lint, test, `test-openvino`, the JS integration tests, and package builds. The pre-commit hook (`just setup-hooks`) runs `fmt-check` and `lint`.
 
 ## Architecture
 

@@ -281,39 +281,20 @@ pub(super) fn video_node_index(node: &str) -> Option<u32> {
     node.strip_prefix("/dev/video")?.parse().ok()
 }
 
-/// Scan V4L2 nodes for one matching `vid:pid` with the requested color-ness. The GStreamer device
-/// monitor enumerates via the plain V4L2 provider without a PipeWire session; ids come from sysfs.
+/// Scan V4L2 nodes for one matching `vid:pid` with the requested color-ness; ids come from sysfs.
 pub(super) fn resolve_usb_video_node(vid: u16, pid: u16, want_color: bool) -> Option<String> {
-    gstreamer::init().ok()?;
-    let monitor = gstreamer::DeviceMonitor::new();
-    let caps = gstreamer::Caps::builder("video/x-raw").build();
-    monitor.add_filter(Some("Video/Source"), Some(&caps));
-    monitor.start().ok()?;
-    wait_for_device_updates(&monitor);
-    let devices = monitor.devices();
-    monitor.stop();
-
-    let mut nodes = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for device in devices {
-        let Some(node) = device_video_node(&device) else {
-            continue;
-        };
-        if !seen.insert(node.clone()) {
-            continue;
-        }
-        let Some((dev_vid, dev_pid)) = usb_ids_of(&node) else {
-            continue;
-        };
-        let is_color = has_color_caps(&device);
-        nodes.push(VideoNodeInfo {
-            node,
-            vid: dev_vid,
-            pid: dev_pid,
-            is_color,
-        });
-    }
-
+    let nodes: Vec<VideoNodeInfo> = v4l2_source_nodes()
+        .into_iter()
+        .filter_map(|(node, is_color)| {
+            let (vid, pid) = usb_ids_of(&node)?;
+            Some(VideoNodeInfo {
+                node,
+                vid,
+                pid,
+                is_color,
+            })
+        })
+        .collect();
     select_usb_node(&nodes, vid, pid, want_color)
 }
 
@@ -321,9 +302,16 @@ pub(super) fn first_v4l2_node(want_color: bool) -> Option<String> {
     v4l2_nodes_with_color(want_color).into_iter().next()
 }
 
-/// Every V4L2 node with the requested color-ness, lowest-numbered first. Enumeration goes through
-/// the plain V4L2 provider, so it still answers in a greeter that has no PipeWire session.
 pub(super) fn v4l2_nodes_with_color(want_color: bool) -> Vec<String> {
+    v4l2_source_nodes()
+        .into_iter()
+        .filter_map(|(node, is_color)| (is_color == want_color).then_some(node))
+        .collect()
+}
+
+/// Every V4L2 capture node and whether it is color, lowest-numbered first. Enumeration goes
+/// through the plain V4L2 provider, so it still answers in a greeter that has no PipeWire session.
+fn v4l2_source_nodes() -> Vec<(String, bool)> {
     if gstreamer::init().is_err() {
         return Vec::new();
     }
@@ -336,18 +324,16 @@ pub(super) fn v4l2_nodes_with_color(want_color: bool) -> Vec<String> {
     let raw_caps = gstreamer::Caps::builder("video/x-raw").build();
 
     let mut seen = std::collections::HashSet::new();
-    let mut nodes: Vec<String> = devices
+    let mut nodes: Vec<(String, bool)> = devices
         .iter()
         .filter(|device| is_raw_video_source(device, &raw_caps))
         .filter_map(|device| {
             let node = device_video_node(device)?;
-            if !seen.insert(node.clone()) {
-                return None;
-            }
-            (has_color_caps(device) == want_color).then_some(node)
+            seen.insert(node.clone())
+                .then(|| (node, has_color_caps(device)))
         })
         .collect();
-    nodes.sort_by_key(|node| video_node_index(node).unwrap_or(u32::MAX));
+    nodes.sort_by_key(|(node, _)| video_node_index(node).unwrap_or(u32::MAX));
     nodes
 }
 
@@ -837,6 +823,18 @@ pub(super) fn pipewire_target_nodes(target: &str) -> Option<Vec<String>> {
     Some(nodes)
 }
 
+const V4L2_CLASS_DIR: &str = "/sys/class/video4linux";
+
+fn usb_camera_present(class_dir: &std::path::Path, vid: u16, pid: u16) -> bool {
+    match std::fs::read_dir(class_dir) {
+        Ok(entries) => entries
+            .flatten()
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .any(|name| name.starts_with("video") && usb_ids_of(&name) == Some((vid, pid))),
+        Err(err) => err.kind() != std::io::ErrorKind::NotFound,
+    }
+}
+
 pub fn camera_disconnected(source: &str, want_color: bool, allow_nonphysical: bool) -> bool {
     let source = source.trim();
     if let Some(name) = parse_libcamera_spec(source) {
@@ -850,12 +848,14 @@ pub fn camera_disconnected(source: &str, want_color: bool, allow_nonphysical: bo
     if let V4l2Fallback::SameNode(target) = v4l2_fallback_for(source) {
         return pipewire_target_nodes(&target).is_some_and(|nodes| nodes.is_empty());
     }
+    if let Some((vid, pid)) = parse_usb_spec(source) {
+        return !usb_camera_present(std::path::Path::new(V4L2_CLASS_DIR), vid, pid);
+    }
     if source.starts_with("/dev/video") {
         return resolve_privileged_node(source, want_color, allow_nonphysical)
             .is_some_and(|node| !std::path::Path::new(&node).exists());
     }
-    let names_device =
-        source == DEFAULT_RGB_CAMERA || source == "pipewiresrc" || parse_usb_spec(source).is_some();
+    let names_device = source == DEFAULT_RGB_CAMERA || source == "pipewiresrc";
     names_device && resolve_privileged_node(source, want_color, allow_nonphysical).is_none()
 }
 
@@ -1514,6 +1514,7 @@ mod tests {
             false,
             false
         ));
+        assert!(camera_disconnected("usb:ffff:ffff", false, false));
         for source in [
             "videotestsrc num-buffers=2",
             "pipewiresrc target-object=alsa_input.pci-0000_00_1f.3",
@@ -1523,6 +1524,20 @@ mod tests {
         ] {
             assert!(!camera_disconnected(source, false, false), "{source:?}");
         }
+    }
+
+    #[test]
+    fn a_usb_camera_is_only_absent_when_the_kernel_lists_no_such_device() {
+        let root = std::env::temp_dir().join(format!("gaze-usb-camera-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("not-a-directory");
+        std::fs::write(&file, "").unwrap();
+
+        assert!(!usb_camera_present(&root, 0xffff, 0xffff));
+        assert!(!usb_camera_present(&root.join("missing"), 0xffff, 0xffff));
+        assert!(usb_camera_present(&file, 0xffff, 0xffff));
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

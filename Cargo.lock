@@ -955,7 +955,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-cli"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -975,7 +975,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-core"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "libc",
@@ -992,7 +992,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-gui"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "futures",
@@ -1002,6 +1002,7 @@ dependencies = [
  "gtk4",
  "libadwaita",
  "opencv",
+ "pangocairo",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1010,7 +1011,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-security"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1024,7 +1025,7 @@ dependencies = [
 
 [[package]]
 name = "gaze-vision"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "gaze-core",
@@ -1041,7 +1042,7 @@ dependencies = [
 
 [[package]]
 name = "gazed"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2286,7 +2287,7 @@ dependencies = [
 
 [[package]]
 name = "pam-gaze"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "futures",
@@ -2301,7 +2302,7 @@ dependencies = [
 
 [[package]]
 name = "pam-gaze-grosshack"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "futures",
@@ -2334,6 +2335,31 @@ dependencies = [
  "glib-sys",
  "gobject-sys",
  "libc",
+ "system-deps 9.0.1",
+]
+
+[[package]]
+name = "pangocairo"
+version = "0.22.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd199a0fef965b3ebda91a929a1ab5e7729538882c68e8de38e1904d2e094757"
+dependencies = [
+ "cairo-rs",
+ "glib",
+ "pango",
+ "pangocairo-sys",
+]
+
+[[package]]
+name = "pangocairo-sys"
+version = "0.22.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a649a616d67ae68539bc85f00fb45d36fba742ed20fc20e6712a15d8ee52bd3f"
+dependencies = [
+ "cairo-sys-rs",
+ "glib-sys",
+ "libc",
+ "pango-sys",
  "system-deps 9.0.1",
 ]
 

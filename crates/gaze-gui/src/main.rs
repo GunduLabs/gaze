@@ -3,6 +3,7 @@
 
 mod camera;
 mod dialog;
+mod i18n;
 mod window;
 
 use gtk4::prelude::*;
@@ -25,31 +26,44 @@ fn main() {
         let provider = gtk4::CssProvider::new();
         provider.load_from_string(
             r#"
-            .success { color: #2ec27e; }
-            .error { color: #e01b24; }
-            .badge-success {
-                background-color: #2ec27e;
-                color: white;
-                border-radius: 6px;
-                padding: 1px 6px;
-                font-weight: bold;
+            .badge-success,
+            .badge-warning,
+            .badge-muted {
+                border-radius: 999px;
+                padding: 2px 8px;
+                font-weight: 600;
                 font-size: 0.75rem;
+            }
+            .badge-success {
+                background-color: alpha(@success_bg_color, 0.18);
+                color: @success_color;
             }
             .badge-warning {
-                background-color: #e5a50a;
-                color: white;
-                border-radius: 6px;
-                padding: 1px 6px;
-                font-weight: bold;
-                font-size: 0.75rem;
+                background-color: alpha(@warning_bg_color, 0.2);
+                color: @warning_color;
             }
             .badge-muted {
-                background-color: alpha(currentColor, 0.12);
-                color: alpha(currentColor, 0.45);
-                border-radius: 6px;
-                padding: 1px 6px;
+                background-color: alpha(currentColor, 0.08);
+                color: alpha(currentColor, 0.55);
+            }
+            .step-marker {
+                min-width: 26px;
+                min-height: 26px;
+                border-radius: 999px;
+                background-color: alpha(currentColor, 0.1);
                 font-weight: bold;
-                font-size: 0.75rem;
+                font-size: 0.85rem;
+            }
+            .step-marker.done {
+                background-color: @success_bg_color;
+                color: @success_fg_color;
+            }
+            .camera-frame {
+                border-radius: 12px;
+            }
+            .report-text {
+                padding: 12px;
+                border-radius: 8px;
             }
             "#,
         );

@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Clear a Gaze duress lockout"
+msgstr "Gaze の強要時ロックアウトを解除"
+
+msgid "Authentication is required to re-enable face authentication after a duress signal."
+msgstr "強要の合図の後に顔認証を再び有効にするには、認証が必要です。"
+
+msgid "Manage face enrollments for Gaze"
+msgstr "Gaze の顔登録を管理"
+
+msgid "Authentication is required to manage Gaze face enrollments."
+msgstr "Gaze の顔登録を管理するには、認証が必要です。"
+
+msgid "Manage daemon configuration for Gaze"
+msgstr "Gaze デーモンの設定を管理"
+
+msgid "Authentication is required to change Gaze daemon configuration."
+msgstr "Gaze デーモンの設定を変更するには、認証が必要です。"
+
+msgid "Manage GDM login authentication for Gaze"
+msgstr "Gaze の GDM ログイン認証を管理"
+
+msgid "Authentication is required to change Gaze face authentication at the GDM login screen."
+msgstr "GDM ログイン画面での Gaze の顔認証を変更するには、認証が必要です。"
+
+msgid "Enroll faces and configure facial authentication"
+msgstr "顔の登録と顔認証の設定"
+
+msgid "face;auth;login;biometric;"
+msgstr "顔;顔認証;認証;ロック解除;ログイン;生体認証;"
+
+msgid "Enroll and manage faces, test face authentication, and adjust every Gaze setting."
+msgstr "顔の登録と管理、顔認証のテスト、Gaze のすべての設定の調整を行えます。"
+
+msgid "Facial authentication"
+msgstr "顔認証"
+
+msgid "Gaze Settings"
+msgstr "Gaze の設定"

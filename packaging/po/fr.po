@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: fr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+msgid "Clear a Gaze duress lockout"
+msgstr "Lever le verrouillage sous contrainte de Gaze"
+
+msgid "Authentication is required to re-enable face authentication after a duress signal."
+msgstr "Une authentification est requise pour réactiver l’authentification faciale après un signal de contrainte."
+
+msgid "Manage face enrollments for Gaze"
+msgstr "Gérer les visages enregistrés dans Gaze"
+
+msgid "Authentication is required to manage Gaze face enrollments."
+msgstr "Une authentification est requise pour gérer les visages enregistrés dans Gaze."
+
+msgid "Manage daemon configuration for Gaze"
+msgstr "Gérer la configuration du service Gaze"
+
+msgid "Authentication is required to change Gaze daemon configuration."
+msgstr "Une authentification est requise pour modifier la configuration du service Gaze."
+
+msgid "Manage GDM login authentication for Gaze"
+msgstr "Gérer l’authentification de connexion GDM pour Gaze"
+
+msgid "Authentication is required to change Gaze face authentication at the GDM login screen."
+msgstr "Une authentification est requise pour modifier l’authentification faciale de Gaze sur l’écran de connexion GDM."
+
+msgid "Enroll faces and configure facial authentication"
+msgstr "Enregistrer des visages et configurer l’authentification faciale"
+
+msgid "face;auth;login;biometric;"
+msgstr "visage;déverrouiller;authentification;connexion;biométrie;"
+
+msgid "Enroll and manage faces, test face authentication, and adjust every Gaze setting."
+msgstr "Enregistrez et gérez des visages, testez l’authentification faciale et ajustez tous les paramètres de Gaze."
+
+msgid "Facial authentication"
+msgstr "Authentification faciale"
+
+msgid "Gaze Settings"
+msgstr "Paramètres de Gaze"

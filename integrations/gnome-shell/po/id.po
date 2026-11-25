@@ -1,0 +1,160 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: id\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Enrollment"
+msgstr "Pendaftaran"
+
+msgid "Behavior"
+msgstr "Perilaku"
+
+msgid "Face authentication"
+msgstr "Autentikasi wajah"
+
+msgid "Face authentication for unlocking this session. This does not affect the GDM login screen (see below). Settings are stored in your current dconf profile."
+msgstr "Autentikasi wajah untuk membuka kunci sesi ini. Ini tidak memengaruhi layar login GDM (lihat di bawah). Pengaturan disimpan di profil dconf Anda saat ini."
+
+msgid "Enable face authentication (lock screen)"
+msgstr "Aktifkan autentikasi wajah (layar kunci)"
+
+msgid "Face retry mode"
+msgstr "Mode percobaan ulang wajah"
+
+msgid "Disabled"
+msgstr "Dinonaktifkan"
+
+msgid "Fixed tries"
+msgstr "Jumlah percobaan tetap"
+
+msgid "Infinite"
+msgstr "Tidak terbatas"
+
+msgid "Maximum face tries"
+msgstr "Percobaan wajah maksimum"
+
+msgid "Enrolled faces"
+msgstr "Wajah terdaftar"
+
+msgid "Checking…"
+msgstr "Memeriksa…"
+
+msgid "Open Gaze"
+msgstr "Buka Gaze"
+
+msgid "Could not open the Gaze app. Run gaze-gui from a terminal."
+msgstr "Tidak dapat membuka aplikasi Gaze. Jalankan gaze-gui dari terminal."
+
+msgid "A face is enrolled for this account."
+msgstr "Wajah telah terdaftar untuk akun ini."
+
+msgid "No face is enrolled yet, so face unlock has nothing to match. Open Gaze to enroll one."
+msgstr "Belum ada wajah yang terdaftar, sehingga buka kunci wajah tidak memiliki pembanding. Buka Gaze untuk mendaftarkannya."
+
+msgid "Gaze daemon unavailable."
+msgstr "Layanan Gaze tidak tersedia."
+
+msgid "GDM login screen"
+msgstr "Layar login GDM"
+
+msgid "Enable face authentication at the GDM login screen. Requires administrator authorization. Note: GNOME keyring is normally unlocked by your password, so logging in with face only may leave it locked."
+msgstr "Aktifkan autentikasi wajah di layar login GDM. Memerlukan otorisasi administrator. Catatan: keyring GNOME biasanya dibuka dengan kata sandi Anda, sehingga login hanya dengan wajah dapat membuatnya tetap terkunci."
+
+msgid "Enable face authentication at GDM login"
+msgstr "Aktifkan autentikasi wajah saat login GDM"
+
+msgid "Administrator authorization is required to enable face authentication at the GDM login screen."
+msgstr "Otorisasi administrator diperlukan untuk mengaktifkan autentikasi wajah di layar login GDM."
+
+msgid "Administrator authorization is required to disable face authentication at the GDM login screen."
+msgstr "Otorisasi administrator diperlukan untuk menonaktifkan autentikasi wajah di layar login GDM."
+
+msgid "Could not update GDM login face authentication: {error}"
+msgstr "Tidak dapat memperbarui autentikasi wajah untuk login GDM: {error}"
+
+msgid "Face auth enabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "Autentikasi wajah diaktifkan di layar login GDM. Mulai ulang GDM (atau komputer) agar berlaku."
+
+msgid "Face auth disabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "Autentikasi wajah dinonaktifkan di layar login GDM. Mulai ulang GDM (atau komputer) agar berlaku."
+
+msgid "Face not recognized. Please enter your password."
+msgstr "Wajah tidak dikenali. Masukkan kata sandi Anda."
+
+msgid "Face not detected. Please enter your password."
+msgstr "Wajah tidak terdeteksi. Masukkan kata sandi Anda."
+
+msgid "Too dark for face authentication. Please enter your password."
+msgstr "Terlalu gelap untuk autentikasi wajah. Masukkan kata sandi Anda."
+
+msgid "Face authentication timed out. Please enter your password."
+msgstr "Waktu autentikasi wajah habis. Masukkan kata sandi Anda."
+
+msgid "Face authentication unavailable. Please enter your password."
+msgstr "Autentikasi wajah tidak tersedia. Masukkan kata sandi Anda."
+
+msgid "Changing Gaze's settings or faces needs your password."
+msgstr "Mengubah pengaturan atau wajah Gaze memerlukan kata sandi Anda."
+
+msgid "Sorry, face authentication did not work. Please try again."
+msgstr "Maaf, autentikasi wajah tidak berhasil. Silakan coba lagi."
+
+msgid "You reached the maximum face authentication attempts, please try another method"
+msgstr "Anda telah mencapai batas maksimum percobaan autentikasi wajah, silakan coba cara lain"
+
+msgid "(or look at the camera)"
+msgstr "(atau lihat ke kamera)"
+
+msgid "(or look at the camera or swipe finger)"
+msgstr "(atau lihat ke kamera atau usap jari)"
+
+msgid "(or look at the camera or place finger on reader)"
+msgstr "(atau lihat ke kamera atau letakkan jari pada pembaca)"
+
+msgid "(or swipe finger across reader)"
+msgstr "(atau usap jari melintasi pembaca)"
+
+msgid "(or place finger on reader)"
+msgstr "(atau letakkan jari pada pembaca)"
+
+msgid "Password"
+msgstr "Kata sandi"
+
+msgid "Face verified. Press Enter or click Authenticate to confirm."
+msgstr "Wajah terverifikasi. Tekan Enter atau klik Autentikasi untuk mengonfirmasi."
+
+msgid "Face authentication failed"
+msgstr "Autentikasi wajah gagal"
+
+msgid "Confirm Face Unlock"
+msgstr "Konfirmasi Buka Kunci Wajah"
+
+msgid "Failed to show confirmation prompt"
+msgstr "Gagal menampilkan permintaan konfirmasi"
+
+msgid "Please look at the camera..."
+msgstr "Silakan lihat ke kamera…"
+
+msgid "Need more light..."
+msgstr "Perlu lebih banyak cahaya…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "Wajah terpotong. Silakan mundur…"
+
+msgid "Please center your face..."
+msgstr "Posisikan wajah Anda di tengah…"
+
+msgid "Please come closer..."
+msgstr "Silakan mendekat…"
+
+msgid "Please back up..."
+msgstr "Silakan mundur…"
+
+msgid "Hold still..."
+msgstr "Jangan bergerak…"

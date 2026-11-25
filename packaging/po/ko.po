@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: ko\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Clear a Gaze duress lockout"
+msgstr "Gaze 강압 잠금 해제"
+
+msgid "Authentication is required to re-enable face authentication after a duress signal."
+msgstr "강압 신호 후 얼굴 인증을 다시 사용하려면 인증이 필요합니다."
+
+msgid "Manage face enrollments for Gaze"
+msgstr "Gaze 얼굴 등록 관리"
+
+msgid "Authentication is required to manage Gaze face enrollments."
+msgstr "Gaze 얼굴 등록을 관리하려면 인증이 필요합니다."
+
+msgid "Manage daemon configuration for Gaze"
+msgstr "Gaze 데몬 설정 관리"
+
+msgid "Authentication is required to change Gaze daemon configuration."
+msgstr "Gaze 데몬 설정을 변경하려면 인증이 필요합니다."
+
+msgid "Manage GDM login authentication for Gaze"
+msgstr "Gaze의 GDM 로그인 인증 관리"
+
+msgid "Authentication is required to change Gaze face authentication at the GDM login screen."
+msgstr "GDM 로그인 화면에서 Gaze 얼굴 인증을 변경하려면 인증이 필요합니다."
+
+msgid "Enroll faces and configure facial authentication"
+msgstr "얼굴을 등록하고 얼굴 인증을 설정합니다"
+
+msgid "face;auth;login;biometric;"
+msgstr "얼굴;얼굴 인식;잠금 해제;인증;로그인;생체 인식;"
+
+msgid "Enroll and manage faces, test face authentication, and adjust every Gaze setting."
+msgstr "얼굴을 등록 및 관리하고, 얼굴 인증을 테스트하고, 모든 Gaze 설정을 조정합니다."
+
+msgid "Facial authentication"
+msgstr "얼굴 인증"
+
+msgid "Gaze Settings"
+msgstr "Gaze 설정"
