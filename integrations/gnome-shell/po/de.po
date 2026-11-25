@@ -31,7 +31,7 @@ msgid "Disabled"
 msgstr "Deaktiviert"
 
 msgid "Fixed tries"
-msgstr "Feste Anzahl an Versuchen"
+msgstr "Begrenzt"
 
 msgid "Infinite"
 msgstr "Unbegrenzt"
