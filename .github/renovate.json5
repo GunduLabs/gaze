@@ -134,7 +134,7 @@
       ],
     },
     {
-      description: 'OpenCV 5 needs LAPACK, so the static build stays on 4.x; each bump also needs its SHA256 in scripts/build-opencv.sh',
+      description: 'The static build stays on 4.x, where imgproc needs only core; each bump also needs its SHA256 in scripts/build-opencv.sh',
       matchManagers: [
         'custom.regex',
       ],
