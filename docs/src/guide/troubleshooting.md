@@ -131,8 +131,9 @@ status 127. Update to a `gaze-bin` release built against the new OpenCV:
 yay -Syu gaze-bin
 ```
 
-Newer packages declare a version-bounded `opencv` dependency, so pacman
-refuses the OpenCV upgrade up front instead of breaking the installed daemon.
+Releases after 0.5.2 link OpenCV statically and are not affected. Earlier packages
+that declare a version-bounded `opencv` dependency make pacman
+refuse the OpenCV upgrade up front instead of breaking the installed daemon.
 If pacman reports that upgrading `opencv` would break the dependency and no
 updated `gaze-bin` exists yet, wait for the rebuilt release before upgrading,
 or build and install Gaze from source against the new OpenCV.

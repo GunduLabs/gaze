@@ -15,6 +15,7 @@ homepage: "https://gaze.gundulabs.com"
 license: "GPL-3.0-or-later"
 
 contents:
+${OPENCV_CONTENTS}
   - src: "target/release/onnxruntime-LICENSE"
     dst: "/usr/share/licenses/gaze/onnxruntime/LICENSE"
     file_info:
@@ -179,11 +180,9 @@ ${RPM_LIB_DEPENDS}
       postinstall: "packaging/scriptlets/postinst-arch.sh"
       preremove: "packaging/scriptlets/prerm-arch.sh"
     depends:
-      # The `_nfpm` recipe computes these bounds from the libopencv_core soversion linked by
-      # gazed. Arch changes that version each minor release, so an unbounded dependency can break
-      # during `pacman -Syu`.
-      - "opencv>=${OPENCV_MIN}"
-      - "opencv<${OPENCV_NEXT}"
+      # The `_nfpm` recipe bounds opencv by the libopencv_core soversion gazed links, which Arch
+      # changes each minor release. A static link needs no opencv at all.
+${OPENCV_DEPENDS}
       - pam
       - tpm2-tss
       - gst-plugins-base

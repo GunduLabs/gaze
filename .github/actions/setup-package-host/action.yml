@@ -190,7 +190,7 @@ runs:
           clang \
           llvm \
           openmp \
-          opencv \
+          zlib \
           v4l-utils \
           pam \
           tpm2-tss \

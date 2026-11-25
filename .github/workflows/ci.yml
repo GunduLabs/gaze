@@ -197,8 +197,8 @@ jobs:
             cache_key: ci-package-v1
           - format: archlinux
             build_deps: "true"
-            apt_packages: dpkg-dev gettext-base checkpolicy semodule-utils
-            cache_key: ci-package-v1
+            apt_packages: dpkg-dev gettext-base checkpolicy semodule-utils cmake zlib1g-dev
+            cache_key: ci-package-arch-v1
           - format: rpm
             container: fedora:45
             distro: fedora
@@ -376,6 +376,7 @@ jobs:
         env:
           CARGO_BUILD_JOBS: 2
           RUSTFLAGS: -Cdebuginfo=0
+          GAZE_OPENCV: ${{ matrix.format == 'archlinux' && 'static' || 'system' }}
         run: just build-rust
 
       - name: Build SELinux policy
