@@ -89,12 +89,14 @@ using [Hardware Acceleration](/guide/acceleration), then restart the daemon afte
 
 ## Language
 
-`gaze-gui` follows your desktop language. It currently ships English and
-Simplified Chinese (`zh_CN`); any other language falls back to English. To pick
-a language for this app only, set `GAZE_GUI_LANG`:
+`gaze-gui` follows your desktop language. It ships English, Brazilian Portuguese,
+Czech, French, German, Indonesian, Italian, Japanese, Korean, Polish, Russian,
+Simplified and Traditional Chinese, Spanish, Turkish, and Vietnamese; any other
+language falls back to English. To pick a language for this app only, set
+`GAZE_GUI_LANG`:
 
 ```bash
-GAZE_GUI_LANG=zh_CN gaze-gui
+GAZE_GUI_LANG=de gaze-gui
 ```
 
 `GAZE_GUI_LANG=en` forces English. Messages that come from the daemon or from

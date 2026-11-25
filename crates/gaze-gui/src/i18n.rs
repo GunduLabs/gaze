@@ -13,7 +13,23 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 /// Embedded catalogs, keyed by POSIX locale name (`ll` or `ll_CC`).
-const CATALOGS: &[(&str, &str)] = &[("zh_CN", include_str!("../po/zh_CN.po"))];
+const CATALOGS: &[(&str, &str)] = &[
+    ("cs", include_str!("../po/cs.po")),
+    ("de", include_str!("../po/de.po")),
+    ("es", include_str!("../po/es.po")),
+    ("fr", include_str!("../po/fr.po")),
+    ("id", include_str!("../po/id.po")),
+    ("it", include_str!("../po/it.po")),
+    ("ja", include_str!("../po/ja.po")),
+    ("ko", include_str!("../po/ko.po")),
+    ("pl", include_str!("../po/pl.po")),
+    ("pt_BR", include_str!("../po/pt_BR.po")),
+    ("ru", include_str!("../po/ru.po")),
+    ("tr", include_str!("../po/tr.po")),
+    ("vi", include_str!("../po/vi.po")),
+    ("zh_CN", include_str!("../po/zh_CN.po")),
+    ("zh_TW", include_str!("../po/zh_TW.po")),
+];
 
 type Catalog = HashMap<String, String>;
 
@@ -93,8 +109,8 @@ fn requested_locales(var: impl Fn(&str) -> Option<String>) -> Vec<String> {
     wanted
 }
 
-/// Picks the first catalog matching a requested locale, trying `ll_CC` and then `ll`. A bare `zh`
-/// matches `zh_CN`, since that is the only Chinese catalog.
+/// Picks the first catalog matching a requested locale, trying `ll_CC` and then `ll`. Chinese
+/// locales match by script: Traditional uses `zh_TW`, everything else `zh_CN`.
 fn pick_catalog(wanted: &[String]) -> Option<&'static str> {
     for locale in wanted {
         let base = locale.split(['.', '@']).next().unwrap_or_default();
@@ -104,10 +120,13 @@ fn pick_catalog(wanted: &[String]) -> Option<&'static str> {
         if let Some((_, po)) = CATALOGS.iter().find(|(name, _)| *name == base) {
             return Some(po);
         }
-        let language = base.split('_').next().unwrap_or_default();
+        let language = match base {
+            "zh_HK" | "zh_MO" | "zh_Hant" | "zh_Hant_TW" | "zh_Hant_HK" => "zh_TW",
+            _ => base.split('_').next().unwrap_or_default(),
+        };
         if let Some((_, po)) = CATALOGS
             .iter()
-            .find(|(name, _)| name.split('_').next() == Some(language))
+            .find(|(name, _)| *name == language || name.split('_').next() == Some(language))
         {
             return Some(po);
         }
@@ -255,8 +274,25 @@ mod tests {
         assert!(pick(&["zh"]));
         assert!(pick(&["zh_SG@latin"]));
         assert!(!pick(&["en_US.UTF-8", "zh_CN"]));
-        assert!(!pick(&["de_DE", "fr"]));
-        assert!(pick(&["de_DE", "zh_CN"]));
+        assert!(!pick(&["nl_NL", "sv"]));
+        assert!(pick(&["nl_NL", "zh_CN"]));
+    }
+
+    #[test]
+    fn catalog_matches_the_right_regional_variant() {
+        let pick = |locale: &str| {
+            let po = pick_catalog(&[locale.to_string()]);
+            CATALOGS
+                .iter()
+                .find(|(_, candidate)| Some(*candidate) == po)
+                .map(|(name, _)| *name)
+        };
+        assert_eq!(pick("de_AT.UTF-8"), Some("de"));
+        assert_eq!(pick("pt_BR.UTF-8"), Some("pt_BR"));
+        assert_eq!(pick("zh_CN.UTF-8"), Some("zh_CN"));
+        assert_eq!(pick("zh"), Some("zh_CN"));
+        assert_eq!(pick("zh_TW.UTF-8"), Some("zh_TW"));
+        assert_eq!(pick("zh_HK.UTF-8"), Some("zh_TW"));
     }
 
     #[test]
