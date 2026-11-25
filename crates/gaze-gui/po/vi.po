@@ -1,0 +1,742 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: vi\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Face authentication could not run"
+msgstr "Không thể chạy xác thực khuôn mặt"
+
+msgid "Face not recognized"
+msgstr "Không nhận dạng được khuôn mặt"
+
+msgid "Too dark for face authentication"
+msgstr "Quá tối để xác thực khuôn mặt"
+
+msgid "No face detected"
+msgstr "Không phát hiện khuôn mặt"
+
+msgid "Move your face into the frame and try again"
+msgstr "Hãy đưa khuôn mặt vào khung hình và thử lại"
+
+msgid "Close"
+msgstr "Đóng"
+
+msgid "Remove “{name}”?"
+msgstr "Xóa “{name}”?"
+
+msgid "Gaze will stop recognizing this face. You can enroll it again later."
+msgstr "Gaze sẽ không còn nhận ra khuôn mặt này. Bạn có thể đăng ký lại sau."
+
+msgid "Cancel"
+msgstr "Hủy"
+
+msgid "Remove"
+msgstr "Xóa"
+
+msgid "Daemon Failed"
+msgstr "Dịch vụ gặp lỗi"
+
+msgid "Gaze could not start. Run gaze doctor. On a new install, check that TPM 2.0 is enabled; settings cannot be changed here until the service starts."
+msgstr "Không thể khởi động Gaze. Hãy chạy gaze doctor. Nếu vừa mới cài Gaze, hãy kiểm tra TPM 2.0 đã được bật; không thể thay đổi cài đặt tại đây cho đến khi dịch vụ khởi động."
+
+msgid "Daemon Disabled"
+msgstr "Dịch vụ đã bị tắt"
+
+msgid "The Gaze daemon is turned off. Turn it on with:"
+msgstr "Dịch vụ Gaze đang tắt. Hãy bật bằng lệnh:"
+
+msgid "Daemon Stopped"
+msgstr "Dịch vụ đã dừng"
+
+msgid "The Gaze daemon is not running. Start it with:"
+msgstr "Dịch vụ Gaze không chạy. Hãy khởi động bằng lệnh:"
+
+msgid "Daemon Not Installed"
+msgstr "Dịch vụ chưa được cài đặt"
+
+msgid "The gazed service is missing. Install the gaze package for your distribution."
+msgstr "Thiếu dịch vụ gazed. Hãy cài đặt gói gaze cho bản phân phối của bạn."
+
+msgid "Daemon Starting"
+msgstr "Dịch vụ đang khởi động"
+
+msgid "The Gaze daemon is starting up. Its first start downloads face models, which can take a few minutes."
+msgstr "Dịch vụ Gaze đang khởi động. Lần khởi động đầu tiên sẽ tải các mô hình khuôn mặt, có thể mất vài phút."
+
+msgid "Connecting to the Gaze daemon…"
+msgstr "Đang kết nối với dịch vụ Gaze…"
+
+msgid "Enrollment was not authorized"
+msgstr "Việc đăng ký không được cấp quyền"
+
+msgid "Could not start enrollment: {error}"
+msgstr "Không thể bắt đầu đăng ký: {error}"
+
+msgid "Could not start enrollment"
+msgstr "Không thể bắt đầu đăng ký"
+
+msgid "Could not start camera"
+msgstr "Không thể khởi động camera"
+
+msgid "Close other camera apps, check the privacy shutter, or choose another camera in Settings."
+msgstr "Hãy đóng các ứng dụng khác đang dùng camera, kiểm tra nắp che riêng tư hoặc chọn camera khác trong Cài đặt."
+
+msgid "ready"
+msgstr "sẵn sàng"
+
+msgid "needs captures"
+msgstr "cần chụp thêm"
+
+msgid "unused"
+msgstr "không dùng"
+
+msgid "Enroll a new face"
+msgstr "Đăng ký khuôn mặt mới"
+
+msgid "Settings"
+msgstr "Cài đặt"
+
+msgid "Connecting…"
+msgstr "Đang kết nối…"
+
+msgid "Loading from the Gaze daemon…"
+msgstr "Đang tải từ dịch vụ Gaze…"
+
+msgid "Enrolled Faces"
+msgstr "Khuôn mặt đã đăng ký"
+
+msgid "Rename a face, add captures to improve it, or remove it."
+msgstr "Đổi tên khuôn mặt, chụp thêm để cải thiện hoặc xóa khuôn mặt."
+
+msgid "Recognition"
+msgstr "Nhận dạng"
+
+msgid "Test recognition"
+msgstr "Kiểm tra nhận dạng"
+
+msgid "Not tested in this session yet."
+msgstr "Chưa kiểm tra trong phiên này."
+
+msgid "Test"
+msgstr "Kiểm tra"
+
+msgid "Look at the camera and check that Gaze recognizes you"
+msgstr "Nhìn vào camera và kiểm tra xem Gaze có nhận ra bạn không"
+
+msgid "Setup Checklist"
+msgstr "Danh sách các bước thiết lập"
+
+msgid "Work through these once before using face unlock on your desktop."
+msgstr "Hãy thực hiện các bước này một lần trước khi dùng mở khóa bằng khuôn mặt trên máy tính của bạn."
+
+msgid "Choose your camera"
+msgstr "Chọn camera"
+
+msgid "Pick the camera in Settings, then check it in the enrollment preview"
+msgstr "Chọn camera trong Cài đặt, sau đó kiểm tra trong bản xem trước khi đăng ký"
+
+msgid "Enroll a face"
+msgstr "Đăng ký khuôn mặt"
+
+msgid "Capture your face from a few angles"
+msgstr "Chụp khuôn mặt của bạn từ một vài góc"
+
+msgid "Confirm that Gaze recognizes you"
+msgstr "Xác nhận rằng Gaze nhận ra bạn"
+
+msgid "Check desktop integration"
+msgstr "Kiểm tra tích hợp với màn hình nền"
+
+msgid "Run gaze doctor before trying screen unlock"
+msgstr "Chạy gaze doctor trước khi thử mở khóa màn hình"
+
+msgid "Enroll a Face"
+msgstr "Đăng ký khuôn mặt"
+
+msgid "Running gaze doctor…"
+msgstr "Đang chạy gaze doctor…"
+
+msgid "Run gaze doctor in a terminal on your Linux host to check desktop integration. If the installer requested a reboot, do that before testing screen unlock. Login and keyring unlock are optional, separate settings."
+msgstr "Hãy chạy gaze doctor trong terminal trên máy Linux của bạn để kiểm tra tích hợp với màn hình nền. Nếu trình cài đặt yêu cầu khởi động lại, hãy làm vậy trước khi thử mở khóa màn hình. Đăng nhập và mở khóa chùm khóa là các cài đặt tùy chọn, riêng biệt."
+
+msgid "Desktop setup checks"
+msgstr "Kiểm tra thiết lập màn hình nền"
+
+msgid "Look at the camera…"
+msgstr "Hãy nhìn vào camera…"
+
+msgid "Reconnecting to the Gaze daemon…"
+msgstr "Đang kết nối lại với dịch vụ Gaze…"
+
+msgid "Could not access the camera: {error}. Close other camera apps and retry; run gaze doctor if it persists."
+msgstr "Không thể truy cập camera: {error}. Hãy đóng các ứng dụng khác đang dùng camera và thử lại; chạy gaze doctor nếu vẫn gặp lỗi."
+
+msgid "Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled."
+msgstr "Không thể bắt đầu nhận dạng. Hãy chạy gaze doctor và kiểm tra xem đã đăng ký hồ sơ khuôn mặt dùng được chưa."
+
+msgid "Face recognized. Next: check desktop integration before trying screen unlock."
+msgstr "Đã nhận dạng khuôn mặt. Tiếp theo: kiểm tra tích hợp với màn hình nền trước khi thử mở khóa màn hình."
+
+msgid "Lost contact with the Gaze daemon"
+msgstr "Mất kết nối với dịch vụ Gaze"
+
+msgid "Recognition timed out without a result. Retry, or run gaze doctor to check the camera and service"
+msgstr "Hết thời gian nhận dạng mà không có kết quả. Hãy thử lại hoặc chạy gaze doctor để kiểm tra camera và dịch vụ"
+
+msgid "Unsupported CPU"
+msgstr "CPU không được hỗ trợ"
+
+msgid "Could Not Load Faces"
+msgstr "Không thể tải các khuôn mặt"
+
+msgid "No Faces Enrolled"
+msgstr "Chưa đăng ký khuôn mặt nào"
+
+msgid "Choose your camera in Settings, then enroll a face. The capture window lets you check the camera before starting."
+msgstr "Hãy chọn camera trong Cài đặt, sau đó đăng ký khuôn mặt. Cửa sổ chụp cho phép bạn kiểm tra camera trước khi bắt đầu."
+
+msgid "1 capture"
+msgstr "1 lần chụp"
+
+msgid "{count} captures"
+msgstr "{count} lần chụp"
+
+msgid "Rename"
+msgstr "Đổi tên"
+
+msgid "Improve this face"
+msgstr "Cải thiện khuôn mặt này"
+
+msgid "Delete"
+msgstr "Xóa"
+
+msgid "New face name"
+msgstr "Tên khuôn mặt mới"
+
+msgid "A face with this name already exists"
+msgstr "Đã có khuôn mặt mang tên này"
+
+msgid "Failed to rename face"
+msgstr "Không thể đổi tên khuôn mặt"
+
+msgid "Renamed “{old}” to “{new}”"
+msgstr "Đã đổi tên “{old}” thành “{new}”"
+
+msgid "Failed to remove face"
+msgstr "Không thể xóa khuôn mặt"
+
+msgid "Camera Not Activated"
+msgstr "Camera chưa được kích hoạt"
+
+msgid "No Face"
+msgstr "Không có khuôn mặt"
+
+msgid "Need More Light"
+msgstr "Cần thêm ánh sáng"
+
+msgid "Not Centered"
+msgstr "Chưa ở giữa"
+
+msgid "Face Clipped"
+msgstr "Khuôn mặt bị cắt"
+
+msgid "Come Closer"
+msgstr "Lại gần hơn"
+
+msgid "Back Up"
+msgstr "Lùi ra xa"
+
+msgid "Ready"
+msgstr "Sẵn sàng"
+
+msgid "The camera could not be opened: {error}"
+msgstr "Không thể mở camera: {error}"
+
+msgid "Main cameras"
+msgstr "Camera chính"
+
+msgid "Fallback cameras {index}"
+msgstr "Camera dự phòng {index}"
+
+msgid "Improve “{name}”"
+msgstr "Cải thiện “{name}”"
+
+msgid "Add Face"
+msgstr "Thêm khuôn mặt"
+
+msgid "Infrared camera"
+msgstr "Camera hồng ngoại"
+
+msgid "RGB camera"
+msgstr "Camera RGB"
+
+msgid "Infrared camera · preview starts when capture does"
+msgstr "Camera hồng ngoại · bản xem trước bắt đầu khi chụp"
+
+msgid "Face name"
+msgstr "Tên khuôn mặt"
+
+msgid "Camera"
+msgstr "Camera"
+
+msgid "{camera} · preview starts when capture does"
+msgstr "{camera} · bản xem trước bắt đầu khi chụp"
+
+msgid "Start Capture"
+msgstr "Bắt đầu chụp"
+
+msgid "Done — test recognition next"
+msgstr "Xong — tiếp theo hãy kiểm tra nhận dạng"
+
+msgid "Cancel Enrollment?"
+msgstr "Hủy đăng ký?"
+
+msgid "This will discard any partial captures."
+msgstr "Các lần chụp chưa hoàn tất sẽ bị bỏ."
+
+msgid "Resume"
+msgstr "Tiếp tục"
+
+msgid "Discard"
+msgstr "Bỏ"
+
+msgid "{camera} · starting capture"
+msgstr "{camera} · đang bắt đầu chụp"
+
+msgid "Starting enrollment…"
+msgstr "Đang bắt đầu đăng ký…"
+
+msgid "Failed to connect to enrollment stream. Try again."
+msgstr "Không thể kết nối với luồng đăng ký. Hãy thử lại."
+
+msgid "Failed to connect to capture stream. Try again."
+msgstr "Không thể kết nối với luồng chụp. Hãy thử lại."
+
+msgid "Could not claim camera: {error}. Try again."
+msgstr "Không thể giành quyền dùng camera: {error}. Hãy thử lại."
+
+msgid "{camera} · live preview unavailable, look at the camera"
+msgstr "{camera} · không có bản xem trước trực tiếp, hãy nhìn vào camera"
+
+msgid "Enrollment timed out. Close this window and try again."
+msgstr "Hết thời gian đăng ký. Hãy đóng cửa sổ này và thử lại."
+
+msgid "Lost contact with the Gaze daemon. Close this window and try again."
+msgstr "Mất kết nối với dịch vụ Gaze. Hãy đóng cửa sổ này và thử lại."
+
+msgid "Face saved. Use Test in the main window, then check desktop integration."
+msgstr "Đã lưu khuôn mặt. Hãy dùng “Kiểm tra” trong cửa sổ chính, sau đó kiểm tra tích hợp với màn hình nền."
+
+msgid "Enrollment finished without saving."
+msgstr "Đăng ký kết thúc mà không lưu."
+
+msgid "Lost contact with the Gaze daemon."
+msgstr "Mất kết nối với dịch vụ Gaze."
+
+msgid "Try Again"
+msgstr "Thử lại"
+
+msgid "Failed to apply config: {error}"
+msgstr "Không thể áp dụng cấu hình: {error}"
+
+msgid "Configured as {source}, which this list cannot show"
+msgstr "Đã cấu hình là {source}, danh sách này không thể hiển thị"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI. Restart the Gaze daemon after changing this"
+msgstr "CPU, NPU tự động, Intel OpenVINO hoặc AMD Ryzen AI. Hãy khởi động lại dịch vụ Gaze sau khi thay đổi"
+
+msgid "Configured as {provider}/{device}, which this build cannot show"
+msgstr "Đã cấu hình là {provider}/{device}, bản dựng này không thể hiển thị"
+
+msgid "Ordered fallback: {sources}. Selecting a camera replaces this list."
+msgstr "Thứ tự dự phòng: {sources}. Chọn một camera sẽ thay thế danh sách này."
+
+msgid "Finding cameras…"
+msgstr "Đang tìm camera…"
+
+msgid "Settings will appear when the camera scan finishes."
+msgstr "Cài đặt sẽ xuất hiện khi tìm xong camera."
+
+msgid "Primary camera"
+msgstr "Camera chính"
+
+msgid "None"
+msgstr "Không có"
+
+msgid "None (IR only)"
+msgstr "Không có (chỉ IR)"
+
+msgid "Could not list cameras"
+msgstr "Không thể liệt kê camera"
+
+msgid "Close other camera applications and try Settings again. Run gaze doctor if the problem continues."
+msgstr "Hãy đóng các ứng dụng khác đang dùng camera và mở lại Cài đặt. Chạy gaze doctor nếu vẫn gặp lỗi."
+
+msgid "Settings are locked"
+msgstr "Cài đặt đang bị khóa"
+
+msgid "Unlock…"
+msgstr "Mở khóa…"
+
+msgid "Everyday"
+msgstr "Cơ bản"
+
+msgid "Advanced"
+msgstr "Nâng cao"
+
+msgid "Changes save automatically after unlocking."
+msgstr "Các thay đổi được tự động lưu sau khi mở khóa."
+
+msgid "Security"
+msgstr "Bảo mật"
+
+msgid "Security level"
+msgstr "Mức bảo mật"
+
+msgid "Medium is recommended. Changing the recognition model requires re-enrolling existing profiles. Custom controls are in Advanced"
+msgstr "Nên dùng mức Trung bình. Khi đổi mô hình nhận dạng, bạn phải đăng ký lại các hồ sơ hiện có. Các tùy chỉnh nằm trong phần Nâng cao"
+
+msgid "Detector level"
+msgstr "Mức phát hiện"
+
+msgid "Recognizer level"
+msgstr "Mức nhận dạng"
+
+msgid "RGB recognizer threshold"
+msgstr "Ngưỡng nhận dạng RGB"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "Độ tương đồng RGB tối thiểu để khớp"
+
+msgid "IR recognizer threshold"
+msgstr "Ngưỡng nhận dạng IR"
+
+msgid "Minimum IR similarity for a match"
+msgstr "Độ tương đồng IR tối thiểu để khớp"
+
+msgid "Hardware"
+msgstr "Phần cứng"
+
+msgid "Inference execution provider"
+msgstr "Trình thực thi suy luận"
+
+msgid "OpenVINO inference device"
+msgstr "Thiết bị suy luận OpenVINO"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "Thiết bị Intel dùng cho tất cả mô hình ONNX"
+
+msgid "RGB camera source"
+msgstr "Nguồn camera RGB"
+
+msgid "IR camera source"
+msgstr "Nguồn camera IR"
+
+msgid "IR frame size override"
+msgstr "Ép kích thước khung hình IR"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "Ép dùng một độ phân giải nếu hình IR bị xanh lá hoặc bị lỗi ở chế độ tự động"
+
+msgid "Width"
+msgstr "Chiều rộng"
+
+msgid "Height"
+msgstr "Chiều cao"
+
+msgid "Force IR emitter"
+msgstr "Ép bật đèn phát IR"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "Ghi đè điều khiển đèn phát, chỉ khi đèn phát IR không tự bật"
+
+msgid "Parallel RGB + IR capture"
+msgstr "Chụp RGB + IR song song"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "Xác thực kết hợp nhanh hơn, nhưng một số webcam không thể truyền đồng thời từ cả hai cảm biến"
+
+msgid "Darkness cutoff"
+msgstr "Ngưỡng tối"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "Loại bỏ khung hình có độ sáng trung bình thấp hơn mức này (0–255)"
+
+msgid "Enrollment"
+msgstr "Đăng ký"
+
+msgid "Maximum templates"
+msgstr "Số mẫu tối đa"
+
+msgid "Number of capture sets stored per face"
+msgstr "Số bộ ảnh chụp được lưu cho mỗi khuôn mặt"
+
+msgid "Minimum face size ratio"
+msgstr "Tỷ lệ kích thước khuôn mặt tối thiểu"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "Khuôn mặt nhỏ nhất được chấp nhận khi đăng ký; giá trị thấp hơn cho phép ngồi xa hơn"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "Phát hiện thực thể sống chống giả mạo"
+
+msgid "Enable liveness spoof prevention"
+msgstr "Bật chống giả mạo bằng phát hiện thực thể sống"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "Kiểm tra hình ảnh camera và chuyển động tự nhiên để tìm dấu hiệu của ảnh chụp hoặc màn hình"
+
+msgid "Liveness threshold"
+msgstr "Ngưỡng phát hiện thực thể sống"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "Độ tin cậy tối thiểu khi chống giả mạo"
+
+msgid "Maximum liveness duration"
+msgstr "Thời gian phát hiện thực thể sống tối đa"
+
+msgid "Usable face time per camera before falling back to your password"
+msgstr "Thời gian khuôn mặt dùng được cho mỗi camera trước khi chuyển sang mật khẩu"
+
+msgid "Authentication"
+msgstr "Xác thực"
+
+msgid "Abort if SSH"
+msgstr "Hủy nếu là SSH"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "Ngăn xác thực qua kết nối SSH"
+
+msgid "Abort if lid closed"
+msgstr "Hủy nếu nắp máy đóng"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "Ngăn xác thực khi nắp máy tính xách tay đang đóng"
+
+msgid "Require a suspend first"
+msgstr "Yêu cầu tạm ngưng trước"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "Ngăn xác thực cho đến khi hệ thống đã tạm ngưng và tiếp tục một lần"
+
+msgid "Require confirmation on lock screen"
+msgstr "Yêu cầu xác nhận trên màn hình khóa"
+
+msgid "Confirm after matching where supported. On KDE lock/login screens this uses your password instead of face unlock"
+msgstr "Xác nhận sau khi khớp ở nơi được hỗ trợ. Trên màn hình khóa/đăng nhập của KDE, mật khẩu được dùng thay cho mở khóa bằng khuôn mặt"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "Yêu cầu xác nhận khi xác thực với quyền cao hơn"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "Yêu cầu nhấn Enter hoặc bấm OK để cho phép sau khi khuôn mặt khớp với sudo, polkit và các yêu cầu tương tự"
+
+msgid "Resume grace period (ms)"
+msgstr "Thời gian chờ sau khi tiếp tục (ms)"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "Trì hoãn xác thực khuôn mặt khi thức dậy từ trạng thái tạm ngưng"
+
+msgid "Start delay (ms)"
+msgstr "Độ trễ bắt đầu (ms)"
+
+msgid "Use 3000–5000 ms on KDE or hyprlock to give yourself time to step away after locking"
+msgstr "Dùng 3000–5000 ms trên KDE hoặc hyprlock để có thời gian rời đi sau khi khóa"
+
+msgid "Start delay applies to"
+msgstr "Độ trễ bắt đầu áp dụng cho"
+
+msgid "Which prompts wait for the start delay"
+msgstr "Những yêu cầu nào chờ độ trễ bắt đầu"
+
+msgid "Hybrid combining policy"
+msgstr "Chính sách kết hợp"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "Chính sách kết hợp khi cả camera RGB và IR đều hoạt động"
+
+msgid "Storage"
+msgstr "Lưu trữ"
+
+msgid "Encrypt face templates"
+msgstr "Mã hóa mẫu khuôn mặt"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "Mã hóa các mẫu khuôn mặt được lưu bằng khóa được TPM niêm phong"
+
+msgid "Unlock GNOME Keyring"
+msgstr "Mở khóa GNOME Keyring"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login. Needs liveness and template encryption, and keeps both on while enabled"
+msgstr "Dùng mật khẩu đã đăng ký sau khi đăng nhập bằng khuôn mặt qua GDM hoặc greetd có phát hiện thực thể sống. Cần phát hiện thực thể sống và mã hóa mẫu, đồng thời giữ cả hai luôn bật khi tùy chọn này được bật"
+
+msgid "Unlock KWallet"
+msgstr "Mở khóa KWallet"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet. Needs liveness and template encryption, and keeps both on while enabled"
+msgstr "Dùng mật khẩu đã đăng ký sau khi đăng nhập KDE có phát hiện thực thể sống; đăng ký bằng gaze keyring --kwallet. Cần phát hiện thực thể sống và mã hóa mẫu, đồng thời giữ cả hai luôn bật khi tùy chọn này được bật"
+
+msgid "Set up password…"
+msgstr "Thiết lập mật khẩu…"
+
+msgid "Finish password unlock setup"
+msgstr "Hoàn tất thiết lập mở khóa bằng mật khẩu"
+
+msgid "The switch enables this feature. Enroll your password from a terminal as your desktop user; then check your login integration. Passwords stay on this machine, protected by the TPM."
+msgstr "Công tắc này bật tính năng. Hãy đăng ký mật khẩu từ terminal bằng tài khoản người dùng của bạn; sau đó kiểm tra tích hợp đăng nhập. Mật khẩu được giữ trên máy này và được TPM bảo vệ."
+
+msgid "1. Wait for Settings to show Saved.\n2. Run: {command}\n3. Run: gaze doctor\n4. Reopen Settings to refresh password status."
+msgstr "1. Chờ đến khi Cài đặt hiển thị “Đã lưu”.\n2. Chạy: {command}\n3. Chạy: gaze doctor\n4. Mở lại Cài đặt để làm mới trạng thái mật khẩu."
+
+msgid "Cameras"
+msgstr "Camera"
+
+msgid "Choose a camera, then use Enroll a Face to preview and check it."
+msgstr "Chọn một camera, sau đó dùng “Đăng ký khuôn mặt” để xem trước và kiểm tra."
+
+msgid "Lock screen and password prompts"
+msgstr "Màn hình khóa và yêu cầu mật khẩu"
+
+msgid "Preparing and saving settings… Model downloads may take a few minutes."
+msgstr "Đang chuẩn bị và lưu cài đặt… Việc tải mô hình có thể mất vài phút."
+
+msgid "Recognition model change cancelled; reopen Settings to confirm"
+msgstr "Đã hủy thay đổi mô hình nhận dạng; mở lại Cài đặt để xác nhận"
+
+msgid "Re-enroll faces after this change?"
+msgstr "Đăng ký lại khuôn mặt sau thay đổi này?"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face to capture new samples for every profile you use."
+msgstr "Các ảnh chụp hiện có không thể khớp với mô hình nhận dạng mới. Chúng vẫn còn trên đĩa. Sau khi lưu, hãy dùng “Cải thiện khuôn mặt này” để chụp mẫu mới cho mọi hồ sơ bạn dùng."
+
+msgid "Keep current model"
+msgstr "Giữ mô hình hiện tại"
+
+msgid "Change model"
+msgstr "Đổi mô hình"
+
+msgid "Model change cancelled. Current settings restored"
+msgstr "Đã hủy thay đổi mô hình. Đã khôi phục cài đặt hiện tại"
+
+msgid "Saved. Restart gazed, then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active."
+msgstr "Đã lưu. Khởi động lại gazed, sau đó chạy gaze doctor --benchmark để kiểm tra khả năng tăng tốc; có thể CPU đang được dùng thay thế."
+
+msgid "Saved. Use Improve this face on each existing profile to re-enroll, then test recognition."
+msgstr "Đã lưu. Dùng “Cải thiện khuôn mặt này” cho từng hồ sơ hiện có để đăng ký lại, sau đó kiểm tra nhận dạng."
+
+msgid "Saved. Changes are active."
+msgstr "Đã lưu. Các thay đổi đã có hiệu lực."
+
+msgid "Could not read the current configuration from the Gaze daemon"
+msgstr "Không thể đọc cấu hình hiện tại từ dịch vụ Gaze"
+
+msgid "Try again"
+msgstr "Thử lại"
+
+msgid "Password stored"
+msgstr "Mật khẩu đã lưu"
+
+msgid "Password not enrolled"
+msgstr "Mật khẩu chưa được đăng ký"
+
+msgid "Password status unavailable"
+msgstr "Không có trạng thái mật khẩu"
+
+msgid "{state}. After enabling, run {command} in a terminal to enroll or replace it. Run gaze doctor to check login integration. Requires liveness and encryption."
+msgstr "{state}. Sau khi bật, chạy {command} trong terminal để đăng ký hoặc thay mật khẩu. Chạy gaze doctor để kiểm tra tích hợp đăng nhập. Cần phát hiện thực thể sống và mã hóa."
+
+msgid "Failed to load configuration: {error}"
+msgstr "Không thể tải cấu hình: {error}"
+
+msgid "Settings stay locked: {error}"
+msgstr "Cài đặt vẫn bị khóa: {error}"
+
+msgid "Low"
+msgstr "Thấp"
+
+msgid "Medium"
+msgstr "Trung bình"
+
+msgid "High"
+msgstr "Cao"
+
+msgid "Maximum"
+msgstr "Tối đa"
+
+msgid "Custom"
+msgstr "Tùy chỉnh"
+
+msgid "Standard"
+msgstr "Tiêu chuẩn"
+
+msgid "Accurate"
+msgstr "Chính xác"
+
+msgid "Default"
+msgstr "Mặc định"
+
+msgid "Or"
+msgstr "Hoặc"
+
+msgid "Fallback on dark"
+msgstr "Chuyển sang dự phòng khi tối"
+
+msgid "And"
+msgstr "Và"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "Không bao giờ (chụp RGB rồi đến IR)"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "Tự động (song song khi camera cho phép)"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "Luôn luôn (chụp RGB và IR cùng lúc)"
+
+msgid "All face authentication (including sudo)"
+msgstr "Mọi xác thực khuôn mặt (kể cả sudo)"
+
+msgid "Screen lockers only"
+msgstr "Chỉ các trình khóa màn hình"
+
+msgid "Automatic (NPU)"
+msgstr "Tự động (NPU)"
+
+msgid "Face the camera"
+msgstr "Nhìn thẳng vào camera"
+
+msgid "Tilt your face slightly up"
+msgstr "Nghiêng mặt lên trên một chút"
+
+msgid "Tilt your face slightly down"
+msgstr "Nghiêng mặt xuống dưới một chút"
+
+msgid "Turn your face slightly left"
+msgstr "Quay mặt sang trái một chút"
+
+msgid "Turn your face slightly right"
+msgstr "Quay mặt sang phải một chút"
+
+msgid "Database error during enrollment"
+msgstr "Lỗi cơ sở dữ liệu khi đăng ký"
+
+msgid "Camera error during enrollment"
+msgstr "Lỗi camera khi đăng ký"
+
+msgid "Enrollment cancelled"
+msgstr "Đã hủy đăng ký"
+
+msgid "Captured"
+msgstr "Đã chụp"
+
+msgid "Completed"
+msgstr "Hoàn tất"
+
+msgid "Run gaze doctor for recovery steps."
+msgstr "Chạy gaze doctor để xem các bước khôi phục."
