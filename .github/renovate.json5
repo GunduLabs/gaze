@@ -134,6 +134,16 @@
       ],
     },
     {
+      description: 'OpenCV 5 needs LAPACK, so the static build stays on 4.x; each bump also needs its SHA256 in scripts/build-opencv.sh',
+      matchManagers: [
+        'custom.regex',
+      ],
+      matchPackageNames: [
+        'opencv/opencv',
+      ],
+      allowedVersions: '<5',
+    },
+    {
       description: 'Pin GitHub Actions to commit SHAs so a moved tag cannot change code that sees release secrets; Renovate keeps the SHA and its version comment current',
       matchManagers: [
         'github-actions',
@@ -213,6 +223,18 @@
       ],
       depNameTemplate: 'Microsoft.ML.OnnxRuntime',
       datasourceTemplate: 'nuget',
+      versioningTemplate: 'semver',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^Justfile$/',
+      ],
+      matchStrings: [
+        '(?:^|\\n)opencv_version[ \\t]*:=[ \\t]*env\\("OPENCV_VERSION",[ \\t]*"(?<currentValue>\\d+\\.\\d+\\.\\d+)"\\)',
+      ],
+      depNameTemplate: 'opencv/opencv',
+      datasourceTemplate: 'github-tags',
       versioningTemplate: 'semver',
     },
   ],

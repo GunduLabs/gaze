@@ -151,6 +151,21 @@ the `just` recipes automatically point the `opencv` crate at the `opencv5`
 pkg-config name; when running `cargo` directly, set
 `OPENCV_PKGCONFIG_NAME=opencv5` yourself.
 
+The published Arch packages link OpenCV statically, because Arch-compatible distributions
+carry different OpenCV versions at the same time. To build them the same way, set
+`GAZE_OPENCV=static`, which needs cmake and zlib:
+
+```bash
+GAZE_OPENCV=static just package archlinux
+```
+
+This builds the `core` and `imgproc` modules of the OpenCV release pinned in
+`scripts/build-opencv.sh` into `target/opencv-static` (or `OPENCV_CACHE_DIR`). Changing
+`opencv_version` in the Justfile means adding that release's SHA256 to the script. OpenCV
+security fixes reach these packages only through a Gaze release. The default,
+`GAZE_OPENCV=system`, links the distribution's library, and Arch packages built that way
+depend on that exact OpenCV minor version. Other package formats support only `system`.
+
 Only `gaze-gui` needs gtk4 and libadwaita (`libgtk-4-dev`/`gtk4-devel`/`gtk4`,
 `libadwaita-1-dev`/`libadwaita-devel`/`libadwaita`, and on Debian/Ubuntu the
 cairo, glib, gdk-pixbuf, pango, and graphene headers listed with them). For a
