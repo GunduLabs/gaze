@@ -150,7 +150,7 @@ entirely is still bounded.
 | Dark stream | 1 s | the first `TooDark` after warm-up | Attempt ends. "Need more light". |
 | No face | 5 s | the last frame with a face in it | Attempt ends. "Face not detected". |
 | No usable frame | 8 s | the last frame that produced an embedding | Attempt ends. Bounds a face that stays badly framed. |
-| Serial RGB budget | 4 s | the RGB phase start | RGB hands the camera to IR even without a match. Only when IR also runs and `parallel_capture = "never"`. |
+| Serial RGB budget | 4 s | the RGB phase start | RGB hands the camera to IR even without a match. Only when IR also runs and `parallel_capture = "never"`. Under `or`, RGB hands over right after warm-up if it has only seen dark frames. |
 | Frame budget | `liveness.max_seconds` x camera fps, minimum 6 frames (default 2.0 s, so 60 frames at 30 fps) | frames counted only while a usable face is in view, per spectrum | Attempt ends. Logged as `frame budget spent`. |
 | PAM backstop | 12 s plus the start delay | the PAM prompt | PAM stops waiting. "Face authentication timed out". |
 | Client backstop | 20 s | the DBus call | The CLI or GUI stops waiting on the daemon. |
