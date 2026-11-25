@@ -88,6 +88,8 @@ On image-based Fedora (Silverblue, Kinoite, Bazzite), packages that cannot be ap
 
 Use this if you prefer to configure package sources yourself. Debian/Ubuntu, Fedora-compatible systems, and openSUSE Tumbleweed use Gundu Labs repositories. Arch Linux and Arch-compatible distributions such as Manjaro and CachyOS use the AUR packages.
 
+The AUR packages are built against current Arch Linux. Distributions that hold Arch packages back can briefly ship an OpenCV that does not match; see [library versions on Arch-compatible distributions](/guide/troubleshooting#aur-library-versions).
+
 Debian/Ubuntu packages are built per release, and each apt suite carries only the builds for that release: `noble` (Ubuntu 24.04), `questing` (Ubuntu 25.10), `resolute` (Ubuntu 26.04), `stonking` (Ubuntu 26.10), `trixie` (Debian 13), and `forky` (Debian 14). The snippet below picks the suite matching your system; installing another release's package leaves `gazed` unable to load its OpenCV libraries.
 
 Debian 14 (forky) is still testing, so its libraries keep moving. The `forky` packages are built against whatever OpenCV and GTK sonames testing carried at release time, and a soname bump in testing can leave `gazed` unable to start until the next Gaze release rebuilds against it. Reinstalling from the `forky` suite after such a bump picks up the rebuilt package.

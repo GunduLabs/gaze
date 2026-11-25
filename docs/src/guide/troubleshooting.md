@@ -174,6 +174,60 @@ If `/etc/gaze/config.toml.pacsave` exists, restore your settings from it. The
 AUR packages install under the names `gaze-bin` and `gaze-gui-bin`, which do not
 collide, so this cannot happen again once you are on them.
 
+### Installer reports library versions the repositories do not provide (Arch-compatible) {#aur-library-versions}
+
+The AUR packages are built against current Arch Linux libraries, and OpenCV's
+library name changes with every minor release. Distributions that hold Arch
+packages back, such as Manjaro stable and testing or Omarchy stable, can still
+ship the previous OpenCV. The installer then stops before changing anything, and
+an AUR helper run by hand reports:
+
+```
+No AUR package found for opencv>=5.1 (required by: gaze-bin)
+```
+
+Update first, in case only the local package databases are stale:
+
+```bash
+sudo pacman -Syu
+pacman -Si opencv
+```
+
+If the repositories still carry the older OpenCV, either wait for your
+distribution to update it or install the last Gaze release built against it.
+Find the matching commit in the AUR history and build that. Repeat for
+`gaze-gui-bin` and any desktop package you use, at the same Gaze version:
+
+```bash
+git clone https://aur.archlinux.org/gaze-bin.git
+cd gaze-bin
+git log -p -- .SRCINFO
+git checkout <commit>
+makepkg -si
+```
+
+Enable the daemon with `sudo systemctl enable --now gazed`, then add the
+packages to `IgnorePkg` in `/etc/pacman.conf` so that your AUR helper does not
+try the newer release. Older releases stay downloadable only for a few versions.
+
+Once your distribution ships the newer OpenCV, pacman refuses to upgrade it while
+the older Gaze is installed. Remove the `IgnorePkg` entry and run `yay -Syu`. If
+that still stops on the same dependency, remove Gaze, upgrade, and reinstall it.
+Adjust the list to the packages you have:
+
+```bash
+sudo pacman -R gaze-gui-bin gaze-bin
+sudo pacman -Syu
+yay -S gaze-bin gaze-gui-bin
+```
+
+Enrolled faces in `/var/lib/gaze` survive this. Keep your password at hand, since
+face authentication is unavailable in between, and restore your settings from
+`/etc/gaze/config.toml.pacsave` if pacman leaves one.
+
+Do not symlink the OpenCV libraries or edit the version bounds. The daemon would
+fail to start or run against an incompatible library.
+
 ### Daemon fails with "error while loading shared libraries: libopencv_*" (Debian/Ubuntu)
 
 ```
