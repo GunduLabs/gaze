@@ -470,12 +470,32 @@ restore_omarchy() {
     restore_or_remove "$OMARCHY_HELPER_DST"
 }
 
+link_locales() {
+    locale_owner=${3:-root:root}
+    [ -d "$1" ] || return 0
+    for mo in "$1"/*/LC_MESSAGES/*.mo; do
+        rel=${mo#"$1"/}
+        for locale_dir in "$2" "$2/${rel%%/*}" "$2/${rel%/*}"; do
+            [ -d "$locale_dir" ] || install -d -o "${locale_owner%:*}" -g "${locale_owner#*:}" "$locale_dir"
+        done
+        backup_and_install "$mo" "$2/$rel" 0644
+        chown "$locale_owner" "$2/$rel"
+    done
+}
+
+restore_locales() {
+    for mo in "$1"/*/LC_MESSAGES/gaze@gundulabs.com.mo; do
+        [ ! -e "$mo" ] && [ ! -L "$mo" ] || restore_or_remove "$mo"
+    done
+}
+
 link_extension_files() {
     dir=$1
     install -d "$dir"
     backup_and_install "$REPO/integrations/gnome-shell/metadata.json" "$dir/metadata.json" 0644
     backup_and_install "$REPO/integrations/gnome-shell/extension.js" "$dir/extension.js" 0644
     backup_and_install "$REPO/integrations/gnome-shell/prefs.js" "$dir/prefs.js" 0644
+    link_locales "$REPO/dist/locale/gnome$SYSTEM_EXTENSION_DIR/locale" "$dir/locale"
 }
 
 restore_extension_files() {
@@ -483,6 +503,7 @@ restore_extension_files() {
     restore_or_remove "$dir/metadata.json"
     restore_or_remove "$dir/extension.js"
     restore_or_remove "$dir/prefs.js"
+    restore_locales "$dir/locale"
 }
 
 sudo_user_home() {
@@ -528,6 +549,7 @@ restore_cinnamon_files() {
 link_cinnamon_extension() {
     [ -d /usr/share/cinnamon ] || return 0
     link_cinnamon_files "$SYSTEM_CINNAMON_EXTENSION_DIR"
+    link_locales "$REPO/dist/locale/cinnamon/usr/share/locale" /usr/share/locale
 
     if home=$(sudo_user_home); then
         user_cinnamon_dir="$home/.local/share/cinnamon/extensions/gaze@gundulabs.com"
@@ -538,14 +560,17 @@ link_cinnamon_extension() {
             "$user_cinnamon_dir/metadata.json" \
             "$user_cinnamon_dir/extension.js" \
             "$user_cinnamon_dir/settings-schema.json"
+        link_locales "$REPO/dist/locale/cinnamon/usr/share/locale" "$home/.local/share/locale" "$SUDO_USER:$sudo_user_group"
     fi
 }
 
 restore_cinnamon_extension() {
     restore_cinnamon_files "$SYSTEM_CINNAMON_EXTENSION_DIR"
+    restore_locales /usr/share/locale
 
     if home=$(sudo_user_home); then
         restore_cinnamon_files "$home/.local/share/cinnamon/extensions/gaze@gundulabs.com"
+        restore_locales "$home/.local/share/locale"
     fi
 }
 
@@ -562,6 +587,7 @@ link_gnome_extension() {
             "$user_extension_dir/metadata.json" \
             "$user_extension_dir/extension.js" \
             "$user_extension_dir/prefs.js"
+        [ ! -d "$user_extension_dir/locale" ] || chown -R "$SUDO_USER:$sudo_user_group" "$user_extension_dir/locale"
     fi
 
     if command -v glib-compile-schemas >/dev/null 2>&1; then

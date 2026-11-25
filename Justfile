@@ -92,6 +92,13 @@ build-kcm format="rpm":
         ;;
     esac
 
+# Compile the GNOME and Cinnamon extension translations into dist/locale
+[group("build")]
+build-locales:
+    rm -rf dist/locale
+    scripts/build-locales.sh integrations/gnome-shell/po dist/locale/gnome/usr/share/gnome-shell/extensions/gaze@gundulabs.com/locale
+    scripts/build-locales.sh integrations/cinnamon/po dist/locale/cinnamon/usr/share/locale
+
 [private]
 prepare-ort:
     bash scripts/prepare-ort.sh {{ quote(ort_version) }} {{ quote(arch) }}
@@ -233,6 +240,21 @@ _nfpm config format:
         fi
     fi
 
+    # build-locales stages one catalog per language.
+    export LOCALE_CONTENTS="  # unused for {{ config }}"
+    if grep -q 'LOCALE_CONTENTS' {{ quote(config) }}; then
+        case {{ quote(config) }} in
+        *cinnamon*) locales=dist/locale/cinnamon ;;
+        *) locales=dist/locale/gnome ;;
+        esac
+        [ -d "$locales" ] || { echo "_nfpm: {{ config }} ships $locales, which is not staged; run just build-locales" >&2; exit 1; }
+        LOCALE_CONTENTS=""
+        while read -r src; do
+            printf -v entry '  - src: "%s"\n    dst: "%s"\n    file_info:\n      mode: 0644\n' "$src" "${src#"$locales"}"
+            LOCALE_CONTENTS+=$entry
+        done < <(find "$locales" -type f | sort)
+    fi
+
     needed() { objdump -p "${binaries[@]}" | awk '/NEEDED/ { print $2 }' | sort -u; }
 
     for module in "${binaries[@]}"; do
@@ -346,7 +368,7 @@ _nfpm config format:
     esac
 
     tmp_config=$(mktemp)
-    envsubst '$MULTIARCH $OPENCV_CONTENTS $OPENCV_DEPENDS $DEB_LIB_DEPENDS $RPM_LIB_DEPENDS $RPM_GSTREAMER_BASE $RPM_GSTREAMER_GOOD $RPM_GSTREAMER_PIPEWIRE $KCM_CONTENTS $KCM_DEPENDS $KCM_RECOMMENDS' < {{ quote(config) }} > "$tmp_config"
+    envsubst '$MULTIARCH $OPENCV_CONTENTS $OPENCV_DEPENDS $DEB_LIB_DEPENDS $RPM_LIB_DEPENDS $RPM_GSTREAMER_BASE $RPM_GSTREAMER_GOOD $RPM_GSTREAMER_PIPEWIRE $KCM_CONTENTS $KCM_DEPENDS $KCM_RECOMMENDS $LOCALE_CONTENTS' < {{ quote(config) }} > "$tmp_config"
     {{ quote(nfpm) }} pkg -f "$tmp_config" --packager {{ format }} --target dist/packages
     rm -f "$tmp_config"
 
@@ -641,6 +663,7 @@ _verify-package format:
     want_files /usr/share/gnome-shell/extensions/gaze@gundulabs.com/metadata.json \
         /usr/share/gnome-shell/extensions/gaze@gundulabs.com/extension.js \
         /usr/share/gnome-shell/extensions/gaze@gundulabs.com/prefs.js \
+        /usr/share/gnome-shell/extensions/gaze@gundulabs.com/locale/de/LC_MESSAGES/gaze@gundulabs.com.mo \
         /usr/share/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml \
         /etc/dconf/db/gdm.d/00-gaze-defaults /usr/share/gaze/dconf-profile-gdm \
         /etc/pam.d/gdm-face
@@ -655,7 +678,8 @@ _verify-package format:
     load gaze-cinnamon-extension
     want_files /usr/share/cinnamon/extensions/gaze@gundulabs.com/metadata.json \
         /usr/share/cinnamon/extensions/gaze@gundulabs.com/extension.js \
-        /usr/share/cinnamon/extensions/gaze@gundulabs.com/settings-schema.json
+        /usr/share/cinnamon/extensions/gaze@gundulabs.com/settings-schema.json \
+        /usr/share/locale/de/LC_MESSAGES/gaze@gundulabs.com.mo
     want_depends cinnamon
     ok "$base ships the Cinnamon extension files"
 
@@ -674,6 +698,7 @@ _verify-package format:
     if grep -Eq '^/usr/lib(64)?/([^/]+/)?qt6/plugins/plasma/kcms/systemsettings/kcm_gaze\.so$' <<< "$paths"; then
         want_files /usr/share/applications/kcm_gaze.desktop \
             /usr/share/applications/com.gundulabs.Gaze.Settings.desktop \
+            /usr/share/locale/de/LC_MESSAGES/kcm_gaze.mo \
             /usr/share/icons/hicolor/scalable/apps/com.gundulabs.Gaze.Settings.svg
         case "{{ format }}" in
         deb) want_depends qml6-module-org-kde-kirigami qml6-module-org-kde-kcmutils ;;
@@ -731,7 +756,7 @@ package format: build-rust build-selinux (build-kcm format) && (package-prebuilt
 # Package already-built artifacts for a given packager
 [arg("format", pattern="deb|rpm|archlinux")]
 [group("package")]
-package-prebuilt format: _dist-packages prepare-ort
+package-prebuilt format: _dist-packages prepare-ort build-locales
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -890,6 +915,16 @@ lint: prepare-opencv
 fmt-check:
     cargo fmt --all -- --check
 
+# Check the translation catalogs and the metadata generated from them
+[group("checks")]
+check-translations:
+    python3 scripts/sync-translations.py --check
+
+# Regenerate the translated desktop, metainfo, polkit and KCM metadata
+[group("dev")]
+sync-translations:
+    python3 scripts/sync-translations.py
+
 # Apply formatting
 [group("dev")]
 fmt:
@@ -898,7 +933,7 @@ fmt:
 # Also enables TPM template encryption when a TPM is present; GAZE_DEV_TPM=0 skips it.
 # Link the installed system runtime to this checkout's release build
 [group("dev")]
-dev-link-system: build-rust
+dev-link-system: build-rust build-locales
     sudo GAZE_DEV_TPM="${GAZE_DEV_TPM:-1}" scripts/dev-link-system.sh enable
 
 # Restore package-installed files that dev-link-system replaced

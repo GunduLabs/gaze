@@ -1,0 +1,503 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: ko\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "The Gaze daemon is not running yet. Its first start downloads face models, which can take a few minutes. This page updates when it is ready."
+msgstr "Gaze 데몬이 아직 실행되고 있지 않습니다. 처음 시작할 때 얼굴 모델을 다운로드하므로 몇 분 정도 걸릴 수 있습니다. 준비되면 이 페이지가 업데이트됩니다."
+
+msgid "Face the camera"
+msgstr "카메라를 정면으로 보세요"
+
+msgid "Tilt your face slightly up"
+msgstr "얼굴을 살짝 위로 기울이세요"
+
+msgid "Tilt your face slightly down"
+msgstr "얼굴을 살짝 아래로 기울이세요"
+
+msgid "Turn your face slightly left"
+msgstr "얼굴을 살짝 왼쪽으로 돌리세요"
+
+msgid "Turn your face slightly right"
+msgstr "얼굴을 살짝 오른쪽으로 돌리세요"
+
+msgid "Captured"
+msgstr "촬영됨"
+
+msgid "Enrollment complete"
+msgstr "등록 완료"
+
+msgid "Enrollment cancelled"
+msgstr "등록이 취소되었습니다"
+
+msgid "Database error during enrollment"
+msgstr "등록 중 데이터베이스 오류"
+
+msgid "Camera error during enrollment"
+msgstr "등록 중 카메라 오류"
+
+msgid "Please look at the camera..."
+msgstr "카메라를 보세요…"
+
+msgid "Need more light..."
+msgstr "더 밝은 조명이 필요합니다…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "얼굴이 잘렸습니다. 뒤로 물러나세요…"
+
+msgid "Please center your face..."
+msgstr "얼굴을 중앙에 맞추세요…"
+
+msgid "Please come closer..."
+msgstr "더 가까이 오세요…"
+
+msgid "Please back up..."
+msgstr "뒤로 물러나세요…"
+
+msgid "Hold still..."
+msgstr "움직이지 마세요…"
+
+msgid "Face authentication could not run"
+msgstr "얼굴 인증을 실행할 수 없습니다"
+
+msgid "Face not recognized"
+msgstr "얼굴을 인식하지 못했습니다"
+
+msgid "Too dark for face authentication"
+msgstr "너무 어두워 얼굴 인증을 할 수 없습니다"
+
+msgid "No face detected"
+msgstr "얼굴이 감지되지 않았습니다"
+
+msgid "Move your face into the frame and try again"
+msgstr "얼굴을 화면 안으로 옮긴 후 다시 시도하세요"
+
+msgid "Starting enrollment…"
+msgstr "등록을 시작하는 중…"
+
+msgid "Enrollment finished without saving."
+msgstr "저장하지 않고 등록이 종료되었습니다."
+
+msgid "%1 [%2s]"
+msgstr "%1 [%2s]"
+
+msgid "Could not restart the Gaze service (%1)"
+msgstr "Gaze 서비스를 다시 시작할 수 없습니다(%1)"
+
+msgid "The Gaze service did not start again after the restart"
+msgstr "다시 시작한 후 Gaze 서비스가 실행되지 않았습니다"
+
+msgid "Re-enroll faces after this change?"
+msgstr "변경 후 얼굴을 다시 등록할까요?"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face for each profile, then test recognition."
+msgstr "기존 촬영은 새 인식 모델과 비교할 수 없습니다. 촬영 데이터는 디스크에 남아 있습니다. 저장한 후 각 프로필에서 “이 얼굴 개선”을 사용한 다음 인식을 테스트하세요."
+
+msgid "Standard"
+msgstr "표준"
+
+msgid "Accurate"
+msgstr "정확"
+
+msgid "Settings"
+msgstr "설정"
+
+msgid "Everyday settings"
+msgstr "일반 설정"
+
+msgid "Advanced settings"
+msgstr "고급 설정"
+
+msgid "Restart Service"
+msgstr "서비스 다시 시작"
+
+msgid "Settings are locked"
+msgstr "설정이 잠겨 있습니다"
+
+msgid "Unlock…"
+msgstr "잠금 해제…"
+
+msgid "Settings saved. Restart the Gaze service to use the new inference provider."
+msgstr "설정을 저장했습니다. 새 추론 공급자를 사용하려면 Gaze 서비스를 다시 시작하세요."
+
+msgid "Restarting the Gaze service…"
+msgstr "Gaze 서비스를 다시 시작하는 중…"
+
+msgid "Gaze service restarted"
+msgstr "Gaze 서비스를 다시 시작했습니다"
+
+msgid "Restarting the Gaze service failed"
+msgstr "Gaze 서비스를 다시 시작하지 못했습니다"
+
+msgid "Security"
+msgstr "보안"
+
+msgid "Security level"
+msgstr "보안 수준"
+
+msgid "Medium is recommended. Changing the recognition model requires new captures for existing profiles"
+msgstr "“중간”을 권장합니다. 인식 모델을 변경하면 기존 프로필을 새로 촬영해야 합니다"
+
+msgid "Low"
+msgstr "낮음"
+
+msgid "Medium"
+msgstr "중간"
+
+msgid "High"
+msgstr "높음"
+
+msgid "Maximum"
+msgstr "최대"
+
+msgid "Custom"
+msgstr "사용자 지정"
+
+msgid "Detector level"
+msgstr "감지기 수준"
+
+msgid "Recognizer level"
+msgstr "인식기 수준"
+
+msgid "RGB recognizer threshold"
+msgstr "RGB 인식 임곗값"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "일치로 판단할 최소 RGB 유사도"
+
+msgid "IR recognizer threshold"
+msgstr "IR 인식 임곗값"
+
+msgid "Minimum IR similarity for a match"
+msgstr "일치로 판단할 최소 IR 유사도"
+
+msgid "Hybrid combining policy"
+msgstr "하이브리드 결합 정책"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "RGB 및 IR 카메라가 모두 활성 상태일 때의 결합 정책"
+
+msgid "Default"
+msgstr "기본값"
+
+msgid "Or"
+msgstr "또는"
+
+msgid "Fallback on dark"
+msgstr "어두우면 대체"
+
+msgid "And"
+msgstr "그리고"
+
+msgid "Hardware"
+msgstr "하드웨어"
+
+msgid "Inference execution provider"
+msgstr "추론 실행 공급자"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI"
+msgstr "CPU, 자동 NPU, Intel OpenVINO 또는 AMD Ryzen AI"
+
+msgid "CPU"
+msgstr "CPU"
+
+msgid "Automatic (NPU)"
+msgstr "자동(NPU)"
+
+msgid "Intel OpenVINO"
+msgstr "Intel OpenVINO"
+
+msgid "AMD Ryzen AI"
+msgstr "AMD Ryzen AI"
+
+msgid "OpenVINO inference device"
+msgstr "OpenVINO 추론 장치"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "모든 ONNX 모델에 사용할 Intel 장치"
+
+msgid "GPU"
+msgstr "GPU"
+
+msgid "NPU"
+msgstr "NPU"
+
+msgid "RGB camera source"
+msgstr "RGB 카메라 소스"
+
+msgid "Primary camera"
+msgstr "기본 카메라"
+
+msgid "None (IR only)"
+msgstr "없음(IR만)"
+
+msgid "IR camera source"
+msgstr "IR 카메라 소스"
+
+msgid "None"
+msgstr "없음"
+
+msgid "IR frame size override"
+msgstr "IR 프레임 크기 지정"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "자동 모드에서 IR 영상이 녹색이거나 손상된 경우 하나의 해상도를 강제로 사용합니다"
+
+msgid "Width"
+msgstr "너비"
+
+msgid "Height"
+msgstr "높이"
+
+msgid "Force IR emitter"
+msgstr "IR 이미터 강제 켜기"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "IR 이미터가 스스로 켜지지 않는 경우에만 이미터 제어를 재정의합니다"
+
+msgid "Parallel RGB + IR capture"
+msgstr "RGB + IR 동시 촬영"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "하이브리드 인증이 더 빨라지지만 일부 웹캠은 두 센서를 동시에 스트리밍할 수 없습니다"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "사용 안 함(RGB 촬영 후 IR 촬영)"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "자동(카메라가 지원하면 동시에 촬영)"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "항상(RGB와 IR을 동시에 촬영)"
+
+msgid "Darkness cutoff"
+msgstr "어두움 기준값"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "평균 밝기가 이 값보다 낮은 프레임을 거부합니다 (0–255)"
+
+msgid "Enrollment"
+msgstr "등록"
+
+msgid "Maximum templates"
+msgstr "최대 템플릿 수"
+
+msgid "Number of capture sets stored per face"
+msgstr "얼굴별로 저장할 촬영 세트 수"
+
+msgid "Minimum face size ratio"
+msgstr "최소 얼굴 크기 비율"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "등록할 때 허용되는 가장 작은 얼굴 크기입니다. 값이 낮을수록 더 먼 거리에서 등록할 수 있습니다"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "라이브니스 위조 방지"
+
+msgid "Enable liveness spoof prevention"
+msgstr "라이브니스 위조 방지 사용"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "카메라 영상과 자연스러운 움직임에서 사진이나 화면의 흔적을 확인합니다"
+
+msgid "Liveness threshold"
+msgstr "라이브니스 임곗값"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "위조 방지 최소 신뢰도"
+
+msgid "Maximum liveness duration"
+msgstr "최대 라이브니스 검사 시간"
+
+msgid "Maximum seconds analyzed for liveness verification"
+msgstr "라이브니스 확인을 위해 분석할 최대 시간(초)"
+
+msgid "Authentication"
+msgstr "인증"
+
+msgid "Abort if SSH"
+msgstr "SSH이면 중단"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "SSH 연결을 통한 인증을 막습니다"
+
+msgid "Abort if lid closed"
+msgstr "덮개가 닫혀 있으면 중단"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "노트북 덮개가 닫혀 있을 때 인증을 막습니다"
+
+msgid "Require a suspend first"
+msgstr "먼저 절전 모드 필요"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "시스템이 한 번 절전 모드에 들어갔다가 재개될 때까지 인증을 막습니다"
+
+msgid "Require confirmation on lock screen"
+msgstr "잠금 화면에서 확인 필요"
+
+msgid "On KDE lock/login screens this requires your password instead of face unlock. Confirmation after a match is available on other supported surfaces"
+msgstr "KDE 잠금/로그인 화면에서는 얼굴 잠금 해제 대신 암호가 필요합니다. 일치 후 확인은 지원되는 다른 곳에서 사용할 수 있습니다"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "권한 상승 인증 시 확인 필요"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "sudo, polkit 및 유사한 요청에서 얼굴이 일치한 후 Enter를 누르거나 확인을 클릭해야 승인됩니다"
+
+msgid "Resume grace period (ms)"
+msgstr "재개 후 유예 시간(ms)"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "절전 모드에서 깨어날 때 얼굴 인증을 지연합니다"
+
+msgid "Start delay (ms)"
+msgstr "시작 지연(ms)"
+
+msgid "Use 3000–5000 ms to give yourself time to step away after locking"
+msgstr "잠근 후 자리를 뜰 시간을 갖도록 3000–5000ms를 사용하세요"
+
+msgid "Start delay applies to"
+msgstr "시작 지연 적용 대상"
+
+msgid "Which prompts wait for the start delay"
+msgstr "시작 지연을 기다릴 요청"
+
+msgid "All face authentication (including sudo)"
+msgstr "모든 얼굴 인증(sudo 포함)"
+
+msgid "Screen lockers only"
+msgstr "화면 잠금만"
+
+msgid "Storage"
+msgstr "저장소"
+
+msgid "Encrypt face templates"
+msgstr "얼굴 템플릿 암호화"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "저장된 얼굴 템플릿을 TPM으로 봉인된 키로 암호화합니다"
+
+msgid "Unlock GNOME Keyring"
+msgstr "GNOME Keyring 잠금 해제"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login"
+msgstr "라이브니스로 보호되는 GDM 또는 greetd 얼굴 로그인 후 등록된 암호를 사용합니다"
+
+msgid "Unlock KWallet"
+msgstr "KWallet 잠금 해제"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet"
+msgstr "라이브니스로 보호되는 KDE 로그인 후 등록된 암호를 사용합니다. gaze keyring --kwallet으로 등록하세요"
+
+msgid "Enrolled Faces"
+msgstr "등록된 얼굴"
+
+msgid "Configure"
+msgstr "설정"
+
+msgid "Configure Gaze"
+msgstr "Gaze 설정"
+
+msgid "Test"
+msgstr "테스트"
+
+msgid "Test face authentication"
+msgstr "얼굴 인증 테스트"
+
+msgid "Add Face…"
+msgstr "얼굴 추가…"
+
+msgid "Enroll a new face"
+msgstr "새 얼굴 등록"
+
+msgid "Faces enrolled for %1"
+msgstr "%1에 등록된 얼굴"
+
+msgid "Look at the camera…"
+msgstr "카메라를 보세요…"
+
+msgid "Face recognized"
+msgstr "얼굴을 인식했습니다"
+
+msgid "No face seen before the test timed out"
+msgstr "테스트 시간이 끝날 때까지 얼굴이 보이지 않았습니다"
+
+msgid "No Faces Enrolled"
+msgstr "등록된 얼굴 없음"
+
+msgid "Enroll a face to get started"
+msgstr "시작하려면 얼굴을 등록하세요"
+
+msgid "%1 capture"
+msgid_plural "%1 captures"
+msgstr[0] "촬영 %1개"
+
+msgid "RGB"
+msgstr "RGB"
+
+msgid "IR"
+msgstr "IR"
+
+msgid "Rename"
+msgstr "이름 바꾸기"
+
+msgid "Improve this face"
+msgstr "이 얼굴 개선"
+
+msgid "Delete"
+msgstr "삭제"
+
+msgid "Improve “%1”"
+msgstr "“%1” 개선"
+
+msgid "Add Face"
+msgstr "얼굴 추가"
+
+msgid "Face name"
+msgstr "얼굴 이름"
+
+msgid "A face with this name already exists"
+msgstr "같은 이름의 얼굴이 이미 있습니다"
+
+msgid "Look at the camera and follow the prompts to add more captures to “%1”."
+msgstr "카메라를 보고 안내에 따라 “%1”에 촬영을 추가하세요."
+
+msgid "Look at the camera and follow the prompts. Keep your face centered and well lit."
+msgstr "카메라를 보고 안내를 따르세요. 얼굴을 중앙에 두고 조명을 밝게 유지하세요."
+
+msgid "Start Capture"
+msgstr "촬영 시작"
+
+msgid "Cancel"
+msgstr "취소"
+
+msgid "Done"
+msgstr "완료"
+
+msgid "Cancel Enrollment?"
+msgstr "등록을 취소할까요?"
+
+msgid "This will discard any partial captures."
+msgstr "완료되지 않은 촬영은 모두 삭제됩니다."
+
+msgid "Resume"
+msgstr "계속"
+
+msgid "Discard"
+msgstr "버리기"
+
+msgid "Delete Face"
+msgstr "얼굴 삭제"
+
+msgid "Delete “%1”? You can add it again later."
+msgstr "“%1”을(를) 삭제할까요? 나중에 다시 추가할 수 있습니다."
+
+msgid "Rename Face"
+msgstr "얼굴 이름 바꾸기"

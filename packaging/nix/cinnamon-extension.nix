@@ -5,6 +5,7 @@
 {
   lib,
   stdenvNoCC,
+  gettext,
 }:
 
 let
@@ -16,8 +17,13 @@ stdenvNoCC.mkDerivation {
 
   src = lib.fileset.toSource {
     root = ../..;
-    fileset = ../../integrations/cinnamon;
+    fileset = lib.fileset.unions [
+      ../../integrations/cinnamon
+      ../../scripts/build-locales.sh
+    ];
   };
+
+  nativeBuildInputs = [ gettext ];
 
   installPhase = ''
     runHook preInstall
@@ -26,6 +32,7 @@ stdenvNoCC.mkDerivation {
     install -Dm644 integrations/cinnamon/metadata.json -t "$ext"
     install -Dm644 integrations/cinnamon/extension.js -t "$ext"
     install -Dm644 integrations/cinnamon/settings-schema.json -t "$ext"
+    bash scripts/build-locales.sh integrations/cinnamon/po "$out/share/locale"
 
     runHook postInstall
   '';

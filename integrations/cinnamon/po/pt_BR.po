@@ -1,0 +1,103 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: pt_BR\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+msgid "Behavior"
+msgstr "Comportamento"
+
+msgid "Face authentication"
+msgstr "Autenticação facial"
+
+msgid "Enable face authentication (lock screen)"
+msgstr "Ativar a autenticação facial (tela de bloqueio)"
+
+msgid "Face retry mode"
+msgstr "Modo de novas tentativas faciais"
+
+msgid "Disabled"
+msgstr "Desativado"
+
+msgid "Fixed tries"
+msgstr "Tentativas fixas"
+
+msgid "Infinite"
+msgstr "Infinito"
+
+msgid "Maximum face tries"
+msgstr "Máximo de tentativas faciais"
+
+msgid "Face authentication for unlocking this session. This does not affect the login screen. Settings are stored in this extension's configuration."
+msgstr "Autenticação facial para desbloquear esta sessão. Isso não afeta a tela de login. As opções são armazenadas na configuração desta extensão."
+
+msgid "Cinnamon extension for Gaze face authentication and PolKit confirmation"
+msgstr "Extensão do Cinnamon para autenticação facial do Gaze e confirmação do PolKit"
+
+msgid "Face not recognized. Please enter your password."
+msgstr "Rosto não reconhecido. Digite sua senha."
+
+msgid "Face not detected. Please enter your password."
+msgstr "Nenhum rosto detectado. Digite sua senha."
+
+msgid "Too dark for face authentication. Please enter your password."
+msgstr "Muito escuro para a autenticação facial. Digite sua senha."
+
+msgid "Face authentication timed out. Please enter your password."
+msgstr "O tempo da autenticação facial esgotou. Digite sua senha."
+
+msgid "Face authentication unavailable. Please enter your password."
+msgstr "Autenticação facial indisponível. Digite sua senha."
+
+msgid "Changing Gaze's settings or faces needs your password."
+msgstr "Alterar as configurações ou os rostos do Gaze exige sua senha."
+
+msgid "Sorry, face authentication did not work. Please try again."
+msgstr "A autenticação facial não funcionou. Tente novamente."
+
+msgid "You reached the maximum face authentication attempts, please try another method"
+msgstr "Você atingiu o número máximo de tentativas de autenticação facial; tente outro método"
+
+msgid "(or look at the camera)"
+msgstr "(ou olhe para a câmera)"
+
+msgid "Password"
+msgstr "Senha"
+
+msgid "Face verified. Press Enter or click Authenticate to confirm."
+msgstr "Rosto verificado. Pressione Enter ou clique em Autenticar para confirmar."
+
+msgid "Face authentication failed"
+msgstr "A autenticação facial falhou"
+
+msgid "Face authentication failed. Please enter your password."
+msgstr "A autenticação facial falhou. Digite sua senha."
+
+msgid "Confirm Face Unlock"
+msgstr "Confirmar desbloqueio facial"
+
+msgid "Please look at the camera..."
+msgstr "Olhe para a câmera…"
+
+msgid "Need more light..."
+msgstr "Precisa de mais luz…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "O rosto está cortado. Afaste-se um pouco…"
+
+msgid "Please center your face..."
+msgstr "Centralize o rosto…"
+
+msgid "Please come closer..."
+msgstr "Aproxime-se…"
+
+msgid "Please back up..."
+msgstr "Afaste-se…"
+
+msgid "Hold still..."
+msgstr "Fique parado…"

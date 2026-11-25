@@ -1,0 +1,504 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: pt_BR\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+msgid "The Gaze daemon is not running yet. Its first start downloads face models, which can take a few minutes. This page updates when it is ready."
+msgstr "O serviço do Gaze ainda não está em execução. Na primeira vez, ele baixa os modelos faciais, o que pode levar alguns minutos. Esta página será atualizada quando ele estiver pronto."
+
+msgid "Face the camera"
+msgstr "Olhe de frente para a câmera"
+
+msgid "Tilt your face slightly up"
+msgstr "Incline o rosto levemente para cima"
+
+msgid "Tilt your face slightly down"
+msgstr "Incline o rosto levemente para baixo"
+
+msgid "Turn your face slightly left"
+msgstr "Vire o rosto levemente para a esquerda"
+
+msgid "Turn your face slightly right"
+msgstr "Vire o rosto levemente para a direita"
+
+msgid "Captured"
+msgstr "Capturado"
+
+msgid "Enrollment complete"
+msgstr "Registro concluído"
+
+msgid "Enrollment cancelled"
+msgstr "Registro cancelado"
+
+msgid "Database error during enrollment"
+msgstr "Erro de banco de dados durante o registro"
+
+msgid "Camera error during enrollment"
+msgstr "Erro de câmera durante o registro"
+
+msgid "Please look at the camera..."
+msgstr "Olhe para a câmera…"
+
+msgid "Need more light..."
+msgstr "Precisa de mais luz…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "O rosto está cortado. Afaste-se um pouco…"
+
+msgid "Please center your face..."
+msgstr "Centralize o rosto…"
+
+msgid "Please come closer..."
+msgstr "Aproxime-se…"
+
+msgid "Please back up..."
+msgstr "Afaste-se…"
+
+msgid "Hold still..."
+msgstr "Fique parado…"
+
+msgid "Face authentication could not run"
+msgstr "Não foi possível executar a autenticação facial"
+
+msgid "Face not recognized"
+msgstr "Rosto não reconhecido"
+
+msgid "Too dark for face authentication"
+msgstr "Muito escuro para a autenticação facial"
+
+msgid "No face detected"
+msgstr "Nenhum rosto detectado"
+
+msgid "Move your face into the frame and try again"
+msgstr "Posicione o rosto dentro do quadro e tente novamente"
+
+msgid "Starting enrollment…"
+msgstr "Iniciando o registro…"
+
+msgid "Enrollment finished without saving."
+msgstr "O registro terminou sem salvar."
+
+msgid "%1 [%2s]"
+msgstr "%1 [%2s]"
+
+msgid "Could not restart the Gaze service (%1)"
+msgstr "Não foi possível reiniciar o serviço do Gaze (%1)"
+
+msgid "The Gaze service did not start again after the restart"
+msgstr "O serviço do Gaze não voltou a iniciar após a reinicialização"
+
+msgid "Re-enroll faces after this change?"
+msgstr "Registrar os rostos novamente após esta alteração?"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face for each profile, then test recognition."
+msgstr "As capturas existentes não são compatíveis com o novo modelo de reconhecimento. Elas permanecem no disco. Depois de salvar, use “Melhorar este rosto” em cada perfil e depois teste o reconhecimento."
+
+msgid "Standard"
+msgstr "Padrão"
+
+msgid "Accurate"
+msgstr "Preciso"
+
+msgid "Settings"
+msgstr "Configurações"
+
+msgid "Everyday settings"
+msgstr "Configurações básicas"
+
+msgid "Advanced settings"
+msgstr "Configurações avançadas"
+
+msgid "Restart Service"
+msgstr "Reiniciar serviço"
+
+msgid "Settings are locked"
+msgstr "As configurações estão bloqueadas"
+
+msgid "Unlock…"
+msgstr "Desbloquear…"
+
+msgid "Settings saved. Restart the Gaze service to use the new inference provider."
+msgstr "Configurações salvas. Reinicie o serviço do Gaze para usar o novo provedor de inferência."
+
+msgid "Restarting the Gaze service…"
+msgstr "Reiniciando o serviço do Gaze…"
+
+msgid "Gaze service restarted"
+msgstr "Serviço do Gaze reiniciado"
+
+msgid "Restarting the Gaze service failed"
+msgstr "Falha ao reiniciar o serviço do Gaze"
+
+msgid "Security"
+msgstr "Segurança"
+
+msgid "Security level"
+msgstr "Nível de segurança"
+
+msgid "Medium is recommended. Changing the recognition model requires new captures for existing profiles"
+msgstr "Médio é o recomendado. Alterar o modelo de reconhecimento exige novas capturas para os perfis existentes"
+
+msgid "Low"
+msgstr "Baixo"
+
+msgid "Medium"
+msgstr "Médio"
+
+msgid "High"
+msgstr "Alto"
+
+msgid "Maximum"
+msgstr "Máximo"
+
+msgid "Custom"
+msgstr "Personalizado"
+
+msgid "Detector level"
+msgstr "Nível do detector"
+
+msgid "Recognizer level"
+msgstr "Nível do reconhecedor"
+
+msgid "RGB recognizer threshold"
+msgstr "Limiar do reconhecedor RGB"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "Similaridade RGB mínima para uma correspondência"
+
+msgid "IR recognizer threshold"
+msgstr "Limiar do reconhecedor IR"
+
+msgid "Minimum IR similarity for a match"
+msgstr "Similaridade IR mínima para uma correspondência"
+
+msgid "Hybrid combining policy"
+msgstr "Política de combinação híbrida"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "Política de combinação quando as câmeras RGB e IR estão ativas"
+
+msgid "Default"
+msgstr "Predefinido"
+
+msgid "Or"
+msgstr "Ou"
+
+msgid "Fallback on dark"
+msgstr "Alternativa no escuro"
+
+msgid "And"
+msgstr "E"
+
+msgid "Hardware"
+msgstr "Hardware"
+
+msgid "Inference execution provider"
+msgstr "Provedor de execução de inferência"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI"
+msgstr "CPU, NPU automática, Intel OpenVINO ou AMD Ryzen AI"
+
+msgid "CPU"
+msgstr "CPU"
+
+msgid "Automatic (NPU)"
+msgstr "Automático (NPU)"
+
+msgid "Intel OpenVINO"
+msgstr "Intel OpenVINO"
+
+msgid "AMD Ryzen AI"
+msgstr "AMD Ryzen AI"
+
+msgid "OpenVINO inference device"
+msgstr "Dispositivo de inferência do OpenVINO"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "O dispositivo Intel usado para todos os modelos ONNX"
+
+msgid "GPU"
+msgstr "GPU"
+
+msgid "NPU"
+msgstr "NPU"
+
+msgid "RGB camera source"
+msgstr "Origem da câmera RGB"
+
+msgid "Primary camera"
+msgstr "Câmera principal"
+
+msgid "None (IR only)"
+msgstr "Nenhuma (somente IR)"
+
+msgid "IR camera source"
+msgstr "Origem da câmera IR"
+
+msgid "None"
+msgstr "Nenhuma"
+
+msgid "IR frame size override"
+msgstr "Forçar tamanho do quadro IR"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "Força uma resolução se a imagem IR aparecer verde ou corrompida no modo automático"
+
+msgid "Width"
+msgstr "Largura"
+
+msgid "Height"
+msgstr "Altura"
+
+msgid "Force IR emitter"
+msgstr "Forçar emissor IR"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "Substitui o controle do emissor; use apenas se o emissor IR não ligar sozinho"
+
+msgid "Parallel RGB + IR capture"
+msgstr "Captura RGB + IR em paralelo"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "Autenticação híbrida mais rápida, mas algumas webcams não conseguem transmitir os dois sensores ao mesmo tempo"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "Nunca (captura RGB, depois IR)"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "Automático (em paralelo quando a câmera permite)"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "Sempre (captura RGB e IR ao mesmo tempo)"
+
+msgid "Darkness cutoff"
+msgstr "Limite de escuridão"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "Rejeita quadros abaixo deste brilho médio (0–255)"
+
+msgid "Enrollment"
+msgstr "Registro"
+
+msgid "Maximum templates"
+msgstr "Máximo de modelos faciais"
+
+msgid "Number of capture sets stored per face"
+msgstr "Número de conjuntos de capturas armazenados por rosto"
+
+msgid "Minimum face size ratio"
+msgstr "Proporção mínima do tamanho do rosto"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "Menor rosto aceito durante o registro; um valor menor permite mais distância"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "Prova de vida contra fraudes"
+
+msgid "Enable liveness spoof prevention"
+msgstr "Ativar a prevenção de fraudes por prova de vida"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "Procura sinais de foto ou tela nas imagens da câmera e no movimento natural"
+
+msgid "Liveness threshold"
+msgstr "Limiar da prova de vida"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "Confiança mínima da prevenção de fraudes"
+
+msgid "Maximum liveness duration"
+msgstr "Duração máxima da prova de vida"
+
+msgid "Maximum seconds analyzed for liveness verification"
+msgstr "Máximo de segundos analisados para a prova de vida"
+
+msgid "Authentication"
+msgstr "Autenticação"
+
+msgid "Abort if SSH"
+msgstr "Cancelar se for SSH"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "Impede a autenticação em conexões SSH"
+
+msgid "Abort if lid closed"
+msgstr "Cancelar se a tampa estiver fechada"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "Impede a autenticação quando a tampa do notebook está fechada"
+
+msgid "Require a suspend first"
+msgstr "Exigir uma suspensão antes"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "Impede a autenticação até que o sistema tenha sido suspenso e retomado uma vez"
+
+msgid "Require confirmation on lock screen"
+msgstr "Exigir confirmação na tela de bloqueio"
+
+msgid "On KDE lock/login screens this requires your password instead of face unlock. Confirmation after a match is available on other supported surfaces"
+msgstr "Nas telas de bloqueio e login do KDE, isso exige sua senha em vez do desbloqueio facial. A confirmação após uma correspondência está disponível em outros ambientes compatíveis"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "Exigir confirmação para autenticação com privilégios elevados"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "Exige pressionar Enter ou clicar em OK para autorizar após a correspondência facial no sudo, polkit e solicitações semelhantes"
+
+msgid "Resume grace period (ms)"
+msgstr "Período de tolerância ao retomar (ms)"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "Atrasa a autenticação facial ao sair da suspensão"
+
+msgid "Start delay (ms)"
+msgstr "Atraso inicial (ms)"
+
+msgid "Use 3000–5000 ms to give yourself time to step away after locking"
+msgstr "Use 3000–5000 ms para ter tempo de se afastar após bloquear"
+
+msgid "Start delay applies to"
+msgstr "O atraso inicial se aplica a"
+
+msgid "Which prompts wait for the start delay"
+msgstr "Quais solicitações aguardam o atraso inicial"
+
+msgid "All face authentication (including sudo)"
+msgstr "Toda autenticação facial (incluindo sudo)"
+
+msgid "Screen lockers only"
+msgstr "Somente bloqueadores de tela"
+
+msgid "Storage"
+msgstr "Armazenamento"
+
+msgid "Encrypt face templates"
+msgstr "Criptografar modelos faciais"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "Criptografa os modelos faciais armazenados com uma chave selada pelo TPM"
+
+msgid "Unlock GNOME Keyring"
+msgstr "Desbloquear o GNOME Keyring"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login"
+msgstr "Usa uma senha registrada após um login facial no GDM ou greetd protegido por prova de vida"
+
+msgid "Unlock KWallet"
+msgstr "Desbloquear o KWallet"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet"
+msgstr "Usa uma senha registrada após um login no KDE protegido por prova de vida; registre com gaze keyring --kwallet"
+
+msgid "Enrolled Faces"
+msgstr "Rostos registrados"
+
+msgid "Configure"
+msgstr "Configurar"
+
+msgid "Configure Gaze"
+msgstr "Configurar o Gaze"
+
+msgid "Test"
+msgstr "Testar"
+
+msgid "Test face authentication"
+msgstr "Testar a autenticação facial"
+
+msgid "Add Face…"
+msgstr "Adicionar rosto…"
+
+msgid "Enroll a new face"
+msgstr "Registrar um novo rosto"
+
+msgid "Faces enrolled for %1"
+msgstr "Rostos registrados de %1"
+
+msgid "Look at the camera…"
+msgstr "Olhe para a câmera…"
+
+msgid "Face recognized"
+msgstr "Rosto reconhecido"
+
+msgid "No face seen before the test timed out"
+msgstr "Nenhum rosto foi visto antes do fim do teste"
+
+msgid "No Faces Enrolled"
+msgstr "Nenhum rosto registrado"
+
+msgid "Enroll a face to get started"
+msgstr "Registre um rosto para começar"
+
+msgid "%1 capture"
+msgid_plural "%1 captures"
+msgstr[0] "%1 captura"
+msgstr[1] "%1 capturas"
+
+msgid "RGB"
+msgstr "RGB"
+
+msgid "IR"
+msgstr "IR"
+
+msgid "Rename"
+msgstr "Renomear"
+
+msgid "Improve this face"
+msgstr "Melhorar este rosto"
+
+msgid "Delete"
+msgstr "Excluir"
+
+msgid "Improve “%1”"
+msgstr "Melhorar “%1”"
+
+msgid "Add Face"
+msgstr "Adicionar rosto"
+
+msgid "Face name"
+msgstr "Nome do rosto"
+
+msgid "A face with this name already exists"
+msgstr "Já existe um rosto com este nome"
+
+msgid "Look at the camera and follow the prompts to add more captures to “%1”."
+msgstr "Olhe para a câmera e siga as instruções para adicionar mais capturas a “%1”."
+
+msgid "Look at the camera and follow the prompts. Keep your face centered and well lit."
+msgstr "Olhe para a câmera e siga as instruções. Mantenha o rosto centralizado e bem iluminado."
+
+msgid "Start Capture"
+msgstr "Iniciar captura"
+
+msgid "Cancel"
+msgstr "Cancelar"
+
+msgid "Done"
+msgstr "Concluído"
+
+msgid "Cancel Enrollment?"
+msgstr "Cancelar o registro?"
+
+msgid "This will discard any partial captures."
+msgstr "As capturas parciais serão descartadas."
+
+msgid "Resume"
+msgstr "Continuar"
+
+msgid "Discard"
+msgstr "Descartar"
+
+msgid "Delete Face"
+msgstr "Excluir rosto"
+
+msgid "Delete “%1”? You can add it again later."
+msgstr "Excluir “%1”? Você poderá adicioná-lo novamente mais tarde."
+
+msgid "Rename Face"
+msgstr "Renomear rosto"

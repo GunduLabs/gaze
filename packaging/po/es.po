@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: es\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Clear a Gaze duress lockout"
+msgstr "Quitar el bloqueo por coacción de Gaze"
+
+msgid "Authentication is required to re-enable face authentication after a duress signal."
+msgstr "Se requiere autenticación para volver a activar la autenticación facial después de una señal de coacción."
+
+msgid "Manage face enrollments for Gaze"
+msgstr "Gestionar los rostros registrados en Gaze"
+
+msgid "Authentication is required to manage Gaze face enrollments."
+msgstr "Se requiere autenticación para gestionar los rostros registrados en Gaze."
+
+msgid "Manage daemon configuration for Gaze"
+msgstr "Gestionar la configuración del servicio de Gaze"
+
+msgid "Authentication is required to change Gaze daemon configuration."
+msgstr "Se requiere autenticación para cambiar la configuración del servicio de Gaze."
+
+msgid "Manage GDM login authentication for Gaze"
+msgstr "Gestionar la autenticación de inicio de sesión de GDM para Gaze"
+
+msgid "Authentication is required to change Gaze face authentication at the GDM login screen."
+msgstr "Se requiere autenticación para cambiar la autenticación facial de Gaze en la pantalla de inicio de sesión de GDM."
+
+msgid "Enroll faces and configure facial authentication"
+msgstr "Registre rostros y configure la autenticación facial"
+
+msgid "face;auth;login;biometric;"
+msgstr "rostro;cara;facial;desbloqueo;autenticación;inicio de sesión;biometría;"
+
+msgid "Enroll and manage faces, test face authentication, and adjust every Gaze setting."
+msgstr "Registre y gestione rostros, pruebe la autenticación facial y ajuste toda la configuración de Gaze."
+
+msgid "Facial authentication"
+msgstr "Autenticación facial"
+
+msgid "Gaze Settings"
+msgstr "Configuración de Gaze"

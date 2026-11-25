@@ -276,7 +276,7 @@ sudo apt install build-essential pkg-config clang libclang-dev \
   libcairo2-dev libglib2.0-dev libgdk-pixbuf-2.0-dev libpango1.0-dev libgraphene-1.0-dev \
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
   gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire \
-  gettext-base
+  gettext
 ```
 
 For `just package`, install the additional KDE build dependencies listed in the
