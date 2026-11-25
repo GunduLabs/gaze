@@ -169,11 +169,8 @@ fn check_camera_system(
                             ),
                         );
                     }
-                } else if let Some((vid, pid)) = gaze_vision::camera::parse_usb_spec(rgb) {
-                    report.pass(
-                        rgb_name,
-                        format!("resolves the color node for USB {vid:04x}:{pid:04x} at runtime"),
-                    );
+                } else if gaze_vision::camera::parse_usb_spec(rgb).is_some() {
+                    check_usb_camera(report, rgb_name, "cameras.rgb", rgb, true);
                 } else if let Some(name) = gaze_vision::camera::parse_libcamera_spec(rgb) {
                     check_libcamera_camera(report, rgb_name, "cameras.rgb", name);
                 } else if rgb.starts_with("/dev/video") {
@@ -244,11 +241,8 @@ fn check_camera_system(
                 "Verify PipeWire is running and the IR device is connected.",
             ),
         }
-    } else if let Some((vid, pid)) = gaze_vision::camera::parse_usb_spec(ir) {
-        report.pass(
-            ir_name,
-            format!("resolves the IR node for USB {vid:04x}:{pid:04x} at runtime"),
-        );
+    } else if gaze_vision::camera::parse_usb_spec(ir).is_some() {
+        check_usb_camera(report, ir_name, "cameras.ir", ir, false);
     } else if let Some(name) = gaze_vision::camera::parse_libcamera_spec(ir) {
         check_libcamera_camera(report, ir_name, "cameras.ir", name);
     } else {
@@ -339,6 +333,40 @@ fn check_ir_node(
             format!("bridge provenance for {node} failed: {err:#}"),
             "Make sure the bridge service is running and wrote the configured marker.",
         ),
+    }
+}
+
+fn check_usb_camera(
+    report: &mut Report,
+    check: &'static str,
+    key: &str,
+    source: &str,
+    want_color: bool,
+) {
+    let kind = if want_color { "color" } else { "IR" };
+    if let Some(node) = gaze_vision::camera::resolve_node_for(source, want_color) {
+        report.pass(
+            check,
+            format!("{source} resolves to the {kind} node {node}"),
+        );
+    } else if gaze_vision::camera::camera_disconnected(source, want_color, false) {
+        report.error(
+            check,
+            format!("{source} is not connected"),
+            format!("Reconnect the camera or correct {key}."),
+        );
+    } else if running_as_root() {
+        report.error(
+            check,
+            format!("{source} is connected but has no usable {kind} node"),
+            format!("Compare with `v4l2-ctl --list-devices`, then correct {key}."),
+        );
+    } else {
+        report.warning(
+            check,
+            format!("{source} is connected, but its {kind} node could not be read"),
+            "Run `sudo gaze doctor` to check the camera.",
+        );
     }
 }
 
