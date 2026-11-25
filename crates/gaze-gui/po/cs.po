@@ -1,0 +1,742 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: cs\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n==1) ? 0 : (n>=2 && n<=4) ? 1 : 2;\n"
+
+msgid "Face authentication could not run"
+msgstr "Ověření obličejem se nepodařilo spustit"
+
+msgid "Face not recognized"
+msgstr "Obličej nebyl rozpoznán"
+
+msgid "Too dark for face authentication"
+msgstr "Na ověření obličejem je příliš tma"
+
+msgid "No face detected"
+msgstr "Nebyl zjištěn žádný obličej"
+
+msgid "Move your face into the frame and try again"
+msgstr "Umístěte obličej do záběru a zkuste to znovu"
+
+msgid "Close"
+msgstr "Zavřít"
+
+msgid "Remove “{name}”?"
+msgstr "Odebrat „{name}“?"
+
+msgid "Gaze will stop recognizing this face. You can enroll it again later."
+msgstr "Gaze přestane tento obličej rozpoznávat. Později jej můžete zaregistrovat znovu."
+
+msgid "Cancel"
+msgstr "Zrušit"
+
+msgid "Remove"
+msgstr "Odebrat"
+
+msgid "Daemon Failed"
+msgstr "Služba selhala"
+
+msgid "Gaze could not start. Run gaze doctor. On a new install, check that TPM 2.0 is enabled; settings cannot be changed here until the service starts."
+msgstr "Gaze se nepodařilo spustit. Spusťte gaze doctor. U nové instalace zkontrolujte, zda je povolen TPM 2.0; dokud se služba nespustí, nelze zde měnit nastavení."
+
+msgid "Daemon Disabled"
+msgstr "Služba je zakázaná"
+
+msgid "The Gaze daemon is turned off. Turn it on with:"
+msgstr "Služba Gaze je vypnutá. Zapněte ji příkazem:"
+
+msgid "Daemon Stopped"
+msgstr "Služba je zastavená"
+
+msgid "The Gaze daemon is not running. Start it with:"
+msgstr "Služba Gaze neběží. Spusťte ji příkazem:"
+
+msgid "Daemon Not Installed"
+msgstr "Služba není nainstalovaná"
+
+msgid "The gazed service is missing. Install the gaze package for your distribution."
+msgstr "Chybí služba gazed. Nainstalujte balíček gaze pro svou distribuci."
+
+msgid "Daemon Starting"
+msgstr "Služba se spouští"
+
+msgid "The Gaze daemon is starting up. Its first start downloads face models, which can take a few minutes."
+msgstr "Služba Gaze se spouští. Při prvním spuštění se stahují modely obličejů, což může trvat několik minut."
+
+msgid "Connecting to the Gaze daemon…"
+msgstr "Připojování ke službě Gaze…"
+
+msgid "Enrollment was not authorized"
+msgstr "Registrace nebyla povolena"
+
+msgid "Could not start enrollment: {error}"
+msgstr "Registraci se nepodařilo zahájit: {error}"
+
+msgid "Could not start enrollment"
+msgstr "Registraci se nepodařilo zahájit"
+
+msgid "Could not start camera"
+msgstr "Kameru se nepodařilo spustit"
+
+msgid "Close other camera apps, check the privacy shutter, or choose another camera in Settings."
+msgstr "Zavřete ostatní aplikace používající kameru, zkontrolujte krytku kamery nebo vyberte jinou kameru v Nastavení."
+
+msgid "ready"
+msgstr "připraveno"
+
+msgid "needs captures"
+msgstr "chybí snímky"
+
+msgid "unused"
+msgstr "nepoužívá se"
+
+msgid "Enroll a new face"
+msgstr "Zaregistrovat nový obličej"
+
+msgid "Settings"
+msgstr "Nastavení"
+
+msgid "Connecting…"
+msgstr "Připojování…"
+
+msgid "Loading from the Gaze daemon…"
+msgstr "Načítání ze služby Gaze…"
+
+msgid "Enrolled Faces"
+msgstr "Zaregistrované obličeje"
+
+msgid "Rename a face, add captures to improve it, or remove it."
+msgstr "Obličej můžete přejmenovat, zlepšit přidáním snímků nebo odebrat."
+
+msgid "Recognition"
+msgstr "Rozpoznávání"
+
+msgid "Test recognition"
+msgstr "Vyzkoušet rozpoznávání"
+
+msgid "Not tested in this session yet."
+msgstr "V této relaci zatím nevyzkoušeno."
+
+msgid "Test"
+msgstr "Vyzkoušet"
+
+msgid "Look at the camera and check that Gaze recognizes you"
+msgstr "Podívejte se do kamery a ověřte, že vás Gaze pozná"
+
+msgid "Setup Checklist"
+msgstr "Kontrolní seznam nastavení"
+
+msgid "Work through these once before using face unlock on your desktop."
+msgstr "Než začnete používat odemykání obličejem na ploše, projděte jednou tyto kroky."
+
+msgid "Choose your camera"
+msgstr "Vyberte kameru"
+
+msgid "Pick the camera in Settings, then check it in the enrollment preview"
+msgstr "Vyberte kameru v Nastavení a poté ji zkontrolujte v náhledu registrace"
+
+msgid "Enroll a face"
+msgstr "Zaregistrujte obličej"
+
+msgid "Capture your face from a few angles"
+msgstr "Nasnímejte svůj obličej z několika úhlů"
+
+msgid "Confirm that Gaze recognizes you"
+msgstr "Ověřte, že vás Gaze pozná"
+
+msgid "Check desktop integration"
+msgstr "Zkontrolujte integraci s plochou"
+
+msgid "Run gaze doctor before trying screen unlock"
+msgstr "Než vyzkoušíte odemykání obrazovky, spusťte gaze doctor"
+
+msgid "Enroll a Face"
+msgstr "Zaregistrovat obličej"
+
+msgid "Running gaze doctor…"
+msgstr "Spouští se gaze doctor…"
+
+msgid "Run gaze doctor in a terminal on your Linux host to check desktop integration. If the installer requested a reboot, do that before testing screen unlock. Login and keyring unlock are optional, separate settings."
+msgstr "Spusťte gaze doctor v terminálu svého systému Linux a zkontrolujte integraci s plochou. Pokud instalátor požádal o restart, proveďte jej před zkoušením odemykání obrazovky. Přihlašování a odemykání klíčenky jsou volitelná samostatná nastavení."
+
+msgid "Desktop setup checks"
+msgstr "Kontroly nastavení plochy"
+
+msgid "Look at the camera…"
+msgstr "Podívejte se do kamery…"
+
+msgid "Reconnecting to the Gaze daemon…"
+msgstr "Opětovné připojování ke službě Gaze…"
+
+msgid "Could not access the camera: {error}. Close other camera apps and retry; run gaze doctor if it persists."
+msgstr "Ke kameře se nepodařilo získat přístup: {error}. Zavřete ostatní aplikace používající kameru a zkuste to znovu; pokud potíže trvají, spusťte gaze doctor."
+
+msgid "Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled."
+msgstr "Rozpoznávání se nepodařilo spustit. Spusťte gaze doctor a zkontrolujte, zda je zaregistrován použitelný profil obličeje."
+
+msgid "Face recognized. Next: check desktop integration before trying screen unlock."
+msgstr "Obličej rozpoznán. Nyní před zkoušením odemykání obrazovky zkontrolujte integraci s plochou."
+
+msgid "Lost contact with the Gaze daemon"
+msgstr "Spojení se službou Gaze bylo ztraceno"
+
+msgid "Recognition timed out without a result. Retry, or run gaze doctor to check the camera and service"
+msgstr "Čas na rozpoznání vypršel bez výsledku. Zkuste to znovu nebo spusťte gaze doctor a zkontrolujte kameru a službu"
+
+msgid "Unsupported CPU"
+msgstr "Nepodporovaný procesor"
+
+msgid "Could Not Load Faces"
+msgstr "Obličeje se nepodařilo načíst"
+
+msgid "No Faces Enrolled"
+msgstr "Žádné zaregistrované obličeje"
+
+msgid "Choose your camera in Settings, then enroll a face. The capture window lets you check the camera before starting."
+msgstr "Vyberte kameru v Nastavení a poté zaregistrujte obličej. V okně snímání můžete kameru před zahájením zkontrolovat."
+
+msgid "1 capture"
+msgstr "1 snímek"
+
+msgid "{count} captures"
+msgstr "Snímky: {count}"
+
+msgid "Rename"
+msgstr "Přejmenovat"
+
+msgid "Improve this face"
+msgstr "Zlepšit tento obličej"
+
+msgid "Delete"
+msgstr "Smazat"
+
+msgid "New face name"
+msgstr "Nový název obličeje"
+
+msgid "A face with this name already exists"
+msgstr "Obličej s tímto názvem již existuje"
+
+msgid "Failed to rename face"
+msgstr "Obličej se nepodařilo přejmenovat"
+
+msgid "Renamed “{old}” to “{new}”"
+msgstr "„{old}“ přejmenováno na „{new}“"
+
+msgid "Failed to remove face"
+msgstr "Obličej se nepodařilo odebrat"
+
+msgid "Camera Not Activated"
+msgstr "Kamera není aktivní"
+
+msgid "No Face"
+msgstr "Žádný obličej"
+
+msgid "Need More Light"
+msgstr "Je potřeba více světla"
+
+msgid "Not Centered"
+msgstr "Není na střed"
+
+msgid "Face Clipped"
+msgstr "Obličej je oříznutý"
+
+msgid "Come Closer"
+msgstr "Přibližte se"
+
+msgid "Back Up"
+msgstr "Ustupte"
+
+msgid "Ready"
+msgstr "Připraveno"
+
+msgid "The camera could not be opened: {error}"
+msgstr "Kameru se nepodařilo otevřít: {error}"
+
+msgid "Main cameras"
+msgstr "Hlavní kamery"
+
+msgid "Fallback cameras {index}"
+msgstr "Záložní kamery {index}"
+
+msgid "Improve “{name}”"
+msgstr "Zlepšit „{name}“"
+
+msgid "Add Face"
+msgstr "Přidat obličej"
+
+msgid "Infrared camera"
+msgstr "Infračervená kamera"
+
+msgid "RGB camera"
+msgstr "Kamera RGB"
+
+msgid "Infrared camera · preview starts when capture does"
+msgstr "Infračervená kamera · náhled se spustí spolu se snímáním"
+
+msgid "Face name"
+msgstr "Název obličeje"
+
+msgid "Camera"
+msgstr "Kamera"
+
+msgid "{camera} · preview starts when capture does"
+msgstr "{camera} · náhled se spustí spolu se snímáním"
+
+msgid "Start Capture"
+msgstr "Zahájit snímání"
+
+msgid "Done — test recognition next"
+msgstr "Hotovo – nyní vyzkoušejte rozpoznávání"
+
+msgid "Cancel Enrollment?"
+msgstr "Zrušit registraci?"
+
+msgid "This will discard any partial captures."
+msgstr "Částečné snímky budou zahozeny."
+
+msgid "Resume"
+msgstr "Pokračovat"
+
+msgid "Discard"
+msgstr "Zahodit"
+
+msgid "{camera} · starting capture"
+msgstr "{camera} · zahajuje se snímání"
+
+msgid "Starting enrollment…"
+msgstr "Zahajuje se registrace…"
+
+msgid "Failed to connect to enrollment stream. Try again."
+msgstr "K registračnímu proudu se nepodařilo připojit. Zkuste to znovu."
+
+msgid "Failed to connect to capture stream. Try again."
+msgstr "K proudu snímání se nepodařilo připojit. Zkuste to znovu."
+
+msgid "Could not claim camera: {error}. Try again."
+msgstr "Kameru se nepodařilo vyhradit: {error}. Zkuste to znovu."
+
+msgid "{camera} · live preview unavailable, look at the camera"
+msgstr "{camera} · živý náhled není dostupný, dívejte se do kamery"
+
+msgid "Enrollment timed out. Close this window and try again."
+msgstr "Čas na registraci vypršel. Zavřete toto okno a zkuste to znovu."
+
+msgid "Lost contact with the Gaze daemon. Close this window and try again."
+msgstr "Spojení se službou Gaze bylo ztraceno. Zavřete toto okno a zkuste to znovu."
+
+msgid "Face saved. Use Test in the main window, then check desktop integration."
+msgstr "Obličej uložen. Použijte „Vyzkoušet“ v hlavním okně a poté zkontrolujte integraci s plochou."
+
+msgid "Enrollment finished without saving."
+msgstr "Registrace skončila bez uložení."
+
+msgid "Lost contact with the Gaze daemon."
+msgstr "Spojení se službou Gaze bylo ztraceno."
+
+msgid "Try Again"
+msgstr "Zkusit znovu"
+
+msgid "Failed to apply config: {error}"
+msgstr "Konfiguraci se nepodařilo použít: {error}"
+
+msgid "Configured as {source}, which this list cannot show"
+msgstr "Nastaveno na {source}, což tento seznam neumí zobrazit"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI. Restart the Gaze daemon after changing this"
+msgstr "CPU, automatické NPU, Intel OpenVINO nebo AMD Ryzen AI. Po změně restartujte službu Gaze"
+
+msgid "Configured as {provider}/{device}, which this build cannot show"
+msgstr "Nastaveno na {provider}/{device}, což toto sestavení neumí zobrazit"
+
+msgid "Ordered fallback: {sources}. Selecting a camera replaces this list."
+msgstr "Pořadí záložních kamer: {sources}. Výběr kamery tento seznam nahradí."
+
+msgid "Finding cameras…"
+msgstr "Hledání kamer…"
+
+msgid "Settings will appear when the camera scan finishes."
+msgstr "Nastavení se zobrazí po dokončení hledání kamer."
+
+msgid "Primary camera"
+msgstr "Hlavní kamera"
+
+msgid "None"
+msgstr "Žádná"
+
+msgid "None (IR only)"
+msgstr "Žádná (pouze IR)"
+
+msgid "Could not list cameras"
+msgstr "Seznam kamer se nepodařilo získat"
+
+msgid "Close other camera applications and try Settings again. Run gaze doctor if the problem continues."
+msgstr "Zavřete ostatní aplikace používající kameru a otevřete Nastavení znovu. Pokud potíže trvají, spusťte gaze doctor."
+
+msgid "Settings are locked"
+msgstr "Nastavení je uzamčeno"
+
+msgid "Unlock…"
+msgstr "Odemknout…"
+
+msgid "Everyday"
+msgstr "Běžné"
+
+msgid "Advanced"
+msgstr "Pokročilé"
+
+msgid "Changes save automatically after unlocking."
+msgstr "Po odemknutí se změny ukládají automaticky."
+
+msgid "Security"
+msgstr "Zabezpečení"
+
+msgid "Security level"
+msgstr "Úroveň zabezpečení"
+
+msgid "Medium is recommended. Changing the recognition model requires re-enrolling existing profiles. Custom controls are in Advanced"
+msgstr "Doporučená je úroveň „Střední“. Změna modelu rozpoznávání vyžaduje novou registraci existujících profilů. Vlastní ovládání najdete v části „Pokročilé“"
+
+msgid "Detector level"
+msgstr "Úroveň detektoru"
+
+msgid "Recognizer level"
+msgstr "Úroveň rozpoznávání"
+
+msgid "RGB recognizer threshold"
+msgstr "Práh rozpoznávání RGB"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "Minimální podobnost RGB pro shodu"
+
+msgid "IR recognizer threshold"
+msgstr "Práh rozpoznávání IR"
+
+msgid "Minimum IR similarity for a match"
+msgstr "Minimální podobnost IR pro shodu"
+
+msgid "Hardware"
+msgstr "Hardware"
+
+msgid "Inference execution provider"
+msgstr "Poskytovatel provádění inference"
+
+msgid "OpenVINO inference device"
+msgstr "Zařízení pro inferenci OpenVINO"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "Zařízení Intel použité pro všechny modely ONNX"
+
+msgid "RGB camera source"
+msgstr "Zdroj kamery RGB"
+
+msgid "IR camera source"
+msgstr "Zdroj kamery IR"
+
+msgid "IR frame size override"
+msgstr "Vynutit velikost snímku IR"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "Vynutí jedno rozlišení, pokud je obraz IR v automatickém režimu zelený nebo poškozený"
+
+msgid "Width"
+msgstr "Šířka"
+
+msgid "Height"
+msgstr "Výška"
+
+msgid "Force IR emitter"
+msgstr "Vynutit IR zářič"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "Přepíše ovládání zářiče, pouze pokud se IR zářič sám nezapne"
+
+msgid "Parallel RGB + IR capture"
+msgstr "Souběžné snímání RGB + IR"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "Rychlejší hybridní ověření, ale některé webkamery neumí vysílat z obou snímačů najednou"
+
+msgid "Darkness cutoff"
+msgstr "Mez tmy"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "Odmítat snímky s průměrným jasem pod touto hodnotou (0–255)"
+
+msgid "Enrollment"
+msgstr "Registrace"
+
+msgid "Maximum templates"
+msgstr "Maximální počet šablon"
+
+msgid "Number of capture sets stored per face"
+msgstr "Počet sad snímků uložených pro každý obličej"
+
+msgid "Minimum face size ratio"
+msgstr "Minimální poměr velikosti obličeje"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "Nejmenší přijatelný obličej při registraci; nižší hodnota umožní větší vzdálenost"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "Detekce živosti (ochrana proti podvržení)"
+
+msgid "Enable liveness spoof prevention"
+msgstr "Povolit ochranu proti podvržení detekcí živosti"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "Kontrolovat v obrazu kamery a přirozeném pohybu známky fotografie nebo obrazovky"
+
+msgid "Liveness threshold"
+msgstr "Práh živosti"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "Minimální spolehlivost ochrany proti podvržení"
+
+msgid "Maximum liveness duration"
+msgstr "Maximální doba detekce živosti"
+
+msgid "Usable face time per camera before falling back to your password"
+msgstr "Využitelný čas obličeje na kameru, než se přejde k heslu"
+
+msgid "Authentication"
+msgstr "Ověřování"
+
+msgid "Abort if SSH"
+msgstr "Přerušit při SSH"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "Zabránit ověření přes připojení SSH"
+
+msgid "Abort if lid closed"
+msgstr "Přerušit při zavřeném víku"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "Zabránit ověření, když je víko notebooku zavřené"
+
+msgid "Require a suspend first"
+msgstr "Nejprve vyžadovat uspání"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "Zabránit ověření, dokud se systém jednou neuspí a neprobudí"
+
+msgid "Require confirmation on lock screen"
+msgstr "Vyžadovat potvrzení na zamykací obrazovce"
+
+msgid "Confirm after matching where supported. On KDE lock/login screens this uses your password instead of face unlock"
+msgstr "Potvrzovat po shodě tam, kde je to podporováno. Na zamykací a přihlašovací obrazovce KDE se místo odemknutí obličejem použije heslo"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "Vyžadovat potvrzení při ověření se zvýšenými oprávněními"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "Po shodě obličeje u sudo, polkit a podobných výzev vyžadovat k povolení stisk klávesy Enter nebo kliknutí na OK"
+
+msgid "Resume grace period (ms)"
+msgstr "Prodleva po probuzení (ms)"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "Odložit ověření obličejem při probuzení z uspání"
+
+msgid "Start delay (ms)"
+msgstr "Prodleva zahájení (ms)"
+
+msgid "Use 3000–5000 ms on KDE or hyprlock to give yourself time to step away after locking"
+msgstr "V KDE nebo hyprlock použijte 3000–5000 ms, abyste měli po uzamčení čas odejít"
+
+msgid "Start delay applies to"
+msgstr "Prodleva zahájení platí pro"
+
+msgid "Which prompts wait for the start delay"
+msgstr "Které výzvy čekají na prodlevu zahájení"
+
+msgid "Hybrid combining policy"
+msgstr "Pravidlo hybridní kombinace"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "Pravidlo kombinace, když jsou aktivní kamery RGB i IR"
+
+msgid "Storage"
+msgstr "Úložiště"
+
+msgid "Encrypt face templates"
+msgstr "Šifrovat šablony obličejů"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "Šifrovat uložené šablony obličejů klíčem zapečetěným v TPM"
+
+msgid "Unlock GNOME Keyring"
+msgstr "Odemknout GNOME Keyring"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login. Needs liveness and template encryption, and keeps both on while enabled"
+msgstr "Použije zaregistrované heslo po přihlášení obličejem přes GDM nebo greetd chráněném detekcí živosti. Vyžaduje detekci živosti a šifrování šablon a po dobu zapnutí je obojí ponecháno aktivní"
+
+msgid "Unlock KWallet"
+msgstr "Odemknout KWallet"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet. Needs liveness and template encryption, and keeps both on while enabled"
+msgstr "Použije zaregistrované heslo po přihlášení do KDE chráněném detekcí živosti; zaregistrujte jej příkazem gaze keyring --kwallet. Vyžaduje detekci živosti a šifrování šablon a po dobu zapnutí je obojí ponecháno aktivní"
+
+msgid "Set up password…"
+msgstr "Nastavit heslo…"
+
+msgid "Finish password unlock setup"
+msgstr "Dokončit nastavení odemykání heslem"
+
+msgid "The switch enables this feature. Enroll your password from a terminal as your desktop user; then check your login integration. Passwords stay on this machine, protected by the TPM."
+msgstr "Přepínač tuto funkci zapne. Zaregistrujte heslo v terminálu pod svým uživatelem plochy a poté zkontrolujte integraci s přihlašováním. Hesla zůstávají na tomto počítači chráněná modulem TPM."
+
+msgid "1. Wait for Settings to show Saved.\n2. Run: {command}\n3. Run: gaze doctor\n4. Reopen Settings to refresh password status."
+msgstr "1. Počkejte, až se v Nastavení zobrazí „Uloženo“.\n2. Spusťte: {command}\n3. Spusťte: gaze doctor\n4. Otevřete Nastavení znovu, aby se stav hesla obnovil."
+
+msgid "Cameras"
+msgstr "Kamery"
+
+msgid "Choose a camera, then use Enroll a Face to preview and check it."
+msgstr "Vyberte kameru a poté ji pomocí „Zaregistrovat obličej“ zobrazte v náhledu a zkontrolujte."
+
+msgid "Lock screen and password prompts"
+msgstr "Zamykací obrazovka a výzvy k zadání hesla"
+
+msgid "Preparing and saving settings… Model downloads may take a few minutes."
+msgstr "Připravuje a ukládá se nastavení… Stahování modelů může trvat několik minut."
+
+msgid "Recognition model change cancelled; reopen Settings to confirm"
+msgstr "Změna modelu rozpoznávání byla zrušena; pro potvrzení otevřete Nastavení znovu"
+
+msgid "Re-enroll faces after this change?"
+msgstr "Zaregistrovat po této změně obličeje znovu?"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face to capture new samples for every profile you use."
+msgstr "Existující snímky nelze porovnat s novým modelem rozpoznávání. Zůstanou na disku. Po uložení použijte „Zlepšit tento obličej“ a pořiďte nové snímky pro každý profil, který používáte."
+
+msgid "Keep current model"
+msgstr "Ponechat současný model"
+
+msgid "Change model"
+msgstr "Změnit model"
+
+msgid "Model change cancelled. Current settings restored"
+msgstr "Změna modelu byla zrušena. Současné nastavení bylo obnoveno"
+
+msgid "Saved. Restart gazed, then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active."
+msgstr "Uloženo. Restartujte gazed a poté spusťte gaze doctor --benchmark pro ověření akcelerace; možná se místo ní používá CPU."
+
+msgid "Saved. Use Improve this face on each existing profile to re-enroll, then test recognition."
+msgstr "Uloženo. U každého existujícího profilu použijte „Zlepšit tento obličej“, aby se zaregistroval znovu, a poté vyzkoušejte rozpoznávání."
+
+msgid "Saved. Changes are active."
+msgstr "Uloženo. Změny jsou aktivní."
+
+msgid "Could not read the current configuration from the Gaze daemon"
+msgstr "Současnou konfiguraci se ze služby Gaze nepodařilo načíst"
+
+msgid "Try again"
+msgstr "Zkusit znovu"
+
+msgid "Password stored"
+msgstr "Heslo je uložené"
+
+msgid "Password not enrolled"
+msgstr "Heslo není zaregistrované"
+
+msgid "Password status unavailable"
+msgstr "Stav hesla není dostupný"
+
+msgid "{state}. After enabling, run {command} in a terminal to enroll or replace it. Run gaze doctor to check login integration. Requires liveness and encryption."
+msgstr "{state}. Po zapnutí jej zaregistrujte nebo nahraďte spuštěním {command} v terminálu. Spuštěním gaze doctor zkontrolujte integraci s přihlašováním. Vyžaduje detekci živosti a šifrování."
+
+msgid "Failed to load configuration: {error}"
+msgstr "Konfiguraci se nepodařilo načíst: {error}"
+
+msgid "Settings stay locked: {error}"
+msgstr "Nastavení zůstává uzamčeno: {error}"
+
+msgid "Low"
+msgstr "Nízká"
+
+msgid "Medium"
+msgstr "Střední"
+
+msgid "High"
+msgstr "Vysoká"
+
+msgid "Maximum"
+msgstr "Maximální"
+
+msgid "Custom"
+msgstr "Vlastní"
+
+msgid "Standard"
+msgstr "Standardní"
+
+msgid "Accurate"
+msgstr "Přesná"
+
+msgid "Default"
+msgstr "Výchozí"
+
+msgid "Or"
+msgstr "Nebo"
+
+msgid "Fallback on dark"
+msgstr "Záloha při tmě"
+
+msgid "And"
+msgstr "A"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "Nikdy (nejprve RGB, poté IR)"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "Automaticky (souběžně, pokud to kamera umožňuje)"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "Vždy (RGB a IR najednou)"
+
+msgid "All face authentication (including sudo)"
+msgstr "Veškeré ověření obličejem (včetně sudo)"
+
+msgid "Screen lockers only"
+msgstr "Pouze zámky obrazovky"
+
+msgid "Automatic (NPU)"
+msgstr "Automaticky (NPU)"
+
+msgid "Face the camera"
+msgstr "Dívejte se přímo do kamery"
+
+msgid "Tilt your face slightly up"
+msgstr "Mírně zakloňte obličej nahoru"
+
+msgid "Tilt your face slightly down"
+msgstr "Mírně skloňte obličej dolů"
+
+msgid "Turn your face slightly left"
+msgstr "Mírně otočte obličej doleva"
+
+msgid "Turn your face slightly right"
+msgstr "Mírně otočte obličej doprava"
+
+msgid "Database error during enrollment"
+msgstr "Chyba databáze během registrace"
+
+msgid "Camera error during enrollment"
+msgstr "Chyba kamery během registrace"
+
+msgid "Enrollment cancelled"
+msgstr "Registrace byla zrušena"
+
+msgid "Captured"
+msgstr "Nasnímáno"
+
+msgid "Completed"
+msgstr "Dokončeno"
+
+msgid "Run gaze doctor for recovery steps."
+msgstr "Postup nápravy zjistíte spuštěním gaze doctor."

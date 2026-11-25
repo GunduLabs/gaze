@@ -68,7 +68,7 @@ sudo apt install build-essential pkg-config clang libclang-dev \
   libpango1.0-dev libgraphene-1.0-dev \
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
   gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire \
-  gettext-base unzip \
+  gettext unzip \
   flatpak flatpak-builder elfutils
 ```
 
@@ -89,7 +89,7 @@ sudo zypper install --no-recommends \
   libopenssl-devel gtk4-devel libadwaita-devel \
   gstreamer-devel gstreamer-plugins-base-devel \
   gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugin-pipewire \
-  checkpolicy policycoreutils pkgconf-pkg-config envsubst gcc gcc-c++ unzip \
+  checkpolicy policycoreutils pkgconf-pkg-config envsubst gettext-tools gcc gcc-c++ unzip \
   flatpak flatpak-builder elfutils
 ```
 
@@ -106,7 +106,7 @@ sudo pacman -S base-devel pkgconf clang llvm \
 
 `libtss2-dev`/`tpm2-tss-devel`/`tpm2-tss`/`tpm2-0-tss-devel` and `libssl-dev`/`openssl-devel`/`openssl`/`libopenssl-devel` back the
 `tss-esapi` and `openssl-sys` crates (the daemon seals the face-template key to the TPM);
-`gettext-base`/`gettext`/`envsubst` provides `envsubst`, which the `package` recipe below needs;
+`gettext`/`gettext-tools`/`envsubst` provide `envsubst` and `msgfmt`, which the `package` recipe below needs;
 `unzip` unpacks the pinned ONNX Runtime from Microsoft's NuGet package.
 
 ### Additional dependencies for package builds

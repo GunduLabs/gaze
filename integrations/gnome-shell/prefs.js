@@ -6,7 +6,7 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 
-import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
+import {ExtensionPreferences, gettext as _} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 const GAZE_DBUS_NAME = 'com.gundulabs.Gaze';
 const GAZE_OBJECT_PATH = '/com/gundulabs/Gaze';
@@ -37,20 +37,18 @@ export default class GazePreferences extends ExtensionPreferences {
         const extensionSettings = this.getSettings();
 
         const behaviorPage = new Adw.PreferencesPage({
-            title: 'Behavior',
+            title: _('Behavior'),
             icon_name: 'preferences-system-symbolic',
         });
 
         const behaviorGroup = new Adw.PreferencesGroup({
-            title: 'Face authentication',
+            title: _('Face authentication'),
             description:
-                'Face authentication for unlocking this session. ' +
-                'This does not affect the GDM login screen (see below). ' +
-                'Settings are stored in your current dconf profile.',
+                _('Face authentication for unlocking this session. This does not affect the GDM login screen (see below). Settings are stored in your current dconf profile.'),
         });
 
         const faceRow = new Adw.SwitchRow({
-            title: 'Enable face authentication (lock screen)',
+            title: _('Enable face authentication (lock screen)'),
             active: extensionSettings.get_boolean(FACE_AUTH_KEY),
         });
 
@@ -64,17 +62,17 @@ export default class GazePreferences extends ExtensionPreferences {
 
         const retryModes = ['disabled', 'fixed', 'infinite'];
         const retryModeRow = new Adw.ComboRow({
-            title: 'Face retry mode',
+            title: _('Face retry mode'),
             model: Gtk.StringList.new([
-                'Disabled',
-                'Fixed tries',
-                'Infinite'
+                _('Disabled'),
+                _('Fixed tries'),
+                _('Infinite')
             ]),
         });
         behaviorGroup.add(retryModeRow);
 
         const triesRow = new Adw.SpinRow({
-            title: 'Maximum face tries',
+            title: _('Maximum face tries'),
             adjustment: new Gtk.Adjustment({
                 lower: 2,
                 upper: 20,
@@ -119,13 +117,13 @@ export default class GazePreferences extends ExtensionPreferences {
             updateTriesRowSensitivity(val);
         });
 
-        const facesGroup = new Adw.PreferencesGroup({title: 'Enrollment'});
+        const facesGroup = new Adw.PreferencesGroup({title: _('Enrollment')});
         const facesRow = new Adw.ActionRow({
-            title: 'Enrolled faces',
-            subtitle: 'Checking…',
+            title: _('Enrolled faces'),
+            subtitle: _('Checking…'),
         });
         const openButton = new Gtk.Button({
-            label: 'Open Gaze',
+            label: _('Open Gaze'),
             valign: Gtk.Align.CENTER,
         });
         openButton.connect('clicked', () => {
@@ -135,7 +133,7 @@ export default class GazePreferences extends ExtensionPreferences {
                 ).launch([], null);
             } catch (e) {
                 logError(e, '[gaze] Failed to open the Gaze app');
-                facesRow.set_subtitle('Could not open the Gaze app. Run gaze-gui from a terminal.');
+                facesRow.set_subtitle(_('Could not open the Gaze app. Run gaze-gui from a terminal.'));
             }
         });
         facesRow.add_suffix(openButton);
@@ -145,28 +143,25 @@ export default class GazePreferences extends ExtensionPreferences {
             .then(result => {
                 const [enrolled] = result.deepUnpack();
                 facesRow.set_subtitle(enrolled
-                    ? 'A face is enrolled for this account.'
-                    : 'No face is enrolled yet, so face unlock has nothing to match. Open Gaze to enroll one.');
+                    ? _('A face is enrolled for this account.')
+                    : _('No face is enrolled yet, so face unlock has nothing to match. Open Gaze to enroll one.'));
             })
             .catch(error => {
                 logError(error, '[gaze] Failed to read enrolled faces');
-                facesRow.set_subtitle('Gaze daemon unavailable.');
+                facesRow.set_subtitle(_('Gaze daemon unavailable.'));
             });
 
         behaviorPage.add(facesGroup);
         behaviorPage.add(behaviorGroup);
 
         const loginGroup = new Adw.PreferencesGroup({
-            title: 'GDM login screen',
+            title: _('GDM login screen'),
             description:
-                'Enable face authentication at the GDM login screen. ' +
-                'Requires administrator authorization. ' +
-                'Note: GNOME keyring is normally unlocked by your password, ' +
-                'so logging in with face only may leave it locked.',
+                _('Enable face authentication at the GDM login screen. Requires administrator authorization. Note: GNOME keyring is normally unlocked by your password, so logging in with face only may leave it locked.'),
         });
 
         const gdmRow = new Adw.SwitchRow({
-            title: 'Enable face authentication at GDM login',
+            title: _('Enable face authentication at GDM login'),
             active: false,
             sensitive: false,
         });
@@ -188,7 +183,7 @@ export default class GazePreferences extends ExtensionPreferences {
                 })
                 .catch(error => {
                     logError(error, '[gaze] Failed to read GDM face auth state');
-                    gdmRow.set_subtitle('Gaze daemon unavailable.');
+                    gdmRow.set_subtitle(_('Gaze daemon unavailable.'));
                 });
         };
 
@@ -197,7 +192,7 @@ export default class GazePreferences extends ExtensionPreferences {
             loadGdmState,
             () => {
                 gdmRow.set_sensitive(false);
-                gdmRow.set_subtitle('Gaze daemon unavailable.');
+                gdmRow.set_subtitle(_('Gaze daemon unavailable.'));
             }
         );
         window.connect('close-request', () => {
@@ -213,11 +208,12 @@ export default class GazePreferences extends ExtensionPreferences {
             let message;
             if (accessDenied) {
                 message = desired
-                    ? 'Administrator authorization is required to enable face authentication at the GDM login screen.'
-                    : 'Administrator authorization is required to disable face authentication at the GDM login screen.';
+                    ? _('Administrator authorization is required to enable face authentication at the GDM login screen.')
+                    : _('Administrator authorization is required to disable face authentication at the GDM login screen.');
             } else {
                 Gio.DBusError.strip_remote_error(error);
-                message = `Could not update GDM login face authentication: ${error.message}`;
+                message = _('Could not update GDM login face authentication: {error}')
+                    .replace('{error}', () => error.message);
             }
             gdmRow.set_subtitle(message);
             if (typeof window.add_toast === 'function')
@@ -238,8 +234,8 @@ export default class GazePreferences extends ExtensionPreferences {
                     gdmRow.set_sensitive(true);
                     if (typeof window.add_toast === 'function') {
                         const message = desired
-                            ? 'Face auth enabled at the GDM login screen. Restart GDM (or reboot) for it to take effect.'
-                            : 'Face auth disabled at the GDM login screen. Restart GDM (or reboot) for it to take effect.';
+                            ? _('Face auth enabled at the GDM login screen. Restart GDM (or reboot) for it to take effect.')
+                            : _('Face auth disabled at the GDM login screen. Restart GDM (or reboot) for it to take effect.');
                         window.add_toast(new Adw.Toast({title: message}));
                     }
                 })

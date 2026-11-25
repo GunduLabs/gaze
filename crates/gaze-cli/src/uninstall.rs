@@ -132,6 +132,11 @@ fn remove_unmanaged_install_artifacts_cmd() -> String {
           [ -e "$p" ] || [ -L "$p" ] || continue;
           remove_if_unmanaged "$p";
         done;
+        for p in /usr/share/gnome-shell/extensions/gaze@gundulabs.com/locale/*/LC_MESSAGES/gaze@gundulabs.com.mo /usr/share/locale/*/LC_MESSAGES/gaze@gundulabs.com.mo; do
+          [ -e "$p" ] || [ -L "$p" ] || continue;
+          remove_if_unmanaged "$p";
+        done;
+        sudo find /usr/share/gnome-shell/extensions/gaze@gundulabs.com/locale -depth -type d -empty -delete 2>/dev/null || true;
         sudo rmdir /usr/share/gnome-shell/extensions/gaze@gundulabs.com 2>/dev/null || true;
         sudo rm -rf /etc/systemd/system/gazed.service.d;
         sudo rm -rf /usr/local/share/gaze-dev;

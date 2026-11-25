@@ -60,7 +60,7 @@ runs:
           libssl-dev \
           gnupg \
           devscripts \
-          gettext-base \
+          gettext \
           pkg-config
 
     - name: Install Plasma 6 build dependencies
@@ -170,6 +170,7 @@ runs:
           gpg2 \
           pkgconf-pkg-config \
           envsubst \
+          gettext-tools \
           gcc \
           gcc-c++ \
           binutils \

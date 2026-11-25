@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: pl\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Clear a Gaze duress lockout"
+msgstr "Usuń blokadę Gaze po sygnale przymusu"
+
+msgid "Authentication is required to re-enable face authentication after a duress signal."
+msgstr "Wymagane jest uwierzytelnienie, aby ponownie włączyć uwierzytelnianie twarzą po sygnale przymusu."
+
+msgid "Manage face enrollments for Gaze"
+msgstr "Zarządzaj twarzami zarejestrowanymi w Gaze"
+
+msgid "Authentication is required to manage Gaze face enrollments."
+msgstr "Wymagane jest uwierzytelnienie, aby zarządzać twarzami zarejestrowanymi w Gaze."
+
+msgid "Manage daemon configuration for Gaze"
+msgstr "Zarządzaj konfiguracją usługi Gaze"
+
+msgid "Authentication is required to change Gaze daemon configuration."
+msgstr "Wymagane jest uwierzytelnienie, aby zmienić konfigurację usługi Gaze."
+
+msgid "Manage GDM login authentication for Gaze"
+msgstr "Zarządzaj uwierzytelnianiem Gaze przy logowaniu GDM"
+
+msgid "Authentication is required to change Gaze face authentication at the GDM login screen."
+msgstr "Wymagane jest uwierzytelnienie, aby zmienić uwierzytelnianie twarzą Gaze na ekranie logowania GDM."
+
+msgid "Enroll faces and configure facial authentication"
+msgstr "Rejestracja twarzy i konfiguracja uwierzytelniania twarzą"
+
+msgid "face;auth;login;biometric;"
+msgstr "twarz;odblokowanie;uwierzytelnianie;logowanie;biometria;"
+
+msgid "Enroll and manage faces, test face authentication, and adjust every Gaze setting."
+msgstr "Rejestruj twarze i zarządzaj nimi, testuj uwierzytelnianie twarzą i dostosowuj wszystkie ustawienia Gaze."
+
+msgid "Facial authentication"
+msgstr "Uwierzytelnianie twarzą"
+
+msgid "Gaze Settings"
+msgstr "Ustawienia Gaze"

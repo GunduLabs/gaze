@@ -1,0 +1,742 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: zh_TW\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Face authentication could not run"
+msgstr "無法執行臉部驗證"
+
+msgid "Face not recognized"
+msgstr "無法辨識臉部"
+
+msgid "Too dark for face authentication"
+msgstr "光線太暗，無法進行臉部驗證"
+
+msgid "No face detected"
+msgstr "未偵測到臉部"
+
+msgid "Move your face into the frame and try again"
+msgstr "請將臉部移入畫面中，然後再試一次"
+
+msgid "Close"
+msgstr "關閉"
+
+msgid "Remove “{name}”?"
+msgstr "要移除「{name}」嗎？"
+
+msgid "Gaze will stop recognizing this face. You can enroll it again later."
+msgstr "Gaze 將不再辨識此臉部。您之後可以重新註冊。"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Remove"
+msgstr "移除"
+
+msgid "Daemon Failed"
+msgstr "服務失敗"
+
+msgid "Gaze could not start. Run gaze doctor. On a new install, check that TPM 2.0 is enabled; settings cannot be changed here until the service starts."
+msgstr "Gaze 無法啟動。請執行 gaze doctor。若為全新安裝，請確認 TPM 2.0 已啟用；在服務啟動之前，無法在此變更設定。"
+
+msgid "Daemon Disabled"
+msgstr "服務已停用"
+
+msgid "The Gaze daemon is turned off. Turn it on with:"
+msgstr "Gaze 服務已關閉。請使用以下指令開啟："
+
+msgid "Daemon Stopped"
+msgstr "服務已停止"
+
+msgid "The Gaze daemon is not running. Start it with:"
+msgstr "Gaze 服務未在執行。請使用以下指令啟動："
+
+msgid "Daemon Not Installed"
+msgstr "服務未安裝"
+
+msgid "The gazed service is missing. Install the gaze package for your distribution."
+msgstr "找不到 gazed 服務。請安裝適用於您發行版的 gaze 套件。"
+
+msgid "Daemon Starting"
+msgstr "服務啟動中"
+
+msgid "The Gaze daemon is starting up. Its first start downloads face models, which can take a few minutes."
+msgstr "Gaze 服務正在啟動。首次啟動時會下載臉部模型，可能需要幾分鐘。"
+
+msgid "Connecting to the Gaze daemon…"
+msgstr "正在連線至 Gaze 服務…"
+
+msgid "Enrollment was not authorized"
+msgstr "註冊未獲授權"
+
+msgid "Could not start enrollment: {error}"
+msgstr "無法開始註冊：{error}"
+
+msgid "Could not start enrollment"
+msgstr "無法開始註冊"
+
+msgid "Could not start camera"
+msgstr "無法啟動相機"
+
+msgid "Close other camera apps, check the privacy shutter, or choose another camera in Settings."
+msgstr "請關閉其他使用相機的應用程式、檢查隱私遮蓋，或在「設定」中選擇其他相機。"
+
+msgid "ready"
+msgstr "就緒"
+
+msgid "needs captures"
+msgstr "需要擷取"
+
+msgid "unused"
+msgstr "未使用"
+
+msgid "Enroll a new face"
+msgstr "註冊新臉部"
+
+msgid "Settings"
+msgstr "設定"
+
+msgid "Connecting…"
+msgstr "正在連線…"
+
+msgid "Loading from the Gaze daemon…"
+msgstr "正在從 Gaze 服務載入…"
+
+msgid "Enrolled Faces"
+msgstr "已註冊的臉部"
+
+msgid "Rename a face, add captures to improve it, or remove it."
+msgstr "您可以重新命名臉部、新增擷取樣本以改善辨識，或將其移除。"
+
+msgid "Recognition"
+msgstr "辨識"
+
+msgid "Test recognition"
+msgstr "測試辨識"
+
+msgid "Not tested in this session yet."
+msgstr "此工作階段尚未測試。"
+
+msgid "Test"
+msgstr "測試"
+
+msgid "Look at the camera and check that Gaze recognizes you"
+msgstr "請看著相機，確認 Gaze 能辨識您"
+
+msgid "Setup Checklist"
+msgstr "設定檢查清單"
+
+msgid "Work through these once before using face unlock on your desktop."
+msgstr "在桌面上使用臉部解鎖之前，請先完成以下步驟一次。"
+
+msgid "Choose your camera"
+msgstr "選擇您的相機"
+
+msgid "Pick the camera in Settings, then check it in the enrollment preview"
+msgstr "在「設定」中選擇相機，然後在註冊預覽中確認"
+
+msgid "Enroll a face"
+msgstr "註冊臉部"
+
+msgid "Capture your face from a few angles"
+msgstr "從幾個角度擷取您的臉部"
+
+msgid "Confirm that Gaze recognizes you"
+msgstr "確認 Gaze 能辨識您"
+
+msgid "Check desktop integration"
+msgstr "檢查桌面整合"
+
+msgid "Run gaze doctor before trying screen unlock"
+msgstr "嘗試螢幕解鎖前，請先執行 gaze doctor"
+
+msgid "Enroll a Face"
+msgstr "註冊臉部"
+
+msgid "Running gaze doctor…"
+msgstr "正在執行 gaze doctor…"
+
+msgid "Run gaze doctor in a terminal on your Linux host to check desktop integration. If the installer requested a reboot, do that before testing screen unlock. Login and keyring unlock are optional, separate settings."
+msgstr "請在您 Linux 主機的終端機中執行 gaze doctor，以檢查桌面整合。如果安裝程式要求重新開機，請在測試螢幕解鎖之前先重新開機。登入與鑰匙圈解鎖是各自獨立的選用設定。"
+
+msgid "Desktop setup checks"
+msgstr "桌面設定檢查"
+
+msgid "Look at the camera…"
+msgstr "請看著相機…"
+
+msgid "Reconnecting to the Gaze daemon…"
+msgstr "正在重新連線至 Gaze 服務…"
+
+msgid "Could not access the camera: {error}. Close other camera apps and retry; run gaze doctor if it persists."
+msgstr "無法存取相機：{error}。請關閉其他使用相機的應用程式後重試；如果問題仍然存在，請執行 gaze doctor。"
+
+msgid "Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled."
+msgstr "無法開始辨識。請執行 gaze doctor，並確認已註冊可用的臉部設定檔。"
+
+msgid "Face recognized. Next: check desktop integration before trying screen unlock."
+msgstr "已辨識臉部。接下來：嘗試螢幕解鎖前，請先檢查桌面整合。"
+
+msgid "Lost contact with the Gaze daemon"
+msgstr "與 Gaze 服務失去連線"
+
+msgid "Recognition timed out without a result. Retry, or run gaze doctor to check the camera and service"
+msgstr "辨識逾時，沒有結果。請重試，或執行 gaze doctor 檢查相機與服務"
+
+msgid "Unsupported CPU"
+msgstr "不支援的 CPU"
+
+msgid "Could Not Load Faces"
+msgstr "無法載入臉部"
+
+msgid "No Faces Enrolled"
+msgstr "尚未註冊臉部"
+
+msgid "Choose your camera in Settings, then enroll a face. The capture window lets you check the camera before starting."
+msgstr "請在「設定」中選擇相機，然後註冊臉部。擷取視窗可讓您在開始前檢查相機。"
+
+msgid "1 capture"
+msgstr "1 次擷取"
+
+msgid "{count} captures"
+msgstr "{count} 次擷取"
+
+msgid "Rename"
+msgstr "重新命名"
+
+msgid "Improve this face"
+msgstr "改善此臉部"
+
+msgid "Delete"
+msgstr "刪除"
+
+msgid "New face name"
+msgstr "新的臉部名稱"
+
+msgid "A face with this name already exists"
+msgstr "已有相同名稱的臉部"
+
+msgid "Failed to rename face"
+msgstr "無法重新命名臉部"
+
+msgid "Renamed “{old}” to “{new}”"
+msgstr "已將「{old}」重新命名為「{new}」"
+
+msgid "Failed to remove face"
+msgstr "無法移除臉部"
+
+msgid "Camera Not Activated"
+msgstr "相機未啟用"
+
+msgid "No Face"
+msgstr "沒有臉部"
+
+msgid "Need More Light"
+msgstr "需要更多光線"
+
+msgid "Not Centered"
+msgstr "未置中"
+
+msgid "Face Clipped"
+msgstr "臉部超出畫面"
+
+msgid "Come Closer"
+msgstr "請靠近一點"
+
+msgid "Back Up"
+msgstr "請後退一點"
+
+msgid "Ready"
+msgstr "就緒"
+
+msgid "The camera could not be opened: {error}"
+msgstr "無法開啟相機：{error}"
+
+msgid "Main cameras"
+msgstr "主要相機"
+
+msgid "Fallback cameras {index}"
+msgstr "備用相機 {index}"
+
+msgid "Improve “{name}”"
+msgstr "改善「{name}」"
+
+msgid "Add Face"
+msgstr "新增臉部"
+
+msgid "Infrared camera"
+msgstr "紅外線相機"
+
+msgid "RGB camera"
+msgstr "RGB 相機"
+
+msgid "Infrared camera · preview starts when capture does"
+msgstr "紅外線相機 · 開始擷取時會顯示預覽"
+
+msgid "Face name"
+msgstr "臉部名稱"
+
+msgid "Camera"
+msgstr "相機"
+
+msgid "{camera} · preview starts when capture does"
+msgstr "{camera} · 開始擷取時會顯示預覽"
+
+msgid "Start Capture"
+msgstr "開始擷取"
+
+msgid "Done — test recognition next"
+msgstr "完成，接下來請測試辨識"
+
+msgid "Cancel Enrollment?"
+msgstr "要取消註冊嗎？"
+
+msgid "This will discard any partial captures."
+msgstr "這會捨棄所有未完成的擷取。"
+
+msgid "Resume"
+msgstr "繼續"
+
+msgid "Discard"
+msgstr "捨棄"
+
+msgid "{camera} · starting capture"
+msgstr "{camera} · 正在開始擷取"
+
+msgid "Starting enrollment…"
+msgstr "正在開始註冊…"
+
+msgid "Failed to connect to enrollment stream. Try again."
+msgstr "無法連線至註冊串流。請再試一次。"
+
+msgid "Failed to connect to capture stream. Try again."
+msgstr "無法連線至擷取串流。請再試一次。"
+
+msgid "Could not claim camera: {error}. Try again."
+msgstr "無法取得相機使用權：{error}。請再試一次。"
+
+msgid "{camera} · live preview unavailable, look at the camera"
+msgstr "{camera} · 無法使用即時預覽，請看著相機"
+
+msgid "Enrollment timed out. Close this window and try again."
+msgstr "註冊逾時。請關閉此視窗後再試一次。"
+
+msgid "Lost contact with the Gaze daemon. Close this window and try again."
+msgstr "與 Gaze 服務失去連線。請關閉此視窗後再試一次。"
+
+msgid "Face saved. Use Test in the main window, then check desktop integration."
+msgstr "臉部已儲存。請使用主視窗中的「測試」，然後檢查桌面整合。"
+
+msgid "Enrollment finished without saving."
+msgstr "註冊已結束，但未儲存。"
+
+msgid "Lost contact with the Gaze daemon."
+msgstr "與 Gaze 服務失去連線。"
+
+msgid "Try Again"
+msgstr "再試一次"
+
+msgid "Failed to apply config: {error}"
+msgstr "無法套用設定：{error}"
+
+msgid "Configured as {source}, which this list cannot show"
+msgstr "已設定為 {source}，此清單無法顯示"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI. Restart the Gaze daemon after changing this"
+msgstr "CPU、自動 NPU、Intel OpenVINO 或 AMD Ryzen AI。變更後請重新啟動 Gaze 服務"
+
+msgid "Configured as {provider}/{device}, which this build cannot show"
+msgstr "已設定為 {provider}/{device}，此版本無法顯示"
+
+msgid "Ordered fallback: {sources}. Selecting a camera replaces this list."
+msgstr "備用順序：{sources}。選擇相機會取代此清單。"
+
+msgid "Finding cameras…"
+msgstr "正在尋找相機…"
+
+msgid "Settings will appear when the camera scan finishes."
+msgstr "相機掃描完成後會顯示設定。"
+
+msgid "Primary camera"
+msgstr "主要相機"
+
+msgid "None"
+msgstr "無"
+
+msgid "None (IR only)"
+msgstr "無（僅 IR）"
+
+msgid "Could not list cameras"
+msgstr "無法列出相機"
+
+msgid "Close other camera applications and try Settings again. Run gaze doctor if the problem continues."
+msgstr "請關閉其他使用相機的應用程式，然後再次開啟「設定」。如果問題持續發生，請執行 gaze doctor。"
+
+msgid "Settings are locked"
+msgstr "設定已鎖定"
+
+msgid "Unlock…"
+msgstr "解鎖…"
+
+msgid "Everyday"
+msgstr "一般"
+
+msgid "Advanced"
+msgstr "進階"
+
+msgid "Changes save automatically after unlocking."
+msgstr "解鎖後會自動儲存變更。"
+
+msgid "Security"
+msgstr "安全性"
+
+msgid "Security level"
+msgstr "安全等級"
+
+msgid "Medium is recommended. Changing the recognition model requires re-enrolling existing profiles. Custom controls are in Advanced"
+msgstr "建議使用「中」。變更辨識模型後，必須重新註冊現有的設定檔。自訂控制項位於「進階」"
+
+msgid "Detector level"
+msgstr "偵測器等級"
+
+msgid "Recognizer level"
+msgstr "辨識器等級"
+
+msgid "RGB recognizer threshold"
+msgstr "RGB 辨識閾值"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "視為相符的最低 RGB 相似度"
+
+msgid "IR recognizer threshold"
+msgstr "IR 辨識閾值"
+
+msgid "Minimum IR similarity for a match"
+msgstr "視為相符的最低 IR 相似度"
+
+msgid "Hardware"
+msgstr "硬體"
+
+msgid "Inference execution provider"
+msgstr "推論執行提供者"
+
+msgid "OpenVINO inference device"
+msgstr "OpenVINO 推論裝置"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "所有 ONNX 模型使用的 Intel 裝置"
+
+msgid "RGB camera source"
+msgstr "RGB 相機來源"
+
+msgid "IR camera source"
+msgstr "IR 相機來源"
+
+msgid "IR frame size override"
+msgstr "覆寫 IR 影格大小"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "若自動模式下 IR 畫面呈綠色或損毀，則強制使用單一解析度"
+
+msgid "Width"
+msgstr "寬度"
+
+msgid "Height"
+msgstr "高度"
+
+msgid "Force IR emitter"
+msgstr "強制開啟 IR 發射器"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "覆寫發射器控制，僅在 IR 發射器無法自行開啟時使用"
+
+msgid "Parallel RGB + IR capture"
+msgstr "同時擷取 RGB + IR"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "混合驗證速度更快，但部分網路攝影機無法同時串流兩個感測器"
+
+msgid "Darkness cutoff"
+msgstr "黑暗臨界值"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "拒絕平均亮度低於此值的影格 (0–255)"
+
+msgid "Enrollment"
+msgstr "註冊"
+
+msgid "Maximum templates"
+msgstr "範本數量上限"
+
+msgid "Number of capture sets stored per face"
+msgstr "每個臉部儲存的擷取組數"
+
+msgid "Minimum face size ratio"
+msgstr "最小臉部大小比例"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "註冊時可接受的最小臉部；數值越低，可保持的距離越遠"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "活體偵測防偽"
+
+msgid "Enable liveness spoof prevention"
+msgstr "啟用活體偵測防偽"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "檢查相機影像與自然動作，找出照片或螢幕的跡象"
+
+msgid "Liveness threshold"
+msgstr "活體偵測閾值"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "防偽的最低信賴度"
+
+msgid "Maximum liveness duration"
+msgstr "活體偵測最長時間"
+
+msgid "Usable face time per camera before falling back to your password"
+msgstr "改用密碼前，每部相機可用的臉部時間"
+
+msgid "Authentication"
+msgstr "驗證"
+
+msgid "Abort if SSH"
+msgstr "使用 SSH 時中止"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "禁止透過 SSH 連線進行驗證"
+
+msgid "Abort if lid closed"
+msgstr "上蓋闔上時中止"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "筆記型電腦上蓋闔上時禁止驗證"
+
+msgid "Require a suspend first"
+msgstr "需先暫停一次"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "在系統暫停並恢復過一次之前，禁止驗證"
+
+msgid "Require confirmation on lock screen"
+msgstr "鎖定畫面需要確認"
+
+msgid "Confirm after matching where supported. On KDE lock/login screens this uses your password instead of face unlock"
+msgstr "在支援的地方，比對相符後要求確認。在 KDE 鎖定/登入畫面上，會使用密碼而非臉部解鎖"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "提升權限的驗證需要確認"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "在 sudo、polkit 和類似提示中，臉部相符後需按 Enter 或點選「確定」才能授權"
+
+msgid "Resume grace period (ms)"
+msgstr "恢復後的寬限時間（毫秒）"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "從暫停狀態喚醒時延後臉部驗證"
+
+msgid "Start delay (ms)"
+msgstr "開始延遲（毫秒）"
+
+msgid "Use 3000–5000 ms on KDE or hyprlock to give yourself time to step away after locking"
+msgstr "在 KDE 或 hyprlock 上請使用 3000–5000 毫秒，讓您在鎖定後有時間離開"
+
+msgid "Start delay applies to"
+msgstr "開始延遲套用於"
+
+msgid "Which prompts wait for the start delay"
+msgstr "哪些提示需等待開始延遲"
+
+msgid "Hybrid combining policy"
+msgstr "混合組合原則"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "RGB 與 IR 相機同時啟用時的組合原則"
+
+msgid "Storage"
+msgstr "儲存"
+
+msgid "Encrypt face templates"
+msgstr "加密臉部範本"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "使用 TPM 密封的金鑰加密儲存的臉部範本"
+
+msgid "Unlock GNOME Keyring"
+msgstr "解鎖 GNOME Keyring"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login. Needs liveness and template encryption, and keeps both on while enabled"
+msgstr "在受活體偵測保護的 GDM 或 greetd 臉部登入後使用已註冊的密碼。需要活體偵測與範本加密，啟用期間兩者都會保持開啟"
+
+msgid "Unlock KWallet"
+msgstr "解鎖 KWallet"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet. Needs liveness and template encryption, and keeps both on while enabled"
+msgstr "在受活體偵測保護的 KDE 登入後使用已註冊的密碼；請以 gaze keyring --kwallet 註冊。需要活體偵測與範本加密，啟用期間兩者都會保持開啟"
+
+msgid "Set up password…"
+msgstr "設定密碼…"
+
+msgid "Finish password unlock setup"
+msgstr "完成密碼解鎖設定"
+
+msgid "The switch enables this feature. Enroll your password from a terminal as your desktop user; then check your login integration. Passwords stay on this machine, protected by the TPM."
+msgstr "此開關會啟用這項功能。請以桌面使用者身分在終端機中註冊密碼，然後檢查登入整合。密碼會留在這部電腦上，並受 TPM 保護。"
+
+msgid "1. Wait for Settings to show Saved.\n2. Run: {command}\n3. Run: gaze doctor\n4. Reopen Settings to refresh password status."
+msgstr "1. 等待「設定」顯示「已儲存」。\n2. 執行：{command}\n3. 執行：gaze doctor\n4. 重新開啟「設定」以更新密碼狀態。"
+
+msgid "Cameras"
+msgstr "相機"
+
+msgid "Choose a camera, then use Enroll a Face to preview and check it."
+msgstr "選擇相機，然後使用「註冊臉部」來預覽並檢查。"
+
+msgid "Lock screen and password prompts"
+msgstr "鎖定畫面與密碼提示"
+
+msgid "Preparing and saving settings… Model downloads may take a few minutes."
+msgstr "正在準備並儲存設定… 下載模型可能需要幾分鐘。"
+
+msgid "Recognition model change cancelled; reopen Settings to confirm"
+msgstr "已取消變更辨識模型；請重新開啟「設定」以確認"
+
+msgid "Re-enroll faces after this change?"
+msgstr "變更後要重新註冊臉部嗎？"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face to capture new samples for every profile you use."
+msgstr "現有的擷取無法與新的辨識模型比對。它們會保留在磁碟上。儲存後，請使用「改善此臉部」，為您使用的每個設定檔擷取新的樣本。"
+
+msgid "Keep current model"
+msgstr "保留目前的模型"
+
+msgid "Change model"
+msgstr "變更模型"
+
+msgid "Model change cancelled. Current settings restored"
+msgstr "已取消變更模型。已還原目前的設定"
+
+msgid "Saved. Restart gazed, then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active."
+msgstr "已儲存。請重新啟動 gazed，然後執行 gaze doctor --benchmark 以驗證加速功能；目前可能改用 CPU。"
+
+msgid "Saved. Use Improve this face on each existing profile to re-enroll, then test recognition."
+msgstr "已儲存。請對每個現有設定檔使用「改善此臉部」重新註冊，然後測試辨識。"
+
+msgid "Saved. Changes are active."
+msgstr "已儲存。變更已生效。"
+
+msgid "Could not read the current configuration from the Gaze daemon"
+msgstr "無法從 Gaze 服務讀取目前的設定"
+
+msgid "Try again"
+msgstr "再試一次"
+
+msgid "Password stored"
+msgstr "密碼已儲存"
+
+msgid "Password not enrolled"
+msgstr "密碼未註冊"
+
+msgid "Password status unavailable"
+msgstr "無法取得密碼狀態"
+
+msgid "{state}. After enabling, run {command} in a terminal to enroll or replace it. Run gaze doctor to check login integration. Requires liveness and encryption."
+msgstr "{state}。啟用後，請在終端機中執行 {command} 以註冊或更換密碼。請執行 gaze doctor 檢查登入整合。需要活體偵測與加密。"
+
+msgid "Failed to load configuration: {error}"
+msgstr "無法載入設定：{error}"
+
+msgid "Settings stay locked: {error}"
+msgstr "設定保持鎖定：{error}"
+
+msgid "Low"
+msgstr "低"
+
+msgid "Medium"
+msgstr "中"
+
+msgid "High"
+msgstr "高"
+
+msgid "Maximum"
+msgstr "最高"
+
+msgid "Custom"
+msgstr "自訂"
+
+msgid "Standard"
+msgstr "標準"
+
+msgid "Accurate"
+msgstr "精確"
+
+msgid "Default"
+msgstr "預設"
+
+msgid "Or"
+msgstr "或"
+
+msgid "Fallback on dark"
+msgstr "黑暗時改用備用"
+
+msgid "And"
+msgstr "且"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "永不（先擷取 RGB，再擷取 IR）"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "自動（相機支援時同時擷取）"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "一律（同時擷取 RGB 與 IR）"
+
+msgid "All face authentication (including sudo)"
+msgstr "所有臉部驗證（包含 sudo）"
+
+msgid "Screen lockers only"
+msgstr "僅螢幕鎖定"
+
+msgid "Automatic (NPU)"
+msgstr "自動（NPU）"
+
+msgid "Face the camera"
+msgstr "請正對相機"
+
+msgid "Tilt your face slightly up"
+msgstr "請將臉稍微抬高"
+
+msgid "Tilt your face slightly down"
+msgstr "請將臉稍微朝下"
+
+msgid "Turn your face slightly left"
+msgstr "請將臉稍微轉向左邊"
+
+msgid "Turn your face slightly right"
+msgstr "請將臉稍微轉向右邊"
+
+msgid "Database error during enrollment"
+msgstr "註冊時發生資料庫錯誤"
+
+msgid "Camera error during enrollment"
+msgstr "註冊時發生相機錯誤"
+
+msgid "Enrollment cancelled"
+msgstr "註冊已取消"
+
+msgid "Captured"
+msgstr "已擷取"
+
+msgid "Completed"
+msgstr "已完成"
+
+msgid "Run gaze doctor for recovery steps."
+msgstr "請執行 gaze doctor 以取得復原步驟。"

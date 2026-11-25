@@ -1,0 +1,742 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Face authentication could not run"
+msgstr "顔認証を実行できませんでした"
+
+msgid "Face not recognized"
+msgstr "顔を認識できませんでした"
+
+msgid "Too dark for face authentication"
+msgstr "暗すぎるため顔認証を行えません"
+
+msgid "No face detected"
+msgstr "顔が検出されませんでした"
+
+msgid "Move your face into the frame and try again"
+msgstr "顔を枠内に入れて、もう一度お試しください"
+
+msgid "Close"
+msgstr "閉じる"
+
+msgid "Remove “{name}”?"
+msgstr "「{name}」を削除しますか？"
+
+msgid "Gaze will stop recognizing this face. You can enroll it again later."
+msgstr "Gaze はこの顔を認識しなくなります。後でもう一度登録できます。"
+
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgid "Remove"
+msgstr "削除"
+
+msgid "Daemon Failed"
+msgstr "デーモンエラー"
+
+msgid "Gaze could not start. Run gaze doctor. On a new install, check that TPM 2.0 is enabled; settings cannot be changed here until the service starts."
+msgstr "Gaze を起動できませんでした。gaze doctor を実行してください。新規インストールの場合は、TPM 2.0 が有効か確認してください。サービスが起動するまで、ここで設定を変更することはできません。"
+
+msgid "Daemon Disabled"
+msgstr "デーモンは無効です"
+
+msgid "The Gaze daemon is turned off. Turn it on with:"
+msgstr "Gaze デーモンが無効になっています。次のコマンドで有効にしてください:"
+
+msgid "Daemon Stopped"
+msgstr "デーモンは停止しています"
+
+msgid "The Gaze daemon is not running. Start it with:"
+msgstr "Gaze デーモンが実行されていません。次のコマンドで起動してください:"
+
+msgid "Daemon Not Installed"
+msgstr "デーモンがインストールされていません"
+
+msgid "The gazed service is missing. Install the gaze package for your distribution."
+msgstr "gazed サービスが見つかりません。お使いのディストリビューション用の gaze パッケージをインストールしてください。"
+
+msgid "Daemon Starting"
+msgstr "デーモンを起動中"
+
+msgid "The Gaze daemon is starting up. Its first start downloads face models, which can take a few minutes."
+msgstr "Gaze デーモンを起動しています。初回起動時は顔モデルをダウンロードするため、数分かかることがあります。"
+
+msgid "Connecting to the Gaze daemon…"
+msgstr "Gaze デーモンに接続中…"
+
+msgid "Enrollment was not authorized"
+msgstr "登録が許可されませんでした"
+
+msgid "Could not start enrollment: {error}"
+msgstr "登録を開始できませんでした: {error}"
+
+msgid "Could not start enrollment"
+msgstr "登録を開始できませんでした"
+
+msgid "Could not start camera"
+msgstr "カメラを起動できませんでした"
+
+msgid "Close other camera apps, check the privacy shutter, or choose another camera in Settings."
+msgstr "ほかのカメラアプリを閉じ、プライバシーシャッターを確認するか、設定で別のカメラを選択してください。"
+
+msgid "ready"
+msgstr "準備完了"
+
+msgid "needs captures"
+msgstr "撮影が必要"
+
+msgid "unused"
+msgstr "未使用"
+
+msgid "Enroll a new face"
+msgstr "新しい顔を登録"
+
+msgid "Settings"
+msgstr "設定"
+
+msgid "Connecting…"
+msgstr "接続中…"
+
+msgid "Loading from the Gaze daemon…"
+msgstr "Gaze デーモンから読み込み中…"
+
+msgid "Enrolled Faces"
+msgstr "登録済みの顔"
+
+msgid "Rename a face, add captures to improve it, or remove it."
+msgstr "顔の名前の変更、精度向上のための撮影の追加、削除ができます。"
+
+msgid "Recognition"
+msgstr "認識"
+
+msgid "Test recognition"
+msgstr "認識をテスト"
+
+msgid "Not tested in this session yet."
+msgstr "このセッションではまだテストしていません。"
+
+msgid "Test"
+msgstr "テスト"
+
+msgid "Look at the camera and check that Gaze recognizes you"
+msgstr "カメラを見て、Gaze に認識されるか確認してください"
+
+msgid "Setup Checklist"
+msgstr "セットアップチェックリスト"
+
+msgid "Work through these once before using face unlock on your desktop."
+msgstr "デスクトップで顔によるロック解除を使う前に、一度これらを確認してください。"
+
+msgid "Choose your camera"
+msgstr "カメラを選択"
+
+msgid "Pick the camera in Settings, then check it in the enrollment preview"
+msgstr "設定でカメラを選び、登録のプレビューで確認します"
+
+msgid "Enroll a face"
+msgstr "顔を登録"
+
+msgid "Capture your face from a few angles"
+msgstr "いくつかの角度から顔を撮影します"
+
+msgid "Confirm that Gaze recognizes you"
+msgstr "Gaze に認識されることを確認します"
+
+msgid "Check desktop integration"
+msgstr "デスクトップ連携を確認"
+
+msgid "Run gaze doctor before trying screen unlock"
+msgstr "画面ロックの解除を試す前に gaze doctor を実行してください"
+
+msgid "Enroll a Face"
+msgstr "顔を登録"
+
+msgid "Running gaze doctor…"
+msgstr "gaze doctor を実行中…"
+
+msgid "Run gaze doctor in a terminal on your Linux host to check desktop integration. If the installer requested a reboot, do that before testing screen unlock. Login and keyring unlock are optional, separate settings."
+msgstr "お使いの Linux のターミナルで gaze doctor を実行し、デスクトップ連携を確認してください。インストーラーから再起動を求められた場合は、画面ロックの解除をテストする前に再起動してください。ログインとキーリングのロック解除は、それぞれ独立した任意の設定です。"
+
+msgid "Desktop setup checks"
+msgstr "デスクトップ設定の確認"
+
+msgid "Look at the camera…"
+msgstr "カメラを見てください…"
+
+msgid "Reconnecting to the Gaze daemon…"
+msgstr "Gaze デーモンに再接続中…"
+
+msgid "Could not access the camera: {error}. Close other camera apps and retry; run gaze doctor if it persists."
+msgstr "カメラにアクセスできませんでした: {error}。ほかのカメラアプリを閉じて再試行してください。解決しない場合は gaze doctor を実行してください。"
+
+msgid "Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled."
+msgstr "認識を開始できませんでした。gaze doctor を実行し、使用可能な顔プロファイルが登録されているか確認してください。"
+
+msgid "Face recognized. Next: check desktop integration before trying screen unlock."
+msgstr "顔を認識しました。次に、画面ロックの解除を試す前にデスクトップ連携を確認してください。"
+
+msgid "Lost contact with the Gaze daemon"
+msgstr "Gaze デーモンとの接続が切れました"
+
+msgid "Recognition timed out without a result. Retry, or run gaze doctor to check the camera and service"
+msgstr "結果が得られないまま認識がタイムアウトしました。再試行するか、gaze doctor を実行してカメラとサービスを確認してください"
+
+msgid "Unsupported CPU"
+msgstr "サポートされていない CPU"
+
+msgid "Could Not Load Faces"
+msgstr "顔を読み込めませんでした"
+
+msgid "No Faces Enrolled"
+msgstr "登録された顔がありません"
+
+msgid "Choose your camera in Settings, then enroll a face. The capture window lets you check the camera before starting."
+msgstr "設定でカメラを選んでから顔を登録してください。撮影ウィンドウでは、開始前にカメラを確認できます。"
+
+msgid "1 capture"
+msgstr "撮影 1 件"
+
+msgid "{count} captures"
+msgstr "撮影 {count} 件"
+
+msgid "Rename"
+msgstr "名前を変更"
+
+msgid "Improve this face"
+msgstr "この顔を改善"
+
+msgid "Delete"
+msgstr "削除"
+
+msgid "New face name"
+msgstr "新しい顔の名前"
+
+msgid "A face with this name already exists"
+msgstr "この名前の顔はすでに存在します"
+
+msgid "Failed to rename face"
+msgstr "顔の名前を変更できませんでした"
+
+msgid "Renamed “{old}” to “{new}”"
+msgstr "「{old}」の名前を「{new}」に変更しました"
+
+msgid "Failed to remove face"
+msgstr "顔を削除できませんでした"
+
+msgid "Camera Not Activated"
+msgstr "カメラが有効になっていません"
+
+msgid "No Face"
+msgstr "顔がありません"
+
+msgid "Need More Light"
+msgstr "もっと明るくしてください"
+
+msgid "Not Centered"
+msgstr "中央にありません"
+
+msgid "Face Clipped"
+msgstr "顔が切れています"
+
+msgid "Come Closer"
+msgstr "近づいてください"
+
+msgid "Back Up"
+msgstr "離れてください"
+
+msgid "Ready"
+msgstr "準備完了"
+
+msgid "The camera could not be opened: {error}"
+msgstr "カメラを開けませんでした: {error}"
+
+msgid "Main cameras"
+msgstr "メインカメラ"
+
+msgid "Fallback cameras {index}"
+msgstr "予備カメラ {index}"
+
+msgid "Improve “{name}”"
+msgstr "「{name}」を改善"
+
+msgid "Add Face"
+msgstr "顔を追加"
+
+msgid "Infrared camera"
+msgstr "赤外線カメラ"
+
+msgid "RGB camera"
+msgstr "RGB カメラ"
+
+msgid "Infrared camera · preview starts when capture does"
+msgstr "赤外線カメラ · 撮影を開始するとプレビューが表示されます"
+
+msgid "Face name"
+msgstr "顔の名前"
+
+msgid "Camera"
+msgstr "カメラ"
+
+msgid "{camera} · preview starts when capture does"
+msgstr "{camera} · 撮影を開始するとプレビューが表示されます"
+
+msgid "Start Capture"
+msgstr "撮影を開始"
+
+msgid "Done — test recognition next"
+msgstr "完了 — 次は認識をテストしてください"
+
+msgid "Cancel Enrollment?"
+msgstr "登録をキャンセルしますか？"
+
+msgid "This will discard any partial captures."
+msgstr "途中までの撮影データは破棄されます。"
+
+msgid "Resume"
+msgstr "再開"
+
+msgid "Discard"
+msgstr "破棄"
+
+msgid "{camera} · starting capture"
+msgstr "{camera} · 撮影を開始しています"
+
+msgid "Starting enrollment…"
+msgstr "登録を開始中…"
+
+msgid "Failed to connect to enrollment stream. Try again."
+msgstr "登録ストリームに接続できませんでした。もう一度お試しください。"
+
+msgid "Failed to connect to capture stream. Try again."
+msgstr "撮影ストリームに接続できませんでした。もう一度お試しください。"
+
+msgid "Could not claim camera: {error}. Try again."
+msgstr "カメラを確保できませんでした: {error}。もう一度お試しください。"
+
+msgid "{camera} · live preview unavailable, look at the camera"
+msgstr "{camera} · ライブプレビューは利用できません。カメラを見てください"
+
+msgid "Enrollment timed out. Close this window and try again."
+msgstr "登録がタイムアウトしました。このウィンドウを閉じて、もう一度お試しください。"
+
+msgid "Lost contact with the Gaze daemon. Close this window and try again."
+msgstr "Gaze デーモンとの接続が切れました。このウィンドウを閉じて、もう一度お試しください。"
+
+msgid "Face saved. Use Test in the main window, then check desktop integration."
+msgstr "顔を保存しました。メインウィンドウの「テスト」を使い、その後デスクトップ連携を確認してください。"
+
+msgid "Enrollment finished without saving."
+msgstr "保存されずに登録が終了しました。"
+
+msgid "Lost contact with the Gaze daemon."
+msgstr "Gaze デーモンとの接続が切れました。"
+
+msgid "Try Again"
+msgstr "再試行"
+
+msgid "Failed to apply config: {error}"
+msgstr "設定を適用できませんでした: {error}"
+
+msgid "Configured as {source}, which this list cannot show"
+msgstr "{source} に設定されていますが、この一覧には表示できません"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI. Restart the Gaze daemon after changing this"
+msgstr "CPU、自動 NPU、Intel OpenVINO、AMD Ryzen AI。変更後は Gaze デーモンを再起動してください"
+
+msgid "Configured as {provider}/{device}, which this build cannot show"
+msgstr "{provider}/{device} に設定されていますが、このビルドでは表示できません"
+
+msgid "Ordered fallback: {sources}. Selecting a camera replaces this list."
+msgstr "予備の順序: {sources}。カメラを選択すると、この一覧は置き換えられます。"
+
+msgid "Finding cameras…"
+msgstr "カメラを検索中…"
+
+msgid "Settings will appear when the camera scan finishes."
+msgstr "カメラの検索が終わると設定が表示されます。"
+
+msgid "Primary camera"
+msgstr "メインカメラ"
+
+msgid "None"
+msgstr "なし"
+
+msgid "None (IR only)"
+msgstr "なし (IR のみ)"
+
+msgid "Could not list cameras"
+msgstr "カメラの一覧を取得できませんでした"
+
+msgid "Close other camera applications and try Settings again. Run gaze doctor if the problem continues."
+msgstr "ほかのカメラアプリを閉じて、設定をもう一度開いてください。問題が続く場合は gaze doctor を実行してください。"
+
+msgid "Settings are locked"
+msgstr "設定はロックされています"
+
+msgid "Unlock…"
+msgstr "ロックを解除…"
+
+msgid "Everyday"
+msgstr "基本"
+
+msgid "Advanced"
+msgstr "詳細"
+
+msgid "Changes save automatically after unlocking."
+msgstr "ロックを解除すると、変更は自動的に保存されます。"
+
+msgid "Security"
+msgstr "セキュリティ"
+
+msgid "Security level"
+msgstr "セキュリティレベル"
+
+msgid "Medium is recommended. Changing the recognition model requires re-enrolling existing profiles. Custom controls are in Advanced"
+msgstr "「中」を推奨します。認識モデルを変更すると、既存のプロファイルの再登録が必要です。カスタム設定は「詳細」にあります"
+
+msgid "Detector level"
+msgstr "検出器のレベル"
+
+msgid "Recognizer level"
+msgstr "認識器のレベル"
+
+msgid "RGB recognizer threshold"
+msgstr "RGB 認識のしきい値"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "一致とみなす RGB 類似度の最小値"
+
+msgid "IR recognizer threshold"
+msgstr "IR 認識のしきい値"
+
+msgid "Minimum IR similarity for a match"
+msgstr "一致とみなす IR 類似度の最小値"
+
+msgid "Hardware"
+msgstr "ハードウェア"
+
+msgid "Inference execution provider"
+msgstr "推論実行プロバイダー"
+
+msgid "OpenVINO inference device"
+msgstr "OpenVINO 推論デバイス"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "すべての ONNX モデルに使用する Intel デバイス"
+
+msgid "RGB camera source"
+msgstr "RGB カメラのソース"
+
+msgid "IR camera source"
+msgstr "IR カメラのソース"
+
+msgid "IR frame size override"
+msgstr "IR フレームサイズの指定"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "自動で IR 映像が緑色になる、または乱れる場合に解像度を固定します"
+
+msgid "Width"
+msgstr "幅"
+
+msgid "Height"
+msgstr "高さ"
+
+msgid "Force IR emitter"
+msgstr "IR エミッターを強制"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "IR エミッターが自動で点灯しない場合にのみ、エミッターの制御を上書きします"
+
+msgid "Parallel RGB + IR capture"
+msgstr "RGB + IR の並列撮影"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "ハイブリッド認証が速くなりますが、両方のセンサーを同時に使用できないウェブカメラもあります"
+
+msgid "Darkness cutoff"
+msgstr "暗さの下限"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "平均の明るさがこの値を下回るフレームを除外します (0–255)"
+
+msgid "Enrollment"
+msgstr "登録"
+
+msgid "Maximum templates"
+msgstr "テンプレートの最大数"
+
+msgid "Number of capture sets stored per face"
+msgstr "顔ごとに保存する撮影セットの数"
+
+msgid "Minimum face size ratio"
+msgstr "顔の最小サイズ比"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "登録時に受け付ける顔の最小サイズ。小さくすると、より離れて登録できます"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "生体検知 (なりすまし防止)"
+
+msgid "Enable liveness spoof prevention"
+msgstr "生体検知によるなりすまし防止を有効にする"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "カメラ画像と自然な動きから、写真や画面の兆候を確認します"
+
+msgid "Liveness threshold"
+msgstr "生体検知のしきい値"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "なりすまし防止の最小信頼度"
+
+msgid "Maximum liveness duration"
+msgstr "生体検知の最大時間"
+
+msgid "Usable face time per camera before falling back to your password"
+msgstr "パスワードに切り替えるまでの、カメラごとの有効な顔の時間"
+
+msgid "Authentication"
+msgstr "認証"
+
+msgid "Abort if SSH"
+msgstr "SSH の場合は中止"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "SSH 接続での認証を禁止します"
+
+msgid "Abort if lid closed"
+msgstr "ふたが閉じている場合は中止"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "ノートパソコンのふたが閉じているときの認証を禁止します"
+
+msgid "Require a suspend first"
+msgstr "先にサスペンドを必須にする"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "システムが一度サスペンドから復帰するまで認証を禁止します"
+
+msgid "Require confirmation on lock screen"
+msgstr "ロック画面で確認を必須にする"
+
+msgid "Confirm after matching where supported. On KDE lock/login screens this uses your password instead of face unlock"
+msgstr "対応している環境では、一致した後に確認します。KDE のロック/ログイン画面では、顔によるロック解除の代わりにパスワードを使用します"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "権限昇格の認証で確認を必須にする"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "sudo や polkit などのプロンプトで顔が一致した後、Enter を押すか OK をクリックして承認する必要があります"
+
+msgid "Resume grace period (ms)"
+msgstr "復帰後の猶予時間 (ミリ秒)"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "サスペンドからの復帰時に顔認証を遅らせます"
+
+msgid "Start delay (ms)"
+msgstr "開始の遅延 (ミリ秒)"
+
+msgid "Use 3000–5000 ms on KDE or hyprlock to give yourself time to step away after locking"
+msgstr "KDE や hyprlock では、ロック後に離れる時間を確保するため 3000–5000 ミリ秒にしてください"
+
+msgid "Start delay applies to"
+msgstr "開始の遅延を適用する対象"
+
+msgid "Which prompts wait for the start delay"
+msgstr "開始の遅延を待つプロンプト"
+
+msgid "Hybrid combining policy"
+msgstr "ハイブリッドの組み合わせ方法"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "RGB と IR の両方のカメラが有効なときの組み合わせ方法"
+
+msgid "Storage"
+msgstr "保存"
+
+msgid "Encrypt face templates"
+msgstr "顔テンプレートを暗号化"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "保存された顔テンプレートを TPM で封印した鍵で暗号化します"
+
+msgid "Unlock GNOME Keyring"
+msgstr "GNOME Keyring のロックを解除"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login. Needs liveness and template encryption, and keeps both on while enabled"
+msgstr "生体検知で保護された GDM または greetd の顔ログイン後に、登録したパスワードを使用します。生体検知とテンプレートの暗号化が必要で、有効な間は両方ともオンのままになります"
+
+msgid "Unlock KWallet"
+msgstr "KWallet のロックを解除"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet. Needs liveness and template encryption, and keeps both on while enabled"
+msgstr "生体検知で保護された KDE ログイン後に、登録したパスワードを使用します。gaze keyring --kwallet で登録してください。生体検知とテンプレートの暗号化が必要で、有効な間は両方ともオンのままになります"
+
+msgid "Set up password…"
+msgstr "パスワードを設定…"
+
+msgid "Finish password unlock setup"
+msgstr "パスワードによるロック解除の設定を完了"
+
+msgid "The switch enables this feature. Enroll your password from a terminal as your desktop user; then check your login integration. Passwords stay on this machine, protected by the TPM."
+msgstr "このスイッチで機能を有効にします。デスクトップのユーザーとしてターミナルからパスワードを登録し、その後ログイン連携を確認してください。パスワードは TPM で保護され、このコンピューターから外に出ません。"
+
+msgid "1. Wait for Settings to show Saved.\n2. Run: {command}\n3. Run: gaze doctor\n4. Reopen Settings to refresh password status."
+msgstr "1. 設定に「保存しました」と表示されるまで待ちます。\n2. 実行: {command}\n3. 実行: gaze doctor\n4. 設定を開き直して、パスワードの状態を更新します。"
+
+msgid "Cameras"
+msgstr "カメラ"
+
+msgid "Choose a camera, then use Enroll a Face to preview and check it."
+msgstr "カメラを選び、「顔を登録」でプレビューして確認してください。"
+
+msgid "Lock screen and password prompts"
+msgstr "ロック画面とパスワードプロンプト"
+
+msgid "Preparing and saving settings… Model downloads may take a few minutes."
+msgstr "設定を準備して保存中… モデルのダウンロードには数分かかることがあります。"
+
+msgid "Recognition model change cancelled; reopen Settings to confirm"
+msgstr "認識モデルの変更をキャンセルしました。設定を開き直して確認してください"
+
+msgid "Re-enroll faces after this change?"
+msgstr "この変更後に顔を登録し直しますか？"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face to capture new samples for every profile you use."
+msgstr "既存の撮影データは新しい認識モデルと照合できません。データはディスクに残ります。保存後、使用するすべてのプロファイルで「この顔を改善」を使って撮影し直してください。"
+
+msgid "Keep current model"
+msgstr "現在のモデルを維持"
+
+msgid "Change model"
+msgstr "モデルを変更"
+
+msgid "Model change cancelled. Current settings restored"
+msgstr "モデルの変更をキャンセルしました。現在の設定を復元しました"
+
+msgid "Saved. Restart gazed, then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active."
+msgstr "保存しました。gazed を再起動し、gaze doctor --benchmark を実行して高速化を確認してください。代わりに CPU が使われている可能性があります。"
+
+msgid "Saved. Use Improve this face on each existing profile to re-enroll, then test recognition."
+msgstr "保存しました。既存の各プロファイルで「この顔を改善」を使って登録し直し、その後認識をテストしてください。"
+
+msgid "Saved. Changes are active."
+msgstr "保存しました。変更は有効です。"
+
+msgid "Could not read the current configuration from the Gaze daemon"
+msgstr "Gaze デーモンから現在の設定を読み取れませんでした"
+
+msgid "Try again"
+msgstr "再試行"
+
+msgid "Password stored"
+msgstr "パスワードは保存済み"
+
+msgid "Password not enrolled"
+msgstr "パスワードは未登録"
+
+msgid "Password status unavailable"
+msgstr "パスワードの状態は不明"
+
+msgid "{state}. After enabling, run {command} in a terminal to enroll or replace it. Run gaze doctor to check login integration. Requires liveness and encryption."
+msgstr "{state}。有効にした後、ターミナルで {command} を実行して登録または変更してください。gaze doctor を実行してログイン連携を確認してください。生体検知と暗号化が必要です。"
+
+msgid "Failed to load configuration: {error}"
+msgstr "設定を読み込めませんでした: {error}"
+
+msgid "Settings stay locked: {error}"
+msgstr "設定はロックされたままです: {error}"
+
+msgid "Low"
+msgstr "低"
+
+msgid "Medium"
+msgstr "中"
+
+msgid "High"
+msgstr "高"
+
+msgid "Maximum"
+msgstr "最高"
+
+msgid "Custom"
+msgstr "カスタム"
+
+msgid "Standard"
+msgstr "標準"
+
+msgid "Accurate"
+msgstr "高精度"
+
+msgid "Default"
+msgstr "既定"
+
+msgid "Or"
+msgstr "いずれか (OR)"
+
+msgid "Fallback on dark"
+msgstr "暗いときに切り替え"
+
+msgid "And"
+msgstr "両方 (AND)"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "使用しない (RGB の後に IR を撮影)"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "自動 (カメラが対応していれば並列)"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "常に使用 (RGB と IR を同時に撮影)"
+
+msgid "All face authentication (including sudo)"
+msgstr "すべての顔認証 (sudo を含む)"
+
+msgid "Screen lockers only"
+msgstr "画面ロックのみ"
+
+msgid "Automatic (NPU)"
+msgstr "自動 (NPU)"
+
+msgid "Face the camera"
+msgstr "カメラの正面を向いてください"
+
+msgid "Tilt your face slightly up"
+msgstr "顔を少し上に傾けてください"
+
+msgid "Tilt your face slightly down"
+msgstr "顔を少し下に傾けてください"
+
+msgid "Turn your face slightly left"
+msgstr "顔を少し左に向けてください"
+
+msgid "Turn your face slightly right"
+msgstr "顔を少し右に向けてください"
+
+msgid "Database error during enrollment"
+msgstr "登録中にデータベースエラーが発生しました"
+
+msgid "Camera error during enrollment"
+msgstr "登録中にカメラエラーが発生しました"
+
+msgid "Enrollment cancelled"
+msgstr "登録をキャンセルしました"
+
+msgid "Captured"
+msgstr "撮影しました"
+
+msgid "Completed"
+msgstr "完了しました"
+
+msgid "Run gaze doctor for recovery steps."
+msgstr "復旧手順は gaze doctor を実行して確認してください。"

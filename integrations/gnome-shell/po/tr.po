@@ -1,0 +1,160 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: tr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Enrollment"
+msgstr "Kayıt"
+
+msgid "Behavior"
+msgstr "Davranış"
+
+msgid "Face authentication"
+msgstr "Yüz kimlik doğrulaması"
+
+msgid "Face authentication for unlocking this session. This does not affect the GDM login screen (see below). Settings are stored in your current dconf profile."
+msgstr "Bu oturumun kilidini açmak için yüz kimlik doğrulaması. GDM oturum açma ekranını etkilemez (aşağıya bakın). Ayarlar geçerli dconf profilinizde saklanır."
+
+msgid "Enable face authentication (lock screen)"
+msgstr "Yüz kimlik doğrulamasını etkinleştir (kilit ekranı)"
+
+msgid "Face retry mode"
+msgstr "Yüz yeniden deneme kipi"
+
+msgid "Disabled"
+msgstr "Devre dışı"
+
+msgid "Fixed tries"
+msgstr "Sabit deneme sayısı"
+
+msgid "Infinite"
+msgstr "Sınırsız"
+
+msgid "Maximum face tries"
+msgstr "En fazla yüz denemesi"
+
+msgid "Enrolled faces"
+msgstr "Kayıtlı yüzler"
+
+msgid "Checking…"
+msgstr "Denetleniyor…"
+
+msgid "Open Gaze"
+msgstr "Gaze’i Aç"
+
+msgid "Could not open the Gaze app. Run gaze-gui from a terminal."
+msgstr "Gaze uygulaması açılamadı. Bir uçbirimden gaze-gui komutunu çalıştırın."
+
+msgid "A face is enrolled for this account."
+msgstr "Bu hesap için bir yüz kayıtlı."
+
+msgid "No face is enrolled yet, so face unlock has nothing to match. Open Gaze to enroll one."
+msgstr "Henüz kayıtlı yüz yok, bu nedenle yüzle kilit açmanın eşleştirecek bir şeyi yok. Kaydetmek için Gaze’i açın."
+
+msgid "Gaze daemon unavailable."
+msgstr "Gaze hizmeti kullanılamıyor."
+
+msgid "GDM login screen"
+msgstr "GDM oturum açma ekranı"
+
+msgid "Enable face authentication at the GDM login screen. Requires administrator authorization. Note: GNOME keyring is normally unlocked by your password, so logging in with face only may leave it locked."
+msgstr "GDM oturum açma ekranında yüz kimlik doğrulamasını etkinleştirir. Yönetici yetkisi gerektirir. Not: GNOME anahtarlığının kilidi normalde parolanızla açılır, bu nedenle yalnızca yüzle oturum açmak onu kilitli bırakabilir."
+
+msgid "Enable face authentication at GDM login"
+msgstr "GDM oturum açmada yüz kimlik doğrulamasını etkinleştir"
+
+msgid "Administrator authorization is required to enable face authentication at the GDM login screen."
+msgstr "GDM oturum açma ekranında yüz kimlik doğrulamasını etkinleştirmek için yönetici yetkisi gerekiyor."
+
+msgid "Administrator authorization is required to disable face authentication at the GDM login screen."
+msgstr "GDM oturum açma ekranında yüz kimlik doğrulamasını devre dışı bırakmak için yönetici yetkisi gerekiyor."
+
+msgid "Could not update GDM login face authentication: {error}"
+msgstr "GDM oturum açma yüz kimlik doğrulaması güncellenemedi: {error}"
+
+msgid "Face auth enabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "GDM oturum açma ekranında yüz kimlik doğrulaması etkinleştirildi. Geçerli olması için GDM’yi (veya bilgisayarı) yeniden başlatın."
+
+msgid "Face auth disabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "GDM oturum açma ekranında yüz kimlik doğrulaması devre dışı bırakıldı. Geçerli olması için GDM’yi (veya bilgisayarı) yeniden başlatın."
+
+msgid "Face not recognized. Please enter your password."
+msgstr "Yüz tanınmadı. Lütfen parolanızı girin."
+
+msgid "Face not detected. Please enter your password."
+msgstr "Yüz algılanmadı. Lütfen parolanızı girin."
+
+msgid "Too dark for face authentication. Please enter your password."
+msgstr "Yüz kimlik doğrulaması için çok karanlık. Lütfen parolanızı girin."
+
+msgid "Face authentication timed out. Please enter your password."
+msgstr "Yüz kimlik doğrulaması zaman aşımına uğradı. Lütfen parolanızı girin."
+
+msgid "Face authentication unavailable. Please enter your password."
+msgstr "Yüz kimlik doğrulaması kullanılamıyor. Lütfen parolanızı girin."
+
+msgid "Changing Gaze's settings or faces needs your password."
+msgstr "Gaze ayarlarını veya yüzlerini değiştirmek için parolanız gerekiyor."
+
+msgid "Sorry, face authentication did not work. Please try again."
+msgstr "Üzgünüz, yüz kimlik doğrulaması başarısız oldu. Lütfen yeniden deneyin."
+
+msgid "You reached the maximum face authentication attempts, please try another method"
+msgstr "En fazla yüz kimlik doğrulama denemesine ulaştınız, lütfen başka bir yöntem deneyin"
+
+msgid "(or look at the camera)"
+msgstr "(veya kameraya bakın)"
+
+msgid "(or look at the camera or swipe finger)"
+msgstr "(ya da kameraya bak veya parmağı kaydır)"
+
+msgid "(or look at the camera or place finger on reader)"
+msgstr "(ya da kameraya bak veya parmağı okuyucuya yerleştir)"
+
+msgid "(or swipe finger across reader)"
+msgstr "(ya da parmağı okuyucuda kaydır)"
+
+msgid "(or place finger on reader)"
+msgstr "(ya da parmağı okuyucuya yerleştir)"
+
+msgid "Password"
+msgstr "Parola"
+
+msgid "Face verified. Press Enter or click Authenticate to confirm."
+msgstr "Yüz doğrulandı. Onaylamak için Enter’a basın veya Doğrula’ya tıklayın."
+
+msgid "Face authentication failed"
+msgstr "Yüz kimlik doğrulaması başarısız oldu"
+
+msgid "Confirm Face Unlock"
+msgstr "Yüzle Kilit Açmayı Onayla"
+
+msgid "Failed to show confirmation prompt"
+msgstr "Onay isteği gösterilemedi"
+
+msgid "Please look at the camera..."
+msgstr "Lütfen kameraya bakın…"
+
+msgid "Need more light..."
+msgstr "Daha fazla ışık gerekiyor…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "Yüz kesilmiş. Lütfen geri çekilin…"
+
+msgid "Please center your face..."
+msgstr "Lütfen yüzünüzü ortalayın…"
+
+msgid "Please come closer..."
+msgstr "Lütfen yaklaşın…"
+
+msgid "Please back up..."
+msgstr "Lütfen uzaklaşın…"
+
+msgid "Hold still..."
+msgstr "Hareketsiz durun…"

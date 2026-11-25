@@ -1,0 +1,160 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: es\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Enrollment"
+msgstr "Registro"
+
+msgid "Behavior"
+msgstr "Comportamiento"
+
+msgid "Face authentication"
+msgstr "Autenticación facial"
+
+msgid "Face authentication for unlocking this session. This does not affect the GDM login screen (see below). Settings are stored in your current dconf profile."
+msgstr "Autenticación facial para desbloquear esta sesión. No afecta a la pantalla de inicio de sesión de GDM (véase más abajo). La configuración se guarda en su perfil de dconf actual."
+
+msgid "Enable face authentication (lock screen)"
+msgstr "Activar la autenticación facial (pantalla de bloqueo)"
+
+msgid "Face retry mode"
+msgstr "Modo de reintento facial"
+
+msgid "Disabled"
+msgstr "Desactivado"
+
+msgid "Fixed tries"
+msgstr "Intentos fijos"
+
+msgid "Infinite"
+msgstr "Infinito"
+
+msgid "Maximum face tries"
+msgstr "Máximo de intentos faciales"
+
+msgid "Enrolled faces"
+msgstr "Rostros registrados"
+
+msgid "Checking…"
+msgstr "Comprobando…"
+
+msgid "Open Gaze"
+msgstr "Abrir Gaze"
+
+msgid "Could not open the Gaze app. Run gaze-gui from a terminal."
+msgstr "No se pudo abrir la aplicación Gaze. Ejecute gaze-gui desde una terminal."
+
+msgid "A face is enrolled for this account."
+msgstr "Hay un rostro registrado para esta cuenta."
+
+msgid "No face is enrolled yet, so face unlock has nothing to match. Open Gaze to enroll one."
+msgstr "Aún no hay ningún rostro registrado, así que el desbloqueo facial no tiene con qué comparar. Abra Gaze para registrar uno."
+
+msgid "Gaze daemon unavailable."
+msgstr "El servicio de Gaze no está disponible."
+
+msgid "GDM login screen"
+msgstr "Pantalla de inicio de sesión de GDM"
+
+msgid "Enable face authentication at the GDM login screen. Requires administrator authorization. Note: GNOME keyring is normally unlocked by your password, so logging in with face only may leave it locked."
+msgstr "Activa la autenticación facial en la pantalla de inicio de sesión de GDM. Requiere autorización de administrador. Nota: el depósito de claves de GNOME normalmente se desbloquea con la contraseña, por lo que puede quedar bloqueado si inicia sesión solo con el rostro."
+
+msgid "Enable face authentication at GDM login"
+msgstr "Activar la autenticación facial al iniciar sesión en GDM"
+
+msgid "Administrator authorization is required to enable face authentication at the GDM login screen."
+msgstr "Se requiere autorización de administrador para activar la autenticación facial en la pantalla de inicio de sesión de GDM."
+
+msgid "Administrator authorization is required to disable face authentication at the GDM login screen."
+msgstr "Se requiere autorización de administrador para desactivar la autenticación facial en la pantalla de inicio de sesión de GDM."
+
+msgid "Could not update GDM login face authentication: {error}"
+msgstr "No se pudo actualizar la autenticación facial de inicio de sesión de GDM: {error}"
+
+msgid "Face auth enabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "Autenticación facial activada en la pantalla de inicio de sesión de GDM. Reinicie GDM (o el equipo) para que surta efecto."
+
+msgid "Face auth disabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "Autenticación facial desactivada en la pantalla de inicio de sesión de GDM. Reinicie GDM (o el equipo) para que surta efecto."
+
+msgid "Face not recognized. Please enter your password."
+msgstr "Rostro no reconocido. Introduzca su contraseña."
+
+msgid "Face not detected. Please enter your password."
+msgstr "No se detectó ningún rostro. Introduzca su contraseña."
+
+msgid "Too dark for face authentication. Please enter your password."
+msgstr "Hay muy poca luz para la autenticación facial. Introduzca su contraseña."
+
+msgid "Face authentication timed out. Please enter your password."
+msgstr "Se agotó el tiempo de la autenticación facial. Introduzca su contraseña."
+
+msgid "Face authentication unavailable. Please enter your password."
+msgstr "Autenticación facial no disponible. Introduzca su contraseña."
+
+msgid "Changing Gaze's settings or faces needs your password."
+msgstr "Para cambiar la configuración o los rostros de Gaze se necesita su contraseña."
+
+msgid "Sorry, face authentication did not work. Please try again."
+msgstr "La autenticación facial no funcionó. Inténtelo de nuevo."
+
+msgid "You reached the maximum face authentication attempts, please try another method"
+msgstr "Alcanzó el número máximo de intentos de autenticación facial; pruebe con otro método"
+
+msgid "(or look at the camera)"
+msgstr "(o mire a la cámara)"
+
+msgid "(or look at the camera or swipe finger)"
+msgstr "(o mire a la cámara o pase el dedo)"
+
+msgid "(or look at the camera or place finger on reader)"
+msgstr "(o mire a la cámara o coloque el dedo en el lector)"
+
+msgid "(or swipe finger across reader)"
+msgstr "(o pase el dedo por el lector)"
+
+msgid "(or place finger on reader)"
+msgstr "(o coloque el dedo en el lector)"
+
+msgid "Password"
+msgstr "Contraseña"
+
+msgid "Face verified. Press Enter or click Authenticate to confirm."
+msgstr "Rostro verificado. Pulse Intro o haga clic en Autenticar para confirmar."
+
+msgid "Face authentication failed"
+msgstr "Falló la autenticación facial"
+
+msgid "Confirm Face Unlock"
+msgstr "Confirmar desbloqueo facial"
+
+msgid "Failed to show confirmation prompt"
+msgstr "No se pudo mostrar la solicitud de confirmación"
+
+msgid "Please look at the camera..."
+msgstr "Mire a la cámara…"
+
+msgid "Need more light..."
+msgstr "Se necesita más luz…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "El rostro está cortado. Aléjese un poco…"
+
+msgid "Please center your face..."
+msgstr "Centre su rostro…"
+
+msgid "Please come closer..."
+msgstr "Acérquese…"
+
+msgid "Please back up..."
+msgstr "Aléjese…"
+
+msgid "Hold still..."
+msgstr "No se mueva…"
