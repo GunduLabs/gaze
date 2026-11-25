@@ -12,6 +12,7 @@ PKG_BASE_URL="https://packages.gundulabs.com"
 HYPRLAND_DOCS_URL="https://gaze.gundulabs.com/guide/hyprland"
 KDE_DOCS_URL="https://gaze.gundulabs.com/guide/kde"
 PAM_DOCS_URL="https://gaze.gundulabs.com/guide/pam"
+AUR_DEPS_DOCS_URL="https://gaze.gundulabs.com/guide/troubleshooting#aur-library-versions"
 PAM_SUDO_OPTOUT="/etc/gaze/pam-sudo.optout"
 REPO_KEY_FPR="505AC1C71AFEDBD5555235F6CB4FA24E5C1C7C98"
 PAM_OPTOUT="/etc/gaze/pam.optout"
@@ -1069,10 +1070,45 @@ require_published_repository() {
     esac
 }
 
+unmet_aur_dependencies() {
+    for aur_pkg in "$@"; do
+        curl --proto '=https' --tlsv1.2 -fsS --max-time 20 \
+            "https://aur.archlinux.org/cgit/aur.git/plain/.SRCINFO?h=${aur_pkg}" 2>/dev/null || true
+    done | awk '$1 == "depends" && $3 ~ /[<>=]/ && $3 !~ /^gaze/ { print $3 }' | sort -u |
+        while read -r dep; do
+            pacman -T "$dep" >/dev/null 2>&1 ||
+                pacman -Spdd --noconfirm "$dep" >/dev/null 2>&1 ||
+                printf '%s\n' "$dep"
+        done
+}
+
+require_aur_dependencies() {
+    command -v pacman >/dev/null 2>&1 || return 0
+    unmet_deps="$(unmet_aur_dependencies gaze-bin gaze-gui-bin)"
+    if [ -z "$unmet_deps" ]; then
+        return 0
+    fi
+
+    fail "Gaze needs library versions that this system's repositories do not provide:"
+    printf '%s\n' "$unmet_deps" | while read -r dep; do cmd "$dep"; done
+    say ""
+    say "Nothing has been changed on this system. Update it, then re-run this installer:"
+    cmd "sudo pacman -Syu"
+    say ""
+    say "If that does not help, your distribution ships a different version of these"
+    say "libraries than Arch Linux does. See:"
+    link "$AUR_DEPS_DOCS_URL"
+    exit 1
+}
+
 require_published_repository
 
 if is_arch && [ "$(id -u)" -eq 0 ]; then
     die "AUR helpers refuse to build as root. Re-run this installer as your normal user."
+fi
+
+if is_arch; then
+    require_aur_dependencies
 fi
 
 if [ "$NO_PAM" -eq 0 ] && [ -e "$PAM_OPTOUT" ]; then
