@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: tr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Clear a Gaze duress lockout"
+msgstr "Gaze zorlama kilidini kaldır"
+
+msgid "Authentication is required to re-enable face authentication after a duress signal."
+msgstr "Zorlama işaretinden sonra yüz kimlik doğrulamasını yeniden etkinleştirmek için kimlik doğrulaması gereklidir."
+
+msgid "Manage face enrollments for Gaze"
+msgstr "Gaze’e kayıtlı yüzleri yönet"
+
+msgid "Authentication is required to manage Gaze face enrollments."
+msgstr "Gaze’e kayıtlı yüzleri yönetmek için kimlik doğrulaması gereklidir."
+
+msgid "Manage daemon configuration for Gaze"
+msgstr "Gaze hizmetinin yapılandırmasını yönet"
+
+msgid "Authentication is required to change Gaze daemon configuration."
+msgstr "Gaze hizmetinin yapılandırmasını değiştirmek için kimlik doğrulaması gereklidir."
+
+msgid "Manage GDM login authentication for Gaze"
+msgstr "Gaze için GDM oturum açma kimlik doğrulamasını yönet"
+
+msgid "Authentication is required to change Gaze face authentication at the GDM login screen."
+msgstr "GDM oturum açma ekranında Gaze yüz kimlik doğrulamasını değiştirmek için kimlik doğrulaması gereklidir."
+
+msgid "Enroll faces and configure facial authentication"
+msgstr "Yüz kaydedin ve yüz kimlik doğrulamasını yapılandırın"
+
+msgid "face;auth;login;biometric;"
+msgstr "yüz;kilit açma;kimlik doğrulama;oturum açma;biyometrik;"
+
+msgid "Enroll and manage faces, test face authentication, and adjust every Gaze setting."
+msgstr "Yüzleri kaydedin ve yönetin, yüz kimlik doğrulamasını sınayın ve tüm Gaze ayarlarını düzenleyin."
+
+msgid "Facial authentication"
+msgstr "Yüz kimlik doğrulaması"
+
+msgid "Gaze Settings"
+msgstr "Gaze Ayarları"

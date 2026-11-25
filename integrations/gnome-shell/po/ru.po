@@ -1,0 +1,160 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Enrollment"
+msgstr "Регистрация"
+
+msgid "Behavior"
+msgstr "Поведение"
+
+msgid "Face authentication"
+msgstr "Аутентификация по лицу"
+
+msgid "Face authentication for unlocking this session. This does not affect the GDM login screen (see below). Settings are stored in your current dconf profile."
+msgstr "Аутентификация по лицу для разблокировки этого сеанса. Не влияет на экран входа GDM (см. ниже). Настройки хранятся в текущем профиле dconf."
+
+msgid "Enable face authentication (lock screen)"
+msgstr "Включить аутентификацию по лицу (экран блокировки)"
+
+msgid "Face retry mode"
+msgstr "Режим повторных попыток"
+
+msgid "Disabled"
+msgstr "Отключено"
+
+msgid "Fixed tries"
+msgstr "Ограничено"
+
+msgid "Infinite"
+msgstr "Без ограничений"
+
+msgid "Maximum face tries"
+msgstr "Максимум попыток распознавания лица"
+
+msgid "Enrolled faces"
+msgstr "Зарегистрированные лица"
+
+msgid "Checking…"
+msgstr "Проверка…"
+
+msgid "Open Gaze"
+msgstr "Открыть Gaze"
+
+msgid "Could not open the Gaze app. Run gaze-gui from a terminal."
+msgstr "Не удалось открыть приложение Gaze. Запустите gaze-gui из терминала."
+
+msgid "A face is enrolled for this account."
+msgstr "Для этой учётной записи зарегистрировано лицо."
+
+msgid "No face is enrolled yet, so face unlock has nothing to match. Open Gaze to enroll one."
+msgstr "Лица ещё не зарегистрированы, поэтому разблокировке по лицу не с чем сравнивать. Откройте Gaze, чтобы зарегистрировать лицо."
+
+msgid "Gaze daemon unavailable."
+msgstr "Служба Gaze недоступна."
+
+msgid "GDM login screen"
+msgstr "Экран входа GDM"
+
+msgid "Enable face authentication at the GDM login screen. Requires administrator authorization. Note: GNOME keyring is normally unlocked by your password, so logging in with face only may leave it locked."
+msgstr "Включить аутентификацию по лицу на экране входа GDM. Требуется авторизация администратора. Примечание: связка ключей GNOME обычно разблокируется вашим паролем, поэтому при входе только по лицу она может остаться заблокированной."
+
+msgid "Enable face authentication at GDM login"
+msgstr "Включить аутентификацию по лицу при входе через GDM"
+
+msgid "Administrator authorization is required to enable face authentication at the GDM login screen."
+msgstr "Для включения аутентификации по лицу на экране входа GDM требуется авторизация администратора."
+
+msgid "Administrator authorization is required to disable face authentication at the GDM login screen."
+msgstr "Для отключения аутентификации по лицу на экране входа GDM требуется авторизация администратора."
+
+msgid "Could not update GDM login face authentication: {error}"
+msgstr "Не удалось изменить аутентификацию по лицу при входе через GDM: {error}"
+
+msgid "Face auth enabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "Аутентификация по лицу на экране входа GDM включена. Перезапустите GDM (или компьютер), чтобы изменение вступило в силу."
+
+msgid "Face auth disabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "Аутентификация по лицу на экране входа GDM отключена. Перезапустите GDM (или компьютер), чтобы изменение вступило в силу."
+
+msgid "Face not recognized. Please enter your password."
+msgstr "Лицо не распознано. Введите пароль."
+
+msgid "Face not detected. Please enter your password."
+msgstr "Лицо не обнаружено. Введите пароль."
+
+msgid "Too dark for face authentication. Please enter your password."
+msgstr "Слишком темно для аутентификации по лицу. Введите пароль."
+
+msgid "Face authentication timed out. Please enter your password."
+msgstr "Время аутентификации по лицу истекло. Введите пароль."
+
+msgid "Face authentication unavailable. Please enter your password."
+msgstr "Аутентификация по лицу недоступна. Введите пароль."
+
+msgid "Changing Gaze's settings or faces needs your password."
+msgstr "Для изменения настроек или лиц Gaze требуется ваш пароль."
+
+msgid "Sorry, face authentication did not work. Please try again."
+msgstr "Аутентификация по лицу не удалась. Повторите попытку."
+
+msgid "You reached the maximum face authentication attempts, please try another method"
+msgstr "Достигнуто максимальное число попыток аутентификации по лицу, попробуйте другой способ"
+
+msgid "(or look at the camera)"
+msgstr "(или посмотрите в камеру)"
+
+msgid "(or look at the camera or swipe finger)"
+msgstr "(или посмотрите в камеру либо проведите пальцем)"
+
+msgid "(or look at the camera or place finger on reader)"
+msgstr "(или посмотрите в камеру либо поместите палец на считывающее устройство)"
+
+msgid "(or swipe finger across reader)"
+msgstr "(или проведите пальцем по считывающему устройству)"
+
+msgid "(or place finger on reader)"
+msgstr "(или поместите палец на считывающее устройство)"
+
+msgid "Password"
+msgstr "Пароль"
+
+msgid "Face verified. Press Enter or click Authenticate to confirm."
+msgstr "Лицо подтверждено. Нажмите Enter или кнопку «Подтвердить» для подтверждения."
+
+msgid "Face authentication failed"
+msgstr "Ошибка аутентификации по лицу"
+
+msgid "Confirm Face Unlock"
+msgstr "Подтвердите разблокировку по лицу"
+
+msgid "Failed to show confirmation prompt"
+msgstr "Не удалось показать запрос подтверждения"
+
+msgid "Please look at the camera..."
+msgstr "Смотрите в камеру…"
+
+msgid "Need more light..."
+msgstr "Нужно больше света…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "Лицо обрезано. Отодвиньтесь…"
+
+msgid "Please center your face..."
+msgstr "Поместите лицо по центру…"
+
+msgid "Please come closer..."
+msgstr "Подойдите ближе…"
+
+msgid "Please back up..."
+msgstr "Отодвиньтесь…"
+
+msgid "Hold still..."
+msgstr "Не двигайтесь…"

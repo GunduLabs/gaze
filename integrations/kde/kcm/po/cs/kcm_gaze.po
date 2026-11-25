@@ -1,0 +1,505 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: cs\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n==1) ? 0 : (n>=2 && n<=4) ? 1 : 2;\n"
+
+msgid "The Gaze daemon is not running yet. Its first start downloads face models, which can take a few minutes. This page updates when it is ready."
+msgstr "Služba Gaze ještě neběží. Při prvním spuštění se stahují modely obličejů, což může trvat několik minut. Až bude služba připravena, tato stránka se aktualizuje."
+
+msgid "Face the camera"
+msgstr "Dívejte se přímo do kamery"
+
+msgid "Tilt your face slightly up"
+msgstr "Mírně zakloňte obličej nahoru"
+
+msgid "Tilt your face slightly down"
+msgstr "Mírně skloňte obličej dolů"
+
+msgid "Turn your face slightly left"
+msgstr "Mírně otočte obličej doleva"
+
+msgid "Turn your face slightly right"
+msgstr "Mírně otočte obličej doprava"
+
+msgid "Captured"
+msgstr "Nasnímáno"
+
+msgid "Enrollment complete"
+msgstr "Registrace dokončena"
+
+msgid "Enrollment cancelled"
+msgstr "Registrace byla zrušena"
+
+msgid "Database error during enrollment"
+msgstr "Chyba databáze během registrace"
+
+msgid "Camera error during enrollment"
+msgstr "Chyba kamery během registrace"
+
+msgid "Please look at the camera..."
+msgstr "Podívejte se do kamery…"
+
+msgid "Need more light..."
+msgstr "Je potřeba více světla…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "Obličej je oříznutý. Ustupte…"
+
+msgid "Please center your face..."
+msgstr "Umístěte obličej doprostřed…"
+
+msgid "Please come closer..."
+msgstr "Přibližte se…"
+
+msgid "Please back up..."
+msgstr "Ustupte…"
+
+msgid "Hold still..."
+msgstr "Nehýbejte se…"
+
+msgid "Face authentication could not run"
+msgstr "Ověření obličejem se nepodařilo spustit"
+
+msgid "Face not recognized"
+msgstr "Obličej nebyl rozpoznán"
+
+msgid "Too dark for face authentication"
+msgstr "Na ověření obličejem je příliš tma"
+
+msgid "No face detected"
+msgstr "Nebyl zjištěn žádný obličej"
+
+msgid "Move your face into the frame and try again"
+msgstr "Umístěte obličej do záběru a zkuste to znovu"
+
+msgid "Starting enrollment…"
+msgstr "Zahajuje se registrace…"
+
+msgid "Enrollment finished without saving."
+msgstr "Registrace skončila bez uložení."
+
+msgid "%1 [%2s]"
+msgstr "%1 [%2s]"
+
+msgid "Could not restart the Gaze service (%1)"
+msgstr "Službu Gaze se nepodařilo restartovat (%1)"
+
+msgid "The Gaze service did not start again after the restart"
+msgstr "Služba Gaze se po restartu znovu nespustila"
+
+msgid "Re-enroll faces after this change?"
+msgstr "Zaregistrovat po této změně obličeje znovu?"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face for each profile, then test recognition."
+msgstr "Existující snímky nelze porovnat s novým modelem rozpoznávání. Zůstanou na disku. Po uložení použijte „Zlepšit tento obličej“ u každého profilu a poté vyzkoušejte rozpoznávání."
+
+msgid "Standard"
+msgstr "Standardní"
+
+msgid "Accurate"
+msgstr "Přesná"
+
+msgid "Settings"
+msgstr "Nastavení"
+
+msgid "Everyday settings"
+msgstr "Běžné nastavení"
+
+msgid "Advanced settings"
+msgstr "Pokročilé nastavení"
+
+msgid "Restart Service"
+msgstr "Restartovat službu"
+
+msgid "Settings are locked"
+msgstr "Nastavení je uzamčeno"
+
+msgid "Unlock…"
+msgstr "Odemknout…"
+
+msgid "Settings saved. Restart the Gaze service to use the new inference provider."
+msgstr "Nastavení uloženo. Restartujte službu Gaze, aby se použil nový poskytovatel inference."
+
+msgid "Restarting the Gaze service…"
+msgstr "Služba Gaze se restartuje…"
+
+msgid "Gaze service restarted"
+msgstr "Služba Gaze byla restartována"
+
+msgid "Restarting the Gaze service failed"
+msgstr "Restart služby Gaze se nezdařil"
+
+msgid "Security"
+msgstr "Zabezpečení"
+
+msgid "Security level"
+msgstr "Úroveň zabezpečení"
+
+msgid "Medium is recommended. Changing the recognition model requires new captures for existing profiles"
+msgstr "Doporučená je úroveň „Střední“. Změna modelu rozpoznávání vyžaduje nové snímky pro existující profily"
+
+msgid "Low"
+msgstr "Nízká"
+
+msgid "Medium"
+msgstr "Střední"
+
+msgid "High"
+msgstr "Vysoká"
+
+msgid "Maximum"
+msgstr "Maximální"
+
+msgid "Custom"
+msgstr "Vlastní"
+
+msgid "Detector level"
+msgstr "Úroveň detektoru"
+
+msgid "Recognizer level"
+msgstr "Úroveň rozpoznávání"
+
+msgid "RGB recognizer threshold"
+msgstr "Práh rozpoznávání RGB"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "Minimální podobnost RGB pro shodu"
+
+msgid "IR recognizer threshold"
+msgstr "Práh rozpoznávání IR"
+
+msgid "Minimum IR similarity for a match"
+msgstr "Minimální podobnost IR pro shodu"
+
+msgid "Hybrid combining policy"
+msgstr "Pravidlo hybridní kombinace"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "Pravidlo kombinace, když jsou aktivní kamery RGB i IR"
+
+msgid "Default"
+msgstr "Výchozí"
+
+msgid "Or"
+msgstr "Nebo"
+
+msgid "Fallback on dark"
+msgstr "Záloha při tmě"
+
+msgid "And"
+msgstr "A"
+
+msgid "Hardware"
+msgstr "Hardware"
+
+msgid "Inference execution provider"
+msgstr "Poskytovatel provádění inference"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI"
+msgstr "CPU, automatické NPU, Intel OpenVINO nebo AMD Ryzen AI"
+
+msgid "CPU"
+msgstr "CPU"
+
+msgid "Automatic (NPU)"
+msgstr "Automaticky (NPU)"
+
+msgid "Intel OpenVINO"
+msgstr "Intel OpenVINO"
+
+msgid "AMD Ryzen AI"
+msgstr "AMD Ryzen AI"
+
+msgid "OpenVINO inference device"
+msgstr "Zařízení pro inferenci OpenVINO"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "Zařízení Intel použité pro všechny modely ONNX"
+
+msgid "GPU"
+msgstr "GPU"
+
+msgid "NPU"
+msgstr "NPU"
+
+msgid "RGB camera source"
+msgstr "Zdroj kamery RGB"
+
+msgid "Primary camera"
+msgstr "Hlavní kamera"
+
+msgid "None (IR only)"
+msgstr "Žádná (pouze IR)"
+
+msgid "IR camera source"
+msgstr "Zdroj kamery IR"
+
+msgid "None"
+msgstr "Žádná"
+
+msgid "IR frame size override"
+msgstr "Vynutit velikost snímku IR"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "Vynutí jedno rozlišení, pokud je obraz IR v automatickém režimu zelený nebo poškozený"
+
+msgid "Width"
+msgstr "Šířka"
+
+msgid "Height"
+msgstr "Výška"
+
+msgid "Force IR emitter"
+msgstr "Vynutit IR zářič"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "Přepíše ovládání zářiče, pouze pokud se IR zářič sám nezapne"
+
+msgid "Parallel RGB + IR capture"
+msgstr "Souběžné snímání RGB + IR"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "Rychlejší hybridní ověření, ale některé webkamery neumí vysílat z obou snímačů najednou"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "Nikdy (nejprve RGB, poté IR)"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "Automaticky (souběžně, pokud to kamera umožňuje)"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "Vždy (RGB a IR najednou)"
+
+msgid "Darkness cutoff"
+msgstr "Mez tmy"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "Odmítat snímky s průměrným jasem pod touto hodnotou (0–255)"
+
+msgid "Enrollment"
+msgstr "Registrace"
+
+msgid "Maximum templates"
+msgstr "Maximální počet šablon"
+
+msgid "Number of capture sets stored per face"
+msgstr "Počet sad snímků uložených pro každý obličej"
+
+msgid "Minimum face size ratio"
+msgstr "Minimální poměr velikosti obličeje"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "Nejmenší přijatelný obličej při registraci; nižší hodnota umožní větší vzdálenost"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "Detekce živosti (ochrana proti podvržení)"
+
+msgid "Enable liveness spoof prevention"
+msgstr "Povolit ochranu proti podvržení detekcí živosti"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "Kontrolovat v obrazu kamery a přirozeném pohybu známky fotografie nebo obrazovky"
+
+msgid "Liveness threshold"
+msgstr "Práh živosti"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "Minimální spolehlivost ochrany proti podvržení"
+
+msgid "Maximum liveness duration"
+msgstr "Maximální doba detekce živosti"
+
+msgid "Maximum seconds analyzed for liveness verification"
+msgstr "Maximální počet sekund analyzovaných při detekci živosti"
+
+msgid "Authentication"
+msgstr "Ověřování"
+
+msgid "Abort if SSH"
+msgstr "Přerušit při SSH"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "Zabránit ověření přes připojení SSH"
+
+msgid "Abort if lid closed"
+msgstr "Přerušit při zavřeném víku"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "Zabránit ověření, když je víko notebooku zavřené"
+
+msgid "Require a suspend first"
+msgstr "Nejprve vyžadovat uspání"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "Zabránit ověření, dokud se systém jednou neuspí a neprobudí"
+
+msgid "Require confirmation on lock screen"
+msgstr "Vyžadovat potvrzení na zamykací obrazovce"
+
+msgid "On KDE lock/login screens this requires your password instead of face unlock. Confirmation after a match is available on other supported surfaces"
+msgstr "Na zamykací a přihlašovací obrazovce KDE se místo odemknutí obličejem vyžaduje heslo. Potvrzení po shodě je k dispozici na ostatních podporovaných místech"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "Vyžadovat potvrzení při ověření se zvýšenými oprávněními"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "Po shodě obličeje u sudo, polkit a podobných výzev vyžadovat k povolení stisk klávesy Enter nebo kliknutí na OK"
+
+msgid "Resume grace period (ms)"
+msgstr "Prodleva po probuzení (ms)"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "Odložit ověření obličejem při probuzení z uspání"
+
+msgid "Start delay (ms)"
+msgstr "Prodleva zahájení (ms)"
+
+msgid "Use 3000–5000 ms to give yourself time to step away after locking"
+msgstr "Použijte 3000–5000 ms, abyste měli po uzamčení čas odejít"
+
+msgid "Start delay applies to"
+msgstr "Prodleva zahájení platí pro"
+
+msgid "Which prompts wait for the start delay"
+msgstr "Které výzvy čekají na prodlevu zahájení"
+
+msgid "All face authentication (including sudo)"
+msgstr "Veškeré ověření obličejem (včetně sudo)"
+
+msgid "Screen lockers only"
+msgstr "Pouze zámky obrazovky"
+
+msgid "Storage"
+msgstr "Úložiště"
+
+msgid "Encrypt face templates"
+msgstr "Šifrovat šablony obličejů"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "Šifrovat uložené šablony obličejů klíčem zapečetěným v TPM"
+
+msgid "Unlock GNOME Keyring"
+msgstr "Odemknout GNOME Keyring"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login"
+msgstr "Použije zaregistrované heslo po přihlášení obličejem přes GDM nebo greetd chráněném detekcí živosti"
+
+msgid "Unlock KWallet"
+msgstr "Odemknout KWallet"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet"
+msgstr "Použije zaregistrované heslo po přihlášení do KDE chráněném detekcí živosti; zaregistrujte jej příkazem gaze keyring --kwallet"
+
+msgid "Enrolled Faces"
+msgstr "Zaregistrované obličeje"
+
+msgid "Configure"
+msgstr "Nastavit"
+
+msgid "Configure Gaze"
+msgstr "Nastavit Gaze"
+
+msgid "Test"
+msgstr "Vyzkoušet"
+
+msgid "Test face authentication"
+msgstr "Vyzkoušet ověření obličejem"
+
+msgid "Add Face…"
+msgstr "Přidat obličej…"
+
+msgid "Enroll a new face"
+msgstr "Zaregistrovat nový obličej"
+
+msgid "Faces enrolled for %1"
+msgstr "Obličeje zaregistrované pro %1"
+
+msgid "Look at the camera…"
+msgstr "Podívejte se do kamery…"
+
+msgid "Face recognized"
+msgstr "Obličej rozpoznán"
+
+msgid "No face seen before the test timed out"
+msgstr "Před vypršením času zkoušky nebyl spatřen žádný obličej"
+
+msgid "No Faces Enrolled"
+msgstr "Žádné zaregistrované obličeje"
+
+msgid "Enroll a face to get started"
+msgstr "Začněte registrací obličeje"
+
+msgid "%1 capture"
+msgid_plural "%1 captures"
+msgstr[0] "%1 snímek"
+msgstr[1] "%1 snímky"
+msgstr[2] "%1 snímků"
+
+msgid "RGB"
+msgstr "RGB"
+
+msgid "IR"
+msgstr "IR"
+
+msgid "Rename"
+msgstr "Přejmenovat"
+
+msgid "Improve this face"
+msgstr "Zlepšit tento obličej"
+
+msgid "Delete"
+msgstr "Smazat"
+
+msgid "Improve “%1”"
+msgstr "Zlepšit „%1“"
+
+msgid "Add Face"
+msgstr "Přidat obličej"
+
+msgid "Face name"
+msgstr "Název obličeje"
+
+msgid "A face with this name already exists"
+msgstr "Obličej s tímto názvem již existuje"
+
+msgid "Look at the camera and follow the prompts to add more captures to “%1”."
+msgstr "Podívejte se do kamery a podle pokynů přidejte další snímky k „%1“."
+
+msgid "Look at the camera and follow the prompts. Keep your face centered and well lit."
+msgstr "Podívejte se do kamery a postupujte podle pokynů. Udržujte obličej uprostřed a dobře osvětlený."
+
+msgid "Start Capture"
+msgstr "Zahájit snímání"
+
+msgid "Cancel"
+msgstr "Zrušit"
+
+msgid "Done"
+msgstr "Hotovo"
+
+msgid "Cancel Enrollment?"
+msgstr "Zrušit registraci?"
+
+msgid "This will discard any partial captures."
+msgstr "Částečné snímky budou zahozeny."
+
+msgid "Resume"
+msgstr "Pokračovat"
+
+msgid "Discard"
+msgstr "Zahodit"
+
+msgid "Delete Face"
+msgstr "Smazat obličej"
+
+msgid "Delete “%1”? You can add it again later."
+msgstr "Smazat „%1“? Později jej můžete přidat znovu."
+
+msgid "Rename Face"
+msgstr "Přejmenovat obličej"

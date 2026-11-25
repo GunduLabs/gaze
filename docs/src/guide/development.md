@@ -68,7 +68,7 @@ sudo apt install build-essential pkg-config clang libclang-dev \
   libpango1.0-dev libgraphene-1.0-dev \
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
   gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire \
-  gettext-base unzip \
+  gettext unzip \
   flatpak flatpak-builder elfutils
 ```
 
@@ -89,7 +89,7 @@ sudo zypper install --no-recommends \
   libopenssl-devel gtk4-devel libadwaita-devel \
   gstreamer-devel gstreamer-plugins-base-devel \
   gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugin-pipewire \
-  checkpolicy policycoreutils pkgconf-pkg-config envsubst gcc gcc-c++ unzip \
+  checkpolicy policycoreutils pkgconf-pkg-config envsubst gettext-tools gcc gcc-c++ unzip \
   flatpak flatpak-builder elfutils
 ```
 
@@ -106,7 +106,7 @@ sudo pacman -S base-devel pkgconf clang llvm \
 
 `libtss2-dev`/`tpm2-tss-devel`/`tpm2-tss`/`tpm2-0-tss-devel` and `libssl-dev`/`openssl-devel`/`openssl`/`libopenssl-devel` back the
 `tss-esapi` and `openssl-sys` crates (the daemon seals the face-template key to the TPM);
-`gettext-base`/`gettext`/`envsubst` provides `envsubst`, which the `package` recipe below needs;
+`gettext`/`gettext-tools`/`envsubst` provide `envsubst` and `msgfmt`, which the `package` recipe below needs;
 `unzip` unpacks the pinned ONNX Runtime from Microsoft's NuGet package.
 
 ### Additional dependencies for package builds
@@ -150,6 +150,21 @@ Both OpenCV 4 and 5 work. On distros that ship OpenCV 5 (such as Arch Linux),
 the `just` recipes automatically point the `opencv` crate at the `opencv5`
 pkg-config name; when running `cargo` directly, set
 `OPENCV_PKGCONFIG_NAME=opencv5` yourself.
+
+The published Arch packages link OpenCV statically, because Arch-compatible distributions
+carry different OpenCV versions at the same time. To build them the same way, set
+`GAZE_OPENCV=static`, which needs cmake and zlib:
+
+```bash
+GAZE_OPENCV=static just package archlinux
+```
+
+This builds the `core` and `imgproc` modules of the OpenCV release pinned in
+`scripts/build-opencv.sh` into `target/opencv-static` (or `OPENCV_CACHE_DIR`). Changing
+`opencv_version` in the Justfile means adding that release's SHA256 to the script. OpenCV
+security fixes reach these packages only through a Gaze release. The default,
+`GAZE_OPENCV=system`, links the distribution's library, and Arch packages built that way
+depend on that exact OpenCV minor version. Other package formats support only `system`.
 
 Only `gaze-gui` needs gtk4 and libadwaita (`libgtk-4-dev`/`gtk4-devel`/`gtk4`,
 `libadwaita-1-dev`/`libadwaita-devel`/`libadwaita`, and on Debian/Ubuntu the

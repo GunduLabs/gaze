@@ -1,0 +1,160 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: vi\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Enrollment"
+msgstr "Đăng ký"
+
+msgid "Behavior"
+msgstr "Hành vi"
+
+msgid "Face authentication"
+msgstr "Xác thực khuôn mặt"
+
+msgid "Face authentication for unlocking this session. This does not affect the GDM login screen (see below). Settings are stored in your current dconf profile."
+msgstr "Xác thực khuôn mặt để mở khóa phiên này. Không ảnh hưởng đến màn hình đăng nhập GDM (xem bên dưới). Các cài đặt được lưu trong hồ sơ dconf hiện tại của bạn."
+
+msgid "Enable face authentication (lock screen)"
+msgstr "Bật xác thực khuôn mặt (màn hình khóa)"
+
+msgid "Face retry mode"
+msgstr "Chế độ thử lại khuôn mặt"
+
+msgid "Disabled"
+msgstr "Tắt"
+
+msgid "Fixed tries"
+msgstr "Số lần thử cố định"
+
+msgid "Infinite"
+msgstr "Không giới hạn"
+
+msgid "Maximum face tries"
+msgstr "Số lần thử khuôn mặt tối đa"
+
+msgid "Enrolled faces"
+msgstr "Khuôn mặt đã đăng ký"
+
+msgid "Checking…"
+msgstr "Đang kiểm tra…"
+
+msgid "Open Gaze"
+msgstr "Mở Gaze"
+
+msgid "Could not open the Gaze app. Run gaze-gui from a terminal."
+msgstr "Không thể mở ứng dụng Gaze. Hãy chạy gaze-gui từ terminal."
+
+msgid "A face is enrolled for this account."
+msgstr "Tài khoản này đã đăng ký khuôn mặt."
+
+msgid "No face is enrolled yet, so face unlock has nothing to match. Open Gaze to enroll one."
+msgstr "Chưa đăng ký khuôn mặt nào nên mở khóa bằng khuôn mặt không có gì để so khớp. Hãy mở Gaze để đăng ký."
+
+msgid "Gaze daemon unavailable."
+msgstr "Dịch vụ Gaze không khả dụng."
+
+msgid "GDM login screen"
+msgstr "Màn hình đăng nhập GDM"
+
+msgid "Enable face authentication at the GDM login screen. Requires administrator authorization. Note: GNOME keyring is normally unlocked by your password, so logging in with face only may leave it locked."
+msgstr "Bật xác thực khuôn mặt trên màn hình đăng nhập GDM. Cần quyền quản trị viên. Lưu ý: chùm khóa GNOME thường được mở bằng mật khẩu của bạn, nên nếu chỉ đăng nhập bằng khuôn mặt thì nó có thể vẫn bị khóa."
+
+msgid "Enable face authentication at GDM login"
+msgstr "Bật xác thực khuôn mặt khi đăng nhập GDM"
+
+msgid "Administrator authorization is required to enable face authentication at the GDM login screen."
+msgstr "Cần quyền quản trị viên để bật xác thực khuôn mặt trên màn hình đăng nhập GDM."
+
+msgid "Administrator authorization is required to disable face authentication at the GDM login screen."
+msgstr "Cần quyền quản trị viên để tắt xác thực khuôn mặt trên màn hình đăng nhập GDM."
+
+msgid "Could not update GDM login face authentication: {error}"
+msgstr "Không thể cập nhật xác thực khuôn mặt khi đăng nhập GDM: {error}"
+
+msgid "Face auth enabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "Đã bật xác thực khuôn mặt trên màn hình đăng nhập GDM. Khởi động lại GDM (hoặc máy) để có hiệu lực."
+
+msgid "Face auth disabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "Đã tắt xác thực khuôn mặt trên màn hình đăng nhập GDM. Khởi động lại GDM (hoặc máy) để có hiệu lực."
+
+msgid "Face not recognized. Please enter your password."
+msgstr "Không nhận dạng được khuôn mặt. Vui lòng nhập mật khẩu của bạn."
+
+msgid "Face not detected. Please enter your password."
+msgstr "Không phát hiện khuôn mặt. Vui lòng nhập mật khẩu của bạn."
+
+msgid "Too dark for face authentication. Please enter your password."
+msgstr "Quá tối để xác thực khuôn mặt. Vui lòng nhập mật khẩu của bạn."
+
+msgid "Face authentication timed out. Please enter your password."
+msgstr "Hết thời gian xác thực khuôn mặt. Vui lòng nhập mật khẩu của bạn."
+
+msgid "Face authentication unavailable. Please enter your password."
+msgstr "Xác thực khuôn mặt không khả dụng. Vui lòng nhập mật khẩu của bạn."
+
+msgid "Changing Gaze's settings or faces needs your password."
+msgstr "Cần mật khẩu của bạn để thay đổi cài đặt hoặc khuôn mặt của Gaze."
+
+msgid "Sorry, face authentication did not work. Please try again."
+msgstr "Rất tiếc, xác thực khuôn mặt không thành công. Vui lòng thử lại."
+
+msgid "You reached the maximum face authentication attempts, please try another method"
+msgstr "Bạn đã đạt số lần xác thực khuôn mặt tối đa, vui lòng thử cách khác"
+
+msgid "(or look at the camera)"
+msgstr "(hoặc nhìn vào camera)"
+
+msgid "(or look at the camera or swipe finger)"
+msgstr "(hoặc nhìn vào camera hay quẹt ngón tay)"
+
+msgid "(or look at the camera or place finger on reader)"
+msgstr "(hoặc nhìn vào camera hay đặt ngón tay trên bộ đọc)"
+
+msgid "(or swipe finger across reader)"
+msgstr "(hoặc quẹt ngón tay xuyên suốt bộ đọc)"
+
+msgid "(or place finger on reader)"
+msgstr "(hoặc đặt ngón tay trên bộ đọc)"
+
+msgid "Password"
+msgstr "Mật khẩu"
+
+msgid "Face verified. Press Enter or click Authenticate to confirm."
+msgstr "Đã xác minh khuôn mặt. Nhấn Enter hoặc bấm Xác thực để xác nhận."
+
+msgid "Face authentication failed"
+msgstr "Xác thực khuôn mặt thất bại"
+
+msgid "Confirm Face Unlock"
+msgstr "Xác nhận mở khóa bằng khuôn mặt"
+
+msgid "Failed to show confirmation prompt"
+msgstr "Không thể hiển thị yêu cầu xác nhận"
+
+msgid "Please look at the camera..."
+msgstr "Vui lòng nhìn vào camera…"
+
+msgid "Need more light..."
+msgstr "Cần thêm ánh sáng…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "Khuôn mặt bị cắt. Vui lòng lùi ra xa…"
+
+msgid "Please center your face..."
+msgstr "Vui lòng đưa khuôn mặt vào giữa…"
+
+msgid "Please come closer..."
+msgstr "Vui lòng lại gần hơn…"
+
+msgid "Please back up..."
+msgstr "Vui lòng lùi ra xa…"
+
+msgid "Hold still..."
+msgstr "Giữ yên…"

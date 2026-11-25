@@ -10,7 +10,37 @@
 
   <action id="com.gundulabs.gaze.clear-duress">
     <description>Clear a Gaze duress lockout</description>
+    <description xml:lang="cs">Zrušit uzamčení Gaze po signálu nátlaku</description>
+    <description xml:lang="de">Gaze-Nötigungssperre aufheben</description>
+    <description xml:lang="es">Quitar el bloqueo por coacción de Gaze</description>
+    <description xml:lang="fr">Lever le verrouillage sous contrainte de Gaze</description>
+    <description xml:lang="id">Hapus penguncian Gaze akibat paksaan</description>
+    <description xml:lang="it">Rimuovi il blocco per coercizione di Gaze</description>
+    <description xml:lang="ja">Gaze の強要時ロックアウトを解除</description>
+    <description xml:lang="ko">Gaze 강압 잠금 해제</description>
+    <description xml:lang="pl">Usuń blokadę Gaze po sygnale przymusu</description>
+    <description xml:lang="pt_BR">Remover o bloqueio por coação do Gaze</description>
+    <description xml:lang="ru">Снять блокировку Gaze после сигнала принуждения</description>
+    <description xml:lang="tr">Gaze zorlama kilidini kaldır</description>
+    <description xml:lang="vi">Gỡ khóa Gaze do bị ép buộc</description>
+    <description xml:lang="zh_CN">解除 Gaze 胁迫锁定</description>
+    <description xml:lang="zh_TW">解除 Gaze 脅迫鎖定</description>
     <message>Authentication is required to re-enable face authentication after a duress signal.</message>
+    <message xml:lang="cs">Pro opětovné povolení ověření obličejem po signálu nátlaku je vyžadováno ověření.</message>
+    <message xml:lang="de">Zum erneuten Aktivieren der Gesichtsauthentifizierung nach einem Nötigungssignal ist eine Authentifizierung erforderlich.</message>
+    <message xml:lang="es">Se requiere autenticación para volver a activar la autenticación facial después de una señal de coacción.</message>
+    <message xml:lang="fr">Une authentification est requise pour réactiver l’authentification faciale après un signal de contrainte.</message>
+    <message xml:lang="id">Autentikasi diperlukan untuk mengaktifkan kembali autentikasi wajah setelah sinyal paksaan.</message>
+    <message xml:lang="it">È richiesta l’autenticazione per riattivare l’autenticazione facciale dopo un segnale di coercizione.</message>
+    <message xml:lang="ja">強要の合図の後に顔認証を再び有効にするには、認証が必要です。</message>
+    <message xml:lang="ko">강압 신호 후 얼굴 인증을 다시 사용하려면 인증이 필요합니다.</message>
+    <message xml:lang="pl">Wymagane jest uwierzytelnienie, aby ponownie włączyć uwierzytelnianie twarzą po sygnale przymusu.</message>
+    <message xml:lang="pt_BR">É necessária autenticação para reativar a autenticação facial após um sinal de coação.</message>
+    <message xml:lang="ru">Чтобы снова включить аутентификацию по лицу после сигнала принуждения, требуется аутентификация.</message>
+    <message xml:lang="tr">Zorlama işaretinden sonra yüz kimlik doğrulamasını yeniden etkinleştirmek için kimlik doğrulaması gereklidir.</message>
+    <message xml:lang="vi">Cần xác thực để bật lại xác thực khuôn mặt sau tín hiệu bị ép buộc.</message>
+    <message xml:lang="zh_CN">在胁迫信号之后重新启用人脸认证需要身份验证。</message>
+    <message xml:lang="zh_TW">在脅迫訊號之後重新啟用臉部驗證需要驗證。</message>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>auth_admin</allow_inactive>
@@ -20,7 +50,37 @@
 
   <action id="com.gundulabs.gaze.manage-faces">
     <description>Manage face enrollments for Gaze</description>
+    <description xml:lang="cs">Spravovat obličeje zaregistrované v Gaze</description>
+    <description xml:lang="de">Gesichtsregistrierungen für Gaze verwalten</description>
+    <description xml:lang="es">Gestionar los rostros registrados en Gaze</description>
+    <description xml:lang="fr">Gérer les visages enregistrés dans Gaze</description>
+    <description xml:lang="id">Kelola wajah yang terdaftar di Gaze</description>
+    <description xml:lang="it">Gestisci i volti registrati in Gaze</description>
+    <description xml:lang="ja">Gaze の顔登録を管理</description>
+    <description xml:lang="ko">Gaze 얼굴 등록 관리</description>
+    <description xml:lang="pl">Zarządzaj twarzami zarejestrowanymi w Gaze</description>
+    <description xml:lang="pt_BR">Gerenciar os rostos registrados no Gaze</description>
+    <description xml:lang="ru">Управление лицами, зарегистрированными в Gaze</description>
+    <description xml:lang="tr">Gaze’e kayıtlı yüzleri yönet</description>
+    <description xml:lang="vi">Quản lý các khuôn mặt đã đăng ký trong Gaze</description>
+    <description xml:lang="zh_CN">管理 Gaze 的人脸录入</description>
+    <description xml:lang="zh_TW">管理 Gaze 的臉部註冊</description>
     <message>Authentication is required to manage Gaze face enrollments.</message>
+    <message xml:lang="cs">Pro správu obličejů zaregistrovaných v Gaze je vyžadováno ověření.</message>
+    <message xml:lang="de">Zum Verwalten der Gaze-Gesichtsregistrierungen ist eine Authentifizierung erforderlich.</message>
+    <message xml:lang="es">Se requiere autenticación para gestionar los rostros registrados en Gaze.</message>
+    <message xml:lang="fr">Une authentification est requise pour gérer les visages enregistrés dans Gaze.</message>
+    <message xml:lang="id">Autentikasi diperlukan untuk mengelola wajah yang terdaftar di Gaze.</message>
+    <message xml:lang="it">È richiesta l’autenticazione per gestire i volti registrati in Gaze.</message>
+    <message xml:lang="ja">Gaze の顔登録を管理するには、認証が必要です。</message>
+    <message xml:lang="ko">Gaze 얼굴 등록을 관리하려면 인증이 필요합니다.</message>
+    <message xml:lang="pl">Wymagane jest uwierzytelnienie, aby zarządzać twarzami zarejestrowanymi w Gaze.</message>
+    <message xml:lang="pt_BR">É necessária autenticação para gerenciar os rostos registrados no Gaze.</message>
+    <message xml:lang="ru">Для управления лицами, зарегистрированными в Gaze, требуется аутентификация.</message>
+    <message xml:lang="tr">Gaze’e kayıtlı yüzleri yönetmek için kimlik doğrulaması gereklidir.</message>
+    <message xml:lang="vi">Cần xác thực để quản lý các khuôn mặt đã đăng ký trong Gaze.</message>
+    <message xml:lang="zh_CN">管理 Gaze 的人脸录入需要身份验证。</message>
+    <message xml:lang="zh_TW">管理 Gaze 的臉部註冊需要驗證。</message>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>auth_admin</allow_inactive>
@@ -30,7 +90,37 @@
 
   <action id="com.gundulabs.gaze.manage-config">
     <description>Manage daemon configuration for Gaze</description>
+    <description xml:lang="cs">Spravovat konfiguraci služby Gaze</description>
+    <description xml:lang="de">Daemon-Konfiguration für Gaze verwalten</description>
+    <description xml:lang="es">Gestionar la configuración del servicio de Gaze</description>
+    <description xml:lang="fr">Gérer la configuration du service Gaze</description>
+    <description xml:lang="id">Kelola konfigurasi layanan Gaze</description>
+    <description xml:lang="it">Gestisci la configurazione del servizio Gaze</description>
+    <description xml:lang="ja">Gaze デーモンの設定を管理</description>
+    <description xml:lang="ko">Gaze 데몬 설정 관리</description>
+    <description xml:lang="pl">Zarządzaj konfiguracją usługi Gaze</description>
+    <description xml:lang="pt_BR">Gerenciar a configuração do serviço do Gaze</description>
+    <description xml:lang="ru">Управление конфигурацией службы Gaze</description>
+    <description xml:lang="tr">Gaze hizmetinin yapılandırmasını yönet</description>
+    <description xml:lang="vi">Quản lý cấu hình dịch vụ Gaze</description>
+    <description xml:lang="zh_CN">管理 Gaze 的守护进程配置</description>
+    <description xml:lang="zh_TW">管理 Gaze 的服務設定</description>
     <message>Authentication is required to change Gaze daemon configuration.</message>
+    <message xml:lang="cs">Pro změnu konfigurace služby Gaze je vyžadováno ověření.</message>
+    <message xml:lang="de">Zum Ändern der Konfiguration des Gaze-Daemons ist eine Authentifizierung erforderlich.</message>
+    <message xml:lang="es">Se requiere autenticación para cambiar la configuración del servicio de Gaze.</message>
+    <message xml:lang="fr">Une authentification est requise pour modifier la configuration du service Gaze.</message>
+    <message xml:lang="id">Autentikasi diperlukan untuk mengubah konfigurasi layanan Gaze.</message>
+    <message xml:lang="it">È richiesta l’autenticazione per modificare la configurazione del servizio Gaze.</message>
+    <message xml:lang="ja">Gaze デーモンの設定を変更するには、認証が必要です。</message>
+    <message xml:lang="ko">Gaze 데몬 설정을 변경하려면 인증이 필요합니다.</message>
+    <message xml:lang="pl">Wymagane jest uwierzytelnienie, aby zmienić konfigurację usługi Gaze.</message>
+    <message xml:lang="pt_BR">É necessária autenticação para alterar a configuração do serviço do Gaze.</message>
+    <message xml:lang="ru">Для изменения конфигурации службы Gaze требуется аутентификация.</message>
+    <message xml:lang="tr">Gaze hizmetinin yapılandırmasını değiştirmek için kimlik doğrulaması gereklidir.</message>
+    <message xml:lang="vi">Cần xác thực để thay đổi cấu hình dịch vụ Gaze.</message>
+    <message xml:lang="zh_CN">更改 Gaze 守护进程配置需要身份验证。</message>
+    <message xml:lang="zh_TW">變更 Gaze 的服務設定需要驗證。</message>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>auth_admin</allow_inactive>
@@ -40,7 +130,37 @@
 
   <action id="com.gundulabs.gaze.manage-gdm-profile">
     <description>Manage GDM login authentication for Gaze</description>
+    <description xml:lang="cs">Spravovat ověřování Gaze při přihlášení přes GDM</description>
+    <description xml:lang="de">GDM-Anmeldeauthentifizierung für Gaze verwalten</description>
+    <description xml:lang="es">Gestionar la autenticación de inicio de sesión de GDM para Gaze</description>
+    <description xml:lang="fr">Gérer l’authentification de connexion GDM pour Gaze</description>
+    <description xml:lang="id">Kelola autentikasi login GDM untuk Gaze</description>
+    <description xml:lang="it">Gestisci l’autenticazione di accesso GDM per Gaze</description>
+    <description xml:lang="ja">Gaze の GDM ログイン認証を管理</description>
+    <description xml:lang="ko">Gaze의 GDM 로그인 인증 관리</description>
+    <description xml:lang="pl">Zarządzaj uwierzytelnianiem Gaze przy logowaniu GDM</description>
+    <description xml:lang="pt_BR">Gerenciar a autenticação de login do GDM para o Gaze</description>
+    <description xml:lang="ru">Управление аутентификацией Gaze при входе через GDM</description>
+    <description xml:lang="tr">Gaze için GDM oturum açma kimlik doğrulamasını yönet</description>
+    <description xml:lang="vi">Quản lý xác thực đăng nhập GDM cho Gaze</description>
+    <description xml:lang="zh_CN">管理 Gaze 的 GDM 登录认证</description>
+    <description xml:lang="zh_TW">管理 Gaze 的 GDM 登入驗證</description>
     <message>Authentication is required to change Gaze face authentication at the GDM login screen.</message>
+    <message xml:lang="cs">Pro změnu ověřování obličejem Gaze na přihlašovací obrazovce GDM je vyžadováno ověření.</message>
+    <message xml:lang="de">Zum Ändern der Gaze-Gesichtsauthentifizierung auf dem GDM-Anmeldebildschirm ist eine Authentifizierung erforderlich.</message>
+    <message xml:lang="es">Se requiere autenticación para cambiar la autenticación facial de Gaze en la pantalla de inicio de sesión de GDM.</message>
+    <message xml:lang="fr">Une authentification est requise pour modifier l’authentification faciale de Gaze sur l’écran de connexion GDM.</message>
+    <message xml:lang="id">Autentikasi diperlukan untuk mengubah autentikasi wajah Gaze di layar login GDM.</message>
+    <message xml:lang="it">È richiesta l’autenticazione per modificare l’autenticazione facciale di Gaze nella schermata di accesso GDM.</message>
+    <message xml:lang="ja">GDM ログイン画面での Gaze の顔認証を変更するには、認証が必要です。</message>
+    <message xml:lang="ko">GDM 로그인 화면에서 Gaze 얼굴 인증을 변경하려면 인증이 필요합니다.</message>
+    <message xml:lang="pl">Wymagane jest uwierzytelnienie, aby zmienić uwierzytelnianie twarzą Gaze na ekranie logowania GDM.</message>
+    <message xml:lang="pt_BR">É necessária autenticação para alterar a autenticação facial do Gaze na tela de login do GDM.</message>
+    <message xml:lang="ru">Для изменения аутентификации Gaze по лицу на экране входа GDM требуется аутентификация.</message>
+    <message xml:lang="tr">GDM oturum açma ekranında Gaze yüz kimlik doğrulamasını değiştirmek için kimlik doğrulaması gereklidir.</message>
+    <message xml:lang="vi">Cần xác thực để thay đổi xác thực khuôn mặt của Gaze trên màn hình đăng nhập GDM.</message>
+    <message xml:lang="zh_CN">更改 GDM 登录界面的 Gaze 人脸认证需要身份验证。</message>
+    <message xml:lang="zh_TW">變更 GDM 登入畫面的 Gaze 臉部驗證需要驗證。</message>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>auth_admin</allow_inactive>

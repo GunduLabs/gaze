@@ -7,6 +7,7 @@
   lib,
   stdenvNoCC,
   glib,
+  gettext,
 }:
 
 let
@@ -21,10 +22,14 @@ stdenvNoCC.mkDerivation {
     fileset = lib.fileset.unions [
       ../../integrations/gnome-shell
       ../../packaging/config/org.gnome.shell.extensions.gaze.gschema.xml
+      ../../scripts/build-locales.sh
     ];
   };
 
-  nativeBuildInputs = [ glib ];
+  nativeBuildInputs = [
+    glib
+    gettext
+  ];
 
   installPhase = ''
     runHook preInstall
@@ -33,6 +38,7 @@ stdenvNoCC.mkDerivation {
     install -Dm644 integrations/gnome-shell/metadata.json -t "$ext"
     install -Dm644 integrations/gnome-shell/extension.js -t "$ext"
     install -Dm644 integrations/gnome-shell/prefs.js -t "$ext"
+    bash scripts/build-locales.sh integrations/gnome-shell/po "$ext/locale"
 
     # GNOME Shell loads the settings schema from the extension directory.
     install -Dm644 packaging/config/org.gnome.shell.extensions.gaze.gschema.xml \

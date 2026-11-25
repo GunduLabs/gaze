@@ -1,0 +1,503 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "The Gaze daemon is not running yet. Its first start downloads face models, which can take a few minutes. This page updates when it is ready."
+msgstr "Gaze デーモンはまだ実行されていません。初回起動時は顔モデルをダウンロードするため、数分かかることがあります。準備ができると、このページが更新されます。"
+
+msgid "Face the camera"
+msgstr "カメラの正面を向いてください"
+
+msgid "Tilt your face slightly up"
+msgstr "顔を少し上に傾けてください"
+
+msgid "Tilt your face slightly down"
+msgstr "顔を少し下に傾けてください"
+
+msgid "Turn your face slightly left"
+msgstr "顔を少し左に向けてください"
+
+msgid "Turn your face slightly right"
+msgstr "顔を少し右に向けてください"
+
+msgid "Captured"
+msgstr "撮影しました"
+
+msgid "Enrollment complete"
+msgstr "登録が完了しました"
+
+msgid "Enrollment cancelled"
+msgstr "登録をキャンセルしました"
+
+msgid "Database error during enrollment"
+msgstr "登録中にデータベースエラーが発生しました"
+
+msgid "Camera error during enrollment"
+msgstr "登録中にカメラエラーが発生しました"
+
+msgid "Please look at the camera..."
+msgstr "カメラを見てください…"
+
+msgid "Need more light..."
+msgstr "もっと明るくしてください…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "顔が切れています。少し離れてください…"
+
+msgid "Please center your face..."
+msgstr "顔を中央に合わせてください…"
+
+msgid "Please come closer..."
+msgstr "もっと近づいてください…"
+
+msgid "Please back up..."
+msgstr "少し離れてください…"
+
+msgid "Hold still..."
+msgstr "そのまま動かないでください…"
+
+msgid "Face authentication could not run"
+msgstr "顔認証を実行できませんでした"
+
+msgid "Face not recognized"
+msgstr "顔を認識できませんでした"
+
+msgid "Too dark for face authentication"
+msgstr "暗すぎるため顔認証を行えません"
+
+msgid "No face detected"
+msgstr "顔が検出されませんでした"
+
+msgid "Move your face into the frame and try again"
+msgstr "顔を枠内に入れて、もう一度お試しください"
+
+msgid "Starting enrollment…"
+msgstr "登録を開始中…"
+
+msgid "Enrollment finished without saving."
+msgstr "保存されずに登録が終了しました。"
+
+msgid "%1 [%2s]"
+msgstr "%1 [%2s]"
+
+msgid "Could not restart the Gaze service (%1)"
+msgstr "Gaze サービスを再起動できませんでした (%1)"
+
+msgid "The Gaze service did not start again after the restart"
+msgstr "再起動後に Gaze サービスが起動しませんでした"
+
+msgid "Re-enroll faces after this change?"
+msgstr "この変更後に顔を登録し直しますか？"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face for each profile, then test recognition."
+msgstr "既存の撮影データは新しい認識モデルと照合できません。データはディスクに残ります。保存後、各プロファイルで「この顔を改善」を使い、その後認識をテストしてください。"
+
+msgid "Standard"
+msgstr "標準"
+
+msgid "Accurate"
+msgstr "高精度"
+
+msgid "Settings"
+msgstr "設定"
+
+msgid "Everyday settings"
+msgstr "基本設定"
+
+msgid "Advanced settings"
+msgstr "詳細設定"
+
+msgid "Restart Service"
+msgstr "サービスを再起動"
+
+msgid "Settings are locked"
+msgstr "設定はロックされています"
+
+msgid "Unlock…"
+msgstr "ロックを解除…"
+
+msgid "Settings saved. Restart the Gaze service to use the new inference provider."
+msgstr "設定を保存しました。新しい推論プロバイダーを使うには Gaze サービスを再起動してください。"
+
+msgid "Restarting the Gaze service…"
+msgstr "Gaze サービスを再起動中…"
+
+msgid "Gaze service restarted"
+msgstr "Gaze サービスを再起動しました"
+
+msgid "Restarting the Gaze service failed"
+msgstr "Gaze サービスの再起動に失敗しました"
+
+msgid "Security"
+msgstr "セキュリティ"
+
+msgid "Security level"
+msgstr "セキュリティレベル"
+
+msgid "Medium is recommended. Changing the recognition model requires new captures for existing profiles"
+msgstr "「中」を推奨します。認識モデルを変更すると、既存のプロファイルの撮影をやり直す必要があります"
+
+msgid "Low"
+msgstr "低"
+
+msgid "Medium"
+msgstr "中"
+
+msgid "High"
+msgstr "高"
+
+msgid "Maximum"
+msgstr "最高"
+
+msgid "Custom"
+msgstr "カスタム"
+
+msgid "Detector level"
+msgstr "検出器のレベル"
+
+msgid "Recognizer level"
+msgstr "認識器のレベル"
+
+msgid "RGB recognizer threshold"
+msgstr "RGB 認識のしきい値"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "一致とみなす RGB 類似度の最小値"
+
+msgid "IR recognizer threshold"
+msgstr "IR 認識のしきい値"
+
+msgid "Minimum IR similarity for a match"
+msgstr "一致とみなす IR 類似度の最小値"
+
+msgid "Hybrid combining policy"
+msgstr "ハイブリッドの組み合わせ方法"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "RGB と IR の両方のカメラが有効なときの組み合わせ方法"
+
+msgid "Default"
+msgstr "既定"
+
+msgid "Or"
+msgstr "いずれか (OR)"
+
+msgid "Fallback on dark"
+msgstr "暗いときに切り替え"
+
+msgid "And"
+msgstr "両方 (AND)"
+
+msgid "Hardware"
+msgstr "ハードウェア"
+
+msgid "Inference execution provider"
+msgstr "推論実行プロバイダー"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI"
+msgstr "CPU、自動 NPU、Intel OpenVINO、AMD Ryzen AI"
+
+msgid "CPU"
+msgstr "CPU"
+
+msgid "Automatic (NPU)"
+msgstr "自動 (NPU)"
+
+msgid "Intel OpenVINO"
+msgstr "Intel OpenVINO"
+
+msgid "AMD Ryzen AI"
+msgstr "AMD Ryzen AI"
+
+msgid "OpenVINO inference device"
+msgstr "OpenVINO 推論デバイス"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "すべての ONNX モデルに使用する Intel デバイス"
+
+msgid "GPU"
+msgstr "GPU"
+
+msgid "NPU"
+msgstr "NPU"
+
+msgid "RGB camera source"
+msgstr "RGB カメラのソース"
+
+msgid "Primary camera"
+msgstr "メインカメラ"
+
+msgid "None (IR only)"
+msgstr "なし (IR のみ)"
+
+msgid "IR camera source"
+msgstr "IR カメラのソース"
+
+msgid "None"
+msgstr "なし"
+
+msgid "IR frame size override"
+msgstr "IR フレームサイズの指定"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "自動で IR 映像が緑色になる、または乱れる場合に解像度を固定します"
+
+msgid "Width"
+msgstr "幅"
+
+msgid "Height"
+msgstr "高さ"
+
+msgid "Force IR emitter"
+msgstr "IR エミッターを強制"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "IR エミッターが自動で点灯しない場合にのみ、エミッターの制御を上書きします"
+
+msgid "Parallel RGB + IR capture"
+msgstr "RGB + IR の並列撮影"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "ハイブリッド認証が速くなりますが、両方のセンサーを同時に使用できないウェブカメラもあります"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "使用しない (RGB の後に IR を撮影)"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "自動 (カメラが対応していれば並列)"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "常に使用 (RGB と IR を同時に撮影)"
+
+msgid "Darkness cutoff"
+msgstr "暗さの下限"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "平均の明るさがこの値を下回るフレームを除外します (0–255)"
+
+msgid "Enrollment"
+msgstr "登録"
+
+msgid "Maximum templates"
+msgstr "テンプレートの最大数"
+
+msgid "Number of capture sets stored per face"
+msgstr "顔ごとに保存する撮影セットの数"
+
+msgid "Minimum face size ratio"
+msgstr "顔の最小サイズ比"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "登録時に受け付ける顔の最小サイズ。小さくすると、より離れて登録できます"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "生体検知 (なりすまし防止)"
+
+msgid "Enable liveness spoof prevention"
+msgstr "生体検知によるなりすまし防止を有効にする"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "カメラ画像と自然な動きから、写真や画面の兆候を確認します"
+
+msgid "Liveness threshold"
+msgstr "生体検知のしきい値"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "なりすまし防止の最小信頼度"
+
+msgid "Maximum liveness duration"
+msgstr "生体検知の最大時間"
+
+msgid "Maximum seconds analyzed for liveness verification"
+msgstr "生体検知で解析する最大秒数"
+
+msgid "Authentication"
+msgstr "認証"
+
+msgid "Abort if SSH"
+msgstr "SSH の場合は中止"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "SSH 接続での認証を禁止します"
+
+msgid "Abort if lid closed"
+msgstr "ふたが閉じている場合は中止"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "ノートパソコンのふたが閉じているときの認証を禁止します"
+
+msgid "Require a suspend first"
+msgstr "先にサスペンドを必須にする"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "システムが一度サスペンドから復帰するまで認証を禁止します"
+
+msgid "Require confirmation on lock screen"
+msgstr "ロック画面で確認を必須にする"
+
+msgid "On KDE lock/login screens this requires your password instead of face unlock. Confirmation after a match is available on other supported surfaces"
+msgstr "KDE のロック/ログイン画面では、顔によるロック解除の代わりにパスワードが必要になります。そのほかの対応環境では、一致後の確認を利用できます"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "権限昇格の認証で確認を必須にする"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "sudo や polkit などのプロンプトで顔が一致した後、Enter を押すか OK をクリックして承認する必要があります"
+
+msgid "Resume grace period (ms)"
+msgstr "復帰後の猶予時間 (ミリ秒)"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "サスペンドからの復帰時に顔認証を遅らせます"
+
+msgid "Start delay (ms)"
+msgstr "開始の遅延 (ミリ秒)"
+
+msgid "Use 3000–5000 ms to give yourself time to step away after locking"
+msgstr "ロック後に離れる時間を確保するため 3000–5000 ミリ秒にしてください"
+
+msgid "Start delay applies to"
+msgstr "開始の遅延を適用する対象"
+
+msgid "Which prompts wait for the start delay"
+msgstr "開始の遅延を待つプロンプト"
+
+msgid "All face authentication (including sudo)"
+msgstr "すべての顔認証 (sudo を含む)"
+
+msgid "Screen lockers only"
+msgstr "画面ロックのみ"
+
+msgid "Storage"
+msgstr "保存"
+
+msgid "Encrypt face templates"
+msgstr "顔テンプレートを暗号化"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "保存された顔テンプレートを TPM で封印した鍵で暗号化します"
+
+msgid "Unlock GNOME Keyring"
+msgstr "GNOME Keyring のロックを解除"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login"
+msgstr "生体検知で保護された GDM または greetd の顔ログイン後に、登録したパスワードを使用します"
+
+msgid "Unlock KWallet"
+msgstr "KWallet のロックを解除"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet"
+msgstr "生体検知で保護された KDE ログイン後に、登録したパスワードを使用します。gaze keyring --kwallet で登録してください"
+
+msgid "Enrolled Faces"
+msgstr "登録済みの顔"
+
+msgid "Configure"
+msgstr "設定"
+
+msgid "Configure Gaze"
+msgstr "Gaze を設定"
+
+msgid "Test"
+msgstr "テスト"
+
+msgid "Test face authentication"
+msgstr "顔認証をテスト"
+
+msgid "Add Face…"
+msgstr "顔を追加…"
+
+msgid "Enroll a new face"
+msgstr "新しい顔を登録"
+
+msgid "Faces enrolled for %1"
+msgstr "%1 に登録された顔"
+
+msgid "Look at the camera…"
+msgstr "カメラを見てください…"
+
+msgid "Face recognized"
+msgstr "顔を認識しました"
+
+msgid "No face seen before the test timed out"
+msgstr "テストの時間内に顔が検出されませんでした"
+
+msgid "No Faces Enrolled"
+msgstr "登録された顔がありません"
+
+msgid "Enroll a face to get started"
+msgstr "まず顔を登録してください"
+
+msgid "%1 capture"
+msgid_plural "%1 captures"
+msgstr[0] "撮影 %1 件"
+
+msgid "RGB"
+msgstr "RGB"
+
+msgid "IR"
+msgstr "IR"
+
+msgid "Rename"
+msgstr "名前を変更"
+
+msgid "Improve this face"
+msgstr "この顔を改善"
+
+msgid "Delete"
+msgstr "削除"
+
+msgid "Improve “%1”"
+msgstr "「%1」を改善"
+
+msgid "Add Face"
+msgstr "顔を追加"
+
+msgid "Face name"
+msgstr "顔の名前"
+
+msgid "A face with this name already exists"
+msgstr "この名前の顔はすでに存在します"
+
+msgid "Look at the camera and follow the prompts to add more captures to “%1”."
+msgstr "カメラを見て、画面の指示に従い「%1」の撮影を追加してください。"
+
+msgid "Look at the camera and follow the prompts. Keep your face centered and well lit."
+msgstr "カメラを見て、画面の指示に従ってください。顔を中央に合わせ、十分に明るくしてください。"
+
+msgid "Start Capture"
+msgstr "撮影を開始"
+
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgid "Done"
+msgstr "完了"
+
+msgid "Cancel Enrollment?"
+msgstr "登録をキャンセルしますか？"
+
+msgid "This will discard any partial captures."
+msgstr "途中までの撮影データは破棄されます。"
+
+msgid "Resume"
+msgstr "再開"
+
+msgid "Discard"
+msgstr "破棄"
+
+msgid "Delete Face"
+msgstr "顔を削除"
+
+msgid "Delete “%1”? You can add it again later."
+msgstr "「%1」を削除しますか？後でもう一度追加できます。"
+
+msgid "Rename Face"
+msgstr "顔の名前を変更"
