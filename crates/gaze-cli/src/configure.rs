@@ -128,6 +128,7 @@ pub async fn run_config_wizard(
     loop {
         let choice = Select::with_theme(&theme)
             .with_prompt("Settings")
+            .report(false)
             .items([
                 "Cameras",
                 "Security",
@@ -161,6 +162,7 @@ pub async fn run_config_wizard(
             Some(3) => {
                 match Select::with_theme(&theme)
                     .with_prompt("Advanced settings")
+                    .report(false)
                     .items([
                         "Hardware acceleration",
                         "Camera tuning",
