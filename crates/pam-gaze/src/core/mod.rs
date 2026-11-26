@@ -26,9 +26,9 @@ use service::is_kde_login_greeter;
 pub use service::{
     KDE_FACE_PAM_SERVICE, KDE_SMARTCARD_PAM_SERVICE, OMARCHY_FACE_PAM_FILE,
     OMARCHY_FACE_PAM_SERVICE, PLASMALOGIN_FACE_PAM_SERVICE, caller_is_remote,
-    face_auth_out_of_scope, pam_stack_runs_gaze, root_service_is_local, service_cannot_be_prompted,
-    service_defers_to_face_service, service_defers_to_face_slot, service_is_network_facing,
-    service_retires_unavailable_slot, service_retries_transient_give_up,
+    face_auth_out_of_scope, invoked_by_another_user, pam_stack_runs_gaze, root_service_is_local,
+    service_cannot_be_prompted, service_defers_to_face_service, service_defers_to_face_slot,
+    service_is_network_facing, service_retires_unavailable_slot, service_retries_transient_give_up,
     service_shows_only_error_messages,
 };
 
@@ -898,6 +898,23 @@ pub unsafe fn get_username(pamh: PamHandle) -> Option<String> {
         return None;
     }
     unsafe { CStr::from_ptr(user_ptr).to_str().ok().map(|s| s.to_owned()) }
+}
+
+pub fn account_uid(username: &str) -> Option<u32> {
+    let name = CString::new(username).ok()?;
+    let mut buffer = vec![0u8; 65536];
+    let mut pwd = MaybeUninit::<libc::passwd>::uninit();
+    let mut result = ptr::null_mut();
+    let status = unsafe {
+        libc::getpwnam_r(
+            name.as_ptr(),
+            pwd.as_mut_ptr(),
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+            &mut result,
+        )
+    };
+    (status == 0 && !result.is_null()).then(|| unsafe { (*result).pw_uid })
 }
 
 pub unsafe fn username_and_runtime(

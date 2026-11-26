@@ -944,6 +944,16 @@ pub unsafe fn do_authenticate(pamh: PamHandle, flags: c_int, options: PamOptions
     {
         return PAM_IGNORE;
     }
+    if unsafe { libc::geteuid() } == 0
+        && invoked_by_another_user(
+            unsafe { libc::getuid() },
+            unsafe { get_username(pamh) }
+                .as_deref()
+                .and_then(account_uid),
+        )
+    {
+        return PAM_IGNORE;
+    }
     // Retry entries keep their own first-pass logic and are meant to scan again.
     let rescan = options.mode != PamMode::Retry;
     if rescan && unsafe { scanned_in_this_pass(pamh) } {
