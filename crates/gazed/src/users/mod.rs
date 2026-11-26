@@ -13,7 +13,10 @@ use std::path::{Path, PathBuf};
 
 use crate::crypto::{self, EmbeddingCipher};
 
+mod owner;
 mod recode;
+
+pub use owner::OwnerCheck;
 
 type FaceMap = HashMap<String, HashMap<String, (Array1<f32>, Spectrum)>>;
 pub type FaceScore = (String, f32, f32, bool, u32);
