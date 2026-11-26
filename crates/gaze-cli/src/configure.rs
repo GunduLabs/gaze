@@ -138,26 +138,30 @@ pub async fn run_config_wizard(
             ])
             .default(0)
             .interact_opt()?;
+        let mut draft = config.clone();
         let result = match choice {
-            Some(0) => {
-                if let Err(error) = edit_cameras(term, &theme, &mut config) {
+            Some(0) => match edit_cameras(term, &theme, &mut draft) {
+                Ok(()) => {
+                    if Confirm::with_theme(&theme)
+                        .with_prompt("Check these cameras now")
+                        .default(true)
+                        .interact()?
+                        && let Err(error) = crate::setup::check_cameras(&draft).await
+                    {
+                        term.write_line(&format!("Camera check: {error}. Choose Cameras to try another source; nothing has been saved."))?;
+                    }
+                    Ok(())
+                }
+                Err(error) if error.is::<BackToMenu>() => Err(error),
+                Err(error) => {
                     term.write_line(&format!(
                         "{error}. Draft retained; choose a section to continue."
                     ))?;
                     continue;
                 }
-                if Confirm::with_theme(&theme)
-                    .with_prompt("Check these cameras now")
-                    .default(true)
-                    .interact()?
-                    && let Err(error) = crate::setup::check_cameras(&config).await
-                {
-                    term.write_line(&format!("Camera check: {error}. Choose Cameras to try another source; nothing has been saved."))?;
-                }
-                Ok(())
-            }
-            Some(1) => edit_security(term, &theme, &mut config),
-            Some(2) => edit_authentication(term, &theme, &mut config),
+            },
+            Some(1) => edit_security(term, &theme, &mut draft),
+            Some(2) => edit_authentication(term, &theme, &mut draft),
             Some(3) => {
                 match Select::with_theme(&theme)
                     .with_prompt("Advanced settings")
@@ -172,12 +176,12 @@ pub async fn run_config_wizard(
                     ])
                     .interact_opt()?
                 {
-                    Some(0) => edit_acceleration(term, &theme, &mut config),
-                    Some(1) => edit_camera_tuning(term, &theme, &mut config),
-                    Some(2) => edit_enrollment(term, &theme, &mut config),
-                    Some(3) => edit_liveness(term, &theme, &mut config),
-                    Some(4) => edit_storage(term, &theme, &mut config, keyring_supported),
-                    Some(5) => edit_authentication_tuning(term, &theme, &mut config),
+                    Some(0) => edit_acceleration(term, &theme, &mut draft),
+                    Some(1) => edit_camera_tuning(term, &theme, &mut draft),
+                    Some(2) => edit_enrollment(term, &theme, &mut draft),
+                    Some(3) => edit_liveness(term, &theme, &mut draft),
+                    Some(4) => edit_storage(term, &theme, &mut draft, keyring_supported),
+                    Some(5) => edit_authentication_tuning(term, &theme, &mut draft),
                     _ => Ok(()),
                 }
             }
@@ -246,9 +250,45 @@ pub async fn run_config_wizard(
                 return Ok(());
             }
         };
-        if let Err(error) = result {
-            term.write_line(&format!("{error}. Your draft has not been saved."))?;
+        match result {
+            Ok(()) => config = draft,
+            Err(error) if error.is::<BackToMenu>() => {
+                term.write_line("Back to the menu; that section was left as it was.")?;
+            }
+            Err(error) => {
+                term.write_line(&format!("{error}. Your draft has not been saved."))?;
+            }
         }
+    }
+}
+
+#[derive(Debug)]
+struct BackToMenu;
+
+impl std::fmt::Display for BackToMenu {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("back to the settings menu")
+    }
+}
+
+impl std::error::Error for BackToMenu {}
+
+trait PickOrBack {
+    type Answer;
+    fn pick(self) -> anyhow::Result<Self::Answer>;
+}
+
+impl PickOrBack for Select<'_> {
+    type Answer = usize;
+    fn pick(self) -> anyhow::Result<usize> {
+        self.interact_opt()?.ok_or_else(|| BackToMenu.into())
+    }
+}
+
+impl PickOrBack for Confirm<'_> {
+    type Answer = bool;
+    fn pick(self) -> anyhow::Result<bool> {
+        self.interact_opt()?.ok_or_else(|| BackToMenu.into())
     }
 }
 
@@ -275,7 +315,7 @@ fn edit_cameras(term: &Term, theme: &ColorfulTheme, config: &mut Config) -> anyh
         .with_prompt("Color camera")
         .items(&cam_names)
         .default(default_cam_idx)
-        .interact()?;
+        .pick()?;
 
     if Some(selected_cam_idx) != keep_fallback_idx {
         config.cameras.rgb = cameras[selected_cam_idx].1.clone().into();
@@ -291,7 +331,7 @@ fn edit_cameras(term: &Term, theme: &ColorfulTheme, config: &mut Config) -> anyh
         .with_prompt("Infrared camera (leave None unless you use one)")
         .items(&ir_names)
         .default(default_ir_idx)
-        .interact()?;
+        .pick()?;
 
     config.cameras.ir = ir_options[selected_ir_idx].1.clone();
 
@@ -318,7 +358,7 @@ fn edit_security(term: &Term, theme: &ColorfulTheme, config: &mut Config) -> any
             "Custom — advanced tuning",
         ])
         .default(config.security.level_index() as usize)
-        .interact()?;
+        .pick()?;
 
     if let Some(level) = SecurityLevel::preset_from_index(selected) {
         config.security = level;
@@ -329,14 +369,14 @@ fn edit_security(term: &Term, theme: &ColorfulTheme, config: &mut Config) -> any
             .with_prompt("Custom detector level")
             .items(MODEL_QUALITY_OPTIONS)
             .default(SecurityLevel::model_quality_index(&seed.detector) as usize)
-            .interact()?;
+            .pick()?;
         let detector = SecurityLevel::model_quality_from_index(selected_det_idx).to_string();
 
         let selected_rec_idx = Select::with_theme(theme)
             .with_prompt("Custom recognizer level")
             .items(MODEL_QUALITY_OPTIONS)
             .default(SecurityLevel::model_quality_index(&seed.recognizer) as usize)
-            .interact()?;
+            .pick()?;
         let recognizer = SecurityLevel::model_quality_from_index(selected_rec_idx).to_string();
 
         let rgb_threshold = prompt_security_threshold(theme, "RGB", seed.rgb_threshold)?;
@@ -346,7 +386,7 @@ fn edit_security(term: &Term, theme: &ColorfulTheme, config: &mut Config) -> any
             .with_prompt("Custom hybrid combining policy")
             .items(HYBRID_POLICY_OPTIONS)
             .default(SecurityLevel::hybrid_policy_index_for_value(&seed.hybrid_policy) as usize)
-            .interact()?;
+            .pick()?;
         let hybrid_policy = SecurityLevel::hybrid_policy_from_index(selected_hybrid_idx);
 
         config.security = SecurityLevel::custom_with_thresholds(
@@ -372,7 +412,7 @@ fn edit_acceleration(
             .with_prompt("Hardware acceleration (vendor runtime required; CPU is recommended)")
             .items(gaze_core::config::INFERENCE_EXECUTION_PROVIDER_LABELS)
             .default(config.inference.execution_provider_index() as usize)
-            .interact()?;
+            .pick()?;
         config.inference.execution_provider =
             gaze_core::config::InferenceConfig::execution_provider_from_index(
                 selected_execution_provider,
@@ -384,7 +424,7 @@ fn edit_acceleration(
                 .with_prompt("OpenVINO inference device")
                 .items(INFERENCE_DEVICE_OPTIONS)
                 .default(config.inference.device_index() as usize)
-                .interact()?;
+                .pick()?;
             config.inference.device =
                 gaze_core::config::InferenceConfig::device_from_index(selected_device).to_string();
         } else {
@@ -422,14 +462,14 @@ fn edit_authentication(
             "Require confirmation (press Enter/Authenticate/OK) on the lock screen after face matches",
         )
         .default(config.auth.require_confirmation_lock_screen)
-        .interact()?;
+        .pick()?;
 
     config.auth.require_confirmation_elevation = Confirm::with_theme(theme)
         .with_prompt(
             "Require confirmation (press Enter/Authenticate/OK) for elevated auth (sudo, polkit, etc.) after face matches",
         )
         .default(config.auth.require_confirmation_elevation)
-        .interact()?;
+        .pick()?;
 
     config.auth.start_delay_ms = Input::with_theme(theme)
         .with_prompt("Start delay in milliseconds (0 disables)")
@@ -444,7 +484,7 @@ fn edit_authentication(
                 AuthConfig::start_delay_scope_index_for_value(config.auth.start_delay_scope())
                     as usize,
             )
-            .interact()?;
+            .pick()?;
         config.auth.start_delay_scope = AuthConfig::start_delay_scope_from_index(scope_index);
     }
 
@@ -460,17 +500,17 @@ fn edit_authentication_tuning(
     config.auth.abort_if_ssh = Confirm::with_theme(theme)
         .with_prompt("Abort face authentication for SSH sessions")
         .default(config.auth.abort_if_ssh)
-        .interact()?;
+        .pick()?;
 
     config.auth.abort_if_lid_closed = Confirm::with_theme(theme)
         .with_prompt("Abort face authentication when laptop lid is closed")
         .default(config.auth.abort_if_lid_closed)
-        .interact()?;
+        .pick()?;
 
     config.auth.abort_before_first_resume = Confirm::with_theme(theme)
         .with_prompt("Abort face authentication until the system has suspended and resumed once")
         .default(config.auth.abort_before_first_resume)
-        .interact()?;
+        .pick()?;
 
     config.auth.resume_grace_ms = Input::with_theme(theme)
         .with_prompt("Resume grace period in milliseconds (delay auth after suspend)")
@@ -510,7 +550,7 @@ fn edit_liveness(term: &Term, theme: &ColorfulTheme, config: &mut Config) -> any
     config.liveness.enabled = Confirm::with_theme(theme)
         .with_prompt("Enable liveness anti-spoofing")
         .default(config.liveness.enabled)
-        .interact()?;
+        .pick()?;
     if config.liveness.enabled {
         config.liveness.threshold = Input::<String>::with_theme(theme)
             .with_prompt(format!(
@@ -564,7 +604,7 @@ fn edit_storage(
     config.storage.encrypt_templates = Confirm::with_theme(theme)
         .with_prompt("Encrypt face templates at rest using TPM 2.0")
         .default(config.storage.encrypt_templates)
-        .interact()?;
+        .pick()?;
 
     let keyring_prerequisites = config.storage.encrypt_templates && config.liveness.enabled;
     for (was_on, name) in [
@@ -584,7 +624,7 @@ fn edit_storage(
             Confirm::with_theme(theme)
                 .with_prompt("Enable TPM-backed GNOME Keyring unlock for GDM or greetd face logins")
                 .default(config.storage.unlock_gnome_keyring)
-                .interact()?
+                .pick()?
         } else {
             false
         };
@@ -595,7 +635,7 @@ fn edit_storage(
             Confirm::with_theme(theme)
                 .with_prompt("Enable TPM-backed KWallet unlock for KDE face logins")
                 .default(config.storage.unlock_kwallet)
-                .interact()?
+                .pick()?
         } else {
             false
         };
@@ -621,7 +661,7 @@ fn edit_camera_tuning(
         config.cameras.emitter_enabled = Confirm::with_theme(theme)
             .with_prompt("Force IR emitter override (only use if emitter stays off automatically)")
             .default(config.cameras.emitter_enabled)
-            .interact()?;
+            .pick()?;
 
         if config.cameras.rgb.is_empty() {
             config.cameras.parallel_capture = "never".to_string();
@@ -632,7 +672,7 @@ fn edit_camera_tuning(
                 )
                 .items(gaze_core::config::PARALLEL_CAPTURE_LABELS.as_slice())
                 .default(config.cameras.parallel_capture_index() as usize)
-                .interact()?;
+                .pick()?;
             config.cameras.parallel_capture =
                 gaze_core::config::CameraConfig::parallel_capture_from_index(capture_idx);
         }
