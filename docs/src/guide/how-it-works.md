@@ -51,8 +51,8 @@ same daemon code runs on every surface, so a problem you can reproduce with
    and the client releases it when it finishes. A claim that is never released is
     reclaimed after 5 minutes so an abandoned claim cannot keep the camera busy.
 2. Gaze checks three refusals in order: no suspend or resume since boot
-   (`auth.abort_before_first_resume`), the caller sits inside an SSH session
-   (`auth.abort_if_ssh`), and the laptop lid is closed (`auth.abort_if_lid_closed`). Any of
+   (`auth.abort_before_first_resume`), the caller sits inside an SSH session or, for an
+   elevation prompt, you have any remote session open (`auth.abort_if_ssh`), and the laptop lid is closed (`auth.abort_if_lid_closed`). Any of
    them ends the attempt before a camera is touched. A closed lid is the exception when
    logind is set to suspend on lid close: see [Suspend during an attempt](#suspend-during-an-attempt).
 3. Gaze works out which spectra can run. RGB runs when `cameras.rgb` is set *and* you have

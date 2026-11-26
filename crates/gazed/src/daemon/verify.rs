@@ -447,6 +447,9 @@ impl AuthDaemon {
         }
         let claim = self.check_claim(&header).await?;
         let (caller_uid, target_uid) = Self::ensure_claim_camera_access(&header, &claim).await?;
+        let elevating_uid = (gaze_core::config::classify_pam_service(pam_service.as_deref())
+            == gaze_core::config::AuthSurface::Elevation)
+            .then_some(target_uid);
         let mut rx =
             replace_claim_task(&self.claim_state, &self.active_cancel, claim.epoch).await?;
         let config = self.settings.for_run(&mut rx).await?;
@@ -454,7 +457,7 @@ impl AuthDaemon {
             biased;
             _ = &mut rx => return Err(fdo::Error::Failed("capture cancelled".into())),
             result = async {
-                self.ensure_auth_not_aborted(&header, &config.auth).await?;
+                self.ensure_auth_not_aborted(&header, &config.auth, elevating_uid).await?;
                 self.lid_closed_wait(config.auth.abort_if_lid_closed).await
             } => result?,
         };
