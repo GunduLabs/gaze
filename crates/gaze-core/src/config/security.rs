@@ -382,6 +382,30 @@ impl SecurityLevel {
         }
     }
 
+    pub fn effective(&self) -> Self {
+        let mut resolved = self.clone();
+        if !SECURITY_LEVEL_OPTIONS.contains(&self.level.as_str()) {
+            resolved.level = "medium".to_string();
+            return resolved;
+        }
+        if self.level != "custom" {
+            return resolved;
+        }
+        resolved.detector = self.effective_detector_quality().to_string();
+        resolved.recognizer = self.effective_recognizer_quality().to_string();
+        for threshold in [&mut resolved.rgb_threshold, &mut resolved.ir_threshold] {
+            if !Self::threshold_in_range(*threshold) {
+                *threshold = DEFAULT_SECURITY_THRESHOLD;
+            }
+        }
+        if !self.hybrid_policy.is_empty()
+            && !HYBRID_POLICY_OPTIONS.contains(&self.hybrid_policy.as_str())
+        {
+            resolved.hybrid_policy = "fallback_on_dark".to_string();
+        }
+        resolved
+    }
+
     pub fn hybrid_policy(&self) -> &str {
         match self.level.as_str() {
             "low" => "or",
@@ -761,5 +785,50 @@ mod tests {
         assert_eq!(seed.rgb_threshold, 0.31);
         assert_eq!(seed.ir_threshold, 0.62);
         assert_eq!(seed.hybrid_policy, "and");
+    }
+
+    #[test]
+    fn effective_reports_the_values_an_invalid_config_actually_runs_with() {
+        let mut level = SecurityLevel::custom_with_thresholds(
+            "huge".to_string(),
+            "accurate".to_string(),
+            0.0,
+            f64::NAN,
+            "OR".to_string(),
+        );
+        let resolved = level.effective();
+        assert_eq!(resolved.detector, "standard");
+        assert_eq!(resolved.recognizer, "accurate");
+        assert_eq!(resolved.rgb_threshold, DEFAULT_SECURITY_THRESHOLD);
+        assert_eq!(resolved.ir_threshold, DEFAULT_SECURITY_THRESHOLD);
+        assert_eq!(resolved.hybrid_policy, "fallback_on_dark");
+        assert!(resolved.validate().is_ok());
+        assert_eq!(resolved.rgb_threshold(), level.rgb_threshold());
+        assert_eq!(resolved.ir_threshold(), level.ir_threshold());
+        assert_eq!(resolved.detector(), level.detector());
+
+        level.level = "extreme".to_string();
+        let resolved = level.effective();
+        assert_eq!(resolved.level, "medium");
+        assert_eq!(resolved.rgb_threshold(), level.rgb_threshold());
+        assert_eq!(resolved.hybrid_policy(), level.hybrid_policy());
+        assert_eq!(resolved.detector(), level.detector());
+        assert_eq!(resolved.recognizer(), level.recognizer());
+    }
+
+    #[test]
+    fn effective_leaves_a_valid_level_untouched() {
+        let level = SecurityLevel::custom_with_thresholds(
+            "accurate".to_string(),
+            "standard".to_string(),
+            0.55,
+            0.45,
+            "and".to_string(),
+        );
+        let resolved = level.effective();
+        assert_eq!(resolved.rgb_threshold, 0.55);
+        assert_eq!(resolved.ir_threshold, 0.45);
+        assert_eq!(resolved.hybrid_policy, "and");
+        assert_eq!(resolved.detector, "accurate");
     }
 }

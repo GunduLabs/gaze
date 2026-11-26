@@ -100,6 +100,15 @@ fn command_needs_password_authorization(command: &Commands) -> bool {
     }
 }
 
+fn command_needs_terminal(command: &Commands) -> Option<&'static str> {
+    match command {
+        Commands::Setup => Some("setup"),
+        Commands::AddFace { .. } => Some("add-face"),
+        Commands::RefineFace { .. } => Some("refine-face"),
+        _ => None,
+    }
+}
+
 fn command_target_user(command: &Commands) -> Option<&str> {
     match command {
         Commands::Test { user, .. }
@@ -898,6 +907,14 @@ fn main() -> anyhow::Result<()> {
 async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
+    if let Some(name) = command_needs_terminal(&cli.command)
+        && !interactive_terminal()
+    {
+        exit_with_error(&format!(
+            "gaze {name} needs an interactive terminal; run it from a terminal window or an SSH session with a TTY"
+        ));
+    }
+
     if let Some(name) = command_requires_root(&cli.command)
         && !is_root()
     {
@@ -1260,6 +1277,21 @@ mod tests {
 
         let cli = Cli::try_parse_from(["gaze", "add-face", "default"]).unwrap();
         assert_eq!(command_target_user(&cli.command), None);
+    }
+
+    #[test]
+    fn only_the_capture_commands_need_a_terminal() {
+        for (args, name) in [
+            (vec!["gaze", "setup"], Some("setup")),
+            (vec!["gaze", "add-face", "default"], Some("add-face")),
+            (vec!["gaze", "refine-face", "default"], Some("refine-face")),
+            (vec!["gaze", "test", "--silent"], None),
+            (vec!["gaze", "list-faces"], None),
+            (vec!["gaze", "config", "get", "security.level"], None),
+        ] {
+            let cli = Cli::try_parse_from(&args).unwrap();
+            assert_eq!(command_needs_terminal(&cli.command), name, "{args:?}");
+        }
     }
 
     #[test]

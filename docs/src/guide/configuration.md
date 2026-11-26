@@ -664,10 +664,16 @@ sudo systemctl restart gazed
 Gaze manages these storage locations for you, so you do not need to configure them:
 
 - User embeddings: `/var/lib/gaze/users`
+- Account owners of those embeddings: `/var/lib/gaze/.gaze-owners`
 - Duress lockouts: `/var/lib/gaze/duress`
 - Downloaded models: `/var/cache/gaze`
 
 Models are auto-downloaded on first run if missing.
+
+Enrolled faces are stored by username, and Gaze records the UID of the account that owns them.
+If an account is deleted and a different account later gets the same name, Gaze deletes the old
+faces the first time the new account uses Gaze, so it never inherits them. Changing an account's
+UID has the same effect: enroll again afterwards.
 
 ## Encrypt face templates with the TPM
 
