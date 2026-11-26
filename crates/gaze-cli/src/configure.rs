@@ -111,7 +111,7 @@ pub fn print_apply_notes(before: &Config, after: &Config) {
         || before.inference.device != after.inference.device
     {
         println!(
-            "After applying this acceleration change, run sudo systemctl restart gazed, then gaze doctor --benchmark to check the effective provider; CPU fallback may still be active."
+            "After applying this acceleration change, gazed restarts by itself if the new provider needs a different runtime. Then run gaze doctor --benchmark to check the effective provider; CPU fallback may still be active."
         );
     }
 }

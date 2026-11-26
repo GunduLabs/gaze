@@ -1049,6 +1049,18 @@ impl AuthDaemon {
         db.list_faces(&username).map_err(Self::map_user_db_error)
     }
 
+    async fn stale_faces(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        username: String,
+    ) -> fdo::Result<Vec<String>> {
+        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        self.reconcile_template_owner(&username, Self::username_uid(&username)?)
+            .await?;
+        let db = self.db.lock().await;
+        db.stale_faces(&username).map_err(Self::map_user_db_error)
+    }
+
     async fn has_enrolled_faces(
         &self,
         #[zbus(header)] header: Header<'_>,
