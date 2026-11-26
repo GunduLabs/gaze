@@ -242,6 +242,19 @@ pub async fn run_config_wizard(
                 return Ok(());
             }
             _ => {
+                let pending = change_summary(&original, &config)?.len();
+                if pending > 0
+                    && !Confirm::with_theme(&theme)
+                        .with_prompt(format!(
+                            "Discard {pending} unsaved change{}",
+                            if pending == 1 { "" } else { "s" }
+                        ))
+                        .default(false)
+                        .interact_opt()?
+                        .unwrap_or(false)
+                {
+                    continue;
+                }
                 term.write_line("Draft discarded. Settings unchanged.")?;
                 return Ok(());
             }
