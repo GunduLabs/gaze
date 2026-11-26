@@ -835,7 +835,7 @@ srpm: _dist-packages _srpm-sources
 
     mkdir -p "{{ srpm_topdir }}/SPECS"
     spec="{{ srpm_topdir }}/SPECS/gaze.spec"
-    envsubst '$VERSION $PACKAGE_RELEASE $ORT_VERSION $CHANGELOG_DATE $SCRIPTLET_MAIN_POST $SCRIPTLET_EXTENSION_POST $SCRIPTLET_EXTENSION_POSTUN $SCRIPTLET_HYPRLOCK_POST $SCRIPTLET_HYPRLOCK_POSTUN $SCRIPTLET_KDE_POST $SCRIPTLET_KDE_POSTUN' \
+    envsubst '$VERSION $PACKAGE_RELEASE $ORT_VERSION $CHANGELOG_DATE $SCRIPTLET_MAIN_POST $SCRIPTLET_EXTENSION_POST $SCRIPTLET_EXTENSION_POSTUN $SCRIPTLET_OMARCHY_PREUN $SCRIPTLET_OMARCHY_POST $SCRIPTLET_HYPRLOCK_POST $SCRIPTLET_HYPRLOCK_POSTUN $SCRIPTLET_KDE_POST $SCRIPTLET_KDE_POSTUN' \
         < packaging/rpm/gaze.spec.in > "$spec"
 
     {{ quote(rpmbuild) }} -bs "$spec" --define "_topdir $PWD/{{ srpm_topdir }}"
@@ -909,6 +909,11 @@ check-pam-link:
 lint: prepare-opencv
     @{{ gui_notice }}
     {{ opencv_env }} cargo clippy --workspace {{ gui_exclude }} --all-targets -- -D warnings
+
+# Lint every tracked shell script, including the installer and package scriptlets
+[group("checks")]
+lint-shell:
+    git ls-files -z '*.sh' integrations/kde/gaze-kde-pam integrations/omarchy/gaze-omarchy scripts/pre-commit | xargs -0 shellcheck -S warning
 
 # Check formatting (does not write)
 [group("checks")]
