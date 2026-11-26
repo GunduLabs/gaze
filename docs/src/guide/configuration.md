@@ -52,7 +52,7 @@ abort_if_ssh = true
 abort_if_lid_closed = true
 abort_before_first_resume = false
 require_confirmation_lock_screen = false
-require_confirmation_elevation = false
+require_confirmation_elevation = true
 require_attention = false
 resume_grace_ms = 0
 start_delay_ms = 0
@@ -564,7 +564,7 @@ abort_if_ssh = true
 abort_if_lid_closed = true
 abort_before_first_resume = false
 require_confirmation_lock_screen = false
-require_confirmation_elevation = false
+require_confirmation_elevation = true
 require_attention = false
 resume_grace_ms = 0
 start_delay_ms = 0
@@ -582,6 +582,8 @@ Gaze arms the gate from logind's `PrepareForSleep` signal, the same signal `resu
 `require_attention` holds a face match until you face the camera with both eyes open for several frames in a row, so face authentication does not pass while you are looking away or asleep. It checks head pose and the duress eye-state model, not where your pupils point. The eye model loads even with `[duress]` off; if it cannot load, face authentication fails closed and falls through to the password. The setting is only read from `config.toml`, and saving from the GUI keeps it.
 
 `require_confirmation_lock_screen` and `require_confirmation_elevation` each add a manual intent check step after a successful face match, and can be toggled independently. `require_confirmation_lock_screen` covers the lock screen and login/greeter screens (e.g. GDM); `require_confirmation_elevation` covers elevated auth prompts (`sudo`, `su`, `doas`, `run0`, polkit, `pkexec`). Both PAM modules honor them.
+
+`require_confirmation_elevation` is on by default. Without it, any program running as you can start `sudo` on a pseudo-terminal it opened itself, or trigger a polkit prompt, and get root the moment your face is in view, with the camera light as the only sign. Your password would otherwise have stopped it. Turn it off only if you accept that trade. `require_confirmation_lock_screen` stays off by default, because unlocking your own session grants nothing a program already running in it lacks.
 
 When confirmation is disabled, a successful match replaces the camera prompt with "Face Verified." and authentication continues immediately without waiting for input.
 

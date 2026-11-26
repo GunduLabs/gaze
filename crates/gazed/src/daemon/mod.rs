@@ -913,7 +913,6 @@ mod tests {
 
         assert_ne!(defaults.security.level, hardened.security.level);
         assert!(!defaults.auth.require_confirmation_lock_screen);
-        assert!(!defaults.auth.require_confirmation_elevation);
     }
 
     #[tokio::test]
