@@ -51,7 +51,7 @@ need_root() {
 }
 
 repo_root() {
-    CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P
+    CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P
 }
 
 REPO=$(repo_root)
