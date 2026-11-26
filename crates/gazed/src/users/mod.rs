@@ -1046,6 +1046,46 @@ impl UserDatabase {
         Ok(faces)
     }
 
+    pub fn stale_faces(&self, username: &str) -> Result<Vec<String>, UserDbError> {
+        self.ensure_available()?;
+        Self::validate_username(username)?;
+        let Some(face_map) = self.users.get(username) else {
+            return Err(UserDbError::UserNotFound(username.to_string()));
+        };
+        let Some(current) = &self.recognizer else {
+            return Ok(Vec::new());
+        };
+        let mut stale = Vec::new();
+        for face_name in face_map.keys() {
+            let mut stack = vec![self.face_dir(username, face_name)];
+            let mut found = false;
+            while let Some(dir) = stack.pop() {
+                let Ok(entries) = fs::read_dir(&dir) else {
+                    continue;
+                };
+                let tag = Self::recognizer_tag(&dir);
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                        stack.push(path);
+                    } else if path.extension().and_then(|e| e.to_str()) == Some("bin")
+                        && tag.as_ref().is_some_and(|tag| tag != current)
+                    {
+                        found = true;
+                    }
+                }
+                if found {
+                    break;
+                }
+            }
+            if found {
+                stale.push(face_name.clone());
+            }
+        }
+        stale.sort();
+        Ok(stale)
+    }
+
     pub fn has_enrolled_faces(&self, username: &str) -> Result<bool, UserDbError> {
         self.ensure_available()?;
         Self::validate_username(username)?;
@@ -2217,11 +2257,14 @@ mod tests {
             "w600k_mbf.onnx"
         );
 
+        assert!(db.stale_faces("alice").unwrap().is_empty());
+
         db.use_recognizer("w600k_r50.onnx").unwrap();
         assert_eq!(
             sorted_faces(&db, "alice"),
             vec![("work".to_string(), 0, false, false)]
         );
+        assert_eq!(db.stale_faces("alice").unwrap(), vec!["work".to_string()]);
         assert!(!db.has_enrolled_faces("alice").unwrap());
         assert!(
             db.match_faces("alice", &embedding(&[1.0, 0.0]), 0.5, Spectrum::Rgb)

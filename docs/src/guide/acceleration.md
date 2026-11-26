@@ -67,7 +67,9 @@ execution_provider = "auto"
 device = "npu"
 ```
 
-Finally, restart the daemon and check that each model is using the expected provider:
+Finally, restart the daemon and check that each model is using the expected provider.
+When you change the provider through `gaze config` or the settings window instead,
+gazed restarts by itself if the new provider needs a different runtime.
 
 ```bash
 sudo systemctl restart gazed
