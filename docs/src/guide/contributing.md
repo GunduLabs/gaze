@@ -71,6 +71,9 @@ just test
 just audit
 ```
 
+If you changed a shell script (the installer, package scriptlets, or anything in
+`scripts/`), also run `just lint-shell`.
+
 If you changed the `Justfile`, also run:
 
 ```bash
