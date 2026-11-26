@@ -744,7 +744,6 @@ need grep
 need uname
 need awk
 need id
-need gpg
 if [ "$(id -u)" -eq 0 ]; then
     SUDO=""
 else
@@ -1100,6 +1099,10 @@ require_aur_dependencies() {
     link "$AUR_DEPS_DOCS_URL"
     exit 1
 }
+
+if is_deb || is_rpm; then
+    need gpg
+fi
 
 require_published_repository
 
