@@ -1021,6 +1021,7 @@ pub trait Gaze {
     async fn enroll_stop(&self) -> zbus::Result<()>;
 
     async fn list_faces(&self, username: &str) -> zbus::Result<Vec<(String, u32, bool, bool)>>;
+    async fn stale_faces(&self, username: &str) -> zbus::Result<Vec<String>>;
     async fn has_enrolled_faces(&self, username: &str) -> zbus::Result<bool>;
     async fn credential_status(&self, username: &str) -> zbus::Result<(bool, bool)>;
     async fn is_camera_available(&self) -> zbus::Result<bool>;
