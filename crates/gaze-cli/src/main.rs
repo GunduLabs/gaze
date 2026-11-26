@@ -1058,6 +1058,11 @@ async fn run() -> anyhow::Result<()> {
             handle_rename_face(&proxy, &user.unwrap_or_else(get_current_user), &from, &to).await?;
         }
         Commands::ClearUser { user, yes } => {
+            if let Some(name) = &user
+                && !user_exists(name)
+            {
+                exit_with_error(&format!("unknown user '{name}'; nothing was deleted"));
+            }
             handle_clear_user(&proxy, &user.unwrap_or_else(get_current_user), yes).await?;
         }
         Commands::Duress { clear, user } => {
