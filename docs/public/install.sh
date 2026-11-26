@@ -172,6 +172,39 @@ print_manual_cinnamon_enable() {
     say "Open System Settings → Extensions and enable Gaze. Existing extensions will be preserved."
 }
 
+hyprlock_pam_module() {
+    awk '
+        {
+            line = $0
+            sub(/#.*/, "", line)
+            while (line != "") {
+                if (match(line, /^[[:space:]]*[A-Za-z_][A-Za-z0-9_:-]*[[:space:]]*\{/)) {
+                    name = substr(line, RSTART, RLENGTH)
+                    gsub(/[[:space:]{]/, "", name)
+                    path = path ":" name
+                    line = substr(line, RSTART + RLENGTH)
+                } else if (match(line, /^[[:space:]]*\}/)) {
+                    sub(/:[^:]*$/, "", path)
+                    line = substr(line, RSTART + RLENGTH)
+                } else if (match(line, /^[[:space:]]*[A-Za-z_][A-Za-z0-9_:-]*[[:space:]]*=/)) {
+                    key = substr(line, RSTART, RLENGTH)
+                    gsub(/[[:space:]=]/, "", key)
+                    value = substr(line, RSTART + RLENGTH)
+                    sub(/[[:space:]]*\}.*/, "", value)
+                    gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+                    if (path ":" key == ":auth:pam:module") {
+                        print value
+                        exit
+                    }
+                    line = ""
+                } else {
+                    line = ""
+                }
+            }
+        }
+    ' "$1"
+}
+
 configure_hyprlock_conf() {
     if [ "$(id -u)" -eq 0 ]; then
         warn "Running as root; skipping per-user hyprlock.conf edit."
@@ -201,8 +234,8 @@ EOF
         return 0
     fi
 
-    if grep -qE '^[[:space:]]*module[[:space:]]*=' "$conf"; then
-        current_pam="$(grep -E '^[[:space:]]*module[[:space:]]*=' "$conf" | head -1 | sed 's/.*=[[:space:]]*//;s/[[:space:]]*$//')"
+    current_pam="$(hyprlock_pam_module "$conf")"
+    if [ -n "$current_pam" ]; then
         case "$current_pam" in
         hyprlock-gaze | hyprlock-gaze-simultaneous)
             HYPRLOCK_STATUS="configured"
