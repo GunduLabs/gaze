@@ -812,7 +812,7 @@ impl<'de> Deserialize<'de> for AuthConfig {
         D: serde::Deserializer<'de>,
     {
         let file = AuthConfigFile::deserialize(deserializer)?;
-        let legacy = file.require_confirmation.unwrap_or(false);
+        let legacy = file.require_confirmation;
 
         Ok(Self {
             abort_if_ssh: file.abort_if_ssh,
@@ -820,8 +820,12 @@ impl<'de> Deserialize<'de> for AuthConfig {
             abort_before_first_resume: file.abort_before_first_resume,
             require_confirmation_lock_screen: file
                 .require_confirmation_lock_screen
-                .unwrap_or(legacy),
-            require_confirmation_elevation: file.require_confirmation_elevation.unwrap_or(legacy),
+                .or(legacy)
+                .unwrap_or(false),
+            require_confirmation_elevation: file
+                .require_confirmation_elevation
+                .or(legacy)
+                .unwrap_or(true),
             require_attention: file.require_attention,
             resume_grace_ms: file.resume_grace_ms,
             start_delay_ms: file.start_delay_ms,
@@ -968,7 +972,7 @@ impl Default for AuthConfig {
             abort_if_lid_closed: true,
             abort_before_first_resume: false,
             require_confirmation_lock_screen: false,
-            require_confirmation_elevation: false,
+            require_confirmation_elevation: true,
             require_attention: false,
             resume_grace_ms: default_resume_grace_ms(),
             start_delay_ms: default_start_delay_ms(),
@@ -2188,8 +2192,15 @@ mod tests {
     }
 
     #[test]
-    fn confirmation_defaults_to_off_without_any_key() {
+    fn only_elevation_confirmation_defaults_on_without_any_key() {
         let auth: AuthConfig = toml_edit::de::from_str("").unwrap();
+        assert!(!auth.require_confirmation_lock_screen);
+        assert!(auth.require_confirmation_elevation);
+    }
+
+    #[test]
+    fn a_legacy_false_still_turns_elevation_confirmation_off() {
+        let auth: AuthConfig = toml_edit::de::from_str("require_confirmation = false\n").unwrap();
         assert!(!auth.require_confirmation_lock_screen);
         assert!(!auth.require_confirmation_elevation);
     }
@@ -2590,7 +2601,7 @@ mod tests {
         assert!(config.auth.abort_if_lid_closed);
         assert!(!config.auth.abort_before_first_resume);
         assert!(!config.auth.require_confirmation_lock_screen);
-        assert!(!config.auth.require_confirmation_elevation);
+        assert!(config.auth.require_confirmation_elevation);
         assert!(!config.auth.require_attention);
         assert_eq!(config.auth.start_delay_ms, 0);
         assert_eq!(config.enrollment.max_templates, 2);

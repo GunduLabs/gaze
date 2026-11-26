@@ -80,7 +80,9 @@ abort_before_first_resume = false
 # back. Requiring confirmation makes Gaze fall back to the password on those surfaces.
 # See `gaze doctor` and the KDE guide.
 require_confirmation_lock_screen = false
-require_confirmation_elevation = false
+# Ask for confirmation after a face match for sudo, su, polkit and similar prompts.
+# Without it, any program running as you can get root while your face is in view.
+require_confirmation_elevation = true
 # Require the user to face the camera with open eyes before a face match unlocks.
 require_attention = false
 # Delay face auth by this many milliseconds on the first unlock after resuming from
