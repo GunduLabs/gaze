@@ -20,6 +20,9 @@ pub struct PolkitAgent {
 
 impl PolkitAgent {
     pub fn spawn() -> Self {
+        if std::fs::File::open("/dev/tty").is_err() {
+            return PolkitAgent { child: None };
+        }
         match Self::try_spawn() {
             Ok(agent) => agent,
             Err(err) => {
