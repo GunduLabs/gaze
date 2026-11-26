@@ -215,6 +215,12 @@ pub async fn handle_rename_face(
     .await?;
 
     match result {
+        Ok(true) if from == to => {
+            term.write_line(&format!(
+                "{} Face '{from}' is already named '{to}' for '{user}'; nothing changed",
+                style("✓").green().bold(),
+            ))?;
+        }
         Ok(true) => {
             term.write_line(&format!(
                 "{} Face '{}' renamed to '{}' for '{}'",
