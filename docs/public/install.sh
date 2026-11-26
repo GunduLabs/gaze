@@ -201,8 +201,8 @@ EOF
         return 0
     fi
 
-    if grep -qE '^\s*module\s*=' "$conf"; then
-        current_pam="$(grep -E '^\s*module\s*=' "$conf" | head -1 | sed 's/.*=\s*//;s/\s*$//')"
+    if grep -qE '^[[:space:]]*module[[:space:]]*=' "$conf"; then
+        current_pam="$(grep -E '^[[:space:]]*module[[:space:]]*=' "$conf" | head -1 | sed 's/.*=[[:space:]]*//;s/[[:space:]]*$//')"
         case "$current_pam" in
         hyprlock-gaze | hyprlock-gaze-simultaneous)
             HYPRLOCK_STATUS="configured"
@@ -219,10 +219,10 @@ EOF
 
     cp "$conf" "$conf.gaze-backup"
 
-    if grep -qE '^\s*pam\s*\{' "$conf"; then
+    if grep -qE '^[[:space:]]*pam[[:space:]]*\{' "$conf"; then
         awk '
             BEGIN { done = 0 }
-            /^\s*pam\s*\{/ && !done {
+            /^[[:space:]]*pam[[:space:]]*\{/ && !done {
                 print
                 print "        module = hyprlock-gaze"
                 done = 1
@@ -232,10 +232,10 @@ EOF
         ' "$conf.gaze-backup" >"$conf"
         HYPRLOCK_STATUS="configured"
         ok "Added module = hyprlock-gaze to existing pam {} block in $conf."
-    elif grep -qE '^\s*auth\s*\{' "$conf"; then
+    elif grep -qE '^[[:space:]]*auth[[:space:]]*\{' "$conf"; then
         awk '
             BEGIN { done = 0 }
-            /^\s*auth\s*\{/ && !done {
+            /^[[:space:]]*auth[[:space:]]*\{/ && !done {
                 print
                 print "    pam {"
                 print "        module = hyprlock-gaze"
@@ -376,6 +376,7 @@ enable_gnome_extension() {
     # `gnome-extensions enable` usually fails here and gsettings writes dconf directly.
     if command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions enable "$EXT_ID" >/dev/null 2>&1 && _gsettings_enable_face_auth; then
         DESKTOP_STATUS="GNOME lock screen: enabled"
+        return 0
     elif _gsettings_add_extension "$EXT_ID" && _gsettings_enable_face_auth; then
         DESKTOP_STATUS="GNOME lock screen: pending reboot"
     else
@@ -1239,6 +1240,14 @@ if [ "$PLAINTEXT_TEMPLATES" -eq 1 ]; then
     $SUDO chmod 644 /etc/gaze/config.toml
 fi
 
+# ── configure repositories + install packages ────────────────────────────────
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+if is_deb || is_rpm; then
+    KEY_PATH="$(fetch_repo_key)"
+fi
+
 # ── clean up old repo files ──────────────────────────────────────────────────
 if is_deb; then
     if [ -f /etc/apt/sources.list.d/gundulabs.list ] || [ -f /usr/share/keyrings/gundulabs-archive-keyring.gpg ]; then
@@ -1254,17 +1263,12 @@ elif is_rpm; then
     fi
 fi
 
-# ── configure repositories + install packages ────────────────────────────────
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
-
 if [ "$NO_PAM" -eq 1 ]; then
     record_pam_optout
 fi
 
 if is_deb; then
     step "Configuring apt repository"
-    KEY_PATH="$(fetch_repo_key)"
     gpg --dearmor --yes --output "$TMP/gundulabs-archive-keyring.gpg" "$KEY_PATH"
     $SUDO mkdir -p -m 0755 /usr/share/keyrings
     $SUDO cp "$TMP/gundulabs-archive-keyring.gpg" /usr/share/keyrings/gundulabs-archive-keyring.gpg
@@ -1307,8 +1311,6 @@ if is_deb; then
 
 elif is_rpm; then
     step "Configuring repository"
-    # Verify and install the key before configuring the repository.
-    KEY_PATH="$(fetch_repo_key)"
     $SUDO mkdir -p /etc/pki/rpm-gpg
     $SUDO cp "$KEY_PATH" /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
     $SUDO chmod 0644 /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
