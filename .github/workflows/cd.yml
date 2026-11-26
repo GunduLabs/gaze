@@ -324,7 +324,6 @@ jobs:
             target/release/gaze-gui \
             target/release/gazed \
             target/release/libpam_gaze.so \
-            target/release/libpam_gaze_grosshack.so \
             dist/opencv \
             dist/selinux \
             dist/kcm

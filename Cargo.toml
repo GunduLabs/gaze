@@ -10,7 +10,6 @@ members = [
     "crates/gaze-security",
     "crates/gaze-vision",
     "crates/pam-gaze",
-    "crates/pam-gaze-grosshack",
 ]
 resolver = "3"
 

@@ -55,7 +55,7 @@ Crates (`crates/`):
 - `gaze-cli`: the `gaze` binary (CLI, TUI config, `setup`, `doctor/` diagnostics, `uninstall`).
 - `gaze-gui`: GTK4/libadwaita app.
 - `pam-gaze`: `cdylib` PAM module; asks `gazed` over DBus. `PamMode` is `Sequential`/`Simultaneous`/`Retry`.
-- `pam-gaze-grosshack`: deprecated shim that `#[path]`-includes `pam-gaze` sources and forces `Simultaneous`. New work goes in `pam-gaze`.
+- `pam_gaze_grosshack.so` is a packaged symlink to `pam_gaze.so`; `pam-gaze` detects that load name and forces `Simultaneous`. It is deprecated, so new work goes in `pam-gaze`.
 
 Other trees: `integrations/` (GNOME Shell, Cinnamon, KDE KCM + `gaze-kde-pam`, Omarchy Quickshell), `packaging/` (nfpm, RPM spec, authselect, PAM configs, SELinux, systemd/DBus/polkit config, flatpak, nix, maintainer scriptlets), `scripts/` (dev helpers and test harnesses), `docs/src/` (VitePress site; `docs/archive/` and `docs/.vitepress/dist` are generated).
 
