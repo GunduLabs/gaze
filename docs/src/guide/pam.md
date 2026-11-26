@@ -98,6 +98,17 @@ auth    [success=done default=ignore]    pam_gaze.so local
 Unknown options are ignored with a warning in the system log, so run
 `journalctl -g pam_gaze` if an option seems to have no effect.
 
+### Only you can face-authenticate as you
+
+A setuid program such as `su` runs as root but was started by someone. When
+that someone is a different user from the account being authenticated,
+`pam_gaze.so` returns `PAM_IGNORE` and the password is required. Otherwise
+another user on the machine could run `su yourname` from a background session,
+a cron job or an SSH login while you sit at the camera, and your face would let
+them in. `sudo`, `doas` and the polkit helper authenticate the user who started
+them, so they keep working. `sudo` configured with `targetpw`, `runaspw` or
+`rootpw` asks for another account's password and falls through to it.
+
 ## Debian / Ubuntu
 
 Packages install PAM profiles for `pam-auth-update`.

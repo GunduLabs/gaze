@@ -103,6 +103,10 @@ pub fn root_service_is_local(service: Option<&str>, tty: Option<&str>, trusted: 
     }
 }
 
+pub fn invoked_by_another_user(real_uid: u32, target_uid: Option<u32>) -> bool {
+    real_uid != 0 && target_uid != Some(real_uid)
+}
+
 pub fn service_defers_to_face_service(service: Option<&str>) -> bool {
     match service {
         Some(name) => name.starts_with("gdm-") && name != FACE_PAM_SERVICE,
@@ -266,6 +270,15 @@ mod tests {
         }
         assert!(!root_service_is_local(None, None, false));
         assert!(root_service_is_local(Some("webmin"), None, true));
+    }
+
+    #[test]
+    fn a_setuid_host_started_by_another_user_is_not_face_authenticated() {
+        assert!(invoked_by_another_user(1001, Some(1000)));
+        assert!(invoked_by_another_user(1001, None));
+        assert!(!invoked_by_another_user(1000, Some(1000)));
+        assert!(!invoked_by_another_user(0, Some(1000)));
+        assert!(!invoked_by_another_user(0, None));
     }
 
     #[test]
