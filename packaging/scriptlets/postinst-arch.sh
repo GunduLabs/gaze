@@ -186,6 +186,6 @@ if [ -d /run/systemd/system ]; then
 	systemctl daemon-reload >/dev/null 2>&1 || true
 	dbus-send --system --type=method_call --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig >/dev/null 2>&1 || true
 	if ! cpu_lacks_avx2; then
-		systemctl try-restart gazed >/dev/null 2>&1 || true
+		systemctl --no-block try-restart gazed >/dev/null 2>&1 || true
 	fi
 fi
