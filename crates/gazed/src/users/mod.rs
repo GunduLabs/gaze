@@ -128,6 +128,8 @@ pub struct UserDatabase {
     fail_rollback: bool,
 }
 
+const MAX_COMPONENT_BYTES: usize = 255;
+
 impl UserDatabase {
     fn is_abandoned_name(name: &str) -> bool {
         [".gaze-stage-", ".gaze-deleted-"].iter().any(|prefix| {
@@ -152,6 +154,11 @@ impl UserDatabase {
         {
             return Err(UserDbError::InvalidName(format!(
                 "{kind} must be a single safe path component"
+            )));
+        }
+        if value.len() > MAX_COMPONENT_BYTES {
+            return Err(UserDbError::InvalidName(format!(
+                "{kind} must be at most {MAX_COMPONENT_BYTES} bytes"
             )));
         }
         Ok(())
@@ -1245,6 +1252,13 @@ mod tests {
                 "{name:?} should be invalid"
             );
         }
+    }
+
+    #[test]
+    fn validate_names_reject_components_longer_than_a_filename() {
+        UserDatabase::validate_face_name(&"a".repeat(MAX_COMPONENT_BYTES)).unwrap();
+        assert!(UserDatabase::validate_face_name(&"a".repeat(MAX_COMPONENT_BYTES + 1)).is_err());
+        assert!(UserDatabase::validate_face_name(&"é".repeat(128)).is_err());
     }
 
     #[test]
