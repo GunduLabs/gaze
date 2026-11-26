@@ -175,6 +175,46 @@ impl UserDatabase {
         Self::validate_component("face name", face_name)
     }
 
+    pub fn validate_new_face_name(face_name: &str) -> Result<(), UserDbError> {
+        Self::validate_face_name(face_name)?;
+        if face_name.chars().any(Self::is_invisible_format_char) {
+            return Err(UserDbError::InvalidName(
+                "face name cannot contain invisible or text-direction characters".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn is_invisible_format_char(c: char) -> bool {
+        matches!(
+            c,
+            '\u{00AD}'
+                | '\u{034F}'
+                | '\u{061C}'
+                | '\u{115F}'
+                | '\u{1160}'
+                | '\u{17B4}'
+                | '\u{17B5}'
+                | '\u{180E}'
+                | '\u{200B}'
+                | '\u{200E}'
+                | '\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{206F}'
+                | '\u{3164}'
+                | '\u{FEFF}'
+                | '\u{FFA0}'
+                | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{E0000}'..='\u{E007F}'
+        )
+    }
+
+    pub fn has_face(&self, username: &str, face_name: &str) -> bool {
+        self.users
+            .get(username)
+            .is_some_and(|faces| faces.contains_key(face_name))
+    }
+
     fn validate_template_id(template_id: &str) -> Result<(), UserDbError> {
         Self::validate_component("template id", template_id)
     }
@@ -862,7 +902,7 @@ impl UserDatabase {
         Self::validate_username(username)?;
         self.ensure_available()?;
         Self::validate_face_name(old_face_name)?;
-        Self::validate_face_name(new_face_name)?;
+        Self::validate_new_face_name(new_face_name)?;
         if old_face_name == new_face_name {
             return Ok(());
         }
@@ -1234,6 +1274,34 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn new_face_names_reject_invisible_and_direction_characters() {
+        for name in [
+            "Alice Smith",
+            "café",
+            "李雷",
+            "face 😀",
+            "❤\u{FE0F}",
+            "می\u{200C}خواهم",
+        ] {
+            UserDatabase::validate_new_face_name(name).unwrap();
+        }
+        for name in [
+            "bob\u{200B}face",
+            "\u{202E}ecaf",
+            "bob\u{FEFF}",
+            "bob\u{2060}face",
+            "bob\u{00AD}face",
+            "bob\u{3164}",
+        ] {
+            UserDatabase::validate_face_name(name).unwrap();
+            assert!(
+                UserDatabase::validate_new_face_name(name).is_err(),
+                "{name:?} should be rejected"
+            );
+        }
     }
 
     #[test]
