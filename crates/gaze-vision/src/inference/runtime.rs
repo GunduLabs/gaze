@@ -13,6 +13,7 @@ pub struct RuntimeLibrary {
     pub path: PathBuf,
     pub version: String,
     pub provider: String,
+    pub requested: String,
     pub fallback_reason: Option<String>,
     pub environment: ort::environment::Environment,
 }
@@ -177,6 +178,22 @@ fn library_version(path: &Path) -> anyhow::Result<String> {
     Ok(version)
 }
 
+pub fn needs_restart_for(config: &InferenceConfig) -> bool {
+    let Some(runtime) = RUNTIME.get() else {
+        return false;
+    };
+    if std::env::var_os("ORT_DYLIB_PATH").is_some() {
+        return false;
+    }
+    let devices = acceleration::discover_npus();
+    let wanted = if config.validate().is_ok() {
+        requested_provider(config, &devices)
+    } else {
+        "cpu"
+    };
+    wanted != runtime.requested && !(wanted == "cpu" && runtime.provider == "cpu")
+}
+
 pub fn initialize_runtime(config: &InferenceConfig) -> anyhow::Result<&'static RuntimeLibrary> {
     let _guard = INITIALIZE.lock().unwrap_or_else(|error| error.into_inner());
     if let Some(runtime) = RUNTIME.get() {
@@ -237,6 +254,7 @@ pub fn initialize_runtime(config: &InferenceConfig) -> anyhow::Result<&'static R
                     path,
                     version,
                     provider: active_provider,
+                    requested: provider.to_string(),
                     fallback_reason,
                     environment,
                 };
