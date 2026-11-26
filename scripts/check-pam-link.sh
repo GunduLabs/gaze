@@ -43,10 +43,8 @@ for module in "$@"; do
     fi
 
     for lib in $needed; do
-        # Both modules share pam-gaze/src/auth.rs and its local credential
-        # unsealing code. The compatibility shim therefore also uses TPM.
         case "${module##*/}:$lib" in
-            libpam_gaze.so:libtss2-esys.so.0|libpam_gaze.so:libtss2-mu.so.0|libpam_gaze.so:libtss2-tctildr.so.0|libpam_gaze_grosshack.so:libtss2-esys.so.0|libpam_gaze_grosshack.so:libtss2-mu.so.0|libpam_gaze_grosshack.so:libtss2-tctildr.so.0)
+            libpam_gaze.so:libtss2-esys.so.0|libpam_gaze.so:libtss2-mu.so.0|libpam_gaze.so:libtss2-tctildr.so.0)
                 continue ;;
         esac
         if ! echo "$ALLOWED" | grep -qxF "$lib"; then

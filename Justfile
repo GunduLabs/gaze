@@ -65,8 +65,8 @@ default:
 [group("build")]
 build-rust: prepare-ort prepare-opencv && _stage-opencv
     {{ opencv_env }} cargo build --locked -p gazed --release
-    {{ opencv_env }} cargo build --locked -p gaze-cli {{ gui_pkg }} -p pam-gaze -p pam-gaze-grosshack --release
-    scripts/check-pam-link.sh target/release/libpam_gaze.so target/release/libpam_gaze_grosshack.so
+    {{ opencv_env }} cargo build --locked -p gaze-cli {{ gui_pkg }} -p pam-gaze --release
+    scripts/check-pam-link.sh target/release/libpam_gaze.so
 
 # Stage the gaze-kde System Settings files in dist/kcm
 [arg("format", pattern="deb|rpm|archlinux")]
@@ -259,7 +259,7 @@ _nfpm config format:
 
     for module in "${binaries[@]}"; do
         case "$module" in
-        */libpam_gaze.so|*/libpam_gaze_grosshack.so) scripts/check-pam-link.sh "$module" ;;
+        */libpam_gaze.so) scripts/check-pam-link.sh "$module" ;;
         esac
     done
     export OPENCV_CONTENTS="  # unused for {{ config }}"
@@ -487,6 +487,14 @@ _verify-package format:
         [ ${#missing[@]} -eq 0 ] || fail "$base does not ship: ${missing[*]}"
     }
 
+    want_link() {
+        local p
+        for p in "$@"; do
+            awk -F'\t' -v p="$p" '$1 == p && $2 == "l" { found = 1 } END { exit !found }' <<< "$rows" ||
+                fail "$base does not ship $p as a symlink"
+        done
+    }
+
     want_size() {
         local size
         size=$(awk -F'\t' -v p="$1" '$1 == p && $2 == "f" { print $3; exit }' <<< "$rows")
@@ -598,7 +606,7 @@ _verify-package format:
             /usr/lib/security/pam_gaze.so /usr/lib/security/pam_gaze_grosshack.so \
             /usr/share/pam-configs/gaze /usr/share/pam-configs/gaze-simultaneous
         want_size "/lib/{{ multiarch }}/security/pam_gaze.so" 20000
-        want_size "/lib/{{ multiarch }}/security/pam_gaze_grosshack.so" 20000
+        want_link "/lib/{{ multiarch }}/security/pam_gaze_grosshack.so"
         for module in pam_gaze pam_gaze_grosshack; do
             target=$(dpkg-deb -c "$pkg" | sed -n "s#.* \./usr/lib/security/${module}\.so -> ##p")
             [ "$target" = "/lib/{{ multiarch }}/security/${module}.so" ] || {
@@ -617,7 +625,7 @@ _verify-package format:
         want_files /usr/lib64/security/pam_gaze.so /usr/lib64/security/pam_gaze_grosshack.so \
             /usr/share/gaze/gaze-gdm-camera.pp /usr/share/gaze/gaze-greeter-keyring.pp
         want_size /usr/lib64/security/pam_gaze.so 20000
-        want_size /usr/lib64/security/pam_gaze_grosshack.so 20000
+        want_link /usr/lib64/security/pam_gaze_grosshack.so
         if [ -n "$suse" ]; then
             want_files /usr/lib/pam-config.d/gaze.conf
             want_depends pam pam-config
@@ -636,7 +644,7 @@ _verify-package format:
     archlinux)
         want_files /usr/lib/security/pam_gaze.so /usr/lib/security/pam_gaze_grosshack.so
         want_size /usr/lib/security/pam_gaze.so 20000
-        want_size /usr/lib/security/pam_gaze_grosshack.so 20000
+        want_link /usr/lib/security/pam_gaze_grosshack.so
         want_scripts post_upgrade
         want_depends pam tpm2-tss
         want_opencv /usr/bin/gazed /usr/bin/gaze
@@ -902,7 +910,7 @@ audit:
 # Verify PAM links only system libraries and the main module's TPM libraries
 [group("checks")]
 check-pam-link:
-    scripts/check-pam-link.sh target/release/libpam_gaze.so target/release/libpam_gaze_grosshack.so
+    scripts/check-pam-link.sh target/release/libpam_gaze.so
 
 # Run clippy lints across the workspace
 [group("checks")]

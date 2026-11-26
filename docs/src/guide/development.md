@@ -204,7 +204,7 @@ Rust packages live under `crates/`; desktop integration source lives under
 - `crates/gaze-security`: TPM sealing and the GNOME Keyring credential store. Links tpm2-tss plus pure-Rust crypto (`aes-gcm`, `sha2`) and nothing heavier, so `pam-gaze` can depend on it.
 - `crates/gaze-vision`: camera capture, face detection, and inference. Detection sits behind the `detection` cargo feature. The workspace dependency turns default features off, so the CLI and GUI get camera support alone and only `gazed` enables `detection`.
 - `crates/pam-gaze`: `cdylib` PAM module. Depends on `gaze-core` and `gaze-security` for TPM keyring unsealing, never `gaze-vision`; `just check-pam-link` enforces its library allowlist (see warning below).
-- `crates/pam-gaze-grosshack`: deprecated `cdylib` compatibility shim that forces `PamMode::Simultaneous` and prints a deprecation notice. It `#[path]`-includes `pam-gaze`'s own modules rather than duplicating them. Every package still installs it so legacy PAM lines keep working, and it is slated for removal; new work belongs in `pam-gaze`.
+- `pam_gaze_grosshack.so`: deprecated compatibility name. Every package installs it as a symlink to `pam_gaze.so`, which forces `PamMode::Simultaneous` and prints a deprecation notice when loaded under that name, so legacy PAM lines keep working. It is slated for removal; new work belongs in `pam-gaze`.
 - `crates/gaze-gui`: GTK4/libadwaita app. Desktop integrations in `integrations/` are packaged separately.
 
 ## Build and test rust components
@@ -348,7 +348,6 @@ The CLI and GUI need no special setup; they talk to whichever `gazed` currently 
 `pam-gaze` builds as a `cdylib`. After `just build-rust` you'll have:
 
 - `target/release/libpam_gaze.so`
-- `target/release/libpam_gaze_grosshack.so` (the deprecated shim; only the openSUSE packages install it)
 
 `just build-rust` also runs `just check-pam-link` over it, which fails the build
 if the module does not link `libpam.so.0`, or links anything beyond that, libc,

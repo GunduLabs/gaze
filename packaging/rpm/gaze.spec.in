@@ -198,7 +198,7 @@ RUSTFLAGS="-Cdebuginfo=0" \
     cargo build --release --locked --offline -p gazed
 
 RUSTFLAGS="-Cdebuginfo=0" \
-    cargo build --release --locked --offline -p gaze-cli -p gaze-gui -p pam-gaze -p pam-gaze-grosshack
+    cargo build --release --locked --offline -p gaze-cli -p gaze-gui -p pam-gaze
 
 checkmodule -M -m -o gaze-gdm-camera.mod packaging/selinux/gaze-gdm-camera.te
 semodule_package -o gaze-gdm-camera.pp -m gaze-gdm-camera.mod
@@ -216,7 +216,7 @@ install -Dpm 0644 packaging/config/com.gundulabs.Gaze.conf %{buildroot}%{_syscon
 install -Dpm 0644 packaging/config/com.gundulabs.gaze.policy %{buildroot}%{_datadir}/polkit-1/actions/com.gundulabs.gaze.policy
 install -Dpm 0644 packaging/config/gazed.service %{buildroot}%{_unitdir}/gazed.service
 install -Dpm 0755 target/release/libpam_gaze.so %{buildroot}%{_libdir}/security/pam_gaze.so
-install -Dpm 0755 target/release/libpam_gaze_grosshack.so %{buildroot}%{_libdir}/security/pam_gaze_grosshack.so
+ln -s pam_gaze.so %{buildroot}%{_libdir}/security/pam_gaze_grosshack.so
 
 %if 0%{?suse_version}
 # Tumbleweed uses pam-config; Fedora uses the authselect files below.
