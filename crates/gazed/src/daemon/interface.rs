@@ -306,7 +306,12 @@ impl AuthDaemon {
         Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let signal_destination = Self::signal_destination(&claim.sender)?;
 
-        UserDatabase::validate_face_name(&face_name).map_err(Self::map_user_db_error)?;
+        if self.db.lock().await.has_face(&username, &face_name) {
+            UserDatabase::validate_face_name(&face_name)
+        } else {
+            UserDatabase::validate_new_face_name(&face_name)
+        }
+        .map_err(Self::map_user_db_error)?;
 
         let db_arc = self.db.clone();
 
