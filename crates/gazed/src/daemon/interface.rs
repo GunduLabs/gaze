@@ -1269,7 +1269,9 @@ impl AuthDaemon {
         let header =
             header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
         Self::ensure_config_read_access(&header).await?;
-        Ok(self.current_config().await.into())
+        let mut config = self.current_config().await;
+        config.security = config.security.effective();
+        Ok(config.into())
     }
 
     #[zbus(property)]
