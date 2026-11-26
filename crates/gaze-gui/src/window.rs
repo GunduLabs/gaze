@@ -1082,6 +1082,16 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                     Err(_) => (true, true),
                                 }
                             };
+                            let stale_faces: std::collections::HashSet<String> = if faces.is_empty() {
+                                std::collections::HashSet::new()
+                            } else {
+                                proxy
+                                    .stale_faces(&username)
+                                    .await
+                                    .unwrap_or_default()
+                                    .into_iter()
+                                    .collect()
+                            };
                             if refresh_generation.get() != generation {
                                 return;
                             }
@@ -1115,7 +1125,9 @@ pub fn build_window(app: &libadwaita::Application, username: &str) {
                                     let row = libadwaita::ActionRow::new();
                                     row.set_use_markup(false);
                                     row.set_title(&face_name);
-                                    row.set_subtitle(&if count == 1 {
+                                    row.set_subtitle(&if stale_faces.contains(&face_name) {
+                                        tr("Enrolled with a different face model. Improve this face to capture it again.").to_string()
+                                    } else if count == 1 {
                                         tr("1 capture").to_string()
                                     } else {
                                         trf("{count} captures", &[("count", &count.to_string())])

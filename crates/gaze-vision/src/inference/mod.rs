@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 mod runtime;
 
-pub use runtime::{initialize_runtime, prepare_environment};
+pub use runtime::{initialize_runtime, needs_restart_for, prepare_environment};
 
 /// A regular file and its digest, verified during model acquisition.
 /// Session caches reuse the digest instead of hashing the weights again.

@@ -128,6 +128,24 @@ pub async fn handle_list_faces(
                     ))?;
                 }
                 term.write_line("")?;
+                let stale = proxy.stale_faces(user).await.unwrap_or_default();
+                let user_flag = if user == crate::get_current_user() {
+                    String::new()
+                } else {
+                    format!("--user {user} ")
+                };
+                for face in &stale {
+                    term.write_line(&format!(
+                        "{} '{}' was enrolled with a different face model and no longer matches. Run `gaze refine-face {}{}` to capture it again.",
+                        style("!").yellow().bold(),
+                        face,
+                        user_flag,
+                        face
+                    ))?;
+                }
+                if !stale.is_empty() {
+                    term.write_line("")?;
+                }
             }
         }
         Err(e) => {
