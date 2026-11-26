@@ -826,7 +826,7 @@ enable_gazed() {
         problem "systemd is not running here; start the daemon with: sudo systemctl enable --now gazed"
         return 0
     fi
-    if enable_output="$($SUDO systemctl enable --now gazed </dev/null 2>&1)"; then
+    if enable_output="$($SUDO systemctl --no-block enable --now gazed </dev/null 2>&1)"; then
         ok "Enabled the Gaze daemon."
     else
         problem "Could not enable the Gaze daemon:"
@@ -834,31 +834,33 @@ enable_gazed() {
     fi
 }
 
-daemon_on_bus() {
-    busctl --system call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
-        NameHasOwner s com.gundulabs.Gaze 2>/dev/null | grep -q true
-}
-
-wait_for_daemon_bus() {
-    command -v busctl >/dev/null 2>&1 || return 0
-    daemon_on_bus && return 0
+wait_for_daemon() {
+    state="$(systemctl is-active gazed 2>/dev/null || true)"
+    [ "$state" = "active" ] && return 0
     say "Preparing face recognition (first start may download models; up to 3 minutes)…"
     waited=0
     while [ "$waited" -lt 180 ]; do
-        sleep 3
-        waited=$((waited + 3))
-        if daemon_on_bus; then
+        case "$state" in
+        active)
             ok "The Gaze daemon is ready."
             return 0
-        fi
-        case "$(systemctl is-active gazed 2>/dev/null || true)" in
-        active | activating | reloading) ;;
+            ;;
+        activating | reloading) ;;
+        inactive)
+            if [ "$waited" -ge 6 ]; then
+                problem "Gaze did not start. Run gaze doctor; see journalctl -u gazed -n 50."
+                return 0
+            fi
+            ;;
         *)
             problem "Gaze stopped during preparation. Run gaze doctor; see journalctl -u gazed -n 50."
             return 0
             ;;
         esac
+        sleep 3
+        waited=$((waited + 3))
         [ $((waited % 15)) -ne 0 ] || say "  Still preparing… ${waited}s elapsed"
+        state="$(systemctl is-active gazed 2>/dev/null || true)"
     done
     problem "Preparation did not finish within 3 minutes. Run gaze doctor before enrolling."
 }
@@ -866,14 +868,7 @@ wait_for_daemon_bus() {
 verify_install() {
     [ "${OSTREE_PENDING:-0}" -eq 1 ] && return 0
     if [ -d /run/systemd/system ]; then
-        sleep 2
-        state="$(systemctl is-active gazed 2>/dev/null || true)"
-        if [ "$state" = "active" ]; then
-            ok "The Gaze daemon is running."
-            wait_for_daemon_bus
-        else
-            problem "The Gaze daemon is ${state:-not running}; see: journalctl -u gazed -n 50"
-        fi
+        wait_for_daemon
     fi
     if [ "$NO_PAM" -eq 0 ] && ! grep -rqsE '^[[:space:]]*-?auth[[:space:]].*pam_gaze' /etc/pam.d/; then
         problem "No PAM service uses pam_gaze yet, so sudo and login will not offer face authentication."
