@@ -624,7 +624,8 @@ msgstr "Zmień model"
 msgid "Model change cancelled. Current settings restored"
 msgstr "Anulowano zmianę modelu. Przywrócono obecne ustawienia"
 
-msgid "Saved. Restart gazed, then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active."
+#, fuzzy
+msgid "Saved. gazed restarts by itself if the new provider needs a different runtime. Then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active."
 msgstr "Zapisano. Uruchom ponownie gazed, a potem uruchom gaze doctor --benchmark, aby sprawdzić przyspieszenie; możliwe, że zamiast niego używany jest procesor."
 
 msgid "Saved. Use Improve this face on each existing profile to re-enroll, then test recognition."

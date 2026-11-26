@@ -197,6 +197,18 @@ struct PreparedConfig {
     cipher: Option<crate::crypto::EmbeddingCipher>,
 }
 
+const EXIT_RUNTIME_RESTART: i32 = 75;
+
+fn schedule_runtime_restart() {
+    info!(
+        "The new acceleration settings need a different ONNX Runtime; restarting gazed to load it"
+    );
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        std::process::exit(EXIT_RUNTIME_RESTART);
+    });
+}
+
 impl PreparedConfig {
     fn load(
         current: &Config,
@@ -381,6 +393,11 @@ impl AuthDaemon {
                         *ir_liveness.blocking_lock() = None;
                     }
                     info!("Config reloaded successfully");
+                    if prepared.reload.inference
+                        && gaze_vision::inference::needs_restart_for(&requested.inference)
+                    {
+                        schedule_runtime_restart();
+                    }
                     Ok(())
                 },
             )
