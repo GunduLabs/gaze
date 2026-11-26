@@ -116,6 +116,34 @@ pub fn print_apply_notes(before: &Config, after: &Config) {
     }
 }
 
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        if !line.is_empty()
+            && console::measure_text_width(&line) + 1 + console::measure_text_width(word) > width
+        {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+fn write_wrapped(term: &Term, text: &str) -> std::io::Result<()> {
+    let width = usize::from(term.size().1).clamp(20, 100);
+    for line in wrap_words(text, width) {
+        term.write_line(&line)?;
+    }
+    Ok(())
+}
+
 pub async fn run_config_wizard(
     term: &Term,
     proxy: &GazeProxy<'_>,
@@ -124,7 +152,10 @@ pub async fn run_config_wizard(
 ) -> anyhow::Result<()> {
     let theme = ColorfulTheme::default();
     let original = config.clone();
-    term.write_line("Gaze settings — choose a section. Changes stay in this draft until you save. Esc returns to the menu; Ctrl+C discards the draft.")?;
+    write_wrapped(
+        term,
+        "Gaze settings — choose a section. Changes stay in this draft until you save. Esc returns to the menu; Ctrl+C discards the draft.",
+    )?;
     loop {
         let choice = Select::with_theme(&theme)
             .with_prompt("Settings")
@@ -663,6 +694,21 @@ fn enroll_keyring(config: &Config, backend: gaze_security::keyring::Backend) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wrap_words_breaks_only_between_words() {
+        let lines = wrap_words("Changes stay in this draft until you save.", 12);
+        assert_eq!(
+            lines,
+            ["Changes stay", "in this", "draft until", "you save."]
+        );
+        assert!(lines.iter().all(|line| line.chars().count() <= 12));
+        assert_eq!(
+            wrap_words("unbreakable-long-word here", 5),
+            ["unbreakable-long-word", "here"]
+        );
+        assert!(wrap_words("   ", 10).is_empty());
+    }
 
     #[test]
     fn review_only_lists_changed_fields_and_keeps_sections() {
