@@ -130,6 +130,22 @@ async fn shared_proxy(cell: &SharedProxy) -> zbus::Result<Rc<GazeProxy<'static>>
     Ok(proxy)
 }
 
+async fn live_proxy(cell: &SharedProxy) -> zbus::Result<Rc<GazeProxy<'static>>> {
+    let cached = cell.borrow().clone();
+    if let Some(proxy) = cached {
+        let owner = proxy.inner().destination().to_owned();
+        let alive = match zbus::fdo::DBusProxy::new(proxy.inner().connection()).await {
+            Ok(bus) => bus.name_has_owner(owner).await.unwrap_or(false),
+            Err(_) => false,
+        };
+        if alive {
+            return Ok(proxy);
+        }
+        *cell.borrow_mut() = None;
+    }
+    shared_proxy(cell).await
+}
+
 type ConfigWriteFuture = futures::future::LocalBoxFuture<'static, anyhow::Result<()>>;
 
 type ConfigWriter = Rc<dyn Fn(Config) -> ConfigWriteFuture>;
@@ -974,7 +990,7 @@ fn build_config_dialog(
                     save_status.set_text(tr(
                         "Preparing and saving settings… Model downloads may take a few minutes.",
                     ));
-                    let proxy = shared_proxy(&proxy_cell).await?;
+                    let proxy = live_proxy(&proxy_cell).await?;
                     let before = gaze_core::dbus::load_config_from_daemon(&proxy).await?;
                     if before.security.recognizer() != cfg.security.recognizer() {
                         let Some(window) = window.upgrade() else {
@@ -1014,7 +1030,7 @@ fn build_config_dialog(
                             || before.inference.device != cfg.inference.device
                         {
                             tr(
-                                "Saved. Restart gazed, then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active.",
+                                "Saved. gazed restarts by itself if the new provider needs a different runtime. Then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active.",
                             )
                         } else if before.security.recognizer() != cfg.security.recognizer() {
                             tr(
@@ -1546,7 +1562,7 @@ fn build_config_dialog(
                 keyring_supported,
                 async move {
                     let load_result = async {
-                        let proxy = shared_proxy(&proxy_cell).await?;
+                        let proxy = live_proxy(&proxy_cell).await?;
                         load_config_with_keyring_from_daemon(&proxy).await
                     }
                     .await;
@@ -1556,7 +1572,7 @@ fn build_config_dialog(
                             keyring_supported.set(supported.gnome || supported.kwallet);
                             unlock_gnome_keyring_row.set_visible(supported.gnome);
                             unlock_kwallet_row.set_visible(supported.kwallet);
-                            if let Ok(proxy) = shared_proxy(&proxy_cell).await {
+                            if let Ok(proxy) = live_proxy(&proxy_cell).await {
                                 let user = std::env::var("USER").unwrap_or_default();
                                 let status = proxy.credential_status(&user).await.ok();
                                 for (row, present, command) in [
@@ -1630,7 +1646,7 @@ fn build_config_dialog(
                 overlay,
                 async move {
                     let result =
-                        async { shared_proxy(&proxy_cell).await?.authorize_settings().await }.await;
+                        async { live_proxy(&proxy_cell).await?.authorize_settings().await }.await;
                     is_authorized.set(result.is_ok());
                     update_locked_state();
                     if let Err(e) = result {
@@ -1655,7 +1671,7 @@ fn build_config_dialog(
         #[strong]
         load_config,
         async move {
-            let Ok(proxy) = shared_proxy(&proxy_cell).await else {
+            let Ok(proxy) = live_proxy(&proxy_cell).await else {
                 return;
             };
             let gaze = proxy.inner();

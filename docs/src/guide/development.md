@@ -216,6 +216,7 @@ just lint
 just fmt-check
 just audit             # check dependencies for known CVEs
 just check-pam-link    # check the PAM modules' shared-library footprint
+just lint-shell        # shellcheck the installer, scriptlets and scripts
 just fmt               # apply formatting (fmt-check only checks)
 ```
 

@@ -11,7 +11,6 @@ esac
 lock_pam_files="/etc/pam.d/kde-fingerprint /etc/pam.d/kde-smartcard"
 login_pam_files="/etc/pam.d/plasmalogin /etc/pam.d/sddm"
 login_face_pam_file=/etc/pam.d/plasmalogin-fingerprint
-vendor_pam_dir=/usr/lib/pam.d
 state_dir=/etc/gaze
 login_flag="$state_dir/login-enabled"
 begin_marker='# BEGIN gaze (managed by gaze-kde; remove with `gaze-kde-pam disable`)'

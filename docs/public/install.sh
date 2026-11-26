@@ -201,8 +201,8 @@ EOF
         return 0
     fi
 
-    if grep -qE '^\s*module\s*=' "$conf"; then
-        current_pam="$(grep -E '^\s*module\s*=' "$conf" | head -1 | sed 's/.*=\s*//;s/\s*$//')"
+    if grep -qE '^[[:space:]]*module[[:space:]]*=' "$conf"; then
+        current_pam="$(grep -E '^[[:space:]]*module[[:space:]]*=' "$conf" | head -1 | sed 's/.*=[[:space:]]*//;s/[[:space:]]*$//')"
         case "$current_pam" in
         hyprlock-gaze | hyprlock-gaze-simultaneous)
             HYPRLOCK_STATUS="configured"
@@ -219,10 +219,10 @@ EOF
 
     cp "$conf" "$conf.gaze-backup"
 
-    if grep -qE '^\s*pam\s*\{' "$conf"; then
+    if grep -qE '^[[:space:]]*pam[[:space:]]*\{' "$conf"; then
         awk '
             BEGIN { done = 0 }
-            /^\s*pam\s*\{/ && !done {
+            /^[[:space:]]*pam[[:space:]]*\{/ && !done {
                 print
                 print "        module = hyprlock-gaze"
                 done = 1
@@ -232,10 +232,10 @@ EOF
         ' "$conf.gaze-backup" >"$conf"
         HYPRLOCK_STATUS="configured"
         ok "Added module = hyprlock-gaze to existing pam {} block in $conf."
-    elif grep -qE '^\s*auth\s*\{' "$conf"; then
+    elif grep -qE '^[[:space:]]*auth[[:space:]]*\{' "$conf"; then
         awk '
             BEGIN { done = 0 }
-            /^\s*auth\s*\{/ && !done {
+            /^[[:space:]]*auth[[:space:]]*\{/ && !done {
                 print
                 print "    pam {"
                 print "        module = hyprlock-gaze"
@@ -376,6 +376,7 @@ enable_gnome_extension() {
     # `gnome-extensions enable` usually fails here and gsettings writes dconf directly.
     if command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions enable "$EXT_ID" >/dev/null 2>&1 && _gsettings_enable_face_auth; then
         DESKTOP_STATUS="GNOME lock screen: enabled"
+        return 0
     elif _gsettings_add_extension "$EXT_ID" && _gsettings_enable_face_auth; then
         DESKTOP_STATUS="GNOME lock screen: pending reboot"
     else
@@ -825,7 +826,7 @@ enable_gazed() {
         problem "systemd is not running here; start the daemon with: sudo systemctl enable --now gazed"
         return 0
     fi
-    if enable_output="$($SUDO systemctl enable --now gazed </dev/null 2>&1)"; then
+    if enable_output="$($SUDO systemctl --no-block enable --now gazed </dev/null 2>&1)"; then
         ok "Enabled the Gaze daemon."
     else
         problem "Could not enable the Gaze daemon:"
@@ -833,31 +834,33 @@ enable_gazed() {
     fi
 }
 
-daemon_on_bus() {
-    busctl --system call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
-        NameHasOwner s com.gundulabs.Gaze 2>/dev/null | grep -q true
-}
-
-wait_for_daemon_bus() {
-    command -v busctl >/dev/null 2>&1 || return 0
-    daemon_on_bus && return 0
+wait_for_daemon() {
+    state="$(systemctl is-active gazed 2>/dev/null || true)"
+    [ "$state" = "active" ] && return 0
     say "Preparing face recognition (first start may download models; up to 3 minutes)…"
     waited=0
     while [ "$waited" -lt 180 ]; do
-        sleep 3
-        waited=$((waited + 3))
-        if daemon_on_bus; then
+        case "$state" in
+        active)
             ok "The Gaze daemon is ready."
             return 0
-        fi
-        case "$(systemctl is-active gazed 2>/dev/null || true)" in
-        active | activating | reloading) ;;
+            ;;
+        activating | reloading) ;;
+        inactive)
+            if [ "$waited" -ge 6 ]; then
+                problem "Gaze did not start. Run gaze doctor; see journalctl -u gazed -n 50."
+                return 0
+            fi
+            ;;
         *)
             problem "Gaze stopped during preparation. Run gaze doctor; see journalctl -u gazed -n 50."
             return 0
             ;;
         esac
+        sleep 3
+        waited=$((waited + 3))
         [ $((waited % 15)) -ne 0 ] || say "  Still preparing… ${waited}s elapsed"
+        state="$(systemctl is-active gazed 2>/dev/null || true)"
     done
     problem "Preparation did not finish within 3 minutes. Run gaze doctor before enrolling."
 }
@@ -865,14 +868,7 @@ wait_for_daemon_bus() {
 verify_install() {
     [ "${OSTREE_PENDING:-0}" -eq 1 ] && return 0
     if [ -d /run/systemd/system ]; then
-        sleep 2
-        state="$(systemctl is-active gazed 2>/dev/null || true)"
-        if [ "$state" = "active" ]; then
-            ok "The Gaze daemon is running."
-            wait_for_daemon_bus
-        else
-            problem "The Gaze daemon is ${state:-not running}; see: journalctl -u gazed -n 50"
-        fi
+        wait_for_daemon
     fi
     if [ "$NO_PAM" -eq 0 ] && ! grep -rqsE '^[[:space:]]*-?auth[[:space:]].*pam_gaze' /etc/pam.d/; then
         problem "No PAM service uses pam_gaze yet, so sudo and login will not offer face authentication."
@@ -1236,6 +1232,14 @@ if [ "$PLAINTEXT_TEMPLATES" -eq 1 ]; then
     $SUDO chmod 644 /etc/gaze/config.toml
 fi
 
+# ── configure repositories + install packages ────────────────────────────────
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+if is_deb || is_rpm; then
+    KEY_PATH="$(fetch_repo_key)"
+fi
+
 # ── clean up old repo files ──────────────────────────────────────────────────
 if is_deb; then
     if [ -f /etc/apt/sources.list.d/gundulabs.list ] || [ -f /usr/share/keyrings/gundulabs-archive-keyring.gpg ]; then
@@ -1251,17 +1255,12 @@ elif is_rpm; then
     fi
 fi
 
-# ── configure repositories + install packages ────────────────────────────────
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
-
 if [ "$NO_PAM" -eq 1 ]; then
     record_pam_optout
 fi
 
 if is_deb; then
     step "Configuring apt repository"
-    KEY_PATH="$(fetch_repo_key)"
     gpg --dearmor --yes --output "$TMP/gundulabs-archive-keyring.gpg" "$KEY_PATH"
     $SUDO mkdir -p -m 0755 /usr/share/keyrings
     $SUDO cp "$TMP/gundulabs-archive-keyring.gpg" /usr/share/keyrings/gundulabs-archive-keyring.gpg
@@ -1304,8 +1303,6 @@ if is_deb; then
 
 elif is_rpm; then
     step "Configuring repository"
-    # Verify and install the key before configuring the repository.
-    KEY_PATH="$(fetch_repo_key)"
     $SUDO mkdir -p /etc/pki/rpm-gpg
     $SUDO cp "$KEY_PATH" /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
     $SUDO chmod 0644 /etc/pki/rpm-gpg/RPM-GPG-KEY-gundulabs
