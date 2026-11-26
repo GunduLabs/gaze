@@ -156,7 +156,8 @@ Practical guidance:
 
 Templates only match the recognizer that enrolled them. After switching between
 a MobileFaceNet level and a ResNet50 level, re-enroll your faces. Until you do,
-those faces show 0 templates and face login falls back to your password.
+those faces show 0 templates, `gaze list-faces` and the face list in the app mark
+them as enrolled with a different model, and face login falls back to your password.
 Switching back to the original recognizer makes the old templates usable again.
 
 ### Custom level
