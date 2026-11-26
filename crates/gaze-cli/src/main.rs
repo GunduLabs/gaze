@@ -895,13 +895,17 @@ async fn handle_test(
     Ok(())
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() {
     CompleteEnv::with_factory(Cli::command).complete();
 
-    tokio::runtime::Builder::new_multi_thread()
+    let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .build()?
-        .block_on(run())
+        .build()
+        .map_err(anyhow::Error::from)
+        .and_then(|runtime| runtime.block_on(run()));
+    if let Err(err) = result {
+        exit_with_error(&format!("{err:#}"));
+    }
 }
 
 async fn run() -> anyhow::Result<()> {
