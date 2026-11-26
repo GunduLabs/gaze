@@ -42,7 +42,7 @@ Notes for direct cargo use:
 
 JS integration tests (Node 22+, downloaded upstream sources, simulated shell/PAM): `node scripts/test-gnome.mjs`, `node scripts/test-kde.mjs`, `node scripts/test-kcm.mjs`, `node scripts/test-cinnamon.mjs`.
 
-CI (`.github/workflows/ci.yml`) runs fmt, translation checks, shellcheck, audit, lint, test, `test-openvino`, the JS integration tests, and package builds. The pre-commit hook (`just setup-hooks`) runs `fmt-check` and `lint`.
+CI (`.github/workflows/ci.yml`) runs fmt, a release `build-rust` whose cargo cache the test job reuses, translation checks, shellcheck, audit, lint, test, `test-openvino`, the JS integration tests, and package builds. The pre-commit hook (`just setup-hooks`) runs `fmt-check` and `lint`.
 
 ## Architecture
 
