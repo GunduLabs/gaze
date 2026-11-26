@@ -51,6 +51,9 @@ jobs:
       - name: Check translations
         run: just check-translations
 
+      - name: Lint shell scripts
+        run: just lint-shell
+
   audit:
     name: Audit
     runs-on: ubuntu-latest
