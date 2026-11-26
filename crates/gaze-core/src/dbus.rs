@@ -751,10 +751,12 @@ async fn apply_ir_frame_size_to_daemon(
 
 pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> anyhow::Result<()> {
     apply_ir_frame_size_to_daemon(proxy, config).await?;
-    proxy
-        .set_config(config.clone().into())
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to set config property: {e}"))
+    proxy.set_config(config.clone().into()).await.map_err(|e| {
+        anyhow::anyhow!(
+            "gazed did not apply the configuration: {}",
+            dbus_error_message(&e)
+        )
+    })
 }
 
 pub async fn apply_config_with_keyring_to_daemon(
@@ -773,14 +775,20 @@ pub async fn apply_config_with_keyring_to_daemon(
         Err(error) if dbus_is_unknown_method(&error) && !unlock_kwallet => {}
         Err(error) => {
             return Err(anyhow::anyhow!(
-                "Failed to set wallet configuration: {error}"
+                "gazed did not apply the configuration: {}",
+                dbus_error_message(&error)
             ));
         }
     }
     proxy
         .set_config_with_keyring(config, unlock_gnome_keyring)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to set keyring-aware config: {e}"))
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "gazed did not apply the configuration: {}",
+                dbus_error_message(&e)
+            )
+        })
 }
 
 pub async fn get_pam_internal(proxy: &GazeProxy<'_>) -> Vec<String> {
