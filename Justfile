@@ -910,6 +910,11 @@ lint: prepare-opencv
     @{{ gui_notice }}
     {{ opencv_env }} cargo clippy --workspace {{ gui_exclude }} --all-targets -- -D warnings
 
+# Lint every tracked shell script, including the installer and package scriptlets
+[group("checks")]
+lint-shell:
+    git ls-files -z '*.sh' integrations/kde/gaze-kde-pam integrations/omarchy/gaze-omarchy scripts/pre-commit | xargs -0 shellcheck -S warning
+
 # Check formatting (does not write)
 [group("checks")]
 fmt-check:
