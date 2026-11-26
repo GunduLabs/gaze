@@ -1179,6 +1179,11 @@ impl Config {
         Ok(toml_edit::ser::to_string_pretty(self)?)
     }
 
+    pub fn knows_setting_root(&self, key: &str) -> bool {
+        let root = key.split('.').next().unwrap_or(key);
+        toml_edit::ser::to_document(self).is_ok_and(|doc| doc.get(root).is_some())
+    }
+
     pub fn get_key(&self, key: &str) -> anyhow::Result<String> {
         let doc = toml_edit::ser::to_document(self)?;
         let mut item = doc.as_item();
@@ -1498,6 +1503,16 @@ fn merge_into_toml_table(target: &mut toml_edit::Table, desired: &toml_edit::Tab
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn knows_setting_root_matches_top_level_sections_only() {
+        let config = Config::default();
+        assert!(config.knows_setting_root("security.level"));
+        assert!(config.knows_setting_root("security"));
+        assert!(config.knows_setting_root("security.not_a_real_leaf"));
+        assert!(!config.knows_setting_root("nosuch.key"));
+        assert!(!config.knows_setting_root(""));
+    }
 
     #[test]
     fn rgb_sources_accept_strings_and_ordered_lists_and_preserve_their_shape() {

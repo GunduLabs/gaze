@@ -441,6 +441,10 @@ pub fn dbus_error_message(err: &zbus::Error) -> String {
     text
 }
 
+pub fn dbus_is_access_denied(err: &zbus::Error) -> bool {
+    err.to_string().contains("AccessDenied")
+}
+
 pub fn dbus_is_file_not_found(err: &zbus::Error) -> bool {
     err.to_string().contains("FileNotFound")
 }
@@ -616,9 +620,13 @@ pub fn benchmark_from_reply(
 }
 
 pub async fn try_load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Option<Config>> {
-    let raw = raw_property(proxy, "Config")
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to read config property: {e}"))?;
+    let raw = match raw_property(proxy, "Config").await {
+        Ok(raw) => raw,
+        Err(e) => {
+            let message = format!("Failed to read config property: {e}");
+            return Err(anyhow::Error::new(e).context(message));
+        }
+    };
     config_from_property(raw)
 }
 

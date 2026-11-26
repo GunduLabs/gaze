@@ -24,7 +24,7 @@ use gaze_core::config::Config;
 use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon,
     apply_config_with_keyring_to_daemon, connect_gaze, daemon_unavailable_hint, dbus_error_message,
-    dbus_is_not_activatable, load_config_with_keyring_from_daemon,
+    dbus_is_access_denied, dbus_is_not_activatable, load_config_with_keyring_from_daemon,
 };
 use std::{future::Future, time::Duration};
 use tui::{AuthScreen, BusyScreen, EnrollScreen, Tone, TuiAction, TuiTerminal};
@@ -189,6 +189,11 @@ async fn describe_dbus_error(proxy: &GazeProxy<'_>, context: &str, err: &zbus::E
     if dbus_is_not_activatable(err) {
         let (problem, fix) = daemon_unavailable_hint(proxy.inner().connection()).await;
         format!("{context}: {problem}\n  {fix}")
+    } else if dbus_is_access_denied(err) {
+        format!(
+            "{context}: {}\n  Run the command with sudo, or from a terminal in the logged-in desktop session.",
+            dbus_error_message(err)
+        )
     } else {
         format!("{context}: {}", dbus_error_message(err))
     }
@@ -1049,6 +1054,13 @@ async fn run() -> anyhow::Result<()> {
             handle_duress(&proxy, &user.unwrap_or_else(get_current_user), clear).await?;
         }
         Commands::Config { show, action } => {
+            if let Some(ConfigAction::Get { key } | ConfigAction::Set { key, .. }) = &action
+                && !Config::default().knows_setting_root(key)
+            {
+                exit_with_error(&format!(
+                    "unknown setting `{key}`. Run `gaze config --show` to list the settings."
+                ));
+            }
             let (config, keyring_supported) =
                 match load_config_with_keyring_from_daemon(&proxy).await {
                     Ok(loaded) => loaded,
