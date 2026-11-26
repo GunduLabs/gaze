@@ -194,6 +194,11 @@ async fn describe_dbus_error(proxy: &GazeProxy<'_>, context: &str, err: &zbus::E
     }
 }
 
+fn user_exists(name: &str) -> bool {
+    std::ffi::CString::new(name)
+        .is_ok_and(|name| !unsafe { libc::getpwnam(name.as_ptr()) }.is_null())
+}
+
 fn exit_with_error(message: &str) -> ! {
     let _ = Term::stderr().write_line(&format!("{} {message}", style("✗").red().bold()));
     std::process::exit(1);
@@ -1043,6 +1048,11 @@ async fn run() -> anyhow::Result<()> {
             handle_rename_face(&proxy, &user.unwrap_or_else(get_current_user), &from, &to).await?;
         }
         Commands::ClearUser { user, yes } => {
+            if let Some(name) = &user
+                && !user_exists(name)
+            {
+                exit_with_error(&format!("unknown user '{name}'; nothing was deleted"));
+            }
             handle_clear_user(&proxy, &user.unwrap_or_else(get_current_user), yes).await?;
         }
         Commands::Duress { clear, user } => {
