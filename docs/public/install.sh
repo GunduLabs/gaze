@@ -376,6 +376,7 @@ enable_gnome_extension() {
     # `gnome-extensions enable` usually fails here and gsettings writes dconf directly.
     if command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions enable "$EXT_ID" >/dev/null 2>&1 && _gsettings_enable_face_auth; then
         DESKTOP_STATUS="GNOME lock screen: enabled"
+        return 0
     elif _gsettings_add_extension "$EXT_ID" && _gsettings_enable_face_auth; then
         DESKTOP_STATUS="GNOME lock screen: pending reboot"
     else
