@@ -63,6 +63,7 @@ impl AuthDaemon {
                     .into(),
             ));
         }
+        self.reconcile_template_owner(&username, target_uid).await?;
 
         let mut state = self.claim_state.lock().await;
         if let Some(existing) = &*state {
@@ -993,7 +994,7 @@ impl AuthDaemon {
                         .map_or(0, |d| d.as_secs());
                     Some(db.next_template_id(&username, &face_name, now_secs).and_then(|template_id| {
                         db.add_template(&username, &face_name, &template_id, captured_embeddings)
-                    }))
+                    }).and_then(|_| db.reconcile_owner(&username, target_uid).map(|_| ())))
                 } else {
                     None
                 };
@@ -1042,6 +1043,8 @@ impl AuthDaemon {
         username: String,
     ) -> fdo::Result<Vec<(String, u32, bool, bool)>> {
         Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        self.reconcile_template_owner(&username, Self::username_uid(&username)?)
+            .await?;
         let db = self.db.lock().await;
         db.list_faces(&username).map_err(Self::map_user_db_error)
     }
@@ -1052,6 +1055,8 @@ impl AuthDaemon {
         username: String,
     ) -> fdo::Result<bool> {
         Self::ensure_user_query_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        self.reconcile_template_owner(&username, Self::username_uid(&username)?)
+            .await?;
         let db = self.db.lock().await;
         db.has_enrolled_faces(&username)
             .map_err(Self::map_user_db_error)
@@ -1269,7 +1274,9 @@ impl AuthDaemon {
         let header =
             header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
         Self::ensure_config_read_access(&header).await?;
-        Ok(self.current_config().await.into())
+        let mut config = self.current_config().await;
+        config.security = config.security.effective();
+        Ok(config.into())
     }
 
     #[zbus(property)]

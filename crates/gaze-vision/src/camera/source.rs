@@ -394,6 +394,9 @@ pub(super) fn check_trusted_node(
     if is_physical_node(node) {
         return Ok(());
     }
+    if std::fs::symlink_metadata(node).is_err() {
+        anyhow::bail!("camera {node} is not connected");
+    }
     let voucher = if opt_in.enabled {
         "cameras.allow_nonphysical_rgb vouches for it".to_string()
     } else {
@@ -1614,12 +1617,35 @@ mod tests {
 
     #[test]
     fn a_virtual_node_without_a_bridge_marker_stays_refused() {
-        let missing = "/dev/video-gaze-test-missing";
-        let err = check_trusted_node(missing, None, NonphysicalRgbOptIn::default()).unwrap_err();
+        let path =
+            std::env::temp_dir().join(format!("gaze-test-virtual-node-{}", std::process::id()));
+        std::fs::write(&path, b"").unwrap();
+        let result =
+            check_trusted_node(path.to_str().unwrap(), None, NonphysicalRgbOptIn::default());
+        std::fs::remove_file(&path).unwrap();
+        let err = result.unwrap_err();
         assert!(
             err.to_string().contains("not a physical camera"),
             "unexpected error: {err:#}"
         );
+    }
+
+    #[test]
+    fn a_missing_node_is_refused_as_disconnected() {
+        let missing = "/dev/video-gaze-test-missing";
+        for opt_in in [
+            NonphysicalRgbOptIn::default(),
+            NonphysicalRgbOptIn {
+                enabled: true,
+                allow_untrusted_writers: true,
+            },
+        ] {
+            let err = check_trusted_node(missing, None, opt_in).unwrap_err();
+            assert!(
+                err.to_string().contains("is not connected"),
+                "unexpected error: {err:#}"
+            );
+        }
     }
 
     #[test]
