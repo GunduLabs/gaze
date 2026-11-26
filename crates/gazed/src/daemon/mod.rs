@@ -75,7 +75,6 @@ const VERIFY_NO_USABLE_TIMEOUT: Duration = Duration::from_secs(8);
 /// Hybrid verify runs one camera at a time for single-function UVC devices (e.g. Logitech
 /// Brio). Caps the RGB phase so it yields to IR even without a match. See `verify_start`.
 const VERIFY_SERIAL_RGB_BUDGET: Duration = Duration::from_secs(4);
-const VERIFY_WATCHDOG_POLL: Duration = Duration::from_millis(250);
 const LID_SLEEP_WAIT: Duration = Duration::from_secs(3);
 const SSH_PROC_CHAIN_MAX_DEPTH: usize = 16;
 

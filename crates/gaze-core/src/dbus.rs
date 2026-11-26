@@ -441,6 +441,10 @@ pub fn dbus_error_message(err: &zbus::Error) -> String {
     text
 }
 
+pub fn dbus_is_access_denied(err: &zbus::Error) -> bool {
+    err.to_string().contains("AccessDenied")
+}
+
 pub fn dbus_is_file_not_found(err: &zbus::Error) -> bool {
     err.to_string().contains("FileNotFound")
 }
@@ -616,9 +620,13 @@ pub fn benchmark_from_reply(
 }
 
 pub async fn try_load_config_from_daemon(proxy: &GazeProxy<'_>) -> anyhow::Result<Option<Config>> {
-    let raw = raw_property(proxy, "Config")
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to read config property: {e}"))?;
+    let raw = match raw_property(proxy, "Config").await {
+        Ok(raw) => raw,
+        Err(e) => {
+            let message = format!("Failed to read config property: {e}");
+            return Err(anyhow::Error::new(e).context(message));
+        }
+    };
     config_from_property(raw)
 }
 
@@ -751,10 +759,12 @@ async fn apply_ir_frame_size_to_daemon(
 
 pub async fn apply_config_to_daemon(proxy: &GazeProxy<'_>, config: &Config) -> anyhow::Result<()> {
     apply_ir_frame_size_to_daemon(proxy, config).await?;
-    proxy
-        .set_config(config.clone().into())
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to set config property: {e}"))
+    proxy.set_config(config.clone().into()).await.map_err(|e| {
+        anyhow::anyhow!(
+            "gazed did not apply the configuration: {}",
+            dbus_error_message(&e)
+        )
+    })
 }
 
 pub async fn apply_config_with_keyring_to_daemon(
@@ -773,14 +783,20 @@ pub async fn apply_config_with_keyring_to_daemon(
         Err(error) if dbus_is_unknown_method(&error) && !unlock_kwallet => {}
         Err(error) => {
             return Err(anyhow::anyhow!(
-                "Failed to set wallet configuration: {error}"
+                "gazed did not apply the configuration: {}",
+                dbus_error_message(&error)
             ));
         }
     }
     proxy
         .set_config_with_keyring(config, unlock_gnome_keyring)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to set keyring-aware config: {e}"))
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "gazed did not apply the configuration: {}",
+                dbus_error_message(&e)
+            )
+        })
 }
 
 pub async fn get_pam_internal(proxy: &GazeProxy<'_>) -> Vec<String> {
@@ -933,6 +949,37 @@ pub async fn session_paths_on(connection: &zbus::Connection) -> anyhow::Result<V
         .collect())
 }
 
+pub async fn uid_has_live_remote_session_on(
+    connection: &zbus::Connection,
+    uid: u32,
+) -> anyhow::Result<bool> {
+    let proxy = zbus::Proxy::new(
+        connection,
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1",
+        "org.freedesktop.login1.Manager",
+    )
+    .await?;
+    let sessions: Vec<(String, u32, String, String, zbus::OwnedObjectPath)> =
+        proxy.call("ListSessions", &()).await?;
+    for (_, session_uid, _, _, path) in sessions {
+        if session_uid != uid || session_is_closing(connection, &path).await {
+            continue;
+        }
+        let session = zbus::Proxy::new(
+            connection,
+            "org.freedesktop.login1",
+            path,
+            "org.freedesktop.login1.Session",
+        )
+        .await?;
+        if session.get_property::<bool>("Remote").await? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Treats an unreadable session as live, so a failed lookup keeps the seat looking occupied.
 async fn session_is_closing(connection: &zbus::Connection, path: &zbus::OwnedObjectPath) -> bool {
     let Ok(proxy) = zbus::Proxy::new(
@@ -990,6 +1037,7 @@ pub trait Gaze {
     async fn enroll_stop(&self) -> zbus::Result<()>;
 
     async fn list_faces(&self, username: &str) -> zbus::Result<Vec<(String, u32, bool, bool)>>;
+    async fn stale_faces(&self, username: &str) -> zbus::Result<Vec<String>>;
     async fn has_enrolled_faces(&self, username: &str) -> zbus::Result<bool>;
     async fn credential_status(&self, username: &str) -> zbus::Result<(bool, bool)>;
     async fn is_camera_available(&self) -> zbus::Result<bool>;

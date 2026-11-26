@@ -4,6 +4,29 @@
 use super::*;
 use zbus::interface;
 
+#[derive(Default)]
+struct StepSignal {
+    lock: std::sync::Mutex<()>,
+    changed: std::sync::Condvar,
+}
+
+impl StepSignal {
+    fn notify(&self) {
+        let _guard = self.lock.lock().unwrap_or_else(|error| error.into_inner());
+        self.changed.notify_all();
+    }
+
+    fn wait_while(&self, mut waiting: impl FnMut() -> bool) {
+        let mut guard = self.lock.lock().unwrap_or_else(|error| error.into_inner());
+        while waiting() {
+            guard = match self.changed.wait_timeout(guard, Duration::from_secs(1)) {
+                Ok((guard, _)) => guard,
+                Err(error) => error.into_inner().0,
+            };
+        }
+    }
+}
+
 enum EnrollMsg {
     Status(usize, Spectrum, CaptureStatus),
     Captured(usize, Spectrum, Array1<f32>),
@@ -63,6 +86,7 @@ impl AuthDaemon {
                     .into(),
             ));
         }
+        self.reconcile_template_owner(&username, target_uid).await?;
 
         let mut state = self.claim_state.lock().await;
         if let Some(existing) = &*state {
@@ -306,7 +330,12 @@ impl AuthDaemon {
         Self::ensure_face_write_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
         let signal_destination = Self::signal_destination(&claim.sender)?;
 
-        UserDatabase::validate_face_name(&face_name).map_err(Self::map_user_db_error)?;
+        if self.db.lock().await.has_face(&username, &face_name) {
+            UserDatabase::validate_face_name(&face_name)
+        } else {
+            UserDatabase::validate_new_face_name(&face_name)
+        }
+        .map_err(Self::map_user_db_error)?;
 
         let db_arc = self.db.clone();
 
@@ -410,6 +439,7 @@ impl AuthDaemon {
             let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let completed_steps_atomic = Arc::new(std::sync::atomic::AtomicU32::new(0));
             let rgb_captured_for_step = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let step_signal = Arc::new(StepSignal::default());
 
             let mut rgb_thread = None;
             if run_rgb {
@@ -421,6 +451,7 @@ impl AuthDaemon {
                 let completed_steps_clone = completed_steps_atomic.clone();
                 let rgb_device_clone = rgb_device.clone();
                 let rgb_captured_for_step_clone = rgb_captured_for_step.clone();
+                let step_signal_clone = step_signal.clone();
                 let preview_tx_clone = preview_tx.clone();
                 let orientation_clone = orientation.clone();
 
@@ -444,7 +475,10 @@ impl AuthDaemon {
                                 return;
                             }
                             if rgb_captured_for_step_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                                std::thread::sleep(Duration::from_millis(50));
+                                step_signal_clone.wait_while(|| {
+                                    !stop_clone.load(std::sync::atomic::Ordering::Relaxed)
+                                        && rgb_captured_for_step_clone.load(std::sync::atomic::Ordering::Relaxed)
+                                });
                                 continue;
                             }
 
@@ -528,6 +562,7 @@ impl AuthDaemon {
                                     // The flag hands the device to the IR thread, so it must be closed first.
                                     drop(cam);
                                     rgb_captured_for_step_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+                                    step_signal_clone.notify();
                                     let _ = tx.blocking_send(EnrollMsg::Captured(current_step, Spectrum::Rgb, data.embedding));
                                     dead_streams = 0;
                                     continue 'steps;
@@ -652,6 +687,7 @@ impl AuthDaemon {
                 let ir_device_clone = ir_device.clone();
                 let ir_node_clone = ir_node.clone();
                 let rgb_captured_for_step_clone = rgb_captured_for_step.clone();
+                let step_signal_clone = step_signal.clone();
                 let preview_tx_clone = preview_tx.clone();
                 let orientation_clone = orientation.clone();
 
@@ -678,7 +714,12 @@ impl AuthDaemon {
                             if step == captured_step
                                 || !rgb_captured_for_step_clone.load(std::sync::atomic::Ordering::Relaxed)
                             {
-                                std::thread::sleep(Duration::from_millis(50));
+                                step_signal_clone.wait_while(|| {
+                                    !stop_clone.load(std::sync::atomic::Ordering::Relaxed)
+                                        && completed_steps_clone.load(std::sync::atomic::Ordering::Relaxed) as usize == step
+                                        && (step == captured_step
+                                            || !rgb_captured_for_step_clone.load(std::sync::atomic::Ordering::Relaxed))
+                                });
                                 continue;
                             }
 
@@ -980,6 +1021,7 @@ impl AuthDaemon {
 
                                     completed_steps += 1;
                                     completed_steps_atomic.store(completed_steps as u32, std::sync::atomic::Ordering::Relaxed);
+                                    step_signal.notify();
 
                                     let _ = Self::enroll_status(&ctxt, &face_name, completed_steps as u32, max_steps, false, EnrollPrompt::Captured, 0.0).await;
                                     hold_until = Some(tokio::time::Instant::now() + Duration::from_millis(500));
@@ -997,6 +1039,7 @@ impl AuthDaemon {
             }
 
             stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            step_signal.notify();
             // Unblock any producer waiting on a full channel before joining it.
             drop(enroll_rx);
             drop(preview_rx);
@@ -1010,7 +1053,7 @@ impl AuthDaemon {
                         .map_or(0, |d| d.as_secs());
                     Some(db.next_template_id(&username, &face_name, now_secs).and_then(|template_id| {
                         db.add_template(&username, &face_name, &template_id, captured_embeddings)
-                    }))
+                    }).and_then(|_| db.reconcile_owner(&username, target_uid).map(|_| ())))
                 } else {
                     None
                 };
@@ -1059,8 +1102,22 @@ impl AuthDaemon {
         username: String,
     ) -> fdo::Result<Vec<(String, u32, bool, bool)>> {
         Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        self.reconcile_template_owner(&username, Self::username_uid(&username)?)
+            .await?;
         let db = self.db.lock().await;
         db.list_faces(&username).map_err(Self::map_user_db_error)
+    }
+
+    async fn stale_faces(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        username: String,
+    ) -> fdo::Result<Vec<String>> {
+        Self::ensure_user_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        self.reconcile_template_owner(&username, Self::username_uid(&username)?)
+            .await?;
+        let db = self.db.lock().await;
+        db.stale_faces(&username).map_err(Self::map_user_db_error)
     }
 
     async fn has_enrolled_faces(
@@ -1069,6 +1126,8 @@ impl AuthDaemon {
         username: String,
     ) -> fdo::Result<bool> {
         Self::ensure_user_query_access(&header, &username, POLKIT_ACTION_MANAGE_FACES).await?;
+        self.reconcile_template_owner(&username, Self::username_uid(&username)?)
+            .await?;
         let db = self.db.lock().await;
         db.has_enrolled_faces(&username)
             .map_err(Self::map_user_db_error)
@@ -1286,7 +1345,9 @@ impl AuthDaemon {
         let header =
             header.ok_or_else(|| fdo::Error::Failed("No message header provided".to_string()))?;
         Self::ensure_config_read_access(&header).await?;
-        Ok(self.current_config().await.into())
+        let mut config = self.current_config().await;
+        config.security = config.security.effective();
+        Ok(config.into())
     }
 
     #[zbus(property)]
@@ -1433,7 +1494,38 @@ impl AuthDaemon {
 
 #[cfg(test)]
 mod tests {
+    use super::StepSignal;
     use super::is_kwallet_pam_service;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn step_signal_wakes_a_waiter_without_waiting_for_the_timeout() {
+        let signal = Arc::new(StepSignal::default());
+        let ready = Arc::new(AtomicBool::new(false));
+        let waiter = {
+            let signal = signal.clone();
+            let ready = ready.clone();
+            std::thread::spawn(move || {
+                let started = Instant::now();
+                signal.wait_while(|| !ready.load(Ordering::Relaxed));
+                started.elapsed()
+            })
+        };
+        std::thread::sleep(Duration::from_millis(50));
+        ready.store(true, Ordering::Relaxed);
+        signal.notify();
+        assert!(waiter.join().unwrap() < Duration::from_millis(900));
+    }
+
+    #[test]
+    fn step_signal_returns_at_once_when_nothing_to_wait_for() {
+        let signal = StepSignal::default();
+        let started = Instant::now();
+        signal.wait_while(|| false);
+        assert!(started.elapsed() < Duration::from_millis(100));
+    }
 
     #[test]
     fn only_kde_login_services_may_drive_kwallet() {

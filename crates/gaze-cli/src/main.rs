@@ -24,7 +24,7 @@ use gaze_core::config::Config;
 use gaze_core::dbus::{
     CaptureStatus, EnrollPrompt, GazeProxy, VerifyResult, apply_config_to_daemon,
     apply_config_with_keyring_to_daemon, connect_gaze, daemon_unavailable_hint, dbus_error_message,
-    dbus_is_not_activatable, load_config_with_keyring_from_daemon,
+    dbus_is_access_denied, dbus_is_not_activatable, load_config_with_keyring_from_daemon,
 };
 use std::{future::Future, time::Duration};
 use tui::{AuthScreen, BusyScreen, EnrollScreen, Tone, TuiAction, TuiTerminal};
@@ -97,6 +97,15 @@ fn command_needs_password_authorization(command: &Commands) -> bool {
             None => !show,
         },
         _ => false,
+    }
+}
+
+fn command_needs_terminal(command: &Commands) -> Option<&'static str> {
+    match command {
+        Commands::Setup => Some("setup"),
+        Commands::AddFace { .. } => Some("add-face"),
+        Commands::RefineFace { .. } => Some("refine-face"),
+        _ => None,
     }
 }
 
@@ -180,9 +189,19 @@ async fn describe_dbus_error(proxy: &GazeProxy<'_>, context: &str, err: &zbus::E
     if dbus_is_not_activatable(err) {
         let (problem, fix) = daemon_unavailable_hint(proxy.inner().connection()).await;
         format!("{context}: {problem}\n  {fix}")
+    } else if dbus_is_access_denied(err) {
+        format!(
+            "{context}: {}\n  Run the command with sudo, or from a terminal in the logged-in desktop session.",
+            dbus_error_message(err)
+        )
     } else {
         format!("{context}: {}", dbus_error_message(err))
     }
+}
+
+fn user_exists(name: &str) -> bool {
+    std::ffi::CString::new(name)
+        .is_ok_and(|name| !unsafe { libc::getpwnam(name.as_ptr()) }.is_null())
 }
 
 fn exit_with_error(message: &str) -> ! {
@@ -886,17 +905,29 @@ async fn handle_test(
     Ok(())
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() {
     CompleteEnv::with_factory(Cli::command).complete();
 
-    tokio::runtime::Builder::new_multi_thread()
+    let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .build()?
-        .block_on(run())
+        .build()
+        .map_err(anyhow::Error::from)
+        .and_then(|runtime| runtime.block_on(run()));
+    if let Err(err) = result {
+        exit_with_error(&format!("{err:#}"));
+    }
 }
 
 async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    if let Some(name) = command_needs_terminal(&cli.command)
+        && !interactive_terminal()
+    {
+        exit_with_error(&format!(
+            "gaze {name} needs an interactive terminal; run it from a terminal window or an SSH session with a TTY"
+        ));
+    }
 
     if let Some(name) = command_requires_root(&cli.command)
         && !is_root()
@@ -944,6 +975,11 @@ async fn run() -> anyhow::Result<()> {
             json,
             report,
         } => {
+            if let Some(name) = user
+                && !user_exists(name)
+            {
+                exit_with_error(&format!("unknown user '{name}'"));
+            }
             let username = user.clone().unwrap_or_else(get_current_user);
             let output = if *json {
                 doctor::Output::Json
@@ -1026,12 +1062,24 @@ async fn run() -> anyhow::Result<()> {
             handle_rename_face(&proxy, &user.unwrap_or_else(get_current_user), &from, &to).await?;
         }
         Commands::ClearUser { user, yes } => {
+            if let Some(name) = &user
+                && !user_exists(name)
+            {
+                exit_with_error(&format!("unknown user '{name}'; nothing was deleted"));
+            }
             handle_clear_user(&proxy, &user.unwrap_or_else(get_current_user), yes).await?;
         }
         Commands::Duress { clear, user } => {
             handle_duress(&proxy, &user.unwrap_or_else(get_current_user), clear).await?;
         }
         Commands::Config { show, action } => {
+            if let Some(ConfigAction::Get { key } | ConfigAction::Set { key, .. }) = &action
+                && !Config::default().knows_setting_root(key)
+            {
+                exit_with_error(&format!(
+                    "unknown setting `{key}`. Run `gaze config --show` to list the settings."
+                ));
+            }
             let (config, keyring_supported) =
                 match load_config_with_keyring_from_daemon(&proxy).await {
                     Ok(loaded) => loaded,
@@ -1260,6 +1308,21 @@ mod tests {
 
         let cli = Cli::try_parse_from(["gaze", "add-face", "default"]).unwrap();
         assert_eq!(command_target_user(&cli.command), None);
+    }
+
+    #[test]
+    fn only_the_capture_commands_need_a_terminal() {
+        for (args, name) in [
+            (vec!["gaze", "setup"], Some("setup")),
+            (vec!["gaze", "add-face", "default"], Some("add-face")),
+            (vec!["gaze", "refine-face", "default"], Some("refine-face")),
+            (vec!["gaze", "test", "--silent"], None),
+            (vec!["gaze", "list-faces"], None),
+            (vec!["gaze", "config", "get", "security.level"], None),
+        ] {
+            let cli = Cli::try_parse_from(&args).unwrap();
+            assert_eq!(command_needs_terminal(&cli.command), name, "{args:?}");
+        }
     }
 
     #[test]

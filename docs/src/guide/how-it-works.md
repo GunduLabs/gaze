@@ -51,8 +51,8 @@ same daemon code runs on every surface, so a problem you can reproduce with
    and the client releases it when it finishes. A claim that is never released is
     reclaimed after 5 minutes so an abandoned claim cannot keep the camera busy.
 2. Gaze checks three refusals in order: no suspend or resume since boot
-   (`auth.abort_before_first_resume`), the caller sits inside an SSH session
-   (`auth.abort_if_ssh`), and the laptop lid is closed (`auth.abort_if_lid_closed`). Any of
+   (`auth.abort_before_first_resume`), the caller sits inside an SSH session or, for an
+   elevation prompt, you have any remote session open (`auth.abort_if_ssh`), and the laptop lid is closed (`auth.abort_if_lid_closed`). Any of
    them ends the attempt before a camera is touched. A closed lid is the exception when
    logind is set to suspend on lid close: see [Suspend during an attempt](#suspend-during-an-attempt).
 3. Gaze works out which spectra can run. RGB runs when `cameras.rgb` is set *and* you have
@@ -150,7 +150,7 @@ entirely is still bounded.
 | Dark stream | 1 s | the first `TooDark` after warm-up | Attempt ends. "Need more light". |
 | No face | 5 s | the last frame with a face in it | Attempt ends. "Face not detected". |
 | No usable frame | 8 s | the last frame that produced an embedding | Attempt ends. Bounds a face that stays badly framed. |
-| Serial RGB budget | 4 s | the RGB phase start | RGB hands the camera to IR even without a match. Only when IR also runs and `parallel_capture = "never"`. |
+| Serial RGB budget | 4 s | the RGB phase start | RGB hands the camera to IR even without a match. Only when IR also runs and `parallel_capture = "never"`. Under `or`, RGB hands over right after warm-up if it has only seen dark frames. |
 | Frame budget | `liveness.max_seconds` x camera fps, minimum 6 frames (default 2.0 s, so 60 frames at 30 fps) | frames counted only while a usable face is in view, per spectrum | Attempt ends. Logged as `frame budget spent`. |
 | PAM backstop | 12 s plus the start delay | the PAM prompt | PAM stops waiting. "Face authentication timed out". |
 | Client backstop | 20 s | the DBus call | The CLI or GUI stops waiting on the daemon. |

@@ -1,0 +1,743 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: id\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Face authentication could not run"
+msgstr "Autentikasi wajah tidak dapat dijalankan"
+
+msgid "Face not recognized"
+msgstr "Wajah tidak dikenali"
+
+msgid "Too dark for face authentication"
+msgstr "Terlalu gelap untuk autentikasi wajah"
+
+msgid "No face detected"
+msgstr "Tidak ada wajah yang terdeteksi"
+
+msgid "Move your face into the frame and try again"
+msgstr "Posisikan wajah Anda di dalam bingkai lalu coba lagi"
+
+msgid "Close"
+msgstr "Tutup"
+
+msgid "Remove “{name}”?"
+msgstr "Hapus “{name}”?"
+
+msgid "Gaze will stop recognizing this face. You can enroll it again later."
+msgstr "Gaze tidak akan lagi mengenali wajah ini. Anda dapat mendaftarkannya lagi nanti."
+
+msgid "Cancel"
+msgstr "Batal"
+
+msgid "Remove"
+msgstr "Hapus"
+
+msgid "Daemon Failed"
+msgstr "Layanan Gagal"
+
+msgid "Gaze could not start. Run gaze doctor. On a new install, check that TPM 2.0 is enabled; settings cannot be changed here until the service starts."
+msgstr "Gaze tidak dapat dimulai. Jalankan gaze doctor. Pada instalasi baru, pastikan TPM 2.0 aktif; pengaturan tidak dapat diubah di sini sampai layanan dimulai."
+
+msgid "Daemon Disabled"
+msgstr "Layanan Dinonaktifkan"
+
+msgid "The Gaze daemon is turned off. Turn it on with:"
+msgstr "Layanan Gaze dimatikan. Aktifkan dengan:"
+
+msgid "Daemon Stopped"
+msgstr "Layanan Berhenti"
+
+msgid "The Gaze daemon is not running. Start it with:"
+msgstr "Layanan Gaze tidak berjalan. Mulai dengan:"
+
+msgid "Daemon Not Installed"
+msgstr "Layanan Belum Terpasang"
+
+msgid "The gazed service is missing. Install the gaze package for your distribution."
+msgstr "Layanan gazed tidak ditemukan. Pasang paket gaze untuk distribusi Anda."
+
+msgid "Daemon Starting"
+msgstr "Layanan Sedang Dimulai"
+
+msgid "The Gaze daemon is starting up. Its first start downloads face models, which can take a few minutes."
+msgstr "Layanan Gaze sedang dimulai. Saat pertama kali dimulai, model wajah akan diunduh, yang dapat memakan waktu beberapa menit."
+
+msgid "Connecting to the Gaze daemon…"
+msgstr "Menghubungkan ke layanan Gaze…"
+
+msgid "Enrollment was not authorized"
+msgstr "Pendaftaran tidak diizinkan"
+
+msgid "Could not start enrollment: {error}"
+msgstr "Tidak dapat memulai pendaftaran: {error}"
+
+msgid "Could not start enrollment"
+msgstr "Tidak dapat memulai pendaftaran"
+
+msgid "Could not start camera"
+msgstr "Tidak dapat memulai kamera"
+
+msgid "Close other camera apps, check the privacy shutter, or choose another camera in Settings."
+msgstr "Tutup aplikasi kamera lain, periksa penutup privasi, atau pilih kamera lain di Pengaturan."
+
+msgid "ready"
+msgstr "siap"
+
+msgid "needs captures"
+msgstr "perlu pengambilan gambar"
+
+msgid "unused"
+msgstr "tidak dipakai"
+
+msgid "Enroll a new face"
+msgstr "Daftarkan wajah baru"
+
+msgid "Settings"
+msgstr "Pengaturan"
+
+msgid "Connecting…"
+msgstr "Menghubungkan…"
+
+msgid "Loading from the Gaze daemon…"
+msgstr "Memuat dari layanan Gaze…"
+
+msgid "Enrolled Faces"
+msgstr "Wajah Terdaftar"
+
+msgid "Rename a face, add captures to improve it, or remove it."
+msgstr "Ganti nama wajah, tambahkan pengambilan gambar untuk menyempurnakannya, atau hapus."
+
+msgid "Recognition"
+msgstr "Pengenalan"
+
+msgid "Test recognition"
+msgstr "Uji pengenalan"
+
+msgid "Not tested in this session yet."
+msgstr "Belum diuji dalam sesi ini."
+
+msgid "Test"
+msgstr "Uji"
+
+msgid "Look at the camera and check that Gaze recognizes you"
+msgstr "Lihat ke kamera dan pastikan Gaze mengenali Anda"
+
+msgid "Setup Checklist"
+msgstr "Daftar Periksa Penyiapan"
+
+msgid "Work through these once before using face unlock on your desktop."
+msgstr "Selesaikan langkah-langkah ini satu kali sebelum memakai buka kunci wajah di desktop Anda."
+
+msgid "Choose your camera"
+msgstr "Pilih kamera Anda"
+
+msgid "Pick the camera in Settings, then check it in the enrollment preview"
+msgstr "Pilih kamera di Pengaturan, lalu periksa di pratinjau pendaftaran"
+
+msgid "Enroll a face"
+msgstr "Daftarkan wajah"
+
+msgid "Capture your face from a few angles"
+msgstr "Ambil gambar wajah Anda dari beberapa sudut"
+
+msgid "Confirm that Gaze recognizes you"
+msgstr "Pastikan Gaze mengenali Anda"
+
+msgid "Check desktop integration"
+msgstr "Periksa integrasi desktop"
+
+msgid "Run gaze doctor before trying screen unlock"
+msgstr "Jalankan gaze doctor sebelum mencoba buka kunci layar"
+
+msgid "Enroll a Face"
+msgstr "Daftarkan Wajah"
+
+msgid "Running gaze doctor…"
+msgstr "Menjalankan gaze doctor…"
+
+msgid "Run gaze doctor in a terminal on your Linux host to check desktop integration. If the installer requested a reboot, do that before testing screen unlock. Login and keyring unlock are optional, separate settings."
+msgstr "Jalankan gaze doctor di terminal pada sistem Linux Anda untuk memeriksa integrasi desktop. Jika pemasang meminta mulai ulang, lakukan sebelum menguji buka kunci layar. Login dan buka kunci keyring adalah pengaturan opsional yang terpisah."
+
+msgid "Desktop setup checks"
+msgstr "Pemeriksaan penyiapan desktop"
+
+msgid "Look at the camera…"
+msgstr "Lihat ke kamera…"
+
+msgid "Reconnecting to the Gaze daemon…"
+msgstr "Menghubungkan ulang ke layanan Gaze…"
+
+msgid "Could not access the camera: {error}. Close other camera apps and retry; run gaze doctor if it persists."
+msgstr "Tidak dapat mengakses kamera: {error}. Tutup aplikasi kamera lain dan coba lagi; jalankan gaze doctor jika masalah berlanjut."
+
+msgid "Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled."
+msgstr "Tidak dapat memulai pengenalan. Jalankan gaze doctor dan pastikan profil wajah yang dapat digunakan telah terdaftar."
+
+msgid "Face recognized. Next: check desktop integration before trying screen unlock."
+msgstr "Wajah dikenali. Selanjutnya: periksa integrasi desktop sebelum mencoba buka kunci layar."
+
+msgid "Lost contact with the Gaze daemon"
+msgstr "Koneksi dengan layanan Gaze terputus"
+
+msgid "Recognition timed out without a result. Retry, or run gaze doctor to check the camera and service"
+msgstr "Waktu pengenalan habis tanpa hasil. Coba lagi, atau jalankan gaze doctor untuk memeriksa kamera dan layanan"
+
+msgid "Unsupported CPU"
+msgstr "CPU Tidak Didukung"
+
+msgid "Could Not Load Faces"
+msgstr "Tidak Dapat Memuat Wajah"
+
+msgid "No Faces Enrolled"
+msgstr "Belum Ada Wajah Terdaftar"
+
+msgid "Choose your camera in Settings, then enroll a face. The capture window lets you check the camera before starting."
+msgstr "Pilih kamera Anda di Pengaturan, lalu daftarkan wajah. Jendela pengambilan gambar memungkinkan Anda memeriksa kamera sebelum memulai."
+
+msgid "1 capture"
+msgstr "1 pengambilan gambar"
+
+msgid "{count} captures"
+msgstr "{count} pengambilan gambar"
+
+msgid "Rename"
+msgstr "Ganti nama"
+
+msgid "Improve this face"
+msgstr "Sempurnakan wajah ini"
+
+msgid "Delete"
+msgstr "Hapus"
+
+msgid "New face name"
+msgstr "Nama wajah baru"
+
+msgid "A face with this name already exists"
+msgstr "Wajah dengan nama ini sudah ada"
+
+msgid "Failed to rename face"
+msgstr "Gagal mengganti nama wajah"
+
+msgid "Renamed “{old}” to “{new}”"
+msgstr "Nama “{old}” diganti menjadi “{new}”"
+
+msgid "Failed to remove face"
+msgstr "Gagal menghapus wajah"
+
+msgid "Camera Not Activated"
+msgstr "Kamera Tidak Aktif"
+
+msgid "No Face"
+msgstr "Tidak Ada Wajah"
+
+msgid "Need More Light"
+msgstr "Perlu Lebih Banyak Cahaya"
+
+msgid "Not Centered"
+msgstr "Tidak di Tengah"
+
+msgid "Face Clipped"
+msgstr "Wajah Terpotong"
+
+msgid "Come Closer"
+msgstr "Mendekat"
+
+msgid "Back Up"
+msgstr "Mundur"
+
+msgid "Ready"
+msgstr "Siap"
+
+msgid "The camera could not be opened: {error}"
+msgstr "Kamera tidak dapat dibuka: {error}"
+
+msgid "Main cameras"
+msgstr "Kamera utama"
+
+msgid "Fallback cameras {index}"
+msgstr "Kamera cadangan {index}"
+
+msgid "Improve “{name}”"
+msgstr "Sempurnakan “{name}”"
+
+msgid "Add Face"
+msgstr "Tambah Wajah"
+
+msgid "Infrared camera"
+msgstr "Kamera inframerah"
+
+msgid "RGB camera"
+msgstr "Kamera RGB"
+
+msgid "Infrared camera · preview starts when capture does"
+msgstr "Kamera inframerah · pratinjau dimulai saat pengambilan gambar"
+
+msgid "Face name"
+msgstr "Nama wajah"
+
+msgid "Camera"
+msgstr "Kamera"
+
+msgid "{camera} · preview starts when capture does"
+msgstr "{camera} · pratinjau dimulai saat pengambilan gambar"
+
+msgid "Start Capture"
+msgstr "Mulai Pengambilan Gambar"
+
+msgid "Done — test recognition next"
+msgstr "Selesai — selanjutnya uji pengenalan"
+
+msgid "Cancel Enrollment?"
+msgstr "Batalkan Pendaftaran?"
+
+msgid "This will discard any partial captures."
+msgstr "Hasil pengambilan gambar yang belum lengkap akan dibuang."
+
+msgid "Resume"
+msgstr "Lanjutkan"
+
+msgid "Discard"
+msgstr "Buang"
+
+msgid "{camera} · starting capture"
+msgstr "{camera} · memulai pengambilan gambar"
+
+msgid "Starting enrollment…"
+msgstr "Memulai pendaftaran…"
+
+msgid "Failed to connect to enrollment stream. Try again."
+msgstr "Gagal terhubung ke aliran pendaftaran. Coba lagi."
+
+msgid "Failed to connect to capture stream. Try again."
+msgstr "Gagal terhubung ke aliran pengambilan gambar. Coba lagi."
+
+msgid "Could not claim camera: {error}. Try again."
+msgstr "Tidak dapat menggunakan kamera: {error}. Coba lagi."
+
+msgid "{camera} · live preview unavailable, look at the camera"
+msgstr "{camera} · pratinjau langsung tidak tersedia, lihat ke kamera"
+
+msgid "Enrollment timed out. Close this window and try again."
+msgstr "Waktu pendaftaran habis. Tutup jendela ini dan coba lagi."
+
+msgid "Lost contact with the Gaze daemon. Close this window and try again."
+msgstr "Koneksi dengan layanan Gaze terputus. Tutup jendela ini dan coba lagi."
+
+msgid "Face saved. Use Test in the main window, then check desktop integration."
+msgstr "Wajah disimpan. Gunakan “Uji” di jendela utama, lalu periksa integrasi desktop."
+
+msgid "Enrollment finished without saving."
+msgstr "Pendaftaran selesai tanpa menyimpan."
+
+msgid "Lost contact with the Gaze daemon."
+msgstr "Koneksi dengan layanan Gaze terputus."
+
+msgid "Try Again"
+msgstr "Coba Lagi"
+
+msgid "Failed to apply config: {error}"
+msgstr "Gagal menerapkan konfigurasi: {error}"
+
+msgid "Configured as {source}, which this list cannot show"
+msgstr "Dikonfigurasi sebagai {source}, yang tidak dapat ditampilkan di daftar ini"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI. Restart the Gaze daemon after changing this"
+msgstr "CPU, NPU otomatis, Intel OpenVINO, atau AMD Ryzen AI. Mulai ulang layanan Gaze setelah mengubahnya"
+
+msgid "Configured as {provider}/{device}, which this build cannot show"
+msgstr "Dikonfigurasi sebagai {provider}/{device}, yang tidak dapat ditampilkan oleh versi ini"
+
+msgid "Ordered fallback: {sources}. Selecting a camera replaces this list."
+msgstr "Urutan cadangan: {sources}. Memilih kamera akan menggantikan daftar ini."
+
+msgid "Finding cameras…"
+msgstr "Mencari kamera…"
+
+msgid "Settings will appear when the camera scan finishes."
+msgstr "Pengaturan akan muncul setelah pencarian kamera selesai."
+
+msgid "Primary camera"
+msgstr "Kamera utama"
+
+msgid "None"
+msgstr "Tidak ada"
+
+msgid "None (IR only)"
+msgstr "Tidak ada (hanya IR)"
+
+msgid "Could not list cameras"
+msgstr "Tidak dapat menampilkan daftar kamera"
+
+msgid "Close other camera applications and try Settings again. Run gaze doctor if the problem continues."
+msgstr "Tutup aplikasi kamera lain dan buka Pengaturan lagi. Jalankan gaze doctor jika masalah berlanjut."
+
+msgid "Settings are locked"
+msgstr "Pengaturan terkunci"
+
+msgid "Unlock…"
+msgstr "Buka kunci…"
+
+msgid "Everyday"
+msgstr "Umum"
+
+msgid "Advanced"
+msgstr "Lanjutan"
+
+msgid "Changes save automatically after unlocking."
+msgstr "Perubahan disimpan secara otomatis setelah kunci dibuka."
+
+msgid "Security"
+msgstr "Keamanan"
+
+msgid "Security level"
+msgstr "Tingkat keamanan"
+
+msgid "Medium is recommended. Changing the recognition model requires re-enrolling existing profiles. Custom controls are in Advanced"
+msgstr "Sedang disarankan. Mengubah model pengenalan mengharuskan profil yang ada didaftarkan ulang. Kontrol khusus ada di Lanjutan"
+
+msgid "Detector level"
+msgstr "Tingkat pendeteksi"
+
+msgid "Recognizer level"
+msgstr "Tingkat pengenal"
+
+msgid "RGB recognizer threshold"
+msgstr "Ambang pengenal RGB"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "Kemiripan RGB minimum agar dianggap cocok"
+
+msgid "IR recognizer threshold"
+msgstr "Ambang pengenal IR"
+
+msgid "Minimum IR similarity for a match"
+msgstr "Kemiripan IR minimum agar dianggap cocok"
+
+msgid "Hardware"
+msgstr "Perangkat keras"
+
+msgid "Inference execution provider"
+msgstr "Penyedia eksekusi inferensi"
+
+msgid "OpenVINO inference device"
+msgstr "Perangkat inferensi OpenVINO"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "Perangkat Intel yang dipakai untuk semua model ONNX"
+
+msgid "RGB camera source"
+msgstr "Sumber kamera RGB"
+
+msgid "IR camera source"
+msgstr "Sumber kamera IR"
+
+msgid "IR frame size override"
+msgstr "Paksa ukuran bingkai IR"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "Paksa satu resolusi jika gambar IR berwarna hijau atau rusak pada mode otomatis"
+
+msgid "Width"
+msgstr "Lebar"
+
+msgid "Height"
+msgstr "Tinggi"
+
+msgid "Force IR emitter"
+msgstr "Paksa pemancar IR"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "Ganti kendali pemancar, hanya jika pemancar IR tidak menyala sendiri"
+
+msgid "Parallel RGB + IR capture"
+msgstr "Pengambilan RGB + IR paralel"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "Autentikasi hibrida lebih cepat, tetapi beberapa webcam tidak dapat menjalankan kedua sensor sekaligus"
+
+msgid "Darkness cutoff"
+msgstr "Batas kegelapan"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "Tolak bingkai di bawah kecerahan rata-rata ini (0–255)"
+
+msgid "Enrollment"
+msgstr "Pendaftaran"
+
+msgid "Maximum templates"
+msgstr "Templat maksimum"
+
+msgid "Number of capture sets stored per face"
+msgstr "Jumlah set pengambilan gambar yang disimpan per wajah"
+
+msgid "Minimum face size ratio"
+msgstr "Rasio ukuran wajah minimum"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "Wajah terkecil yang diterima saat pendaftaran; nilai lebih rendah memungkinkan jarak lebih jauh"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "Deteksi Liveness Anti-Pemalsuan"
+
+msgid "Enable liveness spoof prevention"
+msgstr "Aktifkan pencegahan pemalsuan dengan deteksi liveness"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "Periksa gambar kamera dan gerakan alami untuk mencari tanda-tanda foto atau layar"
+
+msgid "Liveness threshold"
+msgstr "Ambang deteksi liveness"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "Keyakinan minimum pencegahan pemalsuan"
+
+msgid "Maximum liveness duration"
+msgstr "Durasi maksimum deteksi liveness"
+
+msgid "Usable face time per camera before falling back to your password"
+msgstr "Waktu wajah yang dapat digunakan per kamera sebelum beralih ke kata sandi"
+
+msgid "Authentication"
+msgstr "Autentikasi"
+
+msgid "Abort if SSH"
+msgstr "Batalkan jika SSH"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "Cegah autentikasi melalui koneksi SSH"
+
+msgid "Abort if lid closed"
+msgstr "Batalkan jika penutup tertutup"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "Cegah autentikasi saat penutup laptop tertutup"
+
+msgid "Require a suspend first"
+msgstr "Wajibkan suspensi terlebih dahulu"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "Cegah autentikasi sampai sistem pernah disuspensi dan dilanjutkan satu kali"
+
+msgid "Require confirmation on lock screen"
+msgstr "Wajibkan konfirmasi di layar kunci"
+
+msgid "Confirm after matching where supported. On KDE lock/login screens this uses your password instead of face unlock"
+msgstr "Konfirmasi setelah cocok jika didukung. Pada layar kunci/login KDE, kata sandi Anda digunakan sebagai pengganti buka kunci wajah"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "Wajibkan konfirmasi untuk autentikasi dengan hak istimewa"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "Wajibkan menekan Enter atau mengeklik OK untuk mengizinkan setelah wajah cocok pada sudo, polkit, dan permintaan serupa"
+
+msgid "Resume grace period (ms)"
+msgstr "Masa tenggang setelah dilanjutkan (ms)"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "Tunda autentikasi wajah saat bangun dari suspensi"
+
+msgid "Start delay (ms)"
+msgstr "Penundaan awal (ms)"
+
+msgid "Use 3000–5000 ms on KDE or hyprlock to give yourself time to step away after locking"
+msgstr "Gunakan 3000–5000 ms di KDE atau hyprlock agar Anda sempat menjauh setelah mengunci"
+
+msgid "Start delay applies to"
+msgstr "Penundaan awal berlaku untuk"
+
+msgid "Which prompts wait for the start delay"
+msgstr "Permintaan mana yang menunggu penundaan awal"
+
+msgid "Hybrid combining policy"
+msgstr "Kebijakan kombinasi hibrida"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "Kebijakan kombinasi saat kamera RGB dan IR sama-sama aktif"
+
+msgid "Storage"
+msgstr "Penyimpanan"
+
+msgid "Encrypt face templates"
+msgstr "Enkripsi templat wajah"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "Enkripsi templat wajah yang disimpan dengan kunci yang disegel TPM"
+
+msgid "Unlock GNOME Keyring"
+msgstr "Buka kunci GNOME Keyring"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login. Needs liveness and template encryption, and keeps both on while enabled"
+msgstr "Gunakan kata sandi terdaftar setelah login wajah GDM atau greetd yang dilindungi deteksi liveness. Memerlukan deteksi liveness dan enkripsi templat, serta menjaga keduanya tetap aktif selama opsi ini diaktifkan"
+
+msgid "Unlock KWallet"
+msgstr "Buka kunci KWallet"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet. Needs liveness and template encryption, and keeps both on while enabled"
+msgstr "Gunakan kata sandi terdaftar setelah login KDE yang dilindungi deteksi liveness; daftarkan dengan gaze keyring --kwallet. Memerlukan deteksi liveness dan enkripsi templat, serta menjaga keduanya tetap aktif selama opsi ini diaktifkan"
+
+msgid "Set up password…"
+msgstr "Siapkan kata sandi…"
+
+msgid "Finish password unlock setup"
+msgstr "Selesaikan penyiapan buka kunci dengan kata sandi"
+
+msgid "The switch enables this feature. Enroll your password from a terminal as your desktop user; then check your login integration. Passwords stay on this machine, protected by the TPM."
+msgstr "Sakelar ini mengaktifkan fitur. Daftarkan kata sandi Anda dari terminal sebagai pengguna desktop, lalu periksa integrasi login Anda. Kata sandi tetap berada di komputer ini, dilindungi oleh TPM."
+
+msgid "1. Wait for Settings to show Saved.\n2. Run: {command}\n3. Run: gaze doctor\n4. Reopen Settings to refresh password status."
+msgstr "1. Tunggu sampai Pengaturan menampilkan “Disimpan”.\n2. Jalankan: {command}\n3. Jalankan: gaze doctor\n4. Buka kembali Pengaturan untuk memperbarui status kata sandi."
+
+msgid "Cameras"
+msgstr "Kamera"
+
+msgid "Choose a camera, then use Enroll a Face to preview and check it."
+msgstr "Pilih kamera, lalu gunakan “Daftarkan Wajah” untuk melihat pratinjau dan memeriksanya."
+
+msgid "Lock screen and password prompts"
+msgstr "Layar kunci dan permintaan kata sandi"
+
+msgid "Preparing and saving settings… Model downloads may take a few minutes."
+msgstr "Menyiapkan dan menyimpan pengaturan… Pengunduhan model dapat memakan waktu beberapa menit."
+
+msgid "Recognition model change cancelled; reopen Settings to confirm"
+msgstr "Perubahan model pengenalan dibatalkan; buka kembali Pengaturan untuk memastikan"
+
+msgid "Re-enroll faces after this change?"
+msgstr "Daftarkan ulang wajah setelah perubahan ini?"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face to capture new samples for every profile you use."
+msgstr "Hasil pengambilan gambar yang ada tidak cocok dengan model pengenalan baru. Data tetap tersimpan di disk. Setelah menyimpan, gunakan “Sempurnakan wajah ini” untuk mengambil gambar baru bagi setiap profil yang Anda pakai."
+
+msgid "Keep current model"
+msgstr "Pertahankan model saat ini"
+
+msgid "Change model"
+msgstr "Ubah model"
+
+msgid "Model change cancelled. Current settings restored"
+msgstr "Perubahan model dibatalkan. Pengaturan saat ini dipulihkan"
+
+#, fuzzy
+msgid "Saved. gazed restarts by itself if the new provider needs a different runtime. Then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active."
+msgstr "Disimpan. Mulai ulang gazed, lalu jalankan gaze doctor --benchmark untuk memverifikasi akselerasi; mungkin CPU dipakai sebagai cadangan."
+
+msgid "Saved. Use Improve this face on each existing profile to re-enroll, then test recognition."
+msgstr "Disimpan. Gunakan “Sempurnakan wajah ini” pada setiap profil yang ada untuk mendaftarkannya ulang, lalu uji pengenalan."
+
+msgid "Saved. Changes are active."
+msgstr "Disimpan. Perubahan telah aktif."
+
+msgid "Could not read the current configuration from the Gaze daemon"
+msgstr "Tidak dapat membaca konfigurasi saat ini dari layanan Gaze"
+
+msgid "Try again"
+msgstr "Coba lagi"
+
+msgid "Password stored"
+msgstr "Kata sandi tersimpan"
+
+msgid "Password not enrolled"
+msgstr "Kata sandi belum terdaftar"
+
+msgid "Password status unavailable"
+msgstr "Status kata sandi tidak tersedia"
+
+msgid "{state}. After enabling, run {command} in a terminal to enroll or replace it. Run gaze doctor to check login integration. Requires liveness and encryption."
+msgstr "{state}. Setelah mengaktifkan, jalankan {command} di terminal untuk mendaftarkan atau menggantinya. Jalankan gaze doctor untuk memeriksa integrasi login. Memerlukan deteksi liveness dan enkripsi."
+
+msgid "Failed to load configuration: {error}"
+msgstr "Gagal memuat konfigurasi: {error}"
+
+msgid "Settings stay locked: {error}"
+msgstr "Pengaturan tetap terkunci: {error}"
+
+msgid "Low"
+msgstr "Rendah"
+
+msgid "Medium"
+msgstr "Sedang"
+
+msgid "High"
+msgstr "Tinggi"
+
+msgid "Maximum"
+msgstr "Maksimum"
+
+msgid "Custom"
+msgstr "Khusus"
+
+msgid "Standard"
+msgstr "Standar"
+
+msgid "Accurate"
+msgstr "Akurat"
+
+msgid "Default"
+msgstr "Bawaan"
+
+msgid "Or"
+msgstr "Atau"
+
+msgid "Fallback on dark"
+msgstr "Beralih saat gelap"
+
+msgid "And"
+msgstr "Dan"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "Tidak pernah (ambil RGB, lalu IR)"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "Otomatis (paralel jika kamera mendukung)"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "Selalu (ambil RGB dan IR sekaligus)"
+
+msgid "All face authentication (including sudo)"
+msgstr "Semua autentikasi wajah (termasuk sudo)"
+
+msgid "Screen lockers only"
+msgstr "Hanya pengunci layar"
+
+msgid "Automatic (NPU)"
+msgstr "Otomatis (NPU)"
+
+msgid "Face the camera"
+msgstr "Hadapkan wajah ke kamera"
+
+msgid "Tilt your face slightly up"
+msgstr "Miringkan wajah Anda sedikit ke atas"
+
+msgid "Tilt your face slightly down"
+msgstr "Miringkan wajah Anda sedikit ke bawah"
+
+msgid "Turn your face slightly left"
+msgstr "Putar wajah Anda sedikit ke kiri"
+
+msgid "Turn your face slightly right"
+msgstr "Putar wajah Anda sedikit ke kanan"
+
+msgid "Database error during enrollment"
+msgstr "Kesalahan basis data saat pendaftaran"
+
+msgid "Camera error during enrollment"
+msgstr "Kesalahan kamera saat pendaftaran"
+
+msgid "Enrollment cancelled"
+msgstr "Pendaftaran dibatalkan"
+
+msgid "Captured"
+msgstr "Gambar diambil"
+
+msgid "Completed"
+msgstr "Selesai"
+
+msgid "Run gaze doctor for recovery steps."
+msgstr "Jalankan gaze doctor untuk melihat langkah pemulihan."

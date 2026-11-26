@@ -13,7 +13,10 @@ use std::path::{Path, PathBuf};
 
 use crate::crypto::{self, EmbeddingCipher};
 
+mod owner;
 mod recode;
+
+pub use owner::OwnerCheck;
 
 type FaceMap = HashMap<String, HashMap<String, (Array1<f32>, Spectrum)>>;
 pub type FaceScore = (String, f32, f32, bool, u32);
@@ -128,6 +131,8 @@ pub struct UserDatabase {
     fail_rollback: bool,
 }
 
+const MAX_COMPONENT_BYTES: usize = 255;
+
 impl UserDatabase {
     fn is_abandoned_name(name: &str) -> bool {
         [".gaze-stage-", ".gaze-deleted-"].iter().any(|prefix| {
@@ -154,6 +159,11 @@ impl UserDatabase {
                 "{kind} must be a single safe path component"
             )));
         }
+        if value.len() > MAX_COMPONENT_BYTES {
+            return Err(UserDbError::InvalidName(format!(
+                "{kind} must be at most {MAX_COMPONENT_BYTES} bytes"
+            )));
+        }
         Ok(())
     }
 
@@ -163,6 +173,46 @@ impl UserDatabase {
 
     pub fn validate_face_name(face_name: &str) -> Result<(), UserDbError> {
         Self::validate_component("face name", face_name)
+    }
+
+    pub fn validate_new_face_name(face_name: &str) -> Result<(), UserDbError> {
+        Self::validate_face_name(face_name)?;
+        if face_name.chars().any(Self::is_invisible_format_char) {
+            return Err(UserDbError::InvalidName(
+                "face name cannot contain invisible or text-direction characters".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn is_invisible_format_char(c: char) -> bool {
+        matches!(
+            c,
+            '\u{00AD}'
+                | '\u{034F}'
+                | '\u{061C}'
+                | '\u{115F}'
+                | '\u{1160}'
+                | '\u{17B4}'
+                | '\u{17B5}'
+                | '\u{180E}'
+                | '\u{200B}'
+                | '\u{200E}'
+                | '\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{206F}'
+                | '\u{3164}'
+                | '\u{FEFF}'
+                | '\u{FFA0}'
+                | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{E0000}'..='\u{E007F}'
+        )
+    }
+
+    pub fn has_face(&self, username: &str, face_name: &str) -> bool {
+        self.users
+            .get(username)
+            .is_some_and(|faces| faces.contains_key(face_name))
     }
 
     fn validate_template_id(template_id: &str) -> Result<(), UserDbError> {
@@ -852,7 +902,7 @@ impl UserDatabase {
         Self::validate_username(username)?;
         self.ensure_available()?;
         Self::validate_face_name(old_face_name)?;
-        Self::validate_face_name(new_face_name)?;
+        Self::validate_new_face_name(new_face_name)?;
         if old_face_name == new_face_name {
             return Ok(());
         }
@@ -994,6 +1044,46 @@ impl UserDatabase {
             })
             .collect();
         Ok(faces)
+    }
+
+    pub fn stale_faces(&self, username: &str) -> Result<Vec<String>, UserDbError> {
+        self.ensure_available()?;
+        Self::validate_username(username)?;
+        let Some(face_map) = self.users.get(username) else {
+            return Err(UserDbError::UserNotFound(username.to_string()));
+        };
+        let Some(current) = &self.recognizer else {
+            return Ok(Vec::new());
+        };
+        let mut stale = Vec::new();
+        for face_name in face_map.keys() {
+            let mut stack = vec![self.face_dir(username, face_name)];
+            let mut found = false;
+            while let Some(dir) = stack.pop() {
+                let Ok(entries) = fs::read_dir(&dir) else {
+                    continue;
+                };
+                let tag = Self::recognizer_tag(&dir);
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                        stack.push(path);
+                    } else if path.extension().and_then(|e| e.to_str()) == Some("bin")
+                        && tag.as_ref().is_some_and(|tag| tag != current)
+                    {
+                        found = true;
+                    }
+                }
+                if found {
+                    break;
+                }
+            }
+            if found {
+                stale.push(face_name.clone());
+            }
+        }
+        stale.sort();
+        Ok(stale)
     }
 
     pub fn has_enrolled_faces(&self, username: &str) -> Result<bool, UserDbError> {
@@ -1227,6 +1317,34 @@ mod tests {
     }
 
     #[test]
+    fn new_face_names_reject_invisible_and_direction_characters() {
+        for name in [
+            "Alice Smith",
+            "café",
+            "李雷",
+            "face 😀",
+            "❤\u{FE0F}",
+            "می\u{200C}خواهم",
+        ] {
+            UserDatabase::validate_new_face_name(name).unwrap();
+        }
+        for name in [
+            "bob\u{200B}face",
+            "\u{202E}ecaf",
+            "bob\u{FEFF}",
+            "bob\u{2060}face",
+            "bob\u{00AD}face",
+            "bob\u{3164}",
+        ] {
+            UserDatabase::validate_face_name(name).unwrap();
+            assert!(
+                UserDatabase::validate_new_face_name(name).is_err(),
+                "{name:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
     fn validate_names_accept_safe_components_and_reject_path_tricks() {
         for name in ["alice", "Alice Smith", "face-1", "face_2"] {
             UserDatabase::validate_username(name).unwrap();
@@ -1245,6 +1363,13 @@ mod tests {
                 "{name:?} should be invalid"
             );
         }
+    }
+
+    #[test]
+    fn validate_names_reject_components_longer_than_a_filename() {
+        UserDatabase::validate_face_name(&"a".repeat(MAX_COMPONENT_BYTES)).unwrap();
+        assert!(UserDatabase::validate_face_name(&"a".repeat(MAX_COMPONENT_BYTES + 1)).is_err());
+        assert!(UserDatabase::validate_face_name(&"é".repeat(128)).is_err());
     }
 
     #[test]
@@ -2132,11 +2257,14 @@ mod tests {
             "w600k_mbf.onnx"
         );
 
+        assert!(db.stale_faces("alice").unwrap().is_empty());
+
         db.use_recognizer("w600k_r50.onnx").unwrap();
         assert_eq!(
             sorted_faces(&db, "alice"),
             vec![("work".to_string(), 0, false, false)]
         );
+        assert_eq!(db.stale_faces("alice").unwrap(), vec!["work".to_string()]);
         assert!(!db.has_enrolled_faces("alice").unwrap());
         assert!(
             db.match_faces("alice", &embedding(&[1.0, 0.0]), 0.5, Spectrum::Rgb)

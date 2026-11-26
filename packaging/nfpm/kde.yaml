@@ -36,6 +36,7 @@ archlinux:
 
 scripts:
   postinstall: "packaging/scriptlets/postinst-kde.sh"
+  preremove: "packaging/scriptlets/prerm-kde.sh"
   postremove: "packaging/scriptlets/postrm-kde.sh"
 
 overrides:

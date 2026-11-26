@@ -15,6 +15,7 @@ homepage: "https://gaze.gundulabs.com"
 license: "GPL-3.0-or-later"
 
 contents:
+${OPENCV_CONTENTS}
   - src: "target/release/onnxruntime-LICENSE"
     dst: "/usr/share/licenses/gaze/onnxruntime/LICENSE"
     file_info:
@@ -84,11 +85,10 @@ contents:
     packager: deb
     file_info:
       mode: 0755
-  - src: "target/release/libpam_gaze_grosshack.so"
+  - src: "pam_gaze.so"
     dst: "/lib/${MULTIARCH}/security/pam_gaze_grosshack.so"
+    type: "symlink"
     packager: deb
-    file_info:
-      mode: 0755
   # Ubuntu 26.04's libpam searches /usr/lib/security instead of the
   # multiarch directory used by older suites, so expose both paths.
   - src: "/lib/${MULTIARCH}/security/pam_gaze.so"
@@ -104,21 +104,19 @@ contents:
     packager: rpm
     file_info:
       mode: 0755
-  - src: "target/release/libpam_gaze_grosshack.so"
+  - src: "pam_gaze.so"
     dst: "/usr/lib64/security/pam_gaze_grosshack.so"
+    type: "symlink"
     packager: rpm
-    file_info:
-      mode: 0755
   - src: "target/release/libpam_gaze.so"
     dst: "/usr/lib/security/pam_gaze.so"
     packager: archlinux
     file_info:
       mode: 0755
-  - src: "target/release/libpam_gaze_grosshack.so"
+  - src: "pam_gaze.so"
     dst: "/usr/lib/security/pam_gaze_grosshack.so"
+    type: "symlink"
     packager: archlinux
-    file_info:
-      mode: 0755
   - src: "packaging/pam/gaze"
     dst: "/usr/share/pam-configs/"
     packager: deb
@@ -179,11 +177,9 @@ ${RPM_LIB_DEPENDS}
       postinstall: "packaging/scriptlets/postinst-arch.sh"
       preremove: "packaging/scriptlets/prerm-arch.sh"
     depends:
-      # The `_nfpm` recipe computes these bounds from the libopencv_core soversion linked by
-      # gazed. Arch changes that version each minor release, so an unbounded dependency can break
-      # during `pacman -Syu`.
-      - "opencv>=${OPENCV_MIN}"
-      - "opencv<${OPENCV_NEXT}"
+      # The `_nfpm` recipe bounds opencv by the libopencv_core soversion gazed links, which Arch
+      # changes each minor release. A static link needs no opencv at all.
+${OPENCV_DEPENDS}
       - pam
       - tpm2-tss
       - gst-plugins-base

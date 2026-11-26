@@ -35,6 +35,28 @@ impl AuthDaemon {
             .to_string()
     }
 
+    pub(super) async fn reconcile_template_owner(
+        &self,
+        username: &str,
+        uid: u32,
+    ) -> fdo::Result<()> {
+        let check = self
+            .db
+            .lock()
+            .await
+            .reconcile_owner(username, uid)
+            .map_err(Self::map_user_db_error)?;
+        if let crate::users::OwnerCheck::Reassigned { previous_uid } = check {
+            warn!(
+                username,
+                previous_uid,
+                uid,
+                "Removed face templates enrolled by an earlier account with this name"
+            );
+        }
+        Ok(())
+    }
+
     pub(super) async fn current_config(&self) -> Config {
         self.settings.read().await.clone()
     }
@@ -194,8 +216,16 @@ impl AuthDaemon {
     pub(super) fn ssh_session_verdict(
         heuristic_is_ssh: bool,
         session_remote: Option<bool>,
+        user_remote: Option<bool>,
     ) -> bool {
-        heuristic_is_ssh || session_remote.unwrap_or(false)
+        heuristic_is_ssh || session_remote.unwrap_or(false) || user_remote.unwrap_or(false)
+    }
+
+    pub(super) async fn user_has_remote_session(uid: u32) -> Option<bool> {
+        let conn = system_bus().await.ok()?;
+        gaze_core::dbus::uid_has_live_remote_session_on(&conn, uid)
+            .await
+            .ok()
     }
 
     pub(super) async fn caller_session_is_remote(pid: u32) -> Option<bool> {
@@ -252,6 +282,7 @@ impl AuthDaemon {
         &self,
         header: &Header<'_>,
         auth: &gaze_core::config::AuthConfig,
+        elevating_uid: Option<u32>,
     ) -> fdo::Result<()> {
         if Self::resume_gate_blocks(
             auth.abort_before_first_resume,
@@ -269,8 +300,17 @@ impl AuthDaemon {
                 Some(pid) if !heuristic_is_ssh => Self::caller_session_is_remote(pid).await,
                 _ => None,
             };
-            if Self::ssh_session_verdict(heuristic_is_ssh, session_remote) {
-                warn!(caller_pid, "SSH session detected, aborting face auth");
+            let user_remote = match elevating_uid {
+                Some(uid) if !heuristic_is_ssh && session_remote != Some(true) => {
+                    Self::user_has_remote_session(uid).await
+                }
+                _ => None,
+            };
+            if Self::ssh_session_verdict(heuristic_is_ssh, session_remote, user_remote) {
+                warn!(
+                    caller_pid,
+                    user_remote, "SSH session detected, aborting face auth"
+                );
                 return Err(fdo::Error::Failed("SSH session detected".into()));
             }
         }
@@ -899,11 +939,27 @@ mod tests {
 
     #[test]
     fn ssh_verdict_combines_heuristic_with_logind_remote() {
-        assert!(AuthDaemon::ssh_session_verdict(true, None));
-        assert!(AuthDaemon::ssh_session_verdict(true, Some(false)));
-        assert!(AuthDaemon::ssh_session_verdict(false, Some(true)));
-        assert!(!AuthDaemon::ssh_session_verdict(false, Some(false)));
-        assert!(!AuthDaemon::ssh_session_verdict(false, None));
+        assert!(AuthDaemon::ssh_session_verdict(true, None, None));
+        assert!(AuthDaemon::ssh_session_verdict(true, Some(false), None));
+        assert!(AuthDaemon::ssh_session_verdict(false, Some(true), None));
+        assert!(!AuthDaemon::ssh_session_verdict(false, Some(false), None));
+        assert!(!AuthDaemon::ssh_session_verdict(false, None, None));
+    }
+
+    #[test]
+    fn a_remote_session_of_the_elevating_user_blocks_callers_outside_it() {
+        assert!(AuthDaemon::ssh_session_verdict(false, None, Some(true)));
+        assert!(AuthDaemon::ssh_session_verdict(
+            false,
+            Some(false),
+            Some(true)
+        ));
+        assert!(!AuthDaemon::ssh_session_verdict(false, None, Some(false)));
+        assert!(!AuthDaemon::ssh_session_verdict(
+            false,
+            Some(false),
+            Some(false)
+        ));
     }
 
     #[test]

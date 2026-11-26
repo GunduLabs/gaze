@@ -24,7 +24,16 @@ ort_openvino_dir := justfile_directory() / "target/ort-openvino"
 
 # The opencv crate probes only the `opencv4`/`opencv` pkg-config names, so distros shipping
 # OpenCV 5 (e.g. Arch) need this override. Empty when opencv4/opencv resolve or opencv5 doesn't.
-opencv_env := shell("pkg-config --exists opencv4 2>/dev/null || pkg-config --exists opencv 2>/dev/null || ! pkg-config --exists opencv5 2>/dev/null || echo OPENCV_PKGCONFIG_NAME=opencv5")
+opencv_system_env := shell("pkg-config --exists opencv4 2>/dev/null || pkg-config --exists opencv 2>/dev/null || ! pkg-config --exists opencv5 2>/dev/null || echo OPENCV_PKGCONFIG_NAME=opencv5")
+
+# `GAZE_OPENCV=static` links a pinned OpenCV into the binaries, so one Arch package also installs on
+# derivatives whose repositories carry a different OpenCV.
+opencv := lowercase(env("GAZE_OPENCV", "system"))
+opencv_version := env("OPENCV_VERSION", "4.14.0")
+opencv_recipe := replace_regex(sha256_file("scripts/build-opencv.sh"), '^(.{12}).*$', '$1')
+opencv_dir := env("OPENCV_CACHE_DIR", justfile_directory() / "target/opencv-static") / opencv_version + "-" + arch + "-" + opencv_recipe
+opencv_static_env := "OPENCV_DISABLE_PROBES=pkg_config,cmake,vcpkg_cmake,vcpkg OPENCV_LINK_LIBS=static=opencv_imgproc,static=opencv_core,dylib=z OPENCV_LINK_PATHS=" + quote(opencv_dir / "lib") + " OPENCV_INCLUDE_PATHS=" + quote(opencv_dir / "include/opencv4")
+opencv_env := if opencv == "static" { opencv_static_env } else if opencv == "system" { opencv_system_env } else { error("GAZE_OPENCV must be system or static, got " + opencv) }
 
 # Build the GTK front-end (`gaze-gui`). `GAZE_GUI=0`/`false`/`no`/`off` drops it,
 # and gtk4/libadwaita, from the build, test, and lint recipes below only.
@@ -54,10 +63,10 @@ default:
 # Only the daemon loads ONNX Runtime, after checking CPU support.
 # Build all Rust workspace binaries (release)
 [group("build")]
-build-rust: prepare-ort
+build-rust: prepare-ort prepare-opencv && _stage-opencv
     {{ opencv_env }} cargo build --locked -p gazed --release
-    {{ opencv_env }} cargo build --locked -p gaze-cli {{ gui_pkg }} -p pam-gaze -p pam-gaze-grosshack --release
-    scripts/check-pam-link.sh target/release/libpam_gaze.so target/release/libpam_gaze_grosshack.so
+    {{ opencv_env }} cargo build --locked -p gaze-cli {{ gui_pkg }} -p pam-gaze --release
+    scripts/check-pam-link.sh target/release/libpam_gaze.so
 
 # Stage the gaze-kde System Settings files in dist/kcm
 [arg("format", pattern="deb|rpm|archlinux")]
@@ -83,9 +92,35 @@ build-kcm format="rpm":
         ;;
     esac
 
+# Compile the GNOME and Cinnamon extension translations into dist/locale
+[group("build")]
+build-locales:
+    rm -rf dist/locale
+    scripts/build-locales.sh integrations/gnome-shell/po dist/locale/gnome/usr/share/gnome-shell/extensions/gaze@gundulabs.com/locale
+    scripts/build-locales.sh integrations/cinnamon/po dist/locale/cinnamon/usr/share/locale
+
 [private]
 prepare-ort:
     bash scripts/prepare-ort.sh {{ quote(ort_version) }} {{ quote(arch) }}
+
+[private]
+prepare-opencv:
+    @{{ if opencv == "static" { "bash scripts/build-opencv.sh " + quote(opencv_version) + " " + quote(opencv_dir) } else { "true" } }}
+
+[private]
+_stage-opencv:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -rf dist/opencv
+    mkdir -p dist/opencv
+    [ {{ quote(opencv) }} = static ] || exit 0
+    binaries=(target/release/gazed target/release/gaze)
+    [ -n {{ quote(gui_off) }} ] || binaries+=(target/release/gaze-gui)
+    if objdump -p "${binaries[@]}" | grep 'NEEDED.*libopencv_'; then
+        echo "build-rust: GAZE_OPENCV=static, but the binaries above still link a shared OpenCV" >&2
+        exit 1
+    fi
+    install -m0644 {{ quote(opencv_dir / "LICENSE") }} {{ quote(opencv_dir / "SoftFloat-COPYING.txt") }} dist/opencv/
 
 [private]
 prepare-ort-openvino:
@@ -205,13 +240,30 @@ _nfpm config format:
         fi
     fi
 
+    # build-locales stages one catalog per language.
+    export LOCALE_CONTENTS="  # unused for {{ config }}"
+    if grep -q 'LOCALE_CONTENTS' {{ quote(config) }}; then
+        case {{ quote(config) }} in
+        *cinnamon*) locales=dist/locale/cinnamon ;;
+        *) locales=dist/locale/gnome ;;
+        esac
+        [ -d "$locales" ] || { echo "_nfpm: {{ config }} ships $locales, which is not staged; run just build-locales" >&2; exit 1; }
+        LOCALE_CONTENTS=""
+        while read -r src; do
+            printf -v entry '  - src: "%s"\n    dst: "%s"\n    file_info:\n      mode: 0644\n' "$src" "${src#"$locales"}"
+            LOCALE_CONTENTS+=$entry
+        done < <(find "$locales" -type f | sort)
+    fi
+
     needed() { objdump -p "${binaries[@]}" | awk '/NEEDED/ { print $2 }' | sort -u; }
 
     for module in "${binaries[@]}"; do
         case "$module" in
-        */libpam_gaze.so|*/libpam_gaze_grosshack.so) scripts/check-pam-link.sh "$module" ;;
+        */libpam_gaze.so) scripts/check-pam-link.sh "$module" ;;
         esac
     done
+    export OPENCV_CONTENTS="  # unused for {{ config }}"
+    export OPENCV_DEPENDS="      # unused for {{ format }}"
     yaml_list() { sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' -e 's/^/      - /'; }
 
     lib_depends=""
@@ -246,14 +298,23 @@ _nfpm config format:
             lib_depends=$(printf '%s' "$requires" | yaml_list)
             ;;
         archlinux)
-            # Arch bumps the OpenCV soname every minor release, so pin the soversion the shipped
-            # binaries linked; unpinned, an upgrade crash-loops the daemon instead of failing.
+            # Arch bumps the OpenCV soname every minor release, so pin the soversion of a shared
+            # link; unpinned, an upgrade crash-loops the daemon instead of failing.
             opencv_soname=$(needed | grep '^libopencv_core\.so\.' || true)
             if [ -n "$opencv_soname" ]; then
                 sover=${opencv_soname##*.so.}
                 [[ "$sover" =~ ^[0-9]+$ ]] || { echo "_nfpm: cannot read libopencv_core soversion from {{ config }}" >&2; exit 1; }
-                export OPENCV_MIN="$((sover / 100)).$((sover % 100))"
-                export OPENCV_NEXT="$((sover / 100)).$((sover % 100 + 1))"
+                printf -v OPENCV_DEPENDS '      - "opencv>=%s"\n      - "opencv<%s"' \
+                    "$((sover / 100)).$((sover % 100))" "$((sover / 100)).$((sover % 100 + 1))"
+            elif grep -q 'OPENCV_CONTENTS' {{ quote(config) }}; then
+                OPENCV_DEPENDS="      - zlib"
+                OPENCV_CONTENTS=""
+                pkgname=$(sed -n 's/^name: "\(.*\)"$/\1/p' {{ quote(config) }})
+                for license in LICENSE SoftFloat-COPYING.txt; do
+                    [ -f "dist/opencv/$license" ] || { echo "_nfpm: dist/opencv/$license is not staged; run just build-rust with GAZE_OPENCV=static" >&2; exit 1; }
+                    printf -v entry '  - src: "dist/opencv/%s"\n    dst: "/usr/share/licenses/%s/opencv/%s"\n    file_info:\n      mode: 0644\n' "$license" "$pkgname" "$license"
+                    OPENCV_CONTENTS+=$entry
+                done
             fi
             ;;
         esac
@@ -307,7 +368,7 @@ _nfpm config format:
     esac
 
     tmp_config=$(mktemp)
-    envsubst '$MULTIARCH $OPENCV_MIN $OPENCV_NEXT $DEB_LIB_DEPENDS $RPM_LIB_DEPENDS $RPM_GSTREAMER_BASE $RPM_GSTREAMER_GOOD $RPM_GSTREAMER_PIPEWIRE $KCM_CONTENTS $KCM_DEPENDS $KCM_RECOMMENDS' < {{ quote(config) }} > "$tmp_config"
+    envsubst '$MULTIARCH $OPENCV_CONTENTS $OPENCV_DEPENDS $DEB_LIB_DEPENDS $RPM_LIB_DEPENDS $RPM_GSTREAMER_BASE $RPM_GSTREAMER_GOOD $RPM_GSTREAMER_PIPEWIRE $KCM_CONTENTS $KCM_DEPENDS $KCM_RECOMMENDS $LOCALE_CONTENTS' < {{ quote(config) }} > "$tmp_config"
     {{ quote(nfpm) }} pkg -f "$tmp_config" --packager {{ format }} --target dist/packages
     rm -f "$tmp_config"
 
@@ -315,7 +376,7 @@ _nfpm config format:
 _dist-packages:
     mkdir -p dist/packages
 
-# Assert every packaged format pins the opencv soversion gazed linked against, so a bump fails the
+# Assert every packaged format pins the opencv soversion it links, if any, so a bump fails the
 # transaction rather than crash-looping; that every package ships its payload, maintainer scriptlets
 # and upgrade-preserved config files; and that no two packages claim the same path.
 [arg("format", pattern="deb|rpm|archlinux")]
@@ -426,6 +487,14 @@ _verify-package format:
         [ ${#missing[@]} -eq 0 ] || fail "$base does not ship: ${missing[*]}"
     }
 
+    want_link() {
+        local p
+        for p in "$@"; do
+            awk -F'\t' -v p="$p" '$1 == p && $2 == "l" { found = 1 } END { exit !found }' <<< "$rows" ||
+                fail "$base does not ship $p as a symlink"
+        done
+    }
+
     want_size() {
         local size
         size=$(awk -F'\t' -v p="$1" '$1 == p && $2 == "f" { print $3; exit }' <<< "$rows")
@@ -453,8 +522,21 @@ _verify-package format:
         [ ${#missing[@]} -eq 0 ] || fail "$base lacks runtime dependencies: ${missing[*]}; has $(tr '\n' ' ' <<< "$depends")"
     }
 
-    want_opencv_bounds() {
-        if grep -Eq '^opencv>=[0-9]+\.[0-9]+$' <<< "$depends" && grep -Eq '^opencv<[0-9]+\.[0-9]+$' <<< "$depends"; then
+    want_opencv() {
+        local binary tmp sonames=""
+        tmp=$(mktemp)
+        for binary in "$@"; do
+            tar -xOf "$pkg" "${binary#/}" > "$tmp"
+            sonames+=$(objdump -p "$tmp" | awk '/NEEDED.*libopencv_/ { print $2 }')
+        done
+        rm -f "$tmp"
+        if [ -z "$sonames" ]; then
+            want_files "/usr/share/licenses/${base%%-[0-9]*}/opencv/LICENSE" \
+                "/usr/share/licenses/${base%%-[0-9]*}/opencv/SoftFloat-COPYING.txt"
+            want_depends zlib
+            ! grep -q '^opencv' <<< "$depends" || fail "$base links opencv statically but still depends on it"
+            ok "$base links opencv statically"
+        elif grep -Eq '^opencv>=[0-9]+\.[0-9]+$' <<< "$depends" && grep -Eq '^opencv<[0-9]+\.[0-9]+$' <<< "$depends"; then
             ok "$base pins opencv ($(grep -E '^opencv[<>=]' <<< "$depends" | tr '\n' ' '))"
         else
             fail "$base lacks a version-bounded opencv dependency; an opencv soname bump will crash-loop it"
@@ -524,7 +606,7 @@ _verify-package format:
             /usr/lib/security/pam_gaze.so /usr/lib/security/pam_gaze_grosshack.so \
             /usr/share/pam-configs/gaze /usr/share/pam-configs/gaze-simultaneous
         want_size "/lib/{{ multiarch }}/security/pam_gaze.so" 20000
-        want_size "/lib/{{ multiarch }}/security/pam_gaze_grosshack.so" 20000
+        want_link "/lib/{{ multiarch }}/security/pam_gaze_grosshack.so"
         for module in pam_gaze pam_gaze_grosshack; do
             target=$(dpkg-deb -c "$pkg" | sed -n "s#.* \./usr/lib/security/${module}\.so -> ##p")
             [ "$target" = "/lib/{{ multiarch }}/security/${module}.so" ] || {
@@ -543,7 +625,7 @@ _verify-package format:
         want_files /usr/lib64/security/pam_gaze.so /usr/lib64/security/pam_gaze_grosshack.so \
             /usr/share/gaze/gaze-gdm-camera.pp /usr/share/gaze/gaze-greeter-keyring.pp
         want_size /usr/lib64/security/pam_gaze.so 20000
-        want_size /usr/lib64/security/pam_gaze_grosshack.so 20000
+        want_link /usr/lib64/security/pam_gaze_grosshack.so
         if [ -n "$suse" ]; then
             want_files /usr/lib/pam-config.d/gaze.conf
             want_depends pam pam-config
@@ -562,10 +644,10 @@ _verify-package format:
     archlinux)
         want_files /usr/lib/security/pam_gaze.so /usr/lib/security/pam_gaze_grosshack.so
         want_size /usr/lib/security/pam_gaze.so 20000
-        want_size /usr/lib/security/pam_gaze_grosshack.so 20000
+        want_link /usr/lib/security/pam_gaze_grosshack.so
         want_scripts post_upgrade
         want_depends pam tpm2-tss
-        want_opencv_bounds
+        want_opencv /usr/bin/gazed /usr/bin/gaze
         ;;
     esac
     want_files /usr/lib/gaze/libonnxruntime.so \
@@ -581,7 +663,7 @@ _verify-package format:
     want_depends "${gst[@]}"
     if [ "{{ format }}" = archlinux ]; then
         want_depends gtk4 libadwaita
-        want_opencv_bounds
+        want_opencv /usr/bin/gaze-gui
     fi
     ok "$base ships its binary, desktop entry, icon and metainfo"
 
@@ -589,6 +671,7 @@ _verify-package format:
     want_files /usr/share/gnome-shell/extensions/gaze@gundulabs.com/metadata.json \
         /usr/share/gnome-shell/extensions/gaze@gundulabs.com/extension.js \
         /usr/share/gnome-shell/extensions/gaze@gundulabs.com/prefs.js \
+        /usr/share/gnome-shell/extensions/gaze@gundulabs.com/locale/de/LC_MESSAGES/gaze@gundulabs.com.mo \
         /usr/share/glib-2.0/schemas/org.gnome.shell.extensions.gaze.gschema.xml \
         /etc/dconf/db/gdm.d/00-gaze-defaults /usr/share/gaze/dconf-profile-gdm \
         /etc/pam.d/gdm-face
@@ -603,7 +686,8 @@ _verify-package format:
     load gaze-cinnamon-extension
     want_files /usr/share/cinnamon/extensions/gaze@gundulabs.com/metadata.json \
         /usr/share/cinnamon/extensions/gaze@gundulabs.com/extension.js \
-        /usr/share/cinnamon/extensions/gaze@gundulabs.com/settings-schema.json
+        /usr/share/cinnamon/extensions/gaze@gundulabs.com/settings-schema.json \
+        /usr/share/locale/de/LC_MESSAGES/gaze@gundulabs.com.mo
     want_depends cinnamon
     ok "$base ships the Cinnamon extension files"
 
@@ -622,6 +706,7 @@ _verify-package format:
     if grep -Eq '^/usr/lib(64)?/([^/]+/)?qt6/plugins/plasma/kcms/systemsettings/kcm_gaze\.so$' <<< "$paths"; then
         want_files /usr/share/applications/kcm_gaze.desktop \
             /usr/share/applications/com.gundulabs.Gaze.Settings.desktop \
+            /usr/share/locale/de/LC_MESSAGES/kcm_gaze.mo \
             /usr/share/icons/hicolor/scalable/apps/com.gundulabs.Gaze.Settings.svg
         case "{{ format }}" in
         deb) want_depends qml6-module-org-kde-kirigami qml6-module-org-kde-kcmutils ;;
@@ -636,7 +721,7 @@ _verify-package format:
         want_files "$legacy_entry"
     fi
     want_size /usr/bin/gaze-kde-pam 1000
-    want_scripts "$post" "$postun"
+    want_scripts "$post" "$preun" "$postun"
     if [ "{{ format }}" = archlinux ]; then
         want_scripts post_upgrade
     fi
@@ -679,7 +764,7 @@ package format: build-rust build-selinux (build-kcm format) && (package-prebuilt
 # Package already-built artifacts for a given packager
 [arg("format", pattern="deb|rpm|archlinux")]
 [group("package")]
-package-prebuilt format: _dist-packages prepare-ort
+package-prebuilt format: _dist-packages prepare-ort build-locales
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -752,13 +837,14 @@ srpm: _dist-packages _srpm-sources
     export SCRIPTLET_OMARCHY_PREUN="$(cat packaging/scriptlets/prerm-omarchy.sh)"
     export SCRIPTLET_OMARCHY_POST="$(cat packaging/scriptlets/postinst-omarchy.sh)"
     export SCRIPTLET_KDE_POST="$(cat packaging/scriptlets/postinst-kde.sh)"
+    export SCRIPTLET_KDE_PREUN="$(cat packaging/scriptlets/prerm-kde.sh)"
     export SCRIPTLET_KDE_POSTUN="$(cat packaging/scriptlets/postrm-kde.sh)"
     export SCRIPTLET_HYPRLOCK_POST="$(cat packaging/scriptlets/postinst-hyprlock.sh)"
     export SCRIPTLET_HYPRLOCK_POSTUN="$(cat packaging/scriptlets/postrm-hyprlock.sh)"
 
     mkdir -p "{{ srpm_topdir }}/SPECS"
     spec="{{ srpm_topdir }}/SPECS/gaze.spec"
-    envsubst '$VERSION $PACKAGE_RELEASE $ORT_VERSION $CHANGELOG_DATE $SCRIPTLET_MAIN_POST $SCRIPTLET_EXTENSION_POST $SCRIPTLET_EXTENSION_POSTUN $SCRIPTLET_HYPRLOCK_POST $SCRIPTLET_HYPRLOCK_POSTUN $SCRIPTLET_KDE_POST $SCRIPTLET_KDE_POSTUN' \
+    envsubst '$VERSION $PACKAGE_RELEASE $ORT_VERSION $CHANGELOG_DATE $SCRIPTLET_MAIN_POST $SCRIPTLET_EXTENSION_POST $SCRIPTLET_EXTENSION_POSTUN $SCRIPTLET_OMARCHY_PREUN $SCRIPTLET_OMARCHY_POST $SCRIPTLET_HYPRLOCK_POST $SCRIPTLET_HYPRLOCK_POSTUN $SCRIPTLET_KDE_POST $SCRIPTLET_KDE_PREUN $SCRIPTLET_KDE_POSTUN' \
         < packaging/rpm/gaze.spec.in > "$spec"
 
     {{ quote(rpmbuild) }} -bs "$spec" --define "_topdir $PWD/{{ srpm_topdir }}"
@@ -803,7 +889,7 @@ setup-hooks:
 
 # Run the full test suite
 [group("checks")]
-test: prepare-ort
+test: prepare-ort prepare-opencv
     @{{ gui_notice }}
     {{ opencv_env }} cargo test --workspace {{ gui_exclude }} --release
     bash scripts/test-keyring-pam.sh
@@ -811,7 +897,7 @@ test: prepare-ort
 
 # Run the inference tests, plus the ignored OpenVINO session test, against Intel's OpenVINO runtime
 [group("checks")]
-test-openvino: prepare-ort-openvino
+test-openvino: prepare-ort-openvino prepare-opencv
     ORT_DYLIB_PATH={{ quote(ort_openvino_dir / "lib/libonnxruntime.so") }} \
     LD_LIBRARY_PATH={{ quote(ort_openvino_dir / "lib") }} \
     XDG_CACHE_HOME={{ quote(ort_openvino_dir / "cache") }} \
@@ -825,18 +911,33 @@ audit:
 # Verify PAM links only system libraries and the main module's TPM libraries
 [group("checks")]
 check-pam-link:
-    scripts/check-pam-link.sh target/release/libpam_gaze.so target/release/libpam_gaze_grosshack.so
+    scripts/check-pam-link.sh target/release/libpam_gaze.so
 
 # Run clippy lints across the workspace
 [group("checks")]
-lint:
+lint: prepare-opencv
     @{{ gui_notice }}
     {{ opencv_env }} cargo clippy --workspace {{ gui_exclude }} --all-targets -- -D warnings
+
+# Lint every tracked shell script, including the installer and package scriptlets
+[group("checks")]
+lint-shell:
+    git ls-files -z '*.sh' integrations/kde/gaze-kde-pam integrations/omarchy/gaze-omarchy scripts/pre-commit | xargs -0 shellcheck -S warning
 
 # Check formatting (does not write)
 [group("checks")]
 fmt-check:
     cargo fmt --all -- --check
+
+# Check the translation catalogs and the metadata generated from them
+[group("checks")]
+check-translations:
+    python3 scripts/sync-translations.py --check
+
+# Regenerate the translated desktop, metainfo, polkit and KCM metadata
+[group("dev")]
+sync-translations:
+    python3 scripts/sync-translations.py
 
 # Apply formatting
 [group("dev")]
@@ -846,7 +947,7 @@ fmt:
 # Also enables TPM template encryption when a TPM is present; GAZE_DEV_TPM=0 skips it.
 # Link the installed system runtime to this checkout's release build
 [group("dev")]
-dev-link-system: build-rust
+dev-link-system: build-rust build-locales
     sudo GAZE_DEV_TPM="${GAZE_DEV_TPM:-1}" scripts/dev-link-system.sh enable
 
 # Restore package-installed files that dev-link-system replaced

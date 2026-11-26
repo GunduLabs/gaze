@@ -56,8 +56,21 @@ pub(super) enum VerifyMsg {
     Error(String),
 }
 
-pub(super) fn should_yield_rgb_to_ir(policy: &str, run_ir: bool, status: CaptureStatus) -> bool {
-    run_ir && !matches!(policy, "or" | "and") && matches!(status, CaptureStatus::TooDark)
+pub(super) fn should_yield_rgb_to_ir(
+    policy: &str,
+    run_ir: bool,
+    serial_capture: bool,
+    rgb_was_lit: bool,
+    status: CaptureStatus,
+) -> bool {
+    if !run_ir || status != CaptureStatus::TooDark {
+        return false;
+    }
+    match policy {
+        "and" => false,
+        "or" => serial_capture && !rgb_was_lit,
+        _ => true,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,6 +111,15 @@ struct VerifySystem {
 
 /// Bound both missing faces and unusable frames: `Clipped` and `Ready` refresh only
 /// the face deadline, so framing problems cannot keep verification alive forever.
+pub(super) fn verify_deadline(
+    last_face_at: Instant,
+    last_usable_at: Instant,
+) -> tokio::time::Instant {
+    tokio::time::Instant::from_std(
+        (last_face_at + VERIFY_NO_FACE_TIMEOUT).min(last_usable_at + VERIFY_NO_USABLE_TIMEOUT),
+    )
+}
+
 pub(super) fn verify_give_up(since_face: Duration, since_usable: Duration) -> Option<VerifyGiveUp> {
     if since_face >= VERIFY_NO_FACE_TIMEOUT {
         return Some(VerifyGiveUp::NoFace);
@@ -436,6 +458,9 @@ impl AuthDaemon {
         }
         let claim = self.check_claim(&header).await?;
         let (caller_uid, target_uid) = Self::ensure_claim_camera_access(&header, &claim).await?;
+        let elevating_uid = (gaze_core::config::classify_pam_service(pam_service.as_deref())
+            == gaze_core::config::AuthSurface::Elevation)
+            .then_some(target_uid);
         let mut rx =
             replace_claim_task(&self.claim_state, &self.active_cancel, claim.epoch).await?;
         let config = self.settings.for_run(&mut rx).await?;
@@ -443,7 +468,7 @@ impl AuthDaemon {
             biased;
             _ = &mut rx => return Err(fdo::Error::Failed("capture cancelled".into())),
             result = async {
-                self.ensure_auth_not_aborted(&header, &config.auth).await?;
+                self.ensure_auth_not_aborted(&header, &config.auth, elevating_uid).await?;
                 self.lid_closed_wait(config.auth.abort_if_lid_closed).await
             } => result?,
         };
@@ -837,6 +862,7 @@ impl AuthDaemon {
                         // is still underexposed. Give face exposure its own bounded warmup.
                         let mut face_warmup = RgbWarmupGate::new(config_clone.cameras.dark_luma_threshold);
                         let mut logged_dark_stream = false;
+                        let mut rgb_was_lit = false;
                         let mut logged_rgb_luma_statuses = Vec::new();
                         let mut live_scores: Vec<f32> = Vec::new();
                         let mut landmark_seq: Vec<[(f32, f32); 5]> = Vec::new();
@@ -858,7 +884,7 @@ impl AuthDaemon {
                             }
 
                             match warmup.classify_with_luma(&frame) {
-                                (RgbFrameKind::Lit, _) => {}
+                                (RgbFrameKind::Lit, _) => rgb_was_lit = true,
                                 (RgbFrameKind::WarmupDark, _) => continue,
                                 (RgbFrameKind::SettledDark, luma) => {
                                     if !logged_dark_stream {
@@ -927,7 +953,7 @@ impl AuthDaemon {
                             let latest_embed = embed_opt.as_ref().map(|d| d.embedding.clone());
                             let status_sent = tx.try_send(VerifyMsg::Status(Spectrum::Rgb, status, latest_embed, cam.fps())).is_ok();
 
-                            if should_yield_rgb_to_ir(&hybrid_policy_clone, run_ir, status) {
+                            if should_yield_rgb_to_ir(&hybrid_policy_clone, run_ir, serial_capture, rgb_was_lit, status) {
                                 yielded_to_ir = true;
                                 break;
                             }
@@ -1405,7 +1431,7 @@ impl AuthDaemon {
                             suspended = true;
                             break;
                         }
-                        _ = tokio::time::sleep(VERIFY_WATCHDOG_POLL) => {
+                        _ = tokio::time::sleep_until(verify_deadline(last_face_at, last_usable_at)) => {
                             if let Some(give_up) = verify_give_up(last_face_at.elapsed(), last_usable_at.elapsed()) {
                                 info!("VerifyStart: {}", give_up.reason());
                                 stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1775,16 +1801,27 @@ mod tests {
     }
 
     #[test]
-    fn watchdog_polls_faster_than_the_timeouts_it_guards() {
+    fn watchdog_deadline_is_the_earlier_timeout_and_gives_up_there() {
         use super::{
-            VERIFY_NO_FACE_TIMEOUT, VERIFY_NO_USABLE_TIMEOUT, VERIFY_TOO_DARK_TIMEOUT,
-            VERIFY_WATCHDOG_POLL,
+            VERIFY_NO_FACE_TIMEOUT, VERIFY_NO_USABLE_TIMEOUT, VerifyGiveUp, verify_deadline,
+            verify_give_up,
         };
+        use std::time::Instant;
 
-        assert!(VERIFY_WATCHDOG_POLL < VERIFY_NO_FACE_TIMEOUT);
-        assert!(VERIFY_WATCHDOG_POLL < VERIFY_TOO_DARK_TIMEOUT);
-        assert!(VERIFY_WATCHDOG_POLL < VERIFY_NO_USABLE_TIMEOUT);
-        assert!(!VERIFY_WATCHDOG_POLL.is_zero());
+        let now = Instant::now();
+        let deadline = verify_deadline(now, now).into_std();
+        assert_eq!(
+            deadline,
+            now + VERIFY_NO_FACE_TIMEOUT.min(VERIFY_NO_USABLE_TIMEOUT)
+        );
+        assert!(verify_give_up(deadline - now, deadline - now).is_some());
+
+        let usable_long_ago = now - VERIFY_NO_USABLE_TIMEOUT;
+        assert_eq!(verify_deadline(now, usable_long_ago).into_std(), now);
+        assert_eq!(
+            verify_give_up(std::time::Duration::ZERO, VERIFY_NO_USABLE_TIMEOUT),
+            Some(VerifyGiveUp::NoUsableFrame)
+        );
     }
 
     #[test]
@@ -1910,22 +1947,21 @@ mod tests {
 
     #[test]
     fn a_stalled_capture_stream_still_reaches_the_no_face_deadline() {
-        use super::VERIFY_WATCHDOG_POLL;
+        use super::verify_deadline;
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (_retained_tx, mut rx) = tokio::sync::mpsc::channel::<u32>(10);
-            let deadline = std::time::Duration::from_millis(500);
+            let anchor = std::time::Instant::now()
+                - (super::VERIFY_NO_FACE_TIMEOUT - std::time::Duration::from_millis(300));
             let started = std::time::Instant::now();
             let mut gave_up = false;
 
             loop {
                 tokio::select! {
-                    _ = tokio::time::sleep(VERIFY_WATCHDOG_POLL) => {
-                        if started.elapsed() >= deadline {
-                            gave_up = true;
-                            break;
-                        }
+                    _ = tokio::time::sleep_until(verify_deadline(anchor, anchor)) => {
+                        gave_up = true;
+                        break;
                     }
                     msg = rx.recv() => {
                         if msg.is_none() {
@@ -1936,7 +1972,8 @@ mod tests {
             }
 
             assert!(gave_up);
-            assert!(started.elapsed() < deadline * 4);
+            assert!(started.elapsed() >= std::time::Duration::from_millis(250));
+            assert!(started.elapsed() < std::time::Duration::from_secs(2));
         });
     }
 
@@ -2041,6 +2078,8 @@ mod tests {
         assert!(should_yield_rgb_to_ir(
             "fallback_on_dark",
             true,
+            false,
+            false,
             CaptureStatus::TooDark
         ));
         assert!(hybrid_auth_passed(
@@ -2221,20 +2260,37 @@ mod tests {
     #[test]
     fn hybrid_fallback_yields_settled_dark_rgb_to_ir() {
         for policy in ["fallback_on_dark", "default", ""] {
-            assert!(should_yield_rgb_to_ir(policy, true, CaptureStatus::TooDark));
+            for (serial, lit) in [(true, true), (true, false), (false, true), (false, false)] {
+                assert!(
+                    should_yield_rgb_to_ir(policy, true, serial, lit, CaptureStatus::TooDark),
+                    "{policy} {serial} {lit}"
+                );
+            }
         }
-        assert!(!should_yield_rgb_to_ir(
-            "fallback_on_dark",
-            false,
-            CaptureStatus::TooDark
-        ));
-        assert!(!should_yield_rgb_to_ir(
-            "fallback_on_dark",
-            true,
-            CaptureStatus::NoFace
-        ));
-        assert!(!should_yield_rgb_to_ir("or", true, CaptureStatus::TooDark));
-        assert!(!should_yield_rgb_to_ir("and", true, CaptureStatus::TooDark));
+        for policy in ["fallback_on_dark", "or", "and"] {
+            assert!(
+                !should_yield_rgb_to_ir(policy, false, true, false, CaptureStatus::TooDark),
+                "{policy}"
+            );
+            assert!(
+                !should_yield_rgb_to_ir(policy, true, true, false, CaptureStatus::NoFace),
+                "{policy}"
+            );
+        }
+        for (serial, lit) in [(true, true), (true, false), (false, true), (false, false)] {
+            assert!(
+                !should_yield_rgb_to_ir("and", true, serial, lit, CaptureStatus::TooDark),
+                "{serial} {lit}"
+            );
+        }
+    }
+
+    #[test]
+    fn or_policy_yields_only_a_serial_rgb_camera_that_was_never_lit() {
+        let dark = CaptureStatus::TooDark;
+        assert!(should_yield_rgb_to_ir("or", true, true, false, dark));
+        assert!(!should_yield_rgb_to_ir("or", true, true, true, dark));
+        assert!(!should_yield_rgb_to_ir("or", true, false, false, dark));
     }
 
     #[test]

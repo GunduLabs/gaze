@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Clear a Gaze duress lockout"
+msgstr "解除 Gaze 胁迫锁定"
+
+msgid "Authentication is required to re-enable face authentication after a duress signal."
+msgstr "在胁迫信号之后重新启用人脸认证需要身份验证。"
+
+msgid "Manage face enrollments for Gaze"
+msgstr "管理 Gaze 的人脸录入"
+
+msgid "Authentication is required to manage Gaze face enrollments."
+msgstr "管理 Gaze 的人脸录入需要身份验证。"
+
+msgid "Manage daemon configuration for Gaze"
+msgstr "管理 Gaze 的守护进程配置"
+
+msgid "Authentication is required to change Gaze daemon configuration."
+msgstr "更改 Gaze 守护进程配置需要身份验证。"
+
+msgid "Manage GDM login authentication for Gaze"
+msgstr "管理 Gaze 的 GDM 登录认证"
+
+msgid "Authentication is required to change Gaze face authentication at the GDM login screen."
+msgstr "更改 GDM 登录界面的 Gaze 人脸认证需要身份验证。"
+
+msgid "Enroll faces and configure facial authentication"
+msgstr "录入人脸并配置人脸认证"
+
+msgid "face;auth;login;biometric;"
+msgstr "人脸;解锁;认证;身份验证;登录;生物识别;"
+
+msgid "Enroll and manage faces, test face authentication, and adjust every Gaze setting."
+msgstr "录入和管理人脸、测试人脸认证，并调整 Gaze 的所有设置。"
+
+msgid "Facial authentication"
+msgstr "人脸认证"
+
+msgid "Gaze Settings"
+msgstr "Gaze 设置"

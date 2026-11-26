@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Gundu Labs
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use crate::i18n::{tr, trf};
 use gaze_core::dbus::CaptureStatus;
 use gaze_vision::camera::{Camera, frame_to_bytes};
 use gtk4::gdk;
@@ -79,14 +80,14 @@ fn status_style(status: CaptureStatus, active: bool) -> (f64, f64, f64, f64) {
 
 fn status_label(status: CaptureStatus) -> &'static str {
     match status {
-        CaptureStatus::Unused => "Camera Not Activated", // This should never be shown
-        CaptureStatus::NoFace => "No Face",
-        CaptureStatus::TooDark => "Need More Light",
-        CaptureStatus::NotCentered => "Not Centered",
-        CaptureStatus::Clipped => "Face Clipped",
-        CaptureStatus::TooFar => "Come Closer",
-        CaptureStatus::TooClose => "Back Up",
-        CaptureStatus::Ready | CaptureStatus::Usable => "Ready",
+        CaptureStatus::Unused => tr("Camera Not Activated"), // This should never be shown
+        CaptureStatus::NoFace => tr("No Face"),
+        CaptureStatus::TooDark => tr("Need More Light"),
+        CaptureStatus::NotCentered => tr("Not Centered"),
+        CaptureStatus::Clipped => tr("Face Clipped"),
+        CaptureStatus::TooFar => tr("Come Closer"),
+        CaptureStatus::TooClose => tr("Back Up"),
+        CaptureStatus::Ready | CaptureStatus::Usable => tr("Ready"),
     }
 }
 
@@ -180,7 +181,7 @@ impl CameraFeed {
         let draw_active = is_active.clone();
         let draw_aspect = frame_aspect.clone();
         let guide = gtk4::DrawingArea::new();
-        guide.set_draw_func(move |_area, cr, width, height| {
+        guide.set_draw_func(move |area, cr, width, height| {
             let status = *draw_status.borrow();
             let active = *draw_active.borrow();
 
@@ -231,13 +232,21 @@ impl CameraFeed {
             }
 
             if active {
-                let label = status_label(status);
-                cr.set_font_size(min_dim * 0.035);
-                if let Ok(extents) = cr.text_extents(label) {
-                    cr.move_to(cx - extents.width() / 2.0, bottom + min_dim * 0.06);
-                    cr.set_source_rgba(1.0, 1.0, 1.0, 0.9);
-                    let _ = cr.show_text(label);
-                }
+                // Pango, unlike Cairo's toy text API, falls back to other fonts for scripts the
+                // default face lacks, so translated labels (such as CJK) render instead of boxes.
+                let layout = area.create_pango_layout(Some(status_label(status)));
+                let mut font = gtk4::pango::FontDescription::new();
+                font.set_weight(gtk4::pango::Weight::Semibold);
+                font.set_absolute_size(min_dim * 0.035 * f64::from(gtk4::pango::SCALE));
+                layout.set_font_description(Some(&font));
+                let (_, logical) = layout.pixel_extents();
+                cr.move_to(
+                    cx - f64::from(logical.width()) / 2.0,
+                    bottom + min_dim * 0.06
+                        - f64::from(layout.baseline()) / f64::from(gtk4::pango::SCALE),
+                );
+                cr.set_source_rgba(1.0, 1.0, 1.0, 0.9);
+                pangocairo::functions::show_layout(cr, &layout);
             }
         });
         overlay.add_overlay(&guide);
@@ -361,8 +370,10 @@ impl CameraFeed {
                     }
                     if ended {
                         if let Some(Ok(message)) = open_error.as_ref().map(|rx| rx.try_recv()) {
-                            error_label
-                                .set_text(&format!("The camera could not be opened: {message}"));
+                            error_label.set_text(&trf(
+                                "The camera could not be opened: {error}",
+                                &[("error", &message.to_string())],
+                            ));
                             error_label.set_visible(true);
                             guide.set_visible(false);
                         }

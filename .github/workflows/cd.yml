@@ -310,6 +310,7 @@ jobs:
           CARGO_BUILD_JOBS: 2
           RUSTFLAGS: -Cdebuginfo=0
           GAZE_KCM: ${{ matrix.deb_suite == 'noble' && 'legacy' || 'plasma6' }}
+          GAZE_OPENCV: ${{ matrix.format == 'archlinux' && 'static' || 'system' }}
         run: |
           VERSION="${DEPLOY_REF_NAME#v}" just build-rust
           VERSION="${DEPLOY_REF_NAME#v}" just build-selinux
@@ -323,7 +324,7 @@ jobs:
             target/release/gaze-gui \
             target/release/gazed \
             target/release/libpam_gaze.so \
-            target/release/libpam_gaze_grosshack.so \
+            dist/opencv \
             dist/selinux \
             dist/kcm
 

@@ -156,7 +156,8 @@ Practical guidance:
 
 Templates only match the recognizer that enrolled them. After switching between
 a MobileFaceNet level and a ResNet50 level, re-enroll your faces. Until you do,
-those faces show 0 templates and face login falls back to your password.
+those faces show 0 templates, `gaze list-faces` and the face list in the app mark
+them as enrolled with a different model, and face login falls back to your password.
 Switching back to the original recognizer makes the old templates usable again.
 
 ### Custom level
@@ -570,7 +571,7 @@ start_delay_ms = 0
 start_delay_scope = "screen_lock"
 ```
 
-`abort_if_ssh` asks logind whether the D-Bus caller's session is remote, falling back to the caller process environment and ancestry where logind is unreachable. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor. When logind is configured to suspend on lid close, a closed lid holds the attempt for up to 3 seconds instead of refusing it outright: if the suspend starts, face authentication resumes after wake rather than failing in the locker that came up on lid close. See [Suspend during an attempt](/guide/how-it-works#suspend-during-an-attempt).
+`abort_if_ssh` asks logind whether the D-Bus caller's session is remote, falling back to the caller process environment and ancestry where logind is unreachable. For elevation prompts (`sudo`, `su`, `doas`, `run0`, polkit and `pkexec`) it also refuses face authentication while the user has any open remote login session. A command started over SSH can reach those prompts through a process outside the SSH session, such as a tmux server started at the desk, `systemd-run --user`, or polkit's socket-activated agent helper, and the camera would see whoever sits at the desk. Lock screens and login greeters are not affected. While you are signed in over SSH, `sudo` at the desk asks for your password. `abort_if_lid_closed` reads ACPI lid state when available and is ignored on systems without a lid sensor. When logind is configured to suspend on lid close, a closed lid holds the attempt for up to 3 seconds instead of refusing it outright: if the suspend starts, face authentication resumes after wake rather than failing in the locker that came up on lid close. See [Suspend during an attempt](/guide/how-it-works#suspend-during-an-attempt).
 
 Aborting face authentication when you type a password is not a key in this file. It is a property of the PAM stack: [simultaneous mode](/guide/pam#what-gaze-installs) (`pam_gaze.so simultaneous`) stands Gaze down as soon as you submit a password, and [retry mode](/guide/pam#retry-after-a-rejected-password) (`pam_gaze.so retry`) gives face authentication one more attempt if that password turns out to be wrong.
 
@@ -664,10 +665,16 @@ sudo systemctl restart gazed
 Gaze manages these storage locations for you, so you do not need to configure them:
 
 - User embeddings: `/var/lib/gaze/users`
+- Account owners of those embeddings: `/var/lib/gaze/.gaze-owners`
 - Duress lockouts: `/var/lib/gaze/duress`
 - Downloaded models: `/var/cache/gaze`
 
 Models are auto-downloaded on first run if missing.
+
+Enrolled faces are stored by username, and Gaze records the UID of the account that owns them.
+If an account is deleted and a different account later gets the same name, Gaze deletes the old
+faces the first time the new account uses Gaze, so it never inherits them. Changing an account's
+UID has the same effect: enroll again afterwards.
 
 ## Encrypt face templates with the TPM
 

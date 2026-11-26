@@ -527,7 +527,7 @@ leave_idle_smartcard_slot() {
 	unwire_lock_slot "$SMARTCARD_PAM_FILE" || [ $? -eq "$NOTHING_TO_REMOVE" ]
 }
 
-enable() {
+enable_lock() {
 	force=0
 	[ "${1:-}" = "--force" ] && force=1
 	require_root enable || return 1
@@ -573,7 +573,7 @@ enable() {
 	fi
 }
 
-disable() {
+disable_lock() {
 	require_root disable || return 1
 
 	mkdir -p "$STATE_DIR" 2>/dev/null || true
@@ -762,8 +762,8 @@ status() {
 }
 
 case "${1:-}" in
-enable) enable "${2:-}" ;;
-disable) disable ;;
+enable) enable_lock "${2:-}" ;;
+disable) disable_lock ;;
 enable-login) enable_login ;;
 disable-login) disable_login ;;
 status) status ;;

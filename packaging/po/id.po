@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: id\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Clear a Gaze duress lockout"
+msgstr "Hapus penguncian Gaze akibat paksaan"
+
+msgid "Authentication is required to re-enable face authentication after a duress signal."
+msgstr "Autentikasi diperlukan untuk mengaktifkan kembali autentikasi wajah setelah sinyal paksaan."
+
+msgid "Manage face enrollments for Gaze"
+msgstr "Kelola wajah yang terdaftar di Gaze"
+
+msgid "Authentication is required to manage Gaze face enrollments."
+msgstr "Autentikasi diperlukan untuk mengelola wajah yang terdaftar di Gaze."
+
+msgid "Manage daemon configuration for Gaze"
+msgstr "Kelola konfigurasi layanan Gaze"
+
+msgid "Authentication is required to change Gaze daemon configuration."
+msgstr "Autentikasi diperlukan untuk mengubah konfigurasi layanan Gaze."
+
+msgid "Manage GDM login authentication for Gaze"
+msgstr "Kelola autentikasi login GDM untuk Gaze"
+
+msgid "Authentication is required to change Gaze face authentication at the GDM login screen."
+msgstr "Autentikasi diperlukan untuk mengubah autentikasi wajah Gaze di layar login GDM."
+
+msgid "Enroll faces and configure facial authentication"
+msgstr "Daftarkan wajah dan konfigurasikan autentikasi wajah"
+
+msgid "face;auth;login;biometric;"
+msgstr "wajah;buka kunci;autentikasi;login;biometrik;"
+
+msgid "Enroll and manage faces, test face authentication, and adjust every Gaze setting."
+msgstr "Daftarkan dan kelola wajah, uji autentikasi wajah, dan sesuaikan semua pengaturan Gaze."
+
+msgid "Facial authentication"
+msgstr "Autentikasi wajah"
+
+msgid "Gaze Settings"
+msgstr "Pengaturan Gaze"

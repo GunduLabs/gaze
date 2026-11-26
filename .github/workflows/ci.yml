@@ -48,6 +48,12 @@ jobs:
       - name: Check Rust formatting
         run: just fmt-check
 
+      - name: Check translations
+        run: just check-translations
+
+      - name: Lint shell scripts
+        run: just lint-shell
+
   audit:
     name: Audit
     runs-on: ubuntu-latest
@@ -66,7 +72,7 @@ jobs:
           build-deps: "false"
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        uses: taiki-e/install-action@893d6ee8d714b6c7dfe2bcd94e5759e9a7958a7e # v2.90.10
         with:
           tool: cargo-audit
 
@@ -94,8 +100,8 @@ jobs:
       - name: Run clippy
         run: just lint
 
-  test:
-    name: Test
+  build:
+    name: Build
     runs-on: ubuntu-latest
 
     steps:
@@ -109,7 +115,31 @@ jobs:
         uses: ./.github/actions/setup-build
         with:
           just-version: ${{ env.JUST_VERSION }}
-          cache-key: ci-test-v1
+          cache-key: ci-build-v1
+
+      - name: Build release binaries
+        env:
+          CARGO_BUILD_JOBS: 2
+        run: just build-rust
+
+  test:
+    name: Test
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up build environment
+        uses: ./.github/actions/setup-build
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+          cache-key: ci-build-v1
+          save-cache: "false"
 
       - name: Run tests
         env:
@@ -193,12 +223,12 @@ jobs:
         include:
           - format: deb
             build_deps: "true"
-            apt_packages: dpkg-dev gettext-base checkpolicy semodule-utils
+            apt_packages: dpkg-dev gettext checkpolicy semodule-utils
             cache_key: ci-package-v1
           - format: archlinux
             build_deps: "true"
-            apt_packages: dpkg-dev gettext-base checkpolicy semodule-utils
-            cache_key: ci-package-v1
+            apt_packages: dpkg-dev gettext checkpolicy semodule-utils cmake zlib1g-dev
+            cache_key: ci-package-arch-v1
           - format: rpm
             container: fedora:45
             distro: fedora
@@ -301,6 +331,7 @@ jobs:
             libopenssl-devel \
             pkgconf-pkg-config \
             envsubst \
+            gettext-tools \
             gcc \
             gcc-c++ \
             binutils \
@@ -376,6 +407,7 @@ jobs:
         env:
           CARGO_BUILD_JOBS: 2
           RUSTFLAGS: -Cdebuginfo=0
+          GAZE_OPENCV: ${{ matrix.format == 'archlinux' && 'static' || 'system' }}
         run: just build-rust
 
       - name: Build SELinux policy
@@ -441,7 +473,7 @@ jobs:
           fetch-depth: 1
 
       - name: Install Nix
-        uses: cachix/install-nix-action@bb0495a1086c46893eee56f32fd192dfe4a15bb9 # v32.0.0
+        uses: cachix/install-nix-action@382a9ed9481c7c1f94f68b72ef105b3417c73877 # v32.1.0
 
       - name: Evaluate flake packages
         run: |

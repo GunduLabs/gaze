@@ -68,7 +68,7 @@ sudo apt install build-essential pkg-config clang libclang-dev \
   libpango1.0-dev libgraphene-1.0-dev \
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
   gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire \
-  gettext-base unzip \
+  gettext unzip \
   flatpak flatpak-builder elfutils
 ```
 
@@ -89,7 +89,7 @@ sudo zypper install --no-recommends \
   libopenssl-devel gtk4-devel libadwaita-devel \
   gstreamer-devel gstreamer-plugins-base-devel \
   gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugin-pipewire \
-  checkpolicy policycoreutils pkgconf-pkg-config envsubst gcc gcc-c++ unzip \
+  checkpolicy policycoreutils pkgconf-pkg-config envsubst gettext-tools gcc gcc-c++ unzip \
   flatpak flatpak-builder elfutils
 ```
 
@@ -106,7 +106,7 @@ sudo pacman -S base-devel pkgconf clang llvm \
 
 `libtss2-dev`/`tpm2-tss-devel`/`tpm2-tss`/`tpm2-0-tss-devel` and `libssl-dev`/`openssl-devel`/`openssl`/`libopenssl-devel` back the
 `tss-esapi` and `openssl-sys` crates (the daemon seals the face-template key to the TPM);
-`gettext-base`/`gettext`/`envsubst` provides `envsubst`, which the `package` recipe below needs;
+`gettext`/`gettext-tools`/`envsubst` provide `envsubst` and `msgfmt`, which the `package` recipe below needs;
 `unzip` unpacks the pinned ONNX Runtime from Microsoft's NuGet package.
 
 ### Additional dependencies for package builds
@@ -151,6 +151,21 @@ the `just` recipes automatically point the `opencv` crate at the `opencv5`
 pkg-config name; when running `cargo` directly, set
 `OPENCV_PKGCONFIG_NAME=opencv5` yourself.
 
+The published Arch packages link OpenCV statically, because Arch-compatible distributions
+carry different OpenCV versions at the same time. To build them the same way, set
+`GAZE_OPENCV=static`, which needs cmake and zlib:
+
+```bash
+GAZE_OPENCV=static just package archlinux
+```
+
+This builds the `core` and `imgproc` modules of the OpenCV release pinned in
+`scripts/build-opencv.sh` into `target/opencv-static` (or `OPENCV_CACHE_DIR`). Changing
+`opencv_version` in the Justfile means adding that release's SHA256 to the script. OpenCV
+security fixes reach these packages only through a Gaze release. The default,
+`GAZE_OPENCV=system`, links the distribution's library, and Arch packages built that way
+depend on that exact OpenCV minor version. Other package formats support only `system`.
+
 Only `gaze-gui` needs gtk4 and libadwaita (`libgtk-4-dev`/`gtk4-devel`/`gtk4`,
 `libadwaita-1-dev`/`libadwaita-devel`/`libadwaita`, and on Debian/Ubuntu the
 cairo, glib, gdk-pixbuf, pango, and graphene headers listed with them). For a
@@ -189,7 +204,7 @@ Rust packages live under `crates/`; desktop integration source lives under
 - `crates/gaze-security`: TPM sealing and the GNOME Keyring credential store. Links tpm2-tss plus pure-Rust crypto (`aes-gcm`, `sha2`) and nothing heavier, so `pam-gaze` can depend on it.
 - `crates/gaze-vision`: camera capture, face detection, and inference. Detection sits behind the `detection` cargo feature. The workspace dependency turns default features off, so the CLI and GUI get camera support alone and only `gazed` enables `detection`.
 - `crates/pam-gaze`: `cdylib` PAM module. Depends on `gaze-core` and `gaze-security` for TPM keyring unsealing, never `gaze-vision`; `just check-pam-link` enforces its library allowlist (see warning below).
-- `crates/pam-gaze-grosshack`: deprecated `cdylib` compatibility shim that forces `PamMode::Simultaneous` and prints a deprecation notice. It `#[path]`-includes `pam-gaze`'s own modules rather than duplicating them. Every package still installs it so legacy PAM lines keep working, and it is slated for removal; new work belongs in `pam-gaze`.
+- `pam_gaze_grosshack.so`: deprecated compatibility name. Every package installs it as a symlink to `pam_gaze.so`, which forces `PamMode::Simultaneous` and prints a deprecation notice when loaded under that name, so legacy PAM lines keep working. It is slated for removal; new work belongs in `pam-gaze`.
 - `crates/gaze-gui`: GTK4/libadwaita app. Desktop integrations in `integrations/` are packaged separately.
 
 ## Build and test rust components
@@ -201,6 +216,7 @@ just lint
 just fmt-check
 just audit             # check dependencies for known CVEs
 just check-pam-link    # check the PAM modules' shared-library footprint
+just lint-shell        # shellcheck the installer, scriptlets and scripts
 just fmt               # apply formatting (fmt-check only checks)
 ```
 
@@ -332,7 +348,6 @@ The CLI and GUI need no special setup; they talk to whichever `gazed` currently 
 `pam-gaze` builds as a `cdylib`. After `just build-rust` you'll have:
 
 - `target/release/libpam_gaze.so`
-- `target/release/libpam_gaze_grosshack.so` (the deprecated shim; only the openSUSE packages install it)
 
 `just build-rust` also runs `just check-pam-link` over it, which fails the build
 if the module does not link `libpam.so.0`, or links anything beyond that, libc,

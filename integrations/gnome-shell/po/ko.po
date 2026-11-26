@@ -1,0 +1,160 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: ko\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Enrollment"
+msgstr "등록"
+
+msgid "Behavior"
+msgstr "동작"
+
+msgid "Face authentication"
+msgstr "얼굴 인증"
+
+msgid "Face authentication for unlocking this session. This does not affect the GDM login screen (see below). Settings are stored in your current dconf profile."
+msgstr "이 세션의 잠금을 해제하기 위한 얼굴 인증입니다. GDM 로그인 화면에는 영향을 주지 않습니다(아래 참조). 설정은 현재 dconf 프로필에 저장됩니다."
+
+msgid "Enable face authentication (lock screen)"
+msgstr "얼굴 인증 사용(잠금 화면)"
+
+msgid "Face retry mode"
+msgstr "얼굴 재시도 모드"
+
+msgid "Disabled"
+msgstr "사용 안 함"
+
+msgid "Fixed tries"
+msgstr "고정 횟수"
+
+msgid "Infinite"
+msgstr "무제한"
+
+msgid "Maximum face tries"
+msgstr "최대 얼굴 시도 횟수"
+
+msgid "Enrolled faces"
+msgstr "등록된 얼굴"
+
+msgid "Checking…"
+msgstr "확인 중…"
+
+msgid "Open Gaze"
+msgstr "Gaze 열기"
+
+msgid "Could not open the Gaze app. Run gaze-gui from a terminal."
+msgstr "Gaze 앱을 열 수 없습니다. 터미널에서 gaze-gui를 실행하세요."
+
+msgid "A face is enrolled for this account."
+msgstr "이 계정에 얼굴이 등록되어 있습니다."
+
+msgid "No face is enrolled yet, so face unlock has nothing to match. Open Gaze to enroll one."
+msgstr "아직 등록된 얼굴이 없어 얼굴 잠금 해제에서 비교할 대상이 없습니다. Gaze를 열어 등록하세요."
+
+msgid "Gaze daemon unavailable."
+msgstr "Gaze 데몬을 사용할 수 없습니다."
+
+msgid "GDM login screen"
+msgstr "GDM 로그인 화면"
+
+msgid "Enable face authentication at the GDM login screen. Requires administrator authorization. Note: GNOME keyring is normally unlocked by your password, so logging in with face only may leave it locked."
+msgstr "GDM 로그인 화면에서 얼굴 인증을 사용합니다. 관리자 승인이 필요합니다. 참고: GNOME 키링은 보통 비밀번호로 잠금 해제되므로 얼굴로만 로그인하면 잠긴 상태로 남을 수 있습니다."
+
+msgid "Enable face authentication at GDM login"
+msgstr "GDM 로그인 시 얼굴 인증 사용"
+
+msgid "Administrator authorization is required to enable face authentication at the GDM login screen."
+msgstr "GDM 로그인 화면에서 얼굴 인증을 사용하려면 관리자 승인이 필요합니다."
+
+msgid "Administrator authorization is required to disable face authentication at the GDM login screen."
+msgstr "GDM 로그인 화면에서 얼굴 인증을 끄려면 관리자 승인이 필요합니다."
+
+msgid "Could not update GDM login face authentication: {error}"
+msgstr "GDM 로그인 얼굴 인증을 업데이트할 수 없습니다: {error}"
+
+msgid "Face auth enabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "GDM 로그인 화면에서 얼굴 인증을 켰습니다. 적용하려면 GDM을 다시 시작하거나 재부팅하세요."
+
+msgid "Face auth disabled at the GDM login screen. Restart GDM (or reboot) for it to take effect."
+msgstr "GDM 로그인 화면에서 얼굴 인증을 껐습니다. 적용하려면 GDM을 다시 시작하거나 재부팅하세요."
+
+msgid "Face not recognized. Please enter your password."
+msgstr "얼굴을 인식하지 못했습니다. 비밀번호를 입력하세요."
+
+msgid "Face not detected. Please enter your password."
+msgstr "얼굴이 감지되지 않았습니다. 비밀번호를 입력하세요."
+
+msgid "Too dark for face authentication. Please enter your password."
+msgstr "너무 어두워 얼굴 인증을 할 수 없습니다. 비밀번호를 입력하세요."
+
+msgid "Face authentication timed out. Please enter your password."
+msgstr "얼굴 인증 시간이 초과되었습니다. 비밀번호를 입력하세요."
+
+msgid "Face authentication unavailable. Please enter your password."
+msgstr "얼굴 인증을 사용할 수 없습니다. 비밀번호를 입력하세요."
+
+msgid "Changing Gaze's settings or faces needs your password."
+msgstr "Gaze의 설정이나 얼굴을 변경하려면 비밀번호가 필요합니다."
+
+msgid "Sorry, face authentication did not work. Please try again."
+msgstr "얼굴 인증에 실패했습니다. 다시 시도하세요."
+
+msgid "You reached the maximum face authentication attempts, please try another method"
+msgstr "최대 얼굴 인증 횟수에 도달했습니다. 다른 방법을 시도하세요"
+
+msgid "(or look at the camera)"
+msgstr "(또는 카메라를 보세요)"
+
+msgid "(or look at the camera or swipe finger)"
+msgstr "(또는 카메라를 보거나 지문을 센서에 문지르십시오)"
+
+msgid "(or look at the camera or place finger on reader)"
+msgstr "(또는 카메라를 보거나 손가락을 센서에 대십시오)"
+
+msgid "(or swipe finger across reader)"
+msgstr "(또는 지문을 센서에 문지르십시오)"
+
+msgid "(or place finger on reader)"
+msgstr "(또는 손가락을 센서에 대십시오)"
+
+msgid "Password"
+msgstr "비밀번호"
+
+msgid "Face verified. Press Enter or click Authenticate to confirm."
+msgstr "얼굴이 확인되었습니다. 계속하려면 Enter를 누르거나 “인증”을 클릭하세요."
+
+msgid "Face authentication failed"
+msgstr "얼굴 인증에 실패했습니다"
+
+msgid "Confirm Face Unlock"
+msgstr "얼굴 잠금 해제 확인"
+
+msgid "Failed to show confirmation prompt"
+msgstr "확인 창을 표시하지 못했습니다"
+
+msgid "Please look at the camera..."
+msgstr "카메라를 보세요…"
+
+msgid "Need more light..."
+msgstr "더 밝은 조명이 필요합니다…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "얼굴이 잘렸습니다. 뒤로 물러나세요…"
+
+msgid "Please center your face..."
+msgstr "얼굴을 중앙에 맞추세요…"
+
+msgid "Please come closer..."
+msgstr "더 가까이 오세요…"
+
+msgid "Please back up..."
+msgstr "뒤로 물러나세요…"
+
+msgid "Hold still..."
+msgstr "움직이지 마세요…"

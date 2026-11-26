@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: cs\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n==1) ? 0 : (n>=2 && n<=4) ? 1 : 2;\n"
+
+msgid "Clear a Gaze duress lockout"
+msgstr "Zrušit uzamčení Gaze po signálu nátlaku"
+
+msgid "Authentication is required to re-enable face authentication after a duress signal."
+msgstr "Pro opětovné povolení ověření obličejem po signálu nátlaku je vyžadováno ověření."
+
+msgid "Manage face enrollments for Gaze"
+msgstr "Spravovat obličeje zaregistrované v Gaze"
+
+msgid "Authentication is required to manage Gaze face enrollments."
+msgstr "Pro správu obličejů zaregistrovaných v Gaze je vyžadováno ověření."
+
+msgid "Manage daemon configuration for Gaze"
+msgstr "Spravovat konfiguraci služby Gaze"
+
+msgid "Authentication is required to change Gaze daemon configuration."
+msgstr "Pro změnu konfigurace služby Gaze je vyžadováno ověření."
+
+msgid "Manage GDM login authentication for Gaze"
+msgstr "Spravovat ověřování Gaze při přihlášení přes GDM"
+
+msgid "Authentication is required to change Gaze face authentication at the GDM login screen."
+msgstr "Pro změnu ověřování obličejem Gaze na přihlašovací obrazovce GDM je vyžadováno ověření."
+
+msgid "Enroll faces and configure facial authentication"
+msgstr "Registrace obličejů a nastavení ověřování obličejem"
+
+msgid "face;auth;login;biometric;"
+msgstr "obličej;tvář;odemknutí;ověření;přihlášení;biometrie;"
+
+msgid "Enroll and manage faces, test face authentication, and adjust every Gaze setting."
+msgstr "Registrujte a spravujte obličeje, zkoušejte ověření obličejem a upravujte všechna nastavení Gaze."
+
+msgid "Facial authentication"
+msgstr "Ověřování obličejem"
+
+msgid "Gaze Settings"
+msgstr "Nastavení Gaze"

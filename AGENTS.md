@@ -18,7 +18,9 @@ All work goes through `just` from the repo root (`just --list` shows every recip
 just build-rust        # release build of all binaries + PAM link check
 just test              # cargo test --workspace --release, plus keyring/kwallet PAM harness scripts
 just lint              # clippy --workspace --all-targets -D warnings
+just check-translations # .po catalogs and the metadata generated from them (just sync-translations applies)
 just fmt-check         # rustfmt check (just fmt applies)
+just lint-shell        # shellcheck installer, scriptlets, scripts
 just audit             # cargo audit
 just --fmt --check     # required if the Justfile changed
 just check-pam-link    # verify PAM modules' shared-library allowlist
@@ -40,7 +42,7 @@ Notes for direct cargo use:
 
 JS integration tests (Node 22+, downloaded upstream sources, simulated shell/PAM): `node scripts/test-gnome.mjs`, `node scripts/test-kde.mjs`, `node scripts/test-kcm.mjs`, `node scripts/test-cinnamon.mjs`.
 
-CI (`.github/workflows/ci.yml`) runs fmt, audit, lint, test, `test-openvino`, the JS integration tests, and package builds. The pre-commit hook (`just setup-hooks`) runs `fmt-check` and `lint`.
+CI (`.github/workflows/ci.yml`) runs fmt, a release `build-rust` whose cargo cache the test job reuses, translation checks, shellcheck, audit, lint, test, `test-openvino`, the JS integration tests, and package builds. The pre-commit hook (`just setup-hooks`) runs `fmt-check` and `lint`.
 
 ## Architecture
 
@@ -54,7 +56,7 @@ Crates (`crates/`):
 - `gaze-cli`: the `gaze` binary (CLI, TUI config, `setup`, `doctor/` diagnostics, `uninstall`).
 - `gaze-gui`: GTK4/libadwaita app.
 - `pam-gaze`: `cdylib` PAM module; asks `gazed` over DBus. `PamMode` is `Sequential`/`Simultaneous`/`Retry`.
-- `pam-gaze-grosshack`: deprecated shim that `#[path]`-includes `pam-gaze` sources and forces `Simultaneous`. New work goes in `pam-gaze`.
+- `pam_gaze_grosshack.so` is a packaged symlink to `pam_gaze.so`; `pam-gaze` detects that load name and forces `Simultaneous`. It is deprecated, so new work goes in `pam-gaze`.
 
 Other trees: `integrations/` (GNOME Shell, Cinnamon, KDE KCM + `gaze-kde-pam`, Omarchy Quickshell), `packaging/` (nfpm, RPM spec, authselect, PAM configs, SELinux, systemd/DBus/polkit config, flatpak, nix, maintainer scriptlets), `scripts/` (dev helpers and test harnesses), `docs/src/` (VitePress site; `docs/archive/` and `docs/.vitepress/dist` are generated).
 

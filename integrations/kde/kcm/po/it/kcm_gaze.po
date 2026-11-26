@@ -1,0 +1,504 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: it\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "The Gaze daemon is not running yet. Its first start downloads face models, which can take a few minutes. This page updates when it is ready."
+msgstr "Il servizio Gaze non è ancora in esecuzione. Al primo avvio scarica i modelli facciali, operazione che può richiedere alcuni minuti. Questa pagina si aggiornerà quando sarà pronto."
+
+msgid "Face the camera"
+msgstr "Guarda dritto verso la fotocamera"
+
+msgid "Tilt your face slightly up"
+msgstr "Inclina leggermente il volto verso l’alto"
+
+msgid "Tilt your face slightly down"
+msgstr "Inclina leggermente il volto verso il basso"
+
+msgid "Turn your face slightly left"
+msgstr "Gira leggermente il volto a sinistra"
+
+msgid "Turn your face slightly right"
+msgstr "Gira leggermente il volto a destra"
+
+msgid "Captured"
+msgstr "Acquisito"
+
+msgid "Enrollment complete"
+msgstr "Registrazione completata"
+
+msgid "Enrollment cancelled"
+msgstr "Registrazione annullata"
+
+msgid "Database error during enrollment"
+msgstr "Errore del database durante la registrazione"
+
+msgid "Camera error during enrollment"
+msgstr "Errore della fotocamera durante la registrazione"
+
+msgid "Please look at the camera..."
+msgstr "Guarda la fotocamera…"
+
+msgid "Need more light..."
+msgstr "Serve più luce…"
+
+msgid "Face is clipped. Please move back..."
+msgstr "Il volto è tagliato. Allontanati un po’…"
+
+msgid "Please center your face..."
+msgstr "Centra il volto…"
+
+msgid "Please come closer..."
+msgstr "Avvicinati…"
+
+msgid "Please back up..."
+msgstr "Allontanati…"
+
+msgid "Hold still..."
+msgstr "Resta fermo…"
+
+msgid "Face authentication could not run"
+msgstr "Impossibile eseguire l’autenticazione facciale"
+
+msgid "Face not recognized"
+msgstr "Volto non riconosciuto"
+
+msgid "Too dark for face authentication"
+msgstr "Troppo buio per l’autenticazione facciale"
+
+msgid "No face detected"
+msgstr "Nessun volto rilevato"
+
+msgid "Move your face into the frame and try again"
+msgstr "Porta il volto all’interno dell’inquadratura e riprova"
+
+msgid "Starting enrollment…"
+msgstr "Avvio della registrazione…"
+
+msgid "Enrollment finished without saving."
+msgstr "La registrazione è terminata senza salvare."
+
+msgid "%1 [%2s]"
+msgstr "%1 [%2s]"
+
+msgid "Could not restart the Gaze service (%1)"
+msgstr "Impossibile riavviare il servizio Gaze (%1)"
+
+msgid "The Gaze service did not start again after the restart"
+msgstr "Il servizio Gaze non si è avviato di nuovo dopo il riavvio"
+
+msgid "Re-enroll faces after this change?"
+msgstr "Registrare di nuovo i volti dopo questa modifica?"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face for each profile, then test recognition."
+msgstr "Le acquisizioni esistenti non sono compatibili con il nuovo modello di riconoscimento. Rimangono sul disco. Dopo il salvataggio, usa «Migliora questo volto» per ogni profilo, poi prova il riconoscimento."
+
+msgid "Standard"
+msgstr "Standard"
+
+msgid "Accurate"
+msgstr "Accurato"
+
+msgid "Settings"
+msgstr "Impostazioni"
+
+msgid "Everyday settings"
+msgstr "Impostazioni comuni"
+
+msgid "Advanced settings"
+msgstr "Impostazioni avanzate"
+
+msgid "Restart Service"
+msgstr "Riavvia servizio"
+
+msgid "Settings are locked"
+msgstr "Le impostazioni sono bloccate"
+
+msgid "Unlock…"
+msgstr "Sblocca…"
+
+msgid "Settings saved. Restart the Gaze service to use the new inference provider."
+msgstr "Impostazioni salvate. Riavvia il servizio Gaze per usare il nuovo provider di inferenza."
+
+msgid "Restarting the Gaze service…"
+msgstr "Riavvio del servizio Gaze…"
+
+msgid "Gaze service restarted"
+msgstr "Servizio Gaze riavviato"
+
+msgid "Restarting the Gaze service failed"
+msgstr "Riavvio del servizio Gaze non riuscito"
+
+msgid "Security"
+msgstr "Sicurezza"
+
+msgid "Security level"
+msgstr "Livello di sicurezza"
+
+msgid "Medium is recommended. Changing the recognition model requires new captures for existing profiles"
+msgstr "Si consiglia Medio. Se cambi il modello di riconoscimento, servono nuove acquisizioni per i profili esistenti"
+
+msgid "Low"
+msgstr "Basso"
+
+msgid "Medium"
+msgstr "Medio"
+
+msgid "High"
+msgstr "Alto"
+
+msgid "Maximum"
+msgstr "Massimo"
+
+msgid "Custom"
+msgstr "Personalizzato"
+
+msgid "Detector level"
+msgstr "Livello del rilevatore"
+
+msgid "Recognizer level"
+msgstr "Livello del riconoscitore"
+
+msgid "RGB recognizer threshold"
+msgstr "Soglia del riconoscitore RGB"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "Somiglianza RGB minima per una corrispondenza"
+
+msgid "IR recognizer threshold"
+msgstr "Soglia del riconoscitore IR"
+
+msgid "Minimum IR similarity for a match"
+msgstr "Somiglianza IR minima per una corrispondenza"
+
+msgid "Hybrid combining policy"
+msgstr "Criterio di combinazione ibrida"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "Criterio di combinazione quando sono attive sia la fotocamera RGB sia quella IR"
+
+msgid "Default"
+msgstr "Predefinito"
+
+msgid "Or"
+msgstr "O"
+
+msgid "Fallback on dark"
+msgstr "Riserva al buio"
+
+msgid "And"
+msgstr "E"
+
+msgid "Hardware"
+msgstr "Hardware"
+
+msgid "Inference execution provider"
+msgstr "Provider di esecuzione dell’inferenza"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI"
+msgstr "CPU, NPU automatica, Intel OpenVINO o AMD Ryzen AI"
+
+msgid "CPU"
+msgstr "CPU"
+
+msgid "Automatic (NPU)"
+msgstr "Automatico (NPU)"
+
+msgid "Intel OpenVINO"
+msgstr "Intel OpenVINO"
+
+msgid "AMD Ryzen AI"
+msgstr "AMD Ryzen AI"
+
+msgid "OpenVINO inference device"
+msgstr "Dispositivo di inferenza OpenVINO"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "Il dispositivo Intel usato per tutti i modelli ONNX"
+
+msgid "GPU"
+msgstr "GPU"
+
+msgid "NPU"
+msgstr "NPU"
+
+msgid "RGB camera source"
+msgstr "Sorgente della fotocamera RGB"
+
+msgid "Primary camera"
+msgstr "Fotocamera principale"
+
+msgid "None (IR only)"
+msgstr "Nessuna (solo IR)"
+
+msgid "IR camera source"
+msgstr "Sorgente della fotocamera IR"
+
+msgid "None"
+msgstr "Nessuna"
+
+msgid "IR frame size override"
+msgstr "Forza dimensione fotogramma IR"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "Forza una risoluzione se l’immagine IR è verde o danneggiata in modalità automatica"
+
+msgid "Width"
+msgstr "Larghezza"
+
+msgid "Height"
+msgstr "Altezza"
+
+msgid "Force IR emitter"
+msgstr "Forza emettitore IR"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "Sostituisce il controllo dell’emettitore, solo se l’emettitore IR non si accende da solo"
+
+msgid "Parallel RGB + IR capture"
+msgstr "Acquisizione RGB + IR in parallelo"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "Autenticazione ibrida più rapida, ma alcune webcam non possono trasmettere entrambi i sensori contemporaneamente"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "Mai (acquisisce RGB, poi IR)"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "Automatico (in parallelo se la fotocamera lo consente)"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "Sempre (acquisisce RGB e IR contemporaneamente)"
+
+msgid "Darkness cutoff"
+msgstr "Soglia di oscurità"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "Rifiuta i fotogrammi al di sotto di questa luminosità media (0–255)"
+
+msgid "Enrollment"
+msgstr "Registrazione"
+
+msgid "Maximum templates"
+msgstr "Numero massimo di modelli"
+
+msgid "Number of capture sets stored per face"
+msgstr "Numero di serie di acquisizioni salvate per volto"
+
+msgid "Minimum face size ratio"
+msgstr "Rapporto minimo della dimensione del volto"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "Volto più piccolo accettato durante la registrazione; un valore inferiore consente una distanza maggiore"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "Rilevamento della vitalità (anti-contraffazione)"
+
+msgid "Enable liveness spoof prevention"
+msgstr "Attiva la prevenzione delle contraffazioni"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "Cerca segni di una foto o di uno schermo nelle immagini della fotocamera e nei movimenti naturali"
+
+msgid "Liveness threshold"
+msgstr "Soglia del rilevamento della vitalità"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "Confidenza minima della prevenzione delle contraffazioni"
+
+msgid "Maximum liveness duration"
+msgstr "Durata massima del rilevamento della vitalità"
+
+msgid "Maximum seconds analyzed for liveness verification"
+msgstr "Numero massimo di secondi analizzati per il rilevamento della vitalità"
+
+msgid "Authentication"
+msgstr "Autenticazione"
+
+msgid "Abort if SSH"
+msgstr "Interrompi se SSH"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "Impedisce l’autenticazione nelle connessioni SSH"
+
+msgid "Abort if lid closed"
+msgstr "Interrompi se il coperchio è chiuso"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "Impedisce l’autenticazione quando il coperchio del portatile è chiuso"
+
+msgid "Require a suspend first"
+msgstr "Richiedi prima una sospensione"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "Impedisce l’autenticazione finché il sistema non è stato sospeso e ripreso una volta"
+
+msgid "Require confirmation on lock screen"
+msgstr "Richiedi conferma nella schermata di blocco"
+
+msgid "On KDE lock/login screens this requires your password instead of face unlock. Confirmation after a match is available on other supported surfaces"
+msgstr "Nelle schermate di blocco e accesso di KDE questa opzione richiede la password invece dello sblocco facciale. La conferma dopo una corrispondenza è disponibile nelle altre interfacce supportate"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "Richiedi conferma per l’autenticazione con privilegi elevati"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "Richiede di premere Invio o fare clic su OK per autorizzare dopo la corrispondenza del volto in sudo, polkit e richieste simili"
+
+msgid "Resume grace period (ms)"
+msgstr "Periodo di tolleranza alla ripresa (ms)"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "Ritarda l’autenticazione facciale al risveglio dalla sospensione"
+
+msgid "Start delay (ms)"
+msgstr "Ritardo di avvio (ms)"
+
+msgid "Use 3000–5000 ms to give yourself time to step away after locking"
+msgstr "Usa 3000–5000 ms per avere il tempo di allontanarti dopo il blocco"
+
+msgid "Start delay applies to"
+msgstr "Il ritardo di avvio si applica a"
+
+msgid "Which prompts wait for the start delay"
+msgstr "Quali richieste attendono il ritardo di avvio"
+
+msgid "All face authentication (including sudo)"
+msgstr "Tutta l’autenticazione facciale (incluso sudo)"
+
+msgid "Screen lockers only"
+msgstr "Solo blocchi dello schermo"
+
+msgid "Storage"
+msgstr "Archiviazione"
+
+msgid "Encrypt face templates"
+msgstr "Cifra i modelli facciali"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "Cifra i modelli facciali archiviati con una chiave sigillata dal TPM"
+
+msgid "Unlock GNOME Keyring"
+msgstr "Sblocca GNOME Keyring"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login"
+msgstr "Usa una password registrata dopo un accesso facciale GDM o greetd protetto dal rilevamento della vitalità"
+
+msgid "Unlock KWallet"
+msgstr "Sblocca KWallet"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet"
+msgstr "Usa una password registrata dopo un accesso KDE protetto dal rilevamento della vitalità; registrala con gaze keyring --kwallet"
+
+msgid "Enrolled Faces"
+msgstr "Volti registrati"
+
+msgid "Configure"
+msgstr "Configura"
+
+msgid "Configure Gaze"
+msgstr "Configura Gaze"
+
+msgid "Test"
+msgstr "Prova"
+
+msgid "Test face authentication"
+msgstr "Prova l’autenticazione facciale"
+
+msgid "Add Face…"
+msgstr "Aggiungi volto…"
+
+msgid "Enroll a new face"
+msgstr "Registra un nuovo volto"
+
+msgid "Faces enrolled for %1"
+msgstr "Volti registrati per %1"
+
+msgid "Look at the camera…"
+msgstr "Guarda la fotocamera…"
+
+msgid "Face recognized"
+msgstr "Volto riconosciuto"
+
+msgid "No face seen before the test timed out"
+msgstr "Nessun volto visto prima della fine della prova"
+
+msgid "No Faces Enrolled"
+msgstr "Nessun volto registrato"
+
+msgid "Enroll a face to get started"
+msgstr "Registra un volto per iniziare"
+
+msgid "%1 capture"
+msgid_plural "%1 captures"
+msgstr[0] "%1 acquisizione"
+msgstr[1] "%1 acquisizioni"
+
+msgid "RGB"
+msgstr "RGB"
+
+msgid "IR"
+msgstr "IR"
+
+msgid "Rename"
+msgstr "Rinomina"
+
+msgid "Improve this face"
+msgstr "Migliora questo volto"
+
+msgid "Delete"
+msgstr "Elimina"
+
+msgid "Improve “%1”"
+msgstr "Migliora «%1»"
+
+msgid "Add Face"
+msgstr "Aggiungi volto"
+
+msgid "Face name"
+msgstr "Nome del volto"
+
+msgid "A face with this name already exists"
+msgstr "Esiste già un volto con questo nome"
+
+msgid "Look at the camera and follow the prompts to add more captures to “%1”."
+msgstr "Guarda la fotocamera e segui le istruzioni per aggiungere altre acquisizioni a «%1»."
+
+msgid "Look at the camera and follow the prompts. Keep your face centered and well lit."
+msgstr "Guarda la fotocamera e segui le istruzioni. Tieni il volto centrato e ben illuminato."
+
+msgid "Start Capture"
+msgstr "Avvia acquisizione"
+
+msgid "Cancel"
+msgstr "Annulla"
+
+msgid "Done"
+msgstr "Fatto"
+
+msgid "Cancel Enrollment?"
+msgstr "Annullare la registrazione?"
+
+msgid "This will discard any partial captures."
+msgstr "Le acquisizioni parziali verranno eliminate."
+
+msgid "Resume"
+msgstr "Riprendi"
+
+msgid "Discard"
+msgstr "Elimina"
+
+msgid "Delete Face"
+msgstr "Elimina volto"
+
+msgid "Delete “%1”? You can add it again later."
+msgstr "Eliminare «%1»? Potrai aggiungerlo di nuovo in seguito."
+
+msgid "Rename Face"
+msgstr "Rinomina volto"

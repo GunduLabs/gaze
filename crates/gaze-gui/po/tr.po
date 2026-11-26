@@ -1,0 +1,743 @@
+# SPDX-FileCopyrightText: 2026 Gundu Labs
+# SPDX-License-Identifier: GPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: gaze\n"
+"Language: tr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Face authentication could not run"
+msgstr "Yüz kimlik doğrulaması çalıştırılamadı"
+
+msgid "Face not recognized"
+msgstr "Yüz tanınmadı"
+
+msgid "Too dark for face authentication"
+msgstr "Yüz kimlik doğrulaması için çok karanlık"
+
+msgid "No face detected"
+msgstr "Yüz algılanmadı"
+
+msgid "Move your face into the frame and try again"
+msgstr "Yüzünüzü kadraja alın ve yeniden deneyin"
+
+msgid "Close"
+msgstr "Kapat"
+
+msgid "Remove “{name}”?"
+msgstr "“{name}” kaldırılsın mı?"
+
+msgid "Gaze will stop recognizing this face. You can enroll it again later."
+msgstr "Gaze artık bu yüzü tanımayacak. Daha sonra yeniden kaydedebilirsiniz."
+
+msgid "Cancel"
+msgstr "İptal"
+
+msgid "Remove"
+msgstr "Kaldır"
+
+msgid "Daemon Failed"
+msgstr "Hizmet Hatası"
+
+msgid "Gaze could not start. Run gaze doctor. On a new install, check that TPM 2.0 is enabled; settings cannot be changed here until the service starts."
+msgstr "Gaze başlatılamadı. gaze doctor komutunu çalıştırın. Yeni bir kurulumda TPM 2.0 özelliğinin etkin olduğunu denetleyin; hizmet başlayana kadar ayarlar buradan değiştirilemez."
+
+msgid "Daemon Disabled"
+msgstr "Hizmet Devre Dışı"
+
+msgid "The Gaze daemon is turned off. Turn it on with:"
+msgstr "Gaze hizmeti kapalı. Şu komutla açın:"
+
+msgid "Daemon Stopped"
+msgstr "Hizmet Durduruldu"
+
+msgid "The Gaze daemon is not running. Start it with:"
+msgstr "Gaze hizmeti çalışmıyor. Şu komutla başlatın:"
+
+msgid "Daemon Not Installed"
+msgstr "Hizmet Kurulu Değil"
+
+msgid "The gazed service is missing. Install the gaze package for your distribution."
+msgstr "gazed hizmeti bulunamadı. Dağıtımınız için gaze paketini kurun."
+
+msgid "Daemon Starting"
+msgstr "Hizmet Başlatılıyor"
+
+msgid "The Gaze daemon is starting up. Its first start downloads face models, which can take a few minutes."
+msgstr "Gaze hizmeti başlatılıyor. İlk başlatmada yüz modelleri indirilir, bu birkaç dakika sürebilir."
+
+msgid "Connecting to the Gaze daemon…"
+msgstr "Gaze hizmetine bağlanılıyor…"
+
+msgid "Enrollment was not authorized"
+msgstr "Kayıt için yetki verilmedi"
+
+msgid "Could not start enrollment: {error}"
+msgstr "Kayıt başlatılamadı: {error}"
+
+msgid "Could not start enrollment"
+msgstr "Kayıt başlatılamadı"
+
+msgid "Could not start camera"
+msgstr "Kamera başlatılamadı"
+
+msgid "Close other camera apps, check the privacy shutter, or choose another camera in Settings."
+msgstr "Kamerayı kullanan diğer uygulamaları kapatın, gizlilik kapağını denetleyin veya Ayarlar’dan başka bir kamera seçin."
+
+msgid "ready"
+msgstr "hazır"
+
+msgid "needs captures"
+msgstr "çekim gerekiyor"
+
+msgid "unused"
+msgstr "kullanılmıyor"
+
+msgid "Enroll a new face"
+msgstr "Yeni yüz kaydet"
+
+msgid "Settings"
+msgstr "Ayarlar"
+
+msgid "Connecting…"
+msgstr "Bağlanılıyor…"
+
+msgid "Loading from the Gaze daemon…"
+msgstr "Gaze hizmetinden yükleniyor…"
+
+msgid "Enrolled Faces"
+msgstr "Kayıtlı Yüzler"
+
+msgid "Rename a face, add captures to improve it, or remove it."
+msgstr "Bir yüzü yeniden adlandırın, iyileştirmek için çekim ekleyin veya kaldırın."
+
+msgid "Recognition"
+msgstr "Tanıma"
+
+msgid "Test recognition"
+msgstr "Tanımayı sına"
+
+msgid "Not tested in this session yet."
+msgstr "Bu oturumda henüz sınanmadı."
+
+msgid "Test"
+msgstr "Sına"
+
+msgid "Look at the camera and check that Gaze recognizes you"
+msgstr "Kameraya bakın ve Gaze’in sizi tanıdığını denetleyin"
+
+msgid "Setup Checklist"
+msgstr "Kurulum Denetim Listesi"
+
+msgid "Work through these once before using face unlock on your desktop."
+msgstr "Masaüstünüzde yüzle kilit açmayı kullanmadan önce bu adımları bir kez tamamlayın."
+
+msgid "Choose your camera"
+msgstr "Kameranızı seçin"
+
+msgid "Pick the camera in Settings, then check it in the enrollment preview"
+msgstr "Ayarlar’dan kamerayı seçin, ardından kayıt önizlemesinde denetleyin"
+
+msgid "Enroll a face"
+msgstr "Bir yüz kaydedin"
+
+msgid "Capture your face from a few angles"
+msgstr "Yüzünüzü birkaç açıdan çekin"
+
+msgid "Confirm that Gaze recognizes you"
+msgstr "Gaze’in sizi tanıdığını doğrulayın"
+
+msgid "Check desktop integration"
+msgstr "Masaüstü bütünleşmesini denetleyin"
+
+msgid "Run gaze doctor before trying screen unlock"
+msgstr "Ekran kilidini açmayı denemeden önce gaze doctor komutunu çalıştırın"
+
+msgid "Enroll a Face"
+msgstr "Yüz Kaydet"
+
+msgid "Running gaze doctor…"
+msgstr "gaze doctor çalıştırılıyor…"
+
+msgid "Run gaze doctor in a terminal on your Linux host to check desktop integration. If the installer requested a reboot, do that before testing screen unlock. Login and keyring unlock are optional, separate settings."
+msgstr "Masaüstü bütünleşmesini denetlemek için Linux sisteminizde bir uçbirimde gaze doctor komutunu çalıştırın. Kurucu yeniden başlatma istediyse ekran kilidini açmayı sınamadan önce yeniden başlatın. Oturum açma ve anahtarlık kilidini açma isteğe bağlı, ayrı ayarlardır."
+
+msgid "Desktop setup checks"
+msgstr "Masaüstü kurulum denetimleri"
+
+msgid "Look at the camera…"
+msgstr "Kameraya bakın…"
+
+msgid "Reconnecting to the Gaze daemon…"
+msgstr "Gaze hizmetine yeniden bağlanılıyor…"
+
+msgid "Could not access the camera: {error}. Close other camera apps and retry; run gaze doctor if it persists."
+msgstr "Kameraya erişilemedi: {error}. Kamerayı kullanan diğer uygulamaları kapatıp yeniden deneyin; sorun sürerse gaze doctor komutunu çalıştırın."
+
+msgid "Could not start recognition. Run gaze doctor and check that a usable face profile is enrolled."
+msgstr "Tanıma başlatılamadı. gaze doctor komutunu çalıştırın ve kullanılabilir bir yüz profilinin kayıtlı olduğunu denetleyin."
+
+msgid "Face recognized. Next: check desktop integration before trying screen unlock."
+msgstr "Yüz tanındı. Şimdi ekran kilidini açmayı denemeden önce masaüstü bütünleşmesini denetleyin."
+
+msgid "Lost contact with the Gaze daemon"
+msgstr "Gaze hizmetiyle bağlantı kesildi"
+
+msgid "Recognition timed out without a result. Retry, or run gaze doctor to check the camera and service"
+msgstr "Tanıma sonuç alınmadan zaman aşımına uğradı. Yeniden deneyin veya kamerayı ve hizmeti denetlemek için gaze doctor komutunu çalıştırın"
+
+msgid "Unsupported CPU"
+msgstr "Desteklenmeyen İşlemci"
+
+msgid "Could Not Load Faces"
+msgstr "Yüzler Yüklenemedi"
+
+msgid "No Faces Enrolled"
+msgstr "Kayıtlı Yüz Yok"
+
+msgid "Choose your camera in Settings, then enroll a face. The capture window lets you check the camera before starting."
+msgstr "Ayarlar’dan kameranızı seçin, ardından bir yüz kaydedin. Çekim penceresi, başlamadan önce kamerayı denetlemenizi sağlar."
+
+msgid "1 capture"
+msgstr "1 çekim"
+
+msgid "{count} captures"
+msgstr "{count} çekim"
+
+msgid "Rename"
+msgstr "Yeniden adlandır"
+
+msgid "Improve this face"
+msgstr "Bu yüzü iyileştir"
+
+msgid "Delete"
+msgstr "Sil"
+
+msgid "New face name"
+msgstr "Yeni yüz adı"
+
+msgid "A face with this name already exists"
+msgstr "Bu adda bir yüz zaten var"
+
+msgid "Failed to rename face"
+msgstr "Yüz yeniden adlandırılamadı"
+
+msgid "Renamed “{old}” to “{new}”"
+msgstr "“{old}”, “{new}” olarak yeniden adlandırıldı"
+
+msgid "Failed to remove face"
+msgstr "Yüz kaldırılamadı"
+
+msgid "Camera Not Activated"
+msgstr "Kamera Etkin Değil"
+
+msgid "No Face"
+msgstr "Yüz Yok"
+
+msgid "Need More Light"
+msgstr "Daha Fazla Işık Gerekiyor"
+
+msgid "Not Centered"
+msgstr "Ortalanmadı"
+
+msgid "Face Clipped"
+msgstr "Yüz Kesilmiş"
+
+msgid "Come Closer"
+msgstr "Yaklaşın"
+
+msgid "Back Up"
+msgstr "Uzaklaşın"
+
+msgid "Ready"
+msgstr "Hazır"
+
+msgid "The camera could not be opened: {error}"
+msgstr "Kamera açılamadı: {error}"
+
+msgid "Main cameras"
+msgstr "Ana kameralar"
+
+msgid "Fallback cameras {index}"
+msgstr "Yedek kameralar {index}"
+
+msgid "Improve “{name}”"
+msgstr "“{name}” yüzünü iyileştir"
+
+msgid "Add Face"
+msgstr "Yüz Ekle"
+
+msgid "Infrared camera"
+msgstr "Kızılötesi kamera"
+
+msgid "RGB camera"
+msgstr "RGB kamera"
+
+msgid "Infrared camera · preview starts when capture does"
+msgstr "Kızılötesi kamera · önizleme çekimle birlikte başlar"
+
+msgid "Face name"
+msgstr "Yüz adı"
+
+msgid "Camera"
+msgstr "Kamera"
+
+msgid "{camera} · preview starts when capture does"
+msgstr "{camera} · önizleme çekimle birlikte başlar"
+
+msgid "Start Capture"
+msgstr "Çekimi Başlat"
+
+msgid "Done — test recognition next"
+msgstr "Tamam — şimdi tanımayı sınayın"
+
+msgid "Cancel Enrollment?"
+msgstr "Kayıt İptal Edilsin mi?"
+
+msgid "This will discard any partial captures."
+msgstr "Tamamlanmamış çekimler silinecek."
+
+msgid "Resume"
+msgstr "Sürdür"
+
+msgid "Discard"
+msgstr "Vazgeç ve sil"
+
+msgid "{camera} · starting capture"
+msgstr "{camera} · çekim başlatılıyor"
+
+msgid "Starting enrollment…"
+msgstr "Kayıt başlatılıyor…"
+
+msgid "Failed to connect to enrollment stream. Try again."
+msgstr "Kayıt akışına bağlanılamadı. Yeniden deneyin."
+
+msgid "Failed to connect to capture stream. Try again."
+msgstr "Çekim akışına bağlanılamadı. Yeniden deneyin."
+
+msgid "Could not claim camera: {error}. Try again."
+msgstr "Kamera ayrılamadı: {error}. Yeniden deneyin."
+
+msgid "{camera} · live preview unavailable, look at the camera"
+msgstr "{camera} · canlı önizleme kullanılamıyor, kameraya bakın"
+
+msgid "Enrollment timed out. Close this window and try again."
+msgstr "Kayıt zaman aşımına uğradı. Bu pencereyi kapatıp yeniden deneyin."
+
+msgid "Lost contact with the Gaze daemon. Close this window and try again."
+msgstr "Gaze hizmetiyle bağlantı kesildi. Bu pencereyi kapatıp yeniden deneyin."
+
+msgid "Face saved. Use Test in the main window, then check desktop integration."
+msgstr "Yüz kaydedildi. Ana pencerede “Sına” düğmesini kullanın, ardından masaüstü bütünleşmesini denetleyin."
+
+msgid "Enrollment finished without saving."
+msgstr "Kayıt, kaydedilmeden sona erdi."
+
+msgid "Lost contact with the Gaze daemon."
+msgstr "Gaze hizmetiyle bağlantı kesildi."
+
+msgid "Try Again"
+msgstr "Yeniden Dene"
+
+msgid "Failed to apply config: {error}"
+msgstr "Yapılandırma uygulanamadı: {error}"
+
+msgid "Configured as {source}, which this list cannot show"
+msgstr "{source} olarak yapılandırılmış, bu liste bunu gösteremiyor"
+
+msgid "CPU, automatic NPU, Intel OpenVINO, or AMD Ryzen AI. Restart the Gaze daemon after changing this"
+msgstr "CPU, otomatik NPU, Intel OpenVINO veya AMD Ryzen AI. Değiştirdikten sonra Gaze hizmetini yeniden başlatın"
+
+msgid "Configured as {provider}/{device}, which this build cannot show"
+msgstr "{provider}/{device} olarak yapılandırılmış, bu derleme bunu gösteremiyor"
+
+msgid "Ordered fallback: {sources}. Selecting a camera replaces this list."
+msgstr "Yedek sırası: {sources}. Bir kamera seçmek bu listenin yerini alır."
+
+msgid "Finding cameras…"
+msgstr "Kameralar aranıyor…"
+
+msgid "Settings will appear when the camera scan finishes."
+msgstr "Ayarlar, kamera taraması bittiğinde görünecek."
+
+msgid "Primary camera"
+msgstr "Birincil kamera"
+
+msgid "None"
+msgstr "Yok"
+
+msgid "None (IR only)"
+msgstr "Yok (yalnızca IR)"
+
+msgid "Could not list cameras"
+msgstr "Kameralar listelenemedi"
+
+msgid "Close other camera applications and try Settings again. Run gaze doctor if the problem continues."
+msgstr "Kamerayı kullanan diğer uygulamaları kapatıp Ayarlar’ı yeniden açın. Sorun sürerse gaze doctor komutunu çalıştırın."
+
+msgid "Settings are locked"
+msgstr "Ayarlar kilitli"
+
+msgid "Unlock…"
+msgstr "Kilidi aç…"
+
+msgid "Everyday"
+msgstr "Temel"
+
+msgid "Advanced"
+msgstr "Gelişmiş"
+
+msgid "Changes save automatically after unlocking."
+msgstr "Kilit açıldıktan sonra değişiklikler kendiliğinden kaydedilir."
+
+msgid "Security"
+msgstr "Güvenlik"
+
+msgid "Security level"
+msgstr "Güvenlik düzeyi"
+
+msgid "Medium is recommended. Changing the recognition model requires re-enrolling existing profiles. Custom controls are in Advanced"
+msgstr "Orta önerilir. Tanıma modelini değiştirmek, var olan profillerin yeniden kaydedilmesini gerektirir. Özel denetimler Gelişmiş bölümündedir"
+
+msgid "Detector level"
+msgstr "Algılayıcı düzeyi"
+
+msgid "Recognizer level"
+msgstr "Tanıyıcı düzeyi"
+
+msgid "RGB recognizer threshold"
+msgstr "RGB tanıma eşiği"
+
+msgid "Minimum RGB similarity for a match"
+msgstr "Eşleşme için en düşük RGB benzerliği"
+
+msgid "IR recognizer threshold"
+msgstr "IR tanıma eşiği"
+
+msgid "Minimum IR similarity for a match"
+msgstr "Eşleşme için en düşük IR benzerliği"
+
+msgid "Hardware"
+msgstr "Donanım"
+
+msgid "Inference execution provider"
+msgstr "Çıkarım yürütme sağlayıcısı"
+
+msgid "OpenVINO inference device"
+msgstr "OpenVINO çıkarım aygıtı"
+
+msgid "The Intel device used for all ONNX models"
+msgstr "Tüm ONNX modelleri için kullanılan Intel aygıtı"
+
+msgid "RGB camera source"
+msgstr "RGB kamera kaynağı"
+
+msgid "IR camera source"
+msgstr "IR kamera kaynağı"
+
+msgid "IR frame size override"
+msgstr "IR kare boyutunu zorla"
+
+msgid "Force one resolution if the IR feed is green or corrupted on auto"
+msgstr "Otomatik kipte IR görüntüsü yeşil veya bozuksa tek bir çözünürlüğü zorlar"
+
+msgid "Width"
+msgstr "Genişlik"
+
+msgid "Height"
+msgstr "Yükseklik"
+
+msgid "Force IR emitter"
+msgstr "IR yayıcıyı zorla"
+
+msgid "Override emitter control, only if the IR emitter stays off on its own"
+msgstr "Yayıcı denetimini geçersiz kılar; yalnızca IR yayıcı kendiliğinden açılmıyorsa kullanın"
+
+msgid "Parallel RGB + IR capture"
+msgstr "Koşut RGB + IR çekimi"
+
+msgid "Faster hybrid authentication, but some webcams cannot stream both sensors at once"
+msgstr "Daha hızlı karma kimlik doğrulama, ancak bazı web kameraları iki algılayıcıyı aynı anda kullanamaz"
+
+msgid "Darkness cutoff"
+msgstr "Karanlık sınırı"
+
+msgid "Reject frames below this mean brightness (0–255)"
+msgstr "Ortalama parlaklığı bu değerin altında olan kareleri reddet (0–255)"
+
+msgid "Enrollment"
+msgstr "Kayıt"
+
+msgid "Maximum templates"
+msgstr "En fazla şablon"
+
+msgid "Number of capture sets stored per face"
+msgstr "Yüz başına saklanan çekim kümesi sayısı"
+
+msgid "Minimum face size ratio"
+msgstr "En küçük yüz boyutu oranı"
+
+msgid "Smallest accepted face during enrollment; lower allows more distance"
+msgstr "Kayıt sırasında kabul edilen en küçük yüz; düşük değer daha uzak mesafeye izin verir"
+
+msgid "Liveness Anti-Spoofing"
+msgstr "Canlılık Testi (Sahteciliğe Karşı)"
+
+msgid "Enable liveness spoof prevention"
+msgstr "Canlılıkla sahteciliği önlemeyi etkinleştir"
+
+msgid "Check camera images and natural movement for signs of a photo or screen"
+msgstr "Fotoğraf veya ekran belirtileri için kamera görüntülerini ve doğal hareketi denetle"
+
+msgid "Liveness threshold"
+msgstr "Canlılık eşiği"
+
+msgid "Minimum spoof prevention confidence"
+msgstr "Sahteciliği önlemede en düşük güven"
+
+msgid "Maximum liveness duration"
+msgstr "En uzun canlılık testi süresi"
+
+msgid "Usable face time per camera before falling back to your password"
+msgstr "Parolaya geçmeden önce kamera başına kullanılabilir yüz süresi"
+
+msgid "Authentication"
+msgstr "Kimlik Doğrulama"
+
+msgid "Abort if SSH"
+msgstr "SSH ise iptal et"
+
+msgid "Prevent authentication over SSH connections"
+msgstr "SSH bağlantılarında kimlik doğrulamayı engelle"
+
+msgid "Abort if lid closed"
+msgstr "Kapak kapalıysa iptal et"
+
+msgid "Prevent authentication when the laptop lid is closed"
+msgstr "Dizüstü bilgisayarın kapağı kapalıyken kimlik doğrulamayı engelle"
+
+msgid "Require a suspend first"
+msgstr "Önce askıya almayı zorunlu kıl"
+
+msgid "Prevent authentication until the system has suspended and resumed once"
+msgstr "Sistem bir kez askıya alınıp sürdürülene kadar kimlik doğrulamayı engelle"
+
+msgid "Require confirmation on lock screen"
+msgstr "Kilit ekranında onay iste"
+
+msgid "Confirm after matching where supported. On KDE lock/login screens this uses your password instead of face unlock"
+msgstr "Desteklendiği yerlerde eşleşmeden sonra onay iste. KDE kilit/oturum açma ekranlarında yüzle kilit açma yerine parolanız kullanılır"
+
+msgid "Require confirmation for elevated authentication"
+msgstr "Yükseltilmiş yetkili kimlik doğrulamada onay iste"
+
+msgid "Require pressing Enter or clicking OK to authorize after face matches for sudo, polkit, and similar prompts"
+msgstr "sudo, polkit ve benzeri isteklerde yüz eşleştikten sonra yetkilendirmek için Enter’a basmayı veya Tamam’a tıklamayı zorunlu kıl"
+
+msgid "Resume grace period (ms)"
+msgstr "Sürdürme sonrası bekleme süresi (ms)"
+
+msgid "Delay face authentication on wake from suspend"
+msgstr "Askıdan uyanınca yüz kimlik doğrulamasını geciktir"
+
+msgid "Start delay (ms)"
+msgstr "Başlangıç gecikmesi (ms)"
+
+msgid "Use 3000–5000 ms on KDE or hyprlock to give yourself time to step away after locking"
+msgstr "Kilitledikten sonra uzaklaşmaya zaman tanımak için KDE veya hyprlock’ta 3000–5000 ms kullanın"
+
+msgid "Start delay applies to"
+msgstr "Başlangıç gecikmesinin geçerli olduğu yer"
+
+msgid "Which prompts wait for the start delay"
+msgstr "Hangi istekler başlangıç gecikmesini bekler"
+
+msgid "Hybrid combining policy"
+msgstr "Karma birleştirme ilkesi"
+
+msgid "Combining policy when both RGB and IR cameras are active"
+msgstr "RGB ve IR kameraların ikisi de etkinken birleştirme ilkesi"
+
+msgid "Storage"
+msgstr "Depolama"
+
+msgid "Encrypt face templates"
+msgstr "Yüz şablonlarını şifrele"
+
+msgid "Encrypt face templates at rest with a TPM-sealed key"
+msgstr "Saklanan yüz şablonlarını TPM ile mühürlenmiş bir anahtarla şifrele"
+
+msgid "Unlock GNOME Keyring"
+msgstr "GNOME Keyring kilidini aç"
+
+msgid "Use an enrolled password after liveness-protected GDM or greetd face login. Needs liveness and template encryption, and keeps both on while enabled"
+msgstr "Canlılık testiyle korunan GDM veya greetd yüz oturumundan sonra kayıtlı bir parola kullanır. Canlılık testi ve şablon şifreleme gerektirir; etkin olduğu sürece ikisini de açık tutar"
+
+msgid "Unlock KWallet"
+msgstr "KWallet kilidini aç"
+
+msgid "Use an enrolled password after liveness-protected KDE login; enroll with gaze keyring --kwallet. Needs liveness and template encryption, and keeps both on while enabled"
+msgstr "Canlılık testiyle korunan KDE oturumundan sonra kayıtlı bir parola kullanır; gaze keyring --kwallet ile kaydedin. Canlılık testi ve şablon şifreleme gerektirir; etkin olduğu sürece ikisini de açık tutar"
+
+msgid "Set up password…"
+msgstr "Parolayı ayarla…"
+
+msgid "Finish password unlock setup"
+msgstr "Parolayla kilit açma kurulumunu tamamlayın"
+
+msgid "The switch enables this feature. Enroll your password from a terminal as your desktop user; then check your login integration. Passwords stay on this machine, protected by the TPM."
+msgstr "Anahtar bu özelliği etkinleştirir. Parolanızı masaüstü kullanıcınızla bir uçbirimden kaydedin, ardından oturum açma bütünleşmesini denetleyin. Parolalar bu makinede kalır ve TPM ile korunur."
+
+msgid "1. Wait for Settings to show Saved.\n2. Run: {command}\n3. Run: gaze doctor\n4. Reopen Settings to refresh password status."
+msgstr "1. Ayarlar’da “Kaydedildi” görünmesini bekleyin.\n2. Çalıştırın: {command}\n3. Çalıştırın: gaze doctor\n4. Parola durumunu yenilemek için Ayarlar’ı yeniden açın."
+
+msgid "Cameras"
+msgstr "Kameralar"
+
+msgid "Choose a camera, then use Enroll a Face to preview and check it."
+msgstr "Bir kamera seçin, ardından önizleyip denetlemek için “Yüz Kaydet” düğmesini kullanın."
+
+msgid "Lock screen and password prompts"
+msgstr "Kilit ekranı ve parola istekleri"
+
+msgid "Preparing and saving settings… Model downloads may take a few minutes."
+msgstr "Ayarlar hazırlanıyor ve kaydediliyor… Model indirmeleri birkaç dakika sürebilir."
+
+msgid "Recognition model change cancelled; reopen Settings to confirm"
+msgstr "Tanıma modeli değişikliği iptal edildi; doğrulamak için Ayarlar’ı yeniden açın"
+
+msgid "Re-enroll faces after this change?"
+msgstr "Bu değişiklikten sonra yüzler yeniden kaydedilsin mi?"
+
+msgid "Existing captures cannot match with the new recognition model. They remain on disk. After saving, use Improve this face to capture new samples for every profile you use."
+msgstr "Var olan çekimler yeni tanıma modeliyle eşleşemez. Diskte kalırlar. Kaydettikten sonra, kullandığınız her profil için yeni çekim yapmak üzere “Bu yüzü iyileştir” seçeneğini kullanın."
+
+msgid "Keep current model"
+msgstr "Geçerli modeli koru"
+
+msgid "Change model"
+msgstr "Modeli değiştir"
+
+msgid "Model change cancelled. Current settings restored"
+msgstr "Model değişikliği iptal edildi. Geçerli ayarlar geri yüklendi"
+
+#, fuzzy
+msgid "Saved. gazed restarts by itself if the new provider needs a different runtime. Then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active."
+msgstr "Kaydedildi. gazed hizmetini yeniden başlatın, ardından hızlandırmayı doğrulamak için gaze doctor --benchmark komutunu çalıştırın; yedek olarak CPU kullanılıyor olabilir."
+
+msgid "Saved. Use Improve this face on each existing profile to re-enroll, then test recognition."
+msgstr "Kaydedildi. Var olan her profili yeniden kaydetmek için “Bu yüzü iyileştir” seçeneğini kullanın, ardından tanımayı sınayın."
+
+msgid "Saved. Changes are active."
+msgstr "Kaydedildi. Değişiklikler etkin."
+
+msgid "Could not read the current configuration from the Gaze daemon"
+msgstr "Gaze hizmetinden geçerli yapılandırma okunamadı"
+
+msgid "Try again"
+msgstr "Yeniden dene"
+
+msgid "Password stored"
+msgstr "Parola kayıtlı"
+
+msgid "Password not enrolled"
+msgstr "Parola kaydedilmemiş"
+
+msgid "Password status unavailable"
+msgstr "Parola durumu kullanılamıyor"
+
+msgid "{state}. After enabling, run {command} in a terminal to enroll or replace it. Run gaze doctor to check login integration. Requires liveness and encryption."
+msgstr "{state}. Etkinleştirdikten sonra kaydetmek veya değiştirmek için bir uçbirimde {command} komutunu çalıştırın. Oturum açma bütünleşmesini denetlemek için gaze doctor komutunu çalıştırın. Canlılık testi ve şifreleme gerektirir."
+
+msgid "Failed to load configuration: {error}"
+msgstr "Yapılandırma yüklenemedi: {error}"
+
+msgid "Settings stay locked: {error}"
+msgstr "Ayarlar kilitli kalıyor: {error}"
+
+msgid "Low"
+msgstr "Düşük"
+
+msgid "Medium"
+msgstr "Orta"
+
+msgid "High"
+msgstr "Yüksek"
+
+msgid "Maximum"
+msgstr "En yüksek"
+
+msgid "Custom"
+msgstr "Özel"
+
+msgid "Standard"
+msgstr "Standart"
+
+msgid "Accurate"
+msgstr "Hassas"
+
+msgid "Default"
+msgstr "Varsayılan"
+
+msgid "Or"
+msgstr "Veya"
+
+msgid "Fallback on dark"
+msgstr "Karanlıkta yedeğe geç"
+
+msgid "And"
+msgstr "Ve"
+
+msgid "Never (capture RGB, then IR)"
+msgstr "Hiçbir zaman (önce RGB, sonra IR çek)"
+
+msgid "Auto (parallel when the camera allows it)"
+msgstr "Otomatik (kamera izin verirse koşut)"
+
+msgid "Always (capture RGB and IR at once)"
+msgstr "Her zaman (RGB ve IR aynı anda çek)"
+
+msgid "All face authentication (including sudo)"
+msgstr "Tüm yüz kimlik doğrulamaları (sudo dahil)"
+
+msgid "Screen lockers only"
+msgstr "Yalnızca ekran kilitleri"
+
+msgid "Automatic (NPU)"
+msgstr "Otomatik (NPU)"
+
+msgid "Face the camera"
+msgstr "Doğrudan kameraya bakın"
+
+msgid "Tilt your face slightly up"
+msgstr "Yüzünüzü hafifçe yukarı eğin"
+
+msgid "Tilt your face slightly down"
+msgstr "Yüzünüzü hafifçe aşağı eğin"
+
+msgid "Turn your face slightly left"
+msgstr "Yüzünüzü hafifçe sola çevirin"
+
+msgid "Turn your face slightly right"
+msgstr "Yüzünüzü hafifçe sağa çevirin"
+
+msgid "Database error during enrollment"
+msgstr "Kayıt sırasında veritabanı hatası"
+
+msgid "Camera error during enrollment"
+msgstr "Kayıt sırasında kamera hatası"
+
+msgid "Enrollment cancelled"
+msgstr "Kayıt iptal edildi"
+
+msgid "Captured"
+msgstr "Çekildi"
+
+msgid "Completed"
+msgstr "Tamamlandı"
+
+msgid "Run gaze doctor for recovery steps."
+msgstr "Kurtarma adımları için gaze doctor komutunu çalıştırın."
