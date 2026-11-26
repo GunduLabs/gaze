@@ -111,6 +111,15 @@ struct VerifySystem {
 
 /// Bound both missing faces and unusable frames: `Clipped` and `Ready` refresh only
 /// the face deadline, so framing problems cannot keep verification alive forever.
+pub(super) fn verify_deadline(
+    last_face_at: Instant,
+    last_usable_at: Instant,
+) -> tokio::time::Instant {
+    tokio::time::Instant::from_std(
+        (last_face_at + VERIFY_NO_FACE_TIMEOUT).min(last_usable_at + VERIFY_NO_USABLE_TIMEOUT),
+    )
+}
+
 pub(super) fn verify_give_up(since_face: Duration, since_usable: Duration) -> Option<VerifyGiveUp> {
     if since_face >= VERIFY_NO_FACE_TIMEOUT {
         return Some(VerifyGiveUp::NoFace);
@@ -1420,7 +1429,7 @@ impl AuthDaemon {
                             suspended = true;
                             break;
                         }
-                        _ = tokio::time::sleep(VERIFY_WATCHDOG_POLL) => {
+                        _ = tokio::time::sleep_until(verify_deadline(last_face_at, last_usable_at)) => {
                             if let Some(give_up) = verify_give_up(last_face_at.elapsed(), last_usable_at.elapsed()) {
                                 info!("VerifyStart: {}", give_up.reason());
                                 stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1789,16 +1798,27 @@ mod tests {
     }
 
     #[test]
-    fn watchdog_polls_faster_than_the_timeouts_it_guards() {
+    fn watchdog_deadline_is_the_earlier_timeout_and_gives_up_there() {
         use super::{
-            VERIFY_NO_FACE_TIMEOUT, VERIFY_NO_USABLE_TIMEOUT, VERIFY_TOO_DARK_TIMEOUT,
-            VERIFY_WATCHDOG_POLL,
+            VERIFY_NO_FACE_TIMEOUT, VERIFY_NO_USABLE_TIMEOUT, VerifyGiveUp, verify_deadline,
+            verify_give_up,
         };
+        use std::time::Instant;
 
-        assert!(VERIFY_WATCHDOG_POLL < VERIFY_NO_FACE_TIMEOUT);
-        assert!(VERIFY_WATCHDOG_POLL < VERIFY_TOO_DARK_TIMEOUT);
-        assert!(VERIFY_WATCHDOG_POLL < VERIFY_NO_USABLE_TIMEOUT);
-        assert!(!VERIFY_WATCHDOG_POLL.is_zero());
+        let now = Instant::now();
+        let deadline = verify_deadline(now, now).into_std();
+        assert_eq!(
+            deadline,
+            now + VERIFY_NO_FACE_TIMEOUT.min(VERIFY_NO_USABLE_TIMEOUT)
+        );
+        assert!(verify_give_up(deadline - now, deadline - now).is_some());
+
+        let usable_long_ago = now - VERIFY_NO_USABLE_TIMEOUT;
+        assert_eq!(verify_deadline(now, usable_long_ago).into_std(), now);
+        assert_eq!(
+            verify_give_up(std::time::Duration::ZERO, VERIFY_NO_USABLE_TIMEOUT),
+            Some(VerifyGiveUp::NoUsableFrame)
+        );
     }
 
     #[test]
@@ -1924,22 +1944,21 @@ mod tests {
 
     #[test]
     fn a_stalled_capture_stream_still_reaches_the_no_face_deadline() {
-        use super::VERIFY_WATCHDOG_POLL;
+        use super::verify_deadline;
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (_retained_tx, mut rx) = tokio::sync::mpsc::channel::<u32>(10);
-            let deadline = std::time::Duration::from_millis(500);
+            let anchor = std::time::Instant::now()
+                - (super::VERIFY_NO_FACE_TIMEOUT - std::time::Duration::from_millis(300));
             let started = std::time::Instant::now();
             let mut gave_up = false;
 
             loop {
                 tokio::select! {
-                    _ = tokio::time::sleep(VERIFY_WATCHDOG_POLL) => {
-                        if started.elapsed() >= deadline {
-                            gave_up = true;
-                            break;
-                        }
+                    _ = tokio::time::sleep_until(verify_deadline(anchor, anchor)) => {
+                        gave_up = true;
+                        break;
                     }
                     msg = rx.recv() => {
                         if msg.is_none() {
@@ -1950,7 +1969,8 @@ mod tests {
             }
 
             assert!(gave_up);
-            assert!(started.elapsed() < deadline * 4);
+            assert!(started.elapsed() >= std::time::Duration::from_millis(250));
+            assert!(started.elapsed() < std::time::Duration::from_secs(2));
         });
     }
 
