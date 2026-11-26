@@ -44,7 +44,7 @@ fn reset_cinnamon_user_settings_cmd() -> String {
         "getent passwd | while IFS=: read -r user _ uid _ _ home _; do",
         r#"[ "$uid" -ge 1000 ] 2>/dev/null || continue;"#,
         r#"[ -d "$home" ] || continue;"#,
-        r#"sudo rm -rf "$home/.config/cinnamon/spices/gaze@gundulabs.com" "$home/.cinnamon/configs/gaze@gundulabs.com" "$home/.local/share/cinnamon/extensions/gaze@gundulabs.com";"#,
+        r#"sudo -u "$user" rm -rf -- "$home/.config/cinnamon/spices/gaze@gundulabs.com" "$home/.cinnamon/configs/gaze@gundulabs.com" "$home/.local/share/cinnamon/extensions/gaze@gundulabs.com";"#,
         "command -v dbus-run-session >/dev/null 2>&1 || continue;",
         r#"sudo -u "$user" env HOME="$home" dbus-run-session sh -c 'EXT_ID="gaze@gundulabs.com";"#,
         "command -v gsettings >/dev/null 2>&1 || exit 0;",
@@ -369,14 +369,17 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
         "Remove per-user GNOME extension copies",
         "for d in /home/*/.local/share/gnome-shell/extensions /root/.local/share/gnome-shell/extensions; do \
           [ -d \"$d/gaze@gundulabs.com\" ] || continue; \
-          sudo rm -rf \"$d/gaze@gundulabs.com\"; \
+          owner=$(stat -c %U -- \"${d%/.local/share/gnome-shell/extensions}\") || continue; \
+          sudo -u \"$owner\" rm -rf -- \"$d/gaze@gundulabs.com\"; \
           done"
             .into(),
     ));
     plan.push((
         "Remove the installer's one-shot GNOME enable",
         "for h in /home/* /root; do \
-          sudo rm -f \"$h/.config/autostart/gaze-gnome-enable.desktop\" \"$h/.local/share/gaze/gnome-enable.sh\"; \
+          [ -d \"$h\" ] || continue; \
+          owner=$(stat -c %U -- \"$h\") || continue; \
+          sudo -u \"$owner\" rm -f -- \"$h/.config/autostart/gaze-gnome-enable.desktop\" \"$h/.local/share/gaze/gnome-enable.sh\"; \
           done"
             .into(),
     ));
@@ -411,8 +414,9 @@ fn build_uninstall_plan(keep_data: bool) -> Vec<(&'static str, String)> {
         "for d in /home/*/.config/hypr /root/.config/hypr; do \
           f=\"$d/hyprlock.conf\"; \
           [ -f \"$f\" ] || continue; \
-          sudo grep -q 'hyprlock-gaze' \"$f\" 2>/dev/null || continue; \
-          sudo sed --follow-symlinks -i.gaze-uninstall-bak \
+          owner=$(stat -c %U -- \"${d%/.config/hypr}\") || continue; \
+          sudo -u \"$owner\" grep -q 'hyprlock-gaze' \"$f\" 2>/dev/null || continue; \
+          sudo -u \"$owner\" sed --follow-symlinks -i.gaze-uninstall-bak \
             '/^\\s*\\(pam_\\)\\?module\\s*=\\s*hyprlock-gaze\\(-simultaneous\\)\\?\\s*$/d' \"$f\" \
             || echo \"  Could not edit $f; remove its hyprlock-gaze module line by hand.\"; \
           done"
@@ -1005,6 +1009,26 @@ mod tests {
                 "step {label:?} has nothing to run"
             );
         }
+    }
+
+    #[test]
+    fn files_in_home_directories_are_removed_as_their_owner() {
+        let plan = build_uninstall_plan(true);
+        let home_steps = [
+            "Remove per-user GNOME extension copies",
+            "Remove the installer's one-shot GNOME enable",
+            "Remove hyprlock Gaze PAM references",
+        ];
+        for label in home_steps {
+            let (_, cmd) = plan.iter().find(|(desc, _)| *desc == label).unwrap();
+            assert!(cmd.contains("sudo -u \"$owner\""), "{label}: {cmd}");
+            assert!(!cmd.contains("sudo rm"), "{label}: {cmd}");
+            assert!(!cmd.contains("sudo sed"), "{label}: {cmd}");
+            assert!(!cmd.contains("sudo grep"), "{label}: {cmd}");
+        }
+        let cinnamon = reset_cinnamon_user_settings_cmd();
+        assert!(cinnamon.contains(r#"sudo -u "$user" rm -rf"#));
+        assert!(!cinnamon.contains("sudo rm"));
     }
 
     #[test]
