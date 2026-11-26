@@ -9,7 +9,10 @@ Requires=dbus.service
 StartLimitIntervalSec=0
 
 [Service]
+Type=dbus
+BusName=com.gundulabs.Gaze
 ExecStart=/usr/bin/gazed
+TimeoutStartSec=30min
 Restart=on-failure
 RestartSec=5
 # 78 is gaze_core::cpu::EXIT_UNSUPPORTED_CPU (no AVX2) and 77 is gazed's template-storage
