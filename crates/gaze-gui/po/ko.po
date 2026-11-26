@@ -624,7 +624,8 @@ msgstr "모델 변경"
 msgid "Model change cancelled. Current settings restored"
 msgstr "모델 변경이 취소되었습니다. 현재 설정을 복원했습니다"
 
-msgid "Saved. Restart gazed, then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active."
+#, fuzzy
+msgid "Saved. gazed restarts by itself if the new provider needs a different runtime. Then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active."
 msgstr "저장됨. gazed를 다시 시작한 다음 gaze doctor --benchmark를 실행하여 가속을 확인하세요. 대신 CPU가 사용되고 있을 수 있습니다."
 
 msgid "Saved. Use Improve this face on each existing profile to re-enroll, then test recognition."
