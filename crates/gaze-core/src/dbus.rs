@@ -441,6 +441,10 @@ pub fn dbus_error_message(err: &zbus::Error) -> String {
     text
 }
 
+pub fn dbus_is_access_denied(err: &zbus::Error) -> bool {
+    err.to_string().contains("AccessDenied")
+}
+
 pub fn dbus_is_file_not_found(err: &zbus::Error) -> bool {
     err.to_string().contains("FileNotFound")
 }
