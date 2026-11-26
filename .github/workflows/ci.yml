@@ -100,8 +100,8 @@ jobs:
       - name: Run clippy
         run: just lint
 
-  test:
-    name: Test
+  build:
+    name: Build
     runs-on: ubuntu-latest
 
     steps:
@@ -115,7 +115,31 @@ jobs:
         uses: ./.github/actions/setup-build
         with:
           just-version: ${{ env.JUST_VERSION }}
-          cache-key: ci-test-v1
+          cache-key: ci-build-v1
+
+      - name: Build release binaries
+        env:
+          CARGO_BUILD_JOBS: 2
+        run: just build-rust
+
+  test:
+    name: Test
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up build environment
+        uses: ./.github/actions/setup-build
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+          cache-key: ci-build-v1
+          save-cache: "false"
 
       - name: Run tests
         env:

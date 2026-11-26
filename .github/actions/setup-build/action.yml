@@ -20,6 +20,9 @@ inputs:
   cache-key:
     description: rust-cache shared key. Empty skips the cargo cache entirely.
     default: ""
+  save-cache:
+    description: Save the cargo cache after the job; "false" only restores another job's cache.
+    default: "true"
   ort-cache-dir:
     description: >-
       Directory scripts/prepare-ort.sh keeps the verified ONNX Runtime archive in,
@@ -78,5 +81,6 @@ runs:
       uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
         shared-key: ${{ inputs.cache-key }}-${{ steps.os.outputs.id }}
+        save-if: ${{ inputs.save-cache == 'true' }}
         cache-on-failure: true
         cache-directories: ${{ inputs.ort-cache-dir }}
