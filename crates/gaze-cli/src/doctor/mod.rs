@@ -8,8 +8,8 @@ use gaze_core::config::{
     MIN_LIVENESS_MAX_SECONDS, MIN_LIVENESS_THRESHOLD, SecurityField, unknown_config_keys,
 };
 use gaze_core::dbus::{
-    GazeProxy, dbus_error_message, dbus_is_file_not_found, dbus_is_not_activatable,
-    dbus_is_unknown_method, try_benchmark_from_daemon,
+    GazeProxy, dbus_error_message, dbus_is_access_denied, dbus_is_file_not_found,
+    dbus_is_not_activatable, dbus_is_unknown_method, try_benchmark_from_daemon,
 };
 use gaze_core::desktop::{
     GDM_DCONF_PROFILE, GDM_FACE_OVERRIDE_PATH, GDM_HOME_DIRS, KDE_FACE_PAM_FILE,

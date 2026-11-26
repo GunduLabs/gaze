@@ -255,6 +255,17 @@ pub(super) async fn connect_daemon(report: &mut Report) -> Option<Daemon> {
             );
             None
         }
+        Ok(Err(err)) if dbus_is_access_denied(&err) => {
+            report.warning(
+                "Daemon",
+                format!(
+                    "gazed is running but would not share its configuration with this session: {}",
+                    dbus_error_message(&err)
+                ),
+                "Run `sudo gaze doctor`, or run it from a terminal in the logged-in desktop session.",
+            );
+            None
+        }
         Ok(Err(err)) => {
             report.error(
                 "Daemon",
