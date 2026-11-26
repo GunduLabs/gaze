@@ -591,6 +591,61 @@ Notes:
   user/group when the container runs as root (native Docker); on uid-mapping backends like
   Colima's sshfs, files already belong to you and are left alone.
 
+### Arch and Omarchy repository snapshots
+
+On x86_64 Linux, build Arch packages in an Arch container:
+
+```bash
+just arch build-rust
+VERSION=0.5.2 just arch package archlinux
+```
+
+The image defaults to the current Arch mirror. Omarchy stable can carry an older
+OpenCV than current Arch and the AUR binary packages. Select its mirror for every
+build and check against that snapshot instead:
+
+```bash
+export GAZE_ARCH_MIRROR=https://stable-mirror.omarchy.org
+export GAZE_CONTAINER_ENGINE=podman # optional; defaults to docker
+just arch build-rust
+just arch test
+VERSION=0.5.2 just arch package archlinux
+```
+
+Use the version of the source you checked out. `just arch` builds the environment
+automatically and runs the same recipes as a native build. It passes `GAZE_GUI`,
+`GAZE_KCM`, `ORT_VERSION`, `VERSION`, `PACKAGE_RELEASE`, `CARGO_BUILD_JOBS` and
+`RUSTFLAGS` through to the container. The container needs no privileged access, camera,
+host D-Bus or PAM mounts, and it runs with SELinux labelling disabled so the checkout
+does not need relabelling. Like the release packages, it builds the Plasma 6 settings
+page; set `GAZE_KCM=legacy` for the System Settings entry that opens `gaze-gui`. The
+image is currently x86_64 only, and `just arch` rejects any other `ARCH`. An ARM build
+needs a native ARM base image, repositories and ONNX Runtime, rather than overriding
+the package architecture.
+
+Artifacts land in `dist/` re-owned to your host user. Under rootless Podman or rootless
+Docker, including a `docker` command provided by podman-docker, container root already
+is your user, so files are left as they are.
+
+The container synchronizes its whole package set to the selected mirror, including
+downgrades when the snapshot predates the base image. Each mirror gets its own image
+(`GAZE_ARCH_IMAGE` overrides the tag), and the package sync is cached. `just arch`
+warns when that sync is more than a week old; run `just arch-refresh` to re-sync with
+the mirror. Cargo target volumes are separate for each image and from Ubuntu builds,
+so a refreshed image starts a fresh target cache. `just arch-refresh` removes the image
+and target volume it replaces, and `just arch-clean` removes target volumes that no
+current Arch image uses. Packages land in `dist/packages`; use a separate checkout or
+move those artifacts before switching mirrors.
+
+Packaging keeps the OpenCV version bounds derived from the linked binaries. A build
+against 5.0 must continue to require `opencv>=5.0` and `opencv<5.1`; removing the cap
+or symlinking the 5.1 library to the 5.0 name does not make it compatible. Rebuild
+again when the target snapshot crosses that ABI boundary. Test the package install
+and password fallback in a disposable system before replacing a live login setup.
+The raw Arch release package names also differ from the AUR wrappers; see
+[Gaze disappears after an AUR helper upgrade](/guide/troubleshooting#gaze-disappears-after-an-aur-helper-upgrade-arch-linux)
+before installing locally built packages on a system managed by an AUR helper.
+
 ## Cleaning build artifacts
 
 ```bash
