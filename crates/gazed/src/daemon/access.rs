@@ -35,6 +35,28 @@ impl AuthDaemon {
             .to_string()
     }
 
+    pub(super) async fn reconcile_template_owner(
+        &self,
+        username: &str,
+        uid: u32,
+    ) -> fdo::Result<()> {
+        let check = self
+            .db
+            .lock()
+            .await
+            .reconcile_owner(username, uid)
+            .map_err(Self::map_user_db_error)?;
+        if let crate::users::OwnerCheck::Reassigned { previous_uid } = check {
+            warn!(
+                username,
+                previous_uid,
+                uid,
+                "Removed face templates enrolled by an earlier account with this name"
+            );
+        }
+        Ok(())
+    }
+
     pub(super) async fn current_config(&self) -> Config {
         self.settings.read().await.clone()
     }
