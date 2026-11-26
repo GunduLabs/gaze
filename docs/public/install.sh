@@ -1121,26 +1121,53 @@ fi
 
 plan() { printf '  %s\n' "• $*"; }
 
+plan_desktop_packages() {
+    suffix=$1
+    from=$2
+    if want_gnome_extension_package; then
+        plan "Install gaze$suffix, gaze-gui$suffix, and gaze-gnome-extension$suffix$from"
+        plan "Enable GNOME lock screen auth for this user when possible"
+    elif want_cinnamon_extension_package; then
+        plan "Install gaze$suffix, gaze-gui$suffix, and gaze-cinnamon-extension$suffix$from"
+        plan "Enable Cinnamon extension for this user when possible"
+    elif is_kde_session; then
+        plan "Install gaze$suffix, gaze-gui$suffix, and gaze-kde$suffix$from (hands-free KDE lock screen face unlock)"
+    else
+        plan "Install gaze$suffix and gaze-gui$suffix$from (skip desktop extension; GNOME/Cinnamon not detected)"
+    fi
+    if [ -n "$suffix" ] && is_omarchy_session; then
+        plan "Install gaze-omarchy$suffix$from and enable it for this user while unlocked"
+    fi
+    if want_hyprlock_setup; then
+        plan "Install gaze-hyprlock$suffix and configure hyprlock"
+    fi
+}
+
+desktop_packages() {
+    suffix=$1
+    packages="gaze$suffix gaze-gui$suffix"
+    if want_gnome_extension_package; then
+        packages="$packages gaze-gnome-extension$suffix"
+    fi
+    if want_cinnamon_extension_package; then
+        packages="$packages gaze-cinnamon-extension$suffix"
+    fi
+    if [ -n "$suffix" ] && is_omarchy_session; then
+        packages="$packages gaze-omarchy$suffix"
+    fi
+    if want_hyprlock_setup; then
+        packages="$packages gaze-hyprlock$suffix"
+    fi
+    printf '%s\n' "$packages"
+}
+
 if is_deb; then
     say "Detected platform: ${BOLD}Debian/Ubuntu ${DISTRO_CODENAME}${RESET} (${PKG_ARCH}), package manager: apt"
     STEP_TOTAL=5
     echo ""
     title "This will:"
     plan "Configure the apt repository"
-    if want_gnome_extension_package; then
-        plan "Install gaze, gaze-gui, and gaze-gnome-extension"
-        plan "Enable GNOME lock screen auth for this user when possible"
-    elif want_cinnamon_extension_package; then
-        plan "Install gaze, gaze-gui, and gaze-cinnamon-extension"
-        plan "Enable Cinnamon extension for this user when possible"
-    elif is_kde_session; then
-        plan "Install gaze, gaze-gui, and gaze-kde (hands-free KDE lock screen face unlock)"
-    else
-        plan "Install gaze and gaze-gui (skip desktop extension; GNOME/Cinnamon not detected)"
-    fi
-    if want_hyprlock_setup; then
-        plan "Install gaze-hyprlock and configure hyprlock"
-    fi
+    plan_desktop_packages "" ""
     if [ "$NO_PAM" -eq 1 ]; then
         plan "Leave PAM unchanged (--no-pam)"
     else
@@ -1164,20 +1191,7 @@ elif is_rpm; then
     echo ""
     title "This will:"
     plan "Configure the package repository"
-    if want_gnome_extension_package; then
-        plan "Install gaze, gaze-gui, and gaze-gnome-extension"
-        plan "Enable GNOME lock screen auth for this user when possible"
-    elif want_cinnamon_extension_package; then
-        plan "Install gaze, gaze-gui, and gaze-cinnamon-extension"
-        plan "Enable Cinnamon extension for this user when possible"
-    elif is_kde_session; then
-        plan "Install gaze, gaze-gui, and gaze-kde (hands-free KDE lock screen face unlock)"
-    else
-        plan "Install gaze and gaze-gui (skip desktop extension; GNOME/Cinnamon not detected)"
-    fi
-    if want_hyprlock_setup; then
-        plan "Install gaze-hyprlock and configure hyprlock"
-    fi
+    plan_desktop_packages "" ""
     if [ "$NO_PAM" -eq 1 ]; then
         plan "Leave PAM unchanged (--no-pam)"
     elif is_opensuse_tumbleweed; then
@@ -1191,23 +1205,7 @@ elif is_arch; then
     STEP_TOTAL=5
     echo ""
     title "This will:"
-    if want_gnome_extension_package; then
-        plan "Install gaze-bin, gaze-gui-bin, and gaze-gnome-extension-bin from the AUR"
-        plan "Enable GNOME lock screen auth for this user when possible"
-    elif want_cinnamon_extension_package; then
-        plan "Install gaze-bin, gaze-gui-bin, and gaze-cinnamon-extension-bin from the AUR"
-        plan "Enable Cinnamon extension for this user when possible"
-    elif is_kde_session; then
-        plan "Install gaze-bin, gaze-gui-bin, and gaze-kde-bin from the AUR (hands-free KDE lock screen face unlock)"
-    else
-        plan "Install gaze-bin and gaze-gui-bin from the AUR (skip desktop extension; GNOME/Cinnamon not detected)"
-    fi
-    if is_omarchy_session; then
-        plan "Install gaze-omarchy-bin from the AUR and enable it for this user while unlocked"
-    fi
-    if want_hyprlock_setup; then
-        plan "Install gaze-hyprlock-bin and configure hyprlock"
-    fi
+    plan_desktop_packages "-bin" " from the AUR"
     if [ "$NO_PAM" -eq 1 ]; then
         plan "Leave PAM unchanged (--no-pam)"
     else
@@ -1280,16 +1278,7 @@ if is_deb; then
     $SUDO apt-get update </dev/null
 
     step "Installing packages"
-    DEB_PKGS="gaze gaze-gui"
-    if want_gnome_extension_package; then
-        DEB_PKGS="$DEB_PKGS gaze-gnome-extension"
-    fi
-    if want_cinnamon_extension_package; then
-        DEB_PKGS="$DEB_PKGS gaze-cinnamon-extension"
-    fi
-    if want_hyprlock_setup; then
-        DEB_PKGS="$DEB_PKGS gaze-hyprlock"
-    fi
+    DEB_PKGS="$(desktop_packages "")"
     $SUDO apt-get install -y $DEB_PKGS </dev/null
     if is_kde_session; then
         KDE_PKGS="gaze-kde"
@@ -1356,19 +1345,10 @@ EOF
     fi
 
     step "Installing packages"
-    RPM_PKGS="gaze gaze-gui"
+    RPM_PKGS="$(desktop_packages "")"
     if is_opensuse_tumbleweed; then
         # Minimal Tumbleweed installations may not include pam-config.
         RPM_PKGS="$RPM_PKGS pam-config"
-    fi
-    if want_gnome_extension_package; then
-        RPM_PKGS="$RPM_PKGS gaze-gnome-extension"
-    fi
-    if want_cinnamon_extension_package; then
-        RPM_PKGS="$RPM_PKGS gaze-cinnamon-extension"
-    fi
-    if want_hyprlock_setup; then
-        RPM_PKGS="$RPM_PKGS gaze-hyprlock"
     fi
     if [ "$RPM_TOOL" = "rpm-ostree" ]; then
         ostree_install $RPM_PKGS || die "rpm-ostree could not layer the Gaze packages."
@@ -1445,19 +1425,7 @@ elif is_arch; then
 
     step "Installing packages from AUR"
     warn_replacing_bare_gaze_package
-    AUR_PKGS="gaze-bin gaze-gui-bin"
-    if want_gnome_extension_package; then
-        AUR_PKGS="$AUR_PKGS gaze-gnome-extension-bin"
-    fi
-    if want_cinnamon_extension_package; then
-        AUR_PKGS="$AUR_PKGS gaze-cinnamon-extension-bin"
-    fi
-    if is_omarchy_session; then
-        AUR_PKGS="$AUR_PKGS gaze-omarchy-bin"
-    fi
-    if want_hyprlock_setup; then
-        AUR_PKGS="$AUR_PKGS gaze-hyprlock-bin"
-    fi
+    AUR_PKGS="$(desktop_packages "-bin")"
     # --needed skips anything already at this version, so re-running the installer does
     # not rebuild from source. stdin is the piped installer itself, so close it the way
     # the apt/dnf paths do: a helper that reads a prompt from there would eat the rest of
