@@ -624,7 +624,8 @@ msgstr "Đổi mô hình"
 msgid "Model change cancelled. Current settings restored"
 msgstr "Đã hủy thay đổi mô hình. Đã khôi phục cài đặt hiện tại"
 
-msgid "Saved. Restart gazed, then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active."
+#, fuzzy
+msgid "Saved. gazed restarts by itself if the new provider needs a different runtime. Then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active."
 msgstr "Đã lưu. Khởi động lại gazed, sau đó chạy gaze doctor --benchmark để kiểm tra khả năng tăng tốc; có thể CPU đang được dùng thay thế."
 
 msgid "Saved. Use Improve this face on each existing profile to re-enroll, then test recognition."

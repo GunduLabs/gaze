@@ -45,8 +45,8 @@ if [ -d /run/systemd/system ]; then
 	dbus-send --system --type=method_call --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig >/dev/null 2>&1 || true
 	# Starting gazed on a CPU without AVX2 only produces a SIGILL restart loop.
 	if ! cpu_lacks_avx2; then
-		systemctl enable --now gazed >/dev/null 2>&1 || true
-		systemctl try-restart gazed >/dev/null 2>&1 || true
+		systemctl --no-block enable --now gazed >/dev/null 2>&1 || true
+		systemctl --no-block try-restart gazed >/dev/null 2>&1 || true
 	fi
 	[ -e /etc/gaze/pam.optout ] || pam-auth-update --package >/dev/null 2>&1 || true
 fi

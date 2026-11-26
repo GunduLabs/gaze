@@ -1030,7 +1030,7 @@ fn build_config_dialog(
                             || before.inference.device != cfg.inference.device
                         {
                             tr(
-                                "Saved. Restart gazed, then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active.",
+                                "Saved. gazed restarts by itself if the new provider needs a different runtime. Then run gaze doctor --benchmark to verify acceleration; CPU fallback may be active.",
                             )
                         } else if before.security.recognizer() != cfg.security.recognizer() {
                             tr(
