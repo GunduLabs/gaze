@@ -721,7 +721,7 @@ _verify-package format:
         want_files "$legacy_entry"
     fi
     want_size /usr/bin/gaze-kde-pam 1000
-    want_scripts "$post" "$postun"
+    want_scripts "$post" "$preun" "$postun"
     if [ "{{ format }}" = archlinux ]; then
         want_scripts post_upgrade
     fi
@@ -837,13 +837,14 @@ srpm: _dist-packages _srpm-sources
     export SCRIPTLET_OMARCHY_PREUN="$(cat packaging/scriptlets/prerm-omarchy.sh)"
     export SCRIPTLET_OMARCHY_POST="$(cat packaging/scriptlets/postinst-omarchy.sh)"
     export SCRIPTLET_KDE_POST="$(cat packaging/scriptlets/postinst-kde.sh)"
+    export SCRIPTLET_KDE_PREUN="$(cat packaging/scriptlets/prerm-kde.sh)"
     export SCRIPTLET_KDE_POSTUN="$(cat packaging/scriptlets/postrm-kde.sh)"
     export SCRIPTLET_HYPRLOCK_POST="$(cat packaging/scriptlets/postinst-hyprlock.sh)"
     export SCRIPTLET_HYPRLOCK_POSTUN="$(cat packaging/scriptlets/postrm-hyprlock.sh)"
 
     mkdir -p "{{ srpm_topdir }}/SPECS"
     spec="{{ srpm_topdir }}/SPECS/gaze.spec"
-    envsubst '$VERSION $PACKAGE_RELEASE $ORT_VERSION $CHANGELOG_DATE $SCRIPTLET_MAIN_POST $SCRIPTLET_EXTENSION_POST $SCRIPTLET_EXTENSION_POSTUN $SCRIPTLET_OMARCHY_PREUN $SCRIPTLET_OMARCHY_POST $SCRIPTLET_HYPRLOCK_POST $SCRIPTLET_HYPRLOCK_POSTUN $SCRIPTLET_KDE_POST $SCRIPTLET_KDE_POSTUN' \
+    envsubst '$VERSION $PACKAGE_RELEASE $ORT_VERSION $CHANGELOG_DATE $SCRIPTLET_MAIN_POST $SCRIPTLET_EXTENSION_POST $SCRIPTLET_EXTENSION_POSTUN $SCRIPTLET_OMARCHY_PREUN $SCRIPTLET_OMARCHY_POST $SCRIPTLET_HYPRLOCK_POST $SCRIPTLET_HYPRLOCK_POSTUN $SCRIPTLET_KDE_POST $SCRIPTLET_KDE_PREUN $SCRIPTLET_KDE_POSTUN' \
         < packaging/rpm/gaze.spec.in > "$spec"
 
     {{ quote(rpmbuild) }} -bs "$spec" --define "_topdir $PWD/{{ srpm_topdir }}"
