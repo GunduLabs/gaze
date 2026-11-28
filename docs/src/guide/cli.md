@@ -150,6 +150,9 @@ gaze add-face glasses
 
 Use separate profiles when your appearance changes often.
 
+Hold each pose for a moment instead of sweeping through it. Gaze compares a few consecutive
+frames per pose and [keeps the sharpest](/guide/how-it-works#which-frame-becomes-a-sample).
+
 ## Improve a profile
 
 ```bash

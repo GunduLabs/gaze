@@ -232,6 +232,23 @@ That makes authentication more robust for:
 - Minor lighting changes
 - Appearance shifts (for example, glasses)
 
+### Which frame becomes a sample
+
+Each sample is taken when your face meets the prompt on screen: centered, at a usable
+distance, and in the requested pose. For the up, down, left, and right prompts that moment
+arrives while your head is still turning, and a turning head blurs.
+
+So on the RGB camera Gaze does not store the first frame that meets the prompt. It keeps
+watching until it has seen four such frames or 300 ms have passed, whichever comes first, and
+stores the sharpest. If a frame stops meeting the prompt before then, the sharpest one seen so far is
+stored. Sharpness is the variance of the Laplacian over the inner part of the aligned face, so
+hair and background do not count.
+
+Frames are only ranked against each other. There is no minimum sharpness, so a camera with a
+soft image enrolls as it did before, and nothing about authentication changes. With
+`RUST_LOG=debug`, `gazed` logs `RGB enrollment frame selected` with the sharpness of each
+stored sample.
+
 ## Where data is stored
 
 By default, Gaze stores its data in these locations:

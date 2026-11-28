@@ -498,6 +498,7 @@ impl AuthDaemon {
                                 }
                             };
                             let mut pose_stability = EnrollmentPoseStability::default();
+                            let mut sharpest = SharpestCapture::default();
 
                             while let Some(frame) = cam.next_interruptible(&stop_clone) {
                                 if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
@@ -531,7 +532,10 @@ impl AuthDaemon {
 
                                 let _ = tx.try_send(EnrollMsg::Status(current_step, Spectrum::Rgb, status));
 
-                                if status == CaptureStatus::Usable && let Some(data) = result_opt {
+                                // A frame that meets the prompt opens a short window, and the
+                                // sharpest frame in it is the one enrolled. Anything else closes
+                                // the window with what it already holds.
+                                let captured = if status == CaptureStatus::Usable && let Some(data) = result_opt {
                                     let is_stable = pose_stability.update(prompt, data.yaw, data.pitch);
                                     let pose_matches = enrollment_pose_matches(
                                         prompt,
@@ -541,19 +545,27 @@ impl AuthDaemon {
                                     );
 
                                     if is_stable && pose_matches {
-                                        if prompt == EnrollPrompt::LookStraight {
-                                            pose_baseline = Some((data.yaw, data.pitch));
-                                        }
-                                        // The flag hands the device to the IR thread, so it must be closed first.
-                                        drop(cam);
-                                        rgb_captured_for_step_clone.store(true, std::sync::atomic::Ordering::Relaxed);
-                                        step_signal_clone.notify();
-                                        let _ = tx.blocking_send(EnrollMsg::Captured(current_step, Spectrum::Rgb, data.embedding));
-                                        dead_streams = 0;
-                                        continue 'steps;
+                                        sharpest.offer(data.sharpness, data, Instant::now())
+                                    } else {
+                                        sharpest.finish()
                                     }
                                 } else {
                                     pose_stability.reset();
+                                    sharpest.finish()
+                                };
+
+                                if let Some(data) = captured {
+                                    tracing::debug!(sharpness = data.sharpness, step = current_step, "RGB enrollment frame selected");
+                                    if prompt == EnrollPrompt::LookStraight {
+                                        pose_baseline = Some((data.yaw, data.pitch));
+                                    }
+                                    // The flag hands the device to the IR thread, so it must be closed first.
+                                    drop(cam);
+                                    rgb_captured_for_step_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+                                    step_signal_clone.notify();
+                                    let _ = tx.blocking_send(EnrollMsg::Captured(current_step, Spectrum::Rgb, data.embedding));
+                                    dead_streams = 0;
+                                    continue 'steps;
                                 }
                             }
 
@@ -582,6 +594,7 @@ impl AuthDaemon {
                     let mut last_processed_step = 999;
                     let mut captured_for_step = false;
                     let mut pose_stability = EnrollmentPoseStability::default();
+                    let mut sharpest = SharpestCapture::default();
 
                     while let Some(frame) = cam.next_interruptible(&stop_clone) {
                         if stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
@@ -596,6 +609,7 @@ impl AuthDaemon {
                             last_processed_step = current_step;
                             captured_for_step = false;
                             pose_stability.reset();
+                            sharpest.reset();
                         }
 
                         if captured_for_step {
@@ -623,7 +637,7 @@ impl AuthDaemon {
 
                         let _ = tx.try_send(EnrollMsg::Status(current_step, Spectrum::Rgb, status));
 
-                        if status == CaptureStatus::Usable && let Some(data) = result_opt {
+                        let captured = if status == CaptureStatus::Usable && let Some(data) = result_opt {
                             let is_stable = pose_stability.update(prompt, data.yaw, data.pitch);
                             let pose_matches = enrollment_pose_matches(
                                 prompt,
@@ -633,14 +647,22 @@ impl AuthDaemon {
                             );
 
                             if is_stable && pose_matches {
-                                if prompt == EnrollPrompt::LookStraight {
-                                    pose_baseline = Some((data.yaw, data.pitch));
-                                }
-                                let _ = tx.blocking_send(EnrollMsg::Captured(current_step, Spectrum::Rgb, data.embedding));
-                                captured_for_step = true;
+                                sharpest.offer(data.sharpness, data, Instant::now())
+                            } else {
+                                sharpest.finish()
                             }
                         } else {
                             pose_stability.reset();
+                            sharpest.finish()
+                        };
+
+                        if let Some(data) = captured {
+                            tracing::debug!(sharpness = data.sharpness, step = current_step, "RGB enrollment frame selected");
+                            if prompt == EnrollPrompt::LookStraight {
+                                pose_baseline = Some((data.yaw, data.pitch));
+                            }
+                            let _ = tx.blocking_send(EnrollMsg::Captured(current_step, Spectrum::Rgb, data.embedding));
+                            captured_for_step = true;
                         }
                     }
 

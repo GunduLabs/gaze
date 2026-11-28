@@ -9,6 +9,7 @@ mod liveness;
 pub mod models;
 mod orientation;
 mod preview;
+mod quality;
 mod recognize;
 mod tpm;
 pub mod users;
