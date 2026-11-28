@@ -134,6 +134,11 @@ looking a few seconds after it loses sight of a face, Gaze keeps retrying
 internally for its whole budget rather than giving up on the first empty frame.
 Waking the screen and looking up a moment later still unlocks.
 
+From Plasma 6.8.4, the greeter also stops the slot when the UI fades back to the
+wallpaper, ten seconds after your last input. It starts the slot again on the next
+key press or mouse move. A scan cut off this way just ends, and `gazed` releases
+the camera.
+
 A slot that answers `PAM_AUTHINFO_UNAVAIL` is never called again for that lock,
 not even after a wrong password. So when Gaze gives up for a reason the next look
 could fix (too dark, no face, budget spent), it reports a plain failure in these
@@ -149,6 +154,15 @@ slot's hint label. Gaze still sends one informational message when it starts
 looking, even though nothing displays it: that is what tells the greeter this
 unlock had a prompt, and without it a face match lands on an extra "Unlock" button
 instead of going straight to the desktop.
+
+So nothing on screen says a scan is running; the camera LED is the only sign.
+Sending that first message as an error would not help: the hint would shake as if
+an attempt had failed, then return to its label while the camera is still looking.
+
+On Plasma 6.8.0 to 6.8.3 the hint label never appears at all
+([KDE bug 527171](https://bugs.kde.org/show_bug.cgi?id=527171)), so a failed scan
+shows nothing either. Face unlock itself still works. Plasma 6.8.4 brings the label
+back.
 
 ### Only one Gaze per unlock
 
@@ -433,6 +447,9 @@ yay -R gaze-kde-bin
 - **`gaze doctor` warns that `kde-fingerprint` runs `pam_gaze.so` in simultaneous mode.**
   That mode waits for a password prompt the greeter can never answer. Use the
   plain `pam_gaze.so` line there instead; reinstalling `gaze-kde` fixes it.
+- **Nothing on the lock screen shows Gaze is looking.** That is expected; the lock
+  screen discards the start message. On Plasma 6.8.0 to 6.8.3 failures are hidden
+  too. See [Status messages](#status-messages).
 - **Falls back to the password every time.** Check `systemctl status gazed` and
   `gaze list-faces`. Most often the daemon is not running or the current user
   has no enrolled face.
