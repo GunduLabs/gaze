@@ -75,7 +75,7 @@ ureq = "3.5.2"
 uuid = "1.29.3"
 zbus = "6.5.0"
 zeroize = "1.9.2"
-zip = "9.8.2"
+zip = "9.9.0"
 
 [profile.release]
 strip = "symbols"
